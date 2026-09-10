@@ -1,12 +1,16 @@
-from types import SimpleNamespace
-import pytest
+import logging
 import os
-from unittest.mock import AsyncMock, patch, MagicMock
 from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
 from cognee.tasks.temporal_graph.models import QueryInterval, Timestamp
-from cognee.infrastructure.llm import LLMGateway
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.fixture(autouse=True)
@@ -32,6 +36,9 @@ def _no_real_llm_calls():
         try:
             return response_model.model_construct()
         except Exception:
+            logger.debug(
+                "Falling back after error in _no_real_llm_calls._structured", exc_info=True
+            )
             return QueryInterval()
 
     with patch.object(
@@ -142,6 +149,7 @@ async def test_filter_top_k_events_includes_unknown_as_infinite_but_not_in_top_k
 @pytest.mark.asyncio
 async def test_filter_top_k_events_matches_uuid_scored_results_against_str_event_ids():
     from uuid import uuid4
+
     from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 
     tr = TemporalRetriever(top_k=2)

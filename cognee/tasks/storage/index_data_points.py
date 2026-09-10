@@ -83,7 +83,7 @@ async def get_data_points_from_model(
 
     for field_name, field_value in data_point:
         if isinstance(field_value, DataPoint):
-            property_key = f"{str(data_point.id)}{field_name}{str(field_value.id)}"
+            property_key = f"{data_point.id!s}{field_name}{field_value.id!s}"
 
             if property_key in visited_properties:
                 return []
@@ -105,7 +105,7 @@ async def get_data_points_from_model(
             and isinstance(field_value[0], DataPoint)
         ):
             for field_value_item in field_value:
-                property_key = f"{str(data_point.id)}{field_name}{str(field_value_item.id)}"
+                property_key = f"{data_point.id!s}{field_name}{field_value_item.id!s}"
 
                 if property_key in visited_properties:
                     return []

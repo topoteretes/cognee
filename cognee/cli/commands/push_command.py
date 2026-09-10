@@ -1,14 +1,14 @@
 import argparse
 import asyncio
 
-from cognee.cli.reference import SupportsCliCommand
-from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
+from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.reference import SupportsCliCommand
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 # Tiny constants-only import; the cognee package is already loaded by the CLI.
 from cognee.modules.migration.sources.base import IMPORT_MODES
-from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 
 class PushCommand(SupportsCliCommand):
@@ -107,7 +107,7 @@ Examples:
                         user=user,
                     )
                 except Exception as e:
-                    raise CliCommandInnerException(f"Failed to push: {str(e)}") from e
+                    raise CliCommandInnerException(f"Failed to push: {e!s}") from e
 
             result = asyncio.run(run_push())
 
@@ -125,4 +125,4 @@ Examples:
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(f"Error during push: {str(e)}", error_code=1) from e
+            raise CliCommandException(f"Error during push: {e!s}", error_code=1) from e

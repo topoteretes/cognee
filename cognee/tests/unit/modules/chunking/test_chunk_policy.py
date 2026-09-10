@@ -10,10 +10,9 @@ about it.
 import asyncio
 from uuid import NAMESPACE_OID, uuid4, uuid5
 
-from cognee.modules.chunking.chunk_id import chunk_content_hash, content_chunk_id
-
 import pytest
 
+from cognee.modules.chunking.chunk_id import chunk_content_hash, content_chunk_id
 from cognee.modules.chunking.chunk_policy import (
     ChunkPlan,
     ChunkPlanRequest,

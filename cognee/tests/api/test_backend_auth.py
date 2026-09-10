@@ -1,8 +1,9 @@
+import asyncio
 import os
 import uuid
-import asyncio
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 with patch("dotenv.load_dotenv"):
     os.environ["REQUIRE_AUTHENTICATION"] = "true"
@@ -119,9 +120,10 @@ class TestHashApiKey:
 
     def test_api_key_is_stored_as_hash(self, client):
         from sqlalchemy import select
-        from cognee.modules.users.models.UserApiKey import UserApiKey
+
         from cognee.infrastructure.databases.relational import get_relational_engine
         from cognee.modules.users.api_key.hash_api_key import hash_api_key as compute_hash
+        from cognee.modules.users.models.UserApiKey import UserApiKey
 
         # Register (ignore if already exists) and login
         client.post(

@@ -1,7 +1,7 @@
 """Dataset-scoped reads from the append-only edge evidence sidecar."""
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 from uuid import UUID
 
 from sqlalchemy import and_, exists, func, or_, select
@@ -108,7 +108,7 @@ async def get_edge_evidence_records(
     except Exception as error:
         # References are optional and existing databases may briefly serve
         # traffic before their migration completes. Never fail the answer.
-        logger.debug("Unable to resolve graph edge evidence: %s", error)
+        logger.debug("Unable to resolve graph edge evidence: %s", error, exc_info=True)
         return []
 
     counts: dict[UUID, int] = {}

@@ -108,7 +108,7 @@ jobs:
     # built artifacts also get a SLSA build-provenance attestation hosted by
     # GitHub. See docs/supply_chain_provenance.md for the one-time PyPI setup.
     permissions:
-      contents: read
+      contents: write       # Attach the distributions and provenance to the release
       id-token: write       # OIDC: Trusted Publishing + signing attestations
       attestations: write   # Persist the SLSA build provenance attestation
     runs-on: ubuntu-latest
@@ -132,6 +132,7 @@ jobs:
         run: uv build
 
       - name: Attest build provenance for distributions
+        id: attest
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be  # v2.4.0
         with:
           subject-path: "dist/*"
@@ -142,6 +143,30 @@ jobs:
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2 (twine 7.0.0: accepts Metadata-Version 2.5)
         with:
           packages-dir: dist/
+
+      - name: Attach distributions and provenance to the GitHub release
+        # The release page carried no assets, so the provenance that PyPI and
+        # the GitHub attestation store already hold was invisible there (OSSF
+        # Scorecard: Signed-Releases). Upload the wheel and sdist together with
+        # the SLSA build-provenance attestation in two shapes: the Sigstore
+        # bundle (certificate + signature + statement; verify with
+        # `gh attestation verify <dist> --bundle <file> --owner topoteretes`)
+        # and the bare DSSE envelope it wraps, in the .intoto.jsonl form the
+        # SLSA ecosystem expects. Runs after publish so a PyPI failure leaves
+        # the release page without artifacts that never shipped.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-github.outputs.tag }}
+          VERSION: ${{ needs.release-github.outputs.version }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          cp "${BUNDLE}" "dist/cognee-${VERSION}.sigstore.json"
+          jq -c '.dsseEnvelope' "${BUNDLE}" > "dist/cognee-${VERSION}.intoto.jsonl"
+          gh release upload "${TAG}" \
+            dist/*.whl dist/*.tar.gz \
+            "dist/cognee-${VERSION}.sigstore.json" \
+            "dist/cognee-${VERSION}.intoto.jsonl" \
+            --repo "${GITHUB_REPOSITORY}" --clobber
 
   release-docker-image:
     needs: release-github

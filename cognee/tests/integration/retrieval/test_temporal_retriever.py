@@ -1,15 +1,19 @@
+import logging
 import os
-import pytest
 import pathlib
-import pytest_asyncio
-import cognee
 
-from cognee.low_level import setup, DataPoint
-from cognee.tasks.storage import add_data_points
-from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
+import pytest
+import pytest_asyncio
+
+import cognee
+from cognee.low_level import DataPoint, setup
 from cognee.modules.engine.models.Event import Event
-from cognee.modules.engine.models.Timestamp import Timestamp
 from cognee.modules.engine.models.Interval import Interval
+from cognee.modules.engine.models.Timestamp import Timestamp
+from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
+from cognee.tasks.storage import add_data_points
+
+logger = logging.getLogger(__name__)
 
 
 @pytest_asyncio.fixture
@@ -124,7 +128,7 @@ async def setup_test_environment_with_events():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_test_environment_with_events", exc_info=True)
 
 
 @pytest_asyncio.fixture
@@ -167,7 +171,7 @@ async def setup_test_environment_with_graph_data():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_test_environment_with_graph_data", exc_info=True)
 
 
 @pytest_asyncio.fixture
@@ -190,7 +194,7 @@ async def setup_test_environment_empty():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_test_environment_empty", exc_info=True)
 
 
 @pytest.mark.asyncio

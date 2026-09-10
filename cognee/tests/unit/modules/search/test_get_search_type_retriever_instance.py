@@ -3,23 +3,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from cognee.modules.search.exceptions import UnsupportedSearchTypeError
-from cognee.modules.search.types import SearchType
-from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
-from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.code_retriever import CodeRetriever
+from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
+    GraphCompletionContextExtensionRetriever,
+)
+from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
 from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
     DecompositionMode,
     GraphCompletionDecompositionRetriever,
 )
-from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
-from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
-    GraphCompletionContextExtensionRetriever,
-)
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
+from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
-from cognee.modules.retrieval.code_retriever import CodeRetriever
+from cognee.modules.search.exceptions import UnsupportedSearchTypeError
+from cognee.modules.search.types import SearchType
 
 
 class _DummyCommunityRetriever:

@@ -20,6 +20,7 @@ Two complementary checks keep the whole bug class from returning:
 import ast
 import importlib
 import inspect
+import logging
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,7 @@ import pytest
 import cognee
 from cognee.exceptions import CogneeApiError
 
+logger = logging.getLogger(__name__)
 
 # The single root of the Cognee error hierarchy, read off the class itself so it
 # can never drift from the source. Every other error class is *discovered* from
@@ -200,6 +202,7 @@ def _import_family_modules():
             # Modules behind optional extras (codegraph, scraping, neptune, ...)
             # may not import in a minimal environment. The static test above
             # already covers them; here we simply skip what we cannot load.
+            logger.debug("Skipping item after error in _import_family_modules", exc_info=True)
             continue
 
 

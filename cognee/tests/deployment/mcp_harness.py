@@ -8,11 +8,14 @@ with guaranteed teardown, and an MCP streamable-HTTP client session.
 from __future__ import annotations
 
 import contextlib
+import logging
 import shutil
 import socket
 import subprocess
 import time
-from typing import AsyncIterator, Iterator, Optional
+from collections.abc import AsyncIterator, Iterator
+
+logger = logging.getLogger(__name__)
 
 # Port the MCP server listens on inside the container (entrypoint default).
 CONTAINER_HTTP_PORT = 8000
@@ -40,6 +43,7 @@ def image_exists(tag: str) -> bool:
         subprocess.run(
             ["docker", "image", "inspect", tag],
             capture_output=True,
+            check=False,
         ).returncode
         == 0
     )
@@ -57,13 +61,14 @@ def wait_for_health(url: str, timeout: float = 120.0) -> None:
     import httpx
 
     deadline = time.monotonic() + timeout
-    last_error: Optional[Exception] = None
+    last_error: Exception | None = None
     while time.monotonic() < deadline:
         try:
             response = httpx.get(url, timeout=5)
             if response.status_code == 200:
                 return
-        except Exception as exc:  # noqa: BLE001 - poller intentionally tolerant
+        except Exception as exc:  # poller intentionally tolerant
+            logger.debug("Ignoring exception in wait_for_health", exc_info=True)
             last_error = exc
         time.sleep(1.0)
     raise TimeoutError(
@@ -96,6 +101,7 @@ class MCPContainer:
             ["docker", "logs", self.name],
             capture_output=True,
             text=True,
+            check=False,
         )
         return result.stdout + result.stderr
 
@@ -104,7 +110,7 @@ class MCPContainer:
 def run_mcp_http_container(
     image: str,
     *,
-    extra_env: Optional[dict] = None,
+    extra_env: dict | None = None,
     health_timeout: float = 120.0,
 ) -> Iterator[MCPContainer]:
     """Start cognee-mcp with ``TRANSPORT_MODE=http``, yield it, always tear down.
@@ -129,7 +135,7 @@ def run_mcp_http_container(
     for key, value in env.items():
         env_args += ["-e", f"{key}={value}"]
 
-    subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+    subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
 
     subprocess.run(
         [
@@ -159,7 +165,7 @@ def run_mcp_http_container(
             raise
         yield container
     finally:
-        subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
 
 
 @contextlib.asynccontextmanager
@@ -168,7 +174,9 @@ async def mcp_client_session(mcp_url: str) -> AsyncIterator[object]:
     from mcp import ClientSession
     from mcp.client.streamable_http import streamablehttp_client
 
-    async with streamablehttp_client(mcp_url) as (read_stream, write_stream, _get_session_id):
-        async with ClientSession(read_stream, write_stream) as session:
-            await session.initialize()
-            yield session
+    async with (
+        streamablehttp_client(mcp_url) as (read_stream, write_stream, _get_session_id),
+        ClientSession(read_stream, write_stream) as session,
+    ):
+        await session.initialize()
+        yield session

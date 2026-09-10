@@ -1,16 +1,14 @@
-from typing import Optional
-
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.construct_data_points_and_edges_with_ontology import (
     ensure_ontology_usable_in_strict_mode,
 )
+from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.ontology_env_config import (
     get_ontology_env_config,
     normalize_ontology_mode,
 )
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
-from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
 
 
 def get_default_ontology_resolver() -> BaseOntologyResolver:
@@ -18,9 +16,9 @@ def get_default_ontology_resolver() -> BaseOntologyResolver:
 
 
 def get_configured_ontology_resolver(
-    config: Optional[Config] = None,
-    ontology_file_path: Optional[str] = None,
-) -> Optional[BaseOntologyResolver]:
+    config: Config | None = None,
+    ontology_file_path: str | None = None,
+) -> BaseOntologyResolver | None:
     """Resolve an explicit file path, configured resolver, or environment in that order."""
     if ontology_file_path:
         return get_ontology_resolver_from_env(
@@ -49,7 +47,7 @@ def get_configured_ontology_resolver(
     return None
 
 
-def get_configured_ontology_mode(config: Optional[Config] = None) -> str:
+def get_configured_ontology_mode(config: Config | None = None) -> str:
     """Resolve the ontology mode from an explicit config or the environment.
 
     A per-call ``ontology_mode`` in the config wins; otherwise the ONTOLOGY_MODE
@@ -97,7 +95,7 @@ def get_ontology_resolver_from_env(
             matching_strategy=FuzzyMatchingStrategy(), ontology_file=file_paths
         )
     else:
-        raise EnvironmentError(
+        raise OSError(
             f"Unsupported ontology resolver: {ontology_resolver}. "
             f"Supported resolvers are: RdfLib with FuzzyMatchingStrategy."
         )

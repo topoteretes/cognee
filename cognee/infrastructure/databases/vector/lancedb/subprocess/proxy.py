@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import asyncio
 import multiprocessing as mp
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import pyarrow as pa
 
+from cognee.shared.logging_utils import get_logger
 from cognee_db_workers.harness import (
     ReplayStep,
     Request,
@@ -24,11 +25,11 @@ from cognee_db_workers.lancedb_protocol import (
     OP_DROP_TABLE,
     OP_OPEN_TABLE,
     OP_TABLE_ADD,
-    OP_TABLE_OPTIMIZE,
     OP_TABLE_COUNT_ROWS,
     OP_TABLE_DELETE,
     OP_TABLE_MERGE_INSERT_EXECUTE,
     OP_TABLE_NAMES,
+    OP_TABLE_OPTIMIZE,
     OP_TABLE_QUERY_EXECUTE,
     OP_TABLE_RELEASE,
     OP_TABLE_SCHEMA,
@@ -37,10 +38,12 @@ from cognee_db_workers.lancedb_protocol import (
 )
 from cognee_db_workers.lancedb_worker import worker_main
 
+logger = get_logger()
+
 
 class LanceDBSubprocessSession(SubprocessSession):
     @classmethod
-    def start(cls, *, max_retries: Optional[int] = None) -> "LanceDBSubprocessSession":
+    def start(cls, *, max_retries: int | None = None) -> LanceDBSubprocessSession:
         ctx = mp.get_context("spawn")
 
         def _spawn():
@@ -60,7 +63,7 @@ class LanceDBSubprocessSession(SubprocessSession):
         # ``SUBPROCESS_MAX_RETRIES`` env var (read by
         # ``SubprocessSession.__init__``) takes effect when the caller
         # doesn't override.
-        kwargs: Dict[str, Any] = {"respawn_factory": _spawn}
+        kwargs: dict[str, Any] = {"respawn_factory": _spawn}
         if max_retries is not None:
             kwargs["max_retries"] = max_retries
         session = cls(proc, req_q, resp_q, **kwargs)
@@ -93,9 +96,9 @@ class _BuilderChain:
         self._table_handle_id = table_handle_id
         self._op_code = op_code
         self._root_args = root_args
-        self._steps: List[Tuple[str, tuple, dict]] = []
+        self._steps: list[tuple[str, tuple, dict]] = []
 
-    def _add(self, name: str, *args, **kwargs) -> "_BuilderChain":
+    def _add(self, name: str, *args, **kwargs) -> _BuilderChain:
         self._steps.append((name, args, kwargs))
         return self
 
@@ -113,7 +116,7 @@ class _BuilderChain:
 class RemoteQuery(_BuilderChain):
     """Proxy for ``Table.query()``."""
 
-    def where(self, predicate: str) -> "RemoteQuery":
+    def where(self, predicate: str) -> RemoteQuery:
         return self._add("where", predicate)
 
     async def to_list(self) -> list:
@@ -123,16 +126,16 @@ class RemoteQuery(_BuilderChain):
 class RemoteVectorSearch(_BuilderChain):
     """Proxy for ``Table.vector_search(vector)``."""
 
-    def distance_type(self, metric: str) -> "RemoteVectorSearch":
+    def distance_type(self, metric: str) -> RemoteVectorSearch:
         return self._add("distance_type", metric)
 
-    def where(self, predicate: str) -> "RemoteVectorSearch":
+    def where(self, predicate: str) -> RemoteVectorSearch:
         return self._add("where", predicate)
 
-    def select(self, columns: List[str]) -> "RemoteVectorSearch":
+    def select(self, columns: list[str]) -> RemoteVectorSearch:
         return self._add("select", columns)
 
-    def limit(self, n: int) -> "RemoteVectorSearch":
+    def limit(self, n: int) -> RemoteVectorSearch:
         return self._add("limit", n)
 
     async def to_list(self) -> list:
@@ -142,10 +145,10 @@ class RemoteVectorSearch(_BuilderChain):
 class RemoteMergeInsert(_BuilderChain):
     """Proxy for ``Table.merge_insert(key)``."""
 
-    def when_matched_update_all(self) -> "RemoteMergeInsert":
+    def when_matched_update_all(self) -> RemoteMergeInsert:
         return self._add("when_matched_update_all")
 
-    def when_not_matched_insert_all(self) -> "RemoteMergeInsert":
+    def when_not_matched_insert_all(self) -> RemoteMergeInsert:
         return self._add("when_not_matched_insert_all")
 
     async def execute(self, records: list) -> None:
@@ -162,7 +165,7 @@ class RemoteLanceDBTable:
 
     def __init__(self, session: LanceDBSubprocessSession, handle_id: int, name: str):
         self._session = session
-        self._handle_id: Optional[int] = handle_id
+        self._handle_id: int | None = handle_id
         self.name = name
         # Register a replay step so that if the worker dies and respawns, the
         # table is re-opened and the handle remap rewrites in-flight Requests
@@ -175,7 +178,7 @@ class RemoteLanceDBTable:
         )
         self._session.add_replay_step(self._replay_step)
 
-    def _apply_new_handle(self, new_handle_id: int) -> Optional[int]:
+    def _apply_new_handle(self, new_handle_id: int) -> int | None:
         """Called by the session after a successful replay of our OPEN_TABLE
         step. Returns the previous handle id so the session's handle-remap
         dict rewrites stale in-flight Requests. Returns ``None`` if the proxy
@@ -208,7 +211,9 @@ class RemoteLanceDBTable:
             try:
                 self._session.remove_replay_step(step)
             except Exception:
-                pass
+                logger.debug(
+                    "Ignoring exception in RemoteLanceDBTable._deregister_replay", exc_info=True
+                )
             self._replay_step = None
 
     async def release(self) -> None:
@@ -222,7 +227,7 @@ class RemoteLanceDBTable:
             await self._session.call_async(Request(op=OP_TABLE_RELEASE, handle_id=hid))
         except Exception:
             # Session already torn down; the handle dies with the worker.
-            pass
+            logger.debug("Ignoring exception in RemoteLanceDBTable.release", exc_info=True)
 
     def release_sync(self) -> None:
         """Sync variant for use in ``__del__`` / non-async contexts."""
@@ -234,7 +239,7 @@ class RemoteLanceDBTable:
         try:
             self._session.call(Request(op=OP_TABLE_RELEASE, handle_id=hid))
         except Exception:
-            pass
+            logger.debug("Ignoring exception in RemoteLanceDBTable.release_sync", exc_info=True)
 
     def __del__(self):
         # Best-effort; async release is preferred. Only try sync release if the
@@ -243,7 +248,7 @@ class RemoteLanceDBTable:
             if self._handle_id is not None and not self._session._closed_event.is_set():
                 self.release_sync()
         except Exception:
-            pass
+            logger.debug("Ignoring exception in RemoteLanceDBTable.__del__", exc_info=True)
 
     async def count_rows(self) -> int:
         resp = await self._session.call_async(
@@ -336,7 +341,7 @@ class RemoteLanceDBConnection:
     API used by cognee's LanceDBAdapter is exposed.
     """
 
-    def __init__(self, session: LanceDBSubprocessSession, url: str, api_key: Optional[str]):
+    def __init__(self, session: LanceDBSubprocessSession, url: str, api_key: str | None):
         self._session = session
         self._url = url
         self._api_key = api_key
@@ -349,7 +354,7 @@ class RemoteLanceDBConnection:
         # then reconnects N times. ``asyncio.Lock`` binds to the running
         # loop on first ``async with``, so eager construction here is fine.
         self._connect_lock = asyncio.Lock()
-        self._connect_replay_step: Optional[ReplayStep] = None
+        self._connect_replay_step: ReplayStep | None = None
 
     async def connect(self) -> None:
         # Fast path: already connected, no lock needed.
@@ -389,7 +394,7 @@ class RemoteLanceDBConnection:
 
     async def create_table(
         self, name: str, schema: pa.Schema, exist_ok: bool = True
-    ) -> "RemoteLanceDBTable":
+    ) -> RemoteLanceDBTable:
         await self._ensure_connected()
         # Use Arrow's native IPC schema serialization rather than pickle —
         # the worker is otherwise an unconditional ``pickle.loads`` target
@@ -402,7 +407,7 @@ class RemoteLanceDBConnection:
         )
         return await self.open_table(name)
 
-    async def open_table(self, name: str) -> "RemoteLanceDBTable":
+    async def open_table(self, name: str) -> RemoteLanceDBTable:
         await self._ensure_connected()
         resp = await self._session.call_async(Request(op=OP_OPEN_TABLE, args=(name,)))
         return RemoteLanceDBTable(self._session, resp.new_handle_id, name)

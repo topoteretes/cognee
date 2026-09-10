@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import os
 import threading
-from typing import List
 
 from cognee.exceptions import CogneeConfigurationError
 
@@ -52,7 +51,7 @@ class ProviderConfigMismatchError(CogneeConfigurationError):
 
 def check_provider_config(
     llm_config=None, embedding_config=None, needs_llm: bool = True
-) -> List[str]:
+) -> list[str]:
     """Return actionable problem descriptions for inconsistent provider config.
 
     Pure and network-free: only reads attributes off the two config objects.
@@ -76,7 +75,7 @@ def check_provider_config(
 
         embedding_config = get_embedding_context_config()
 
-    problems: List[str] = []
+    problems: list[str] = []
 
     llm_provider = (llm_config.llm_provider or "").lower()
     llm_key = (llm_config.llm_api_key or "").strip()

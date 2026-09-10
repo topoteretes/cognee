@@ -1,17 +1,17 @@
+from typing import Any
 from uuid import NAMESPACE_OID, uuid5
+
+from pydantic import Field
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
-
+from cognee.infrastructure.llm import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.low_level import DataPoint
-from cognee.infrastructure.llm import LLMGateway
+from cognee.modules.engine.models import NodeSet
 from cognee.modules.graph.methods import upsert_edges
 from cognee.shared.logging_utils import get_logger
-from cognee.modules.engine.models import NodeSet
 from cognee.tasks.storage import add_data_points, index_graph_edges
-from typing import Dict, Optional, List, Any
-from pydantic import Field
 
 logger = get_logger("coding_rule_association")
 
@@ -20,14 +20,14 @@ class Rule(DataPoint):
     """A single developer rule extracted from text."""
 
     text: str = Field(..., description="The coding rule associated with the conversation")
-    belongs_to_set: Optional[NodeSet] = None
+    belongs_to_set: NodeSet | None = None
     metadata: dict = {"index_fields": ["rule"]}
 
 
 class RuleSet(DataPoint):
     """Collection of parsed rules."""
 
-    rules: List[Rule] = Field(
+    rules: list[Rule] = Field(
         ...,
         description="List of developer rules extracted from the input text. Each rule represents a coding best practice or guideline.",
     )
@@ -53,7 +53,7 @@ async def get_existing_rules(rules_nodeset_name: str) -> str:
     return existing_rules
 
 
-async def get_origin_edges(data: str, rules: List[Rule]) -> list[Any]:
+async def get_origin_edges(data: str, rules: list[Rule]) -> list[Any]:
     vector_engine = await get_vector_engine_async()
 
     origin_chunk = await vector_engine.search("DocumentChunk_text", data, limit=1)
@@ -85,14 +85,14 @@ async def get_origin_edges(data: str, rules: List[Rule]) -> list[Any]:
                         )
                     )
             except Exception as e:
-                logger.info(f"Warning: Skipping invalid rule due to error: {e}")
+                logger.info(f"Warning: Skipping invalid rule due to error: {e}", exc_info=True)
     else:
         logger.info("No valid origin_id or rules provided.")
 
     return relationships
 
 
-async def add_rule_associations(data: str, rules_nodeset_name: str, context: Dict):
+async def add_rule_associations(data: str, rules_nodeset_name: str, context: dict):
     graph_engine = await get_graph_engine()
     existing_rules = await get_existing_rules(rules_nodeset_name=rules_nodeset_name)
 

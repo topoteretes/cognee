@@ -44,7 +44,7 @@ await cognee.remember(
     dataset_name="gmail_inbox",
     primary_key="id",
     write_disposition="merge",
-    max_rows_per_table=0,   # 0 = no read cap, so forget-on-delete sees the whole inbox
+    max_rows_per_table=0,  # 0 = no read cap, so forget-on-delete sees the whole inbox
 )
 
 answer = await cognee.search(

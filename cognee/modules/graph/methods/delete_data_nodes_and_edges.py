@@ -3,15 +3,16 @@ from uuid import UUID
 from cognee.context_global_variables import backend_access_control_enabled
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_engine_async
+from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
 from cognee.modules.graph.legacy.has_edges_in_legacy_ledger import has_edges_in_legacy_ledger
 from cognee.modules.graph.legacy.has_nodes_in_legacy_ledger import has_nodes_in_legacy_ledger
 from cognee.modules.graph.methods import (
     delete_data_related_edges,
     delete_data_related_nodes,
-    get_data_related_nodes,
     get_data_related_edges,
-    get_global_data_related_nodes,
+    get_data_related_nodes,
     get_global_data_related_edges,
+    get_global_data_related_nodes,
     get_orphaned_nodeset_labels_for_dataset,
     get_shared_slugs_losing_dataset_anchor,
 )
@@ -22,10 +23,8 @@ from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElem
 from cognee.modules.graph.methods.try_delete_data_by_graph_provenance import (
     try_delete_data_by_graph_provenance,
 )
-from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
 from cognee.modules.users.methods.get_user import get_user
 from cognee.shared.logging_utils import get_logger
-
 
 logger = get_logger("delete_data_nodes_and_edges")
 
@@ -111,6 +110,7 @@ async def delete_data_nodes_and_edges(
                 "Shared-slug graph detag failed for dataset %s (non-fatal): %s",
                 dataset_id,
                 e,
+                exc_info=True,
             )
         try:
             vector_engine = await get_vector_engine_async()
@@ -122,6 +122,7 @@ async def delete_data_nodes_and_edges(
                 "Shared-slug vector detag failed for dataset %s (non-fatal): %s",
                 dataset_id,
                 e,
+                exc_info=True,
             )
 
     return DeletedGraphElements.from_ledger_rows(affected_nodes or [], affected_edges or [])

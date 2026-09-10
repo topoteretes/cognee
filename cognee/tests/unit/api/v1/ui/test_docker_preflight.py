@@ -1,7 +1,7 @@
 """Tests for Docker daemon preflight checks in cognee.api.v1.ui.ui."""
 
 import subprocess
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import MagicMock, call, patch
 
 from cognee.api.v1.ui.ui import _check_docker_available
 

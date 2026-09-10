@@ -60,7 +60,7 @@ os.environ.setdefault("COGNEE_SKIP_CONNECTION_TEST", "true")
 
 # Reuse the benchmark's own input transforms so chunking stays in sync.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from bench_cognee import DATASET_NAME, load_memories, memory_to_text  # noqa: E402
+from bench_cognee import DATASET_NAME, load_memories, memory_to_text
 
 
 def _build_memories(args: argparse.Namespace) -> list[dict]:

@@ -29,8 +29,8 @@ which is what these tests pin. Two failure directions matter equally:
 import litellm
 import pytest
 from instructor.core.exceptions import FailedAttempt, InstructorRetryException
-from tenacity import RetryError
 from tenacity import Future as TenacityFuture
+from tenacity import RetryError
 
 from cognee.infrastructure.llm.exceptions import (
     LLMPaymentRequiredError,
@@ -74,8 +74,10 @@ LITELLM_BUDGET_MESSAGES = [
     # for ``_wrapped_budget_error`` and other tests key off its exact wording.
     # The key alias and key hint sit mid-sentence, which is the span the bounded
     # wildcard in ``_BUDGET_SENTENCE_RE`` has to cross.
-    "Budget has been exceeded! Key=my-key-alias (sk-...-VGw) "
-    "Current cost: 20.00066499999998, Max budget: 0.01",
+    (
+        "Budget has been exceeded! Key=my-key-alias (sk-...-VGw) "
+        "Current cost: 20.00066499999998, Max budget: 0.01"
+    ),
 ]
 
 # Prose that a cognified document could plausibly contain. None of it may be
@@ -283,7 +285,8 @@ class TestCauseChainWalk:
         try:
             try:
                 raise _rate_limit_error(LITELLM_BUDGET_MESSAGES[0])
-            except Exception:
+            except litellm.RateLimitError:
+                # Deliberately unchained: the test needs __context__ without __cause__.
                 raise ValueError("secondary failure during cleanup")
         except ValueError as e:
             unrelated = e

@@ -1,17 +1,15 @@
-# ruff: noqa: E402
+import asyncio
 import os
 import pathlib
-import asyncio
 from uuid import UUID
 
 import cognee
-from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.shared.logging_utils import get_logger
+from cognee.modules.engine.operations.setup import setup
 from cognee.modules.search.types import SearchType
+from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import create_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
-from cognee.modules.engine.operations.setup import setup
-from cognee.shared.logging_utils import setup_logging, CRITICAL
+from cognee.shared.logging_utils import CRITICAL, get_logger, setup_logging
 
 logger = get_logger()
 

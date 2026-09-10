@@ -4,5 +4,4 @@ from cognee.infrastructure.databases.graph.ladybug.LadybugDatasetDatabaseHandler
     LadybugDatasetDatabaseHandler,
 )
 
-
 KuzuDatasetDatabaseHandler = LadybugDatasetDatabaseHandler

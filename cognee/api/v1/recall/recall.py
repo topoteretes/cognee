@@ -1,6 +1,5 @@
 import asyncio
 import re
-from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -9,14 +8,13 @@ from typing_extensions import TypedDict
 from cognee.base_config import get_base_config
 from cognee.context_global_variables import set_session_user_context_variable
 from cognee.exceptions import CogneeValidationError
-from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
-from cognee.infrastructure.llm.config import LLMConfig
 from cognee.infrastructure.databases.cache import SessionAgentTraceEntry, SessionQAEntry
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.llm.config import LLMConfig
 from cognee.memory.entries import normalize_scope
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_existing_datasets
-from cognee.modules.operations import get_current_operation, record_operation
 from cognee.modules.observability import (
     COGNEE_RECALL_SCOPE,
     COGNEE_RECALL_SOURCE,
@@ -27,6 +25,7 @@ from cognee.modules.observability import (
     COGNEE_SESSION_ID,
     new_span,
 )
+from cognee.modules.operations import get_current_operation, record_operation
 from cognee.modules.recall.types.RecallResponse import (
     RecallResponse,
     ResponseAgentTraceEntry,
@@ -137,9 +136,7 @@ async def _resolve_session_cache_user_id(session_id: str, caller_user_id: str | 
 
         visible: list[SessionRecord] = []
         for r in rows:
-            if r.user_id == caller_uuid:
-                visible.append(r)
-            elif permitted_ids and r.dataset_id in permitted_ids:
+            if r.user_id == caller_uuid or permitted_ids and r.dataset_id in permitted_ids:
                 visible.append(r)
 
         if not visible:
@@ -156,7 +153,7 @@ async def _resolve_session_cache_user_id(session_id: str, caller_user_id: str | 
         owner = getattr(chosen, "user_id", None)
         return str(owner) if owner is not None else caller_user_id
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _resolve_session_cache_user_id", exc_info=True)
     return caller_user_id
 
 
@@ -202,7 +199,7 @@ async def _search_session(
 
     scored: list[tuple[int, SessionQAEntry]] = []
     for entry in entries:
-        entry_text = " ".join((entry.question, entry.context, entry.answer))
+        entry_text = f"{entry.question} {entry.context} {entry.answer}"
         entry_words = _tokenize(entry_text)
 
         hits = len(query_words & entry_words)
@@ -268,11 +265,13 @@ async def _search_trace(
         try:
             parts.append(json.dumps(mp, ensure_ascii=False))
         except Exception:
+            logger.debug("Ignoring exception in _search_trace", exc_info=True)
             parts.append(str(mp))
         mrv = entry.method_return_value
         try:
             parts.append(json.dumps(mrv, ensure_ascii=False))
         except Exception:
+            logger.debug("Ignoring exception in _search_trace", exc_info=True)
             parts.append(str(mrv))
 
         entry_words = _tokenize(" ".join(parts))
@@ -608,7 +607,6 @@ async def recall(
                 from cognee.modules.recall.methods.normalize_search_payload import (
                     normalize_search_payload,
                 )
-
                 from cognee.modules.search.methods.search import authorized_search
                 from cognee.modules.search.operations import log_search_history
 
@@ -684,7 +682,9 @@ async def recall(
                     recall_config = get_recall_config()
                 except Exception as error:
                     logger.warning(
-                        "Recall warm-up config failed to load; skipping guard: %s", error
+                        "Recall warm-up config failed to load; skipping guard: %s",
+                        error,
+                        exc_info=True,
                     )
                 guard_active = (
                     recall_config is not None
@@ -718,6 +718,7 @@ async def recall(
                         logger.warning(
                             "Recall warm-up pre-probe authorization failed; skipping guard: %s",
                             error,
+                            exc_info=True,
                         )
                         guard_active = False
 
@@ -969,7 +970,7 @@ async def recall(
                         top_k=gate_top_k,
                     )
                 except Exception as error:
-                    logger.warning("Skill gate lookup failed (non-fatal): %s", error)
+                    logger.warning("Skill gate lookup failed (non-fatal): %s", error, exc_info=True)
                     return []
 
                 entries: list[RecallResponse] = []

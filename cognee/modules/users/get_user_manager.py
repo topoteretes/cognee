@@ -1,23 +1,24 @@
+import json
+import logging
 import os
 import re
-import json
 import uuid
-import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import select
-from typing import Optional
+
 from fastapi import Depends, HTTPException, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi_users import BaseUserManager, UUIDIDMixin, exceptions
 from fastapi_users.db import SQLAlchemyUserDatabase
 from pwdlib.exceptions import UnknownHashError
-from contextlib import asynccontextmanager
+from sqlalchemy import select
 
-from .models import User
-from .get_user_db import get_user_db
-from cognee.modules.users.models.UserApiKey import UserApiKey
-from cognee.modules.users.api_key.hash_api_key import prepare_api_key
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.users.api_key.hash_api_key import prepare_api_key
+from cognee.modules.users.models.UserApiKey import UserApiKey
+
+from .get_user_db import get_user_db
+from .models import User
 
 logger = logging.getLogger(__name__)
 
@@ -34,24 +35,22 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     verification_token_secret = os.getenv("FASTAPI_USERS_VERIFICATION_TOKEN_SECRET", "super_secret")
 
     async def on_after_login(
-        self, user: User, request: Optional[Request] = None, response: Optional[Response] = None
+        self, user: User, request: Request | None = None, response: Response | None = None
     ):
         logger.info("User %s has logged in.", user.id)
 
-    async def on_after_register(self, user: User, request: Optional[Request] = None):
+    async def on_after_register(self, user: User, request: Request | None = None):
         logger.info("User %s has registered.", user.id)
 
     async def on_after_forgot_password(
-        self, user: User, token: str, request: Optional[Request] = None
+        self, user: User, token: str, request: Request | None = None
     ):
         logger.info("User %s has forgot their password. Reset token: %s", user.id, token)
 
-    async def on_after_request_verify(
-        self, user: User, token: str, request: Optional[Request] = None
-    ):
+    async def on_after_request_verify(self, user: User, token: str, request: Request | None = None):
         logger.info("Verification requested for user %s. Verification token: %s", user.id, token)
 
-    async def authenticate(self, credentials: OAuth2PasswordRequestForm) -> Optional[User]:
+    async def authenticate(self, credentials: OAuth2PasswordRequestForm) -> User | None:
         try:
             user = await self.get_by_email(credentials.username)
         except exceptions.UserNotExists:
@@ -76,7 +75,7 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
 
         return user
 
-    async def get_by_token(self, token: str) -> Optional[User]:
+    async def get_by_token(self, token: str) -> User | None:
         relational_engine = get_relational_engine()
         prepared_api_key = prepare_api_key(token)
 
@@ -106,7 +105,7 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             try:
                 await self._touch_api_key_last_used(session, user_api_key)
             except Exception as error:
-                logger.warning("Failed to update API key last_used_at: %s", error)
+                logger.warning("Failed to update API key last_used_at: %s", error, exc_info=True)
 
             return user
 

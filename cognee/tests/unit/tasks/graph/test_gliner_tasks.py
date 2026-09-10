@@ -1058,6 +1058,7 @@ def _patch_recall(monkeypatch, available: bool):
     recall_module = importlib.import_module("cognee.api.v1.recall.recall")
     serve_state = importlib.import_module("cognee.api.v1.serve.state")
     search_methods = importlib.import_module("cognee.modules.search.methods.search")
+    search_operations = importlib.import_module("cognee.modules.search.operations")
 
     captured = {}
 
@@ -1076,6 +1077,7 @@ def _patch_recall(monkeypatch, available: bool):
     monkeypatch.setattr(recall_module, "set_session_user_context_variable", noop)
     monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
     monkeypatch.setattr(search_methods, "authorized_search", fake_authorized_search)
+    monkeypatch.setattr(search_operations, "log_search_history", noop)
     monkeypatch.setattr(recall_module, "llm_available", fake_llm_available)
     user = SimpleNamespace(id=uuid4(), tenant_id=None)
     return recall_module, captured, user

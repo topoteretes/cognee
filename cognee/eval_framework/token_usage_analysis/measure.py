@@ -14,11 +14,11 @@ import os
 
 import litellm
 import tiktoken
+from cost_model import ChunkMeasurement
+
 from cognee.infrastructure.llm.config import get_llm_config
 from cognee.infrastructure.llm.extraction import extract_content_graph, extract_summary
 from cognee.shared.data_models import KnowledgeGraph, SummarizedContent
-
-from cost_model import ChunkMeasurement
 
 FALLBACK_ENCODING = "o200k_base"
 

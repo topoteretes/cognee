@@ -54,7 +54,7 @@ def _instrument(tool, module, name: str) -> None:
 
 
 def pytest_sessionstart(session):
-    import src.server as server
+    from src import server
 
     # No transform is installed at import time, so this is the full catalog.
     tools = {tool.name: tool for tool in asyncio.run(server.mcp.list_tools())}
@@ -68,7 +68,7 @@ def pytest_sessionstart(session):
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
-    import src.server as server
+    from src import server
 
     registered = set(server.registry.tags)
     uncovered = sorted(registered - _called - _uninstrumented)
@@ -96,7 +96,7 @@ def pytest_sessionfinish(session, exitstatus):
     if not os.getenv(_STRICT_ENV):
         return
 
-    import src.server as server
+    from src import server
 
     uncovered = set(server.registry.tags) - _called - _uninstrumented
     if uncovered:
