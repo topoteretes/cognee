@@ -356,6 +356,11 @@ class BroadRetriever(CompletionRetriever):
             for variant in group:
                 if variant in canonical:
                     canonical[variant] = group[0]
+        logger.info(
+            "BROAD name merge: %d names, %d merged into another spelling",
+            len(names),
+            sum(1 for name, target in canonical.items() if name != target),
+        )
         return canonical
 
     async def count_items(
