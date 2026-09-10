@@ -32,7 +32,13 @@ logger = get_logger("improve")
 IMPROVE_MAX_RERUN_PASSES = 3
 
 # Strong refs for background improve tasks: the event loop keeps only weak
-# references, so an un-anchored task can be garbage-collected mid-run.
+# references, so an un-anchored task can be garbage-collected mid-run. Tasks
+# discard themselves on completion. The set is not capped: single-session
+# improves are already bounded to one in-flight task per session by the
+# improve lock (the only path the plugin uses), and multi-session improves
+# serialize on the dataset lock inside memify. Unbounded but self-draining,
+# the same trade-off as ``_BACKGROUND_PIPELINE_TASKS`` and
+# ``_BACKGROUND_REMEMBER_TASKS``.
 _BACKGROUND_IMPROVE_TASKS: set[asyncio.Task] = set()
 
 
