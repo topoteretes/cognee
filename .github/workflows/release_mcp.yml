@@ -1,0 +1,119 @@
+name: release_mcp.yml
+# Publish cognee-mcp to PyPI.
+#
+# cognee-mcp versions independently of the cognee library (0.5.x vs 1.5.x), so
+# it gets its own workflow and its own tag namespace (cognee-mcp-v*) instead of
+# riding release.yml — which builds from the repo root and therefore only ever
+# publishes `cognee`. Until this file existed every MCP release was done by
+# hand, which is how the package sat at 0.5.5 for seven weeks while ~40 commits
+# (the whole FastMCP 3 migration) went unpublished.
+#
+# Same supply-chain posture as release.yml: PyPI Trusted Publishing over OIDC
+# (no API token), PEP 740 attestations on the uploaded files, and a SLSA build
+# provenance attestation hosted by GitHub. One-time PyPI setup is described in
+# docs/supply_chain_provenance.md — the `cognee-mcp` project needs its own
+# trusted publisher entry; the one registered for `cognee` does not cover it.
+on:
+  workflow_dispatch:
+
+# Minimal default permissions (OSSF Scorecard: Token-Permissions). The one job
+# opts in to exactly what it needs.
+permissions:
+  contents: read
+
+jobs:
+  release-mcp-pypi:
+    name: Release cognee-mcp to PyPI from ${{ github.ref_name }}
+    # Both side effects of this job — the PyPI upload and the tag — are
+    # permanent, so it only runs from main.
+    if: ${{ github.ref_name == 'main' }}
+    permissions:
+      contents: write       # push the cognee-mcp-v* tag
+      id-token: write       # OIDC: Trusted Publishing + signing attestations
+      attestations: write   # Persist the SLSA build provenance attestation
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cognee-mcp
+
+    steps:
+      - name: Check out ${{ github.ref_name }}
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
+
+      - name: Install Python
+        # Pinned below 3.14 on purpose: cognee[docs] -> unstructured -> spacy
+        # has no cp314 wheel, and cognee-mcp declares requires-python <3.14.
+        # 3.12 matches the runtime in cognee-mcp/Dockerfile.
+        run: uv python install 3.12
+
+      - name: Resolve version and tag
+        id: meta
+        run: |
+          VERSION="$(uv version --short)"
+          TAG="cognee-mcp-v${VERSION}"
+          echo "Releasing cognee-mcp ${VERSION} as ${TAG}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse to republish an existing version
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          # PyPI versions are immutable: a second upload of the same version is
+          # rejected, and a yanked version can never be reused. Fail here, with
+          # a message that says what to do, rather than at the upload step.
+          if curl -fsS "https://pypi.org/pypi/cognee-mcp/${VERSION}/json" >/dev/null 2>&1; then
+            echo "::error::cognee-mcp ${VERSION} is already on PyPI. Bump the version in cognee-mcp/pyproject.toml (and re-lock) before releasing."
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "::error::Tag ${TAG} already exists on origin."
+            exit 1
+          fi
+          echo "${VERSION} is unpublished and ${TAG} is free."
+
+      - name: Verify the lockfile matches pyproject.toml
+        # Cheap consistency gate before building: a stale lock here means the
+        # pin someone meant to ship is not the one that would be resolved.
+        run: uv lock --check
+
+      - name: Build distributions
+        run: uv build
+
+      - name: Validate distribution metadata
+        # twine >= 7 is required to accept Metadata-Version 2.5, which uv emits.
+        run: uvx --from "twine>=7" twine check dist/*
+
+      # `with:` paths on actions are workspace-relative — the job-level
+      # working-directory only applies to `run:` steps.
+      - name: Attest build provenance for distributions
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be  # v2.4.0
+        with:
+          subject-path: "cognee-mcp/dist/*"
+
+      - name: Publish cognee-mcp ${{ steps.meta.outputs.version }} to PyPI
+        # Trusted Publishing (OIDC) — no API token. The action generates and
+        # uploads PEP 740 digital attestations by default.
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2 (twine 7.0.0: accepts Metadata-Version 2.5)
+        with:
+          packages-dir: cognee-mcp/dist/
+
+      - name: Tag the released commit
+        # After the upload, not before: a tag that points at an unpublished
+        # version is a lie, whereas a published version with no tag is a
+        # one-line fix by hand.
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          git config user.name "Cognee Team"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "${TAG}"
+          git push origin "${TAG}"
+          echo "Tagged ${TAG} at $(git rev-parse --short HEAD)"
