@@ -42,7 +42,8 @@ def test_parse_enola_snapshot_reads_receipt():
     _facts, receipt = parse_enola_snapshot(FIXTURES_DIR)
 
     assert receipt is not None
-    assert receipt["enola_version"] == "0.3.1"
+    assert receipt["enola_version"] == "0.4.12"
+    assert receipt["format_version"] == 1
     assert receipt["snapshot_id"] == "sha256:abc123def456"
 
 

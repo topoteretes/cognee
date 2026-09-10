@@ -16,9 +16,10 @@ Two execution shapes:
 """
 
 import time
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 from uuid import NAMESPACE_OID, uuid5
 
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.migration.loader import (
     data_item_from_record,
     store_imported_graph,
@@ -29,7 +30,6 @@ from cognee.modules.migration.loader import (
 from cognee.modules.migration.sources.base import IMPORT_MODES, MemorySource
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
-from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 if TYPE_CHECKING:
     from cognee.api.v1.remember.remember import RememberResult
@@ -56,7 +56,7 @@ def _mode_label(source: MemorySource) -> str:
     return IMPORT_MODES[IMPORT_MODES.index(source.mode)]
 
 
-async def _ensure_user(user_payload: Dict[str, Any]):
+async def _ensure_user(user_payload: dict[str, Any]):
     """Create-or-match a user by email, transferring credentials on creation.
 
     An existing target user is returned untouched — their credentials are
@@ -189,10 +189,10 @@ async def _apply_social_grants(source: MemorySource, dataset_name: str, owner, i
 
 
 def _revision_to_stamp(
-    archive_revision: Optional[str],
-    stored_revision: Optional[str],
-    ordered_revisions: List[str],
-) -> Optional[str]:
+    archive_revision: str | None,
+    stored_revision: str | None,
+    ordered_revisions: list[str],
+) -> str | None:
     """The revision the imported store should be re-stamped at, or None.
 
     Stamps only BACKWARD — when the archive's revision is strictly behind the
@@ -291,7 +291,7 @@ async def _restamp_to_source_revision(source: MemorySource, dataset_name: str, u
     )
 
 
-def _pipeline_run_id(pipeline_result: Any) -> Optional[str]:
+def _pipeline_run_id(pipeline_result: Any) -> str | None:
     """Extract the pipeline run id from a run_custom_pipeline return value.
 
     Blocking runs return ``{dataset_id: PipelineRunCompleted}``; background
@@ -313,7 +313,8 @@ async def import_memory_source(
     dataset_name: str = DEFAULT_DATASET_NAME,
     user=None,
     run_in_background: bool = False,
-    node_set: Optional[list] = None,
+    node_set: list | None = None,
+    graph_only: bool = False,
     **kwargs,
 ) -> "RememberResult":
     """Import all records from a memory source into a dataset.
@@ -325,6 +326,13 @@ async def import_memory_source(
     record-level deterministic ids (``data_id`` from external_system +
     external_id, node ids from entity names) make re-running an interrupted
     or repeated import safe.
+
+    ``graph_only=True`` persists the imported graph without initializing or
+    writing a vector engine, and skips the first-run LLM/embedding connection
+    checks: the import then needs no API key at all. Only vector-independent
+    search (e.g. ``CHUNKS_LEXICAL``) can retrieve from such a dataset until it
+    is indexed. Applies to the graph records of preserve-mode imports; raw
+    document content stored via ``add()`` is unaffected.
     """
     from cognee.modules.migrations.startup import run_migrations_and_block
 
@@ -346,10 +354,12 @@ async def import_memory_source(
     node_set = node_set or [f"import:{source.source_system}"]
 
     if source.mode == "preserve" and getattr(source, "replayable", False):
-        result = await _import_streaming(source, dataset_name, user, run_in_background, node_set)
+        result = await _import_streaming(
+            source, dataset_name, user, run_in_background, node_set, graph_only
+        )
     else:
         result = await _import_buffered(
-            source, dataset_name, user, run_in_background, node_set, **kwargs
+            source, dataset_name, user, run_in_background, node_set, graph_only, **kwargs
         )
 
     # After the rows land: cognee-origin archives may need the migration
@@ -369,6 +379,7 @@ async def _import_streaming(
     user,
     run_in_background: bool,
     node_set: list,
+    graph_only: bool = False,
 ) -> "RememberResult":
     """Preserve-mode import with bounded memory.
 
@@ -381,8 +392,8 @@ async def _import_streaming(
 
     started_at = time.monotonic()
 
-    counts: Dict[str, int] = {}
-    pending: List[DataItem] = []
+    counts: dict[str, int] = {}
+    pending: list[DataItem] = []
     data_items_stored = 0
     async for record in source.records():
         counts[record.kind] = counts.get(record.kind, 0) + 1
@@ -399,7 +410,7 @@ async def _import_streaming(
 
     logger.info("Importing from %s (mode=preserve, streaming): %s", _source_label(source), counts)
 
-    stats: Dict[str, int] = {
+    stats: dict[str, int] = {
         "graph_nodes": 0,
         "graph_edges": 0,
         "skipped_facts": 0,
@@ -412,7 +423,7 @@ async def _import_streaming(
         from cognee.modules.run_custom_pipeline import run_custom_pipeline
 
         async def stream_import_graph(items, ctx=None):
-            return await stream_graph_from_source(source, stats, ctx=ctx)
+            return await stream_graph_from_source(source, stats, ctx=ctx, graph_only=graph_only)
 
         pipeline_data_item = DataItem(
             data={"source_system": source.source_system, "kind": "graph_stream"},
@@ -430,6 +441,10 @@ async def _import_streaming(
             user=user,
             run_in_background=run_in_background,
             pipeline_name="migration_import_pipeline",
+            # A graph-only import touches neither the LLM nor the embedding
+            # engine, so the first-run connection checks must not demand an
+            # API key (mirrors the code-graph pipeline's posture).
+            skip_connection_test=graph_only,
         )
 
     backgrounded = run_in_background and has_graph_records
@@ -474,6 +489,7 @@ async def _import_buffered(
     user,
     run_in_background: bool,
     node_set: list,
+    graph_only: bool = False,
     **kwargs,
 ) -> "RememberResult":
     """Translate the full record stream, then run data items and graph batches."""
@@ -527,12 +543,13 @@ async def _import_buffered(
             for index, batch in enumerate(translation.graph_batches)
         ]
         pipeline_result = await run_custom_pipeline(
-            tasks=[Task(store_imported_graph)],
+            tasks=[Task(store_imported_graph, graph_only=graph_only)],
             data=wrapped_batches,
             dataset=dataset_name,
             user=user,
             run_in_background=run_in_background,
             pipeline_name="migration_import_pipeline",
+            skip_connection_test=graph_only,
         )
 
     run_id = _pipeline_run_id(pipeline_result)

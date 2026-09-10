@@ -37,6 +37,7 @@ class SearchResultKind(str, Enum):
     SUMMARY = "summary"
     CODING_RULE = "coding_rule"
     CODE = "code"
+    SKILL = "skill"
     NATURAL_LANGUAGE = "natural_language"
     TEMPORAL = "temporal"
     STRUCTURED = "structured"  # when a response_model was supplied

@@ -22,7 +22,7 @@ import pytest
 # the submodule by its module path (bypassing the shadowed attribute); we then
 # grab the module object from sys.modules and patch on it (patch.object), which
 # is import-order independent.
-from cognee.api.v1.visualize.visualize import visualize_graph as _visualize_graph  # noqa: F401
+from cognee.api.v1.visualize.visualize import visualize_graph as _visualize_graph
 
 visualize_module = sys.modules["cognee.api.v1.visualize.visualize"]
 
@@ -53,10 +53,10 @@ def _patches(engine):
     return (
         patch.object(visualize_module, "get_graph_engine", AsyncMock(return_value=engine)),
         patch.object(visualize_module, "set_database_global_context_variables", _noop_db_context),
-        patch(
-            "cognee.modules.visualization.session_events.collect_session_events",
-            AsyncMock(return_value=[]),
-        ),
+        # Patch the name visualize.py binds at import time. Patching the
+        # source module instead silently stops intercepting, because
+        # fetch_visualization_data resolves this through its module global.
+        patch.object(visualize_module, "collect_session_events", AsyncMock(return_value=[])),
     )
 
 

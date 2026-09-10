@@ -22,11 +22,11 @@ def _isolate_llm_env(monkeypatch):
 
 
 def _build(**kwargs):
-    defaults = dict(
-        llm_api_key="test-key",
-        llm_endpoint="http://localhost:11434/v1",
-        _env_file=None,
-    )
+    defaults = {
+        "llm_api_key": "test-key",
+        "llm_endpoint": "http://localhost:11434/v1",
+        "_env_file": None,
+    }
     defaults.update(kwargs)
     return LLMConfig(**defaults)
 

@@ -5,7 +5,7 @@ import types
 from uuid import uuid4
 
 import pytest
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from cognee.exceptions import CogneeValidationError
 from cognee.memory.entries import normalize_scope
@@ -72,7 +72,7 @@ class TestResponseUnion:
 
     def test_unknown_source_rejected(self):
         adapter = TypeAdapter(list[RecallResponse])
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             adapter.validate_python([{"source": "nonsense", "text": "x"}])
 
 

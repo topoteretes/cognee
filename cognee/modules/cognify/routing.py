@@ -12,12 +12,12 @@ external_metadata is never consulted.
 
 from enum import Enum
 
-from cognee.tasks.documents.classify_documents import document_class_for
 from cognee.modules.data.processing.document_types import (
     CodeFileDocument,
     CodeRepoDocument,
     DltSourceDocument,
 )
+from cognee.tasks.documents.classify_documents import document_class_for
 
 
 class CognifyRoute(Enum):

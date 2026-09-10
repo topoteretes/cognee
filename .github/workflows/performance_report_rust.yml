@@ -159,7 +159,8 @@ jobs:
       # reports (empty-graph timings are cheap but not representative), and the
       # nightly stays green. The warning surfaces as a GitHub annotation + step
       # summary so it is visible without red-failing the whole nightly. Re-record
-      # cognee-rs/scripts/perf/fixtures/cassette.json to clear it (see its README).
+      # the arm's own cassette — `inputs.cassette`, which the warning names — to
+      # clear it (see cognee-rs/scripts/perf/README.md).
       #
       # LOG_LEVEL=info is pinned so the log-scraping check is deterministic
       # regardless of any RUST_LOG/LOG_LEVEL inherited by the runner.
@@ -182,7 +183,12 @@ jobs:
                       | grep -oE '[0-9]+' | head -1 || true)"
           echo "entity-type nodes created on replay: ${entities:-0}"
           if [ -z "${entities:-}" ] || [ "${entities:-0}" -lt 1 ]; then
-            msg="cognee-rs perf cassette looks STALE — replay produced no entity-type nodes (EmptyGraph fallback). Timings below are NOT representative. Re-record cognee-rs/scripts/perf/fixtures/cassette.json (see its README)."
+            # Name the cassette THIS arm replays. Every mock arm shares this
+            # step, so a hardcoded path sends whoever reads the annotation to
+            # re-record a different arm's fixture — and because the guard only
+            # warns, this arm goes on reporting empty-graph timings as "success"
+            # while the drift it reported stays uncleared.
+            msg="cognee-rs perf cassette looks STALE — replay produced no entity-type nodes (EmptyGraph fallback). Timings below are NOT representative. Re-record cognee-rs/${{ inputs.cassette }} (see cognee-rs/scripts/perf/README.md)."
             echo "::warning::$msg"
             echo "⚠️ $msg" >> "$GITHUB_STEP_SUMMARY"
             cat "$log" >&2
@@ -276,6 +282,32 @@ jobs:
           cp "$GITHUB_WORKSPACE/perf-out/report.html" "$HTML_PATH"
           echo "JSON_PATH=$JSON_PATH" >> "$GITHUB_ENV"
           echo "HTML_PATH=$HTML_PATH" >> "$GITHUB_ENV"
+
+      - name: Stamp run provenance into the report
+        env:
+          BRANCH: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          # v_perf_runs has always selected $.git_sha and $.run_id, but nothing
+          # ever wrote them, so both columns were always NULL. Now that the
+          # nightly runs at two refs the report also has to say which branch
+          # produced it — the S3 key cannot: a 4th path segment matches neither
+          # the ETL's globs nor its path regex.
+          if [ ! -s "$JSON_PATH" ]; then
+            echo "no report JSON at $JSON_PATH — leaving the upload step to fail"
+            exit 0
+          fi
+          tmp="$(mktemp)"
+          jq --arg branch "$BRANCH" --arg sha "$SHA" --arg run_id "$RUN_ID" \
+             --arg attempt "$RUN_ATTEMPT" --arg event "$EVENT" \
+             '. + {branch: $branch, git_sha: $sha, run_id: $run_id,
+                   run_attempt: $attempt, event: $event}' \
+             "$JSON_PATH" > "$tmp"
+          mv "$tmp" "$JSON_PATH"
 
       - name: Upload reports to S3
         id: upload

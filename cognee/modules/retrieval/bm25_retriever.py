@@ -1,6 +1,5 @@
 import math
 from collections import Counter
-from typing import Optional
 
 from cognee.modules.retrieval.lexical_retriever import LexicalRetriever, tokenize_words
 from cognee.modules.retrieval.utils.stop_words import DEFAULT_STOP_WORDS
@@ -19,7 +18,7 @@ class BM25ChunksRetriever(LexicalRetriever):
         self,
         top_k: int = 15,
         with_scores: bool = False,
-        stop_words: Optional[list[str]] = None,
+        stop_words: list[str] | None = None,
         k1: float = 1.5,
         b: float = 0.75,
     ):

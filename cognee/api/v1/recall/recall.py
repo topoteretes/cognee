@@ -1,5 +1,5 @@
+import asyncio
 import re
-from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -8,14 +8,13 @@ from typing_extensions import TypedDict
 from cognee.base_config import get_base_config
 from cognee.context_global_variables import set_session_user_context_variable
 from cognee.exceptions import CogneeValidationError
-from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
-from cognee.infrastructure.llm.config import LLMConfig
 from cognee.infrastructure.databases.cache import SessionAgentTraceEntry, SessionQAEntry
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.llm.config import LLMConfig
 from cognee.memory.entries import normalize_scope
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_existing_datasets
-from cognee.modules.operations import get_current_operation, record_operation
 from cognee.modules.observability import (
     COGNEE_RECALL_SCOPE,
     COGNEE_RECALL_SOURCE,
@@ -26,6 +25,7 @@ from cognee.modules.observability import (
     COGNEE_SESSION_ID,
     new_span,
 )
+from cognee.modules.operations import get_current_operation, record_operation
 from cognee.modules.recall.types.RecallResponse import (
     RecallResponse,
     ResponseAgentTraceEntry,
@@ -34,6 +34,7 @@ from cognee.modules.recall.types.RecallResponse import (
     ResponseMarkerEntry,
     ResponseQAEntry,
     ResponseSessionContextEntry,
+    ResponseSkillEntry,
     ResponseToolEntry,
 )
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
@@ -134,9 +135,7 @@ async def _resolve_session_cache_user_id(session_id: str, caller_user_id: str | 
 
         visible: list[SessionRecord] = []
         for r in rows:
-            if r.user_id == caller_uuid:
-                visible.append(r)
-            elif permitted_ids and r.dataset_id in permitted_ids:
+            if r.user_id == caller_uuid or permitted_ids and r.dataset_id in permitted_ids:
                 visible.append(r)
 
         if not visible:
@@ -153,7 +152,7 @@ async def _resolve_session_cache_user_id(session_id: str, caller_user_id: str | 
         owner = getattr(chosen, "user_id", None)
         return str(owner) if owner is not None else caller_user_id
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _resolve_session_cache_user_id", exc_info=True)
     return caller_user_id
 
 
@@ -199,7 +198,7 @@ async def _search_session(
 
     scored: list[tuple[int, SessionQAEntry]] = []
     for entry in entries:
-        entry_text = " ".join((entry.question, entry.context, entry.answer))
+        entry_text = f"{entry.question} {entry.context} {entry.answer}"
         entry_words = _tokenize(entry_text)
 
         hits = len(query_words & entry_words)
@@ -265,11 +264,13 @@ async def _search_trace(
         try:
             parts.append(json.dumps(mp, ensure_ascii=False))
         except Exception:
+            logger.debug("Ignoring exception in _search_trace", exc_info=True)
             parts.append(str(mp))
         mrv = entry.method_return_value
         try:
             parts.append(json.dumps(mrv, ensure_ascii=False))
         except Exception:
+            logger.debug("Ignoring exception in _search_trace", exc_info=True)
             parts.append(str(mrv))
 
         entry_words = _tokenize(" ".join(parts))
@@ -605,7 +606,6 @@ async def recall(
                 from cognee.modules.recall.methods.normalize_search_payload import (
                     normalize_search_payload,
                 )
-
                 from cognee.modules.search.methods.search import authorized_search
                 from cognee.modules.search.operations import log_search_history
 
@@ -673,7 +673,9 @@ async def recall(
                     recall_config = get_recall_config()
                 except Exception as error:
                     logger.warning(
-                        "Recall warm-up config failed to load; skipping guard: %s", error
+                        "Recall warm-up config failed to load; skipping guard: %s",
+                        error,
+                        exc_info=True,
                     )
                 guard_active = (
                     recall_config is not None
@@ -707,6 +709,7 @@ async def recall(
                         logger.warning(
                             "Recall warm-up pre-probe authorization failed; skipping guard: %s",
                             error,
+                            exc_info=True,
                         )
                         guard_active = False
 
@@ -924,6 +927,60 @@ async def recall(
                     )
                 return tagged
 
+            async def _run_skill_gate(gate_top_k: int) -> list[RecallResponse]:
+                """Metadata-only SKILLS lookup for the deterministic skill gate.
+
+                Skipped silently unless exactly one dataset is targeted (skill
+                lookup is single-dataset by invariant). Any failure contributes
+                nothing instead of failing the recall.
+                """
+                from cognee.modules.search.methods.search import authorized_search
+
+                try:
+                    gate_user = user
+                    if gate_user is None:
+                        gate_user = await get_default_user()
+
+                    if dataset_ids and len(dataset_ids) == 1:
+                        gate_dataset_ids = list(dataset_ids)
+                    elif datasets and len(datasets) == 1:
+                        authorized = await get_authorized_existing_datasets(
+                            datasets, "read", gate_user
+                        )
+                        if len(authorized) != 1:
+                            return []
+                        gate_dataset_ids = [dataset.id for dataset in authorized]
+                    else:
+                        return []
+
+                    payloads = await authorized_search(
+                        query_text=query_text,
+                        query_type=SearchType.SKILLS,
+                        user=gate_user,
+                        dataset_ids=gate_dataset_ids,
+                        top_k=gate_top_k,
+                    )
+                except Exception as error:
+                    logger.warning("Skill gate lookup failed (non-fatal): %s", error, exc_info=True)
+                    return []
+
+                entries: list[RecallResponse] = []
+                for payload in payloads or []:
+                    for item in getattr(payload, "completion", None) or []:
+                        if not isinstance(item, dict):
+                            continue
+                        name = item.get("name") or ""
+                        description = item.get("description") or ""
+                        entries.append(
+                            ResponseSkillEntry(
+                                source="skills",
+                                text=f"{name}: {description}" if description else name,
+                                skill={k: v for k, v in item.items() if k != "score"},
+                                score=item.get("score"),
+                            )
+                        )
+                return entries
+
             runners = {
                 "session": _run_session,
                 "trace": _run_trace,
@@ -933,22 +990,49 @@ async def recall(
                 "code": _run_code,
             }
 
+            # Deterministic skill gate: a procedural-looking query triggers a
+            # concurrent metadata-only SKILLS lookup (one vector search, no
+            # LLM call). Additive only — the main lanes never wait on it, and
+            # explicit SKILLS / AGENTIC_COMPLETION calls bypass it.
+            skills_task = None
+            if (
+                "graph" in sources
+                and not only_context
+                and query_type not in (SearchType.SKILLS, SearchType.AGENTIC_COMPLETION)
+            ):
+                from cognee.api.v1.recall.skill_gate import (
+                    DEFAULT_SKILL_GATE_TOP_K,
+                    should_search_skills,
+                    skill_gate_enabled,
+                )
+
+                if skill_gate_enabled() and should_search_skills(query_text).fired:
+                    skills_task = asyncio.create_task(_run_skill_gate(DEFAULT_SKILL_GATE_TOP_K))
+
             session_result_count = 0
-            for src in sources:
-                runner = runners.get(src)
-                if runner is None:
-                    continue
-                # Auto mode special case: session hit short-circuits graph.
-                if auto_fallthrough and src == "graph" and merged:
-                    break
-                # on_empty: the other sources gave cognee enough context — don't
-                # go back to the external database.
-                if src == "tools" and tools_trigger == "on_empty" and merged:
-                    continue
-                part = await runner()
-                if src == "session":
-                    session_result_count = len(part)
-                merged.extend(part)
+            try:
+                for src in sources:
+                    runner = runners.get(src)
+                    if runner is None:
+                        continue
+                    # Auto mode special case: session hit short-circuits graph.
+                    if auto_fallthrough and src == "graph" and merged:
+                        break
+                    # on_empty: the other sources gave cognee enough context — don't
+                    # go back to the external database.
+                    if src == "tools" and tools_trigger == "on_empty" and merged:
+                        continue
+                    part = await runner()
+                    if src == "session":
+                        session_result_count = len(part)
+                    merged.extend(part)
+            except BaseException:
+                if skills_task is not None:
+                    skills_task.cancel()
+                raise
+
+            if skills_task is not None:
+                merged.extend(await skills_task)
 
             if session_result_count:
                 span.set_attribute(COGNEE_SESSION_ENTRY_COUNT, session_result_count)

@@ -2,18 +2,17 @@
 
 import os
 from functools import lru_cache
-from typing import Optional
 
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
+from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import FSCacheAdapter
 from cognee.infrastructure.databases.exceptions import CacheConnectionError
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("CacheEngine")
 
 
-def _resolve_cache_db_url(backend: str, cache_db_url: Optional[str]) -> str:
+def _resolve_cache_db_url(backend: str, cache_db_url: str | None) -> str:
     """
     Resolve the SQLAlchemy async URL for the SQL cache backends.
 
@@ -174,9 +173,9 @@ def create_cache_engine(
 
 
 def get_cache_engine(
-    lock_key: Optional[str] = "default_lock",
-    log_key: Optional[str] = "usage_logs",
-) -> Optional[CacheDBInterface]:
+    lock_key: str | None = "default_lock",
+    log_key: str | None = "usage_logs",
+) -> CacheDBInterface | None:
     """
     Returns a cache adapter instance using current context configuration.
     """
@@ -205,8 +204,8 @@ def get_cache_engine(
 
 
 async def close_cache_engine(
-    lock_key: Optional[str] = "default_lock",
-    log_key: Optional[str] = "usage_logs",
+    lock_key: str | None = "default_lock",
+    log_key: str | None = "usage_logs",
 ) -> None:
     """Close and clear the cached cache engine instance."""
     if create_cache_engine.cache_info().currsize == 0:

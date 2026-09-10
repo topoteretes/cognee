@@ -39,6 +39,6 @@ def read_query_prompt(prompt_file_name: str, base_directory: str | None = None) 
     except FileNotFoundError:
         logger.error(f"Error: Prompt file not found. Attempted to read: {file_path}")
         return None
-    except Exception as e:
-        logger.error(f"An error occurred: {e}")
+    except Exception:
+        logger.exception("An error occurred")
         return None

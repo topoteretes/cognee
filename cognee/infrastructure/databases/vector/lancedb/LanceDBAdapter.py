@@ -4,33 +4,40 @@ import inspect
 import threading
 import types
 from collections import OrderedDict
-from os import path
-from uuid import UUID
 from enum import Enum
+from os import path
+from typing import (  # noqa: UP035 - typing.List is a distinct origin key, not an annotation
+    List,
+    Optional,
+    Union,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
+from uuid import UUID
+
 import lancedb
-from pydantic import BaseModel
 from lancedb.pydantic import LanceModel, Vector
-from typing import List, Optional, Union, get_args, get_origin, get_type_hints
+from pydantic import BaseModel
 
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.files.storage import get_file_storage
-from cognee.modules.storage.utils import copy_model
-from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
-from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
-from cognee.shared.logging_utils import get_logger
-
-from ..embeddings.EmbeddingEngine import EmbeddingEngine
-from ..models.ScoredResult import ScoredResult
-from ..vector_db_interface import VectorDBInterface
-
 from cognee.modules.observability import new_span
 from cognee.modules.observability.tracing import (
     COGNEE_DB_SYSTEM,
     COGNEE_VECTOR_COLLECTION,
     COGNEE_VECTOR_RESULT_COUNT,
 )
+from cognee.modules.storage.utils import copy_model
+from cognee.shared.logging_utils import get_logger
+
+from ..embeddings.EmbeddingEngine import EmbeddingEngine
+from ..models.ScoredResult import ScoredResult
+from ..vector_db_interface import VectorDBInterface
 
 logger = get_logger("LanceDBAdapter")
 _NO_DEFAULT = object()
@@ -44,7 +51,7 @@ _SIMPLE_TYPE_DEFAULTS = {
 }
 _ORIGIN_DEFAULT_FACTORIES = {
     list: list,
-    List: list,
+    List: list,  # noqa: UP006 - typing.List is a distinct origin key, not an annotation
     dict: dict,
     set: set,
     tuple: tuple,
@@ -69,14 +76,14 @@ class IndexSchema(DataPoint):
     # Optional reference scalars carried for the search "Evidence" feature.
     # They stay None for non-chunk data points, so this schema remains
     # compatible with every indexed DataPoint type.
-    document_id: Optional[str] = None
-    document_name: Optional[str] = None
-    chunk_index: Optional[int] = None
-    source_chunk_id: Optional[str] = None
-    importance_weight: Optional[float] = 0.5
+    document_id: str | None = None
+    document_name: str | None = None
+    chunk_index: int | None = None
+    source_chunk_id: str | None = None
+    importance_weight: float | None = 0.5
 
     metadata: dict = {"index_fields": ["text"]}
-    belongs_to_set: List[str] = []
+    belongs_to_set: list[str] = []
 
 
 class LanceDBAdapter(VectorDBInterface):
@@ -87,8 +94,8 @@ class LanceDBAdapter(VectorDBInterface):
     # mode without an API key passes ``api_key=None``, and subprocess-mode
     # adapters constructed from cached state may also receive ``url=None``
     # (the ``RemoteLanceDBConnection`` carries the real URL).
-    url: Optional[str]
-    api_key: Optional[str]
+    url: str | None
+    api_key: str | None
     connection = None
 
     # Class-level memoization caches. They are shared across all adapter
@@ -116,8 +123,8 @@ class LanceDBAdapter(VectorDBInterface):
     @classmethod
     def create_subprocess(
         cls,
-        url: Optional[str],
-        api_key: Optional[str],
+        url: str | None,
+        api_key: str | None,
         embedding_engine: "EmbeddingEngine",
     ) -> "LanceDBAdapter":
         """Create a LanceDBAdapter running in subprocess-proxy mode."""
@@ -143,12 +150,12 @@ class LanceDBAdapter(VectorDBInterface):
 
     def __init__(
         self,
-        url: Optional[str],
-        api_key: Optional[str],
+        url: str | None,
+        api_key: str | None,
         embedding_engine: EmbeddingEngine,
         *,
-        connection: Optional[object] = None,
-        session: Optional[object] = None,
+        connection: object | None = None,
+        session: object | None = None,
     ):
         """
         In subprocess-proxy mode, ``connection`` is a ``RemoteLanceDBConnection``
@@ -260,6 +267,7 @@ class LanceDBAdapter(VectorDBInterface):
                             logger.warning(
                                 "Error shutting down LanceDB subprocess after connect failure: %s",
                                 teardown_err,
+                                exc_info=True,
                             )
                     raise
             # Re-check the closed flag after the await — a concurrent
@@ -302,7 +310,7 @@ class LanceDBAdapter(VectorDBInterface):
         try:
             await stale.close()
         except Exception:
-            pass
+            logger.debug("Ignoring exception in LanceDBAdapter.get_connection", exc_info=True)
         if winner is None:
             raise RuntimeError(
                 "LanceDBAdapter is closed; a new adapter must be created "
@@ -469,6 +477,7 @@ class LanceDBAdapter(VectorDBInterface):
                             "belongs_to_set merge lookup failed for '%s': %s",
                             collection_name,
                             e,
+                            exc_info=True,
                         )
 
                 def create_lance_data_point(data_point: DataPoint, vector: list[float]):
@@ -550,7 +559,7 @@ class LanceDBAdapter(VectorDBInterface):
         self,
         collection_name: str,
         points: list[dict],
-        payload_schema: Optional[type[BaseModel]] = None,
+        payload_schema: type[BaseModel] | None = None,
     ) -> None:
         """Upsert caller-provided vectors without invoking the embedding engine."""
         if not points:
@@ -658,6 +667,7 @@ class LanceDBAdapter(VectorDBInterface):
                     "Skipping row %s during migration (validation failed): %s",
                     row_id,
                     e,
+                    exc_info=True,
                 )
                 skipped += 1
                 failed_rows.append((row_id, str(e)))
@@ -917,7 +927,7 @@ class LanceDBAdapter(VectorDBInterface):
 
         return _NO_DEFAULT
 
-    def _coerce_rows_to_typed_payload(self, rows: list, payload_schema: Optional[type]) -> list:
+    def _coerce_rows_to_typed_payload(self, rows: list, payload_schema: type | None) -> list:
         """Validate raw LanceDB rows through the collection's declared
         payload model so `collection.add()` writes values whose Arrow types
         match the stored schema. Without this, LanceDB infers Arrow types
@@ -952,6 +962,7 @@ class LanceDBAdapter(VectorDBInterface):
                     "_coerce_rows_to_typed_payload: validation fell back for id=%s: %s",
                     row.get("id"),
                     e,
+                    exc_info=True,
                 )
                 coerced.append(row)
                 continue
@@ -980,10 +991,17 @@ class LanceDBAdapter(VectorDBInterface):
             # If collection doesn't exist, return empty list (no items to retrieve)
             return []
 
-        if len(data_point_ids) == 1:
-            query = collection.query().where(f"id = '{data_point_ids[0]}'")
+        # ids may be UUIDs or graph-computed deterministic strings that can
+        # contain single quotes, so build the predicate with SQL escaping
+        # (mirrors delete_data_points). Python's tuple repr double-quotes such
+        # strings and LanceDB >= 0.38 parses double quotes as column names.
+        escaped_ids = [str(id_).replace("'", "''") for id_ in data_point_ids]
+        if len(escaped_ids) == 1:
+            where_clause = f"id = '{escaped_ids[0]}'"
         else:
-            query = collection.query().where(f"id IN {tuple(data_point_ids)}")
+            id_list = ", ".join(f"'{id_}'" for id_ in escaped_ids)
+            where_clause = f"id IN ({id_list})"
+        query = collection.query().where(where_clause)
 
         # Convert query results to list format
         results_list = await query.to_list()
@@ -1004,12 +1022,12 @@ class LanceDBAdapter(VectorDBInterface):
     async def search(
         self,
         collection_name: str,
-        query_text: str = None,
-        query_vector: List[float] = None,
-        limit: Optional[int] = 15,
+        query_text: str | None = None,
+        query_vector: list[float] | None = None,
+        limit: int | None = 15,
         with_vector: bool = False,
         include_payload: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
     ):
         with new_span("cognee.db.vector.search") as otel_span:
@@ -1093,11 +1111,11 @@ class LanceDBAdapter(VectorDBInterface):
     async def batch_search(
         self,
         collection_name: str,
-        query_texts: List[str],
-        limit: Optional[int] = None,
+        query_texts: list[str],
+        limit: int | None = None,
         with_vectors: bool = False,
         include_payload: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
     ):
         query_vectors = await self.embedding_engine.embed_text(query_texts)
 
@@ -1114,6 +1132,62 @@ class LanceDBAdapter(VectorDBInterface):
                 for query_vector in query_vectors
             ]
         )
+
+    supports_payload_update = True
+
+    async def update_payload(self, collection_name: str, payload_updates: dict[str, dict]) -> None:
+        """Update payload fields on existing rows WITHOUT re-embedding.
+
+        Vector-preserving rewrite: read the matching rows (payload struct and
+        stored vector), merge the field updates into each payload, and
+        merge_insert them back with the SAME vector — no embedding call.
+        Fields must already exist in the collection's payload schema. Runs
+        under VECTOR_DB_LOCK like every other read→build→write cycle here.
+        """
+        if not payload_updates:
+            return
+        if not await self.has_collection(collection_name):
+            return
+        collection = await self.get_collection(collection_name)
+
+        escaped_ids = [str(id_).replace("'", "''") for id_ in payload_updates]
+        if len(escaped_ids) == 1:
+            where_clause = f"id = '{escaped_ids[0]}'"
+        else:
+            id_list = ", ".join(f"'{id_}'" for id_ in escaped_ids)
+            where_clause = f"id IN ({id_list})"
+
+        async with self.VECTOR_DB_LOCK:
+            schema = await collection.schema()
+            # The caller contract: every updated field already exists in the
+            # payload struct. pyarrow silently DROPS unknown struct keys when
+            # building against a schema, so an unknown field would be a silent
+            # no-op rather than an update — refuse it instead.
+            payload_type = schema.field("payload").type
+            known_fields = {payload_type.field(i).name for i in range(payload_type.num_fields)}
+            unknown_fields = {
+                field for fields in payload_updates.values() for field in fields
+            } - known_fields
+            if unknown_fields:
+                raise ValueError(
+                    f"update_payload: fields {sorted(unknown_fields)} do not exist in the "
+                    f"payload schema of collection {collection_name!r}"
+                )
+            rows = await collection.query().where(where_clause).to_list()
+            if not rows:
+                return
+            records = []
+            for row in rows:
+                payload = dict(row.get("payload") or {})
+                payload.update(payload_updates[str(row["id"])])
+                records.append({"id": row["id"], "vector": list(row["vector"]), "payload": payload})
+            # Build against the table's OWN arrow schema: plain dicts make
+            # merge_insert re-infer types and choke on the fixed-size-list
+            # vector column.
+            import pyarrow
+
+            arrow_records = pyarrow.Table.from_pylist(records, schema=schema)
+            await collection.merge_insert("id").when_matched_update_all().execute(arrow_records)
 
     # Ids per `IN (...)` delete predicate. Each `collection.delete` is a
     # LanceDB commit that appends a table version, and manifest listing slows
@@ -1145,8 +1219,8 @@ class LanceDBAdapter(VectorDBInterface):
 
     async def remove_belongs_to_set_tags(
         self,
-        tags: List[str],
-        node_ids: Optional[List[str]] = None,
+        tags: list[str],
+        node_ids: list[str] | None = None,
     ) -> None:
         """
         Strip the given tag names from `belongs_to_set` arrays in every
@@ -1163,15 +1237,13 @@ class LanceDBAdapter(VectorDBInterface):
         deletes them when the array is empty.
         """
         if not tags:
-            return None
+            return
 
         if node_ids is not None and not node_ids:
-            return None
+            return
 
         tag_set = set(tags)
-        id_set: Optional[set[str]] = (
-            {str(nid) for nid in node_ids} if node_ids is not None else None
-        )
+        id_set: set[str] | None = {str(nid) for nid in node_ids} if node_ids is not None else None
         connection = await self.get_connection()
         collection_names = await connection.table_names()
 
@@ -1193,6 +1265,7 @@ class LanceDBAdapter(VectorDBInterface):
                     "remove_belongs_to_set_tags: schema read failed for '%s': %s",
                     collection_name,
                     e,
+                    exc_info=True,
                 )
                 continue
 
@@ -1237,6 +1310,7 @@ class LanceDBAdapter(VectorDBInterface):
                         "remove_belongs_to_set_tags: row scan failed for '%s': %s",
                         collection_name,
                         e,
+                        exc_info=True,
                     )
                     continue
 
@@ -1294,7 +1368,7 @@ class LanceDBAdapter(VectorDBInterface):
                         )
                         raise
 
-        return None
+        return
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         await self.create_collection(
@@ -1396,23 +1470,24 @@ class LanceDBAdapter(VectorDBInterface):
         related_models_fields = []
 
         for field_name, field_config in model_type.model_fields.items():
-            if hasattr(field_config, "model_fields"):
-                related_models_fields.append(field_name)
-
-            elif hasattr(field_config.annotation, "model_fields"):
+            if hasattr(field_config, "model_fields") or hasattr(
+                field_config.annotation, "model_fields"
+            ):
                 related_models_fields.append(field_name)
 
             elif (
-                get_origin(field_config.annotation) == Union
+                # `Optional[X]` / `Union[...]` have origin typing.Union; the PEP 604
+                # spelling `X | None` has origin types.UnionType. Treat both alike.
+                get_origin(field_config.annotation) in (Union, types.UnionType)
                 or get_origin(field_config.annotation) is list
             ):
                 models_list = get_args(field_config.annotation)
-                if any(hasattr(model, "model_fields") for model in models_list):
-                    related_models_fields.append(field_name)
-                elif models_list and any(get_args(model) is DataPoint for model in models_list):
-                    related_models_fields.append(field_name)
-                elif models_list and any(
-                    submodel is DataPoint for submodel in get_args(models_list[0])
+                if (
+                    any(hasattr(model, "model_fields") for model in models_list)
+                    or models_list
+                    and any(get_args(model) is DataPoint for model in models_list)
+                    or models_list
+                    and any(submodel is DataPoint for submodel in get_args(models_list[0]))
                 ):
                     related_models_fields.append(field_name)
 
@@ -1425,7 +1500,7 @@ class LanceDBAdapter(VectorDBInterface):
             model_type,
             include_fields={
                 "id": (str, ...),
-                "belongs_to_set": (Optional[List[str]], None),
+                "belongs_to_set": (list[str] | None, None),
             },
             exclude_fields=["metadata"] + related_models_fields,
         )
@@ -1460,7 +1535,7 @@ class LanceDBAdapter(VectorDBInterface):
                 if inspect.isawaitable(close_result):
                     await close_result
             except Exception as e:
-                logger.warning("Error closing LanceDB connection: %s", e)
+                logger.warning("Error closing LanceDB connection: %s", e, exc_info=True)
         if session is not None:
             # ``session.shutdown()`` is sync and joins/terminates/kills the
             # worker process — can take seconds. Offload to a worker thread
@@ -1468,4 +1543,4 @@ class LanceDBAdapter(VectorDBInterface):
             try:
                 await asyncio.to_thread(session.shutdown)
             except Exception as e:
-                logger.warning("Error shutting down LanceDB subprocess: %s", e)
+                logger.warning("Error shutting down LanceDB subprocess: %s", e, exc_info=True)

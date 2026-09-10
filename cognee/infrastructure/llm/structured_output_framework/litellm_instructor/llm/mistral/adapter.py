@@ -15,19 +15,18 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.llm.config import get_llm_config
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, is_budget_exhausted_error
 from cognee.infrastructure.llm.retry_config import (
     llm_retry_condition,
     llm_retry_stop_condition,
 )
-
-from cognee.infrastructure.files.utils.open_data_file import open_data_file
-from cognee.infrastructure.llm.config import get_llm_config
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
-    get_instructor_mode,
-)
-from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, is_budget_exhausted_error
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
 )
 from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
@@ -146,13 +145,13 @@ class MistralAdapter(GenericAPIAdapter):
                 else:
                     raise ValueError("Failed to get valid response after retries")
             except litellm.exceptions.BadRequestError as e:
-                logger.error(f"Bad request error: {str(e)}")
-                raise ValueError(f"Invalid request: {str(e)}")
+                logger.error(f"Bad request error: {e!s}")
+                raise ValueError(f"Invalid request: {e!s}")
 
         except JSONSchemaValidationError as e:
-            logger.error(f"Schema validation failed: {str(e)}")
+            logger.error(f"Schema validation failed: {e!s}")
             logger.debug(f"Raw response: {e.raw_response}")
-            raise ValueError(f"Response failed schema validation: {str(e)}")
+            raise ValueError(f"Response failed schema validation: {e!s}")
         except Exception as e:
             if is_budget_exhausted_error(e):
                 raise LLMPaymentRequiredError() from e

@@ -77,7 +77,7 @@ def test_code_specs_are_forwarded(client, fake_remember):
         data={
             "datasetName": "code_ds",
             "content_type": "code",
-            "repositories": ["https://github.com/org/repo", "https://github.com/org/other"],
+            "raw_data": ["https://github.com/org/repo", "https://github.com/org/other"],
             "index_vectors": "true",
             "run_in_background": "true",
         },
@@ -100,7 +100,7 @@ def test_empty_repository_entries_are_dropped(client, fake_remember):
             "datasetName": "code_ds",
             "content_type": "code",
             # Swagger UI submits untouched array items as "".
-            "repositories": ["https://github.com/org/repo", "", "  "],
+            "raw_data": ["https://github.com/org/repo", "", "  "],
         },
     )
 
@@ -110,14 +110,14 @@ def test_empty_repository_entries_are_dropped(client, fake_remember):
     assert fake_remember["kwargs"]["index_vectors"] is False
 
 
-def test_code_requires_repositories(client, fake_remember):
+def test_code_requires_raw_data_specs(client, fake_remember):
     response = client.post(
         "/remember",
         data={"datasetName": "code_ds", "content_type": "code"},
     )
 
     assert response.status_code == 400
-    assert "repositories" in response.json()["detail"]
+    assert "raw_data" in response.json()["detail"]
     assert not fake_remember
 
 
@@ -127,7 +127,7 @@ def test_code_rejects_file_uploads(client, fake_remember):
         data={
             "datasetName": "code_ds",
             "content_type": "code",
-            "repositories": ["https://github.com/org/repo"],
+            "raw_data": ["https://github.com/org/repo"],
         },
         files=[("data", ("main.py", b"print('hi')", "text/plain"))],
     )
@@ -143,24 +143,13 @@ def test_code_rejects_session_id(client, fake_remember):
         data={
             "datasetName": "code_ds",
             "content_type": "code",
-            "repositories": ["https://github.com/org/repo"],
+            "raw_data": ["https://github.com/org/repo"],
             "session_id": "s1",
         },
     )
 
     assert response.status_code == 400
     assert "session_id" in response.json()["detail"]
-    assert not fake_remember
-
-
-def test_repositories_without_code_content_type_rejected(client, fake_remember):
-    response = client.post(
-        "/remember",
-        data={"datasetName": "ds", "repositories": ["https://github.com/org/repo"]},
-    )
-
-    assert response.status_code == 400
-    assert "content_type='code'" in response.json()["detail"]
     assert not fake_remember
 
 
@@ -183,7 +172,7 @@ def test_local_paths_gated_by_accept_local_file_path(client, fake_remember, monk
         data={
             "datasetName": "code_ds",
             "content_type": "code",
-            "repositories": ["/srv/some/repo"],
+            "raw_data": ["/srv/some/repo"],
         },
     )
 
@@ -200,7 +189,7 @@ def test_remote_urls_allowed_when_local_paths_disabled(client, fake_remember, mo
         data={
             "datasetName": "code_ds",
             "content_type": "code",
-            "repositories": ["https://github.com/org/repo"],
+            "raw_data": ["https://github.com/org/repo"],
         },
     )
 
@@ -214,7 +203,7 @@ def test_local_paths_allowed_by_default(client, fake_remember):
         data={
             "datasetName": "code_ds",
             "content_type": "code",
-            "repositories": ["/srv/some/repo"],
+            "raw_data": ["/srv/some/repo"],
         },
     )
 

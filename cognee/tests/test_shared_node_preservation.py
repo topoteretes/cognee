@@ -14,21 +14,25 @@ Test Coverage:
 
 import os
 import pathlib
-import pytest
-from uuid import UUID, uuid4, NAMESPACE_OID, uuid5
-from pydantic import BaseModel
+from contextlib import AsyncExitStack
 from unittest.mock import AsyncMock, patch
+from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
+
+import pytest
+from pydantic import BaseModel
 
 import cognee
 from cognee.api.v1.datasets import datasets
 from cognee.context_global_variables import set_database_global_context_variables
-from cognee.modules.data.methods import create_authorized_dataset
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm import LLMGateway
+from cognee.infrastructure.locks import dataset_lock
+from cognee.modules.chunking.chunk_id import chunk_content_hash, content_chunk_id
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
+from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.data.processing.document_types.TextDocument import TextDocument
 from cognee.modules.engine.models import Entity
 from cognee.modules.engine.operations.setup import setup
@@ -36,10 +40,10 @@ from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import create_user, get_default_user
 from cognee.modules.users.models import User
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
-from cognee.shared.data_models import KnowledgeGraph, Node, Edge, SummarizedContent
+from cognee.shared.data_models import Edge, KnowledgeGraph, Node, SummarizedContent
 from cognee.shared.logging_utils import get_logger
-from cognee.tests.utils.assert_graph_nodes_present import assert_graph_nodes_present
 from cognee.tests.utils.assert_graph_nodes_not_present import assert_graph_nodes_not_present
+from cognee.tests.utils.assert_graph_nodes_present import assert_graph_nodes_present
 from cognee.tests.utils.extract_entities import extract_entities
 from cognee.tests.utils.extract_summary import extract_summary
 
@@ -152,9 +156,13 @@ async def test_shared_entity_preserved_across_documents(mock_create_structured_o
     mock_create_structured_output.side_effect = mock_llm_output
 
     user = await get_default_user()
-    await set_database_global_context_variables(
-        (await create_authorized_dataset("main_dataset", user)).id, user.id
-    )
+    authorized_dataset = await create_authorized_dataset("main_dataset", user)
+    # Canonical lock order (SDK-483): hold the dataset lock before the legacy
+    # context call below acquires its queue slot; nested add/cognify/delete
+    # re-enter via held_datasets instead of re-acquiring the lock.
+    _lock_stack = AsyncExitStack()
+    await _lock_stack.enter_async_context(dataset_lock(authorized_dataset.id))
+    await set_database_global_context_variables(authorized_dataset.id, user.id)
 
     # Add and cognify first document (BMW)
     bmw_text = "BMW is a german car manufacturer"
@@ -168,7 +176,7 @@ async def test_shared_entity_preserved_across_documents(mock_create_structured_o
 
     # Cognify both documents
     cognify_result: dict = await cognee.cognify()
-    dataset_id = list(cognify_result.keys())[0]
+    dataset_id = next(iter(cognify_result.keys()))
 
     # Extract expected entities
     bmw_document = TextDocument(
@@ -178,7 +186,7 @@ async def test_shared_entity_preserved_across_documents(mock_create_structured_o
         external_metadata="",
     )
     bmw_chunk = DocumentChunk(
-        id=uuid5(NAMESPACE_OID, f"{str(bmw_data_id)}-0"),
+        id=content_chunk_id(str(bmw_data_id), chunk_content_hash(bmw_text), 0),
         text=bmw_text,
         chunk_size=14,
         chunk_index=0,
@@ -194,7 +202,7 @@ async def test_shared_entity_preserved_across_documents(mock_create_structured_o
         external_metadata="",
     )
     netherlands_chunk = DocumentChunk(
-        id=uuid5(NAMESPACE_OID, f"{str(netherlands_data_id)}-0"),
+        id=content_chunk_id(str(netherlands_data_id), chunk_content_hash(netherlands_text), 0),
         text=netherlands_text,
         chunk_size=14,
         chunk_index=0,
@@ -211,11 +219,11 @@ async def test_shared_entity_preserved_across_documents(mock_create_structured_o
     netherlands_entities = extract_entities(netherlands_kg)
 
     # Find the shared Germany entity
-    [e for e in bmw_entities if e.name == "Germany"][0]
-    [e for e in netherlands_entities if e.name == "Germany"][0]
+    next(e for e in bmw_entities if e.name == "Germany")
+    next(e for e in netherlands_entities if e.name == "Germany")
 
-    [e for e in bmw_entities if e.name == "BMW"][0]
-    [e for e in netherlands_entities if e.name == "Netherlands"][0]
+    next(e for e in bmw_entities if e.name == "BMW")
+    next(e for e in netherlands_entities if e.name == "Netherlands")
 
     # Verify both documents created nodes in the graph
     graph_engine = await get_graph_engine()
@@ -332,8 +340,8 @@ async def test_delete_permission_checks_delete_not_read():
     org_y = Organization(name="Test Organization Y")
 
     await set_database_global_context_variables(dataset_y.id, dataset_y.owner_id)
-    from cognee.tasks.storage import add_data_points
     from cognee.modules.pipelines.models import PipelineContext
+    from cognee.tasks.storage import add_data_points
 
     await add_data_points(
         [org_y],
@@ -425,7 +433,7 @@ async def test_dataset_deletion_removes_files():
 
     # Cognify to create graph
     cognify_result = await cognee.cognify([dataset_name], user=user)
-    dataset_id = list(cognify_result.keys())[0]
+    dataset_id = next(iter(cognify_result.keys()))
 
     # Check that files/data exist in storage
     from cognee.modules.data.methods import get_data
@@ -458,7 +466,7 @@ async def test_dataset_deletion_removes_files():
         deleted_dataset = await get_dataset(dataset_id)
         assert deleted_dataset is None, "Dataset should be deleted"
     except Exception as e:
-        logger.info(f"✅ Dataset correctly deleted: {type(e).__name__}")
+        logger.info(f"✅ Dataset correctly deleted: {type(e).__name__}", exc_info=True)
 
     # Verify data records are deleted
     data_1_after = await get_data(data_1_id)

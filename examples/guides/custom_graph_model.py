@@ -1,6 +1,5 @@
 import asyncio
 import os
-from typing import List
 
 from cognee import forget, remember, visualize_graph
 from cognee.low_level import DataPoint
@@ -18,12 +17,12 @@ class Activity(DataPoint):
 
 class Person(DataPoint):
     name: str
-    likes: List[Activity] | None = None
+    likes: list[Activity] | None = None
     metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
 
 class PeopleGraph(DataPoint):
-    people: List[Person]
+    people: list[Person]
 
 
 async def main():

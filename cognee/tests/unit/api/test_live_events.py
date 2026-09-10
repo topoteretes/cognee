@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from cognee.api.v1.visualize.visualize import get_live_events as _get_live_events  # noqa: F401,E501
+from cognee.api.v1.visualize.visualize import get_live_events as _get_live_events
 from cognee.modules.users.exceptions import PermissionDeniedError
 
 visualize_module = sys.modules["cognee.api.v1.visualize.visualize"]
@@ -60,7 +60,8 @@ async def test_since_filters_strictly_greater_so_the_cursor_event_never_repeats(
     ctx_a, ctx_b = _patches(events)
     with ctx_a, ctx_b:
         result = await visualize_module.get_live_events(
-            DATASET_ID, since=datetime(2026, 8, 3, 9, 0, 5)
+            DATASET_ID,
+            since=datetime(2026, 8, 3, 9, 0, 5),  # noqa: DTZ001 - naive by contract: event cursors are naive ISO strings
         )
 
     # The event AT the cursor is excluded — only strictly newer ones return.
@@ -71,7 +72,7 @@ async def test_since_filters_strictly_greater_so_the_cursor_event_never_repeats(
 @pytest.mark.asyncio
 async def test_nothing_new_echoes_the_given_since_back_as_cursor():
     events = [_event("2026-08-03T09:00:00.000000")]
-    since = datetime(2026, 8, 3, 9, 30, 0)
+    since = datetime(2026, 8, 3, 9, 30, 0)  # noqa: DTZ001 - naive by contract: event cursors are naive ISO strings
 
     ctx_a, ctx_b = _patches(events)
     with ctx_a, ctx_b:
@@ -107,9 +108,8 @@ async def test_timezone_aware_since_is_normalized_before_comparing():
 @pytest.mark.asyncio
 async def test_unauthorized_dataset_raises_permission_denied():
     ctx_a, ctx_b = _patches([], authorized=False)
-    with ctx_a, ctx_b:
-        with pytest.raises(PermissionDeniedError):
-            await visualize_module.get_live_events(DATASET_ID)
+    with ctx_a, ctx_b, pytest.raises(PermissionDeniedError):
+        await visualize_module.get_live_events(DATASET_ID)
 
 
 @pytest.mark.asyncio
@@ -119,7 +119,29 @@ async def test_an_event_with_no_time_is_dropped_by_a_since_filter_rather_than_cr
     ctx_a, ctx_b = _patches(events)
     with ctx_a, ctx_b:
         result = await visualize_module.get_live_events(
-            DATASET_ID, since=datetime(2026, 8, 3, 9, 0, 0)
+            DATASET_ID,
+            since=datetime(2026, 8, 3, 9, 0, 0),  # noqa: DTZ001 - naive by contract: event cursors are naive ISO strings
         )
 
     assert result["events"] == [_event("2026-08-03T09:00:10.000000")]
+
+
+@pytest.mark.asyncio
+async def test_the_requested_dataset_is_passed_down_as_the_collection_scope():
+    """The scope kwarg is the whole fix, and every test above survives without
+    it — they assert on whatever the mocked collector returns, so a dropped
+    ``dataset_id=`` would leave them green while re-opening COG-6121."""
+    user = SimpleNamespace(id="44444444-4444-4444-4444-444444444444")
+    collect = AsyncMock(return_value=[])
+
+    with (
+        patch.object(
+            visualize_module,
+            "get_authorized_existing_datasets",
+            AsyncMock(return_value=[SimpleNamespace(id=DATASET_ID)]),
+        ),
+        patch.object(visualize_module, "collect_session_events", collect),
+    ):
+        await visualize_module.get_live_events(DATASET_ID, user=user)
+
+    collect.assert_awaited_once_with(user=user, dataset_id=DATASET_ID)

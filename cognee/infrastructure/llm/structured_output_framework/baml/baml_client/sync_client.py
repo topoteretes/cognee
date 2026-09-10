@@ -11,13 +11,14 @@
 # baml-cli is available with the baml package.
 
 import typing
-import typing_extensions
-import baml_py
 
-from . import stream_types, types, type_builder
-from .parser import LlmResponseParser, LlmStreamParser
-from .runtime import DoNotUseDirectlyCallManager, BamlCallOptions
+import baml_py
+import typing_extensions
+
+from . import stream_types, type_builder, types
 from .globals import DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME as __runtime__
+from .parser import LlmResponseParser, LlmStreamParser
+from .runtime import BamlCallOptions, DoNotUseDirectlyCallManager
 
 
 class BamlSyncClient:
@@ -51,13 +52,11 @@ class BamlSyncClient:
 
     def with_options(
         self,
-        tb: typing.Optional[type_builder.TypeBuilder] = None,
-        client_registry: typing.Optional[baml_py.baml_py.ClientRegistry] = None,
-        collector: typing.Optional[
-            typing.Union[baml_py.baml_py.Collector, typing.List[baml_py.baml_py.Collector]]
-        ] = None,
-        env: typing.Optional[typing.Dict[str, typing.Optional[str]]] = None,
-        on_tick: typing.Optional[typing.Callable[[str, baml_py.baml_py.FunctionLog], None]] = None,
+        tb: type_builder.TypeBuilder | None = None,
+        client_registry: baml_py.baml_py.ClientRegistry | None = None,
+        collector: baml_py.baml_py.Collector | list[baml_py.baml_py.Collector] | None = None,
+        env: dict[str, str | None] | None = None,
+        on_tick: typing.Callable[[str, baml_py.baml_py.FunctionLog], None] | None = None,
     ) -> "BamlSyncClient":
         options: BamlCallOptions = {}
         if tb is not None:

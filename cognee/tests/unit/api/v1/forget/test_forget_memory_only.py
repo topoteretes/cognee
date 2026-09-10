@@ -10,8 +10,8 @@ Covers:
 
 import importlib
 from types import SimpleNamespace
-from uuid import uuid4
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
 
@@ -127,6 +127,13 @@ async def test_forget_dataset_memory_clears_graph_and_resets_pipeline(monkeypatc
         "_resolve_dataset_id",
         AsyncMock(return_value=DATASET_ID),
     )
+    # The memory helpers enter the dataset database context inside the lock
+    # (canonical order, SDK-483); stub it out for these unit tests.
+    monkeypatch.setattr(
+        forget_module,
+        "set_database_global_context_variables",
+        lambda *args, **kwargs: _NoOpAsyncContext(),
+    )
 
     with (
         patch.object(
@@ -196,6 +203,13 @@ async def test_forget_dataset_memory_skips_records_without_pipeline_status(monke
         "_resolve_dataset_id",
         AsyncMock(return_value=DATASET_ID),
     )
+    # The memory helpers enter the dataset database context inside the lock
+    # (canonical order, SDK-483); stub it out for these unit tests.
+    monkeypatch.setattr(
+        forget_module,
+        "set_database_global_context_variables",
+        lambda *args, **kwargs: _NoOpAsyncContext(),
+    )
     mock_reset_status = AsyncMock()
 
     with (
@@ -245,6 +259,13 @@ async def test_forget_data_memory_clears_graph_and_resets_pipeline(monkeypatch):
         "_resolve_dataset_id",
         AsyncMock(return_value=DATASET_ID),
     )
+    # The memory helpers enter the dataset database context inside the lock
+    # (canonical order, SDK-483); stub it out for these unit tests.
+    monkeypatch.setattr(
+        forget_module,
+        "set_database_global_context_variables",
+        lambda *args, **kwargs: _NoOpAsyncContext(),
+    )
 
     with (
         patch.object(
@@ -286,6 +307,13 @@ async def test_forget_data_memory_no_record_found(monkeypatch):
         "_resolve_dataset_id",
         AsyncMock(return_value=DATASET_ID),
     )
+    # The memory helpers enter the dataset database context inside the lock
+    # (canonical order, SDK-483); stub it out for these unit tests.
+    monkeypatch.setattr(
+        forget_module,
+        "set_database_global_context_variables",
+        lambda *args, **kwargs: _NoOpAsyncContext(),
+    )
 
     with (
         patch.object(
@@ -326,9 +354,9 @@ async def test_forget_memory_only_without_dataset_raises(monkeypatch):
         patch.object(
             forget_module, "set_database_global_context_variables", return_value=_NoOpAsyncContext()
         ),
+        pytest.raises(ValueError, match="memory_only requires dataset or dataset_id"),
     ):
-        with pytest.raises(ValueError, match="memory_only requires dataset or dataset_id"):
-            await forget_module.forget(memory_only=True)
+        await forget_module.forget(memory_only=True)
 
 
 @pytest.mark.asyncio

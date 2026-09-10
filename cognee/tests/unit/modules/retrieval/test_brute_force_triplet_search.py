@@ -1,16 +1,17 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 
 from cognee.exceptions import CogneeValidationError
-from cognee.modules.retrieval.utils.brute_force_triplet_search import (
-    brute_force_triplet_search,
-    get_memory_fragment,
-    format_triplets,
-)
-from cognee.modules.graph.models.EdgeType import EdgeType
+from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
-from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
+from cognee.modules.graph.models.EdgeType import EdgeType
+from cognee.modules.retrieval.utils.brute_force_triplet_search import (
+    brute_force_triplet_search,
+    format_triplets,
+    get_memory_fragment,
+)
 
 
 class MockScoredResult:
@@ -957,9 +958,9 @@ async def test_brute_force_triplet_search_generic_exception():
             "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
+        pytest.raises(Exception, match="Generic error"),
     ):
-        with pytest.raises(Exception, match="Generic error"):
-            await brute_force_triplet_search(query="test query")
+        await brute_force_triplet_search(query="test query")
 
 
 @pytest.mark.asyncio
@@ -1227,7 +1228,7 @@ async def test_brute_force_triplet_search_batch_error_fallback():
 @pytest.mark.asyncio
 async def test_cognee_graph_mapping_batch_shapes():
     """Test that CogneeGraph mapping methods accept list-of-lists with query_list_length set."""
-    from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
+    from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
 
     graph = CogneeGraph()
     node1 = Node("node1", {"name": "Node1"})

@@ -4,15 +4,16 @@ A field either points at other DataPoints or holds a plain value. Every part of 
 graph walk asks that question, and this module is the only place it is answered.
 """
 
-from typing import Any, Iterator, List, Optional, Tuple
+from collections.abc import Iterator
+from typing import Any
 
 from cognee.infrastructure.engine import DataPoint, Edge
 
 # One relationship declaration: the edge metadata (if any) and everything it points at.
-EdgeTargets = Tuple[Optional[Edge], List[DataPoint]]
+EdgeTargets = tuple[Edge | None, list[DataPoint]]
 
 
-def _as_edge_targets(value: Any) -> Optional[EdgeTargets]:
+def _as_edge_targets(value: Any) -> EdgeTargets | None:
     """Read one relationship declaration, or None when ``value`` is a plain property.
 
     Accepts a bare DataPoint or an ``(Edge, DataPoint | list[DataPoint])`` tuple —
@@ -31,7 +32,7 @@ def _as_edge_targets(value: Any) -> Optional[EdgeTargets]:
     return None
 
 
-def extract_relationships(field_value: Any) -> List[EdgeTargets]:
+def extract_relationships(field_value: Any) -> list[EdgeTargets]:
     """Every relationship declared by one field. Empty list means it is a property."""
     items = field_value if isinstance(field_value, list) else [field_value]
     return [pair for item in items if (pair := _as_edge_targets(item)) is not None]
@@ -39,8 +40,8 @@ def extract_relationships(field_value: Any) -> List[EdgeTargets]:
 
 def iter_fields(
     data_point: DataPoint,
-    skip: Tuple[str, ...] = (),
-) -> Iterator[Tuple[str, Any, List[EdgeTargets]]]:
+    skip: tuple[str, ...] = (),
+) -> Iterator[tuple[str, Any, list[EdgeTargets]]]:
     """Every field of a node, paired with the relationships it declares.
 
     An empty ``edge_targets`` means the field is a scalar property. Deciding that here
@@ -54,7 +55,7 @@ def iter_fields(
         yield field_name, field_value, extract_relationships(field_value)
 
 
-def iter_targets(edge_targets: List[EdgeTargets]) -> Iterator[DataPoint]:
+def iter_targets(edge_targets: list[EdgeTargets]) -> Iterator[DataPoint]:
     """Every target a field points at, dropping the edge metadata."""
     for _edge_metadata, targets in edge_targets:
         yield from targets

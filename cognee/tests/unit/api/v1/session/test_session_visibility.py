@@ -10,12 +10,12 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 
+from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.session_lifecycle.metrics import (
-    list_session_rows,
     get_session_row,
+    list_session_rows,
 )
 from cognee.modules.session_lifecycle.models import SessionRecord
-from cognee.infrastructure.databases.relational import get_relational_engine
 
 
 @pytest_asyncio.fixture

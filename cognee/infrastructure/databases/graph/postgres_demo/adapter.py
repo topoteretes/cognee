@@ -9,39 +9,42 @@ Interested in further development or production use of Postgres as a graph datab
 us at social@cognee.ai to explore the options.
 """
 
+import asyncio
 import json
+from collections.abc import Callable
+from contextlib import asynccontextmanager
+from typing import Any
 from uuid import UUID
-from typing import Callable, Dict, Any, List, Union, Optional, Tuple, Type
 
 from sqlalchemy import NullPool, text
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
-from cognee.infrastructure.databases.relational import get_relational_config
-from cognee.modules.storage.utils import JSONEncoder
-from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
 from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
     EdgeIdentity,
     NodeDeleteData,
-)
-from cognee.infrastructure.databases.provenance.source_refs import (
-    get_dataset_id_from_source_ref_key,
-    get_pipeline_run_id_from_source_run_ref,
-    get_source_ref_key_from_source_run_ref,
 )
 from cognee.infrastructure.databases.provenance.source_ref_state import (
     ProvenanceColumns,
     provenance_after_attach,
     provenance_after_remove,
 )
+from cognee.infrastructure.databases.provenance.source_refs import (
+    get_dataset_id_from_source_ref_key,
+    get_pipeline_run_id_from_source_run_ref,
+    get_source_ref_key_from_source_run_ref,
+)
+from cognee.infrastructure.databases.relational import get_relational_config
+from cognee.infrastructure.engine import DataPoint
+from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
+from cognee.modules.storage.utils import JSONEncoder
 
 from .tables import _meta
 
 
 def _prepare_node_rows(
-    nodes: Union[List[Tuple[str, Dict]], List[DataPoint]],
+    nodes: list[tuple[str, dict]] | list[DataPoint],
 ) -> list[dict[str, Any]]:
     """Copy, sanitize, deduplicate, and sort nodes for one database write."""
     rows_by_id: dict[str, dict[str, Any]] = {}
@@ -68,7 +71,7 @@ def _prepare_node_rows(
 
 
 def _prepare_edge_rows(
-    edges: List[Tuple[str, str, str, Optional[Dict[str, Any]]]],
+    edges: list[tuple[str, str, str, dict[str, Any] | None]],
 ) -> list[dict[str, Any]]:
     """Copy, sanitize, deduplicate, and sort edges for one database write."""
     rows_by_identity: dict[tuple[str, str, str], dict[str, Any]] = {}
@@ -169,10 +172,46 @@ def _select_nodeset_neighbor_ids(
     }
 
 
+_DEFAULT_POOL_ARGS = {
+    "pool_size": 2,
+    "max_overflow": 20,  # 22-connection ceiling, PER DATASET
+    "pool_pre_ping": True,
+    "pool_recycle": 280,
+    "pool_timeout": 280,
+}
+
+
+def _resolve_engine_args(configured_pool_args) -> dict:
+    """Turn the configured POOL_ARGS into create_async_engine kwargs.
+
+    Defaults mirror PGVectorAdapter._ACCESS_CONTROL_DEFAULT_POOL_ARGS (2/20),
+    NOT SqlAlchemyAdapter's 5/35. Like PGVector's, this engine is created per
+    dataset — the engine-cache key includes graph_database_schema — so its
+    ceiling is multiplied by dataset count, not paid once. dict() handles the
+    config's tuple-of-pairs form (relational/config.py stores POOL_ARGS as
+    tuple(sorted(parsed.items()))).
+
+    Until now only ``poolclass == "nullpool"`` was honoured and every sizing key
+    was dropped, so the adapter always ran SQLAlchemy's stock 5/10/30s pool.
+    """
+    pool_args = dict(configured_pool_args or {})
+    if str(pool_args.get("poolclass", "")).lower() == "nullpool":
+        return {"poolclass": NullPool}
+    pool_args.pop("poolclass", None)
+    for key, value in _DEFAULT_POOL_ARGS.items():
+        pool_args.setdefault(key, value)
+    return pool_args
+
+
 class PostgresDemoAdapter(GraphDBInterface):
     """Reference graph adapter using one node table and one directed-edge table."""
 
     supports_cypher_queries = False
+
+    # Chunk-level incremental updates: get_connections yields the true edge
+    # endpoints, provenance lives in-graph, and update_chunk_index below is the
+    # narrow single-property move the incremental path requires.
+    supports_incremental_chunk_updates = True
 
     _ALLOWED_FILTER_ATTRS = {"id", "name", "type"}
 
@@ -192,14 +231,7 @@ class PostgresDemoAdapter(GraphDBInterface):
         self.schema = schema or ""
 
         relational_config = get_relational_config()
-        configured_pool_args = (
-            dict(relational_config.pool_args) if relational_config.pool_args else {}
-        )
-        engine_args = {}
-        if str(configured_pool_args.get("poolclass", "")).lower() == "nullpool":
-            engine_args["poolclass"] = NullPool
-        else:
-            engine_args["pool_pre_ping"] = True
+        engine_args = _resolve_engine_args(relational_config.pool_args)
         connect_args: dict = (
             dict(relational_config.database_connect_args)
             if relational_config.database_connect_args
@@ -218,17 +250,78 @@ class PostgresDemoAdapter(GraphDBInterface):
             **engine_args,
         )
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
+        self._write_gate = None
+        self._write_gate_loop = None
+        self._initialized = False
+        self._init_lock = None
+        self._init_lock_loop = None
+
+    def _get_write_gate(self) -> asyncio.Lock:
+        """Per-running-loop write gate.
+
+        The adapter is process-cached (closing_lru_cache) and can outlive the
+        loop it was built on; an asyncio.Lock binds to the first loop that
+        awaits it, so an __init__-time Lock is a latent "bound to a different
+        event loop" RuntimeError under repeated asyncio.run (CLI, unit tests).
+        Correctness never depends on this lock — pg_advisory_xact_lock does —
+        so a fresh gate per loop is safe.
+        """
+        loop = asyncio.get_running_loop()
+        if self._write_gate_loop is not loop:
+            self._write_gate = asyncio.Lock()
+            self._write_gate_loop = loop
+        return self._write_gate
+
+    def _get_init_lock(self) -> asyncio.Lock:
+        """Per-running-loop lock for initialize(); same rationale as the write gate."""
+        loop = asyncio.get_running_loop()
+        if self._init_lock_loop is not loop:
+            self._init_lock = asyncio.Lock()
+            self._init_lock_loop = loop
+        return self._init_lock
+
+    @asynccontextmanager
+    async def _write_session(self):
+        """One serialized graph-write transaction.
+
+        Writes are already serialized cluster-wide by pg_advisory_xact_lock.
+        Without this process-local gate every concurrent writer checks a
+        connection out of the pool and *then* blocks on that advisory lock, so
+        N in-flight writers pin min(N, pool ceiling) connections while exactly
+        one makes progress — starving the adapter's own reads (see
+        get_graph_metadata). The gate puts the queue in front of the pool
+        instead of behind it. It is an optimization, not the correctness
+        mechanism: the advisory lock still orders writes across processes.
+        """
+        async with self._get_write_gate(), self.sessionmaker() as session:
+            await _lock_graph_writes(session)
+            yield session
 
     async def close(self) -> None:
         """Dispose the database engine."""
         await self.engine.dispose(close=True)
+        self._initialized = False
 
     async def initialize(self) -> None:
-        """Create the existing graph schema when it is absent."""
-        async with self.engine.begin() as conn:
-            await conn.run_sync(_meta.create_all, checkfirst=True)
+        """Create the graph schema when absent. Idempotent per adapter.
 
-    async def query(self, query_str: str, params: Optional[dict] = None) -> List[Any]:
+        Every get_graph_engine() builds a fresh _GraphEngineHandle whose
+        _ensure_initialized calls this, and get_graph_metadata()/is_empty()
+        call it again — so a 164-item batch ran hundreds of
+        create_all(checkfirst=True) reflections, each holding a pooled
+        connection for a stack of catalog round-trips. That is what exhausted
+        the pool on the read path (job 98411831471).
+        """
+        if self._initialized:
+            return
+        async with self._get_init_lock():
+            if self._initialized:
+                return
+            async with self.engine.begin() as conn:
+                await conn.run_sync(_meta.create_all, checkfirst=True)
+            self._initialized = True
+
+    async def query(self, query_str: str, params: dict | None = None) -> list[Any]:
         """Reject raw Cypher; callers must use the typed graph methods."""
         raise NotImplementedError(
             "The Postgres graph backend does not support raw Cypher queries. "
@@ -244,7 +337,7 @@ class PostgresDemoAdapter(GraphDBInterface):
             return not result.scalar()
 
     async def add_node(
-        self, node: Union[DataPoint, str], properties: Optional[Dict[str, Any]] = None
+        self, node: DataPoint | str, properties: dict[str, Any] | None = None
     ) -> None:
         """Add one node, given either a DataPoint or a node id with properties."""
         if isinstance(node, str):
@@ -254,9 +347,9 @@ class PostgresDemoAdapter(GraphDBInterface):
 
     async def add_nodes(
         self,
-        nodes: Union[List[Tuple[str, Dict]], List[DataPoint]],
-        source_ref_key: Optional[str] = None,
-        pipeline_run_id: Optional[str] = None,
+        nodes: list[tuple[str, dict]] | list[DataPoint],
+        source_ref_key: str | None = None,
+        pipeline_run_id: str | None = None,
     ) -> None:
         """Add or replace nodes, optionally attaching one provenance reference."""
         if not nodes:
@@ -274,8 +367,7 @@ class PostgresDemoAdapter(GraphDBInterface):
                 properties = EXCLUDED.properties,
                 updated_at = now()
         """)
-        async with self.sessionmaker() as session:
-            await _lock_graph_writes(session)
+        async with self._write_session() as session:
             await session.execute(upsert, rows)
             if source_ref_key is not None:
                 await self._update_node_provenance(
@@ -287,23 +379,51 @@ class PostgresDemoAdapter(GraphDBInterface):
                 )
             await session.commit()
 
+    async def update_chunk_index(self, chunk_indexes: dict) -> None:
+        """Set ONLY ``chunk_index`` on the given chunk nodes.
+
+        Node properties live in one JSONB column, so the move is a ``jsonb_set``
+        of that single key; name, type, every other property and the provenance
+        columns are untouched. Missing ids are skipped, like ``get_nodes``.
+        """
+        if not chunk_indexes:
+            return
+        rows = [
+            {"id": str(node_id), "chunk_index": int(chunk_index)}
+            for node_id, chunk_index in chunk_indexes.items()
+        ]
+        statement = text("""
+            UPDATE graph_node
+            SET properties = jsonb_set(
+                    COALESCE(properties, '{}'::jsonb),
+                    '{chunk_index}',
+                    to_jsonb(CAST(:chunk_index AS integer)),
+                    true
+                ),
+                updated_at = now()
+            WHERE id = :id
+        """)
+        async with self.sessionmaker() as session:
+            await _lock_graph_writes(session)
+            await session.execute(statement, rows)
+            await session.commit()
+
     async def delete_node(self, node_id: str) -> None:
         """Delete one node. Delegates to delete_nodes."""
         await self.delete_nodes([node_id])
 
-    async def delete_nodes(self, node_ids: List[str]) -> None:
+    async def delete_nodes(self, node_ids: list[str]) -> None:
         """Delete nodes by id; the schema's foreign keys remove their incident edges."""
         if not node_ids:
             return
-        async with self.sessionmaker() as session:
-            await _lock_graph_writes(session)
+        async with self._write_session() as session:
             await session.execute(
                 text("DELETE FROM graph_node WHERE id = ANY(:ids)"),
                 {"ids": [str(node_id) for node_id in node_ids]},
             )
             await session.commit()
 
-    async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
+    async def get_node(self, node_id: str) -> dict[str, Any] | None:
         """Return one flat node dictionary, or None when the node does not exist."""
         results = await self.get_nodes([node_id])
         return results[0] if results else None
@@ -317,7 +437,7 @@ class PostgresDemoAdapter(GraphDBInterface):
             )
             return bool(result.scalar())
 
-    async def get_nodes(self, node_ids: List[str]) -> List[Dict[str, Any]]:
+    async def get_nodes(self, node_ids: list[str]) -> list[dict[str, Any]]:
         """Return flat node dictionaries, omitting ids that do not exist."""
         if not node_ids:
             return []
@@ -341,7 +461,7 @@ class PostgresDemoAdapter(GraphDBInterface):
         source_id: str,
         target_id: str,
         relationship_name: str,
-        properties: Optional[Dict[str, Any]] = None,
+        properties: dict[str, Any] | None = None,
     ) -> None:
         """Add one directed edge. Delegates to add_edges."""
         await self.add_edges(
@@ -350,9 +470,9 @@ class PostgresDemoAdapter(GraphDBInterface):
 
     async def add_edges(
         self,
-        edges: Union[List[Tuple[str, str, str, Optional[Dict[str, Any]]]], List],
-        source_ref_key: Optional[str] = None,
-        pipeline_run_id: Optional[str] = None,
+        edges: list[tuple[str, str, str, dict[str, Any] | None]] | list,
+        source_ref_key: str | None = None,
+        pipeline_run_id: str | None = None,
     ) -> None:
         """Add or replace edges, optionally attaching one provenance reference."""
         if not edges:
@@ -373,8 +493,7 @@ class PostgresDemoAdapter(GraphDBInterface):
                 properties = EXCLUDED.properties,
                 updated_at = now()
         """)
-        async with self.sessionmaker() as session:
-            await _lock_graph_writes(session)
+        async with self._write_session() as session:
             await session.execute(upsert, rows)
             if source_ref_key is not None:
                 await self._update_edge_provenance(
@@ -398,12 +517,12 @@ class PostgresDemoAdapter(GraphDBInterface):
         result = await self.has_edges([(str(source_id), str(target_id), relationship_name)])
         return len(result) > 0
 
-    async def has_edges(self, edges: List[Tuple[str, str, str]]) -> List[Tuple[str, str, str]]:
+    async def has_edges(self, edges: list[tuple[str, str, str]]) -> list[tuple[str, str, str]]:
         """Return the subset of the requested directed triples that exist."""
         if not edges:
             return []
 
-        found: List[Tuple[str, str, str]] = []
+        found: list[tuple[str, str, str]] = []
         statement = text("""
             SELECT EXISTS(
                 SELECT 1 FROM graph_edge
@@ -428,7 +547,7 @@ class PostgresDemoAdapter(GraphDBInterface):
 
         return found
 
-    async def get_edges(self, node_id: str) -> List[Tuple[Dict[str, Any], str, Dict[str, Any]]]:
+    async def get_edges(self, node_id: str) -> list[tuple[dict[str, Any], str, dict[str, Any]]]:
         """Return every incident edge with its directed source and target nodes."""
         rows = await self._fetch_incident_edge_rows(str(node_id))
         edges = []
@@ -473,7 +592,7 @@ class PostgresDemoAdapter(GraphDBInterface):
             )
             return list(result.mappings().all())
 
-    async def get_neighbors(self, node_id: str) -> List[Dict[str, Any]]:
+    async def get_neighbors(self, node_id: str) -> list[dict[str, Any]]:
         """Return unique incident neighbors, including the node for a self-loop."""
         requested_id = str(node_id)
         rows = await self._fetch_incident_edge_rows(requested_id)
@@ -490,8 +609,8 @@ class PostgresDemoAdapter(GraphDBInterface):
         return list(neighbors.values())
 
     async def get_connections(
-        self, node_id: Union[str, UUID]
-    ) -> List[Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]]:
+        self, node_id: str | UUID
+    ) -> list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]:
         """Return every incident source-edge-target connection."""
         rows = await self._fetch_incident_edge_rows(str(node_id))
         connections = []
@@ -585,7 +704,7 @@ class PostgresDemoAdapter(GraphDBInterface):
 
     async def get_graph_data(
         self,
-    ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+    ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]:
         """Return every node as (id, properties) and every edge as (source, target, name, props)."""
         async with self.sessionmaker() as session:
             node_result = await session.execute(
@@ -617,8 +736,8 @@ class PostgresDemoAdapter(GraphDBInterface):
             return nodes, edges
 
     async def get_id_filtered_graph_data(
-        self, target_ids: List[str]
-    ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+        self, target_ids: list[str]
+    ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]:
         """Retrieve the subgraph touching target_ids: edges with either endpoint
         in the set, plus all endpoint nodes of those edges (edge-driven,
         matching the Ladybug/Neo4j contract). Lets CogneeGraph project only the
@@ -641,8 +760,8 @@ class PostgresDemoAdapter(GraphDBInterface):
             return nodes, edges
 
     async def get_filtered_graph_data(
-        self, attribute_filters: List[Dict[str, List[Union[str, int]]]]
-    ) -> Tuple[List[Tuple[str, Dict]], List[Tuple[str, str, str, Dict]]]:
+        self, attribute_filters: list[dict[str, list[str | int]]]
+    ) -> tuple[list[tuple[str, dict]], list[tuple[str, str, str, dict]]]:
         """Return core-field matches and the edges induced by those nodes."""
         if not attribute_filters:
             return await self.get_graph_data()
@@ -675,8 +794,8 @@ class PostgresDemoAdapter(GraphDBInterface):
             return nodes, edges
 
     async def get_nodeset_subgraph(
-        self, node_type: Type[Any], node_name: List[str], node_name_filter_operator: str = "OR"
-    ) -> Tuple[List[Tuple[str, dict]], List[Tuple[str, str, str, dict]]]:
+        self, node_type: type[Any], node_name: list[str], node_name_filter_operator: str = "OR"
+    ) -> tuple[list[tuple[str, dict]], list[tuple[str, str, str, dict]]]:
         """Return matching primary nodes and their qualifying neighbors."""
         if node_name_filter_operator not in {"OR", "AND"}:
             raise ValueError("node_name_filter_operator must be 'OR' or 'AND'")
@@ -703,7 +822,7 @@ class PostgresDemoAdapter(GraphDBInterface):
             edges = await self._fetch_edges_within(session, subgraph_ids)
             return nodes, edges
 
-    async def get_graph_metrics(self, include_optional: bool = False) -> Dict[str, Any]:
+    async def get_graph_metrics(self, include_optional: bool = False) -> dict[str, Any]:
         """Compute the supported graph metrics in Python."""
         async with self.sessionmaker() as session:
             node_result = await session.execute(text("SELECT id FROM graph_node"))
@@ -733,10 +852,10 @@ class PostgresDemoAdapter(GraphDBInterface):
 
     async def get_neighborhood(
         self,
-        node_ids: List[str],
+        node_ids: list[str],
         depth: int = 1,
-        edge_types: Optional[List[str]] = None,
-    ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+        edge_types: list[str] | None = None,
+    ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]:
         """Walk incident edges breadth-first and return the induced subgraph."""
         if depth < 0:
             raise ValueError("depth must be non-negative")
@@ -782,8 +901,7 @@ class PostgresDemoAdapter(GraphDBInterface):
     async def delete_graph(self) -> None:
         """Delete all nodes and edges from the graph."""
         await self.initialize()
-        async with self.sessionmaker() as session:
-            await _lock_graph_writes(session)
+        async with self._write_session() as session:
             await session.execute(text("TRUNCATE graph_edge, graph_node CASCADE"))
             await session.commit()
 
@@ -885,8 +1003,7 @@ class PostgresDemoAdapter(GraphDBInterface):
         if not source_ref_keys:
             return
         keys_to_add = list(source_ref_keys)
-        async with self.sessionmaker() as session:
-            await _lock_graph_writes(session)
+        async with self._write_session() as session:
             await self._update_node_provenance(
                 session,
                 node_ids,
@@ -905,8 +1022,7 @@ class PostgresDemoAdapter(GraphDBInterface):
         if not source_ref_keys:
             return
         keys_to_add = list(source_ref_keys)
-        async with self.sessionmaker() as session:
-            await _lock_graph_writes(session)
+        async with self._write_session() as session:
             await self._update_edge_provenance(
                 session,
                 edges,
@@ -924,8 +1040,7 @@ class PostgresDemoAdapter(GraphDBInterface):
         if not source_ref_keys:
             return
         keys_to_remove = list(source_ref_keys)
-        async with self.sessionmaker() as session:
-            await _lock_graph_writes(session)
+        async with self._write_session() as session:
             await self._update_node_provenance(
                 session,
                 node_ids,
@@ -941,8 +1056,7 @@ class PostgresDemoAdapter(GraphDBInterface):
         if not source_ref_keys:
             return
         keys_to_remove = list(source_ref_keys)
-        async with self.sessionmaker() as session:
-            await _lock_graph_writes(session)
+        async with self._write_session() as session:
             await self._update_edge_provenance(
                 session,
                 edges,
@@ -960,8 +1074,7 @@ class PostgresDemoAdapter(GraphDBInterface):
               AND target_id = :target_id
               AND relationship_name = :relationship_name
         """)
-        async with self.sessionmaker() as session:
-            await _lock_graph_writes(session)
+        async with self._write_session() as session:
             for source_id, target_id, relationship_name in _edge_identities(edges):
                 await session.execute(
                     statement,
@@ -1199,8 +1312,7 @@ class PostgresDemoAdapter(GraphDBInterface):
             VALUES (:key, :value)
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
         """)
-        async with self.sessionmaker() as session:
-            await _lock_graph_writes(session)
+        async with self._write_session() as session:
             await session.execute(upsert, rows)
             await session.commit()
 
@@ -1213,8 +1325,8 @@ class PostgresDemoAdapter(GraphDBInterface):
 
     async def remove_belongs_to_set_tags(
         self,
-        tags: List[str],
-        node_ids: Optional[List[str]] = None,
+        tags: list[str],
+        node_ids: list[str] | None = None,
     ) -> None:
         """Strip ``tags`` from each node's ``belongs_to_set`` property array.
 
@@ -1243,8 +1355,7 @@ class PostgresDemoAdapter(GraphDBInterface):
             WHERE id = :id
         """)
 
-        async with self.sessionmaker() as session:
-            await _lock_graph_writes(session)
+        async with self._write_session() as session:
             if node_ids is None:
                 result = await session.execute(select_all)
             else:
@@ -1269,7 +1380,7 @@ class PostgresDemoAdapter(GraphDBInterface):
                 )
             await session.commit()
 
-    async def get_triplets_batch(self, offset: int, limit: int) -> List[Dict[str, Any]]:
+    async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
         """Return one page of source-edge-target triplets.
 
         Ordering by the full edge identity keeps pagination stable, so exporting

@@ -1,12 +1,14 @@
 import argparse
 import json
-from typing import Optional, Any
 
-from cognee.cli.reference import SupportsCliCommand
-from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
-from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 from cognee.api.v1.exceptions.exceptions import InvalidConfigAttributeError
+from cognee.cli import DEFAULT_DOCS_URL
+from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.reference import SupportsCliCommand
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 
 class ConfigCommand(SupportsCliCommand):
@@ -86,9 +88,7 @@ Configuration changes will affect how cognee processes and stores data.
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(
-                f"Error managing configuration: {str(e)}", error_code=1
-            ) from e
+            raise CliCommandException(f"Error managing configuration: {e!s}", error_code=1) from e
 
     def _handle_get(self, args: argparse.Namespace) -> None:
         try:
@@ -105,6 +105,7 @@ Configuration changes will affect how cognee processes and stores data.
                     fmt.error(f"Configuration key '{args.key}' not found")
                     fmt.note("Use 'cognee config get' to see all available keys")
                 except Exception:
+                    logger.debug("Ignoring exception in ConfigCommand._handle_get", exc_info=True)
                     fmt.error(f"Configuration key '{args.key}' not found or retrieval failed")
             else:
                 # Get all configuration
@@ -117,7 +118,7 @@ Configuration changes will affect how cognee processes and stores data.
                     fmt.echo("No configuration settings found")
 
         except Exception as e:
-            raise CliCommandInnerException(f"Failed to get configuration: {str(e)}") from e
+            raise CliCommandInnerException(f"Failed to get configuration: {e!s}") from e
 
     def _handle_set(self, args: argparse.Namespace) -> None:
         try:
@@ -137,20 +138,20 @@ Configuration changes will affect how cognee processes and stores data.
                         fmt.note(f"Created new .env file at {persist_info['path']}")
                     fmt.note(f"Persisted {persist_info['env_var']} to {persist_info['path']}")
             except Exception:
+                logger.debug("Ignoring exception in ConfigCommand._handle_set", exc_info=True)
                 fmt.error(f"Failed to set configuration key '{args.key}'")
 
         except Exception as e:
-            raise CliCommandInnerException(f"Failed to set configuration: {str(e)}") from e
+            raise CliCommandInnerException(f"Failed to set configuration: {e!s}") from e
 
     def _handle_unset(self, args: argparse.Namespace) -> None:
         try:
             import cognee
 
             # Confirm unset unless forced
-            if not args.force:
-                if not fmt.confirm(f"Unset configuration key '{args.key}'?"):
-                    fmt.echo("Unset cancelled.")
-                    return
+            if not args.force and not fmt.confirm(f"Unset configuration key '{args.key}'?"):
+                fmt.echo("Unset cancelled.")
+                return
 
             # Since the config system doesn't have explicit unset methods, we
             # map config keys to their default values and reuse the generic
@@ -178,14 +179,15 @@ Configuration changes will affect how cognee processes and stores data.
                     cognee.config.set(args.key, default_value, persist=True)
                     fmt.success(f"Unset {args.key} (reset to default: {default_value})")
                 except Exception as e:
-                    fmt.error(f"Failed to unset '{args.key}': {str(e)}")
+                    logger.debug("Ignoring exception in ConfigCommand._handle_unset", exc_info=True)
+                    fmt.error(f"Failed to unset '{args.key}': {e!s}")
             else:
                 fmt.error(f"Unknown configuration key '{args.key}'")
                 fmt.note("Available keys: " + ", ".join(config_key_defaults.keys()))
                 fmt.note("Use 'cognee config list' to see all available configuration options")
 
         except Exception as e:
-            raise CliCommandInnerException(f"Failed to unset configuration: {str(e)}") from e
+            raise CliCommandInnerException(f"Failed to unset configuration: {e!s}") from e
 
     def _handle_list(self, args: argparse.Namespace) -> None:
         try:
@@ -204,17 +206,16 @@ Configuration changes will affect how cognee processes and stores data.
             fmt.echo("  cognee config reset         - Reset all to defaults")
 
         except Exception as e:
-            raise CliCommandInnerException(f"Failed to list configuration: {str(e)}") from e
+            raise CliCommandInnerException(f"Failed to list configuration: {e!s}") from e
 
     def _handle_reset(self, args: argparse.Namespace) -> None:
         try:
-            if not args.force:
-                if not fmt.confirm("Reset all configuration to defaults?"):
-                    fmt.echo("Reset cancelled.")
-                    return
+            if not args.force and not fmt.confirm("Reset all configuration to defaults?"):
+                fmt.echo("Reset cancelled.")
+                return
 
             fmt.note("Configuration reset not fully implemented yet")
             fmt.echo("This would reset all settings to their default values")
 
         except Exception as e:
-            raise CliCommandInnerException(f"Failed to reset configuration: {str(e)}") from e
+            raise CliCommandInnerException(f"Failed to reset configuration: {e!s}") from e

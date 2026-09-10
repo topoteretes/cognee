@@ -4,8 +4,7 @@ from uuid import uuid4
 
 import pytest
 
-import cognee.infrastructure.databases.dataset_database_handler  # noqa: F401
-
+import cognee.infrastructure.databases.dataset_database_handler
 
 handler_module = import_module(
     "cognee.infrastructure.databases.vector.lancedb.LanceDBDatasetDatabaseHandler"

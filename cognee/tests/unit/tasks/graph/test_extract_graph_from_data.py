@@ -3,12 +3,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from cognee.shared.data_models import KnowledgeGraph, Node, Edge as KGEdge
+from cognee.shared.data_models import Edge as KGEdge
+from cognee.shared.data_models import KnowledgeGraph, Node
+from cognee.tasks.graph.exceptions import InvalidOntologyAdapterError
 from cognee.tasks.graph.extract_graph_from_data import (
     extract_graph_from_data,
     integrate_chunk_graphs,
 )
-from cognee.tasks.graph.exceptions import InvalidOntologyAdapterError
 
 egd_module = importlib.import_module("cognee.tasks.graph.extract_graph_from_data")
 
@@ -62,6 +63,28 @@ async def test_chunk_contains_entities_after_integration(mock_find_existing):
     assert chunk.contains is not None and len(chunk.contains) > 0
     _, entity = chunk.contains[0]
     assert entity.name in ("alice", "bob")
+
+
+@pytest.mark.asyncio
+@patch.object(egd_module, "find_existing_edge_identities", new_callable=AsyncMock)
+async def test_integration_forwards_pipeline_context_for_existing_edge_provenance(
+    mock_find_existing,
+):
+    mock_find_existing.return_value = set()
+    chunk = _make_chunk()
+    graph = _two_node_graph()
+    ctx = MagicMock()
+
+    await integrate_chunk_graphs(
+        [chunk],
+        [graph],
+        KnowledgeGraph,
+        _mock_resolver(),
+        ctx=ctx,
+    )
+
+    mock_find_existing.assert_awaited_once()
+    assert mock_find_existing.await_args.kwargs["ctx"] is ctx
 
 
 @pytest.mark.asyncio
@@ -355,7 +378,7 @@ async def test_stub_resolver_reaches_graph_construction_via_task(mock_find_exist
 
 # --- chunk_attachment (SDK-163) -------------------------------------------------
 
-from typing import Any, List, Optional  # noqa: E402
+from typing import Any  # noqa: E402
 
 from cognee.infrastructure.engine import DataPoint  # noqa: E402
 from cognee.modules.graph.utils import (  # noqa: E402
@@ -371,17 +394,17 @@ class _Activity(DataPoint):
 
 class _Person(DataPoint):
     name: str
-    likes: Optional[List[_Activity]] = None
+    likes: list[_Activity] | None = None
     metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
 
 class _Directory(DataPoint):
-    people: List[_Person]
+    people: list[_Person]
     metadata: dict = {"index_fields": []}
 
 
 class _TransparentDirectory(DataPoint):
-    people: List[_Person]
+    people: list[_Person]
     metadata: dict = {"index_fields": [], "transparent": True}
 
 

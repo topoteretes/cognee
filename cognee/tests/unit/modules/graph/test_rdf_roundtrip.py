@@ -4,7 +4,7 @@ and RDF ingestion (Phase 2)."""
 import importlib
 
 import pytest
-from rdflib import Graph, Literal, RDF, RDFS, URIRef
+from rdflib import RDF, RDFS, Graph, Literal, URIRef
 
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.graph.rdf.export import (

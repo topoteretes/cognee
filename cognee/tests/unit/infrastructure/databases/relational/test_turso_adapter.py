@@ -12,10 +12,10 @@ import sys
 import tempfile
 import types
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import text
-from unittest.mock import patch
 
 from cognee.infrastructure.databases.relational.sqlalchemy.TursoAdapter import TursoAdapter
 

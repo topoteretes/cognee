@@ -1,8 +1,9 @@
-from sqlalchemy import select
 from uuid import UUID
 
-from cognee.modules.users.models import User
+from sqlalchemy import select
+
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.users.models import User
 from cognee.modules.users.permissions.methods.has_user_management_permission import (
     has_user_management_permission,
 )

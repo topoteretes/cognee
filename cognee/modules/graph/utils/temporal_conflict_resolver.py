@@ -18,7 +18,8 @@ cardinality metadata to tell them apart. The opt-in cognify task
 stored graph.
 """
 
-from typing import Any, Collection
+from collections.abc import Collection
+from typing import Any
 
 # Graph edges flow through the pipeline as
 # (source_node_id, target_node_id, relationship_name, properties) tuples.

@@ -20,7 +20,7 @@ import pytest
 # under test is deliberately not registered.
 pytest.importorskip("dlt")
 
-import importlib  # noqa: E402
+import importlib
 
 # The ingestion package re-exports these names, shadowing the submodules on
 # plain ``import a.b.c as m`` — import_module returns the real modules.
@@ -72,8 +72,8 @@ class TestLoad:
             captured["path"] = path
             return SimpleNamespace(name=source_name)
 
-        import cognee.tasks.ingestion.create_dlt_source as create_module
         import cognee.infrastructure.loaders.external.dlt_csv_loader as loader_module
+        import cognee.tasks.ingestion.create_dlt_source as create_module
 
         monkeypatch.setattr(create_module, "create_dlt_source_from_csv", fake_create)
         monkeypatch.setattr(

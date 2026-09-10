@@ -1,6 +1,7 @@
 import asyncio
-import cognee
 import os
+
+import cognee
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 

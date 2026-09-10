@@ -2,7 +2,7 @@
 
 import pytest
 
-from cognee.api.v1.recall.query_router import route_query, record_override, override_counts
+from cognee.api.v1.recall.query_router import override_counts, record_override, route_query
 from cognee.modules.search.types import SearchType
 
 

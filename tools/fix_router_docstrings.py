@@ -33,12 +33,16 @@ from dataclasses import dataclass, field
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from check_router_docstrings import (  # noqa: E402
+import logging
+
+from check_router_docstrings import (
     actual_params,
     documented_params,
     iter_api_routes,
     normalize,
 )
+
+logger = logging.getLogger(__name__)
 
 PATH_SECTION = "Path Parameters"
 QUERY_SECTION = "Query Parameters"
@@ -147,7 +151,7 @@ def format_annotation(annotation) -> str:
     name = getattr(annotation, "__name__", None)
     if name:
         return name
-    return re.sub(r"\w+(\.\w+)+\.", "", str(annotation))
+    return re.sub(r"\b\w+(\.\w+)+\.", "", str(annotation))
 
 
 @dataclass
@@ -203,10 +207,9 @@ def _section_for(parameter: inspect.Parameter, route_path: str, name: str) -> st
 def collect_param_docs(endpoint, route_path: str) -> dict[str, ParamDoc]:
     """Documentation source material for every client-facing parameter."""
     import fastapi
+    from check_router_docstrings import _is_dependency, _pydantic_models
     from fastapi import params as fastapi_params
     from pydantic import BaseModel
-
-    from check_router_docstrings import _is_dependency, _pydantic_models
 
     framework_types = (
         fastapi.Request,
@@ -504,6 +507,7 @@ def main() -> int:
     try:
         fixes = collect_fixes()
     except Exception as exc:
+        logger.debug("Exiting with status 2 after error in main", exc_info=True)
         print(f"Failed to import cognee API app: {exc}", file=sys.stderr)
         return 2
 

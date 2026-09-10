@@ -7,7 +7,7 @@ same wire shape regardless of search type.
 """
 
 import json
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -37,6 +37,7 @@ _KIND_BY_SEARCH_TYPE: dict[SearchType, SearchResultKind] = {
     SearchType.CHUNKS_LEXICAL: SearchResultKind.CHUNK,
     SearchType.SUMMARIES: SearchResultKind.SUMMARY,
     SearchType.AGENTIC_COMPLETION: SearchResultKind.GRAPH_COMPLETION,
+    SearchType.SKILLS: SearchResultKind.SKILL,
 }
 
 
@@ -68,7 +69,7 @@ def _text_from_dict(payload: dict) -> str:
         return str(payload)
 
 
-def _score_from(value: Any) -> Optional[float]:
+def _score_from(value: Any) -> float | None:
     if isinstance(value, dict):
         score = value.get("score")
         if isinstance(score, (int, float)):
@@ -131,6 +132,10 @@ def _build_item(
         raw = _coerce_to_dict(entry)
         text = _text_from_dict(raw) if raw else str(entry)
 
+    metadata = _provenance_metadata(raw)
+    if payload.evidence:
+        metadata["evidence"] = [reference.model_dump(mode="json") for reference in payload.evidence]
+
     return SearchResultItem(
         kind=kind,
         search_type=payload.search_type,
@@ -138,7 +143,7 @@ def _build_item(
         score=_score_from(entry),
         dataset_id=str(payload.dataset_id) if payload.dataset_id else None,
         dataset_name=payload.dataset_name,
-        metadata=_provenance_metadata(raw),
+        metadata=metadata,
         raw=raw,
         structured=structured,
     )
