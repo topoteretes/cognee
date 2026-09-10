@@ -26,6 +26,9 @@ from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
 from cognee.tasks.ingestion.data_item import DataItem
+from cognee.tasks.ingestion.refuse_changed_existing_documents import (
+    refuse_changed_existing_documents,
+)
 from cognee.tasks.ingestion.resolve_dlt_sources import resolve_dlt_sources
 from cognee.tasks.ingestion.utils import materialize_stream_for_background
 
@@ -61,6 +64,12 @@ async def add(
         - **LLM_API_KEY**: Must be set in environment variables for content processing
         - **Database Setup**: Relational and vector databases must be configured
         - **User Authentication**: Uses default user if none provided (created automatically)
+
+    add() creates documents; it never updates one. A file that already exists in
+    the dataset (the same path, or the same filename for an upload) with different
+    content raises ``DocumentUpdateRequiredError``: replace the stored version with
+    ``update(data_id=..., data=..., dataset_id=...)`` so the document keeps its id
+    and its graph is replaced in place. Re-adding identical content is a no-op.
 
     Supported Input Types:
         - **Text strings**: Direct text content (str) - any string not starting with "/" or "file://"
@@ -285,6 +294,11 @@ async def add(
         dataset_id=authorized_dataset.id,
         **kwargs,
     )
+
+    # A file the dataset already holds with other content is an update in
+    # disguise: refuse the whole request now, before the pipeline writes the
+    # items ahead of it one by one, and point at update().
+    await refuse_changed_existing_documents(data, user, authorized_dataset)
 
     # Background runs must not depend on caller/request-scoped stream lifetimes.
     # Materialize stream-like inputs into owned in-memory buffers up front.

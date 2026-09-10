@@ -445,6 +445,33 @@ class TestMemifyEndpoint:
         assert resp.json()["error"] == "Internal server error"
 
 
+class TestAddExistingDocument:
+    def test_add_of_a_changed_existing_file_returns_409_with_the_update_endpoint(self, client):
+        import cognee.api.v1.add as add_pkg
+        from cognee.api.v1.exceptions import DocumentUpdateRequiredError
+
+        data_id = uuid4()
+        add_pkg.add = AsyncMock(
+            side_effect=DocumentUpdateRequiredError(
+                [{"name": "report.txt", "data_id": data_id}], MOCK_DATASET_ID
+            )
+        )
+
+        resp = client.post(
+            "/add",
+            files={"data": ("report.txt", b"version two", "text/plain")},
+            data={"datasetName": "test_dataset"},
+        )
+
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["error"] == "Document already exists; use the update endpoint"
+        assert (
+            f"PATCH /api/v1/update?data_id={data_id}&dataset_id={MOCK_DATASET_ID}" in body["detail"]
+        )
+        assert "report.txt" in body["detail"]
+
+
 # ---------------------------------------------------------------------------
 # Update endpoint
 # ---------------------------------------------------------------------------
