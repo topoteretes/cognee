@@ -333,6 +333,61 @@ def test_a_relation_is_one_item_per_participant_and_a_removal_subtracts_it():
     assert sorted((i.group, i.key) for i in kept) == [("Arthur", "Priya"), ("Priya", "Arthur")]
 
 
+@pytest.mark.asyncio
+async def test_a_relation_listed_under_one_side_counts_for_both(monkeypatch):
+    """The model lists "Helga accepted a request from Art" under Helga only; code adds
+    Arthur's side, spells "Art" as Arthur Bennett, and a removal ends both sides."""
+    shard = ShardItems(
+        items=[
+            _item("Helga Menon", "Art"),
+            _item("Arthur Bennett", "Priya Nair"),
+            _item("Priya Nair", "Arthur Bennett"),  # the same connection from Priya's side
+            _item("Mei Lin", "Arthur Bennett"),
+            _item("Arthur Bennett", "Mei Lin", undone=True),
+            _item("Helga Menon", "Priya Nair"),
+        ],
+        aliases=[["Arthur Bennett", "Art"]],
+    )
+
+    def respond(model, _):
+        if model is ShardItems:
+            return shard
+        if model is TargetMatch:
+            return TargetMatch(names=[])
+        return NameGroups(groups=[["Arthur Bennett", "Art"]])
+
+    _stub_llm(monkeypatch, respond)
+    plan = CountPlan(
+        source="text",
+        item="a connection",
+        group_by="member",
+        target="Art",  # the roster says "Arthur Bennett (usually called Art)"
+        dedup_key="the other member",
+        relation=True,
+        list_items=True,
+    )
+
+    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(plan, _units(6, words=2))
+
+    assert result.total == 2  # Helga and Priya; Mei was removed
+    assert dict(result.groups) == {
+        "Arthur Bennett": 2,
+        "Helga Menon": 2,
+        "Priya Nair": 2,
+    }
+    assert sorted(entry.split(":")[0] for entry in result.evidence) == ["Helga Menon", "Priya Nair"]
+
+
+def test_names_with_digits_are_not_reduced_to_their_digits():
+    """ "raj921" and "RajdeepKushwaha5" are two members, and "@raj921" is raj921; only an
+    item identifier ("PR #921") reduces to its digits."""
+    items = [_item("Ann", "raj921"), _item("Ann", "RajdeepKushwaha5"), _item("Ann", "@raj921")]
+
+    assert len(BroadRetriever.dedup(items, by_group=True)) == 2
+    assert broad_retriever._loose_name("@raj921") == "raj921"
+    assert broad_retriever._normalize_key("PR #921") == "921"
+
+
 def test_one_key_is_one_item_however_its_group_was_spelled():
     """Issue #7 assigned to Ann, recapped as "still with @ann": one item, not two, even if
     the spellings were not merged. A key written "PR #7" or "#7" or "7" is one key."""
@@ -639,14 +694,23 @@ async def test_distinct_without_a_grouping_counts_the_items(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_named_target_without_a_grouping_fails_fast(monkeypatch):
-    _stub_llm(
-        monkeypatch,
-        lambda model, _: CountPlan(source="text", item="an issue", target="Megha"),
-    )
+async def test_a_target_without_its_attribute_gets_one_retry_then_fails(monkeypatch):
+    inputs = []
 
+    def respond(model, text_input):
+        inputs.append(text_input)
+        group_by = "reagent" if "without group_by" in text_input else None
+        return CountPlan(source="text", item="a run", target="RX-7", group_by=group_by)
+
+    _stub_llm(monkeypatch, respond)
+
+    plan = await BroadRetriever().plan("How many milligrams of RX-7 were used?", {})
+
+    assert plan.group_by == "reagent" and len(inputs) == 2
+
+    _stub_llm(monkeypatch, lambda model, _: CountPlan(source="text", item="a run", target="RX-7"))
     with pytest.raises(ValueError, match="target"):
-        await BroadRetriever().plan("How many issues does Megha have?", {})
+        await BroadRetriever().plan("How many milligrams of RX-7 were used?", {})
 
 
 @pytest.mark.asyncio

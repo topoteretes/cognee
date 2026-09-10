@@ -182,7 +182,8 @@ def _normalize_key(value: str) -> str:
 
 
 def _loose_name(name: str) -> str:
-    return _normalize_key(name.lstrip("@"))
+    """A name keeps its letters and digits ("raj921" is not "921"); only @ and punctuation go."""
+    return re.sub(r"[^0-9a-z]+", "", name.lstrip("@").lower())
 
 
 def _paragraphs(text: str, budget: int, tokenizer) -> list[str]:
@@ -325,11 +326,23 @@ class BroadRetriever(CompletionRetriever):
             key=lambda pair: -pair[1],
         )[:BROAD_MAX_PLANNER_TYPES]
         type_list = "\n".join(f"- {name} ({count} entities)" for name, count in type_counts)
+        text_input = f"Question: {query}\n\nEntity types in the graph:\n{type_list or '(none)'}"
         plan = await LLMGateway.acreate_structured_output(
-            text_input=f"Question: {query}\n\nEntity types in the graph:\n{type_list or '(none)'}",
+            text_input=text_input,
             system_prompt=_read_prompt("broad_plan.txt"),
             response_model=CountPlan,
         )
+        if plan.target and not plan.group_by:
+            # A target is a value of some attribute; one retry names the omission.
+            plan = await LLMGateway.acreate_structured_output(
+                text_input=(
+                    f"{text_input}\n\nYour previous plan named the target {plan.target!r} "
+                    "without group_by. Set group_by to the attribute that value belongs to "
+                    "(a reagent, a cell line, a country, an assignee) and return the full plan."
+                ),
+                system_prompt=_read_prompt("broad_plan.txt"),
+                response_model=CountPlan,
+            )
         if plan.target and not plan.group_by:
             raise ValueError(
                 f"BROAD planner named a target ({plan.target!r}) without the attribute it is a "
@@ -411,8 +424,23 @@ class BroadRetriever(CompletionRetriever):
         aliases = _alias_groups(
             [names for _, shard_items in read_shards for names in shard_items.aliases]
         )
+        if plan.relation:
+            # A relation belongs to both participants. The model lists it under one
+            # (usually the sentence's subject); code adds the other side, so
+            # "Helga accepted a request from Arthur" counts for Arthur too.
+            items += [
+                item.model_copy(update={"group": item.key, "key": item.group})
+                for item in items
+                if item.group and item.key
+            ]
 
         canonical = await self.merge_name_variants(plan, items, aliases)
+        if plan.relation and canonical:
+            # For a relation the key is the other participant, a name: spell it as
+            # the group it would be, so "Art" and "Arthur Bennett" are one connection.
+            for item in items:
+                if item.key:
+                    item.key = canonical.get(item.key, item.key)
 
         unkeyed_dropped = 0
         if plan.dedup_key:
@@ -479,20 +507,25 @@ class BroadRetriever(CompletionRetriever):
         (participant, other). An entry without a key is not counted. An entry marked
         undone removes the item it names instead of counting.
         """
+
+        # A relation's key is the other participant, a name; otherwise an identifier.
+        normalize = _loose_name if by_group else _normalize_key
+
+        def identity(item: ExtractedItem) -> tuple[str, str]:
+            return ((item.group or "") if by_group else "", normalize(item.key))
+
+        keyed = [item for item in items if item.key]
+        # An item is undone wherever the removal was read, before or after the item.
+        undone = {identity(item) for item in keyed if item.undone}
+        undone_keys = {identity(item)[1] for item in keyed if item.undone and item.group is None}
         counted: dict[tuple[str, str], ExtractedItem] = {}
-        for item in items:
-            if not item.key:
-                continue
-            key = _normalize_key(item.key)
-            identity = ((item.group or "") if by_group else "", key)
+        for item in keyed:
             if item.undone:
-                if by_group and item.group is None:
-                    for existing in [i for i in counted if i[1] == key]:
-                        del counted[existing]
-                else:
-                    counted.pop(identity, None)
-            elif identity not in counted:
-                counted[identity] = item
+                continue
+            group, key = identity(item)
+            if (group, key) in undone or key in undone_keys or (group, key) in counted:
+                continue
+            counted[(group, key)] = item
         return list(counted.values())
 
     def split_oversized(self, units: list[Unit]) -> list[Unit]:
@@ -580,6 +613,8 @@ class BroadRetriever(CompletionRetriever):
         # Only group values are names. A dedup key is an identifier (a number, a
         # code, a title): merging "similar" identifiers would join different items.
         names = {item.group for item in items if item.group}
+        if plan.relation:
+            names |= {item.key for item in items if item.key}
         if len(names) > BROAD_MAX_ALIAS_NAMES:
             return None
         if len(names) < 2:
