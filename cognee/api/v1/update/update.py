@@ -1,3 +1,4 @@
+from time import perf_counter
 from typing import Any, BinaryIO
 from uuid import UUID
 
@@ -12,7 +13,7 @@ from cognee.api.v1.update.incremental import (
     incremental_update,
     recorded_chunk_budget,
 )
-from cognee.api.v1.update.result import ChunkChanges, UpdateResult
+from cognee.api.v1.update.result import ChunkChanges, Fallback, UpdateError, UpdateResult
 from cognee.modules.chunking.chunk_policy import DEFAULT_CHUNK_POLICY, ChunkPolicy
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
@@ -139,12 +140,13 @@ async def update(
     Returns:
         UpdateResult, the same shape on every path:
             - ``status``: "updated", "unchanged" (chunk-level path found no content
-              change) or "failed" (the rebuild's cognify run errored; ``error_class``
-              and ``error_message`` say why, and the call can be retried).
+              change) or "failed" (the rebuild's cognify run errored; ``error`` says
+              why, and the call can be retried).
             - ``mode``: "incremental" or "full_rebuild".
+            - ``duration_seconds``: wall-clock time of the update.
             - ``chunks``: the chunk-level counters (regions, deleted, added, reused,
-              kept, reindexed); None on a full rebuild, which has no diff.
-            - ``fallback_reason`` / ``fallback_detail``: set on every full rebuild,
+              kept, reindexed, total); None on a full rebuild, which has no diff.
+            - ``fallback``: set on every full rebuild, its ``reason`` and ``detail``
               naming why the chunk-level path did not run — the caller switched it
               off, an unsupported parameter, or one of the engine's refusals.
             - ``pipeline_run_id``: the run to inspect; None for a no-op.
@@ -184,6 +186,7 @@ async def update(
             chunk_level_diff=chunk_level_diff,
         )
 
+    started = perf_counter()
     if not user:
         user = await get_default_user()
 
@@ -282,6 +285,7 @@ async def update(
                 dataset_id=dataset_id,
                 status="unchanged" if summary["status"] == "unchanged" else "updated",
                 mode="incremental",
+                duration_seconds=round(perf_counter() - started, 3),
                 chunks=ChunkChanges(
                     regions=summary["regions"],
                     deleted=summary["deleted_chunks"],
@@ -289,6 +293,7 @@ async def update(
                     reused=summary["reused_chunks"],
                     kept=summary["kept_chunks"],
                     reindexed=summary["reindexed_chunks"],
+                    total=summary["total_chunks"],
                 ),
                 pipeline_run_id=summary["pipeline_run_id"],
             )
@@ -344,11 +349,12 @@ async def update(
         dataset_id=dataset_id,
         status="failed" if errored else "updated",
         mode="full_rebuild",
-        fallback_reason=fallback[0],
-        fallback_detail=fallback[1],
+        duration_seconds=round(perf_counter() - started, 3),
+        fallback=Fallback(reason=fallback[0], detail=fallback[1]),
         pipeline_run_id=run.pipeline_run_id,
-        error_class=errored.error_class if errored else None,
-        error_message=errored.error_message if errored else None,
+        error=UpdateError(error_class=errored.error_class, message=errored.error_message)
+        if errored
+        else None,
     )
 
 

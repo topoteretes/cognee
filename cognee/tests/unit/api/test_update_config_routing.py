@@ -47,6 +47,7 @@ def _engine_summary(status="incremental"):
         "reused_chunks": 0,
         "kept_chunks": 5,
         "reindexed_chunks": 0,
+        "total_chunks": 7,
         "pipeline_run_id": uuid4(),
     }
 
@@ -106,7 +107,7 @@ async def test_custom_configs_skip_the_incremental_path():
         incremental.assert_not_called()
         assert result.mode == "full_rebuild", "custom-config updates must run the full flow"
         assert result.status == "updated"
-        assert result.fallback_reason is RefusalReason.PER_CALL_DB_CONFIG
+        assert result.fallback.reason is RefusalReason.PER_CALL_DB_CONFIG
         assert result.pipeline_run_id == FULL_RUN_ID
 
 
@@ -127,7 +128,7 @@ async def test_node_set_change_skips_the_incremental_path():
 
     incremental.assert_not_called()
     assert result.mode == "full_rebuild"
-    assert result.fallback_reason is RefusalReason.UNSUPPORTED_METADATA
+    assert result.fallback.reason is RefusalReason.UNSUPPORTED_METADATA
 
 
 @pytest.mark.parametrize(
@@ -154,7 +155,7 @@ async def test_custom_extraction_config_skips_the_incremental_path(config_kwargs
 
     incremental.assert_not_called()
     assert result.mode == "full_rebuild"
-    assert result.fallback_reason is RefusalReason.CUSTOM_EXTRACTION_CONFIG
+    assert result.fallback.reason is RefusalReason.CUSTOM_EXTRACTION_CONFIG
 
 
 async def test_multi_item_input_is_rejected_not_multiplied():
@@ -240,7 +241,7 @@ async def test_no_configs_take_the_incremental_path():
         )
     incremental.assert_awaited_once()
     assert (result.mode, result.status) == ("incremental", "updated")
-    assert result.fallback_reason is None
+    assert result.fallback is None
     assert (result.chunks.regions, result.chunks.deleted, result.chunks.added) == (1, 1, 2)
-    assert (result.chunks.kept, result.chunks.reindexed) == (5, 0)
+    assert (result.chunks.kept, result.chunks.reindexed, result.chunks.total) == (5, 0, 7)
     assert result.pipeline_run_id == summary["pipeline_run_id"]

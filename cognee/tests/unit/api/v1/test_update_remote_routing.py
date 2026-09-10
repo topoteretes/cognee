@@ -105,12 +105,19 @@ def _result_payload(**overrides):
         "dataset_id": str(uuid4()),
         "status": "updated",
         "mode": "incremental",
-        "chunks": {"regions": 1, "deleted": 1, "added": 1, "reused": 0, "kept": 3, "reindexed": 0},
-        "fallback_reason": None,
-        "fallback_detail": None,
+        "duration_seconds": 0.8,
+        "chunks": {
+            "regions": 1,
+            "deleted": 1,
+            "added": 1,
+            "reused": 0,
+            "kept": 3,
+            "reindexed": 0,
+            "total": 4,
+        },
+        "fallback": None,
         "pipeline_run_id": str(uuid4()),
-        "error_class": None,
-        "error_message": None,
+        "error": None,
     }
     payload.update(overrides)
     return payload
@@ -214,10 +221,8 @@ async def test_cloud_client_update_returns_a_failed_result_instead_of_raising(mo
         status="failed",
         mode="full_rebuild",
         chunks=None,
-        fallback_reason="disabled",
-        fallback_detail="chunk_level_diff=False was requested",
-        error_class="RuntimeError",
-        error_message="cognify failed",
+        fallback={"reason": "disabled", "detail": "chunk_level_diff=False was requested"},
+        error={"error_class": "RuntimeError", "message": "cognify failed"},
     )
     client, _ = _client_with_fake_patch(
         monkeypatch, _FakeResponse(status=500, text=json.dumps(failed))
@@ -226,4 +231,4 @@ async def test_cloud_client_update_returns_a_failed_result_instead_of_raising(mo
     result = await client.update(data_id=uuid4(), data="new text", dataset_id=uuid4())
 
     assert result == UpdateResult.model_validate(failed)
-    assert (result.status, result.error_message) == ("failed", "cognify failed")
+    assert (result.status, result.error.message) == ("failed", "cognify failed")

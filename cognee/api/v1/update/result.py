@@ -18,9 +18,10 @@ from cognee.api.v1.update.incremental import RefusalReason
 class ChunkChanges(BaseModel):
     """What the chunk-level path did to the document's chunks.
 
-    ``regions`` is the number of disjoint edited spans the diff found; the
-    counts are work done, so ``added`` can exceed the net change when a re-cut
-    chunk with unchanged content is re-extracted in place.
+    ``regions`` is the number of disjoint edited spans the diff found and
+    ``total`` the chunk count after the update, so "kept 29 of 30" reads off
+    directly. The counts are work done: ``added`` can exceed the net change
+    when a re-cut chunk with unchanged content is re-extracted in place.
     """
 
     regions: int = 0
@@ -29,19 +30,34 @@ class ChunkChanges(BaseModel):
     reused: int = 0
     kept: int = 0
     reindexed: int = 0
+    total: int = 0
+
+
+class Fallback(BaseModel):
+    """Why the full rebuild ran instead of the chunk-level update."""
+
+    reason: RefusalReason
+    detail: str
+
+
+class UpdateError(BaseModel):
+    """Why the rebuild's cognify run failed."""
+
+    error_class: str | None = None
+    message: str | None = None
 
 
 class UpdateResult(BaseModel):
     """Per-document outcome of ``update()``.
 
     ``status`` says what happened to the document; ``mode`` says how. A
-    ``full_rebuild`` carries ``fallback_reason`` whenever the chunk-level path
-    was requested and could not run (or was switched off by the caller), so an
-    update that took far longer than usual explains itself. ``chunks`` is set
-    only for the incremental mode: a rebuild re-extracts the whole document
-    and has no diff to report.
+    ``full_rebuild`` always carries ``fallback``, naming why the chunk-level
+    path did not run (or that the caller switched it off), so an update that
+    took far longer than usual explains itself; ``duration_seconds`` makes the
+    "longer" visible. ``chunks`` is set only for the incremental mode: a
+    rebuild re-extracts the whole document and has no diff to report.
 
-    A ``failed`` status names the error so the caller can retry this one
+    A ``failed`` status carries ``error`` so the caller can retry this one
     document; the document keeps its ``data_id`` on every path.
     """
 
@@ -49,9 +65,8 @@ class UpdateResult(BaseModel):
     dataset_id: UUID
     status: Literal["updated", "unchanged", "failed"]
     mode: Literal["incremental", "full_rebuild"]
+    duration_seconds: float
     chunks: ChunkChanges | None = None
-    fallback_reason: RefusalReason | None = None
-    fallback_detail: str | None = None
+    fallback: Fallback | None = None
     pipeline_run_id: UUID | None = None
-    error_class: str | None = None
-    error_message: str | None = None
+    error: UpdateError | None = None

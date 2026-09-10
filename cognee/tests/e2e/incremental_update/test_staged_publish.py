@@ -218,6 +218,9 @@ async def _scenario():
     unchanged = await cognee.update(data_id, text_v3, dataset.id, user=user)
     assert (unchanged.mode, unchanged.status) == ("incremental", "unchanged"), unchanged
     assert unchanged.pipeline_run_id is None, "a no-op records no run"
+    assert unchanged.chunks.kept == unchanged.chunks.total == result.chunks.total, (
+        "unchanged content keeps every chunk"
+    )
     assert len(await _run_records(dataset.id)) == baseline_count, (
         "an unchanged update must leave no run-record noise"
     )

@@ -127,7 +127,7 @@ class RefusalReason(str, Enum):
     Every refusal used to surface as one free-text message and one log line, so
     a permanent misconfiguration (an incompatible chunker, an unsupported
     backend) looked exactly like a first ingestion. The reason is logged as a
-    structured field and returned in ``UpdateResult.fallback_reason`` so they
+    structured field and returned in ``UpdateResult.fallback`` so they
     are separable. The first three come from ``update()`` before this engine
     is consulted; the rest are this engine's own refusals.
     """
@@ -469,11 +469,11 @@ def _changed_staged_metadata(data, old_data: Data, staged: StagedContent) -> lis
     ]
 
 
-def _unchanged_result(reindexed: int) -> dict:
+def _unchanged_result(reindexed: int, kept: int) -> dict:
     """The no-op result, shaped like the incremental one.
 
-    ``update()`` turns both into the same ``UpdateResult.chunks``, so a no-op
-    reports every counter (as zero) rather than omitting them.
+    ``update()`` turns both into the same ``UpdateResult.chunks``. Unchanged
+    content keeps every stored chunk, so ``kept`` is the stored count, not zero.
     """
     return {
         "status": "unchanged",
@@ -481,8 +481,9 @@ def _unchanged_result(reindexed: int) -> dict:
         "deleted_chunks": 0,
         "added_chunks": 0,
         "reused_chunks": 0,
-        "kept_chunks": 0,
+        "kept_chunks": kept,
         "reindexed_chunks": reindexed,
+        "total_chunks": kept,
     }
 
 
@@ -509,7 +510,7 @@ async def _repair_unchanged(
         "incremental update: content unchanged, repaired %s",
         ", ".join(bundle.get("repairs") or ["nothing"]),
     )
-    return _unchanged_result(len(shifted))
+    return _unchanged_result(len(shifted), bundle["stored_count"])
 
 
 async def incremental_update(
@@ -646,7 +647,7 @@ async def _run_incremental_update(
     # A no-op with nothing to repair is the only path that writes nothing, and
     # so the only one that records no run.
     if bundle.get("status") == "unchanged" and not bundle.get("repairs"):
-        return {**_unchanged_result(0), "pipeline_run_id": None}
+        return {**_unchanged_result(0, bundle["stored_count"]), "pipeline_run_id": None}
 
     pipeline_id = generate_pipeline_id(user.id, dataset.id, RUN_PIPELINE_NAME)
     pipeline_run = await log_pipeline_run_start(
@@ -764,6 +765,7 @@ async def _stage_and_plan(
             "repairs": repairs,
             "data_item": old_data,
             "shifted_chunks": shifted,
+            "stored_count": len(stored_chunks),
         }
 
     # Compatibility is a planning question, so answer it before planning. Every
@@ -963,4 +965,5 @@ async def _write_and_publish(
         "reused_chunks": len(reused_chunks),
         "kept_chunks": kept_count,
         "reindexed_chunks": len(shifted_chunks),
+        "total_chunks": kept_count + added_chunks,
     }

@@ -470,17 +470,19 @@ class TestUpdateEndpoint:
         error from the same fields it would read counters from, and retries."""
         import cognee.api.v1.update as update_pkg
         from cognee.api.v1.update import UpdateResult
+        from cognee.api.v1.update.result import Fallback, UpdateError
 
         failed = UpdateResult(
             data_id=uuid4(),
             dataset_id=MOCK_DATASET_ID,
             status="failed",
             mode="full_rebuild",
-            fallback_reason="no_baseline",
-            fallback_detail="no stored processed text for this data item",
+            duration_seconds=2.5,
+            fallback=Fallback(
+                reason="no_baseline", detail="no stored processed text for this data item"
+            ),
             pipeline_run_id=MOCK_PIPELINE_RUN_ID,
-            error_class="RuntimeError",
-            error_message="update failed",
+            error=UpdateError(error_class="RuntimeError", message="update failed"),
         )
         update_pkg.update = AsyncMock(return_value=failed)
 
@@ -496,14 +498,15 @@ class TestUpdateEndpoint:
     def test_update_full_rebuild_returns_200(self, client):
         import cognee.api.v1.update as update_pkg
         from cognee.api.v1.update import UpdateResult
+        from cognee.api.v1.update.result import Fallback
 
         rebuilt = UpdateResult(
             data_id=uuid4(),
             dataset_id=MOCK_DATASET_ID,
             status="updated",
             mode="full_rebuild",
-            fallback_reason="disabled",
-            fallback_detail="chunk_level_diff=False was requested",
+            duration_seconds=4.0,
+            fallback=Fallback(reason="disabled", detail="chunk_level_diff=False was requested"),
             pipeline_run_id=MOCK_PIPELINE_RUN_ID,
         )
         update_pkg.update = AsyncMock(return_value=rebuilt)
@@ -529,8 +532,14 @@ class TestUpdateEndpoint:
             dataset_id=MOCK_DATASET_ID,
             status=incremental_status,
             mode="incremental",
+            duration_seconds=0.4,
             chunks=ChunkChanges(
-                regions=int(changed), deleted=int(changed), added=int(changed), kept=2, reindexed=1
+                regions=int(changed),
+                deleted=int(changed),
+                added=int(changed),
+                kept=2,
+                reindexed=1,
+                total=2 + int(changed),
             ),
             pipeline_run_id=MOCK_PIPELINE_RUN_ID if changed else None,
         )

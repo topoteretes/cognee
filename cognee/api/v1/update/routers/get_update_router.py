@@ -96,15 +96,17 @@ def get_update_router() -> APIRouter:
         ## Response
         One shape on every path, an `UpdateResult`:
         - **status**: `"updated"`, `"unchanged"` (the chunk-level path found no content
-          change) or `"failed"` (the rebuild's cognify run errored; `error_class` and
-          `error_message` say why, and the call can be retried).
+          change) or `"failed"` (the rebuild's cognify run errored; `error` says why, and
+          the call can be retried).
         - **mode**: `"incremental"` or `"full_rebuild"`.
+        - **duration_seconds**: wall-clock time of the update.
         - **chunks**: the chunk-level counters (`regions`, `deleted`, `added`, `reused`,
-          `kept`, `reindexed`); `null` on a full rebuild, which has no diff.
-        - **fallback_reason** / **fallback_detail**: set on every full rebuild, naming why
-          the chunk-level path did not run (`disabled`, `unsupported_metadata`,
-          `custom_extraction_config`, `per_call_db_config`, `unsupported_backend`,
-          `unsupported_chunker`, `no_baseline`, `chunks_not_tiling`, `unreadable_text`).
+          `kept`, `reindexed`, `total`); `null` on a full rebuild, which has no diff.
+        - **fallback**: set on every full rebuild; its `reason` names why the chunk-level
+          path did not run (`disabled`, `unsupported_metadata`, `custom_extraction_config`,
+          `per_call_db_config`, `unsupported_backend`, `unsupported_chunker`,
+          `no_baseline`, `chunks_not_tiling`, `unreadable_text`) and `detail` says it in
+          a sentence.
         - **pipeline_run_id**: the run to inspect; `null` for a no-op.
 
         ## Error Codes
