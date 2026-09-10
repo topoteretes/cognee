@@ -54,7 +54,8 @@ BROAD_PREAMBLE_CHARS = 400
 BROAD_MAX_PLANNER_TYPES = 200
 # Name variants are merged in one LLM call; above this many names it is skipped.
 BROAD_MAX_ALIAS_NAMES = 500
-BROAD_MAX_GROUPS_SHOWN = 50
+# Every group is shown so the answer can read one named group's tally.
+BROAD_MAX_GROUPS_SHOWN = 500
 BROAD_EVIDENCE_SHOWN = 8
 _ENTITY_DESCRIPTION_CHARS = 200
 
@@ -141,7 +142,10 @@ never for rows, records, events, or anything that needs reading to recognize.
 "founded before 1900"), or null. Never "is mentioned", "exists" or "appears in the \
 text" — that holds for everything.
 - group_by: the attribute to tally items by when the question asks who/which has the \
-most or asks for a breakdown, or null.
+most or asks for a breakdown, or null. When the question is about ONE named person or \
+thing ("How many orders did Ann place?"), do not put that name in the condition: group \
+by the attribute ("customer") instead. Names are written in several ways (nicknames, \
+handles), and grouping merges the variants before the answer reads that one tally.
 - dedup_key: when one item can be mentioned several times in the text (recaps, \
 references back, lists repeated), the attribute that identifies it, with its format \
 (e.g. "the PR number, digits only"). Null when every occurrence is its own item \
