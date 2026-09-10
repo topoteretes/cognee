@@ -146,12 +146,31 @@ def _number(value: float) -> str:
     return str(int(value)) if float(value).is_integer() else f"{value:,.2f}"
 
 
+def _alias_groups(raw: list[list[str]]) -> list[list[str]]:
+    """Alias groups as lists of names; a group returned as one "a, b" string is split."""
+    groups = []
+    for group in raw:
+        names = [name.strip() for entry in group for name in entry.split(",") if name.strip()]
+        if len(names) > 1:
+            groups.append(names)
+    return groups
+
+
 def _stated_aliases(aliases: list[list[str]]) -> list[str]:
-    return sorted({" = ".join(group) for group in aliases if len(group) > 1})
+    return sorted({" = ".join(group) for group in aliases})
 
 
 def _normalize_key(value: str) -> str:
     return re.sub(r"[^0-9a-z]+", "", value.lower())
+
+
+def _loose_name(name: str) -> str:
+    return _normalize_key(name.lstrip("@"))
+
+
+def _canonical_spelling(names: list[str]) -> str:
+    """The spelling a group of variants is tallied under: no @, then the longest."""
+    return min(names, key=lambda name: (name.startswith("@"), -len(name), name))
 
 
 class BroadRetriever(CompletionRetriever):
@@ -357,9 +376,11 @@ class BroadRetriever(CompletionRetriever):
                 if marker not in seen:
                     seen.add(marker)
                     items.append(item)
-        aliases = [names for _, shard_items in read_shards for names in shard_items.aliases]
+        aliases = _alias_groups(
+            [names for _, shard_items in read_shards for names in shard_items.aliases]
+        )
 
-        names_merged = await self.merge_name_variants(plan, items, aliases)
+        canonical = await self.merge_name_variants(plan, items, aliases)
 
         if plan.dedup_key:
             keyed: dict[str, ExtractedItem] = {}
@@ -387,7 +408,7 @@ class BroadRetriever(CompletionRetriever):
             # The question's name is matched against the names actually read, so a
             # nickname or partial name finds its person and an unknown name counts zero.
             target_names = await self.match_target(
-                plan.target, [name for name, _ in groups], aliases
+                plan.target, [name for name, _ in groups], aliases, canonical or {}
             )
             items = [item for item in items if item.group in target_names]
         if plan.distinct and not plan.target:
@@ -407,7 +428,7 @@ class BroadRetriever(CompletionRetriever):
             amounts_missing=(
                 sum(1 for item in items if item.amount is None) if plan.measure else 0
             ),
-            names_merged=names_merged,
+            names_merged=canonical is not None,
             target_names=target_names,
             llm_calls=len(shards),
             tokens_read=tokens_read,
@@ -415,13 +436,45 @@ class BroadRetriever(CompletionRetriever):
 
     # --- reading helpers ------------------------------------------------------------
 
+    def split_oversized(self, units: list[Unit]) -> list[Unit]:
+        """Cut a unit longer than a shard into paragraph-aligned pieces.
+
+        A PDF chunk can be ~5k tokens of dense prose; read whole, it is denser
+        than the shard budget allows and the model skips items. Pieces keep the
+        unit's document-start line so a table header still reaches each one.
+        """
+        pieces: list[Unit] = []
+        for unit in units:
+            if len(self.tokenizer.extract_tokens(unit.text)) <= self.shard_tokens:
+                pieces.append(unit)
+                continue
+            paragraphs = [p for p in re.split(r"\n\s*\n|\n", unit.text) if p.strip()]
+            current: list[str] = []
+            current_tokens = 0
+            for paragraph in paragraphs:
+                tokens = len(self.tokenizer.extract_tokens(paragraph))
+                if current and current_tokens + tokens > self.shard_tokens:
+                    pieces.append(
+                        Unit(
+                            f"{unit.id}#{len(pieces)}", "\n".join(current), unit.name, unit.preamble
+                        )
+                    )
+                    current, current_tokens = [], 0
+                current.append(paragraph)
+                current_tokens += tokens
+            if current:
+                pieces.append(
+                    Unit(f"{unit.id}#{len(pieces)}", "\n".join(current), unit.name, unit.preamble)
+                )
+        return pieces
+
     def pack_shards(self, units: list[Unit]) -> tuple[list[list[Unit]], int]:
         """Group units into shards of at most ``shard_tokens``; returns (shards, tokens)."""
         shards: list[list[Unit]] = []
         total_tokens = 0
         current: list[Unit] = []
         current_tokens = 0
-        for unit in units:
+        for unit in self.split_oversized(units):
             tokens = len(self.tokenizer.extract_tokens(unit.text))
             if current and current_tokens + tokens > self.shard_tokens:
                 shards.append(current)
@@ -459,18 +512,19 @@ class BroadRetriever(CompletionRetriever):
 
     async def merge_name_variants(
         self, plan: CountPlan, items: list[ExtractedItem], aliases: list[list[str]]
-    ) -> bool:
+    ) -> dict[str, str] | None:
         """Rewrite every group value to one canonical spelling, in place.
 
-        Returns False when there were too many distinct names to merge.
+        Returns the spelling each name was mapped to, or None when there were too
+        many distinct names to merge.
         """
         # Only group values are names. A dedup key is an identifier (a number, a
         # code, a title): merging "similar" identifiers would join different items.
         names = {item.group for item in items if item.group}
         if len(names) > BROAD_MAX_ALIAS_NAMES:
-            return False
+            return None
         if len(names) < 2:
-            return True
+            return {name: name for name in names}
 
         stated = _stated_aliases(aliases)
         text_input = "\n".join(sorted(names))
@@ -483,9 +537,11 @@ class BroadRetriever(CompletionRetriever):
         )
         canonical = {name: name for name in names}
         for group in result.groups:
-            for variant in group:
-                if variant in canonical:
-                    canonical[variant] = group[0]
+            members = [variant for variant in group if variant in canonical]
+            if len(members) > 1:
+                head = _canonical_spelling(members)
+                for variant in members:
+                    canonical[variant] = head
         logger.info(
             "BROAD name merge: %d names, %d merged into another spelling",
             len(names),
@@ -494,19 +550,30 @@ class BroadRetriever(CompletionRetriever):
         for item in items:
             if item.group:
                 item.group = canonical[item.group]
-        return True
+        return canonical
 
     async def match_target(
-        self, target: str, names: list[str], aliases: list[list[str]]
+        self, target: str, names: list[str], aliases: list[list[str]], canonical: dict[str, str]
     ) -> list[str]:
         """The names read from the corpus that are the person or thing ``target`` names.
 
-        Separate from merging: merging joins spellings only when sure, so different
-        people stay apart, while the question's name may be a nickname or a partial
-        name that only resolves against the names actually present.
+        Matched by code when the question's name is a spelling that was read, or
+        one the text declares equal to it; a model call only resolves the rest
+        (a nickname, a translation), against the names actually present.
         """
         if not names:
             return []
+        wanted = {_loose_name(target)}
+        for group in aliases:
+            if any(_loose_name(name) in wanted for name in group):
+                wanted.update(_loose_name(name) for name in group)
+        spelling_of = {_loose_name(name): name for name in names}
+        spelling_of.update({_loose_name(variant): head for variant, head in canonical.items()})
+        matched = sorted({spelling_of[w] for w in wanted if spelling_of.get(w) in names})
+        if matched:
+            logger.info("BROAD target %r matched %s by spelling", target, matched)
+            return matched
+
         text_input = f"Name in the question: {target}\n\nNames in the corpus:\n" + "\n".join(names)
         stated = _stated_aliases(aliases)
         if stated:

@@ -251,6 +251,24 @@ def test_shards_respect_the_token_budget_and_keep_every_unit():
     assert tokens == sum(len(retriever.tokenizer.extract_tokens(u.text)) for u in units)
 
 
+def test_a_unit_longer_than_a_shard_is_split_at_paragraphs():
+    """A 5k-token PDF chunk read whole is denser than the shard budget: cut it up."""
+    retriever = BroadRetriever(shard_tokens=40)
+    paragraphs = [f"paragraph {i} " + "word " * 20 for i in range(6)]
+    unit = Unit(id="c7", text="\n\n".join(paragraphs), preamble="Header line")
+
+    shards, _ = retriever.pack_shards([unit, Unit(id="c8", text="short")])
+    pieces = [piece for shard in shards for piece in shard]
+
+    assert len(pieces) > 2 and pieces[-1].id == "c8"
+    assert all(
+        piece.id.startswith("c7#") and piece.preamble == "Header line" for piece in pieces[:-1]
+    )
+    assert "\n".join(p.text for p in pieces[:-1]).split() == unit.text.split()  # nothing lost
+    for piece in pieces[:-1]:
+        assert len(retriever.tokenizer.extract_tokens(piece.text)) <= 40 or "\n" not in piece.text
+
+
 @pytest.mark.asyncio
 async def test_every_shard_is_read(monkeypatch):
     seen = []
@@ -340,7 +358,8 @@ async def test_name_variants_are_merged_before_tallying(monkeypatch):
     def respond(model, _):
         if model is ShardItems:
             return shard
-        return NameGroups(groups=[["Akshats-git", "Akshats", "@Akshats-git"], ["Megha-gbs"]])
+        # The model may put the @ form first; code tallies under the plain, longest spelling.
+        return NameGroups(groups=[["@Akshats-git", "Akshats", "Akshats-git"], ["Megha-gbs"]])
 
     _stub_llm(monkeypatch, respond)
     plan = CountPlan(source="text", item="an assignment", group_by="assignee")
@@ -411,12 +430,61 @@ async def test_a_named_target_counts_its_group_under_every_spelling(monkeypatch)
     context = await BroadRetriever().get_context_from_objects("q", result)
 
     assert result.total == 3
-    assert "Name in the question: Megha" in match_inputs[0]
-    assert "Akshats-git" in match_inputs[0]  # matched against the merged corpus names
+    assert match_inputs == []  # "Megha" is a merged spelling of Megha-gbs: matched by code
     assert "TOTAL: 3" in context
     assert 'assignee is Megha-gbs (the names matching "Megha")' in context
     assert all(f"#{issue}" in context for issue in ("1", "2", "4"))
     assert "#3" not in context  # only the target's items are listed
+
+
+@pytest.mark.asyncio
+async def test_a_target_the_text_declares_equal_needs_no_model_call(monkeypatch):
+    """ "Ann-dev, usually called Ann": asking about Ann finds Ann-dev by code, even when
+    the alias group came back as one comma-joined string."""
+    shard = ShardItems(
+        items=[
+            ExtractedItem(unit=0, key="#1", group="Ann-dev", evidence="#1 to Ann-dev"),
+            ExtractedItem(unit=1, key="#2", group="Bob", evidence="#2 to Bob"),
+        ],
+        aliases=[["Ann-dev, Ann"]],
+    )
+    models = []
+
+    def respond(model, _):
+        models.append(model)
+        if model is ShardItems:
+            return shard
+        return NameGroups(groups=[["Ann-dev"], ["Bob"]])
+
+    _stub_llm(monkeypatch, respond)
+    plan = CountPlan(source="text", item="a ticket", group_by="assignee", target="Ann")
+
+    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(plan, _units(2, words=2))
+
+    assert result.total == 1 and result.target_names == ["Ann-dev"]
+    assert TargetMatch not in models
+
+
+@pytest.mark.asyncio
+async def test_a_translated_target_is_resolved_by_the_model(monkeypatch):
+    """ "Deutschland" is no spelling of Germany: only the model can join them."""
+    shard = ShardItems(
+        items=[ExtractedItem(unit=0, key="S1", group="Germany", amount=40, evidence="40 from DE")]
+    )
+    models = []
+
+    def respond(model, _):
+        models.append(model)
+        return shard if model is ShardItems else TargetMatch(names=["Germany"])
+
+    _stub_llm(monkeypatch, respond)
+    plan = CountPlan(
+        source="text", item="a shipment", group_by="origin", target="Deutschland", measure="units"
+    )
+
+    result = await BroadRetriever().count_by_reading(plan, _units(1))
+
+    assert result.total == 40 and TargetMatch in models
 
 
 @pytest.mark.asyncio
