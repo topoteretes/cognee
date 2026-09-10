@@ -16,7 +16,9 @@ an LLM for a number. It
 4. answers: the final LLM only phrases the computed numbers.
 
 Distinct things the graph already types (people, places, ...) are counted from
-the graph directly — no LLM pass at all unless the question adds a condition.
+the graph directly, with name filters applied by code and no LLM pass; any other
+condition is read from the text. How many times a word is written is counted by
+code as well. The model only lists what needs reading.
 """
 
 import asyncio
@@ -38,11 +40,9 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("BroadRetriever")
 
 # Tokens of source text per map call. Small enough that the model lists every
-# match in its shard; the corpus size only changes how many shards run.
-BROAD_SHARD_TOKENS = 12_000
-# Entity records are short and dense, so a shard holds hundreds of them; the
-# model drops matches from long lists, so entity filtering uses smaller shards.
-BROAD_ENTITY_SHARD_TOKENS = 3_000
+# match in its shard; the corpus size only changes how many shards run. Measured:
+# 2,000 CSV rows as text gave the top assignee 84/91 at 12k-token shards, 91/91 at 4k.
+BROAD_SHARD_TOKENS = 4_000
 BROAD_MAX_PARALLEL_CALLS = 16
 # Graph node types whose text the text source reads: document chunks and table rows.
 BROAD_TEXT_NODE_TYPES = ("DocumentChunk", "DltRow")
@@ -60,6 +60,7 @@ class CountPlan(BaseModel):
     entity_types: list[str] = []
     item: str
     name_contains: str | None = None
+    literal_terms: list[str] = []
     condition: str | None = None
     group_by: str | None = None
     dedup_key: str | None = None
@@ -110,7 +111,9 @@ Choose the source:
 - "entities" ONLY when the question asks how many distinct things of one kind exist \
 or are mentioned, and that kind is one of the listed entity types — e.g. "How many \
 cities appear?", "How many companies whose name starts with S are mentioned?". The \
-graph holds each distinct entity once, so this count is exact.
+graph holds each distinct entity once, so this count is exact. Entities carry only a \
+name, so the only restriction allowed here is a name filter (name_contains); any other \
+condition or a breakdown means source "text".
 - "text" for everything else: what happened, who did what, relations between things, \
 attributes or verdicts, how many times something occurs or is mentioned, per-person or \
 per-group tallies of actions — e.g. "Which author wrote the most papers?", "How many \
@@ -123,6 +126,11 @@ counted things belong to. Empty for "text".
 - name_contains: for source "entities", when the restriction is only that the name \
 contains some text (e.g. "companies with Tech in their name" -> "Tech"), that text. It \
 is matched exactly by code, so leave `condition` null in that case. Otherwise null.
+- literal_terms: for source "text", ONLY when the question asks how many times a \
+word or name is mentioned, appears or is used (e.g. "How many times is Paris \
+mentioned?"), the exact spellings to match, with capitalization as written in the text \
+(e.g. ["Paris"]). Code counts whole-word matches exactly. Empty for everything else — \
+never for rows, records, events, or anything that needs reading to recognize.
 - condition: a real restriction beyond the item itself that needs reading (e.g. \
 "founded before 1900"), or null. Never "is mentioned", "exists" or "appears in the \
 text" — that holds for everything.
@@ -134,7 +142,8 @@ references back, lists repeated), the attribute that identifies it, with its for
 (counting mentions, headings, appearances). The key must identify ONE item across the \
 whole corpus: if its values repeat for different items (chapter or section numbers that \
 restart in every part, page numbers, "item 1"), use null. For "how many different X" it \
-is X's name.
+is X's name. Structural items — chapters, sections, pages, headings — are never \
+repeated mentions: count each occurrence, dedup_key null.
 - dedup_key_is_name: true when dedup_key is a name of a person/thing that may be \
 written in different ways (nicknames, handles); false for numbers and codes."""
 
@@ -234,6 +243,12 @@ class BroadRetriever(CompletionRetriever):
             system_prompt=PLAN_PROMPT,
             response_model=CountPlan,
         )
+        if plan.source == "entities" and (plan.condition or plan.group_by):
+            # A graph entity carries only a name and a short description, so a
+            # condition or breakdown is read from the text, where the facts are.
+            plan = plan.model_copy(
+                update={"source": "text", "entity_types": [], "name_contains": None}
+            )
         if plan.source == "entities":
             plan.entity_types = [generate_node_name(name) for name in plan.entity_types]
             unknown = [name for name in plan.entity_types if name not in entities_by_type]
@@ -354,6 +369,27 @@ class BroadRetriever(CompletionRetriever):
             tokens_read=tokens_read,
         )
 
+    def count_literal(self, plan: CountPlan, units: list[Unit]) -> CountResult:
+        """Whole-word, case-sensitive occurrences of the planned spellings in every unit."""
+        terms = sorted(set(plan.literal_terms), key=len, reverse=True)
+        pattern = re.compile(r"(?<!\w)(?:" + "|".join(map(re.escape, terms)) + r")(?!\w)")
+        total = 0
+        evidence: list[str] = []
+        for unit in units:
+            for match in pattern.finditer(unit.text):
+                total += 1
+                if len(evidence) < BROAD_EVIDENCE_SHOWN:
+                    window = unit.text[max(match.start() - 60, 0) : match.end() + 60]
+                    evidence.append(" ".join(window.split()))
+        return CountResult(
+            plan=plan,
+            total=total,
+            groups=[],
+            units_scanned=len(units),
+            units_total=len(units),
+            evidence=evidence,
+        )
+
     async def get_retrieved_objects(self, query: str) -> CountResult:
         unified_engine = await get_unified_engine()
         entities_by_type = await self.load_entities(unified_engine.graph)
@@ -367,26 +403,22 @@ class BroadRetriever(CompletionRetriever):
             if plan.name_contains:
                 needle = generate_node_name(plan.name_contains)
                 units = [unit for unit in all_units if needle in unit.name]
-            if not plan.condition and not plan.group_by:
-                # Graph entities are already distinct: the count is the node count.
-                return CountResult(
-                    plan,
-                    len(units),
-                    [],
-                    len(all_units),
-                    len(all_units),
-                    [unit.text for unit in units[:BROAD_EVIDENCE_SHOWN]],
-                )
-            # Each entity is its own item; the map step only applies the condition.
-            plan = plan.model_copy(
-                update={"dedup_key": "the entity name", "dedup_key_is_name": False}
+            # Graph entities are already distinct: the count is the node count.
+            return CountResult(
+                plan,
+                len(units),
+                [],
+                len(all_units),
+                len(all_units),
+                [unit.text for unit in units[:BROAD_EVIDENCE_SHOWN]],
             )
-            shard_tokens = min(self.shard_tokens, BROAD_ENTITY_SHARD_TOKENS)
-        else:
-            units = await self.load_text_units(unified_engine.graph)
-            shard_tokens = self.shard_tokens
 
-        result = await self.count_items(plan, units, shard_tokens)
+        units = await self.load_text_units(unified_engine.graph)
+        if plan.literal_terms and not plan.condition and not plan.group_by:
+            # Occurrences of written words need no reading: code counts them exactly.
+            return self.count_literal(plan, units)
+
+        result = await self.count_items(plan, units, self.shard_tokens)
         logger.info(
             "BROAD result: total=%d calls=%d tokens=%d",
             result.total,
@@ -405,15 +437,25 @@ class BroadRetriever(CompletionRetriever):
             if plan.source == "entities"
             else "document chunks / table rows"
         )
+        how = (
+            f"{result.llm_calls} parallel extraction calls over {result.tokens_read} tokens"
+            if result.llm_calls
+            else "no extraction calls needed"
+        )
         lines = [
             (
                 f"EXACT COUNT computed by code over all {result.units_scanned} of "
                 f"{result.units_total} {source} (every unit read in full, no sampling; "
-                f"{result.llm_calls} parallel extraction calls over {result.tokens_read} tokens). "
-                "Report these numbers; do not recount."
+                f"{how}). Report these numbers; do not recount."
             ),
             f"Counted item: {plan.item}",
         ]
+        if plan.source == "text" and plan.literal_terms and not result.llm_calls:
+            lines.append(
+                "Counted as whole-word matches of: "
+                + ", ".join(f'"{term}"' for term in plan.literal_terms)
+                + " (references by pronoun or description are not included)"
+            )
         if plan.condition:
             lines.append(f"Condition: {plan.condition}")
         if plan.dedup_key:

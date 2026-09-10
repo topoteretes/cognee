@@ -318,3 +318,52 @@ async def test_search_builds_broad_with_its_scan_settings():
     assert isinstance(retriever, BroadRetriever)
     assert retriever.shard_tokens == 4000
     assert retriever.max_parallel_calls == 4
+
+
+@pytest.mark.asyncio
+async def test_word_mentions_are_counted_by_code_across_every_unit(monkeypatch):
+    """ "How many times is X mentioned" needs no reading: whole-word matches, no listing."""
+    calls = []
+
+    def respond(model, _):
+        calls.append(model)
+        return CountPlan(source="text", item="a mention of Moscow", literal_terms=["Moscow"])
+
+    _stub_llm(monkeypatch, respond)
+    graph = _FakeGraph()
+    graph.text_nodes = [
+        ("c1", {"type": "DocumentChunk", "text": "Moscow burned. They left Moscow's gates."}),
+        ("c2", {"type": "DocumentChunk", "text": "Muscovites and MoscowRiver are not Moscow."}),
+    ]
+    fake_engine = SimpleNamespace(graph=graph, vector=None)
+
+    async def unified():
+        return fake_engine
+
+    monkeypatch.setattr(broad_retriever, "get_unified_engine", unified)
+
+    result = await BroadRetriever().get_retrieved_objects("How many times is Moscow mentioned?")
+
+    assert result.total == 3
+    assert calls == [CountPlan]
+
+
+@pytest.mark.asyncio
+async def test_an_entity_plan_with_a_condition_reads_the_text(monkeypatch):
+    """Entities hold a name, not assignments or verdicts: such conditions scan the text."""
+
+    def respond(model, _):
+        if model is CountPlan:
+            return CountPlan(
+                source="entities", entity_types=["person"], item="an issue", condition="assigned"
+            )
+        return ShardItems(items=[ExtractedItem(unit=0, evidence="Row Data: assignee: ann")])
+
+    _stub_llm(monkeypatch, respond)
+    _use_fake_graph(monkeypatch)
+
+    result = await BroadRetriever().get_retrieved_objects("How many issues were assigned?")
+
+    assert result.plan.source == "text"
+    assert result.total == 1
+    assert result.llm_calls == 1
