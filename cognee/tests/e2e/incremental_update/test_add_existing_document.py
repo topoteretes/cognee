@@ -60,13 +60,23 @@ def add_env():
         except (ImportError, AttributeError):
             pass
 
+    import re
+
     from cognee.infrastructure.llm.LLMGateway import LLMGateway
-    from cognee.shared.data_models import KnowledgeGraph, SummarizedContent
+    from cognee.shared.data_models import KnowledgeGraph, Node, SummarizedContent
+
+    marker = re.compile(r"ENT[A-Z0-9]+")
 
     @staticmethod
     async def _mock_acreate(text_input, system_prompt, response_model, **kwargs):
+        # Documents produce entities; the same deterministic extraction the
+        # other suites in this directory use, so the graph is never empty.
         if isinstance(response_model, type) and issubclass(response_model, KnowledgeGraph):
-            return KnowledgeGraph(nodes=[], edges=[])
+            names = sorted(set(marker.findall(str(text_input))))
+            return KnowledgeGraph(
+                nodes=[Node(id=n, name=n, type="Marker", description=f"marker {n}") for n in names],
+                edges=[],
+            )
         if isinstance(response_model, type) and issubclass(response_model, SummarizedContent):
             return SummarizedContent(summary="Mock summary.", description="")
         return response_model() if isinstance(response_model, type) else "mock"
@@ -97,10 +107,10 @@ async def test_re_adding_a_changed_file_is_refused_and_update_is_the_way(add_env
     from cognee.modules.users.methods import get_default_user
 
     report = add_env / "report.txt"
-    report.write_text("Quarterly report, version one.\n")
+    report.write_text("Quarterly report ENTREPORT, version one.\n")
     await cognee.add(str(report), dataset_name="existing")
     await cognee.add(
-        _upload(b"Meeting notes, version one.\n", "notes.txt"), dataset_name="existing"
+        _upload(b"Meeting notes ENTNOTES, version one.\n", "notes.txt"), dataset_name="existing"
     )
     user = await get_default_user()
     dataset = next(d for d in await get_datasets(user.id) if d.name == "existing")
@@ -110,12 +120,12 @@ async def test_re_adding_a_changed_file_is_refused_and_update_is_the_way(add_env
     # Identical content re-added: a no-op, still two rows.
     await cognee.add(str(report), dataset_name="existing")
     await cognee.add(
-        _upload(b"Meeting notes, version one.\n", "notes.txt"), dataset_name="existing"
+        _upload(b"Meeting notes ENTNOTES, version one.\n", "notes.txt"), dataset_name="existing"
     )
     assert len(await get_dataset_data(dataset.id)) == 2
 
     # The same path with new content: refused, naming the document to update.
-    report.write_text("Quarterly report, version two.\n")
+    report.write_text("Quarterly report ENTREPORT ENTV2, version two.\n")
     with pytest.raises(DocumentUpdateRequiredError) as refused:
         await cognee.add(str(report), dataset_name="existing")
     assert refused.value.status_code == 409
@@ -126,13 +136,14 @@ async def test_re_adding_a_changed_file_is_refused_and_update_is_the_way(add_env
     # The same upload name with new content: refused too.
     with pytest.raises(DocumentUpdateRequiredError) as refused:
         await cognee.add(
-            _upload(b"Meeting notes, version two.\n", "notes.txt"), dataset_name="existing"
+            _upload(b"Meeting notes ENTNOTES ENTV2, version two.\n", "notes.txt"),
+            dataset_name="existing",
         )
     assert refused.value.conflicts[0]["data_id"] == rows["notes"].id
 
     # A batch with one changed file is refused whole, before anything is written.
     fresh = add_env / "fresh.txt"
-    fresh.write_text("A brand new document.\n")
+    fresh.write_text("A brand new document ENTFRESH.\n")
     with pytest.raises(DocumentUpdateRequiredError):
         await cognee.add([str(fresh), str(report)], dataset_name="existing")
     assert len(await get_dataset_data(dataset.id)) == 2, "a refused add must write nothing"
@@ -147,11 +158,11 @@ async def test_re_adding_a_changed_file_is_refused_and_update_is_the_way(add_env
     # A directory re-added after one of its files changed is refused whole too.
     folder = add_env / "folder"
     folder.mkdir(exist_ok=True)
-    (folder / "a.txt").write_text("Folder file A.\n")
-    (folder / "b.txt").write_text("Folder file B.\n")
+    (folder / "a.txt").write_text("Folder file A ENTA.\n")
+    (folder / "b.txt").write_text("Folder file B ENTB.\n")
     await cognee.add(str(folder), dataset_name="existing")
     assert len(await get_dataset_data(dataset.id)) == 4
-    (folder / "b.txt").write_text("Folder file B, edited.\n")
+    (folder / "b.txt").write_text("Folder file B ENTB ENTEDIT, edited.\n")
     with pytest.raises(DocumentUpdateRequiredError) as refused:
         await cognee.add(str(folder), dataset_name="existing")
     assert [c["name"] for c in refused.value.conflicts] == ["b.txt"]

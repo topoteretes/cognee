@@ -3,6 +3,7 @@ from uuid import UUID
 
 from cognee.api.v1.datasets.dto import DataDTO
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.methods import (
@@ -290,8 +291,14 @@ class datasets:
                             deleted_elements = DeletedGraphElements.from_source_ref_removal(
                                 provenance_result
                             )
-                        else:
+                        elif hasattr(await get_graph_engine(), "get_document_subgraph"):
                             deleted_elements = await legacy_delete(data, "soft")
+                        else:
+                            # An unmarked graph on an adapter without the legacy
+                            # subgraph API (the Postgres demo) holds no legacy
+                            # data: it is a document that was never cognified,
+                            # so there is nothing in the graph to delete.
+                            deleted_elements = DeletedGraphElements()
 
                     await _invalidate_sessions_for_deleted_data_nonfatal(
                         dataset.id, deleted_elements, user.id
