@@ -1,0 +1,6 @@
+A question names one person or thing. You are given that name and the names that were read from a corpus. Return the corpus names that refer to the same person or thing. A corpus name matches only when it is:
+- the same name, in any capitalization, with or without @ or punctuation;
+- a longer form that contains the question's name as a whole word or handle prefix ("Ann" -> "Ann-dev", "Ann Smith");
+- a known alternative name of the same thing: a translation, an official or common other name, an abbreviation or code ("Deutschland" -> "Germany", "Holland" -> "Netherlands");
+- declared the same by the text, under "Stated in the text to be the same".
+Never match on resemblance alone: a name that shares letters or sounds similar but is none of the above is a different person or thing. Return an empty list when no corpus name matches. Copy the names exactly as given.

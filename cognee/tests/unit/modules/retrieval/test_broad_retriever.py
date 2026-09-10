@@ -17,6 +17,7 @@ from cognee.modules.retrieval.broad_retriever import (
     ExtractedItem,
     NameGroups,
     ShardItems,
+    TargetMatch,
     Unit,
 )
 from cognee.modules.search.methods.get_search_type_retriever_instance import (
@@ -349,6 +350,155 @@ async def test_name_variants_are_merged_before_tallying(monkeypatch):
     assert result.groups == [("Akshats-git", 3), ("Megha-gbs", 1)]
 
 
+@pytest.mark.asyncio
+async def test_aliases_stated_in_the_text_reach_the_merge_step(monkeypatch):
+    """A roster line ("Akshats-git (usually called Akshats)") is the evidence a merge needs."""
+    shard = ShardItems(
+        items=[
+            ExtractedItem(unit=0, group="Akshats", evidence="Akshats took #1"),
+            ExtractedItem(unit=0, group="Megha-gbs", evidence="Megha-gbs took #2"),
+        ],
+        aliases=[["Akshats-git", "Akshats"]],
+    )
+    merge_inputs = []
+
+    def respond(model, text_input):
+        if model is ShardItems:
+            return shard
+        merge_inputs.append(text_input)
+        return NameGroups(groups=[["Akshats-git", "Akshats"]])
+
+    _stub_llm(monkeypatch, respond)
+    plan = CountPlan(source="text", item="an assignment", group_by="assignee")
+
+    await BroadRetriever().count_by_reading(plan, _units(1))
+
+    assert "Akshats-git = Akshats" in merge_inputs[0]
+
+
+# --- one named target -----------------------------------------------------------------
+
+
+def _assignments(*pairs: tuple[str, str]) -> ShardItems:
+    return ShardItems(
+        items=[
+            ExtractedItem(unit=index, key=f"#{issue}", group=name, evidence=f"#{issue} to {name}")
+            for index, (issue, name) in enumerate(pairs)
+        ]
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_named_target_counts_its_group_under_every_spelling(monkeypatch):
+    """ "Issues assigned to Megha": the handle and the nickname are one person."""
+    shard = _assignments(("1", "Megha-gbs"), ("2", "Megha"), ("3", "Akshats-git"), ("4", "Megha"))
+    match_inputs = []
+
+    def respond(model, text_input):
+        if model is ShardItems:
+            return shard
+        if model is TargetMatch:
+            match_inputs.append(text_input)
+            return TargetMatch(names=["Megha-gbs"])
+        return NameGroups(groups=[["Megha-gbs", "Megha"], ["Akshats-git"]])
+
+    _stub_llm(monkeypatch, respond)
+    plan = CountPlan(
+        source="text", item="an issue", group_by="assignee", target="Megha", dedup_key="issue"
+    )
+
+    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(plan, _units(4, words=2))
+    context = await BroadRetriever().get_context_from_objects("q", result)
+
+    assert result.total == 3
+    assert "Name in the question: Megha" in match_inputs[0]
+    assert "Akshats-git" in match_inputs[0]  # matched against the merged corpus names
+    assert "TOTAL: 3" in context
+    assert 'assignee is Megha-gbs (the names matching "Megha")' in context
+    assert all(f"#{issue}" in context for issue in ("1", "2", "4"))
+    assert "#3" not in context  # only the target's items are listed
+
+
+@pytest.mark.asyncio
+async def test_every_item_of_a_named_target_is_listed(monkeypatch):
+    """ "Which issues": all of them, past the cap on quotes for a whole-corpus count."""
+    count = broad_retriever.BROAD_EVIDENCE_SHOWN + 10
+    shard = _assignments(*[(str(issue), "Akshats-git") for issue in range(count)])
+    _stub_llm(
+        monkeypatch,
+        lambda model, _: TargetMatch(names=["Akshats-git"]) if model is TargetMatch else shard,
+    )
+    plan = CountPlan(
+        source="text", item="an issue", group_by="assignee", target="Akshats-git", dedup_key="issue"
+    )
+
+    result = await BroadRetriever(shard_tokens=100_000).count_by_reading(plan, _units(count, 2))
+
+    assert result.total == count
+    assert len(result.evidence) == count
+
+
+@pytest.mark.asyncio
+async def test_a_named_target_nobody_matches_counts_zero(monkeypatch):
+    """A name the matcher returns that was never read cannot create items."""
+    shard = _assignments(("1", "Megha-gbs"), ("2", "Akshats-git"))
+
+    def respond(model, _):
+        if model is ShardItems:
+            return shard
+        if model is TargetMatch:
+            return TargetMatch(names=["Ashkatosh"])
+        return NameGroups(groups=[["Megha-gbs"], ["Akshats-git"]])
+
+    _stub_llm(monkeypatch, respond)
+    plan = CountPlan(source="text", item="an issue", group_by="assignee", target="Ashkatosh")
+
+    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(plan, _units(2, words=2))
+    context = await BroadRetriever().get_context_from_objects("q", result)
+
+    assert result.total == 0 and result.evidence == []
+    assert "no listed item has assignee Ashkatosh" in context
+
+
+@pytest.mark.asyncio
+async def test_distinct_without_a_grouping_counts_the_items(monkeypatch):
+    """ "How many people have the role SRE" planned as distinct with nothing to group
+    by: the answer is the number of items, not the number of (zero) groups."""
+    _stub_llm(
+        monkeypatch,
+        lambda model, _: CountPlan(source="text", item="a person with role SRE", distinct=True),
+    )
+
+    plan = await BroadRetriever().plan("How many people have the role SRE?", {})
+
+    assert plan.distinct is False
+
+
+@pytest.mark.asyncio
+async def test_a_named_target_without_a_grouping_fails_fast(monkeypatch):
+    _stub_llm(
+        monkeypatch,
+        lambda model, _: CountPlan(source="text", item="an issue", target="Megha"),
+    )
+
+    with pytest.raises(ValueError, match="target"):
+        await BroadRetriever().plan("How many issues does Megha have?", {})
+
+
+@pytest.mark.asyncio
+async def test_a_named_target_counts_its_items_not_different_values(monkeypatch):
+    _stub_llm(
+        monkeypatch,
+        lambda model, _: CountPlan(
+            source="text", item="an issue", group_by="assignee", target="Megha", distinct=True
+        ),
+    )
+
+    plan = await BroadRetriever().plan("How many issues does Megha have?", {})
+
+    assert plan.distinct is False
+
+
 # --- how the result is worded -------------------------------------------------------
 
 
@@ -393,6 +543,163 @@ async def test_graph_and_word_counts_are_stated_as_exact():
 
     assert "Exact." in graph_context and "TOTAL: 6756" in graph_context
     assert 'whole-word matches of "Moscow"' in words_context and "Exact for these" in words_context
+
+
+# --- summing a measure -----------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_measure_is_summed_per_item_and_per_group(monkeypatch):
+    """ "How many units were imported": 40 + 12 + 30 units, not 3 shipments."""
+    shard = ShardItems(
+        items=[
+            ExtractedItem(unit=0, key="SHP-1", group="Germany", amount=40, evidence="40 cameras"),
+            ExtractedItem(unit=1, key="SHP-2", group="Germany", amount=12, evidence="12 lenses"),
+            ExtractedItem(unit=2, key="SHP-3", group="Italy", amount=30, evidence="30 crates"),
+            ExtractedItem(unit=3, key="SHP-4", group="Italy", evidence="olive oil, amount unclear"),
+            ExtractedItem(unit=4, key="SHP-1", group="Germany", amount=40, evidence="recap SHP-1"),
+        ]
+    )
+
+    def respond(model, _):
+        if model is ShardItems:
+            return shard
+        return NameGroups(groups=[["Germany"], ["Italy"]])
+
+    _stub_llm(monkeypatch, respond)
+    plan = CountPlan(
+        source="text",
+        item="a shipment",
+        group_by="origin country",
+        measure="quantity in units",
+        dedup_key="shipment id",
+    )
+
+    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(plan, _units(5, words=2))
+    context = await BroadRetriever().get_context_from_objects("q", result)
+
+    assert result.total == 82  # the recap of SHP-1 is not added twice
+    assert dict(result.groups) == {"Germany": 52, "Italy": 30}
+    assert result.amounts_missing == 1
+    assert "TOTAL: 82" in context and "sum of quantity in units" in context
+    assert "1 listed items stated no amount" in context
+
+
+@pytest.mark.asyncio
+async def test_a_measure_is_never_counted_as_word_mentions(monkeypatch):
+    plan = _plan(literal_terms=["Germany"], measure="quantity")
+    retriever = BroadRetriever()
+    called = []
+
+    async def reading(plan, units):
+        called.append("reading")
+        return CountResult(plan=plan, method="reading", total=0, units=0)
+
+    async def plan_stub(query, entities_by_type):
+        return plan
+
+    async def units(graph_engine):
+        return _units(1)
+
+    monkeypatch.setattr(retriever, "count_by_reading", reading)
+    monkeypatch.setattr(retriever, "plan", plan_stub)
+    monkeypatch.setattr(retriever, "load_text_units", units)
+    _use_graph(monkeypatch, _FakeGraph())
+
+    await retriever.get_retrieved_objects("How many units came from Germany?")
+
+    assert called == ["reading"]
+
+
+# --- listing the counted items ---------------------------------------------------------
+
+
+def _stub_answer(monkeypatch, text: str):
+    """The answer LLM (the base class's completion step) returns ``text``."""
+
+    async def fake(self, query, retrieved_objects, context=None, **kwargs):
+        return [text]
+
+    monkeypatch.setattr(broad_retriever.CompletionRetriever, "get_completion_from_context", fake)
+
+
+@pytest.mark.asyncio
+async def test_a_listing_request_appends_every_item_by_code(monkeypatch):
+    """ "List them": all 981 items, written by code so none can be dropped."""
+    _stub_answer(monkeypatch, "981 pull requests were found.")
+    result = CountResult(
+        plan=_plan(list_items=True),
+        method="reading",
+        total=981,
+        units=28,
+        evidence=[f"#{number}: opened PR #{number}" for number in range(981)],
+    )
+
+    [answer] = await BroadRetriever().get_completion_from_context("q", result, context="c")
+
+    assert answer.startswith("981 pull requests were found.")
+    assert all(f"- #{number}: opened PR #{number}" in answer for number in range(981))
+
+
+@pytest.mark.asyncio
+async def test_no_list_is_appended_unless_asked(monkeypatch):
+    _stub_answer(monkeypatch, "42 rows.")
+    result = CountResult(plan=_plan(), method="reading", total=42, units=6, evidence=["a", "b"])
+
+    assert await BroadRetriever().get_completion_from_context("q", result, context="c") == [
+        "42 rows."
+    ]
+
+
+@pytest.mark.asyncio
+async def test_listing_different_things_lists_the_groups(monkeypatch):
+    _stub_answer(monkeypatch, "2 people.")
+    result = CountResult(
+        plan=_plan(group_by="assignee", distinct=True, list_items=True),
+        method="reading",
+        total=2,
+        units=1,
+        groups=[("Megha-gbs", 3), ("Akshats-git", 1)],
+        evidence=["a", "b", "c", "d"],
+    )
+
+    [answer] = await BroadRetriever().get_completion_from_context("q", result, context="c")
+
+    assert "- Megha-gbs (3)" in answer and "- Akshats-git (1)" in answer
+    assert "- a" not in answer
+
+
+@pytest.mark.asyncio
+async def test_the_answer_context_defers_the_full_list_to_code():
+    count = broad_retriever.BROAD_EVIDENCE_SHOWN + 25
+    result = CountResult(
+        plan=_plan(list_items=True),
+        method="reading",
+        total=count,
+        units=3,
+        evidence=[f"quote {number}" for number in range(count)],
+    )
+
+    context = await BroadRetriever().get_context_from_objects("q", result)
+
+    assert "appended below your answer by code" in context
+    assert f"quote {broad_retriever.BROAD_EVIDENCE_SHOWN - 1}" in context
+    assert f"quote {count - 1}" not in context  # the context carries a sample only
+
+
+@pytest.mark.asyncio
+async def test_a_graph_count_keeps_every_matching_name(monkeypatch):
+    count = broad_retriever.BROAD_EVIDENCE_SHOWN + 10
+    entities = {
+        "person": [
+            Unit(id=f"p{i}", text=f"rostov {i}: x", name=f"rostov {i}") for i in range(count)
+        ]
+    }
+    plan = CountPlan(source="entities", entity_types=["person"], item="a person")
+
+    result = BroadRetriever().count_entities(plan, entities)
+
+    assert len(result.evidence) == count
 
 
 # --- search wiring -------------------------------------------------------------------
