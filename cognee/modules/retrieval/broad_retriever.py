@@ -32,7 +32,9 @@ from pydantic import BaseModel
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
+from cognee.modules.data.processing.document_types.Document import Document
 from cognee.modules.engine.utils import generate_node_name
+from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.shared.logging_utils import get_logger
@@ -46,6 +48,8 @@ BROAD_SHARD_TOKENS = 4_000
 BROAD_MAX_PARALLEL_CALLS = 16
 # Graph node types whose text the text source reads: document chunks and table rows.
 BROAD_TEXT_NODE_TYPES = ("DocumentChunk", "DltRow")
+# Longest document first line (a CSV header, a title) repeated as shard context.
+BROAD_PREAMBLE_CHARS = 400
 # Entity types offered to the planner, most frequent first.
 BROAD_MAX_PLANNER_TYPES = 200
 # Name variants are merged in one LLM call; above this many names it is skipped.
@@ -89,6 +93,8 @@ class Unit:
     id: str
     text: str
     name: str = ""
+    # First line of the unit's document (e.g. a CSV header) when the unit lacks it.
+    preamble: str = ""
 
 
 @dataclass
@@ -157,6 +163,9 @@ or null if there is no identity attribute;
 (resolve pronouns like "they" to the name they refer to), or null if none;
 - unit: the number N of the [unit N] block the item appears in;
 - evidence: a short verbatim quote (at most 20 words) containing the item.
+A "[document start — context only]" block repeats the first line of the document the \
+following units come from (for example a table's column header). Use it to interpret \
+those units; never list items from it.
 Two items in different units are different items even when their quotes are identical \
 (table rows often repeat the same values). Return an empty list if the section \
 contains none."""
@@ -213,19 +222,48 @@ class BroadRetriever(CompletionRetriever):
         return entities_by_type
 
     async def load_text_units(self, graph_engine) -> list[Unit]:
-        """Every document chunk and table row in the dataset.
+        """Every document chunk and table row in the dataset, in document order.
 
         Listed from the graph, not found by vector search: a count needs every
-        unit, and similarity plays no part in which units exist.
+        unit, and similarity plays no part in which units exist. A chunk from the
+        middle of a document carries that document's first line: a CSV ingested
+        as text has its column header only in chunk 0, and without it the model
+        cannot tell one yes/no column from the next.
         """
-        nodes, _ = await graph_engine.get_filtered_graph_data(
-            [{"type": list(BROAD_TEXT_NODE_TYPES)}]
+        document_types = [cls.__name__ for cls in get_all_subclasses(Document)]
+        nodes, edges = await graph_engine.get_filtered_graph_data(
+            [{"type": [*BROAD_TEXT_NODE_TYPES, *document_types]}]
         )
-        units = [
-            Unit(id=str(node_id), text=props["text"])
-            for node_id, props in nodes
-            if props.get("text")
-        ]
+        props_by_id = {str(node_id): props for node_id, props in nodes}
+        document_of = {
+            str(source): str(target)
+            for source, target, relationship_name, _ in edges
+            if relationship_name == "is_part_of"
+        }
+        chunks = {
+            node_id: props
+            for node_id, props in props_by_id.items()
+            if props.get("type") in BROAD_TEXT_NODE_TYPES and props.get("text")
+        }
+        first_lines = {
+            document_of[node_id]: props["text"].strip().split("\n", 1)[0][:BROAD_PREAMBLE_CHARS]
+            for node_id, props in chunks.items()
+            if node_id in document_of and str(props.get("chunk_index")) == "0"
+        }
+        units = []
+        for node_id, props in sorted(
+            chunks.items(),
+            key=lambda item: (document_of.get(item[0], ""), int(item[1].get("chunk_index") or 0)),
+        ):
+            preamble = first_lines.get(document_of.get(node_id), "")
+            if preamble in props["text"]:
+                preamble = ""
+            units.append(Unit(id=node_id, text=props["text"], preamble=preamble))
+        logger.info(
+            "BROAD units: %d, %d carrying their document's first line",
+            len(units),
+            sum(1 for unit in units if unit.preamble),
+        )
         if not units:
             raise NoDataError("No data found in the system, please add data first.")
         return units
@@ -281,8 +319,17 @@ class BroadRetriever(CompletionRetriever):
             f"Identity attribute (key): {plan.dedup_key or 'none'}\n"
             f"Grouping attribute (group): {plan.group_by or 'none'}"
         )
-        # Unit markers let evidence be traced back; units are read in full.
-        body = "\n\n".join(f"[unit {index}]\n{unit.text}" for index, unit in enumerate(shard))
+        # Unit markers let evidence be traced back; units are read in full. A
+        # document's first line is shown once per shard, before its first unit.
+        blocks: list[str] = []
+        shown: set[str] = set()
+        for index, unit in enumerate(shard):
+            block = f"[unit {index}]\n{unit.text}"
+            if unit.preamble and unit.preamble not in shown:
+                shown.add(unit.preamble)
+                block = f"[document start — context only]\n{unit.preamble}\n\n{block}"
+            blocks.append(block)
+        body = "\n\n".join(blocks)
         result = await LLMGateway.acreate_structured_output(
             text_input=f"{spec}\n\nSECTION:\n{body}",
             system_prompt=EXTRACT_PROMPT,

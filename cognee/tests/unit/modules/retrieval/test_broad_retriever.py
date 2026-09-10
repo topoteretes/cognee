@@ -367,3 +367,40 @@ async def test_an_entity_plan_with_a_condition_reads_the_text(monkeypatch):
     assert result.plan.source == "text"
     assert result.total == 1
     assert result.llm_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_mid_document_chunks_carry_the_documents_first_line(monkeypatch):
+    """A CSV ingested as text has its header only in chunk 0; later chunks get it as context."""
+    graph = _FakeGraph()
+    graph.text_nodes = [
+        ("c1", {"type": "DocumentChunk", "chunk_index": 1, "text": "2,bob,no,yes"}),
+        (
+            "c0",
+            {"type": "DocumentChunk", "chunk_index": 0, "text": "id,who,review,main\n1,ann,yes,no"},
+        ),
+        ("d", {"type": "TextDocument", "name": "triage.txt"}),
+    ]
+
+    async def with_edges(attribute_filters):
+        types = attribute_filters[0]["type"]
+        nodes = [n for n in graph.text_nodes if n[1]["type"] in types]
+        return nodes, [("c0", "d", "is_part_of", {}), ("c1", "d", "is_part_of", {})]
+
+    graph.get_filtered_graph_data = with_edges
+    seen = []
+
+    def respond(model, text_input):
+        seen.append(text_input)
+        return ShardItems(items=[])
+
+    _stub_llm(monkeypatch, respond)
+    retriever = BroadRetriever()
+
+    units = await retriever.load_text_units(graph)
+    await retriever.count_items(CountPlan(source="text", item="a row"), units, 10_000)
+
+    assert [unit.id for unit in units] == ["c0", "c1"]
+    assert units[0].preamble == "" and units[1].preamble == "id,who,review,main"
+    assert seen[0].count("id,who,review,main") == 2  # chunk 0 itself + one context line
+    assert seen[0].count("[document start") == 1
