@@ -75,9 +75,11 @@ def _patches(data_id, incremental, full_result, row=None):
             MagicMock(return_value=_relational_engine_stub(row)),
         ),
         patch.object(update_module, "incremental_update", incremental),
-        patch.object(update_module, "datasets", SimpleNamespace(delete_data=AsyncMock())),
+        patch.object(update_module, "forget", AsyncMock()),
+        patch.object(data_methods_module, "reset_data_pipeline_status", AsyncMock()),
         patch.object(update_module, "add", AsyncMock()),
         patch.object(update_module, "cognify", AsyncMock(return_value=full_result)),
+        patch.object(update_module, "recorded_chunk_budget", AsyncMock(return_value=None)),
     )
 
 
@@ -95,8 +97,8 @@ async def test_custom_configs_skip_the_incremental_path():
         },
     ):
         incremental.reset_mock()
-        p1, p2, p3, p4, p5, p6 = _patches(data_id, incremental, full_result)
-        with p1, p2, p3, p4, p5, p6:
+        p1, p2, p3, p4, p5, p6, p7, p8 = _patches(data_id, incremental, full_result)
+        with p1, p2, p3, p4, p5, p6, p7, p8:
             result = await update_module.update(
                 data_id=data_id,
                 data="new content",
@@ -115,8 +117,8 @@ async def test_node_set_change_skips_the_incremental_path():
     incremental = AsyncMock()
     full_result = _full_result(dataset_id)
 
-    p1, p2, p3, p4, p5, p6 = _patches(data_id, incremental, full_result)
-    with p1, p2, p3, p4, p5, p6:
+    p1, p2, p3, p4, p5, p6, p7, p8 = _patches(data_id, incremental, full_result)
+    with p1, p2, p3, p4, p5, p6, p7, p8:
         result = await update_module.update(
             data_id=data_id,
             data="new content",
@@ -142,8 +144,8 @@ async def test_custom_extraction_config_skips_the_incremental_path(config_kwargs
     incremental = AsyncMock()
     full_result = _full_result(dataset_id)
 
-    p1, p2, p3, p4, p5, p6 = _patches(data_id, incremental, full_result)
-    with p1, p2, p3, p4, p5, p6:
+    p1, p2, p3, p4, p5, p6, p7, p8 = _patches(data_id, incremental, full_result)
+    with p1, p2, p3, p4, p5, p6, p7, p8:
         result = await update_module.update(
             data_id=data_id,
             data="new content",
@@ -171,8 +173,8 @@ async def test_multi_item_input_is_rejected_not_multiplied():
     data_id, dataset_id = uuid4(), uuid4()
     incremental = AsyncMock()
 
-    p1, p2, p3, p4, p5, p6 = _patches(data_id, incremental, _full_result(dataset_id))
-    with p1, p2, p3, p4, p5, p6, pytest.raises(IngestionError):
+    p1, p2, p3, p4, p5, p6, p7, p8 = _patches(data_id, incremental, _full_result(dataset_id))
+    with p1, p2, p3, p4, p5, p6, p7, p8, pytest.raises(IngestionError):
         await update_module.update(
             data_id=data_id,
             data=["first document", "second document"],
@@ -188,8 +190,8 @@ async def test_single_item_list_is_unwrapped():
     data_id, dataset_id = uuid4(), uuid4()
     incremental = AsyncMock(return_value=_engine_summary())
 
-    p1, p2, p3, p4, p5, p6 = _patches(data_id, incremental, _full_result(dataset_id))
-    with p1, p2, p3, p4, p5, p6:
+    p1, p2, p3, p4, p5, p6, p7, p8 = _patches(data_id, incremental, _full_result(dataset_id))
+    with p1, p2, p3, p4, p5, p6, p7, p8:
         await update_module.update(
             data_id=data_id,
             data=["only document"],
@@ -203,17 +205,19 @@ async def test_single_item_list_is_unwrapped():
 async def test_the_full_fallback_keeps_the_original_row_owner():
     """Re-ingestion must not hand the document to whoever updated it.
 
-    The fallback deletes the row and calls add(), which mints a fresh Data
-    with owner_id=user.id. A collaborator authorized by the dataset ACL would
-    otherwise take ownership of a document they merely edited — a permission
-    change nobody asked for, and one the incremental branch never makes.
+    The rebuild never deletes the row: it drops the document's memory and
+    refreshes the same row with a pinned add(), so a collaborator authorized
+    by the dataset ACL keeps editing a document that stays owned by whoever
+    ingested it — the incremental branch and the rebuild agree on this.
     """
     data_id, dataset_id, original_owner = uuid4(), uuid4(), uuid4()
     row = SimpleNamespace(id=data_id, legacy_id=None, owner_id=original_owner)
     collaborator = SimpleNamespace(id=uuid4())
 
-    p1, p2, p3, p4, p5, p6 = _patches(data_id, AsyncMock(), _full_result(dataset_id), row=row)
-    with p1, p2, p3, p4, p5, p6:
+    p1, p2, p3, p4, p5, p6, p7, p8 = _patches(
+        data_id, AsyncMock(), _full_result(dataset_id), row=row
+    )
+    with p1, p2, p3, p4, p5, p6, p7, p8:
         await update_module.update(
             data_id=data_id,
             data="new content",
@@ -230,8 +234,8 @@ async def test_no_configs_take_the_incremental_path():
     summary = _engine_summary()
     incremental = AsyncMock(return_value=summary)
 
-    p1, p2, p3, p4, p5, p6 = _patches(data_id, incremental, _full_result(dataset_id))
-    with p1, p2, p3, p4, p5, p6:
+    p1, p2, p3, p4, p5, p6, p7, p8 = _patches(data_id, incremental, _full_result(dataset_id))
+    with p1, p2, p3, p4, p5, p6, p7, p8:
         result = await update_module.update(
             data_id=data_id,
             data="new content",

@@ -72,7 +72,7 @@ def get_update_router() -> APIRouter:
             default=True,
             description=(
                 "Diff the new content against the stored text and re-ingest only the "
-                "affected chunks. Falls back to the full delete + re-add + cognify flow "
+                "affected chunks. Falls back to the full rebuild (memory dropped, row refreshed) "
                 "when chunk-level preconditions are not met."
             ),
         ),
@@ -98,7 +98,7 @@ def get_update_router() -> APIRouter:
         One body on every path (`UpdateResult`), a superset of the chunk-level summary
         returned before:
         - **status**: `"incremental"` (chunks replaced), `"unchanged"` (no content change),
-          `"full_rebuild"` (delete + re-add + cognify ran) or `"failed"` (the rebuild's
+          `"full_rebuild"` (memory dropped and rebuilt from the new content) or `"failed"` (the rebuild's
           cognify run errored; `error` says why, and the call can be retried).
         - **regions**, **deleted_chunks**, **added_chunks**, **reused_chunks**,
           **kept_chunks**, **reindexed_chunks**, **total_chunks**: the chunk-level

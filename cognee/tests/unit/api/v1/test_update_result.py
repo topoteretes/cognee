@@ -67,7 +67,8 @@ class _Stack:
     def __init__(self, data_id, dataset_id, incremental, cognify_run):
         row = SimpleNamespace(id=data_id, legacy_id=None, owner_id=uuid4())
         relational_module = sys.modules["cognee.infrastructure.databases.relational"]
-        self.delete_data = AsyncMock()
+        self.forget = AsyncMock()
+        self.reset_status = AsyncMock()
         self.add = AsyncMock()
         self.cognify = AsyncMock(return_value={dataset_id: cognify_run})
         self.recorded_budget = AsyncMock(return_value=None)
@@ -79,7 +80,8 @@ class _Stack:
                 MagicMock(return_value=_relational_engine_stub(row)),
             ),
             patch.object(update_module, "incremental_update", incremental),
-            patch.object(update_module, "datasets", SimpleNamespace(delete_data=self.delete_data)),
+            patch.object(update_module, "forget", self.forget),
+            patch.object(data_methods_module, "reset_data_pipeline_status", self.reset_status),
             patch.object(update_module, "add", self.add),
             patch.object(update_module, "cognify", self.cognify),
             patch.object(update_module, "recorded_chunk_budget", self.recorded_budget),
@@ -128,7 +130,8 @@ async def test_engine_refusal_becomes_a_full_rebuild_with_its_reason():
     assert result["pipeline_run_id"] == run.pipeline_run_id
     assert (result["data_id"], result["dataset_id"]) == (data_id, dataset_id)
     assert result["duration_seconds"] >= 0
-    stack.delete_data.assert_awaited_once()
+    stack.forget.assert_awaited_once()
+    stack.reset_status.assert_awaited_once()
     stack.add.assert_awaited_once()
 
 
@@ -182,7 +185,7 @@ async def test_incremental_result_keeps_the_old_summary_keys_and_adds_the_new_on
     assert result["fallback"] is None and result["error"] is None
     assert result["pipeline_run_id"] == run_id
     assert (result["data_id"], result["dataset_id"]) == (data_id, dataset_id)
-    stack.delete_data.assert_not_awaited()
+    stack.forget.assert_not_awaited()
     stack.cognify.assert_not_awaited()
 
 
@@ -267,5 +270,5 @@ async def test_dlt_replacement_under_another_name_is_refused_before_the_delete()
             chunk_level_diff=False,
         )
 
-    stack.delete_data.assert_not_awaited()
+    stack.forget.assert_not_awaited()
     stack.add.assert_not_awaited()

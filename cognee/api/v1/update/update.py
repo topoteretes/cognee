@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from cognee.api.v1.add import add
 from cognee.api.v1.cognify import cognify
-from cognee.api.v1.datasets import datasets
+from cognee.api.v1.forget import forget
 from cognee.api.v1.update.incremental import (
     IncrementalUpdateNotPossible,
     RefusalReason,
@@ -23,37 +23,6 @@ from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("update")
-
-
-async def _restore_row_lineage(
-    data_id: UUID, legacy_id: UUID | None, owner_id: UUID | None
-) -> None:
-    """Carry the replaced row's identity onto the one re-ingestion just minted.
-
-    The full fallback deletes the row and re-adds it, and ``add()`` builds a
-    fresh ``Data`` with ``owner_id=user.id``. Both values must survive that:
-
-    - ``legacy_id`` so a fork document's pre-fork id keeps resolving;
-    - ``owner_id`` so a collaborator updating a document does not silently
-      become its owner. Update is authorized by the dataset ACL, which says
-      nothing about who owns the row.
-    """
-    if legacy_id is None and owner_id is None:
-        return
-
-    from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.modules.data.models import Data
-
-    db_engine = get_relational_engine()
-    async with db_engine.get_async_session() as session:
-        row = await session.get(Data, data_id)
-        if row is None:
-            return
-        if legacy_id is not None and row.legacy_id is None:
-            row.legacy_id = legacy_id
-        if owner_id is not None:
-            row.owner_id = owner_id
-        await session.commit()
 
 
 async def update(
@@ -79,8 +48,10 @@ async def update(
     The document keeps its ``data_id`` across updates — on EVERY path. The
     incoming id is resolved first (exact, or the recorded pre-fork
     ``legacy_id``), the chunk-level incremental path operates on the resolved
-    row in place, and the full-rebuild fallback re-ingests pinned to the same
-    id — so externally held id mappings never break, incremental or not.
+    row in place, and the full rebuild drops the document's memory and
+    refreshes the same row with a pinned re-add — the row is never deleted, so
+    externally held id mappings never break and a failed rebuild leaves a
+    document to re-cognify rather than a document that is gone.
     Exactly one document is replaced per call — lists of more than one item
     are rejected. An id that resolves to no document raises
     ``UpdateTargetNotFoundError`` (404) — update() never creates documents;
@@ -130,7 +101,8 @@ async def update(
         chunk_level_diff: When True (default), diff the new content against the stored
                  processed text and replace only the chunks the edit touched — unaffected
                  chunks keep their nodes, entities, and summaries. Falls back to the full
-                 delete + pinned re-add + cognify flow when chunk-level preconditions are
+                 rebuild (memory dropped, row refreshed by a pinned re-add, cognify) when
+                 chunk-level preconditions are
                  not met (first ingestion, non-text content, unverified graph adapter,
                  a code file or a DLT source manifest — those routes keep no chunks).
                  Permission errors always propagate and never trigger the fallback.
@@ -145,7 +117,8 @@ async def update(
         One dict on every path (schema: ``UpdateResult``), a superset of the
         chunk-level summary returned before:
             - ``status``: "incremental" (chunks replaced), "unchanged" (no content
-              change), "full_rebuild" (delete + re-add + cognify ran) or "failed"
+              change), "full_rebuild" (memory dropped and rebuilt from the new
+              content) or "failed"
               (the rebuild's cognify run errored; ``error`` says why, and the call
               can be retried).
             - ``regions``, ``deleted_chunks``, ``added_chunks``, ``reused_chunks``,
@@ -198,9 +171,7 @@ async def update(
     if not user:
         user = await get_default_user()
 
-    from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.modules.data.methods import resolve_data_id
-    from cognee.modules.data.models import Data
+    from cognee.modules.data.methods import reset_data_pipeline_status, resolve_data_id
     from cognee.modules.ingestion.exceptions import IngestionError
     from cognee.tasks.ingestion.data_item import DataItem
     from cognee.tasks.ingestion.resolve_dlt_sources import check_dlt_replacement, is_dlt_input
@@ -226,15 +197,6 @@ async def update(
         raise UpdateTargetNotFoundError(data_id=data_id, dataset_id=dataset_id)
     pinned_id = resolved_id
 
-    preserved_legacy_id = None
-    preserved_owner_id = None
-    db_engine = get_relational_engine()
-    async with db_engine.get_async_session() as session:
-        old_row = await session.get(Data, resolved_id)
-        if old_row is not None:
-            preserved_legacy_id = old_row.legacy_id
-            preserved_owner_id = old_row.owner_id
-
     # Why the chunk-level path is not taken, if it is not. Every full rebuild
     # names its cause in the result, so an update that took far longer than
     # usual explains itself instead of leaving the reason in the server log.
@@ -249,12 +211,6 @@ async def update(
     )
     if fallback is not None:
         logger.warning("%s; running full update", fallback[1])
-
-    # The fallback re-cognifies the whole document. It keeps the chunk budget
-    # the stored chunks record so the document's granularity survives the
-    # rebuild; None (no baseline, or a recorded budget the current provider
-    # cannot take) means the current default.
-    fallback_chunk_size = None
 
     if fallback is None:
         # Chunk-level incremental path: diff the new text against the stored
@@ -287,7 +243,6 @@ async def update(
                 extra={"refusal_reason": refusal.reason.value},
             )
             fallback = (refusal.reason, str(refusal))
-            fallback_chunk_size = await recorded_chunk_budget(pinned_id, dataset_id, user)
         else:
             return UpdateResult(
                 status=summary["status"],
@@ -304,10 +259,16 @@ async def update(
                 pipeline_run_id=summary["pipeline_run_id"],
             ).model_dump()
 
-    # The rebuild deletes first and re-adds second, so anything that would
-    # make the re-add refuse the replacement must be found now, while the
-    # document still exists. A dlt source is the one input whose identity is
-    # decided by the resolver rather than by the pinned id.
+    # The rebuild re-cognifies the whole document. It keeps the chunk budget
+    # the stored chunks record so the document's granularity survives the
+    # rebuild, whichever way the rebuild was decided; None (no baseline, or a
+    # recorded budget the current provider cannot take) means the current
+    # default.
+    fallback_chunk_size = await recorded_chunk_budget(pinned_id, dataset_id, user)
+
+    # A dlt source's identity is decided by the resolver, not by the pinned
+    # id, so a replacement the re-add would refuse is refused now, before the
+    # document's memory is dropped.
     replacement = data.data if isinstance(data, DataItem) else data
     if is_dlt_input(replacement):
         from cognee.modules.data.methods import get_authorized_dataset
@@ -315,15 +276,18 @@ async def update(
         dataset = await get_authorized_dataset(user, dataset_id, "write")
         await check_dlt_replacement(replacement, pinned_id, dataset.name, user)
 
-    await datasets.delete_data(
-        dataset_id=dataset_id,
-        data_id=pinned_id,
-        user=user,
-    )
+    # The rebuild never deletes the document. Its memory (graph nodes, edges,
+    # vectors) is dropped while the row and its stored files stay; the pinned
+    # re-add then refreshes the row in place with the new content, name and
+    # metadata, and cognify rebuilds the graph. A re-add that fails leaves a
+    # document with no graph that the next cognify() rebuilds from its stored
+    # content, not a document that is gone. The row keeps its id, owner and
+    # pre-fork legacy id by construction.
+    await forget(data_id=pinned_id, dataset_id=dataset_id, memory_only=True, user=user)
+    # forget() clears the cognify stamp; the add stamp must go too, or the
+    # pinned re-add is skipped as already added and the row is never refreshed.
+    await reset_data_pipeline_status(pinned_id, dataset_id)
 
-    # Fallback keeps the id too: re-ingest pinned to the resolved id instead
-    # of minting a fresh one (the fallback-churn defect the reconciliation
-    # review identified — callers must never lose their handle to a fallback).
     if isinstance(data, DataItem):
         data.data_id = pinned_id
         pinned_item = data
@@ -341,8 +305,6 @@ async def update(
         incremental_loading=incremental_loading,
         data_cache=data_cache,
     )
-
-    await _restore_row_lineage(pinned_id, preserved_legacy_id, preserved_owner_id)
 
     cognify_runs = await cognify(
         datasets=[dataset_id],

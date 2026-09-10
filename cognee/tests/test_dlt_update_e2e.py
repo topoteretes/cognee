@@ -2,7 +2,7 @@
 
 A DLT manifest is built by the DLT cognify route, which writes row nodes and
 never a document chunk, so the chunk-level path refuses and update() falls
-back to delete + pinned re-add + cognify. The re-add carries the replacement
+back to the full rebuild: memory dropped, pinned re-add, cognify. The re-add carries the replacement
 resource wrapped in a DataItem pinned to the manifest's id; the resolver must
 unwrap it and the DLT route must re-emit the new rows under the same manifest.
 
