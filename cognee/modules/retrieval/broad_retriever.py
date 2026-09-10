@@ -585,7 +585,7 @@ class BroadRetriever(CompletionRetriever):
                 lines.append(f"  ... {len(result.groups) - BROAD_MAX_GROUPS_SHOWN} more groups")
         if not result.names_merged:
             lines.append("Note: too many distinct names to merge spelling variants.")
-        if plan.list_items:
+        if plan.list_items and self.listing(result):
             lines.append(
                 f"The complete list of the {len(self.listing(result))} counted entries is "
                 "appended below your answer by code: do not list them yourself; give the "
@@ -612,9 +612,9 @@ class BroadRetriever(CompletionRetriever):
         completions = await super().get_completion_from_context(
             query, retrieved_objects, context=context, **kwargs
         )
-        if not retrieved_objects.plan.list_items:
-            return completions
         entries = self.listing(retrieved_objects)
+        if not retrieved_objects.plan.list_items or not entries:
+            return completions
         block = [f"Full list ({len(entries)}):"]
         block += [f"- {entry}" for entry in entries[:BROAD_MAX_LISTED]]
         if len(entries) > BROAD_MAX_LISTED:

@@ -652,6 +652,18 @@ async def test_no_list_is_appended_unless_asked(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_nothing_counted_appends_no_empty_list(monkeypatch):
+    _stub_answer(monkeypatch, "0 issues were assigned to Ashkatosh.")
+    result = CountResult(plan=_plan(list_items=True), method="reading", total=0, units=34)
+
+    [answer] = await BroadRetriever().get_completion_from_context("q", result, context="c")
+    context = await BroadRetriever().get_context_from_objects("q", result)
+
+    assert answer == "0 issues were assigned to Ashkatosh."
+    assert "appended below" not in context
+
+
+@pytest.mark.asyncio
 async def test_listing_different_things_lists_the_groups(monkeypatch):
     _stub_answer(monkeypatch, "2 people.")
     result = CountResult(
