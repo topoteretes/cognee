@@ -364,6 +364,7 @@ async def test_a_relation_listed_under_one_side_counts_for_both(monkeypatch):
         target="Art",  # the roster says "Arthur Bennett (usually called Art)"
         dedup_key="the other member",
         relation=True,
+        reversible=True,
         list_items=True,
     )
 
@@ -443,12 +444,29 @@ def test_a_long_paragraph_is_cut_at_sentence_ends_never_inside_one():
 
 
 @pytest.mark.asyncio
+async def test_undone_only_subtracts_when_the_plan_counts_items_in_effect(monkeypatch):
+    """ "How many orders were cancelled" counts the cancellations: an extractor that
+    marks them undone must not empty the count. Only a reversible plan subtracts."""
+    shard = ShardItems(items=[_item(None, "WO-1", undone=True), _item(None, "WO-2", undone=True)])
+    _stub_llm(monkeypatch, lambda model, _: shard)
+
+    counted = await BroadRetriever().count_by_reading(
+        _plan(condition="was cancelled", dedup_key="the order number"), _units(1)
+    )
+    in_effect = await BroadRetriever().count_by_reading(
+        _plan(dedup_key="the order number", reversible=True), _units(1)
+    )
+
+    assert counted.total == 2 and in_effect.total == 0
+
+
+@pytest.mark.asyncio
 async def test_an_undone_entry_without_a_dedup_key_is_not_counted(monkeypatch):
     shard = ShardItems(items=[_item("Ann", None), _item("Bob", None, undone=True)])
     _stub_llm(monkeypatch, lambda model, _: shard if model is ShardItems else NameGroups(groups=[]))
 
     result = await BroadRetriever().count_by_reading(
-        CountPlan(source="text", item="a sale", group_by="seller"), _units(1)
+        CountPlan(source="text", item="a sale", group_by="seller", reversible=True), _units(1)
     )
 
     assert result.total == 1

@@ -84,6 +84,9 @@ class CountPlan(BaseModel):
     # A relation between two things of the same kind (a connection, a co-authorship),
     # listed once per participant: its identity is (participant, other), not the key alone.
     relation: bool = False
+    # The question counts items in effect, and a later event can end one (a connection
+    # removed, an order cancelled after it was placed): such events subtract the item.
+    reversible: bool = False
 
 
 class ExtractedItem(BaseModel):
@@ -420,6 +423,10 @@ class BroadRetriever(CompletionRetriever):
                 marker = (shard_id, item.unit, item.evidence.strip().lower())
                 if marker not in seen:
                     seen.add(marker)
+                    if item.undone and not plan.reversible:
+                        # "How many orders were cancelled" counts the cancellations
+                        # themselves; only a plan that counts items in effect subtracts.
+                        item = item.model_copy(update={"undone": False})
                     items.append(item)
         aliases = _alias_groups(
             [names for _, shard_items in read_shards for names in shard_items.aliases]
@@ -584,7 +591,14 @@ class BroadRetriever(CompletionRetriever):
             f"Condition: {plan.condition or 'none'}\n"
             f"Identity attribute (key): {plan.dedup_key or 'none'}\n"
             f"Grouping attribute (group): {plan.group_by or 'none'}\n"
-            f"Amount to report (amount): {plan.measure or 'none'}"
+            f"Amount to report (amount): {plan.measure or 'none'}\n"
+            "Undone entries: "
+            + (
+                "an item later ended (removed, cancelled after it was placed, returned, "
+                "revoked) is listed with undone = true and its key"
+                if plan.reversible
+                else "not applicable; never set undone"
+            )
         )
         # Unit markers let items be traced back; units are read in full. A
         # document's first line is shown once per shard, before its first unit.
