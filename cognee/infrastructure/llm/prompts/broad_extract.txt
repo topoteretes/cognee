@@ -2,6 +2,6 @@ You extract items from a section of a larger corpus so they can be counted exact
 - key: the value of the identity attribute described below, in that exact format, or null if there is no identity attribute;
 - group: the value of the grouping attribute described below, written as it appears (resolve pronouns like "they" to the name they refer to), or null if none;
 - unit: the number N of the [unit N] block the item appears in;
-- evidence: a short verbatim quote (at most 20 words) containing the item.
+- evidence: a short verbatim quote (at most 20 words) containing the words that make it match the item and condition — for an item that is a fact, the fact itself.
 A "[document start — context only]" block repeats the first line of the document the following units come from (for example a table's column header). Use it to interpret those units; never list items from it.
 Two items in different units are different items even when their quotes are identical (table rows often repeat the same values). Return an empty list if the section contains none.

@@ -53,7 +53,9 @@ BROAD_MAX_PLANNER_TYPES = 200
 BROAD_MAX_ALIAS_NAMES = 500
 # Every group is shown so the answer can read one named group's tally.
 BROAD_MAX_GROUPS_SHOWN = 500
-BROAD_EVIDENCE_SHOWN = 8
+# Listed items quoted in the answer context: all of them behind a small count, so
+# the answer can cite them or, for a question that is not a count, answer from them.
+BROAD_EVIDENCE_SHOWN = 50
 _ENTITY_DESCRIPTION_CHARS = 200
 
 
@@ -65,6 +67,8 @@ class CountPlan(BaseModel):
     literal_terms: list[str] = []
     condition: str | None = None
     group_by: str | None = None
+    # "How many different X": the answer is the number of groups, not of items.
+    distinct: bool = False
     dedup_key: str | None = None
 
 
@@ -103,6 +107,7 @@ class CountResult:
     groups: list[tuple[str, int]] = field(default_factory=list)
     evidence: list[str] = field(default_factory=list)
     names_merged: bool = True
+    items_listed: int = 0
     llm_calls: int = 0
     tokens_read: int = 0
 
@@ -325,12 +330,14 @@ class BroadRetriever(CompletionRetriever):
                     keyed[key] = item
             items = [*keyed.values(), *unkeyed]
 
+        groups = Counter(item.group for item in items if item.group).most_common()
         return CountResult(
             plan=plan,
             method="reading",
-            total=len(items),
+            total=len(groups) if plan.distinct else len(items),
             units=len(units),
-            groups=Counter(item.group for item in items if item.group).most_common(),
+            groups=groups,
+            items_listed=len(items),
             evidence=[item.evidence for item in items[:BROAD_EVIDENCE_SHOWN]],
             names_merged=names_merged,
             llm_calls=len(shards),
@@ -442,16 +449,25 @@ class BroadRetriever(CompletionRetriever):
                 "as a guaranteed exact figure."
             )
 
-        lines = [how, "Report these numbers; do not recount.", f"Counted item: {plan.item}"]
+        lines = [
+            how,
+            (
+                "Report these numbers; do not recount. If the question does not ask for a "
+                "number, answer it from the listed items instead."
+            ),
+            f"Counted item: {plan.item}",
+        ]
         if plan.condition:
             lines.append(f"Condition: {plan.condition}")
         if plan.dedup_key:
             lines.append(f"Repeated mentions of one item removed by: {plan.dedup_key}")
         lines.append(f"TOTAL: {result.total}")
+        if plan.distinct:
+            lines.append(
+                f"  = the number of different {plan.group_by} values (spellings of one name "
+                f"merged), across {result.items_listed} listed items"
+            )
         if result.groups:
-            # "How many different X" is answered by this line: groups are the
-            # distinct values after name variants were merged.
-            lines.append(f"DISTINCT {plan.group_by}: {len(result.groups)}")
             lines.append(f"Tally by {plan.group_by} ({len(result.groups)} groups):")
             lines += [
                 f"  {name}: {count}" for name, count in result.groups[:BROAD_MAX_GROUPS_SHOWN]
@@ -461,7 +477,7 @@ class BroadRetriever(CompletionRetriever):
         if not result.names_merged:
             lines.append("Note: too many distinct names to merge spelling variants.")
         if result.evidence:
-            lines.append("Examples:")
+            lines.append("Listed items (quotes):")
             lines += [f'  - "{quote}"' for quote in result.evidence]
         return "\n".join(lines)
 
