@@ -333,6 +333,41 @@ def test_a_relation_is_one_item_per_participant_and_a_removal_subtracts_it():
     assert sorted((i.group, i.key) for i in kept) == [("Arthur", "Priya"), ("Priya", "Arthur")]
 
 
+def test_an_item_with_several_group_values_is_one_entry_per_value():
+    """A paper by three authors is one paper of each; the key stays the paper."""
+    paper = ExtractedItem(unit=0, key="Paper 3", groups=["Ana", "Ben", "Chen"], evidence="p3")
+    single = ExtractedItem(unit=0, key="Paper 4", group="Dana", evidence="p4")
+
+    entries = broad_retriever._one_entry_per_group([paper, single], relation=False)
+
+    assert [(e.group, e.key) for e in entries] == [
+        ("Ana", "Paper 3"),
+        ("Ben", "Paper 3"),
+        ("Chen", "Paper 3"),
+        ("Dana", "Paper 4"),
+    ]
+
+
+def test_a_relation_listed_once_becomes_every_ordered_pair():
+    """A three-author paper is three co-authorships; each author gets the two others.
+    A relation listed with one side in group and the other in key is completed too."""
+    paper = ExtractedItem(unit=0, groups=["Ana", "Ben", "Chen"], evidence="p3")
+    pair = ExtractedItem(unit=1, group="Helga", key="Arthur", evidence="accepted")
+
+    entries = broad_retriever._one_entry_per_group([paper, pair], relation=True)
+
+    assert sorted((e.group, e.key) for e in entries) == [
+        ("Ana", "Ben"),
+        ("Ana", "Chen"),
+        ("Arthur", "Helga"),
+        ("Ben", "Ana"),
+        ("Ben", "Chen"),
+        ("Chen", "Ana"),
+        ("Chen", "Ben"),
+        ("Helga", "Arthur"),
+    ]
+
+
 @pytest.mark.asyncio
 async def test_a_relation_listed_under_one_side_counts_for_both(monkeypatch):
     """The model lists "Helga accepted a request from Art" under Helga only; code adds

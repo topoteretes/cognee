@@ -93,6 +93,9 @@ class ExtractedItem(BaseModel):
     unit: int
     key: str | None = None
     group: str | None = None
+    # Every value of the grouping attribute when there are several (all authors of a
+    # paper; both members of a connection): code makes one entry per value.
+    groups: list[str] = []
     # The item's value of the plan's measure, when the plan sums one.
     amount: float | None = None
     # The text says this item was later undone (removed, cancelled, returned, revoked):
@@ -202,6 +205,37 @@ def _paragraphs(text: str, budget: int, tokenizer) -> list[str]:
         else:
             pieces += [s for s in re.split(r"(?<=[.!?])\s+", paragraph) if s.strip()]
     return pieces
+
+
+def _one_entry_per_group(items: list[ExtractedItem], relation: bool) -> list[ExtractedItem]:
+    """Expand an item listed once with all its group values into one entry per value.
+
+    A paper with four authors is one item of each author. A relation (a connection,
+    a co-authorship) belongs to every participant: for each participant one entry
+    keyed by each other participant, so "Helga accepted a request from Arthur"
+    counts for Arthur too. The model lists the item once; code does the pairing.
+    """
+    expanded: list[ExtractedItem] = []
+    for item in items:
+        values = [v for v in item.groups if v] or ([item.group] if item.group else [])
+        if relation:
+            if item.key and item.key not in values:
+                values.append(item.key)
+            if len(values) < 2:
+                continue  # a relation needs two participants
+            for participant in values:
+                for other in values:
+                    if other != participant:
+                        expanded.append(
+                            item.model_copy(update={"group": participant, "key": other})
+                        )
+        elif values:
+            expanded += [
+                item.model_copy(update={"group": value}) for value in dict.fromkeys(values)
+            ]
+        else:
+            expanded.append(item)
+    return expanded
 
 
 def _canonical_spelling(names: list[str]) -> str:
@@ -431,15 +465,7 @@ class BroadRetriever(CompletionRetriever):
         aliases = _alias_groups(
             [names for _, shard_items in read_shards for names in shard_items.aliases]
         )
-        if plan.relation:
-            # A relation belongs to both participants. The model lists it under one
-            # (usually the sentence's subject); code adds the other side, so
-            # "Helga accepted a request from Arthur" counts for Arthur too.
-            items += [
-                item.model_copy(update={"group": item.key, "key": item.group})
-                for item in items
-                if item.group and item.key
-            ]
+        items = _one_entry_per_group(items, relation=plan.relation)
 
         canonical = await self.merge_name_variants(plan, items, aliases)
         if plan.relation and canonical:
@@ -598,6 +624,14 @@ class BroadRetriever(CompletionRetriever):
                 "revoked) is listed with undone = true and its key"
                 if plan.reversible
                 else "not applicable; never set undone"
+            )
+            + "\nRelation: "
+            + (
+                "the item relates two or more things of one kind; list it ONCE with every "
+                "participant in groups. One that was only requested, proposed or declined "
+                "is not the relation."
+                if plan.relation
+                else "no"
             )
         )
         # Unit markers let items be traced back; units are read in full. A
