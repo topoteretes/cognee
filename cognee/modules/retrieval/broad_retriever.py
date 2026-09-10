@@ -66,7 +66,6 @@ class CountPlan(BaseModel):
     condition: str | None = None
     group_by: str | None = None
     dedup_key: str | None = None
-    dedup_key_is_name: bool = False
 
 
 class ExtractedItem(BaseModel):
@@ -387,9 +386,9 @@ class BroadRetriever(CompletionRetriever):
 
         Returns False when there were too many distinct names to merge.
         """
+        # Only group values are names. A dedup key is an identifier (a number, a
+        # code, a title): merging "similar" identifiers would join different items.
         fields = ["group"] if plan.group_by else []
-        if plan.dedup_key and plan.dedup_key_is_name:
-            fields.append("key")
         names = {getattr(item, f) for item in items for f in fields if getattr(item, f)}
         if len(names) > BROAD_MAX_ALIAS_NAMES:
             return False
@@ -450,6 +449,9 @@ class BroadRetriever(CompletionRetriever):
             lines.append(f"Repeated mentions of one item removed by: {plan.dedup_key}")
         lines.append(f"TOTAL: {result.total}")
         if result.groups:
+            # "How many different X" is answered by this line: groups are the
+            # distinct values after name variants were merged.
+            lines.append(f"DISTINCT {plan.group_by}: {len(result.groups)}")
             lines.append(f"Tally by {plan.group_by} ({len(result.groups)} groups):")
             lines += [
                 f"  {name}: {count}" for name, count in result.groups[:BROAD_MAX_GROUPS_SHOWN]

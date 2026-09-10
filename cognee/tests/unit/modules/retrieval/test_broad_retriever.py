@@ -409,3 +409,35 @@ async def test_search_builds_broad_with_its_scan_settings():
     assert isinstance(retriever, BroadRetriever)
     assert retriever.shard_tokens == 4000
     assert retriever.max_parallel_calls == 4
+
+
+@pytest.mark.asyncio
+async def test_distinct_names_are_counted_as_groups_and_keys_are_never_merged(monkeypatch):
+    """ "How many different people": groups after merging spellings. Identifiers are keys and
+    are never merged, even when their titles look alike."""
+    shard = ShardItems(
+        items=[
+            ExtractedItem(unit=0, key="INC-1", group="Megha-gbs", evidence="a"),
+            ExtractedItem(unit=1, key="INC-2", group="Megha", evidence="b"),
+            ExtractedItem(unit=2, key="INC-3", group="Akshats-git", evidence="c"),
+        ]
+    )
+    merge_inputs = []
+
+    def respond(model, text_input):
+        if model is ShardItems:
+            return shard
+        merge_inputs.append(text_input)
+        return NameGroups(groups=[["Megha-gbs", "Megha"], ["Akshats-git"]])
+
+    _stub_llm(monkeypatch, respond)
+    plan = CountPlan(
+        source="text", item="an incident", group_by="responder", dedup_key="incident id"
+    )
+
+    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(plan, _units(3, words=2))
+    context = await BroadRetriever().get_context_from_objects("q", result)
+
+    assert result.total == 3  # three different incident ids survive
+    assert "DISTINCT responder: 2" in context
+    assert all("INC-" not in text for text in merge_inputs)  # keys never reach the merge step
