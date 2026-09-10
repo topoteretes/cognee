@@ -126,3 +126,56 @@ async def test_cognify_agent_trace_feedback_errored_run_info_does_not_raise():
         mock_cognify.return_value = {"ds": errored}
 
         await cognify_agent_trace_feedback("Session ID: trace_session\n\nfeedback")
+
+
+@pytest.mark.asyncio
+async def test_batched_tagged_trace_is_unwrapped_and_tagged():
+    """The pipeline runner delivers the extractor's output as a list, even for one item."""
+    from cognee.infrastructure.session.project_tags import TaggedTrace
+
+    with (
+        patch("cognee.add", new_callable=AsyncMock) as mock_add,
+        patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify,
+    ):
+        await cognify_agent_trace_feedback(
+            [TaggedTrace("Session ID: s\n\nstep", ("project-a",))], dataset_id="123"
+        )
+    mock_add.assert_awaited_once_with(
+        "Session ID: s\n\nstep",
+        dataset_id="123",
+        node_set=["agent_trace_feedbacks", "project-a"],
+        user=None,
+    )
+    mock_cognify.assert_awaited_once_with(datasets=["123"], user=None, raise_on_error=False)
+
+
+@pytest.mark.asyncio
+async def test_mixed_batch_adds_once_per_tag_set_and_drops_blanks():
+    from cognee.infrastructure.session.project_tags import TaggedTrace
+
+    batch = ["plain one", TaggedTrace("tagged", ("project-a",)), "plain two", "   "]
+    with (
+        patch("cognee.add", new_callable=AsyncMock) as mock_add,
+        patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify,
+    ):
+        await cognify_agent_trace_feedback(batch, dataset_id="123")
+    assert [call.args[0] for call in mock_add.await_args_list] == [
+        ["plain one", "plain two"],
+        "tagged",
+    ]
+    assert [call.kwargs["node_set"] for call in mock_add.await_args_list] == [
+        ["agent_trace_feedbacks"],
+        ["agent_trace_feedbacks", "project-a"],
+    ]
+    mock_cognify.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_batch_of_blank_traces_is_rejected():
+    with (
+        patch("cognee.add", new_callable=AsyncMock) as mock_add,
+        patch("cognee.cognify", new_callable=AsyncMock),
+        pytest.raises(CogneeValidationError),
+    ):
+        await cognify_agent_trace_feedback(["", "   "], dataset_id="123")
+    mock_add.assert_not_awaited()

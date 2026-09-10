@@ -36,6 +36,10 @@ class FakeSessionManager:
     def __init__(self):
         self.qa: dict[tuple[str, str], list[SessionQAEntry]] = {}
         self.context: dict[tuple[str, str], list[dict]] = {}
+        self._cache = SimpleNamespace(get_session_context_entries=self._raw_context)
+
+    async def _raw_context(self, user_id, session_id):
+        return await self.get_session_context_entries(user_id=user_id, session_id=session_id)
 
     def add_entry(self, user_id: str, session_id: str, question: str, answer: str):
         self.qa.setdefault((user_id, session_id), []).append(

@@ -11,7 +11,7 @@ Raw data (str / bytes / file-like / list of the above) continues to
 flow through the permanent add+cognify path unchanged.
 """
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
@@ -21,7 +21,15 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("memory.entries")
 
 
-class QAEntry(BaseModel):
+class SessionTaggedEntry(BaseModel):
+    node_set: list[Annotated[str, Field(min_length=1, max_length=200)]] | None = Field(
+        default=None,
+        max_length=16,
+        description="Optional immutable project tags, preserved when this session is improved.",
+    )
+
+
+class QAEntry(SessionTaggedEntry):
     """A Q&A turn stored in the session cache.
 
     Represents a user question + assistant answer with optional
@@ -37,7 +45,7 @@ class QAEntry(BaseModel):
     used_graph_element_ids: dict | None = None
 
 
-class TraceEntry(BaseModel):
+class TraceEntry(SessionTaggedEntry):
     """One step of an agent trace.
 
     Structured representation of a tool/function call — origin,

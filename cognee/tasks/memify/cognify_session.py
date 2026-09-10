@@ -61,7 +61,7 @@ async def cognify_session(
             await cognee.add(
                 window.text,
                 dataset_id=dataset_id,
-                node_set=["user_sessions_from_cache"],
+                node_set=list(dict.fromkeys(["user_sessions_from_cache", *window.node_set])),
                 user=user,
             )
             logger.debug("Session data added to cognee with node_set: user_sessions")

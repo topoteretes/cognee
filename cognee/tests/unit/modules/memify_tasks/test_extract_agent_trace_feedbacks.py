@@ -37,6 +37,7 @@ def mock_user():
 def _make_mock_session_manager(feedback_entries, is_available: bool = True):
     mock_session_manager = MagicMock()
     mock_session_manager.is_available = is_available
+    mock_session_manager._cache.get_session_context_entries = AsyncMock(return_value=[])
 
     async def _get_agent_trace_feedback(*, user_id, session_id, last_n=None):
         del user_id, session_id

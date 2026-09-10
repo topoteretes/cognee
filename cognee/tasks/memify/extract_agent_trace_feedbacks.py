@@ -3,6 +3,7 @@ import json
 from cognee.context_global_variables import session_user
 from cognee.exceptions import CogneeSystemError
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.infrastructure.session.project_tags import TaggedTrace, get_project_tags
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 
@@ -109,7 +110,9 @@ async def extract_agent_trace_feedbacks(
                             len(normalized_trace_values),
                             content_label,
                         )
-                        yield f"Session ID: {session_id}\n\n" + "\n".join(normalized_trace_values)
+                        text = f"Session ID: {session_id}\n\n" + "\n".join(normalized_trace_values)
+                        tags = await get_project_tags(session_manager, user_id, session_id)
+                        yield TaggedTrace(text, tags) if tags else text
                 except Exception as error:
                     logger.warning(
                         "Failed to extract agent trace %s for session %s: %s",
