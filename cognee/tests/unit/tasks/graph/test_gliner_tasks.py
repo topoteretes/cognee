@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib
 import textwrap
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -24,7 +25,6 @@ from cognee.tasks.graph.gliner import (
     GlinerOptions,
     GlinerRunStats,
     GlinerSchema,
-    SchemaState,
     extract_graph_and_summarize_with_gliner,
     format_chunk_summary,
     get_gliner_tasks,
@@ -80,8 +80,14 @@ class FakeExtractor:
     def create_schema(self):
         return FakeSchema()
 
+    def extract(self, text, schema, **kwargs):
+        self.calls.append({"method": "extract", "text": text, "schema": schema, **kwargs})
+        return self._result_for_text(text)
+
     def batch_extract_long(self, texts, schema, **kwargs):
-        self.calls.append({"texts": list(texts), "schema": schema, **kwargs})
+        self.calls.append(
+            {"method": "batch_extract_long", "texts": list(texts), "schema": schema, **kwargs}
+        )
         return [self._result_for_text(text) for text in texts]
 
 
@@ -178,17 +184,29 @@ def test_edge_containment_resolves_boundary_mismatch_both_directions():
     assert edges == [("organization:apple inc", "located_in", "location:cupertino")]
 
 
-def test_edge_containment_with_several_hits_takes_longest_entity_name():
-    _, edges = _edges(
+@pytest.mark.parametrize(
+    ("entities", "pair"),
+    [
+        ({"country": ["Russia"], "company": ["Acme"]}, ["US", "Acme"]),
+        (
+            {"person": ["Jordan"], "country": ["Jordan"], "company": ["Acme"]},
+            ["Jordan", "Acme"],
+        ),
+        (
+            {"organization": ["Apple Inc.", "Apple Inc. Retail Division"]},
+            ["Apple", "Apple Inc."],
+        ),
+    ],
+)
+def test_edge_drops_unbounded_or_ambiguous_endpoint_matches(entities, pair):
+    mapped, edges = _edges(
         {
-            "entities": {"organization": ["Apple Inc.", "Apple Inc. Retail Division"]},
-            "relation_extraction": {"part_of": [["Apple", "Apple Inc."]]},
+            "entities": entities,
+            "relation_extraction": {"related_to": [pair]},
         }
     )
-    # "Apple" is contained in both names -> the longest wins; "Apple Inc." is exact.
-    assert edges == [
-        ("organization:apple inc. retail division", "part_of", "organization:apple inc")
-    ]
+    assert edges == []
+    assert (mapped.candidate_edges, mapped.kept_edges, mapped.dropped_edges) == (1, 0, 1)
 
 
 def test_edge_dropped_when_endpoint_does_not_resolve_and_is_counted():
@@ -306,11 +324,23 @@ def test_to_snake_case(raw, expected):
 # --------------------------------------------------------------------------- #
 
 
+def test_document_sketch_is_bounded_and_keeps_signal_and_coverage():
+    sentences = [f"Ordinary sentence number {index} with enough words." for index in range(100)]
+    sentences[50] = "IMPORTANT CONTRACT ID AB-1234 is worth USD 5000."
+
+    sketch = schema_module.make_document_sketch(" ".join(sentences), max_chars=500)
+
+    assert len(sketch) <= 500
+    assert "AB-1234" in sketch
+    assert "number 0" in sketch
+    assert "number 99" in sketch
+
+    assert len(schema_module.make_document_sketch("one two three four", max_words=3).split()) == 3
+
+
 def _probe(result):
     extractor = FakeExtractor(lambda _text: result)
-    schema = schema_from_label_bank(
-        extractor, ["t"], threshold=0.5, batch_size=16, window_words=384, window_overlap_words=64
-    )
+    schema = schema_from_label_bank(extractor, "t", threshold=0.5)
     return extractor, schema
 
 
@@ -322,6 +352,7 @@ def test_bank_probe_sends_full_banks_and_returns_only_bank_names_that_fired():
         }
     )
     sent = extractor.calls[0]["schema"]
+    assert extractor.calls[0]["method"] == "extract"
     assert sent.entity_types == dict(LABEL_BANK)
     assert sent.relation_types == dict(RELATION_BANK)
     assert schema.source == "label_bank"
@@ -361,7 +392,7 @@ def test_caller_labels_skip_ontology_and_bank_entirely():
             ["person", "organization"],
             {"works_for": "employment"},
             extractor=extractor,
-            probe_texts=["t"],
+            probe_text="t",
         )
     assert schema.source == "caller"
     assert schema.entity_types == {"person": "", "organization": ""}
@@ -373,7 +404,7 @@ def test_ontology_wins_over_bank(tmp_path):
     path = tmp_path / "onto.ttl"
     path.write_text(ONTOLOGY_TTL)
     extractor = FakeExtractor()
-    schema = resolve_schema(extractor=extractor, probe_texts=["t"], ontology_file_path=str(path))
+    schema = resolve_schema(extractor=extractor, probe_text="t", ontology_file_path=str(path))
     assert schema.source == "ontology"
     assert extractor.calls == []
 
@@ -381,7 +412,7 @@ def test_ontology_wins_over_bank(tmp_path):
 def test_bank_is_last_resort(tmp_path):
     extractor = FakeExtractor()
     schema = resolve_schema(
-        extractor=extractor, probe_texts=["t"], ontology_file_path=str(tmp_path / "none.owl")
+        extractor=extractor, probe_text="t", ontology_file_path=str(tmp_path / "none.owl")
     )
     assert schema.source == "label_bank"
     assert len(extractor.calls) == 1
@@ -397,13 +428,15 @@ def test_caller_labels_over_cap_raise():
 # --------------------------------------------------------------------------- #
 
 
-async def _run_task(extractor, chunks, schema_state, stats, egfd):
+async def _run_task(extractor, chunks, schema, stats, egfd):
+    for chunk in chunks:
+        chunk.is_part_of._gliner_schema = schema
     with (
         patch.object(tasks_module, "get_extractor", AsyncMock(return_value=extractor)),
         patch.object(tasks_module, "extract_graph_from_data", egfd),
     ):
         return await extract_graph_and_summarize_with_gliner(
-            chunks, schema_state=schema_state, stats=stats, options=_options()
+            chunks, stats=stats, options=_options()
         )
 
 
@@ -411,16 +444,15 @@ async def _run_task(extractor, chunks, schema_state, stats, egfd):
 async def test_task_returns_text_summaries_and_hands_graphs_to_extract_graph_from_data():
     extractor = FakeExtractor()
     chunks = [_chunk(index=0), _chunk("IBM is in Armonk.", index=1)]
-    state = SchemaState(
-        ["person", "organization", "location"],
-        ["works_for", "located_in"],
-        ontology_file_path=None,
-        options=_options(),
+    schema = GlinerSchema(
+        {"person": "", "organization": "", "location": ""},
+        {"works_for": "", "located_in": ""},
+        source="caller",
     )
     stats = GlinerRunStats()
     egfd = AsyncMock(return_value=chunks)
 
-    summaries = await _run_task(extractor, chunks, state, stats, egfd)
+    summaries = await _run_task(extractor, chunks, schema, stats, egfd)
 
     assert [type(s) for s in summaries] == [TextSummary, TextSummary]
     assert summaries[0].made_from is chunks[0]
@@ -450,63 +482,80 @@ async def test_task_returns_text_summaries_and_hands_graphs_to_extract_graph_fro
 async def test_task_never_calls_llm_extraction_helpers():
     extractor = FakeExtractor()
     chunks = [_chunk()]
-    state = SchemaState(["person"], None, ontology_file_path=None, options=_options())
+    schema = GlinerSchema({"person": ""}, source="caller")
     with (
         patch("cognee.tasks.graph.extract_graph_from_data.extract_content_graph") as ecg,
         patch("cognee.tasks.summarization.summarize_text.extract_summary") as es,
     ):
-        await _run_task(extractor, chunks, state, GlinerRunStats(), AsyncMock())
+        await _run_task(extractor, chunks, schema, GlinerRunStats(), AsyncMock())
     ecg.assert_not_called()
     es.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_schema_is_resolved_once_on_first_batch_and_frozen(tmp_path):
+async def test_schema_is_prepared_once_per_document():
     def result_for(text):
-        if "batch2" in text:
+        if "medicine" in text:
             return {"entities": {"drug": ["Aspirin"], "disease": ["Flu"]}}
         return {"entities": {"person": ["Tim Cook"], "organization": ["Apple Inc."]}}
 
     extractor = FakeExtractor(result_for)
-    state = SchemaState(
-        None, None, ontology_file_path=str(tmp_path / "none.owl"), options=_options()
-    )
-    stats = GlinerRunStats()
+    documents = [
+        TextDocument(name="people.txt", raw_data_location="people.txt", external_metadata=None),
+        TextDocument(name="medicine.txt", raw_data_location="medicine.txt", external_metadata=None),
+    ]
 
-    await _run_task(extractor, [_chunk("batch1 text")], state, stats, AsyncMock())
-    first = state.resolved
-    await _run_task(extractor, [_chunk("batch2 text")], state, stats, AsyncMock())
+    async def read(document, **_kwargs):
+        yield SimpleNamespace(text=document.name)
 
-    assert first.source == "label_bank"
-    assert set(first.entity_types) == {"person", "organization"}
-    assert state.resolved is first  # frozen: batch 2 did not re-resolve
-    # probe + extract(batch1) + extract(batch2); the last two use the frozen schema
-    assert len(extractor.calls) == 3
-    assert extractor.calls[1]["schema"].entity_types == dict(first.entity_types)
-    assert extractor.calls[2]["schema"].entity_types == dict(first.entity_types)
+    with (
+        patch.object(TextDocument, "read", read),
+        patch.object(tasks_module, "get_extractor", AsyncMock(return_value=extractor)),
+    ):
+        result = await tasks_module.prepare_gliner_schema(
+            documents,
+            schema=GlinerSchema(),
+            max_chunk_size=512,
+        )
+
+    assert result is documents
+    assert set(documents[0]._gliner_schema.entity_types) == {"person", "organization"}
+    assert set(documents[1]._gliner_schema.entity_types) == {"drug", "disease"}
+    assert [call["method"] for call in extractor.calls] == ["extract", "extract"]
+    assert [call["text"] for call in extractor.calls] == ["people.txt", "medicine.txt"]
 
 
 @pytest.mark.asyncio
-async def test_task_with_empty_schema_makes_no_model_call_and_yields_empty_summaries(tmp_path):
-    extractor = FakeExtractor(lambda _t: {"entities": {n: [] for n in LABEL_BANK}})
-    state = SchemaState(
-        None, None, ontology_file_path=str(tmp_path / "none.owl"), options=_options()
+async def test_explicit_schema_is_attached_without_reading_or_probing():
+    schema = GlinerSchema({"person": ""}, source="caller")
+    document = TextDocument(
+        name="people.txt", raw_data_location="people.txt", external_metadata=None
     )
-    summaries = await _run_task(extractor, [_chunk()], state, GlinerRunStats(), AsyncMock())
-    assert len(extractor.calls) == 1  # the probe only
+    with patch.object(tasks_module, "get_extractor", side_effect=AssertionError):
+        await tasks_module.prepare_gliner_schema([document], schema=schema, max_chunk_size=512)
+    assert document._gliner_schema is schema
+    assert "_gliner_schema" not in document.model_dump()
+
+
+@pytest.mark.asyncio
+async def test_task_with_empty_schema_makes_no_model_call_and_yields_empty_summaries():
+    extractor = FakeExtractor(lambda _t: {"entities": {n: [] for n in LABEL_BANK}})
+    summaries = await _run_task(
+        extractor, [_chunk()], GlinerSchema(), GlinerRunStats(), AsyncMock()
+    )
+    assert extractor.calls == []
     assert summaries[0].text == ""
 
 
 @pytest.mark.asyncio
 async def test_task_rejects_bad_inputs():
-    state = SchemaState(["person"], None, ontology_file_path=None, options=_options())
     with pytest.raises(Exception, match="list"):
         await extract_graph_and_summarize_with_gliner(
-            "nope", schema_state=state, stats=GlinerRunStats(), options=_options()
+            "nope", stats=GlinerRunStats(), options=_options()
         )
     assert (
         await extract_graph_and_summarize_with_gliner(
-            [], schema_state=state, stats=GlinerRunStats(), options=_options()
+            [], stats=GlinerRunStats(), options=_options()
         )
         == []
     )
@@ -528,16 +577,39 @@ async def test_get_gliner_tasks_shape():
 
     assert [t.executable.__name__ for t in tasks] == [
         "classify_documents",
+        "prepare_gliner_schema",
         "extract_chunks_from_documents",
         "extract_graph_and_summarize_with_gliner",
         "add_data_points",
     ]
-    assert tasks[1].default_params["kwargs"]["max_chunk_size"] == 512
-    extraction = tasks[2]
+    schema_task = tasks[1]
+    assert schema_task.default_params["kwargs"]["max_chunk_size"] == 512
+    assert schema_task.default_params["kwargs"]["schema"].entity_types == {"person": ""}
+    assert tasks[2].default_params["kwargs"]["max_chunk_size"] == 512
+    extraction = tasks[3]
     assert extraction.task_config["batch_size"] == 7
     assert extraction.default_params["kwargs"]["stats"] is stats
-    assert extraction.default_params["kwargs"]["schema_state"].entity_types == {"person": ""}
-    assert tasks[3].task_config["batch_size"] == 7
+    assert tasks[4].task_config["batch_size"] == 7
+    # No task in this list calls an LLM, so run_pipeline derives needs_llm=False.
+    assert all(t.needs_llm is False for t in tasks)
+
+
+@pytest.mark.asyncio
+async def test_get_gliner_tasks_appends_optional_graph_tasks_in_order():
+    with patch.object(tasks_module, "require_gliner2"):
+        tasks = await get_gliner_tasks(
+            ["person"],
+            track_provenance=True,
+            check_contradictions=True,
+            functional_relationships={"ceo_of"},
+            chunk_size=512,
+        )
+
+    assert [task.executable.__name__ for task in tasks][-3:] == [
+        "record_provenance",
+        "detect_contradictions",
+        "resolve_temporal_contradictions",
+    ]
 
 
 @pytest.mark.asyncio
@@ -580,7 +652,7 @@ def test_public_surface_matches_plan():
 
 
 # --------------------------------------------------------------------------- #
-# cognify() backend switch
+# cognify() extractor switch
 # --------------------------------------------------------------------------- #
 
 
@@ -592,16 +664,33 @@ def _task_names(tasks):
     return [t.executable.__name__ for t in tasks]
 
 
-@pytest.mark.asyncio
-async def test_cognify_backend_argument_swaps_in_the_gliner_task():
+async def _cognify_standard_tasks(**kwargs):
     cognify_module = _cognify_module()
+    migrations = importlib.import_module("cognee.modules.migrations.startup")
+    captured = {}
+
+    async def execute_pipeline(**pipeline_kwargs):
+        data_item = SimpleNamespace(extension="txt", system_metadata=None)
+        captured["tasks"] = pipeline_kwargs["tasks"](data_item)
+        return {}
+
+    with (
+        patch.object(migrations, "run_migrations_and_block", AsyncMock()),
+        patch.object(cognify_module, "get_pipeline_executor", return_value=execute_pipeline),
+    ):
+        await cognify_module.cognify(chunk_size=512, **kwargs)
+
+    return captured["tasks"]
+
+
+@pytest.mark.asyncio
+async def test_cognify_extractor_argument_selects_the_gliner_task_list():
     with patch.object(tasks_module, "require_gliner2"):
-        tasks = await cognify_module.get_default_tasks(
-            graph_model=KnowledgeGraph, chunk_size=512, graph_extraction_backend="gliner"
-        )
+        tasks = await _cognify_standard_tasks(extractor="gliner")
     names = _task_names(tasks)
-    assert names[:4] == [
+    assert names[:5] == [
         "classify_documents",
+        "prepare_gliner_schema",
         "extract_chunks_from_documents",
         "extract_graph_and_summarize_with_gliner",
         "add_data_points",
@@ -610,140 +699,233 @@ async def test_cognify_backend_argument_swaps_in_the_gliner_task():
 
 
 @pytest.mark.asyncio
-async def test_cognify_backend_env_setting_is_honoured_and_argument_wins():
+async def test_cognify_extractor_env_setting_is_honoured_and_argument_wins():
     cognify_module = _cognify_module()
-    config = cognify_module.get_cognify_config().model_copy(
-        update={"graph_extraction_backend": "gliner"}
-    )
+    config = cognify_module.get_cognify_config().model_copy(update={"graph_extractor": "gliner"})
     with (
         patch.object(tasks_module, "require_gliner2"),
         patch.object(cognify_module, "get_cognify_config", return_value=config),
     ):
-        from_env = await cognify_module.get_default_tasks(
-            graph_model=KnowledgeGraph, chunk_size=512
-        )
-        overridden = await cognify_module.get_default_tasks(
-            graph_model=KnowledgeGraph, chunk_size=512, graph_extraction_backend="llm"
-        )
+        from_env = await _cognify_standard_tasks()
+        overridden = await _cognify_standard_tasks(extractor="llm")
     assert "extract_graph_and_summarize_with_gliner" in _task_names(from_env)
     assert "extract_graph_and_summarize" in _task_names(overridden)
 
 
-def test_cognify_config_defaults_to_llm_backend():
+def test_cognify_config_defaults_to_llm_extractor():
     from cognee.modules.cognify.config import CognifyConfig
 
-    assert CognifyConfig().graph_extraction_backend == "llm"
-    assert "graph_extraction_backend" in CognifyConfig().to_dict()
+    assert CognifyConfig().graph_extractor == "llm"
+    assert "graph_extractor" in CognifyConfig().to_dict()
 
 
 @pytest.mark.asyncio
-async def test_cognify_backend_rejects_unknown_values_and_custom_graph_models():
-    cognify_module = _cognify_module()
-
+async def test_cognify_extractor_rejects_unknown_values_and_custom_graph_models():
     class Custom(KnowledgeGraph):
         pass
 
-    with pytest.raises(ValueError, match="Unknown graph_extraction_backend"):
-        await cognify_module.get_default_tasks(
-            graph_model=KnowledgeGraph, chunk_size=512, graph_extraction_backend="spacy"
-        )
+    with pytest.raises(ValueError, match="Unknown extractor"):
+        await _cognify_standard_tasks(extractor="spacy")
     with (
         patch.object(tasks_module, "require_gliner2"),
         pytest.raises(ValueError, match="custom graph_model"),
     ):
-        await cognify_module.get_default_tasks(
-            graph_model=Custom, chunk_size=512, graph_extraction_backend="gliner"
-        )
+        await _cognify_standard_tasks(graph_model=Custom, extractor="gliner")
 
 
 @pytest.mark.asyncio
-async def test_cognify_backend_gliner_without_the_extra_fails_with_install_hint():
-    cognify_module = _cognify_module()
+async def test_cognify_extractor_gliner_without_the_extra_fails_with_install_hint():
     with (
         patch.object(tasks_module, "require_gliner2", side_effect=GlinerNotInstalledError()),
         pytest.raises(GlinerNotInstalledError, match=r"cognee\[gliner\]"),
     ):
-        await cognify_module.get_default_tasks(
-            graph_model=KnowledgeGraph, chunk_size=512, graph_extraction_backend="gliner"
-        )
+        await _cognify_standard_tasks(extractor="gliner")
 
 
-def test_remember_routes_the_backend_kwarg_to_cognify():
+@pytest.mark.asyncio
+async def test_gliner_extractor_rejects_unknown_kwargs_instead_of_swallowing():
+    with (
+        patch.object(tasks_module, "require_gliner2"),
+        pytest.raises(ValueError, match="Unsupported arguments"),
+    ):
+        await _cognify_standard_tasks(extractor="gliner", n_rounds=3)
+
+
+# The branches that cannot honour the extractor must raise before doing any
+# work — never silently run something other than what the caller selected.
+# All three checks sit at the top of cognify(), before any DB or span setup.
+
+
+@pytest.mark.asyncio
+async def test_cognify_extractor_conflicts_raise_before_any_work(monkeypatch):
+    cognify_module = _cognify_module()
+
+    with pytest.raises(ValueError, match="Unknown extractor"):
+        await cognify_module.cognify(extractor="spacy")
+    with pytest.raises(ValueError, match="temporal"):
+        await cognify_module.cognify(temporal_cognify=True, extractor="gliner")
+    with pytest.raises(ValueError, match="dry_run"):
+        await cognify_module.cognify(dry_run=True, extractor="gliner")
+
+    serve_state = importlib.import_module("cognee.api.v1.serve.state")
+    monkeypatch.setattr(serve_state, "get_remote_client", lambda: object())
+    with pytest.raises(ValueError, match="remote"):
+        await cognify_module.cognify(extractor="llm")
+
+
+def test_remember_routes_the_extractor_kwarg_to_cognify():
     remember_module = importlib.import_module("cognee.api.v1.remember.remember")
-    assert "graph_extraction_backend" in remember_module._COGNIFY_ONLY
-    assert "graph_extraction_backend" in remember_module.RememberKwargs.__annotations__
+    assert "extractor" in remember_module._COGNIFY_ONLY
+    assert "extractor" in remember_module.RememberKwargs.__annotations__
 
 
 # --------------------------------------------------------------------------- #
-# LLM-free mode side effects (GRAPH_EXTRACTION_BACKEND=gliner)
+# Extractor resolution, needs_llm, and the connection gates
 # --------------------------------------------------------------------------- #
 
 
-def _config_with_backend(backend):
+def _config_with_extractor(extractor):
     from cognee.modules.cognify.config import get_cognify_config
 
-    return get_cognify_config().model_copy(update={"graph_extraction_backend": backend})
+    return get_cognify_config().model_copy(update={"graph_extractor": extractor})
 
 
-def test_llm_free_extraction_flag_follows_the_backend_setting():
-    config_module = importlib.import_module("cognee.modules.cognify.config")
-    with patch.object(
-        config_module, "get_cognify_config", return_value=_config_with_backend("gliner")
-    ):
-        assert config_module.llm_free_extraction_enabled() is True
-    with patch.object(
-        config_module, "get_cognify_config", return_value=_config_with_backend("llm")
-    ):
-        assert config_module.llm_free_extraction_enabled() is False
+def test_resolve_extractor_argument_wins_over_config():
+    from cognee.modules.cognify.config import resolve_extractor
+
+    assert resolve_extractor(None, _config_with_extractor("gliner")) == "gliner"
+    assert resolve_extractor("llm", _config_with_extractor("gliner")) == "llm"
+    assert resolve_extractor(" GLiNER ", _config_with_extractor("llm")) == "gliner"
+    with pytest.raises(ValueError, match="Unknown extractor"):
+        resolve_extractor("spacy", _config_with_extractor("llm"))
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("backend, llm_probed", [("llm", True), ("gliner", False)])
-async def test_first_run_check_skips_only_the_llm_probe_on_gliner(backend, llm_probed):
-    env_module = importlib.import_module(
-        "cognee.modules.pipelines.layers.setup_and_check_environment"
+def test_default_pipeline_needs_llm_formula():
+    from cognee.modules.cognify.config import default_pipeline_needs_llm
+
+    assert default_pipeline_needs_llm("llm", _config_with_extractor("llm")) is True
+    assert default_pipeline_needs_llm("gliner", _config_with_extractor("gliner")) is False
+    # The opt-in contradiction pass is an LLM task appended to the gliner list too.
+    contradiction_config = _config_with_extractor("gliner").model_copy(
+        update={"contradiction_detection": True}
     )
-    llm_utils = importlib.import_module("cognee.infrastructure.llm.utils")
-    config_module = importlib.import_module("cognee.modules.cognify.config")
-
-    llm_probe, embedding_probe = AsyncMock(), AsyncMock(return_value=384)
-    with (
-        patch.object(env_module, "_first_run_done", False),
-        patch.object(env_module, "create_relational_db_and_tables", AsyncMock()),
-        patch.object(env_module, "create_pgvector_db_and_tables", AsyncMock()),
-        patch.object(llm_utils, "test_llm_connection", llm_probe),
-        patch.object(llm_utils, "test_embedding_connection", embedding_probe),
-        patch.object(llm_utils, "determine_embedding_dimensions", AsyncMock()),
-        patch.object(
-            config_module, "get_cognify_config", return_value=_config_with_backend(backend)
-        ),
-        patch.dict("os.environ", {"COGNEE_SKIP_CONNECTION_TEST": "false"}),
-    ):
-        await env_module.setup_and_check_environment()
-
-    assert llm_probe.await_count == (1 if llm_probed else 0)
-    embedding_probe.assert_awaited_once()  # embeddings are always probed
+    assert default_pipeline_needs_llm("gliner", contradiction_config) is True
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "backend, auto_route, expected",
-    [
-        ("gliner", True, SearchType.CHUNKS),
-        ("gliner", False, SearchType.CHUNKS),
-        ("llm", False, SearchType.HYBRID_COMPLETION),
-    ],
-)
-async def test_recall_default_query_type_is_chunks_on_gliner(
-    monkeypatch, backend, auto_route, expected
+async def test_default_task_list_llm_need_is_derived_from_the_tasks():
+    # The pipeline gate's authority is the union of Task.needs_llm over the
+    # assembled list — a new LLM task defaults to needs_llm=True, so an
+    # undeclared addition can only over-probe, never silently under-check.
+    from cognee.modules.pipelines.tasks.task import pipeline_needs_llm
+
+    cognify_module = _cognify_module()
+
+    with patch.object(tasks_module, "require_gliner2"):
+        gliner_tasks = await get_gliner_tasks(chunk_size=512)
+        llm_tasks = await cognify_module.get_default_tasks(
+            graph_model=KnowledgeGraph, chunk_size=512
+        )
+        gliner_with_contradictions = await get_gliner_tasks(
+            chunk_size=512, check_contradictions=True
+        )
+
+    assert pipeline_needs_llm(gliner_tasks) is False
+    assert pipeline_needs_llm(llm_tasks) is True
+    # detect_contradictions defaults to needs_llm=True, so the union flags the
+    # gliner list without any formula involved.
+    assert pipeline_needs_llm(gliner_with_contradictions) is True
+
+
+def test_needs_llm_survives_with_config():
+    from cognee.modules.pipelines.tasks.task import Task
+
+    def noop(data):
+        return data
+
+    assert Task(noop, needs_llm=False).with_config(batch_size=5).needs_llm is False
+    assert Task(noop).with_config(batch_size=5).needs_llm is True
+
+
+class _EnvCheck:
+    """One patched setup_and_check_environment invocation context, reusable
+    across calls so the per-capability caching is observable."""
+
+    def __init__(self):
+        self.env_module = importlib.import_module(
+            "cognee.modules.pipelines.layers.setup_and_check_environment"
+        )
+        llm_utils = importlib.import_module("cognee.infrastructure.llm.utils")
+        self.llm_probe, self.embedding_probe = AsyncMock(), AsyncMock(return_value=384)
+        self._patches = (
+            patch.object(self.env_module, "_llm_checked", False),
+            patch.object(self.env_module, "_embeddings_checked", False),
+            patch.object(self.env_module, "create_relational_db_and_tables", AsyncMock()),
+            patch.object(self.env_module, "create_pgvector_db_and_tables", AsyncMock()),
+            patch.object(llm_utils, "test_llm_connection", self.llm_probe),
+            patch.object(llm_utils, "test_embedding_connection", self.embedding_probe),
+            patch.object(llm_utils, "determine_embedding_dimensions", AsyncMock()),
+            patch.dict("os.environ", {"COGNEE_SKIP_CONNECTION_TEST": "false"}),
+        )
+
+    def __enter__(self):
+        for p in self._patches:
+            p.start()
+        return self
+
+    def __exit__(self, *exc):
+        for p in reversed(self._patches):
+            p.stop()
+        return False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("needs_llm, llm_probed", [(True, True), (False, False)])
+async def test_first_run_check_probes_the_llm_only_when_the_pipeline_needs_it(
+    needs_llm, llm_probed
 ):
+    with _EnvCheck() as check:
+        await check.env_module.setup_and_check_environment(needs_llm=needs_llm)
+
+    assert check.llm_probe.await_count == (1 if llm_probed else 0)
+    check.embedding_probe.assert_awaited_once()  # embeddings are always probed
+
+
+@pytest.mark.asyncio
+async def test_llm_free_first_run_does_not_suppress_a_later_llm_check():
+    # The regression this pins: one LLM-free pipeline running first must not
+    # mark the LLM "checked" for the LLM pipelines that follow in the process.
+    with _EnvCheck() as check:
+        await check.env_module.setup_and_check_environment(needs_llm=False)
+        assert check.llm_probe.await_count == 0
+
+        await check.env_module.setup_and_check_environment(needs_llm=True)
+        assert check.llm_probe.await_count == 1
+        check.embedding_probe.assert_awaited_once()  # cached from the first run
+
+        await check.env_module.setup_and_check_environment(needs_llm=True)
+        assert check.llm_probe.await_count == 1  # cached now too
+
+
+@pytest.mark.asyncio
+async def test_caller_scoped_connection_skip_marks_nothing_done():
+    with _EnvCheck() as check:
+        await check.env_module.setup_and_check_environment(skip_connection_test=True)
+        assert check.llm_probe.await_count == 0
+        assert check.embedding_probe.await_count == 0
+
+        await check.env_module.setup_and_check_environment()
+        assert check.llm_probe.await_count == 1
+        check.embedding_probe.assert_awaited_once()
+
+
+def _patch_recall(monkeypatch, available: bool):
     from types import SimpleNamespace
     from uuid import uuid4
 
     recall_module = importlib.import_module("cognee.api.v1.recall.recall")
     serve_state = importlib.import_module("cognee.api.v1.serve.state")
     search_methods = importlib.import_module("cognee.modules.search.methods.search")
-    config_module = importlib.import_module("cognee.modules.cognify.config")
 
     captured = {}
 
@@ -757,47 +939,50 @@ async def test_recall_default_query_type_is_chunks_on_gliner(
     monkeypatch.setattr(recall_module, "set_session_user_context_variable", noop)
     monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
     monkeypatch.setattr(search_methods, "authorized_search", fake_authorized_search)
-    config = _config_with_backend(backend)  # resolve before patching the accessor
-    monkeypatch.setattr(config_module, "get_cognify_config", lambda: config)
+    monkeypatch.setattr(recall_module, "llm_available", lambda: available)
+    user = SimpleNamespace(id=uuid4(), tenant_id=None)
+    return recall_module, captured, user
+
+
+# recall's CHUNKS default keys on LLM availability, never on the extractor that
+# built the graph: a gliner-built graph with a key present answers completions,
+# and an LLM-built graph without one degrades to CHUNKS instead of failing.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "available, auto_route, expected",
+    [
+        (False, True, SearchType.CHUNKS),
+        (False, False, SearchType.CHUNKS),
+        (True, False, SearchType.HYBRID_COMPLETION),
+    ],
+)
+async def test_recall_default_query_type_is_chunks_without_a_usable_llm(
+    monkeypatch, available, auto_route, expected
+):
+    from uuid import uuid4
+
+    recall_module, captured, user = _patch_recall(monkeypatch, available)
 
     await recall_module.recall(
         query_text="Where was Marie Curie born?",
         dataset_ids=[uuid4()],
         auto_route=auto_route,
-        user=SimpleNamespace(id=uuid4(), tenant_id=None),
+        user=user,
     )
     assert captured["query_type"] == expected
 
 
 @pytest.mark.asyncio
-async def test_recall_explicit_query_type_wins_on_gliner(monkeypatch):
-    from types import SimpleNamespace
+async def test_recall_explicit_query_type_wins_without_a_usable_llm(monkeypatch):
     from uuid import uuid4
 
-    recall_module = importlib.import_module("cognee.api.v1.recall.recall")
-    serve_state = importlib.import_module("cognee.api.v1.serve.state")
-    search_methods = importlib.import_module("cognee.modules.search.methods.search")
-    config_module = importlib.import_module("cognee.modules.cognify.config")
-    captured = {}
-
-    async def fake_authorized_search(**kwargs):
-        captured["query_type"] = kwargs.get("query_type")
-        return []
-
-    async def noop(*_args, **_kwargs):
-        return None
-
-    monkeypatch.setattr(recall_module, "set_session_user_context_variable", noop)
-    monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
-    monkeypatch.setattr(search_methods, "authorized_search", fake_authorized_search)
-    config = _config_with_backend("gliner")
-    monkeypatch.setattr(config_module, "get_cognify_config", lambda: config)
+    recall_module, captured, user = _patch_recall(monkeypatch, available=False)
 
     await recall_module.recall(
         query_text="q",
         query_type=SearchType.SUMMARIES,
         dataset_ids=[uuid4()],
         auto_route=False,
-        user=SimpleNamespace(id=uuid4(), tenant_id=None),
+        user=user,
     )
     assert captured["query_type"] == SearchType.SUMMARIES

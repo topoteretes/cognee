@@ -3,8 +3,8 @@
 The names below are the *only* labels bank probing may return. They are fixed
 in the repository on purpose: when neither the caller nor an ontology supplies
 a schema, the type vocabulary of a GLiNER-built graph is chosen from this list
-by measuring which labels actually fire on the first batch — never invented at
-runtime. Descriptions are passed to GLiNER as label descriptions.
+by measuring which labels actually fire on the document sketch — never
+invented at runtime. Descriptions are passed to GLiNER as label descriptions.
 """
 
 from types import MappingProxyType

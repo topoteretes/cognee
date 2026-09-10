@@ -124,6 +124,29 @@ def extract_batch(
         )
 
 
+def extract_once(
+    extractor: Any,
+    text: str,
+    schema: GlinerSchema,
+    *,
+    threshold: float = DEFAULT_THRESHOLD,
+) -> Mapping[str, Any]:
+    """Run one unchunked entity+relation extraction."""
+    if not text or schema.is_empty:
+        return {}
+
+    built = build_gliner_schema(extractor, schema)
+    with _inference_lock:
+        return extractor.extract(
+            text,
+            built,
+            threshold=threshold,
+            include_confidence=False,
+            include_spans=False,
+            overlap_policy=OVERLAP_POLICY,
+        )
+
+
 async def extract_batch_async(
     extractor: Any, texts: Sequence[str], schema: GlinerSchema, **options
 ):

@@ -8,6 +8,8 @@ Usage::
     await cognee.run_custom_pipeline(
         tasks=tasks, user=user, dataset="...", pipeline_name="cognify_pipeline"
     )
+    # Every task declares needs_llm=False, so the first-run check probes only
+    # the embeddings this pipeline actually uses.
 
 Requires the ``gliner`` extra (``pip install "cognee[gliner]"``).
 """
@@ -34,7 +36,6 @@ from .summary import build_text_summary, format_chunk_summary
 from .tasks import (
     GlinerOptions,
     GlinerRunStats,
-    SchemaState,
     build_gliner_extraction_task,
     extract_graph_and_summarize_with_gliner,
     get_gliner_tasks,
@@ -50,7 +51,6 @@ __all__ = [
     "GlinerRunStats",
     "GlinerSchema",
     "MappedChunk",
-    "SchemaState",
     "build_gliner_extraction_task",
     "build_gliner_schema",
     "build_text_summary",

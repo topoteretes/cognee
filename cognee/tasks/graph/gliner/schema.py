@@ -1,12 +1,12 @@
 """Closed-schema resolution for the GLiNER extraction path.
 
-The schema GLiNER receives is resolved once per pipeline run through a fallback
-chain — first non-empty source wins:
+Each document receives a closed schema through this fallback chain — first
+non-empty source wins:
 
 1. labels the caller passed to ``get_gliner_tasks``,
 2. else classes / object properties of the configured OWL ontology,
-3. else the frozen label banks, filtered to the labels that actually fire on
-   the first batch of chunks.
+3. else the frozen label banks, filtered to the labels that fire on a document
+   sketch.
 
 Explicit caller labels short-circuit the chain: no ontology file is read and no
 probing pass runs over the chunks.
@@ -29,6 +29,8 @@ logger = get_logger("gliner.schema")
 # Upper bound on the number of entity types (and, separately, relation types)
 # sent to GLiNER in one schema. Label quality drops as the closed set grows.
 MAX_TYPES = 20
+MAX_SKETCH_CHARS = 12_000
+MAX_SKETCH_WORDS = 3_000
 
 LabelSpec = Sequence[str] | Mapping[str, str | None]
 
@@ -74,6 +76,13 @@ def as_label_map(spec: LabelSpec | None) -> dict[str, str]:
 
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 _NON_WORD = re.compile(r"[^0-9a-zA-Z]+")
+_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+_DATE_RE = re.compile(r"\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2})\b")
+_NUMBER_RE = re.compile(r"\b\d[\d,.]*\b")
+_MONEY_RE = re.compile(r"(?:[$€£]\s?\d|(?:USD|EUR|GBP)\s?\d|\d+(?:\.\d+)?%)", re.IGNORECASE)
+_CONTACT_RE = re.compile(r"(?:\b[\w.+-]+@[\w.-]+\.\w+\b|https?://\S+)")
+_ID_RE = re.compile(r"\b[A-Z]{2,}[-_/]?\d{2,}\b")
+_CAPS_RE = re.compile(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b")
 
 
 def to_snake_case(name: str) -> str:
@@ -81,6 +90,70 @@ def to_snake_case(name: str) -> str:
     name = _CAMEL_BOUNDARY.sub("_", str(name).strip())
     name = _NON_WORD.sub("_", name)
     return re.sub(r"_+", "_", name).strip("_").lower()
+
+
+def make_document_sketch(
+    text: str,
+    max_chars: int = MAX_SKETCH_CHARS,
+    max_words: int = MAX_SKETCH_WORDS,
+) -> str:
+    """Keep a small mix of high-signal and evenly distributed sentences."""
+
+    def limit_words(value: str) -> str:
+        words = list(re.finditer(r"\S+", value))
+        return value if len(words) <= max_words else value[: words[max_words - 1].end()]
+
+    sentences = [sentence.strip() for sentence in _SENTENCE_RE.split(text) if sentence.strip()]
+    joined = "\n".join(sentences)
+    if len(joined) <= max_chars:
+        return limit_words(joined)
+
+    def score(sentence: str) -> int:
+        value = 3 * bool(_DATE_RE.search(sentence))
+        value += 2 * bool(_NUMBER_RE.search(sentence))
+        value += 3 * bool(_MONEY_RE.search(sentence))
+        value += 3 * bool(_CONTACT_RE.search(sentence))
+        value += 3 * bool(_ID_RE.search(sentence))
+        value += min(3, len(_CAPS_RE.findall(sentence)))
+        if len(sentence) < 100 and (
+            sentence.isupper() or sentence.endswith(":") or sentence.istitle()
+        ):
+            value += 4
+        return value
+
+    scores = [score(sentence) for sentence in sentences]
+    signal_budget = int(max_chars * 0.75)
+    chosen: dict[int, str] = {}
+    used = 0
+    ranked = sorted(
+        (index for index, value in enumerate(scores) if value),
+        key=lambda index: scores[index],
+        reverse=True,
+    )
+    for index in ranked:
+        sentence = sentences[index]
+        cost = len(sentence) + bool(chosen)
+        if used + cost <= signal_budget:
+            chosen[index] = sentence
+            used += cost
+
+    remaining = [index for index in range(len(sentences)) if index not in chosen]
+    available = max_chars - used - bool(chosen)
+    average_length = max(1, sum(len(sentences[index]) for index in remaining) // len(remaining))
+    sample_count = min(len(remaining), max(1, available // average_length))
+    for sample in range(sample_count):
+        position = round(sample * (len(remaining) - 1) / max(1, sample_count - 1))
+        index = remaining[position]
+        separator = bool(chosen)
+        available = max_chars - used - separator
+        if available <= 0:
+            break
+        share = max(1, available // (sample_count - sample))
+        sentence = sentences[index][:share].rsplit(" ", 1)[0] or sentences[index][:share]
+        chosen[index] = sentence
+        used += len(sentence) + separator
+
+    return limit_words("\n".join(chosen[index] for index in sorted(chosen)))
 
 
 def cap_types(types: Mapping[str, str], hit_counts: Mapping[str, int] | None = None) -> dict:
@@ -177,34 +250,23 @@ def _count_hits(results: Sequence[Mapping[str, Any]], section: str) -> dict[str,
 
 def schema_from_label_bank(
     extractor: Any,
-    texts: Sequence[str],
+    sketch: str,
     *,
     threshold: float,
-    batch_size: int,
-    window_words: int,
-    window_overlap_words: int,
 ) -> GlinerSchema:
-    """Probe ``texts`` with the full banks and keep only the labels that fired.
+    """Probe one document sketch and keep only bank labels that fired.
 
     Returned names are always members of ``LABEL_BANK`` / ``RELATION_BANK``,
     ordered by hit count then name and capped at ``MAX_TYPES`` each. Empty when
-    nothing fired (or there were no texts to probe).
+    nothing fired (or the sketch is empty).
     """
-    from .extractor import extract_batch
+    from .extractor import extract_once
 
-    if not texts:
+    if not sketch:
         return EMPTY_SCHEMA
 
     probe_schema = GlinerSchema(dict(LABEL_BANK), dict(RELATION_BANK), source="label_bank")
-    results = extract_batch(
-        extractor,
-        texts,
-        probe_schema,
-        threshold=threshold,
-        batch_size=batch_size,
-        window_words=window_words,
-        window_overlap_words=window_overlap_words,
-    )
+    results = [extract_once(extractor, sketch, probe_schema, threshold=threshold)]
 
     entity_hits = {
         n: c for n, c in _count_hits(results, "entities").items() if c and n in LABEL_BANK
@@ -230,7 +292,7 @@ def schema_from_label_bank(
 def _validate_caller_labels(kind: str, labels: Mapping[str, str]) -> None:
     if len(labels) > MAX_TYPES:
         raise ValueError(
-            f"GLiNER accepts at most {MAX_TYPES} {kind}; {len(labels)} were given. "
+            f"Cognee supports at most {MAX_TYPES} GLiNER {kind}; {len(labels)} were given. "
             "Trim the list rather than relying on a silent cut."
         )
 
@@ -240,18 +302,15 @@ def resolve_schema(
     relation_types: LabelSpec | None = None,
     *,
     extractor: Any = None,
-    probe_texts: Sequence[str] = (),
+    probe_text: str = "",
     ontology_file_path: str | None = None,
     threshold: float = 0.5,
-    batch_size: int = 16,
-    window_words: int = 384,
-    window_overlap_words: int = 64,
 ) -> GlinerSchema:
-    """Run the fallback chain once and return the schema to freeze for the run.
+    """Resolve caller labels, an ontology, or one document sketch in that order.
 
     Caller labels win outright (steps 2 and 3 do not run). Otherwise the
     configured ontology is tried, then the label banks are probed on
-    ``probe_texts`` — which requires ``extractor``.
+    ``probe_text`` — which requires ``extractor``.
     """
     caller_entities = as_label_map(entity_types)
     caller_relations = as_label_map(relation_types)
@@ -268,9 +327,6 @@ def resolve_schema(
         return EMPTY_SCHEMA
     return schema_from_label_bank(
         extractor,
-        probe_texts,
+        probe_text,
         threshold=threshold,
-        batch_size=batch_size,
-        window_words=window_words,
-        window_overlap_words=window_overlap_words,
     )

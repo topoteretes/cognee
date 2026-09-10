@@ -60,14 +60,13 @@ async def main():
         relation_types=["works_for", "headquartered_in", "founded_by", "produces", "acquired"],
         stats=stats,
     )
-    # skip_connection_test: the first-run environment check probes the LLM as
-    # well; this pipeline never calls one.
+    # Every task in this list declares needs_llm=False, so the first-run
+    # check probes only the embeddings it does use — no flag needed.
     await cognee.run_custom_pipeline(
         tasks=tasks,
         user=user,
         dataset=DATASET,
         pipeline_name="cognify_pipeline",
-        skip_connection_test=True,
     )
 
     schema = stats.schema

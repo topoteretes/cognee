@@ -54,7 +54,7 @@ class RememberKwargs(TypedDict, total=False):
     """Power-user overrides for remember(). Most users never need these."""
 
     graph_model: Any
-    graph_extraction_backend: Literal["llm", "gliner"]
+    extractor: Literal["llm", "gliner"]
     node_set: List[str]
     preferred_loaders: list
     incremental_loading: bool
@@ -92,7 +92,7 @@ _ADD_ONLY = frozenset(
     }
 )
 _COGNIFY_ONLY = frozenset(
-    {"graph_model", "graph_extraction_backend", "chunks_per_batch", "config", "temporal_cognify"}
+    {"graph_model", "extractor", "chunks_per_batch", "config", "temporal_cognify"}
 )
 _SHARED = frozenset(
     {
@@ -962,6 +962,13 @@ async def _remember_inner(
 
     client = get_remote_client()
     if client is not None:
+        if kwargs.get("extractor") is not None:
+            # client.remember() whitelists its form fields and would silently
+            # drop the extractor choice, so an explicit one has to raise.
+            raise ValueError(
+                "extractor is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to choose the extractor locally."
+            )
         span.set_attribute(COGNEE_OPERATION_MODE, "cloud")
         return await client.remember(
             data,
@@ -977,9 +984,21 @@ async def _remember_inner(
     # Fail loudly on inconsistent LLM/embedding provider config before any DB
     # or ingestion work — otherwise the mismatch surfaces minutes later as an
     # opaque auth error mid-cognify. Cheap (no network), once per process.
+    # needs_llm comes from the same resolution cognify() will make for this
+    # call, so the gate and the pipeline it guards cannot disagree.
+    from cognee.modules.cognify.config import (
+        default_pipeline_needs_llm,
+        get_cognify_config,
+        resolve_extractor,
+    )
     from cognee.modules.preflight import validate_provider_config
 
-    validate_provider_config()
+    cognify_config = get_cognify_config()
+    validate_provider_config(
+        needs_llm=default_pipeline_needs_llm(
+            resolve_extractor(kwargs.get("extractor"), cognify_config), cognify_config
+        )
+    )
 
     # Run vector migrations lazily on the first local SDK call.
     # This ensures stale LanceDB schemas are migrated before any
