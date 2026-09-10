@@ -367,4 +367,4 @@ def get_code_repo_tasks() -> List:
     """The cognify CODE_REPO-route task list: one adapter task, no LLM stages."""
     from cognee.modules.pipelines.tasks.task import Task
 
-    return [Task(extract_code_repo_graph)]
+    return [Task(extract_code_repo_graph, needs_llm=False)]

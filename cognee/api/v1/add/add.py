@@ -1,4 +1,6 @@
+import os
 from uuid import UUID
+from urllib.parse import urlparse
 from typing import Union, BinaryIO, List, Optional, Any
 
 from cognee.modules.users.models import User
@@ -30,6 +32,24 @@ from cognee.modules.observability import (
 )
 
 logger = get_logger()
+
+
+def _add_pipeline_needs_llm(data: Any, preferred_loaders: Optional[dict]) -> bool:
+    """Only known plain-text inputs can safely skip the LLM check."""
+    if preferred_loaders:
+        return True
+
+    data_items = data if isinstance(data, list) else [data]
+    for data_item in data_items:
+        data_item = data_item.data if isinstance(data_item, DataItem) else data_item
+        if not isinstance(data_item, str) or urlparse(data_item).scheme:
+            return True
+        try:
+            if os.path.exists(data_item):
+                return True
+        except OSError:
+            pass
+    return False
 
 
 async def add(
@@ -230,12 +250,12 @@ async def add(
                 transformed[item] = {}
         preferred_loaders = transformed
 
-    # Fail loudly on inconsistent LLM/embedding provider config before any DB
-    # or ingestion work — otherwise the mismatch surfaces minutes later as an
-    # opaque auth error mid-cognify. Cheap (no network), once per process.
+    # Validate only the ingestion work this call will perform. Obvious direct
+    # text is LLM-free; inputs whose loader is not known yet stay conservative.
     from cognee.modules.preflight import validate_provider_config
 
-    validate_provider_config()
+    add_pipeline_needs_llm = _add_pipeline_needs_llm(data, preferred_loaders)
+    validate_provider_config(needs_llm=add_pipeline_needs_llm)
 
     await setup()
 
@@ -265,7 +285,7 @@ async def add(
     # every item (the pipeline also passes the dataset via ctx — this keeps the
     # non-pipeline fallback on the cheap branch too).
     tasks = [
-        Task(resolve_data_directories, include_subdirectories=True),
+        Task(resolve_data_directories, include_subdirectories=True, needs_llm=False),
         Task(
             ingest_data,
             dataset_name,
@@ -274,6 +294,7 @@ async def add(
             authorized_dataset.id,
             preferred_loaders,
             importance_weight,
+            needs_llm=add_pipeline_needs_llm,
         ),
     ]
 

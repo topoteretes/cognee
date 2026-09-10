@@ -10,11 +10,11 @@ def get_default_memify_extraction_tasks():
 
     if not get_cognify_config().triplet_embedding:
         return []
-    return [Task(get_triplet_datapoints, triplets_batch_size=100)]
+    return [Task(get_triplet_datapoints, triplets_batch_size=100, needs_llm=False)]
 
 
 def get_default_memify_enrichment_tasks():
-    return [Task(index_data_points, task_config={"batch_size": 100})]
+    return [Task(index_data_points, task_config={"batch_size": 100}, needs_llm=False)]
 
 
 def get_session_memify_tasks():

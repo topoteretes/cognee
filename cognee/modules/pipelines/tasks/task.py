@@ -61,14 +61,16 @@ class TaskSpec:
         result = await extract_graph_task.direct(chunks, graph_model=KnowledgeGraph)
     """
 
-    def __init__(self, fn, batch_size=None, enriches=False, **default_params):
+    def __init__(self, fn, batch_size=None, enriches=False, needs_llm=True, **default_params):
         self._fn = fn
         self._batch_size = batch_size
         self._enriches = enriches
         self._default_params = default_params
 
         # Pre-build the base Task
-        self._base_task = Task(fn, batch_size=batch_size, enriches=enriches, **default_params)
+        self._base_task = Task(
+            fn, batch_size=batch_size, enriches=enriches, needs_llm=needs_llm, **default_params
+        )
 
         # Copy function metadata for introspection
         self.__name__ = fn.__name__
@@ -87,11 +89,13 @@ class TaskSpec:
         """
         batch_size = kwargs.pop("batch_size", None)
         enriches = kwargs.pop("enriches", None)
+        needs_llm = kwargs.pop("needs_llm", None)
 
-        if batch_size is not None or enriches is not None:
+        if batch_size is not None or enriches is not None or needs_llm is not None:
             inner = self._base_task.with_config(
                 **({"batch_size": batch_size} if batch_size is not None else {}),
                 **({"enriches": enriches} if enriches is not None else {}),
+                **({"needs_llm": needs_llm} if needs_llm is not None else {}),
             )
         else:
             inner = self._base_task
@@ -116,7 +120,7 @@ class TaskSpec:
         return f"TaskSpec({self.__name__}, batch_size={bs})"
 
 
-def task(fn=None, *, batch_size=None, enriches=False, **default_params):
+def task(fn=None, *, batch_size=None, enriches=False, needs_llm=True, **default_params):
     """Create a TaskSpec from a function.
 
     Can be used as a decorator or as a functional wrapper::
@@ -143,11 +147,22 @@ def task(fn=None, *, batch_size=None, enriches=False, **default_params):
     """
 
     def decorator(func):
-        return TaskSpec(func, batch_size=batch_size, enriches=enriches, **default_params)
+        return TaskSpec(
+            func, batch_size=batch_size, enriches=enriches, needs_llm=needs_llm, **default_params
+        )
 
     if fn is not None:
         return decorator(fn)
     return decorator
+
+
+def pipeline_needs_llm(tasks) -> bool:
+    """Union of ``needs_llm`` over ``tasks``: does any of them call the LLM?
+
+    Anything without the attribute (a ``BoundTask`` is unwrapped to its inner
+    ``Task``) counts as needing the LLM — undeclared means conservative.
+    """
+    return any(getattr(getattr(task, "task", task), "needs_llm", True) for task in tasks)
 
 
 def task_summary(template: str):
@@ -182,14 +197,28 @@ class Task:
     default_params: dict[str, Any] = {}
     task_type: str = None
     enriches: bool = False
+    # Whether the executable makes LLM calls. Defaults to True so an
+    # undeclared task is conservatively assumed to need the LLM; a pipeline's
+    # need is the union over its tasks (pipeline_needs_llm), which drives the
+    # first-run LLM connection probe. Declare needs_llm=False on tasks that
+    # never call the LLM (local-model extraction, deterministic graph tasks).
+    needs_llm: bool = True
     _execute_method: Callable = None
 
     def __init__(
-        self, executable, *args, task_config=None, batch_size=None, enriches=False, **kwargs
+        self,
+        executable,
+        *args,
+        task_config=None,
+        batch_size=None,
+        enriches=False,
+        needs_llm=True,
+        **kwargs,
     ):
         self.executable = executable
         self.default_params = {"args": args, "kwargs": kwargs}
         self.enriches = enriches
+        self.needs_llm = needs_llm
 
         if inspect.isasyncgenfunction(executable):
             self.task_type = "Async Generator"
@@ -232,12 +261,14 @@ class Task:
         """
         batch_size = overrides.pop("batch_size", self.task_config["batch_size"])
         enriches = overrides.pop("enriches", self.enriches)
+        needs_llm = overrides.pop("needs_llm", self.needs_llm)
         merged_kwargs = {**self.default_params["kwargs"], **overrides}
         return Task(
             self.executable,
             *self.default_params["args"],
             batch_size=batch_size,
             enriches=enriches,
+            needs_llm=needs_llm,
             **merged_kwargs,
         )
 

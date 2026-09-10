@@ -12,7 +12,7 @@ from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.layers import validate_pipeline_tasks
-from cognee.modules.pipelines.tasks.task import Task
+from cognee.modules.pipelines.tasks.task import Task, pipeline_needs_llm
 from cognee.modules.users.models import User
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
@@ -74,18 +74,30 @@ async def run_pipeline(
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = False,
     skip_connection_test: bool = False,
+    needs_llm: bool = True,
 ):
     """``tasks`` is either the task list every data item runs, or a callable
     mapping one item to its task list (a task resolver — see ``run_tasks``);
-    items resolved to different lists still share one run per dataset."""
+    items resolved to different lists still share one run per dataset.
+
+    Whether the run needs the LLM drives the first-use LLM connection probe
+    (skipped-but-never-marked-done when not needed; embeddings are always
+    probed). For a task list it is derived from the tasks themselves — the
+    union of ``Task.needs_llm`` — and the ``needs_llm`` parameter applies only
+    when ``tasks`` is a resolver, whose caller must pass the union over every
+    list the resolver can return."""
     if tasks is None:
         raise ValueError(
             "run_pipeline requires tasks: a task list or a per-item task resolver callable"
         )
     if not callable(tasks):
         validate_pipeline_tasks(tasks)
+        needs_llm = pipeline_needs_llm(tasks)
     await setup_and_check_environment(
-        vector_db_config, graph_db_config, skip_connection_test=skip_connection_test
+        vector_db_config,
+        graph_db_config,
+        skip_connection_test=skip_connection_test,
+        needs_llm=needs_llm,
     )
 
     user, authorized_datasets = await resolve_authorized_user_datasets(datasets, user)

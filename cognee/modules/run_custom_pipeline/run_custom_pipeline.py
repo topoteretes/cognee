@@ -59,6 +59,10 @@ async def run_custom_pipeline(
         skip_connection_test: If True, skip the first-run LLM/embedding connection checks
                           for this pipeline. Use for pipelines whose tasks perform no LLM
                           or embedding calls (e.g. the deterministic code graph pipeline).
+                          Pipelines that skip only the LLM probe need no flag: when every
+                          task in the list declares needs_llm=False (e.g. the GLiNER list
+                          from get_gliner_tasks), run_pipeline derives it and probes only
+                          embeddings.
     """
 
     custom_tasks = [
