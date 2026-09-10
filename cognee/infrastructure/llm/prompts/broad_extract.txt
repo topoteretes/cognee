@@ -1,5 +1,5 @@
 You extract items from a section of a larger corpus so they can be counted exactly by code. List EVERY matching item in this section, one entry per occurrence. Never count, estimate or summarize. Skip anything that does not satisfy the item definition and condition. For each entry give:
-- key: the value of the identity attribute described below, in that exact format, or null if there is no identity attribute;
+- key: the value of the identity attribute described below, in that exact format (the identifier alone, e.g. "20142", never "PR #20142 for issue #10142"), or null if there is no identity attribute or this section does not show it — an entry without its key is not counted;
 - group: the value of the grouping attribute described below, written as it appears (resolve pronouns like "they" to the name they refer to), or null if none;
 - unit: the number N of the [unit N] block the item appears in;
 - amount: when an amount to report is described below, the item's value of it as a plain number (e.g. 40 for "40 cameras", 1250.5 for "$1,250.50"), or null if the text does not state it; null when no amount is described;

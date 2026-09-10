@@ -294,7 +294,7 @@ async def test_repeated_mentions_of_one_item_are_counted_once(monkeypatch):
     items = [
         ExtractedItem(unit=0, key="#7", group="ann", evidence="Ann opened PR #7"),
         ExtractedItem(unit=0, key="PR 8", group="bob", evidence="Bob opened PR 8"),
-        ExtractedItem(unit=0, key="7", group="ann", evidence="recap: PR #7 by Ann"),
+        ExtractedItem(unit=0, key="PR #7", group="ann", evidence="recap: PR #7 by Ann"),
     ]
 
     def respond(model, _):
@@ -328,17 +328,63 @@ def test_a_relation_is_one_item_per_participant_and_a_removal_subtracts_it():
         _item("Mei", "Arthur", undone=True),
     ]
 
-    kept = BroadRetriever.dedup(items)
+    kept = BroadRetriever.dedup(items, by_group=True)
 
     assert sorted((i.group, i.key) for i in kept) == [("Arthur", "Priya"), ("Priya", "Arthur")]
 
 
-def test_a_recap_without_a_group_is_the_item_already_counted():
-    items = [_item("Ann", "#7"), _item(None, "#7"), _item(None, "#9")]
+def test_one_key_is_one_item_however_its_group_was_spelled():
+    """Issue #7 assigned to Ann, recapped as "still with @ann": one item, not two, even if
+    the spellings were not merged. A key written "PR #7" or "#7" or "7" is one key."""
+    items = [_item("Ann", "PR #7"), _item("@ann", "#7"), _item(None, "7"), _item("Bob", "9")]
 
     kept = BroadRetriever.dedup(items)
 
-    assert [(i.group, i.key) for i in kept] == [("Ann", "#7"), (None, "#9")]
+    assert [(i.group, i.key) for i in kept] == [("Ann", "PR #7"), ("Bob", "9")]
+
+
+def test_an_entry_without_its_key_is_not_counted_and_is_reported():
+    """A record cut across two pieces yields a half without its identifier; counting it
+    could count the record twice, so it is left out and the answer says so."""
+    plan = _plan(dedup_key="the PR number")
+    items = [_item(None, "20142"), _item(None, None), _item(None, "20143")]
+
+    kept = BroadRetriever.dedup(items)
+
+    assert [i.key for i in kept] == ["20142", "20143"]
+    assert plan.dedup_key  # the reported count is checked through the context below
+
+
+@pytest.mark.asyncio
+async def test_unkeyed_entries_are_counted_in_the_context_not_the_total(monkeypatch):
+    shard = ShardItems(
+        items=[
+            _item(None, "1"),
+            ExtractedItem(unit=0, evidence="half a record, its number cut off"),
+            ExtractedItem(unit=1, evidence="another half without a number"),
+        ]
+    )
+    _stub_llm(monkeypatch, lambda model, _: shard)
+    plan = _plan(dedup_key="the order number")
+
+    result = await BroadRetriever().count_by_reading(plan, _units(1))
+    context = await BroadRetriever().get_context_from_objects("q", result)
+
+    assert result.total == 1 and result.unkeyed_dropped == 2
+    assert "2 listed entries carried no the order number and were not counted" in context
+
+
+def test_a_long_paragraph_is_cut_at_sentence_ends_never_inside_one():
+    retriever = BroadRetriever(shard_tokens=30)
+    sentences = [f"Record {i} was opened by someone for issue {i}." for i in range(12)]
+    unit = Unit(id="c1", text=" ".join(sentences))  # pypdf text: no blank lines at all
+
+    pieces = retriever.split_oversized([unit])
+
+    assert len(pieces) > 1
+    for piece in pieces:
+        assert piece.text.endswith(".")
+        assert all(s in " ".join(p.text for p in pieces) for s in sentences)
 
 
 @pytest.mark.asyncio

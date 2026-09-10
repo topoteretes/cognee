@@ -81,6 +81,9 @@ class CountPlan(BaseModel):
     # "... and list them": the full list of counted items is appended to the answer by code.
     list_items: bool = False
     dedup_key: str | None = None
+    # A relation between two things of the same kind (a connection, a co-authorship),
+    # listed once per participant: its identity is (participant, other), not the key alone.
+    relation: bool = False
 
 
 class ExtractedItem(BaseModel):
@@ -133,6 +136,8 @@ class CountResult:
     amounts_missing: int = 0
     # For a plan with a target: the corpus names matched to it; empty when none matched.
     target_names: list[str] = field(default_factory=list)
+    # For a plan with a dedup key: listed entries that carried no key and were not counted.
+    unkeyed_dropped: int = 0
     names_merged: bool = True
     items_listed: int = 0
     llm_calls: int = 0
@@ -165,11 +170,34 @@ def _stated_aliases(aliases: list[list[str]]) -> list[str]:
 
 
 def _normalize_key(value: str) -> str:
+    """One item, one key: "PR #20142", "#20142" and "20142" are the same identifier.
+
+    A key with digits is its digit runs (a label such as PR, WO or EXP is dropped:
+    one question counts one kind of identifier); a key without digits is its letters.
+    """
+    digits = re.findall(r"\d+", value)
+    if digits:
+        return "-".join(digits)
     return re.sub(r"[^0-9a-z]+", "", value.lower())
 
 
 def _loose_name(name: str) -> str:
     return _normalize_key(name.lstrip("@"))
+
+
+def _paragraphs(text: str, budget: int, tokenizer) -> list[str]:
+    """Cut points for a chunk: blank lines; a paragraph over budget is cut at sentence
+    ends; never inside a sentence, so a record is not split into two half-records
+    (a half without its identifier cannot be told from the other half)."""
+    pieces = []
+    for paragraph in re.split(r"\n\s*\n", text):
+        if not paragraph.strip():
+            continue
+        if len(tokenizer.extract_tokens(paragraph)) <= budget:
+            pieces.append(paragraph)
+        else:
+            pieces += [s for s in re.split(r"(?<=[.!?])\s+", paragraph) if s.strip()]
+    return pieces
 
 
 def _canonical_spelling(names: list[str]) -> str:
@@ -386,8 +414,13 @@ class BroadRetriever(CompletionRetriever):
 
         canonical = await self.merge_name_variants(plan, items, aliases)
 
+        unkeyed_dropped = 0
         if plan.dedup_key:
-            items = self.dedup(items)
+            # An entry without its identifier cannot be told from one already
+            # counted (a record cut across two pieces yields such halves), so it is
+            # not counted; the answer says how many were left out.
+            unkeyed_dropped = sum(1 for item in items if not item.key and not item.undone)
+            items = self.dedup(items, by_group=plan.relation)
         else:
             # Without an identity an undone entry cannot name what it undoes.
             items = [item for item in items if not item.undone]
@@ -429,6 +462,7 @@ class BroadRetriever(CompletionRetriever):
             ),
             names_merged=canonical is not None,
             target_names=target_names,
+            unkeyed_dropped=unkeyed_dropped,
             llm_calls=len(shards),
             tokens_read=tokens_read,
         )
@@ -436,37 +470,30 @@ class BroadRetriever(CompletionRetriever):
     # --- reading helpers ------------------------------------------------------------
 
     @staticmethod
-    def dedup(items: list[ExtractedItem]) -> list[ExtractedItem]:
-        """One item per (group, key), in first-seen order, minus the items undone later.
+    def dedup(items: list[ExtractedItem], by_group: bool = False) -> list[ExtractedItem]:
+        """One item per identity, in first-seen order, minus the items undone later.
 
-        The same key under two groups is two items (a connection is listed once per
-        member, keyed by the other). A recap that names the key but not the group
-        is the item already counted. An entry marked undone removes the item it
-        names instead of counting.
+        The identity is the key: the planner defines it as unique across the corpus,
+        so two entries with one key are one item however their group was spelled.
+        For a relation listed once per participant (``by_group``) the identity is
+        (participant, other). An entry without a key is not counted. An entry marked
+        undone removes the item it names instead of counting.
         """
-        by_identity: dict[tuple[str, str], ExtractedItem] = {}
-        keys_seen: set[str] = set()
-        unkeyed: list[ExtractedItem] = []
-        # Grouped entries first, so an ungrouped recap can find its item.
-        for item in sorted(items, key=lambda item: item.group is None):
-            key = _normalize_key(item.key) if item.key else ""
-            if not key:
-                if not item.undone:
-                    unkeyed.append(item)
+        counted: dict[tuple[str, str], ExtractedItem] = {}
+        for item in items:
+            if not item.key:
                 continue
-            identity = (item.group or "", key)
+            key = _normalize_key(item.key)
+            identity = ((item.group or "") if by_group else "", key)
             if item.undone:
-                if item.group is None:
-                    for existing in [i for i in by_identity if i[1] == key]:
-                        del by_identity[existing]
+                if by_group and item.group is None:
+                    for existing in [i for i in counted if i[1] == key]:
+                        del counted[existing]
                 else:
-                    by_identity.pop(identity, None)
-                continue
-            if identity in by_identity or (item.group is None and key in keys_seen):
-                continue
-            by_identity[identity] = item
-            keys_seen.add(key)
-        return [*by_identity.values(), *unkeyed]
+                    counted.pop(identity, None)
+            elif identity not in counted:
+                counted[identity] = item
+        return list(counted.values())
 
     def split_oversized(self, units: list[Unit]) -> list[Unit]:
         """Cut a unit longer than a shard into paragraph-aligned pieces.
@@ -480,7 +507,7 @@ class BroadRetriever(CompletionRetriever):
             if len(self.tokenizer.extract_tokens(unit.text)) <= self.shard_tokens:
                 pieces.append(unit)
                 continue
-            paragraphs = [p for p in re.split(r"\n\s*\n|\n", unit.text) if p.strip()]
+            paragraphs = _paragraphs(unit.text, self.shard_tokens, self.tokenizer)
             current: list[str] = []
             current_tokens = 0
             for paragraph in paragraphs:
@@ -664,6 +691,11 @@ class BroadRetriever(CompletionRetriever):
             lines.append(f"Condition: {plan.condition}")
         if plan.dedup_key:
             lines.append(f"Repeated mentions of one item removed by: {plan.dedup_key}")
+        if result.unkeyed_dropped:
+            lines.append(
+                f"({result.unkeyed_dropped} listed entries carried no {plan.dedup_key} and "
+                "were not counted, since they could be repeats)"
+            )
         lines.append(f"TOTAL: {_number(result.total)}")
         if plan.measure:
             lines.append(f"  = the sum of {plan.measure} over the listed items")
