@@ -658,6 +658,8 @@ Tests are organized in `cognee/tests/`:
 
 When adding features, add corresponding tests. Integration tests should cover the full remember → recall flow (or add → cognify → search when the feature lives in one of those stages).
 
+**Mock-replay ingestion (large stores without API calls).** `cognee/tests/utils/mock_ingestion` builds a real graph/vector store from a corpus (`[{"title", "content"}]`) plus a cassette (`{"memories": [{"title", "knowledge_graph", "summary"}]}`): `ingest_mock(corpus, cassette, [dataset])` runs a real `add` + `cognify`, but `install_mocks` replays the recorded extraction for every chunk whose text contains an entry's `title` (substring match — titles must not contain one another), and `MOCK_EMBEDDING=true` makes every embedding a zero vector, so vector similarity is meaningless on such stores. Set `DATA_ROOT_DIRECTORY`/`SYSTEM_ROOT_DIRECTORY` to a throwaway location first. Cassettes are recorded with `cognee/tests/performance/statistics_percentile/capture_mock.py`; the nightly corpora (e.g. `war_and_peace_large`, a ~100k-node inflated graph) are listed in that folder's `README.md`.
+
 ## API Structure
 
 FastAPI application with versioned routes under `/api/v1/` (routers registered in `cognee/api/client.py`):

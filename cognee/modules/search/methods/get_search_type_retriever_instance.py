@@ -7,7 +7,11 @@ from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
-from cognee.modules.retrieval.broad_retriever import BroadRetriever
+from cognee.modules.retrieval.broad_retriever import (
+    BROAD_MAX_PARALLEL_CALLS,
+    BROAD_SHARD_TOKENS,
+    BroadRetriever,
+)
 
 # Retrievers
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
@@ -278,22 +282,19 @@ async def get_search_type_retriever_instance(
                 "include_references": include_references,
             },
         ),
-        # No top_k or wide_search_top_k: BROAD ranks the whole graph and the
-        # LLM's context window decides how much of it goes in (SDK-324).
+        # No top_k: BROAD counts over every unit of the dataset (SDK-324).
         SearchType.BROAD: (
             BroadRetriever,
             {
                 "system_prompt_path": system_prompt_path,
-                "node_type": node_type,
-                "node_name": node_name,
-                "node_name_filter_operator": node_name_filter_operator,
                 "system_prompt": system_prompt,
-                "triplet_distance_penalty": triplet_distance_penalty,
-                "feedback_influence": feedback_influence,
                 "session_id": session_id,
                 "response_model": retriever_specific_config.get("response_model", str),
                 "include_references": include_references,
-                "context_window_tokens": retriever_specific_config.get("context_window_tokens"),
+                "shard_tokens": retriever_specific_config.get("shard_tokens", BROAD_SHARD_TOKENS),
+                "max_parallel_calls": retriever_specific_config.get(
+                    "max_parallel_calls", BROAD_MAX_PARALLEL_CALLS
+                ),
             },
         ),
         SearchType.GRAPH_SUMMARY_COMPLETION: (
