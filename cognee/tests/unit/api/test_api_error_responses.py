@@ -465,10 +465,24 @@ class TestUpdateEndpoint:
         assert resp.status_code == 422
         update.assert_not_awaited()
 
-    def test_update_pipeline_errored_returns_500(self, client):
+    def test_update_failed_result_returns_500_with_the_result_body(self, client):
+        """A failed rebuild keeps the one result shape: the client reads the
+        error from the same fields it would read counters from, and retries."""
         import cognee.api.v1.update as update_pkg
+        from cognee.api.v1.update import UpdateResult
 
-        update_pkg.update = AsyncMock(return_value={"run": _make_errored(error="update failed")})
+        failed = UpdateResult(
+            data_id=uuid4(),
+            dataset_id=MOCK_DATASET_ID,
+            status="failed",
+            mode="full_rebuild",
+            fallback_reason="no_baseline",
+            fallback_detail="no stored processed text for this data item",
+            pipeline_run_id=MOCK_PIPELINE_RUN_ID,
+            error_class="RuntimeError",
+            error_message="update failed",
+        )
+        update_pkg.update = AsyncMock(return_value=failed)
 
         resp = client.patch(
             "/update",
@@ -477,14 +491,22 @@ class TestUpdateEndpoint:
             data={"node_set": ""},
         )
         assert resp.status_code == 500
-        body = resp.json()
-        assert body["error"] == "Pipeline run errored"
+        assert resp.json() == failed.model_dump(mode="json")
 
-    def test_update_success_returns_200(self, client):
+    def test_update_full_rebuild_returns_200(self, client):
         import cognee.api.v1.update as update_pkg
+        from cognee.api.v1.update import UpdateResult
 
-        completed = _make_completed()
-        update_pkg.update = AsyncMock(return_value={str(MOCK_DATASET_ID): completed})
+        rebuilt = UpdateResult(
+            data_id=uuid4(),
+            dataset_id=MOCK_DATASET_ID,
+            status="updated",
+            mode="full_rebuild",
+            fallback_reason="disabled",
+            fallback_detail="chunk_level_diff=False was requested",
+            pipeline_run_id=MOCK_PIPELINE_RUN_ID,
+        )
+        update_pkg.update = AsyncMock(return_value=rebuilt)
 
         resp = client.patch(
             "/update",
@@ -493,21 +515,26 @@ class TestUpdateEndpoint:
             data={"node_set": ""},
         )
         assert resp.status_code == 200
+        assert resp.json() == rebuilt.model_dump(mode="json")
+        assert resp.json()["chunks"] is None
 
-    @pytest.mark.parametrize("incremental_status", ["incremental", "unchanged"])
-    def test_update_incremental_summary_returns_200(self, client, incremental_status):
+    @pytest.mark.parametrize("incremental_status", ["updated", "unchanged"])
+    def test_update_incremental_result_returns_200(self, client, incremental_status):
         import cognee.api.v1.update as update_pkg
+        from cognee.api.v1.update import ChunkChanges, UpdateResult
 
-        summary = {
-            "status": incremental_status,
-            "regions": 1 if incremental_status == "incremental" else 0,
-            "deleted_chunks": 1 if incremental_status == "incremental" else 0,
-            "added_chunks": 1 if incremental_status == "incremental" else 0,
-            "reused_chunks": 0,
-            "kept_chunks": 2,
-            "reindexed_chunks": 1,
-        }
-        update_pkg.update = AsyncMock(return_value=summary)
+        changed = incremental_status == "updated"
+        result = UpdateResult(
+            data_id=uuid4(),
+            dataset_id=MOCK_DATASET_ID,
+            status=incremental_status,
+            mode="incremental",
+            chunks=ChunkChanges(
+                regions=int(changed), deleted=int(changed), added=int(changed), kept=2, reindexed=1
+            ),
+            pipeline_run_id=MOCK_PIPELINE_RUN_ID if changed else None,
+        )
+        update_pkg.update = AsyncMock(return_value=result)
 
         resp = client.patch(
             "/update",
@@ -517,7 +544,7 @@ class TestUpdateEndpoint:
         )
 
         assert resp.status_code == 200
-        assert resp.json() == summary
+        assert resp.json() == result.model_dump(mode="json")
         assert update_pkg.update.await_args.kwargs["node_set"] is None
 
     def test_update_internal_error_returns_500(self, client):

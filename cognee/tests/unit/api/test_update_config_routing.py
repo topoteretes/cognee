@@ -17,11 +17,38 @@ from uuid import uuid4
 import pytest
 
 import cognee.api.v1.update.update  # bind the real submodule
+from cognee.api.v1.update.incremental import RefusalReason
+from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
 
 update_module = sys.modules["cognee.api.v1.update.update"]
 data_methods_module = sys.modules["cognee.modules.data.methods"]
 
 pytestmark = pytest.mark.asyncio
+
+FULL_RUN_ID = uuid4()
+
+
+def _full_result(dataset_id):
+    """What cognify() hands back for the rebuild: one completed run per dataset."""
+    return {
+        dataset_id: PipelineRunCompleted(
+            pipeline_run_id=FULL_RUN_ID, dataset_id=dataset_id, dataset_name="ds"
+        )
+    }
+
+
+def _engine_summary(status="incremental"):
+    """The chunk-level engine's raw summary, as incremental_update() returns it."""
+    return {
+        "status": status,
+        "regions": 1,
+        "deleted_chunks": 1,
+        "added_chunks": 2,
+        "reused_chunks": 0,
+        "kept_chunks": 5,
+        "reindexed_chunks": 0,
+        "pipeline_run_id": uuid4(),
+    }
 
 
 def _relational_engine_stub(row):
@@ -56,7 +83,7 @@ def _patches(data_id, incremental, full_result, row=None):
 async def test_custom_configs_skip_the_incremental_path():
     data_id, dataset_id = uuid4(), uuid4()
     incremental = AsyncMock()
-    full_result = {"run": "full"}
+    full_result = _full_result(dataset_id)
 
     for config_kwargs in (
         {"vector_db_config": {"vector_db_provider": "custom"}},
@@ -77,13 +104,16 @@ async def test_custom_configs_skip_the_incremental_path():
                 **config_kwargs,
             )
         incremental.assert_not_called()
-        assert result == full_result, "custom-config updates must return the full-flow result"
+        assert result.mode == "full_rebuild", "custom-config updates must run the full flow"
+        assert result.status == "updated"
+        assert result.fallback_reason is RefusalReason.PER_CALL_DB_CONFIG
+        assert result.pipeline_run_id == FULL_RUN_ID
 
 
 async def test_node_set_change_skips_the_incremental_path():
     data_id, dataset_id = uuid4(), uuid4()
     incremental = AsyncMock()
-    full_result = {"run": "full"}
+    full_result = _full_result(dataset_id)
 
     p1, p2, p3, p4, p5, p6 = _patches(data_id, incremental, full_result)
     with p1, p2, p3, p4, p5, p6:
@@ -96,7 +126,8 @@ async def test_node_set_change_skips_the_incremental_path():
         )
 
     incremental.assert_not_called()
-    assert result == full_result
+    assert result.mode == "full_rebuild"
+    assert result.fallback_reason is RefusalReason.UNSUPPORTED_METADATA
 
 
 @pytest.mark.parametrize(
@@ -109,7 +140,7 @@ async def test_node_set_change_skips_the_incremental_path():
 async def test_custom_extraction_config_skips_the_incremental_path(config_kwargs):
     data_id, dataset_id = uuid4(), uuid4()
     incremental = AsyncMock()
-    full_result = {"run": "full"}
+    full_result = _full_result(dataset_id)
 
     p1, p2, p3, p4, p5, p6 = _patches(data_id, incremental, full_result)
     with p1, p2, p3, p4, p5, p6:
@@ -122,7 +153,8 @@ async def test_custom_extraction_config_skips_the_incremental_path(config_kwargs
         )
 
     incremental.assert_not_called()
-    assert result == full_result
+    assert result.mode == "full_rebuild"
+    assert result.fallback_reason is RefusalReason.CUSTOM_EXTRACTION_CONFIG
 
 
 async def test_multi_item_input_is_rejected_not_multiplied():
@@ -139,7 +171,7 @@ async def test_multi_item_input_is_rejected_not_multiplied():
     data_id, dataset_id = uuid4(), uuid4()
     incremental = AsyncMock()
 
-    p1, p2, p3, p4, p5, p6 = _patches(data_id, incremental, {"run": "full"})
+    p1, p2, p3, p4, p5, p6 = _patches(data_id, incremental, _full_result(dataset_id))
     with p1, p2, p3, p4, p5, p6, pytest.raises(IngestionError):
         await update_module.update(
             data_id=data_id,
@@ -154,9 +186,9 @@ async def test_multi_item_input_is_rejected_not_multiplied():
 async def test_single_item_list_is_unwrapped():
     """The permissive shape the HTTP router sends is accepted, not refused."""
     data_id, dataset_id = uuid4(), uuid4()
-    incremental = AsyncMock(return_value={"status": "incremental"})
+    incremental = AsyncMock(return_value=_engine_summary())
 
-    p1, p2, p3, p4, p5, p6 = _patches(data_id, incremental, {"run": "full"})
+    p1, p2, p3, p4, p5, p6 = _patches(data_id, incremental, _full_result(dataset_id))
     with p1, p2, p3, p4, p5, p6:
         await update_module.update(
             data_id=data_id,
@@ -180,7 +212,7 @@ async def test_the_full_fallback_keeps_the_original_row_owner():
     row = SimpleNamespace(id=data_id, legacy_id=None, owner_id=original_owner)
     collaborator = SimpleNamespace(id=uuid4())
 
-    p1, p2, p3, p4, p5, p6 = _patches(data_id, AsyncMock(), {"run": "full"}, row=row)
+    p1, p2, p3, p4, p5, p6 = _patches(data_id, AsyncMock(), _full_result(dataset_id), row=row)
     with p1, p2, p3, p4, p5, p6:
         await update_module.update(
             data_id=data_id,
@@ -195,9 +227,10 @@ async def test_the_full_fallback_keeps_the_original_row_owner():
 
 async def test_no_configs_take_the_incremental_path():
     data_id, dataset_id = uuid4(), uuid4()
-    incremental = AsyncMock(return_value={"status": "incremental"})
+    summary = _engine_summary()
+    incremental = AsyncMock(return_value=summary)
 
-    p1, p2, p3, p4, p5, p6 = _patches(data_id, incremental, {"run": "full"})
+    p1, p2, p3, p4, p5, p6 = _patches(data_id, incremental, _full_result(dataset_id))
     with p1, p2, p3, p4, p5, p6:
         result = await update_module.update(
             data_id=data_id,
@@ -206,4 +239,8 @@ async def test_no_configs_take_the_incremental_path():
             user=SimpleNamespace(id=uuid4()),
         )
     incremental.assert_awaited_once()
-    assert result == {"status": "incremental"}
+    assert (result.mode, result.status) == ("incremental", "updated")
+    assert result.fallback_reason is None
+    assert (result.chunks.regions, result.chunks.deleted, result.chunks.added) == (1, 1, 2)
+    assert (result.chunks.kept, result.chunks.reindexed) == (5, 0)
+    assert result.pipeline_run_id == summary["pipeline_run_id"]

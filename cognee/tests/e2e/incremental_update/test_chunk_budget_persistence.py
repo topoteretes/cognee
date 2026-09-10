@@ -162,7 +162,7 @@ async def _scenario():
         text_v2 = text_v1[:start] + replacement + text_v1[end:]
 
         result = await cognee.update(data_id, text_v2, dataset.id, user=user)
-        assert isinstance(result, dict) and result.get("status") == "incremental", result
+        assert (result.mode, result.status) == ("incremental", "updated"), result
     finally:
         incremental_module.get_max_chunk_tokens = original_budget
 

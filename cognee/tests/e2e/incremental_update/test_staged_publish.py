@@ -206,7 +206,7 @@ async def _scenario():
     # ── 3. a genuine incremental edit over the healed baseline ────────────── #
     text_v3 = text_v2.replace("ENTC", "ENTC3", 1)
     result = await cognee.update(data_id, text_v3, dataset.id, user=user)
-    assert isinstance(result, dict) and result.get("status") == "incremental"
+    assert (result.mode, result.status) == ("incremental", "updated"), result
     assert await _stored_text(user, data_id, dataset.id) == text_v3
     runs = await _run_records(dataset.id)
     assert any(any("COMPLETED" in status for status in statuses) for statuses in runs.values()), (
@@ -216,7 +216,8 @@ async def _scenario():
 
     # Unchanged re-submission: zero new run records.
     unchanged = await cognee.update(data_id, text_v3, dataset.id, user=user)
-    assert isinstance(unchanged, dict) and unchanged.get("status") == "unchanged"
+    assert (unchanged.mode, unchanged.status) == ("incremental", "unchanged"), unchanged
+    assert unchanged.pipeline_run_id is None, "a no-op records no run"
     assert len(await _run_records(dataset.id)) == baseline_count, (
         "an unchanged update must leave no run-record noise"
     )

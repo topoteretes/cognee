@@ -8,12 +8,14 @@ from cognee.api.v1.cognify import cognify
 from cognee.api.v1.datasets import datasets
 from cognee.api.v1.update.incremental import (
     IncrementalUpdateNotPossible,
+    RefusalReason,
     incremental_update,
     recorded_chunk_budget,
 )
+from cognee.api.v1.update.result import ChunkChanges, UpdateResult
 from cognee.modules.chunking.chunk_policy import DEFAULT_CHUNK_POLICY, ChunkPolicy
 from cognee.modules.chunking.TextChunker import TextChunker
-from cognee.modules.pipelines.models import PipelineRunInfo
+from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
@@ -69,7 +71,7 @@ async def update(
     custom_prompt: str | None = None,
     chunker: type = TextChunker,
     policy: ChunkPolicy = DEFAULT_CHUNK_POLICY,
-) -> dict[str, PipelineRunInfo] | list[PipelineRunInfo] | dict:
+) -> UpdateResult:
     """
     Update existing data in Cognee.
 
@@ -135,14 +137,17 @@ async def update(
                  Chunk-level path only; not exposed on the HTTP route.
 
     Returns:
-        With chunk_level_diff, a summary dict with the same keys for either status:
-            {"status": "incremental" | "unchanged", "regions": n, "deleted_chunks": n,
-             "added_chunks": n, "reused_chunks": n, "kept_chunks": n, "reindexed_chunks": n}
-        Otherwise PipelineRunInfo: Information about the ingestion pipeline execution including:
-            - Pipeline run ID for tracking
-            - Dataset ID where data was stored
-            - Processing status and any errors
-            - Execution timestamps and metadata
+        UpdateResult, the same shape on every path:
+            - ``status``: "updated", "unchanged" (chunk-level path found no content
+              change) or "failed" (the rebuild's cognify run errored; ``error_class``
+              and ``error_message`` say why, and the call can be retried).
+            - ``mode``: "incremental" or "full_rebuild".
+            - ``chunks``: the chunk-level counters (regions, deleted, added, reused,
+              kept, reindexed); None on a full rebuild, which has no diff.
+            - ``fallback_reason`` / ``fallback_detail``: set on every full rebuild,
+              naming why the chunk-level path did not run — the caller switched it
+              off, an unsupported parameter, or one of the engine's refusals.
+            - ``pipeline_run_id``: the run to inspect; None for a no-op.
     """
     # Route to the remote instance when connected via serve(). This must come
     # before any local work: the paths below resolve the LOCAL default user and
@@ -218,41 +223,20 @@ async def update(
             preserved_legacy_id = old_row.legacy_id
             preserved_owner_id = old_row.owner_id
 
-    data_item_changes_metadata = isinstance(data, DataItem) and (
-        data.label is not None or data.external_metadata is not None
+    # Why the chunk-level path is not taken, if it is not. Every full rebuild
+    # names its cause in the result, so an update that took far longer than
+    # usual explains itself instead of leaving the reason in the server log.
+    fallback = _full_rebuild_reason(
+        chunk_level_diff,
+        data,
+        node_set,
+        graph_model,
+        custom_prompt,
+        vector_db_config,
+        graph_db_config,
     )
-    if chunk_level_diff and (node_set or data_item_changes_metadata):
-        # Warning, not info: the response carries no hint that the slower,
-        # costlier full rebuild ran instead of the chunk-level update.
-        logger.warning(
-            "Chunk-level incremental update does not reconcile document metadata or "
-            "node_set; running full update"
-        )
-        chunk_level_diff = False
-
-    if chunk_level_diff and (graph_model is not KnowledgeGraph or custom_prompt is not None):
-        # The baseline does not persist the model/prompt that produced its
-        # graph. Applying a new configuration only to fresh chunks would mix
-        # extraction schemas or rules inside one document.
-        logger.warning(
-            "Chunk-level incremental update supports only the default graph model and prompt; "
-            "running full update"
-        )
-        chunk_level_diff = False
-
-    if chunk_level_diff and (vector_db_config is not None or graph_db_config is not None):
-        # The chunk-level incremental engine resolves its stores through the
-        # dataset-context routing system, not per-call config dicts — running
-        # it with these params would silently read and write the DEFAULT
-        # stores. The full ingestion flow honors them, so it runs instead.
-        logger.warning(
-            "Chunk-level incremental update is not supported with per-call "
-            "vector_db_config/graph_db_config forwarding; running full "
-            "ingestion instead. To get incremental updates, configure your "
-            "stores through environment settings and the dataset-context "
-            "database routing system instead of per-call config dicts."
-        )
-        chunk_level_diff = False
+    if fallback is not None:
+        logger.warning("%s; running full update", fallback[1])
 
     # The fallback re-cognifies the whole document. It keeps the chunk budget
     # the stored chunks record so the document's granularity survives the
@@ -260,7 +244,7 @@ async def update(
     # cannot take) means the current default.
     fallback_chunk_size = None
 
-    if chunk_level_diff:
+    if fallback is None:
         # Chunk-level incremental path: diff the new text against the stored
         # processed text, replace only the affected chunks — the Data row is
         # updated in place, so the id trivially survives. Falls through to
@@ -268,7 +252,7 @@ async def update(
         # non-text content, stored chunks unavailable). Permission errors
         # propagate — they must never trigger the fallback.
         try:
-            return await incremental_update(
+            summary = await incremental_update(
                 data_id=pinned_id,
                 data=data,
                 dataset_id=dataset_id,
@@ -284,16 +268,30 @@ async def update(
             # The reason is a structured field, not just prose: an unsupported
             # chunker and a first ingestion produce the same sentence otherwise,
             # so a permanent misconfiguration is indistinguishable from a
-            # one-off in the logs. A warning, not info: the fallback re-extracts
-            # the whole document and the caller's response carries no hint of
-            # it (pipeline-run info instead of the incremental summary), so
-            # this line is the only place the downgrade and its cause show up.
+            # one-off in the logs.
             logger.warning(
                 "chunk-level update not possible (%s); running full update",
                 refusal,
                 extra={"refusal_reason": refusal.reason.value},
             )
+            fallback = (refusal.reason, str(refusal))
             fallback_chunk_size = await recorded_chunk_budget(pinned_id, dataset_id, user)
+        else:
+            return UpdateResult(
+                data_id=pinned_id,
+                dataset_id=dataset_id,
+                status="unchanged" if summary["status"] == "unchanged" else "updated",
+                mode="incremental",
+                chunks=ChunkChanges(
+                    regions=summary["regions"],
+                    deleted=summary["deleted_chunks"],
+                    added=summary["added_chunks"],
+                    reused=summary["reused_chunks"],
+                    kept=summary["kept_chunks"],
+                    reindexed=summary["reindexed_chunks"],
+                ),
+                pipeline_run_id=summary["pipeline_run_id"],
+            )
 
     await datasets.delete_data(
         dataset_id=dataset_id,
@@ -324,7 +322,7 @@ async def update(
 
     await _restore_row_lineage(pinned_id, preserved_legacy_id, preserved_owner_id)
 
-    cognify_run = await cognify(
+    cognify_runs = await cognify(
         datasets=[dataset_id],
         user=user,
         vector_db_config=vector_db_config,
@@ -334,9 +332,70 @@ async def update(
         graph_model=graph_model,
         custom_prompt=custom_prompt,
         chunk_size=fallback_chunk_size,
-        # update() returns the run info for the caller to inspect — an errored
-        # run is a valid return value here, not an exception.
+        # An errored run is reported as a failed result, not raised: the
+        # caller gets the document id and the error to retry this one update.
         raise_on_error=False,
     )
 
-    return cognify_run
+    errored = get_errored_run_info(cognify_runs)
+    run = errored or next(iter(cognify_runs.values()))
+    return UpdateResult(
+        data_id=pinned_id,
+        dataset_id=dataset_id,
+        status="failed" if errored else "updated",
+        mode="full_rebuild",
+        fallback_reason=fallback[0],
+        fallback_detail=fallback[1],
+        pipeline_run_id=run.pipeline_run_id,
+        error_class=errored.error_class if errored else None,
+        error_message=errored.error_message if errored else None,
+    )
+
+
+def _full_rebuild_reason(
+    chunk_level_diff: bool,
+    data,
+    node_set,
+    graph_model,
+    custom_prompt,
+    vector_db_config,
+    graph_db_config,
+) -> tuple[RefusalReason, str] | None:
+    """Decide, before the engine is consulted, whether the full rebuild must run.
+
+    Returns the reason and a sentence for the caller, or None when the
+    chunk-level path may be attempted. Each cause is a limitation of the
+    chunk-level engine: it reconciles chunks, not document metadata; the
+    baseline does not persist the model or prompt that produced its graph, so
+    a different one applied to fresh chunks only would mix extraction schemas
+    inside one document; and it resolves its stores through the dataset
+    context, not per-call config dicts, so running it with those would read
+    and write the default stores while the caller's stores never see the edit.
+    """
+    from cognee.tasks.ingestion.data_item import DataItem
+
+    if not chunk_level_diff:
+        return RefusalReason.DISABLED, "chunk_level_diff=False was requested"
+
+    data_item_changes_metadata = isinstance(data, DataItem) and (
+        data.label is not None or data.external_metadata is not None
+    )
+    if node_set or data_item_changes_metadata:
+        return (
+            RefusalReason.UNSUPPORTED_METADATA,
+            "chunk-level update does not reconcile node_set or document metadata",
+        )
+    if graph_model is not KnowledgeGraph or custom_prompt is not None:
+        return (
+            RefusalReason.CUSTOM_EXTRACTION_CONFIG,
+            "chunk-level update supports only the default graph model and prompt",
+        )
+    if vector_db_config is not None or graph_db_config is not None:
+        return (
+            RefusalReason.PER_CALL_DB_CONFIG,
+            (
+                "chunk-level update does not take per-call vector_db_config/graph_db_config; "
+                "configure stores through environment settings and the dataset-context routing"
+            ),
+        )
+    return None

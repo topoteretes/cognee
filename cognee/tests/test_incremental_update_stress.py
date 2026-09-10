@@ -452,8 +452,9 @@ async def _verify(
 
     # -- Update summary agrees with the observed id-diff -------------------- #
     if summary is not None:
-        assert summary["status"] == ("unchanged" if not expect_run else "incremental"), (
-            f"{label}: unexpected status {summary['status']}"
+        assert summary.mode == "incremental", f"{label}: the chunk-level path did not run"
+        assert summary.status == ("unchanged" if not expect_run else "updated"), (
+            f"{label}: unexpected status {summary.status}"
         )
         if expect_run:
             # The summary counts WORK (chunks extracted / chunks deleted); the
@@ -465,13 +466,13 @@ async def _verify(
             # wasted spend, not wrongness — correctness is pinned by the
             # structure/ownership/vector asserts. Here we pin only that the
             # graph never changes MORE than the summary accounts for.
-            assert len(added_ids) <= summary["added_chunks"], (
+            assert len(added_ids) <= summary.chunks.added, (
                 f"{label}: graph gained {len(added_ids)} chunks but the "
-                f"summary reports only {summary['added_chunks']} added"
+                f"summary reports only {summary.chunks.added} added"
             )
-            assert len(dead_ids) <= summary["deleted_chunks"], (
+            assert len(dead_ids) <= summary.chunks.deleted, (
                 f"{label}: graph lost {len(dead_ids)} chunks but the "
-                f"summary reports only {summary['deleted_chunks']} deleted"
+                f"summary reports only {summary.chunks.deleted} deleted"
             )
         else:
             assert all_chunk_ids == prev_chunk_ids, f"{label}: unchanged must not touch chunks"

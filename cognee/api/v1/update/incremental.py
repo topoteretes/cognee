@@ -127,12 +127,17 @@ class RefusalReason(str, Enum):
     Every refusal used to surface as one free-text message and one log line, so
     a permanent misconfiguration (an incompatible chunker, an unsupported
     backend) looked exactly like a first ingestion. The reason is logged as a
-    structured field so they are separable.
+    structured field and returned in ``UpdateResult.fallback_reason`` so they
+    are separable. The first three come from ``update()`` before this engine
+    is consulted; the rest are this engine's own refusals.
     """
 
+    DISABLED = "disabled"  # the caller passed chunk_level_diff=False
+    CUSTOM_EXTRACTION_CONFIG = "custom_extraction_config"  # graph_model / custom_prompt
+    PER_CALL_DB_CONFIG = "per_call_db_config"  # vector_db_config / graph_db_config
     UNSUPPORTED_BACKEND = "unsupported_backend"
     UNSUPPORTED_CHUNKER = "unsupported_chunker"
-    UNSUPPORTED_METADATA = "unsupported_metadata"
+    UNSUPPORTED_METADATA = "unsupported_metadata"  # node_set, label, external metadata, rename
     NO_BASELINE = "no_baseline"
     CHUNKS_NOT_TILING = "chunks_not_tiling"
     UNREADABLE_TEXT = "unreadable_text"
@@ -467,9 +472,8 @@ def _changed_staged_metadata(data, old_data: Data, staged: StagedContent) -> lis
 def _unchanged_result(reindexed: int) -> dict:
     """The no-op result, shaped like the incremental one.
 
-    The router returns this dict verbatim as the HTTP body, and both the SDK
-    docstring and the route documentation advertise the same keys for either
-    status — so a client reading kept_chunks must not get a KeyError on a no-op.
+    ``update()`` turns both into the same ``UpdateResult.chunks``, so a no-op
+    reports every counter (as zero) rather than omitting them.
     """
     return {
         "status": "unchanged",
@@ -642,7 +646,7 @@ async def _run_incremental_update(
     # A no-op with nothing to repair is the only path that writes nothing, and
     # so the only one that records no run.
     if bundle.get("status") == "unchanged" and not bundle.get("repairs"):
-        return _unchanged_result(0)
+        return {**_unchanged_result(0), "pipeline_run_id": None}
 
     pipeline_id = generate_pipeline_id(user.id, dataset.id, RUN_PIPELINE_NAME)
     pipeline_run = await log_pipeline_run_start(
@@ -687,7 +691,7 @@ async def _run_incremental_update(
         user.id,
         additional_properties={"dataset_id": str(dataset.id), "data_id": str(data_id), **result},
     )
-    return result
+    return {**result, "pipeline_run_id": pipeline_run.pipeline_run_id}
 
 
 async def _stage_and_plan(

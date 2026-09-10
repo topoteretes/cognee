@@ -295,7 +295,7 @@ async def test_entity_orphaned_by_update_is_deleted(ownership_env):
     result = await cognee.update(
         data_id, "Hole met Rabbit.\n\nRabbit met Alice.\n\nNothing remains.", dataset.id, user=user
     )
-    assert result["status"] == "incremental", result
+    assert (result.mode, result.status) == ("incremental", "updated"), result
 
     after = await _view(user, dataset)
     assert "queen" not in after.entities, (
@@ -325,7 +325,7 @@ async def test_fact_survives_loss_of_its_first_producer(ownership_env):
     result = await cognee.update(
         data_id, "Alice met Queen.\n\nAlice met Queen again today.", dataset.id, user=user
     )
-    assert result["status"] == "incremental", result
+    assert (result.mode, result.status) == ("incremental", "updated"), result
     stated_twice = await _view(user, dataset)
     assert len(stated_twice.supporting("alice", "queen")) == 2, "both paragraphs state the fact"
     ownership_before = stated_twice.describe_edge("alice", "queen")
@@ -333,7 +333,7 @@ async def test_fact_survives_loss_of_its_first_producer(ownership_env):
     result = await cognee.update(
         data_id, "Nothing here.\n\nAlice met Queen again today.", dataset.id, user=user
     )
-    assert result["status"] == "incremental", result
+    assert (result.mode, result.status) == ("incremental", "updated"), result
     after = await _view(user, dataset)
     assert after.supporting("alice", "queen"), "a live chunk still states the fact"
     assert ("alice", "queen") in after.precedes, (
