@@ -12,11 +12,13 @@ export async function GET(request: NextRequest) {
   if (apiKey) headers["x-api-key"] = apiKey;
 
   // Server-side default-user login, used only when the browser sent no
-  // credentials at all. It runs only when DEFAULT_USER_PASSWORD is configured:
-  // the default user has no loginable password otherwise, and this route must
-  // never carry a publicly-known credential of its own.
-  const defaultUserPassword = process.env.DEFAULT_USER_PASSWORD;
-  if (!cookie && !authHeader && !apiKey && defaultUserPassword) {
+  // credentials at all. DEFAULT_USER_PASSWORD is the configured password;
+  // the literal is the pre-SDK-549 default, kept so deployments created before
+  // that change keep working. On a new install the default user's password is
+  // random and unrecorded, so this attempt simply fails and the request is
+  // forwarded unauthenticated, exactly as it would with no fallback at all.
+  const defaultUserPassword = process.env.DEFAULT_USER_PASSWORD || "default_password";
+  if (!cookie && !authHeader && !apiKey) {
     try {
       const loginResp = await fetch(`${localApiUrl}/api/v1/auth/login`, {
         method: "POST",

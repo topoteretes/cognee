@@ -6,10 +6,11 @@ import AuthCard from "@/ui/elements/Auth/AuthCard";
 import { getLocalApiUrl } from "@/modules/users/getLocalApiUrl";
 
 const DEFAULT_EMAIL = "default_user@example.com";
-// No password prefill: the default user only has a loginable password when the
-// operator sets DEFAULT_USER_PASSWORD, so prefilling a fixed literal would just
-// pre-fail the form (and taught everyone a public superuser credential).
-const DEFAULT_PASSWORD = "";
+// The pre-SDK-549 default, kept as a prefill so deployments created before that
+// change log in exactly as they did. New installs give the default user a
+// random, unrecorded password, so there the prefill fails until the operator
+// sets DEFAULT_USER_PASSWORD -- the field is editable either way.
+const DEFAULT_PASSWORD = "default_password";
 
 export default function LocalSignInForm() {
   const localApiUrl = getLocalApiUrl();
