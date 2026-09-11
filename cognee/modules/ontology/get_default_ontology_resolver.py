@@ -17,8 +17,15 @@ def get_default_ontology_resolver() -> BaseOntologyResolver:
 
 def get_configured_ontology_resolver(
     config: Config | None = None,
+    ontology_file_path: str | None = None,
 ) -> BaseOntologyResolver | None:
-    """Resolve the ontology resolver from an explicit config or the environment."""
+    """Resolve an explicit file path, configured resolver, or environment in that order."""
+    if ontology_file_path:
+        return get_ontology_resolver_from_env(
+            ontology_resolver="rdflib",
+            matching_strategy="fuzzy",
+            ontology_file_path=ontology_file_path,
+        )
     if config is not None:
         ontology_config = config.get("ontology_config")
         if isinstance(ontology_config, dict) and "ontology_resolver" in ontology_config:

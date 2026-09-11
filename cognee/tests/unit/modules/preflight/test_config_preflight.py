@@ -94,6 +94,16 @@ class TestOnlyEmbeddingsConfiguredTrap:
         assert len(problems) == 1
         assert "LLM_API_KEY" in problems[0]
 
+    def test_missing_llm_key_is_fine_when_the_pipeline_needs_no_llm(self):
+        # needs_llm=False (e.g. the gliner extractor with contradiction
+        # detection off): ingestion needs embeddings, not an LLM.
+        problems = check_provider_config(
+            llm(provider="openai", api_key=None),
+            embeddings(provider="fastembed", model="BAAI/bge-small-en-v1.5"),
+            needs_llm=False,
+        )
+        assert problems == []
+
     def test_whitespace_llm_key_counts_as_missing(self):
         problems = check_provider_config(
             llm(api_key="   "),
@@ -139,6 +149,33 @@ class TestFullyConfiguredAndUnconfigured:
         assert problems == []
 
 
+class TestLlmAvailable:
+    def test_key_bearing_provider_needs_a_key(self):
+        from cognee.modules.preflight import llm_available
+
+        assert llm_available(llm(provider="openai", api_key=None)) is False
+        assert llm_available(llm(provider="openai", api_key="   ")) is False
+        assert llm_available(llm(provider="openai", api_key="sk-test")) is True
+
+    def test_keyless_providers_are_available_without_a_key(self):
+        from cognee.modules.preflight import llm_available
+
+        assert llm_available(llm(provider="bedrock", api_key=None)) is True
+        assert llm_available(llm(provider="llama_cpp", api_key=None)) is True
+        assert llm_available(llm(provider="azure", api_key=None, managed_identity=True)) is True
+
+    @pytest.mark.parametrize("session, expected", [(object(), True), (None, False)])
+    def test_mcp_sampling_requires_a_live_session(self, monkeypatch, session, expected):
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.mcp_sampling import (
+            session_context,
+        )
+        from cognee.modules.preflight import llm_available
+
+        monkeypatch.setattr(session_context, "get_sampling_session", lambda: session)
+
+        assert llm_available(llm(provider="mcp-sampling", api_key=None)) is expected
+
+
 class TestValidateProviderConfig:
     @pytest.fixture(autouse=True)
     def fresh_state(self):
@@ -170,6 +207,22 @@ class TestValidateProviderConfig:
         validate_provider_config()
         validate_provider_config()
         assert len(calls) == 1
+
+    def test_llm_free_pass_does_not_cover_a_later_llm_requiring_call(self, monkeypatch):
+        monkeypatch.delenv("COGNEE_SKIP_PREFLIGHT", raising=False)
+        monkeypatch.delenv("COGNEE_SKIP_CONNECTION_TEST", raising=False)
+        monkeypatch.delenv("MOCK_EMBEDDING", raising=False)
+        calls = []
+        monkeypatch.setattr(
+            config_preflight,
+            "check_provider_config",
+            lambda *a, **k: calls.append(k["needs_llm"]) or [],
+        )
+        validate_provider_config(needs_llm=False)
+        validate_provider_config(needs_llm=True)  # stricter shape: must re-run
+        validate_provider_config(needs_llm=True)
+        validate_provider_config(needs_llm=False)  # covered by the True pass
+        assert calls == [False, True]
 
     @pytest.mark.parametrize(
         "env_var", ["COGNEE_SKIP_PREFLIGHT", "COGNEE_SKIP_CONNECTION_TEST", "MOCK_EMBEDDING"]

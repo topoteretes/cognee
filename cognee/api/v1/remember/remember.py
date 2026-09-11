@@ -54,6 +54,7 @@ class RememberKwargs(TypedDict, total=False):
     """Power-user overrides for remember(). Most users never need these."""
 
     graph_model: Any
+    extractor: Literal["llm", "gliner"]
     node_set: list[str]
     preferred_loaders: list
     incremental_loading: bool
@@ -90,7 +91,9 @@ _ADD_ONLY = frozenset(
         "max_rows_per_table",
     }
 )
-_COGNIFY_ONLY = frozenset({"graph_model", "chunks_per_batch", "config", "temporal_cognify"})
+_COGNIFY_ONLY = frozenset(
+    {"graph_model", "extractor", "chunks_per_batch", "config", "temporal_cognify"}
+)
 _SHARED = frozenset(
     {
         "user",
@@ -836,6 +839,14 @@ async def remember(
         if kwargs.get("content_type"):
             raise ValueError("dry_run is supported for standard add+cognify remember inputs only.")
 
+        from cognee.modules.cognify.config import get_cognify_config, resolve_extractor
+
+        if resolve_extractor(kwargs.get("extractor"), get_cognify_config()) == "gliner":
+            raise ValueError(
+                "dry_run estimates the LLM extraction pipeline only; it has no cost model "
+                "for the gliner extractor."
+            )
+
         from cognee.api.v1.serve.state import get_remote_client
 
         if get_remote_client() is not None:
@@ -856,6 +867,9 @@ async def remember(
             graph_model=kwargs.get("graph_model") or KnowledgeGraph,
             custom_prompt=custom_prompt,
         )
+
+    if session_id is not None and kwargs.get("extractor") is not None:
+        raise ValueError("extractor is not supported when session_id is provided.")
 
     data_size = _estimate_data_size(data)
     item_count = len(data) if isinstance(data, list) else 1
@@ -960,6 +974,13 @@ async def _remember_inner(
 
     client = get_remote_client()
     if client is not None:
+        if kwargs.get("extractor") is not None:
+            # client.remember() whitelists its form fields and would silently
+            # drop the extractor choice, so an explicit one has to raise.
+            raise ValueError(
+                "extractor is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to choose the extractor locally."
+            )
         span.set_attribute(COGNEE_OPERATION_MODE, "cloud")
         return await client.remember(
             data,
@@ -975,9 +996,21 @@ async def _remember_inner(
     # Fail loudly on inconsistent LLM/embedding provider config before any DB
     # or ingestion work — otherwise the mismatch surfaces minutes later as an
     # opaque auth error mid-cognify. Cheap (no network), once per process.
+    # needs_llm comes from the same resolution cognify() will make for this
+    # call, so the gate and the pipeline it guards cannot disagree.
+    from cognee.modules.cognify.config import (
+        default_pipeline_needs_llm,
+        get_cognify_config,
+        resolve_extractor,
+    )
     from cognee.modules.preflight import validate_provider_config
 
-    validate_provider_config()
+    cognify_config = get_cognify_config()
+    validate_provider_config(
+        needs_llm=default_pipeline_needs_llm(
+            resolve_extractor(kwargs.get("extractor"), cognify_config), cognify_config
+        )
+    )
 
     # Run vector migrations lazily on the first local SDK call.
     # This ensures stale LanceDB schemas are migrated before any
