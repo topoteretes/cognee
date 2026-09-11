@@ -732,9 +732,18 @@ class BroadRetriever(CompletionRetriever):
         return shards, total_tokens
 
     async def extract(self, plan: CountPlan, shard: list[Unit]) -> ShardItems:
+        condition = plan.condition or "none"
+        if plan.reversible and plan.condition:
+            # The planner may restate the state ("currently open, not resolved");
+            # applied per entry that would skip the very entries that end an item.
+            condition += (
+                " — this selects which items are of interest, never their current "
+                "state: list EVERY state entry (opened, resolved, reopened, removed) of "
+                "such items; code decides the state from the latest entry"
+            )
         spec = (
             f"Item: {plan.item}\n"
-            f"Condition: {plan.condition or 'none'}\n"
+            f"Condition: {condition}\n"
             f"Identity attribute (key): {plan.dedup_key or 'none'}\n"
             f"Grouping attribute (group): {plan.group_by or 'none'}\n"
             f"Amount to report (amount): {plan.measure or 'none'}\n"

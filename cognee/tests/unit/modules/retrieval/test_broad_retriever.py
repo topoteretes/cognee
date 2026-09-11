@@ -471,6 +471,25 @@ def test_the_latest_dated_entry_decides_an_items_state():
 
 
 @pytest.mark.asyncio
+async def test_a_reversible_plans_condition_never_filters_state_entries(monkeypatch):
+    """The planner wrote "currently open, not resolved"; applied per entry that would
+    skip the resolve entries the state machine needs."""
+    seen = []
+
+    def respond(model, text_input):
+        seen.append(text_input)
+        return ShardItems(items=[])
+
+    _stub_llm(monkeypatch, respond)
+    plan = _plan(condition="currently open, not resolved", reversible=True, dedup_key="ticket")
+
+    await BroadRetriever().count_by_reading(plan, _units(1))
+
+    assert "list EVERY state entry (opened, resolved, reopened, removed)" in seen[0]
+    assert "code decides the state from the latest entry" in seen[0]
+
+
+@pytest.mark.asyncio
 async def test_a_percentage_is_two_counts_from_one_pass(monkeypatch):
     shard = ShardItems(
         items=[
