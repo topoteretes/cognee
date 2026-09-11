@@ -679,6 +679,54 @@ async def test_stated_aliases_merge_by_code_even_when_the_model_does_not(monkeyp
     assert result.groups == [("Arthur Bennett", 2), ("Yuki Sato", 1)]
 
 
+def test_an_alias_returned_as_a_sentence_is_split_into_its_names():
+    """The extractor sometimes returns the stating sentence as one string."""
+    groups = broad_retriever._alias_groups(
+        [
+            ["Pavel Horák is Pav"],
+            ["Akshats-git (usually called Akshats)"],
+            ["Robert, known as Bob"],
+            ["Maria Duarte", "Maria"],
+            ["Lone Name"],
+        ]
+    )
+
+    assert groups == [
+        ["Pavel Horák", "Pav"],
+        ["Akshats-git", "Akshats"],
+        ["Robert", "Bob"],
+        ["Maria Duarte", "Maria"],
+    ]
+
+
+@pytest.mark.asyncio
+async def test_only_read_names_reach_the_model_as_stated_aliases(monkeypatch):
+    """A roster's four alias sets came back as four sentence-strings in one group. None
+    is a read name, so they must not be presented to the model as "the same": it
+    would obey and fold four people into one (Esme Nkemelu, 155 contributions)."""
+    seen: list[str] = []
+    sentences = ["Pavel Horák is Pav", "Anna Lund is Annie", "Esme Nkemelu is Es"]
+    shard = ShardItems(
+        items=[_item("Pavel Horák", "1"), _item("Anna Lund", "2"), _item("Esme Nkemelu", "3")],
+        aliases=[sentences],  # the sentences reach merge only if parsing failed on them
+    )
+
+    def respond(model, text):
+        if model is NameGroups:
+            seen.append(text)
+            return NameGroups(groups=[])
+        return shard
+
+    _stub_llm(monkeypatch, respond)
+    monkeypatch.setattr(broad_retriever, "_alias_groups", lambda raw: raw)  # force the raw form
+    plan = _plan(group_by="contributor", dedup_key="the contribution's number")
+
+    result = await BroadRetriever().count_by_reading(plan, _units(1))
+
+    assert "Stated" not in seen[0]
+    assert set(result.groups) == {("Pavel Horák", 1), ("Anna Lund", 1), ("Esme Nkemelu", 1)}
+
+
 def test_a_long_paragraph_is_cut_at_sentence_ends_never_inside_one():
     retriever = BroadRetriever(shard_tokens=30)
     sentences = [f"Record {i} was opened by someone for issue {i}." for i in range(12)]
@@ -803,10 +851,12 @@ async def test_name_variants_are_merged_before_tallying(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_aliases_stated_in_the_text_reach_the_merge_step(monkeypatch):
-    """A roster line ("Akshats-git (usually called Akshats)") is the evidence a merge needs."""
+    """A roster line ("Akshats-git (usually called Akshats)") is the evidence a merge needs,
+    once both spellings were read."""
     shard = ShardItems(
         items=[
             ExtractedItem(unit=0, group="Akshats", evidence="Akshats took #1"),
+            ExtractedItem(unit=0, group="Akshats-git", evidence="Akshats-git took #3"),
             ExtractedItem(unit=0, group="Megha-gbs", evidence="Megha-gbs took #2"),
         ],
         aliases=[["Akshats-git", "Akshats"]],

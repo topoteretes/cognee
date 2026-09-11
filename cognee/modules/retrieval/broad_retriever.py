@@ -177,11 +177,19 @@ def _number(value: float) -> str:
     return str(int(value)) if float(value).is_integer() else f"{value:,.2f}"
 
 
+# What the model writes between names when it returns a stated alias as one string
+# ("Pavel Horák is Pav", "Robert, known as Bob", "Maria Duarte (Maria)").
+_ALIAS_JOINERS = re.compile(
+    r"\s*(?:[,;()=]|\bis\b|\b(?:usually |often |also )?(?:known as|called|aka)\b)\s*", re.IGNORECASE
+)
+
+
 def _alias_groups(raw: list[list[str]]) -> list[list[str]]:
-    """Alias groups as lists of names; a group returned as one "a, b" string is split."""
+    """Alias groups as lists of names; an entry written as a sentence is split into its names."""
     groups = []
     for group in raw:
-        names = [name.strip() for entry in group for name in entry.split(",") if name.strip()]
+        names = [name.strip() for entry in group for name in _ALIAS_JOINERS.split(entry)]
+        names = [name for name in names if name]
         if len(names) > 1:
             groups.append(names)
     return groups
@@ -807,7 +815,13 @@ class BroadRetriever(CompletionRetriever):
         if len(names) < 2:
             return {name: name for name in names}
 
-        stated = _stated_aliases(aliases)
+        # Only names that were read reach the model as stated aliases: a string that
+        # is not a read name cannot change a count, and one that is a whole sentence
+        # ("Pavel Horák is Pav") would make the model merge whatever else stands
+        # next to it.
+        stated = _stated_aliases(
+            [group for group in _match_stated(aliases, names) if len(set(group)) > 1]
+        )
         text_input = "\n".join(sorted(names))
         if stated:
             text_input += "\n\nStated in the text to be the same:\n" + "\n".join(stated)
