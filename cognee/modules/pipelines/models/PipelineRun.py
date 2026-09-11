@@ -28,10 +28,14 @@ class OperationOutcome(str, enum.Enum):
 
 class PipelineRun(Base):
     __tablename__ = "pipeline_runs"
+    # One tuple, not one per index: a second __table_args__ assignment silently
+    # replaces the first, and that is what kept the composite below out of every
+    # create_all database until it was noticed.
     __table_args__ = (
         # Covers get_pipeline_status.py / get_pipeline_progress.py's
         # ROW_NUMBER() lookup of each dataset's latest run for a pipeline
-        # (filter on dataset_id + pipeline_name, order by created_at DESC).
+        # (filter on dataset_id + pipeline_name, order by created_at DESC),
+        # and log_pipeline_run_start.py's delete of that pair's reset marker.
         # See alembic/versions/d1e2f3a4b5c6_add_pipeline_runs_status_index.py
         # for the migration that adds this to existing databases.
         Index(

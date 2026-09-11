@@ -46,6 +46,7 @@ async def test_recover_stale_cognify_runs_executes_rollback_for_latest_candidate
         pipeline_name="cognify_pipeline",
         dataset_id=dataset_id,
         pipeline_run_id=pipeline_run_id,
+        pipeline_id=uuid4(),
         status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
         created_at=datetime.now(timezone.utc) - timedelta(hours=2),
     )
@@ -60,8 +61,8 @@ async def test_recover_stale_cognify_runs_executes_rollback_for_latest_candidate
     async def _rollback_handler(**kwargs):
         rollback_calls.append(kwargs)
 
-    async def _reset_status(**kwargs):
-        reset_calls.append(kwargs)
+    async def _reset_status(run, **kwargs):
+        reset_calls.append({"run": run, **kwargs})
 
     async def _fake_latest_runs(_dataset_ids, _pipeline_name):
         return {dataset_id: stale_run}
@@ -77,10 +78,16 @@ async def test_recover_stale_cognify_runs_executes_rollback_for_latest_candidate
     assert len(rollback_calls) == 1
     assert rollback_calls[0]["pipeline_run_id"] == pipeline_run_id
     assert rollback_calls[0]["dataset"] == dataset
-    # The lingering STARTED status must be reset so a re-run is not blocked.
+    # The lingering STARTED status must be reset so a re-run is not blocked,
+    # and the reset must name the run it resets: the marker it writes carries
+    # that run's identity, and a marker under a different identity is one
+    # log_pipeline_run_start never clears.
     assert len(reset_calls) == 1
-    assert reset_calls[0]["dataset_id"] == dataset_id
-    assert reset_calls[0]["pipeline_name"] == "cognify_pipeline"
+    assert reset_calls[0]["run"] is stale_run
+    assert reset_calls[0]["run"].dataset_id == dataset_id
+    assert reset_calls[0]["run"].pipeline_run_id == pipeline_run_id
+    assert reset_calls[0]["run"].pipeline_name == "cognify_pipeline"
+    assert reset_calls[0]["user_id"] == owner_id
 
 
 @pytest.mark.asyncio
