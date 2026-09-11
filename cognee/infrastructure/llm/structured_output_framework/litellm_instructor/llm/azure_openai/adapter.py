@@ -23,8 +23,7 @@ from tenacity import (
 
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
-    LLMPaymentRequiredError,
-    is_budget_exhausted_error,
+    raise_if_budget_exhausted,
 )
 from cognee.infrastructure.llm.retry_config import (
     llm_retry_condition,
@@ -237,8 +236,16 @@ class AzureOpenAIAdapter(OpenAIAdapter):
             ContentFilterFinishReasonError,
             ContentPolicyViolationError,
             InstructorRetryException,
-        ):
+        ) as error:
             if not (self.fallback_model and self.fallback_api_key):
+                # Nothing left to try, so classify here: the handler further down
+                # is unreachable once this clause matches. A budget rejection with
+                # a configured fallback is deliberately NOT classified at this
+                # point — the fallback carries a different key, so a per-key spend
+                # cap is precisely the case the fallback exists for. Classifying
+                # earlier would silently remove that failover. A fallback that
+                # caps out in turn is classified by the nested handler below.
+                raise_if_budget_exhausted(error)
                 raise
             # Fall back to litellm for fallback model
             try:
@@ -266,6 +273,12 @@ class AzureOpenAIAdapter(OpenAIAdapter):
                 ContentPolicyViolationError,
                 InstructorRetryException,
             ) as error:
+                # The fallback capped out too. Checked before the content-policy
+                # branch because the model's partial completion is rendered into
+                # str(error), so a budget rejection whose completion happens to
+                # mention a content policy would otherwise be misclassified.
+                raise_if_budget_exhausted(error)
+
                 if (
                     isinstance(error, InstructorRetryException)
                     and "content management policy" not in str(error).lower()
@@ -276,6 +289,6 @@ class AzureOpenAIAdapter(OpenAIAdapter):
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"
                     ) from error
         except Exception as e:
-            if is_budget_exhausted_error(e):
-                raise LLMPaymentRequiredError() from e
+            # Same detail-carrying message as the wrapped-error paths above.
+            raise_if_budget_exhausted(e)
             raise
