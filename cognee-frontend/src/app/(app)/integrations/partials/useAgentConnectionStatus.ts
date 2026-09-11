@@ -14,10 +14,9 @@ const UNCONNECTED: Record<string, boolean> = Object.fromEntries(
 );
 
 /**
- * One-shot (not polled) session lookup for the Agents card badges — this page
- * just needs "did this agent ever check in", not the dashboard's live feed.
- * Delegates the actual session_id → integration matching to the existing
- * useConnectedIntegrations hook so both pages agree on what "Connected" means.
+ * One-shot session lookup for the Agents card badges. Delegates matching and
+ * active-connection polling to the existing useConnectedIntegrations hook so
+ * this page and the dashboard agree on what "Connected" means.
  * That hook only ever reports `true` (sticky, never flips back to false), so
  * we seed every known key at `false` first and let real detections override it —
  * otherwise cards that were never connected would render no badge at all.
