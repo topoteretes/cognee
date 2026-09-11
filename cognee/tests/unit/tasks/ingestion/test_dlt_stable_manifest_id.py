@@ -168,3 +168,74 @@ async def test_csv_paths_pass_through_resolve_untouched():
 
     assert result == data
     assert cleanup is None
+
+
+@pytest.mark.asyncio
+async def test_update_pinned_dlt_source_is_unwrapped_and_resolved():
+    """update()'s full rebuild re-adds the replacement as a DataItem wrapping the
+    dlt resource, pinned to the manifest's id. resolve must ingest it like a
+    bare resource and hand back the manifest, not pass the wrapper through to
+    the loader (which cannot read a DltResource)."""
+    dlt = pytest.importorskip("dlt")
+
+    import sys
+
+    import cognee.tasks.ingestion.resolve_dlt_sources
+
+    resolve_module = sys.modules["cognee.tasks.ingestion.resolve_dlt_sources"]
+
+    @dlt.resource(name="people")
+    def people():
+        yield {"id": 1}
+
+    manifest_id = uuid4()
+    manifest = DataItem(
+        data="{}",
+        system_metadata={"source": "dlt_source", "source_name": "people"},
+        data_id=manifest_id,
+    )
+    ingest = AsyncMock(return_value=["row"])
+
+    with (
+        patch.object(resolve_module, "ingest_dlt_source", new=ingest),
+        patch.object(resolve_module, "get_unique_data_id", new=AsyncMock(return_value=manifest_id)),
+        patch.object(
+            resolve_module, "_build_source_manifest_item", new=AsyncMock(return_value=manifest)
+        ),
+    ):
+        result, _cleanup = await resolve_module.resolve_dlt_sources(
+            DataItem(data=people(), data_id=manifest_id), "ds", user=SimpleNamespace(id=uuid4())
+        )
+
+    ingest.assert_awaited_once()
+    assert result == [manifest]
+
+
+@pytest.mark.asyncio
+async def test_update_pinned_dlt_source_must_keep_its_source_name():
+    """A replacement resolving to another manifest identity is a different
+    document; rebuilding it under the old id is refused before any write."""
+    dlt = pytest.importorskip("dlt")
+
+    import sys
+
+    import cognee.tasks.ingestion.resolve_dlt_sources
+    from cognee.exceptions import CogneeValidationError
+
+    resolve_module = sys.modules["cognee.tasks.ingestion.resolve_dlt_sources"]
+
+    @dlt.resource(name="staff")
+    def staff():
+        yield {"id": 1}
+
+    ingest = AsyncMock(return_value=["row"])
+    with (
+        patch.object(resolve_module, "ingest_dlt_source", new=ingest),
+        patch.object(resolve_module, "get_unique_data_id", new=AsyncMock(return_value=uuid4())),
+        pytest.raises(CogneeValidationError, match="same source name"),
+    ):
+        await resolve_module.resolve_dlt_sources(
+            DataItem(data=staff(), data_id=uuid4()), "ds", user=SimpleNamespace(id=uuid4())
+        )
+
+    ingest.assert_not_awaited()

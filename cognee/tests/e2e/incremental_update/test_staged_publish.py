@@ -175,7 +175,7 @@ async def _scenario():
     text_v2 = text_v1.replace("ENTB", "ENTB2", 1)
     try:
         with pytest.raises(RuntimeError, match="simulated crash"):
-            await cognee.update(data_id, text_v2, dataset.id, user=user)
+            await cognee.update(text_v2, dataset.id, data_id=data_id, user=user)
     finally:
         engine.publish_updated_data = original_publish
 
@@ -194,7 +194,7 @@ async def _scenario():
     # The crashed write phase left the graph no longer tiling the old stored
     # text, so this update fails the tiling gate, falls back to the full
     # rebuild — and, by run-record discipline, logs NO incremental run.
-    await cognee.update(data_id, text_v2, dataset.id, user=user)
+    await cognee.update(text_v2, dataset.id, data_id=data_id, user=user)
     assert await _stored_text(user, data_id, dataset.id) == text_v2
     row_v2 = await get_data(user.id, data_id, dataset.id)
     assert row_v2.content_hash != hash_v1, "the healed update landed the new content"
@@ -205,7 +205,7 @@ async def _scenario():
 
     # ── 3. a genuine incremental edit over the healed baseline ────────────── #
     text_v3 = text_v2.replace("ENTC", "ENTC3", 1)
-    result = await cognee.update(data_id, text_v3, dataset.id, user=user)
+    result = await cognee.update(text_v3, dataset.id, data_id=data_id, user=user)
     assert isinstance(result, dict) and result.get("status") == "incremental"
     assert await _stored_text(user, data_id, dataset.id) == text_v3
     runs = await _run_records(dataset.id)
@@ -215,8 +215,12 @@ async def _scenario():
     baseline_count = len(runs)
 
     # Unchanged re-submission: zero new run records.
-    unchanged = await cognee.update(data_id, text_v3, dataset.id, user=user)
-    assert isinstance(unchanged, dict) and unchanged.get("status") == "unchanged"
+    unchanged = await cognee.update(text_v3, dataset.id, data_id=data_id, user=user)
+    assert unchanged["status"] == "unchanged", unchanged
+    assert unchanged["pipeline_run_id"] is None, "a no-op records no run"
+    assert unchanged["kept_chunks"] == unchanged["total_chunks"] == result["total_chunks"], (
+        "unchanged content keeps every chunk"
+    )
     assert len(await _run_records(dataset.id)) == baseline_count, (
         "an unchanged update must leave no run-record noise"
     )
@@ -225,7 +229,9 @@ async def _scenario():
     # for the incremental pipeline — the full flow takes over silently.
     await cognee.add("plain new doc ENTFRESH content.", dataset_name="staged")
     fresh_id = next(r.id for r in await get_dataset_data(dataset.id) if r.id != data_id)
-    await cognee.update(fresh_id, "plain new doc ENTFRESH content v2.", dataset.id, user=user)
+    await cognee.update(
+        "plain new doc ENTFRESH content v2.", dataset.id, data_id=fresh_id, user=user
+    )
     assert len(await _run_records(dataset.id)) == baseline_count, (
         "a refused (precondition-failed) update must create no incremental run record"
     )

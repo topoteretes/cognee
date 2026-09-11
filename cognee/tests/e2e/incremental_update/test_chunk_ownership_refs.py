@@ -181,7 +181,7 @@ async def _scenario():
     # (the deleted chunk breaks tiling; the update self-heals via full
     # rebuild, which itself must produce chunk-scoped refs again)
     text_v2 = text + _para("c")
-    await cognee.update(data_id, text_v2, dataset.id, user=user)
+    await cognee.update(text_v2, dataset.id, data_id=data_id, user=user)
     refs_by_node = await _refs_by_node(graph, dataset.id)
     fresh_v2 = [
         ref

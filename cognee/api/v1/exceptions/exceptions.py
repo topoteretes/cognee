@@ -67,6 +67,113 @@ class UpdateTargetNotFoundError(CogneeValidationError):
         super().__init__(message, name, status_code)
 
 
+class DocumentUpdateRequiredError(CogneeValidationError):
+    """add() was given a file that already exists in the dataset with other content.
+
+    add() creates documents and leaves existing ones alone: a file that
+    matches a stored document by origin (the same path, or the same filename
+    for an upload) but carries different content is an update, and updates
+    go through update() so the document keeps its id and its graph is
+    replaced in place instead of a second copy being minted. Identical
+    content is not an error: re-adding it is a no-op.
+
+    ``conflicts`` lists every offending file as ``{"name", "data_id"}`` and
+    ``api_message`` says the same thing for HTTP callers, pointing at
+    ``PATCH /api/v1/update``.
+    """
+
+    def __init__(
+        self,
+        conflicts: list[dict],
+        dataset_id,
+        name: str = "DocumentUpdateRequiredError",
+        status_code: int = status.HTTP_409_CONFLICT,
+    ):
+        self.conflicts = conflicts
+        self.dataset_id = dataset_id
+        super().__init__(self._describe(sdk=True), name, status_code)
+
+    @property
+    def api_message(self) -> str:
+        """The same refusal for HTTP callers, pointing at the update endpoint."""
+        return self._describe(sdk=False)
+
+    def _describe(self, sdk: bool) -> str:
+        listed = ", ".join(f"'{c['name']}' (data_id {c['data_id']})" for c in self.conflicts)
+        # With one offending file the pointer is the exact call to make.
+        data_id = self.conflicts[0]["data_id"] if len(self.conflicts) == 1 else "<data_id>"
+        verb = "exists" if len(self.conflicts) == 1 else "exist"
+        if sdk:
+            return (
+                f"add() does not update documents. {listed} already {verb} in dataset "
+                f"{self.dataset_id} with different content. To replace the stored version, call "
+                f"cognee.update(data=<new content>, dataset_id={self.dataset_id}, "
+                f"data_id={data_id})"
+                f"{'' if len(self.conflicts) == 1 else ' for each document'}, or "
+                "cognee.update(<the same file>, dataset_id=...) which matches it by path or "
+                "filename; identical content can be re-added and is a no-op."
+            )
+        return (
+            f"POST /api/v1/add does not update documents. {listed} already {verb} in "
+            f"dataset {self.dataset_id} with different content. Send the new version to "
+            f"PATCH /api/v1/update?data_id={data_id}&dataset_id={self.dataset_id} (multipart "
+            "field 'data'), or cognee.update(...) from the SDK; identical content can be "
+            "re-added and is a no-op."
+        )
+
+
+class UpdateTargetNotInferredError(CogneeValidationError):
+    """update() was called without a data_id and could not infer one from the input.
+
+    update() matches a local file by its path and an upload by its filename
+    against the documents of the dataset. Raw text, a renamed or moved file,
+    an origin no document came from, or one that several documents share
+    cannot be matched, so the caller has to say which document to replace.
+    Nothing is written before this is raised.
+
+    ``unresolved`` lists every offending input as ``{"input", "reason"}`` and
+    ``api_message`` says the same thing for HTTP callers, pointing at the
+    endpoints instead of the SDK calls.
+    """
+
+    def __init__(
+        self,
+        unresolved: list[dict],
+        dataset_id,
+        name: str = "UpdateTargetNotInferredError",
+        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ):
+        self.unresolved = unresolved
+        self.dataset_id = dataset_id
+        super().__init__(self._describe(sdk=True), name, status_code)
+
+    @property
+    def api_message(self) -> str:
+        """The same refusal for HTTP callers, pointing at the endpoints."""
+        return self._describe(sdk=False)
+
+    def _describe(self, sdk: bool) -> str:
+        listed = "; ".join(f"{u['input']}: {u['reason']}" for u in self.unresolved)
+        if sdk:
+            return (
+                f"update() could not determine which document in dataset {self.dataset_id} "
+                f"to replace ({listed}). A local file is matched by its path and an upload by "
+                "its filename; raw text and a renamed or moved file cannot be matched. List the "
+                "dataset's documents with await cognee.datasets.list_data(dataset_id) (or "
+                "`cognee-cli datasets data <dataset_id>`) to find the data_id, then call "
+                f"cognee.update(data=<new content>, dataset_id={self.dataset_id}, "
+                "data_id=<data_id>)."
+            )
+        return (
+            f"PATCH /api/v1/update could not determine which document in dataset "
+            f"{self.dataset_id} to replace ({listed}). An upload is matched by its filename; "
+            "raw text and a renamed file cannot be matched. List the dataset's documents with "
+            f"GET /api/v1/datasets/{self.dataset_id}/data to find the data_id, then send the "
+            f"new version to PATCH /api/v1/update?data_id=<data_id>&dataset_id={self.dataset_id} "
+            "(multipart field 'data')."
+        )
+
+
 class DocumentSubgraphNotFoundError(CogneeValidationError):
     def __init__(
         self,
