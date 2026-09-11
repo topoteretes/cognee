@@ -1,8 +1,9 @@
 from types import SimpleNamespace
 import pytest
 import os
+import time
 from unittest.mock import AsyncMock, patch, MagicMock
-from datetime import datetime
+from datetime import datetime, timezone
 
 from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
 from cognee.tasks.temporal_graph.models import QueryInterval, Timestamp
@@ -786,3 +787,98 @@ async def test_extract_time_from_query_with_none_values():
 
     assert time_from is None
     assert time_to is None
+
+
+@pytest.mark.skipif(
+    not hasattr(time, "tzset"),
+    reason="time.tzset() is POSIX-only; TZ cannot be changed in-process on Windows",
+)
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tz_name",
+    [
+        "UTC",
+        "Asia/Tokyo",  # UTC+9
+        "Asia/Shanghai",  # UTC+8
+        "America/Los_Angeles",  # UTC-7/-8
+        "Pacific/Kiritimati",  # UTC+14
+        "Pacific/Midway",  # UTC-11
+    ],
+)
+async def test_extract_time_from_query_anchors_now_to_utc(tz_name, monkeypatch, request):
+    """The prompt's "current date" must be UTC, not the server's local date.
+
+    Event timestamps are written with ``datetime.now(timezone.utc)``, so a naive
+    ``datetime.now()`` anchor disagrees with the graph for part of every day in
+    any non-UTC zone: "what happened today" then resolves to the wrong calendar
+    day. Asserted against a real ``TZ`` rather than a mocked clock, since a
+    mocked ``datetime`` cannot show the drift this pins.
+
+    The zone list spans UTC-11 to UTC+14 on purpose: whether a given zone's
+    local date differs from UTC depends on the hour the suite runs, and a
+    narrower list silently passes during part of the day. With this spread at
+    least one zone disagrees with UTC at every instant, so the regression
+    cannot hide behind the clock.
+    """
+    monkeypatch.setenv("TZ", tz_name)
+    time.tzset()
+    # monkeypatch restores the env var, but tzset() has already mutated
+    # process-global state; re-apply it on teardown so later tests in this
+    # shard do not inherit this zone.
+    request.addfinalizer(time.tzset)
+
+    retriever = TemporalRetriever(time_extraction_prompt_path="extract_query_time.txt")
+    captured = {}
+
+    def fake_render_prompt(path, context, base_directory=None):
+        captured.update(context)
+        return "System prompt"
+
+    with (
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.render_prompt",
+            side_effect=fake_render_prompt,
+        ),
+        patch.object(
+            LLMGateway,
+            "acreate_structured_output",
+            new_callable=AsyncMock,
+            return_value=QueryInterval(),
+        ),
+    ):
+        await retriever.extract_time_from_query("What happened today?")
+
+    expected = datetime.now(timezone.utc).strftime("%d-%m-%Y")
+    assert captured["time_now"] == expected, (
+        f"in TZ={tz_name} the prompt was told 'today' is {captured['time_now']}, "
+        f"but the graph writes UTC timestamps, where today is {expected}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_extract_time_from_query_now_is_timezone_aware():
+    """The anchor is derived from an aware UTC datetime, not a naive one."""
+    retriever = TemporalRetriever(time_extraction_prompt_path="extract_query_time.txt")
+    captured = {}
+
+    def fake_render_prompt(path, context, base_directory=None):
+        captured.update(context)
+        return "System prompt"
+
+    with (
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.render_prompt",
+            side_effect=fake_render_prompt,
+        ),
+        patch.object(
+            LLMGateway,
+            "acreate_structured_output",
+            new_callable=AsyncMock,
+            return_value=QueryInterval(),
+        ),
+    ):
+        await retriever.extract_time_from_query("What happened today?")
+
+    # Must parse as a date and match UTC's day, not merely be well-formed.
+    parsed = datetime.strptime(captured["time_now"], "%d-%m-%Y").date()
+    assert parsed == datetime.now(timezone.utc).date()
