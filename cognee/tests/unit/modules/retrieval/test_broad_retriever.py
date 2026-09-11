@@ -679,6 +679,33 @@ async def test_stated_aliases_merge_by_code_even_when_the_model_does_not(monkeyp
     assert result.groups == [("Arthur Bennett", 2), ("Yuki Sato", 1)]
 
 
+@pytest.mark.asyncio
+async def test_merged_names_are_tallied_under_the_spelling_the_corpus_uses_most(monkeypatch):
+    """Match reports call Ciaran Rojas "the Lighthouse" 40% of the time; the roster
+    states the alias. The tally must read "Ciaran Rojas", not the longer nickname."""
+    shard = ShardItems(
+        items=[
+            _item("Ciaran Rojas", "1"),
+            _item("Ciaran Rojas", "2"),
+            _item("Ciaran Rojas", "3"),
+            _item("The Lighthouse", "4"),
+            _item("The Lighthouse", "5"),
+            _item("Yusuf Demir", "6"),
+        ],
+        aliases=[["Ciaran Rojas", "the Lighthouse"]],
+    )
+
+    def respond(model, _):
+        return shard if model is ShardItems else NameGroups(groups=[])
+
+    _stub_llm(monkeypatch, respond)
+    plan = _plan(group_by="scorer", dedup_key="the match and minute")
+
+    result = await BroadRetriever().count_by_reading(plan, _units(1))
+
+    assert result.groups == [("Ciaran Rojas", 5), ("Yusuf Demir", 1)]
+
+
 def test_an_alias_returned_as_a_sentence_is_split_into_its_names():
     """The extractor sometimes returns the stating sentence as one string."""
     groups = broad_retriever._alias_groups(
@@ -892,7 +919,9 @@ def _assignments(*pairs: tuple[str, str]) -> ShardItems:
 @pytest.mark.asyncio
 async def test_a_named_target_counts_its_group_under_every_spelling(monkeypatch):
     """ "Issues assigned to Megha": the handle and the nickname are one person."""
-    shard = _assignments(("1", "Megha-gbs"), ("2", "Megha"), ("3", "Akshats-git"), ("4", "Megha"))
+    shard = _assignments(
+        ("1", "Megha-gbs"), ("2", "Megha"), ("3", "Akshats-git"), ("4", "Megha-gbs")
+    )
     match_inputs = []
 
     def respond(model, text_input):

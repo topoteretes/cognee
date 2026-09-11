@@ -303,9 +303,10 @@ def _is_wording_key(dedup_key: str) -> bool:
     return bool(wording) and not identifier
 
 
-def _canonical_spelling(names: list[str]) -> str:
-    """The spelling a group of variants is tallied under: no @, then the longest."""
-    return min(names, key=lambda name: (name.startswith("@"), -len(name), name))
+def _canonical_spelling(names: list[str], used: Counter) -> str:
+    """The spelling a group of variants is tallied under: the one the corpus uses most
+    (so a nickname does not stand in for the name); on a tie, no @, then the longest."""
+    return min(names, key=lambda name: (-used[name], name.startswith("@"), -len(name), name))
 
 
 class BroadRetriever(CompletionRetriever):
@@ -831,12 +832,16 @@ class BroadRetriever(CompletionRetriever):
             response_model=NameGroups,
         )
         canonical = {name: name for name in names}
+        used = Counter(item.group for item in items if item.group)
+        if plan.relation:
+            used.update(item.key for item in items if item.key)
         # What the text itself declares equal ("Arthur Bennett (usually called Art)")
         # is applied by code; the model's groups add what it is sure of on top.
         for group in [*_match_stated(aliases, names), *result.groups]:
             members = {canonical[variant] for variant in group if variant in canonical}
             if len(members) > 1:
-                head = _canonical_spelling(sorted(members))
+                head = _canonical_spelling(sorted(members), used)
+                used[head] = sum(used[member] for member in members)
                 for variant, current in canonical.items():
                     if current in members:
                         canonical[variant] = head
