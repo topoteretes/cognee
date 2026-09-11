@@ -885,7 +885,7 @@ async def test_every_occurrence_counts_without_a_dedup_key(monkeypatch):
         items=[
             ExtractedItem(unit=0, evidence="Moscow burned"),
             ExtractedItem(unit=0, evidence="left Moscow"),
-            ExtractedItem(unit=0, evidence="Moscow burned"),  # same quote listed twice: one item
+            ExtractedItem(unit=0, evidence="Moscow burned"),  # written the same twice: two items
         ]
     )
     _stub_llm(monkeypatch, lambda model, _: shard)
@@ -894,13 +894,13 @@ async def test_every_occurrence_counts_without_a_dedup_key(monkeypatch):
         CountPlan(source="text", item="a burning"), _units(1)
     )
 
-    assert result.total == 2
+    assert result.total == 3
 
 
 @pytest.mark.asyncio
 async def test_keyed_items_sharing_a_templated_quote_in_one_piece_all_count(monkeypatch):
     """Fifty experiments in one piece each say "The run failed": distinct keys, distinct
-    items. Only a keyless repeat of the same quote in the same unit is one occurrence."""
+    items; two keyless entries with the same quote are two occurrences too."""
     shard = ShardItems(
         items=[
             *[_item(None, f"EXP-{n}") for n in range(50)],
@@ -916,7 +916,37 @@ async def test_keyed_items_sharing_a_templated_quote_in_one_piece_all_count(monk
         _plan(dedup_key="the experiment id"), _units(1)
     )
 
-    assert result.total == 51
+    assert result.total == 52
+
+
+@pytest.mark.asyncio
+async def test_unkeyed_entries_with_identical_quotes_in_one_piece_are_separate_items(monkeypatch):
+    """Two sponsor reads of "This episode is brought to you by Ledgerline Accounting."
+    in one piece, two "[crosstalk]" interruptions: written the same each time, listed
+    once per occurrence by the model, and neither is a repeat of the other."""
+    shard = ShardItems(
+        items=[
+            ExtractedItem(
+                unit=0,
+                group="Ledgerline Accounting",
+                evidence="brought to you by Ledgerline Accounting.",
+            ),
+            ExtractedItem(
+                unit=0,
+                group="Ledgerline Accounting",
+                evidence="brought to you by Ledgerline Accounting.",
+            ),
+            ExtractedItem(
+                unit=0, group="Northwind Coffee", evidence="brought to you by Northwind Coffee."
+            ),
+        ]
+    )
+    _stub_llm(monkeypatch, lambda model, _: shard if model is ShardItems else NameGroups(groups=[]))
+
+    result = await BroadRetriever().count_by_reading(_plan(group_by="sponsor"), _units(1))
+
+    assert result.total == 3
+    assert result.groups == [("Ledgerline Accounting", 2), ("Northwind Coffee", 1)]
 
 
 @pytest.mark.asyncio

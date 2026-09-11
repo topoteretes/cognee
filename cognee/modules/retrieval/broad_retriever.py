@@ -576,13 +576,14 @@ class BroadRetriever(CompletionRetriever):
         items: list[ExtractedItem] = []
         for shard_id, shard_items in read_shards:
             for item in shard_items.items:
-                marker = (
-                    shard_id,
-                    item.unit,
-                    (item.group, item.key) if item.key else item.evidence.strip().lower(),
-                )
-                if marker not in seen:
-                    seen.add(marker)
+                # A keyed item listed twice in one unit is one item. An unkeyed entry
+                # is what the model said it is, one per occurrence: a sponsor read or an
+                # interruption is written with the same words each time, and two of
+                # them in one unit are two items, not a repeat.
+                marker = (shard_id, item.unit, item.group, item.key) if item.key else None
+                if marker is None or marker not in seen:
+                    if marker is not None:
+                        seen.add(marker)
                     if item.undone and not plan.reversible:
                         # "How many orders were cancelled" counts the cancellations
                         # themselves; only a plan that counts items in effect subtracts.
