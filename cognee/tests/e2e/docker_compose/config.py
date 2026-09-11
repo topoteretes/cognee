@@ -80,8 +80,8 @@ class E2EConfig:
         return f"{self.mcp_url.rstrip('/')}/health"
 
     @property
-    def mcp_sse_url(self) -> str:
-        return f"{self.mcp_url.rstrip('/')}/sse"
+    def mcp_http_url(self) -> str:
+        return f"{self.mcp_url.rstrip('/')}/mcp"
 
 
 CONFIG = E2EConfig()

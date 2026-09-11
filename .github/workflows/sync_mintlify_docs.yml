@@ -39,16 +39,19 @@ jobs:
         run: |
           BODY_FILE="$(mktemp)"
           if [ "${EVENT_NAME}" = "release" ]; then
+            RELEASE_MODE=true
             TAG="${RELEASE_TAG}"
             RELEASE_LINK="${RELEASE_URL}"
             PUBLISHED_AT="${RELEASE_PUBLISHED_AT}"
             DOCS_BRANCH_NAME="automation/sync-mintlify-docs-${RELEASE_TAG}"
             printf "%s" "${RELEASE_BODY}" > "${BODY_FILE}"
           else
-            TAG="test-sync-${REF_NAME}-${COMMIT_SHA::7}"
+            RELEASE_MODE=false
+            TAG="test-sync-${REF_NAME//\//-}-${COMMIT_SHA::7}"
             RELEASE_LINK="${SERVER_URL}/${REPOSITORY}/commit/${COMMIT_SHA}"
             PUBLISHED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-            DOCS_BRANCH_NAME="${REF_NAME}"
+            # Never the bare ref: a dispatch from main force-pushes cognee-docs' main.
+            DOCS_BRANCH_NAME="automation/sync-mintlify-docs-${REF_NAME//\//-}-${COMMIT_SHA::7}"
             printf "%s\n\n- Source commit: \`%s\`\n- Workflow event: \`%s\`\n- Commit URL: %s\n" \
               "Automated docs sync test run from branch \`${REF_NAME}\`." \
               "${COMMIT_SHA}" \
@@ -63,6 +66,7 @@ jobs:
           echo "release_url=${RELEASE_LINK}" >> "$GITHUB_OUTPUT"
           echo "published_at=${PUBLISHED_AT}" >> "$GITHUB_OUTPUT"
           echo "docs_branch_name=${SAFE_DOCS_BRANCH_NAME}" >> "$GITHUB_OUTPUT"
+          echo "release_mode=${RELEASE_MODE}" >> "$GITHUB_OUTPUT"
 
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
@@ -82,13 +86,22 @@ jobs:
           path: docs-repo
 
       - name: Sync OpenAPI and changelog
+        env:
+          RELEASE_MODE: ${{ steps.release_meta.outputs.release_mode }}
         run: |
+          # Only a real release writes changelog history; a preview tag is synthetic.
+          SKIP_CHANGELOG=()
+          if [ "${RELEASE_MODE}" != "true" ]; then
+            SKIP_CHANGELOG=(--skip-changelog)
+          fi
+
           uv run python tools/sync_release_docs.py \
             --docs-repo "${GITHUB_WORKSPACE}/docs-repo" \
             --tag "${{ steps.release_meta.outputs.tag }}" \
             --release-url "${{ steps.release_meta.outputs.release_url }}" \
             --published-at "${{ steps.release_meta.outputs.published_at }}" \
-            --release-body-file "${{ steps.release_meta.outputs.body_file }}"
+            --release-body-file "${{ steps.release_meta.outputs.body_file }}" \
+            "${SKIP_CHANGELOG[@]}"
 
       - name: Commit docs changes
         id: commit_docs
@@ -120,13 +133,13 @@ jobs:
         if: ${{ steps.commit_docs.outputs.changes_made == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
-          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_MODE: ${{ steps.release_meta.outputs.release_mode }}
           RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
           RELEASE_URL: ${{ steps.release_meta.outputs.release_url }}
           TARGET_REPO: topoteretes/cognee-docs
           HEAD_BRANCH: ${{ steps.commit_docs.outputs.branch_name }}
         run: |
-          if [ "${EVENT_NAME}" = "release" ]; then
+          if [ "${RELEASE_MODE}" = "true" ]; then
             PR_TITLE="docs: sync release ${RELEASE_TAG}"
             PR_BODY=$(cat <<EOF
           Automated sync for release \`${RELEASE_TAG}\`.
