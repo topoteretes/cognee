@@ -131,7 +131,7 @@ TOKEN_STOPWORDS = frozenset(
 BM25_K1 = 1.5
 BM25_B = 0.75
 
-MAX_PAGES = 3
+MAX_PAGES = 4
 # Candidate pages listed for the LLM (titles + URLs only), so it can say which one it used.
 MAX_LISTED_CANDIDATES = 10
 # Pages scoring below this fraction of the best page are noise, not alternatives.
@@ -244,6 +244,7 @@ def make_result(
         "verdict": verdict,
         "reason": reason,
         "signals": list(signals or []),
+        "pages_shown": [],
         "doc_urls": [],
         "source_files": [],
         "docs_files": [],
@@ -299,18 +300,49 @@ def select_issues_created_between(repo: str, since: date, until: date) -> list[d
 
 
 def summary_table_lines(results: list[dict[str, Any]]) -> list[str]:
-    lines = ["| Issue | Verdict | Reason | Docs pages | Commented |", "|---|---|---|---|---|"]
-    for row in results:
+    """Markdown table of every row except the ones the cheap filter skipped.
+
+    Those are the bulk of any backlog pass and carry no decision worth reading; the
+    caller reports their count in one line instead.
+    """
+    listed = [row for row in results if row["verdict"] != "skipped_filter"]
+    lines = [
+        "| Issue | Signals | Verdict | Reason | Pages shown to the LLM | Commented |",
+        "|---|---|---|---|---|---|",
+    ]
+    for row in listed:
         number = row["number"]
         link = f"[#{number}]({row['html_url']})" if row["html_url"] else f"#{number}"
-        title = row["title"].replace("|", "\\|")
-        reason = row["reason"].replace("|", "\\|").replace("\n", " ")
-        docs = "<br>".join(row["doc_urls"]) if row["doc_urls"] else ""
+        title = _cell(row["title"])
+        signals = _cell("; ".join(row["signals"])) if row["signals"] else ""
+        reason = _cell(row["reason"])
+        cited = set(row["doc_urls"])
+        pages = "<br>".join(
+            f"{'**' if url in cited else ''}{url.removeprefix(DOCS_SITE + '/')}"
+            f"{' (cited)**' if url in cited else ''}"
+            for url in row["pages_shown"]
+        )
         commented = "yes" if row["commented"] else "no"
-        lines.append(f"| {link} {title} | `{row['verdict']}` | {reason} | {docs} | {commented} |")
-    if len(results) == 0:
-        lines.append("| _no open issues selected_ | | | | |")
+        lines.append(
+            f"| {link} {title} | {signals} | `{row['verdict']}` | {reason} | {pages} | {commented} |"
+        )
+    if not listed:
+        lines.append("| _no issue passed the cheap filter_ | | | | | |")
     return lines
+
+
+def _cell(text: str) -> str:
+    return text.replace("|", "\\|").replace("\n", " ")
+
+
+def summary_count_lines(results: list[dict[str, Any]]) -> list[str]:
+    skipped = sum(1 for row in results if row["verdict"] == "skipped_filter")
+    listed = len(results) - skipped
+    return [
+        f"- Issues selected: {len(results)}",
+        f"- Passed the cheap filter and listed below: {listed}",
+        f"- No documentation signal, not listed: {skipped}",
+    ]
 
 
 def describe_selector(args: argparse.Namespace) -> str:
@@ -551,6 +583,7 @@ def check_issue_against_docs(row: dict[str, Any], index: DocsIndex) -> None:
 
     row["verdict"] = verdict
     row["reason"] = reason
+    row["pages_shown"] = list(pages)
     row["doc_urls"] = confirmed if verdict == "already_answered" else []
 
 
@@ -639,7 +672,7 @@ def write_step_summary(args: argparse.Namespace, results: list[dict[str, Any]]) 
         f"- Repository: `{args.repo}`",
         f"- Selector: {describe_selector(args)}",
         f"- Dry run: `{'true' if args.dry_run else 'false'}`",
-        f"- Issues selected: {len(results)}",
+        *summary_count_lines(results),
         "",
         (
             "Phase 2: the only public action is one marked comment on `already_answered` "
@@ -703,6 +736,7 @@ def main(argv: list[str] | None = None) -> int:
         args.results_json.write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
 
     print(f"Selector: {describe_selector(args)}")
+    print("\n".join(summary_count_lines(rows)))
     print("\n".join(summary_table_lines(rows)))
     write_step_summary(args, rows)
     write_github_output(rows, args.dry_run)

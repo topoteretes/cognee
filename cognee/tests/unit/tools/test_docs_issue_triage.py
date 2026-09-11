@@ -197,6 +197,7 @@ def test_single_docs_issue_is_pending_and_has_spec_shape(triage, monkeypatch, tm
         "verdict": "needs_source",
         "reason": "default fake verdict",
         "signals": ["title prefix"],
+        "pages_shown": [PAGE_SEARCH],
         "doc_urls": [],
         "source_files": [],
         "docs_files": [],
@@ -263,10 +264,13 @@ def test_github_output_and_step_summary_are_written(triage, monkeypatch, tmp_pat
     summary = summary_file.read_text()
     assert "## Docs issue triage" in summary
     assert "issue #4604" in summary
-    assert "| Issue | Verdict | Reason | Docs pages | Commented |" in summary
+    assert "| Issue | Signals | Verdict | Reason | Pages shown to the LLM | Commented |" in summary
     assert "[#4604](https://github.com/topoteretes/cognee/issues/4604)" in summary
     assert "`needs_source`" in summary
     assert "default fake verdict" in summary
+    assert "label: documentation" in summary  # the cheap-filter signals stay visible
+    assert "- Passed the cheap filter and listed below: 1" in summary
+    assert "- No documentation signal, not listed: 0" in summary
 
 
 def test_http_error_returns_1(triage, monkeypatch):
@@ -525,3 +529,35 @@ def test_empty_export_is_an_error_not_a_silent_run(triage, monkeypatch, capsys):
     _install_fake_api(triage, monkeypatch, [("/issues/4656", _docs_issue())])
     assert triage.main(["--issue-number", "4656", "--dry-run"]) == 1
     assert "contained no pages" in capsys.readouterr().err
+
+
+def test_summary_lists_only_rows_that_passed_the_filter(triage, monkeypatch, tmp_path):
+    summary_file = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_file))
+    page_one = [
+        _issue(12, "Segfault on cognify", body="stack trace", labels=["bug"]),
+        _issue(
+            13, "[Docs]: TRIPLET_COMPLETION", body="The docs say TRIPLET_COMPLETION just works."
+        ),
+        _issue(15, "Another crash", body="no docs words here"),
+    ]
+    _install_fake_api(triage, monkeypatch, [("&page=1&", page_one), ("&page=2&", [])])
+    _set_verdict(triage, monkeypatch, "already_answered", "answered", [PAGE_SEARCH])
+    assert triage.main(["--since", "2026-08-21", "--until", "2026-08-24", "--dry-run"]) == 0
+    summary = summary_file.read_text()
+    assert "- Issues selected: 3" in summary
+    assert "- Passed the cheap filter and listed below: 1" in summary
+    assert "- No documentation signal, not listed: 2" in summary
+    assert "#13" in summary and "#12" not in summary and "#15" not in summary
+    assert "**python-api/search-type (cited)**" in summary  # pages shown, cited one marked
+
+
+def test_pick_pages_caps_at_four(triage):
+    index = triage.DocsIndex(FAKE_EXPORT)
+    ranked = [(10.0, PAGE_SEARCH), (9.0, PAGE_CONFIG), (8.0, PAGE_VECTOR), (7.0, PAGE_QUICKSTART)]
+    assert triage.pick_pages(index, ranked, [f"{PAGE_PRUNE}.md"]) == [
+        PAGE_PRUNE,
+        PAGE_SEARCH,
+        PAGE_CONFIG,
+        PAGE_VECTOR,
+    ]
