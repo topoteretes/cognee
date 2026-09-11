@@ -10,6 +10,10 @@ permissions:
 
 env:
   COGNEE_SKIP_CONNECTION_TEST: 'true'
+  # The default superuser is only loginable when this is set: unset, it is
+  # created with an unrecorded random password. Compose passes it into the
+  # container, and the login steps below use it.
+  DEFAULT_USER_PASSWORD: 'ci-default-user-password'
   # Profiles exercised by the full-stack e2e: the default `cognee` service plus
   # postgres (persistence) and the MCP server.
   COMPOSE_PROFILES: 'postgres,mcp'
@@ -151,7 +155,7 @@ jobs:
     - name: Verify remember and recall round-trip
       run: |
         TOKEN=$(curl -sf -X POST http://localhost:8000/api/v1/auth/login \
-          -d "username=default_user@example.com&password=default_password" | jq -r .access_token)
+          -d "username=default_user@example.com&password=${DEFAULT_USER_PASSWORD}" | jq -r .access_token)
         [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] || { echo "login failed"; exit 1; }
 
         FACT="The glassblower Odene Marsk crafted the twin cobalt lanterns of the Vellinge lighthouse in 1931."

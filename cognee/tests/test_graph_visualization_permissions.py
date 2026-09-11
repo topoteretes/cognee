@@ -8,11 +8,18 @@ from httpx import ASGITransport, AsyncClient
 
 import cognee
 from cognee.api.client import app
+from cognee.base_config import get_base_config
 from cognee.modules.users.methods import create_user, get_default_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
 
 # Use pytest-asyncio to handle all async tests
 pytestmark = pytest.mark.asyncio
+
+# The default superuser is only loginable when DEFAULT_USER_PASSWORD is set --
+# unset, it is created with an unrecorded random password. These tests
+# authenticate as it over HTTP, so they pin the value themselves.
+DEFAULT_USER_EMAIL = "default_user@example.com"
+DEFAULT_USER_PASSWORD = "default_password"
 
 
 @pytest.fixture(scope="module")
@@ -40,6 +47,10 @@ async def setup_environment():
     """
     # 1. Enable permissions feature
     os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "True"
+    # Pin the default user's password before anything resolves it: the account
+    # is created lazily on first use, and BaseConfig is lru_cached.
+    os.environ["DEFAULT_USER_PASSWORD"] = DEFAULT_USER_PASSWORD
+    get_base_config.cache_clear()
 
     # 2. Set up an independent test directory
     base_dir = pathlib.Path(__file__).parent
@@ -89,8 +100,8 @@ async def test_owner_can_access_graph(client: AsyncClient, setup_environment: in
     Test Case 1: The dataset owner should be able to access the graph data successfully.
     """
     dataset_id = setup_environment
-    default_user_email = "default_user@example.com"
-    default_user_password = "default_password"
+    default_user_email = DEFAULT_USER_EMAIL
+    default_user_password = DEFAULT_USER_PASSWORD
 
     response = await client.get(
         f"/api/v1/datasets/{dataset_id}/graph",
@@ -149,8 +160,8 @@ async def test_granting_permission_enables_access(client: AsyncClient, setup_env
     )
 
     # Test the graph data is the same for the test user and the default user
-    default_user_email = "default_user@example.com"
-    default_user_password = "default_password"
+    default_user_email = DEFAULT_USER_EMAIL
+    default_user_password = DEFAULT_USER_PASSWORD
     response_for_default_user = await client.get(
         f"/api/v1/datasets/{dataset_id}/graph",
         headers=await get_authentication_headers(client, default_user_email, default_user_password),
