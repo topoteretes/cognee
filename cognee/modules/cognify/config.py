@@ -48,7 +48,7 @@ def get_cognify_config():
 EXTRACTORS = ("llm", "gliner")
 
 
-def resolve_extractor(value: Optional[str], config: CognifyConfig) -> str:
+def resolve_extractor(value: str | None, config: CognifyConfig) -> str:
     """Resolve the extractor for a cognify run; the explicit argument wins over
     ``GRAPH_EXTRACTOR`` and ``llm`` is the default.
 

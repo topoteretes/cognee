@@ -26,6 +26,7 @@ from cognee.modules.observability import (
     new_span,
 )
 from cognee.modules.operations import get_current_operation, record_operation
+from cognee.modules.preflight import llm_available
 from cognee.modules.recall.types.RecallResponse import (
     RecallResponse,
     ResponseAgentTraceEntry,
@@ -39,7 +40,6 @@ from cognee.modules.recall.types.RecallResponse import (
 )
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
-from cognee.modules.preflight import llm_available
 from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 from cognee.modules.users.methods import get_default_user
