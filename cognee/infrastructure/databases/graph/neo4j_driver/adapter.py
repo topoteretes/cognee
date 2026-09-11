@@ -8,7 +8,7 @@ from neo4j import AsyncSession
 from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import Neo4jError
 from contextlib import asynccontextmanager, nullcontext
-from typing import Optional, Any, List, Dict, Type, Tuple, Coroutine, Set
+from typing import Optional, Any, List, Dict, Type, Tuple, Coroutine, Set, Union
 from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
@@ -2431,35 +2431,49 @@ class Neo4jAdapter(GraphDBInterface):
         result = await self.query(query)
         return [record["n"] for record in result] if result else []
 
-    async def collect_events(self, ids: List[str]) -> Any:
+    @staticmethod
+    def _normalize_temporal_ids(ids: Union[List[str], str]) -> List[str]:
+        """Accept either a list of ids or the legacy pre-quoted, comma-joined string."""
+        if isinstance(ids, str):
+            return [uid.strip().strip("'\"") for uid in ids.split(",") if uid.strip()]
+
+        return ids
+
+    async def collect_events(self, ids: Union[List[str], str]) -> Any:
         """
         Collect all Event-type nodes reachable within 1..2 hops
         from the given node IDs.
 
         Args:
             graph_engine: Object exposing an async .query(str) -> Any
-            ids: List of node IDs (strings)
+            ids: List of node IDs (strings), or the legacy comma-joined
+                pre-quoted string form.
 
         Returns:
             List of events
         """
 
-        event_collection_cypher = """UNWIND [{quoted}] AS uid
-            MATCH (start {{id: uid}})
+        # Bind the ids as a parameter rather than formatting them into the
+        # query text. The previous `.format(quoted=ids)` only produced valid
+        # Cypher for the pre-quoted string form: a genuine List[str] -- which is
+        # what the signature declared -- rendered its Python repr, so
+        # `UNWIND [['a', 'b']] AS uid` bound uid to the whole list and
+        # `MATCH (start {id: uid})` matched nothing. No error, just zero events.
+        event_collection_cypher = """UNWIND $ids AS uid
+            MATCH (start {id: uid})
             MATCH (start)-[*1..2]-(event)
             WHERE event.type = 'Event'
             WITH DISTINCT event
             RETURN collect(event) AS events;
         """
 
-        query = event_collection_cypher.format(quoted=ids)
-        return await self.query(query)
+        return await self.query(event_collection_cypher, {"ids": self._normalize_temporal_ids(ids)})
 
     async def collect_time_ids(
         self,
         time_from: Optional[Timestamp] = None,
         time_to: Optional[Timestamp] = None,
-    ) -> str:
+    ) -> List[str]:
         """
         Collect IDs of Timestamp nodes between time_from and time_to.
 
@@ -2469,8 +2483,8 @@ class Neo4jAdapter(GraphDBInterface):
             time_to: Upper bound int (inclusive), optional
 
         Returns:
-            A string of quoted IDs:  "'id1', 'id2', 'id3'"
-            (ready for use in a Cypher UNWIND clause).
+            A list of timestamp node IDs, matching the ladybug adapter and the
+            List[str] that collect_events binds as a query parameter.
         """
 
         ids: List[str] = []
@@ -2514,9 +2528,8 @@ class Neo4jAdapter(GraphDBInterface):
             return ids
 
         time_nodes = await self.query(cypher, params)
-        time_ids_list = [item["id"] for item in time_nodes if "id" in item]
 
-        return ", ".join(f"'{uid}'" for uid in time_ids_list)
+        return [item["id"] for item in time_nodes if "id" in item]
 
     async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
         """
