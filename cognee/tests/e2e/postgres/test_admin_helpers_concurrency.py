@@ -11,6 +11,7 @@ and skips if it is unreachable.
 """
 
 import asyncio
+import logging
 import os
 import uuid
 
@@ -24,6 +25,8 @@ from cognee.infrastructure.databases.postgres import (
     drop_pg_database_if_exists,
     drop_pg_schema_if_exists,
 )
+
+logger = logging.getLogger(__name__)
 
 CONCURRENCY = 6
 
@@ -51,7 +54,10 @@ async def _postgres_reachable() -> bool:
         async with engine.connect() as connection:
             await connection.execute(text("SELECT 1"))
         return True
-    except Exception:  # noqa: BLE001 - any connection failure means "skip"
+    except Exception:
+        # Any failure to connect means the suite skips, and the cause goes
+        # to the log with its traceback rather than being swallowed.
+        logger.debug("Postgres not reachable; skipping", exc_info=True)
         return False
     finally:
         await engine.dispose()
