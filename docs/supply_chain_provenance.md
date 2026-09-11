@@ -39,6 +39,27 @@ on PyPI **once**:
 
 3. Save both.
 
+`cognee-mcp` is a **separate PyPI project** with its own release workflow
+(`.github/workflows/release_mcp.yml`), and PyPI scopes trusted publishers per
+project — the two entries above do not cover it. Register a third publisher
+for it, once:
+
+4. Go to <https://pypi.org/manage/project/cognee-mcp/settings/publishing/>.
+5. Under **Add a new pending publisher** → **GitHub**, add:
+
+   | Field | MCP release publisher |
+   | --- | --- |
+   | Owner | `topoteretes` |
+   | Repository | `cognee` |
+   | Workflow name | `release_mcp.yml` |
+   | Environment | *(leave blank)* |
+
+6. Save. Then release by running `release_mcp.yml` from `main` in the Actions
+   tab: it reads the version from `cognee-mcp/pyproject.toml`, refuses to run
+   if that version is already on PyPI, publishes over OIDC, and tags the commit
+   `cognee-mcp-v<version>` (its own namespace, since cognee-mcp versions
+   independently of the library).
+
 > The **Environment** value must match the `environment:` declared on the
 > publishing job. The workflows do not set one, so leave this blank — if you
 > later add a GitHub Actions environment, set the same name on both sides or the
