@@ -723,6 +723,31 @@ async def test_merged_names_are_tallied_under_the_spelling_the_corpus_uses_most(
     assert result.groups == [("Ciaran Rojas", 5), ("Yusuf Demir", 1)]
 
 
+@pytest.mark.asyncio
+async def test_the_answer_states_how_many_listed_entries_dedup_removed(monkeypatch):
+    """54 drawn matches once shrank to 25 in silence. The context now says how many
+    entries were listed and how many remain, so a folding key is visible."""
+    shard = ShardItems(
+        items=[
+            ExtractedItem(unit=0, key="M5", evidence="M5 was drawn"),
+            ExtractedItem(unit=1, key="M5", evidence="the M5 draw, recapped"),
+            ExtractedItem(unit=1, key="M7", evidence="M7 was drawn"),
+        ]
+    )
+    _stub_llm(monkeypatch, lambda model, _: shard)
+    plan = _plan(dedup_key="the match heading")
+    retriever = BroadRetriever()
+
+    result = await retriever.count_by_reading(plan, _units(2))
+    context = await retriever.get_context_from_objects("How many draws?", result)
+
+    assert result.total == 2
+    assert (
+        "(3 entries were listed while reading; 2 remain after removing repeated mentions)"
+        in context
+    )
+
+
 def test_an_alias_returned_as_a_sentence_is_split_into_its_names():
     """The extractor sometimes returns the stating sentence as one string."""
     groups = broad_retriever._alias_groups(

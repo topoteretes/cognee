@@ -162,6 +162,9 @@ class CountResult:
     unkeyed: int = 0
     names_merged: bool = True
     items_listed: int = 0
+    # Entries the reading calls returned before repeated mentions were removed: the
+    # gap to items_listed is what dedup took out, and the answer states it.
+    entries_read: int = 0
     llm_calls: int = 0
     tokens_read: int = 0
 
@@ -567,6 +570,7 @@ class BroadRetriever(CompletionRetriever):
                     item.key = canonical.get(item.key, item.key)
 
         unkeyed = 0
+        entries_read = len(items)
         if plan.dedup_key:
             # An entry without its identifier cannot be checked against the ones
             # already counted. It counts (a model omits keys more often than a
@@ -621,6 +625,7 @@ class BroadRetriever(CompletionRetriever):
             denominator=denominator,
             groups=groups,
             items_listed=items_listed,
+            entries_read=entries_read,
             evidence=[
                 f"{item.key}: {item.evidence}" if item.key else item.evidence for item in items
             ],
@@ -945,6 +950,13 @@ class BroadRetriever(CompletionRetriever):
             lines.append(f"Condition: {plan.condition}")
         if plan.dedup_key:
             lines.append(f"Repeated mentions of one item removed by: {plan.dedup_key}")
+        if result.entries_read > result.items_listed:
+            # Said out loud so a key that folds different items together is visible
+            # in the answer rather than silently shrinking the count.
+            lines.append(
+                f"({result.entries_read} entries were listed while reading; "
+                f"{result.items_listed} remain after removing repeated mentions)"
+            )
         if result.unkeyed:
             lines.append(
                 f"({result.unkeyed} counted entries carried no {plan.dedup_key}, so repeats "
