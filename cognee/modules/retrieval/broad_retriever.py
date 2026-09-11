@@ -549,35 +549,38 @@ class BroadRetriever(CompletionRetriever):
 
     @staticmethod
     def dedup(items: list[ExtractedItem], by_group: bool = False) -> list[ExtractedItem]:
-        """One item per identity, in first-seen order, minus the items undone later.
+        """One item per (group, key), in first-seen order, minus the items undone later.
 
-        The identity is the key: the planner defines it as unique across the corpus,
-        so two entries with one key are one item however their group was spelled.
-        For a relation listed once per participant (``by_group``) the identity is
-        (participant, other). An entry without a key counts once (it cannot be
-        checked for repeats). An entry marked undone removes the item it names
-        instead of counting.
+        The key identifies the item (the planner defines it as unique across the
+        corpus); the group is the value it is counted under, and an item with several
+        values (a paper by three authors) is one item of each. Groups are merged
+        spellings by now. An entry with a key but no group is a recap of an item
+        already counted under some group. An entry without a key counts once (it
+        cannot be checked for repeats). An entry marked undone removes the item it
+        names instead of counting.
         """
 
         # A relation's key is the other participant, a name; otherwise an identifier.
         normalize = _loose_name if by_group else _normalize_key
 
-        def identity(item: ExtractedItem) -> tuple[str, str]:
-            return ((item.group or "") if by_group else "", normalize(item.key))
-
-        keyed = [item for item in items if item.key]
+        keyed = [(normalize(item.key), item) for item in items if item.key]
         unkeyed = [item for item in items if not item.key and not item.undone]
         # An item is undone wherever the removal was read, before or after the item.
-        undone = {identity(item) for item in keyed if item.undone}
-        undone_keys = {identity(item)[1] for item in keyed if item.undone and item.group is None}
+        undone = {(item.group or "", key) for key, item in keyed if item.undone}
+        undone_keys = {key for key, item in keyed if item.undone and item.group is None}
         counted: dict[tuple[str, str], ExtractedItem] = {}
-        for item in keyed:
+        keys_seen: set[str] = set()
+        # Grouped entries first, so a recap without a group finds its item.
+        for key, item in sorted(keyed, key=lambda pair: pair[1].group is None):
             if item.undone:
                 continue
-            group, key = identity(item)
-            if (group, key) in undone or key in undone_keys or (group, key) in counted:
+            identity = (item.group or "", key)
+            if identity in undone or key in undone_keys or identity in counted:
                 continue
-            counted[(group, key)] = item
+            if item.group is None and key in keys_seen:
+                continue
+            counted[identity] = item
+            keys_seen.add(key)
         return [*counted.values(), *unkeyed]
 
     def split_oversized(self, units: list[Unit]) -> list[Unit]:

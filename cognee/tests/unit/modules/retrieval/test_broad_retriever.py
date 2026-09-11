@@ -424,14 +424,51 @@ def test_names_with_digits_are_not_reduced_to_their_digits():
     assert broad_retriever._normalize_key("PR #921") == "921"
 
 
-def test_one_key_is_one_item_however_its_group_was_spelled():
-    """Issue #7 assigned to Ann, recapped as "still with @ann": one item, not two, even if
-    the spellings were not merged. A key written "PR #7" or "#7" or "7" is one key."""
-    items = [_item("Ann", "PR #7"), _item("@ann", "#7"), _item(None, "7"), _item("Bob", "9")]
+def test_one_item_per_group_and_key_and_a_recap_finds_its_item():
+    """A key written "PR #7", "#7" or "7" is one key. Paper 3 by Ann and by Bob is one
+    item of each; a recap that names #7 without its group is the item already counted."""
+    items = [
+        _item("Ann", "PR #7"),
+        _item(None, "7"),
+        _item("Ann", "Paper 3"),
+        _item("Bob", "Paper 3"),
+        _item("Ann", "#7"),
+    ]
 
     kept = BroadRetriever.dedup(items)
 
-    assert [(i.group, i.key) for i in kept] == [("Ann", "PR #7"), ("Bob", "9")]
+    assert [(i.group, i.key) for i in kept] == [
+        ("Ann", "PR #7"),
+        ("Ann", "Paper 3"),
+        ("Bob", "Paper 3"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_paper_counts_for_every_author_it_lists(monkeypatch):
+    """The extractor returns paper 34 once with three authors; Ana's tally includes it
+    even though she is not the first author."""
+    shard = ShardItems(
+        items=[
+            ExtractedItem(unit=0, key="34", groups=["Omar Reyes", "Ana Kovač"], evidence="p34"),
+            ExtractedItem(unit=0, key="37", groups=["Ana Kovač", "Emeka Obi"], evidence="p37"),
+            ExtractedItem(unit=1, key="35", groups=["Gil Park", "Iris Ng"], evidence="p35"),
+        ]
+    )
+
+    def respond(model, _):
+        if model is ShardItems:
+            return shard
+        return NameGroups(groups=[]) if model is NameGroups else TargetMatch(names=[])
+
+    _stub_llm(monkeypatch, respond)
+    plan = CountPlan(
+        source="text", item="a paper", group_by="author", target="Ana Kovač", dedup_key="paper"
+    )
+
+    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(plan, _units(2, words=2))
+
+    assert result.total == 2 and dict(result.groups)["Ana Kovač"] == 2
 
 
 @pytest.mark.asyncio
