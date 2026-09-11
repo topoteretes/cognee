@@ -216,6 +216,82 @@ async def test_anthropic_adapter_raises_payment_required_on_402(monkeypatch):
         await adapter.acreate_structured_output("input", "system", _SimpleModel)
 
 
+@pytest.mark.asyncio
+async def test_anthropic_adapter_preserves_budget_detail_message(monkeypatch):
+    """anthropic used to convert via a bare LLMPaymentRequiredError(), losing
+    the provider's own budget sentence that every other adapter's 402 carries.
+    A plain status_code=402 (as in the test above) doesn't distinguish the two
+    patterns, since raise_if_budget_exhausted also falls back to the generic
+    message when no budget wording is present. This pins the actual
+    difference: a wrapped, message-worded budget rejection must come through
+    with its detail intact."""
+    anthropic = pytest.importorskip("anthropic", reason="anthropic package not installed")
+
+    class FakeAsyncAnthropic:
+        class messages:
+            @staticmethod
+            def create(*args, **kwargs):
+                pass
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr(anthropic, "AsyncAnthropic", FakeAsyncAnthropic)
+    monkeypatch.setattr(
+        "cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.anthropic.adapter.instructor.patch",
+        lambda create, mode: object(),
+    )
+
+    from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.anthropic.adapter import (
+        AnthropicAdapter,
+    )
+
+    adapter = AnthropicAdapter(
+        api_key="test-key",
+        model="claude-3-5-sonnet-20241022",
+        max_completion_tokens=1024,
+    )
+
+    async def _raise_wrapped_budget(*args, **kwargs):
+        raise _wrapped_budget_error()
+
+    adapter.aclient = _raise_wrapped_budget
+
+    with pytest.raises(LLMPaymentRequiredError) as exc_info:
+        await adapter.acreate_structured_output("input", "system", _SimpleModel)
+
+    assert "Current cost: 20.0" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# LlamaCppAPIAdapter — server mode (OpenAI-compatible), requires no extra package
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_llama_cpp_adapter_preserves_budget_detail_message(monkeypatch):
+    """Same consistency fix as anthropic: llama_cpp also used to convert via a
+    bare LLMPaymentRequiredError(), dropping the provider's own budget
+    sentence. Exercises server mode, which needs no extra package."""
+    import cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llama_cpp.adapter as llama_cpp_mod
+    from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llama_cpp.adapter import (
+        LlamaCppAPIAdapter,
+    )
+
+    monkeypatch.setattr(llama_cpp_mod.instructor, "from_openai", lambda *a, **kw: object())
+
+    adapter = LlamaCppAPIAdapter(
+        endpoint="http://localhost:8080", api_key="test-key", model="test-model"
+    )
+    adapter.aclient, calls = _fake_client(lambda n: _wrapped_budget_error())
+
+    with pytest.raises(LLMPaymentRequiredError) as exc_info:
+        await adapter.acreate_structured_output("input", "system", _SimpleModel)
+
+    assert "Current cost: 20.0" in str(exc_info.value)
+    assert calls["count"] == 1
+
+
 # ---------------------------------------------------------------------------
 # Retry exclusion: 402 should not be retried
 # ---------------------------------------------------------------------------
