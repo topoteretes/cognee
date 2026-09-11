@@ -425,6 +425,23 @@ def test_a_key_keeps_its_kind_so_pr_42_and_issue_42_are_two_items():
     assert normalize("EXP-1004") == "exp-1004" and normalize("2026-03-04") == "2026-03-04"
 
 
+def test_a_key_made_of_several_words_keeps_them_all():
+    """Match reports have no match number: the record is "Matchday 5: Harbour City v
+    Glenmarsh City". Eight matches share a matchday, so the words must survive — 54
+    draws once collapsed to the 25 matchdays they fell on."""
+    normalize = broad_retriever._normalize_key
+
+    assert normalize("Matchday 5: Harbour City v Glenmarsh City") != normalize(
+        "Matchday 5: Ashvale v Fenwick"
+    )
+    assert normalize("Matchday 5: Harbour City v Glenmarsh City") == normalize(
+        "matchday 5, harbour city v glenmarsh city"
+    )
+    assert normalize("Harbour City v Fenwick, 4th minute") != normalize(
+        "Harbour City v Larkhill, 4th minute"
+    )
+
+
 def test_a_bare_number_adopts_the_kind_written_elsewhere_for_it():
     """Pavel's PR 1032 was keyed "PR 1032" once and "1032" once: one item. PR 42 and
     issue 42 stay two. A bare 7 with no labelled twin stays bare."""

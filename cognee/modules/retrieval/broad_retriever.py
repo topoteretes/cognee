@@ -215,15 +215,20 @@ def _normalize_key(value: str) -> str:
     and so are "PR-42", "PR #42" and "pr 42"; but "PR 42" and "issue 42" are two
     items when a question spans several kinds of contribution.
 
-    A key with digits is its leading word label (if any) plus its digit runs; a key
-    without digits is its letters.
+    A key made of one word label and digits is that label plus its digit runs; a bare
+    identifier is its digits; a key made of several words ("Matchday 5, Harbour City
+    v Glenmarsh City") keeps every word, because dropping the words would fold every
+    record that shares the number into one.
     """
-    digits = re.findall(r"\d+", value)
-    if not digits:
-        return re.sub(r"[^0-9a-z]+", "", value.lower())
-    label = re.match(r"\s*([A-Za-z]+)", value)
-    parts = [label.group(1).lower()] if label and label.group(1).lower() != "no" else []
-    return "-".join(parts + digits)
+    tokens = re.findall(r"[0-9a-z]+", value.lower())
+    if tokens and tokens[0] in ("no", "number", "nr"):
+        tokens = tokens[1:]
+    words = [token for token in tokens if token.isalpha()]
+    if not words:
+        return "-".join(tokens)
+    if len(words) == 1 and any(token.isdigit() for token in tokens):
+        return "-".join(words + [token for token in tokens if token.isdigit()])
+    return "-".join(tokens)
 
 
 def _loose_name(name: str) -> str:
