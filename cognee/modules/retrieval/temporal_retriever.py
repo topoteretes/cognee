@@ -1,7 +1,7 @@
 import os
 import asyncio
 from typing import Any, Dict, List, Optional, Type
-from datetime import datetime
+from datetime import datetime, timezone
 
 from operator import itemgetter
 from cognee.base_config import get_base_config
@@ -93,7 +93,13 @@ class TemporalRetriever(GraphCompletionRetriever):
         else:
             base_directory = None
 
-        time_now = datetime.now().strftime("%d-%m-%Y")
+        # Event timestamps are written with datetime.now(timezone.utc) (see
+        # build_graph_with_temporal_awareness and get_graph_from_model), so the
+        # "current date" the prompt resolves "now"/"today" against has to be UTC
+        # too. A naive datetime.now() is the server's local date, which is a
+        # different calendar day from UTC for part of every day in any non-UTC
+        # zone -- so "what happened today" resolves to the wrong day.
+        time_now = datetime.now(timezone.utc).strftime("%d-%m-%Y")
 
         system_prompt = render_prompt(
             prompt_path, {"time_now": time_now}, base_directory=base_directory
