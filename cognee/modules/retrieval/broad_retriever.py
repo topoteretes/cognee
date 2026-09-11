@@ -87,6 +87,14 @@ class CountPlan(BaseModel):
     # The question counts items in effect, and a later event can end one (a connection
     # removed, an order cancelled after it was placed): such events subtract the item.
     reversible: bool = False
+    # "What share of tickets were escalated": the item is every ticket; this condition
+    # marks the subset, and the answer is subset over all, both counted by code.
+    ratio_condition: str | None = None
+    # "Average order value": the measure's mean over the items instead of its sum.
+    average: bool = False
+    # Why the question cannot be answered by listing what sections of text show
+    # (absence across the corpus, a comparison of separate totals); nothing is read.
+    unsupported: str | None = None
 
 
 class ExtractedItem(BaseModel):
@@ -101,6 +109,11 @@ class ExtractedItem(BaseModel):
     # The text says this item was later undone (removed, cancelled, returned, revoked):
     # code drops the item with the same group and key instead of counting this entry.
     undone: bool = False
+    # The entry's date as written, YYYY-MM-DD, when the section gives one: for an item
+    # whose state changes over time, the latest entry decides.
+    when: str | None = None
+    # Whether the item meets the plan's ratio condition, when the plan has one.
+    matches: bool | None = None
     evidence: str
 
 
@@ -132,9 +145,11 @@ class Unit:
 @dataclass
 class CountResult:
     plan: CountPlan
-    method: Literal["graph", "words", "reading"]
+    method: Literal["graph", "words", "reading", "unsupported"]
     total: float
     units: int
+    # For a plan with a ratio condition: the number of all items, the total being the subset.
+    denominator: int = 0
     groups: list[tuple[str, float]] = field(default_factory=list)
     # Every counted item as one line; the answer context shows a sample, a listing shows all.
     evidence: list[str] = field(default_factory=list)
@@ -279,7 +294,9 @@ class BroadRetriever(CompletionRetriever):
         plan = await self.plan(query, entities_by_type)
         logger.info("BROAD plan: %s", plan.model_dump())
 
-        if plan.source == "entities":
+        if plan.unsupported:
+            result = CountResult(plan=plan, method="unsupported", total=0, units=0)
+        elif plan.source == "entities":
             result = self.count_entities(plan, entities_by_type)
         else:
             units = await self.load_text_units(graph_engine)
@@ -533,12 +550,21 @@ class BroadRetriever(CompletionRetriever):
                 plan.target, [name for name, _ in groups], aliases, canonical or {}
             )
             items = [item for item in items if item.group in target_names]
+        denominator = 0
+        if plan.ratio_condition:
+            # "What share of tickets were escalated": every ticket was listed, each
+            # marked as meeting the condition or not; both counts are code's.
+            denominator = len(items)
+            items = [item for item in items if item.matches]
         if plan.distinct and not plan.target:
             total: float = len(groups)
         elif plan.relation and not plan.target:
             # "How many connections were removed": each relation once, not once per
             # participant; the per-participant tally stays for "who has the most".
             total = len({frozenset((item.group, item.key)) for item in items if item.key})
+        elif plan.measure and plan.average:
+            amounts = [item.amount for item in items if item.amount is not None]
+            total = sum(amounts) / len(amounts) if amounts else 0
         else:
             total = sum(weight(item) for item in items)
         return CountResult(
@@ -546,6 +572,7 @@ class BroadRetriever(CompletionRetriever):
             method="reading",
             total=total,
             units=len(units),
+            denominator=denominator,
             groups=groups,
             items_listed=items_listed,
             evidence=[
@@ -581,23 +608,32 @@ class BroadRetriever(CompletionRetriever):
 
         keyed = [(normalize(item.key), item) for item in items if item.key]
         unkeyed = [item for item in items if not item.key and not item.undone]
-        # An item is undone wherever the removal was read, before or after the item.
-        undone = {(item.group or "", key) for key, item in keyed if item.undone}
-        undone_keys = {key for key, item in keyed if item.undone and item.group is None}
-        counted: dict[tuple[str, str], ExtractedItem] = {}
-        keys_seen: set[str] = set()
-        # Grouped entries first, so a recap without a group finds its item.
-        for key, item in sorted(keyed, key=lambda pair: pair[1].group is None):
-            if item.undone:
+        # An item's state is decided by its latest entry: opened, resolved, reopened
+        # is open. Entries are ordered by the date they carry, then by reading order
+        # (documents ingested as separate files have no order of their own). An
+        # entry with no group is a recap of the item under some group and never
+        # changes its state on its own.
+        first: dict[tuple[str, str], ExtractedItem] = {}
+        states: dict[tuple[str, str], list[tuple[tuple[str, int], bool]]] = {}
+        # "Ticket 7 was resolved" with no group ends ticket 7 under whichever group.
+        ended_by_key: dict[str, list[tuple[str, int]]] = {}
+        for position, (key, item) in enumerate(keyed):
+            stamp = (item.when or "", position)
+            if item.group is None and item.undone:
+                ended_by_key.setdefault(key, []).append(stamp)
                 continue
             identity = (item.group or "", key)
-            if identity in undone or key in undone_keys or identity in counted:
+            first.setdefault(identity, item)
+            states.setdefault(identity, []).append((stamp, item.undone))
+        keys_with_group = {identity[1] for identity in first if identity[0]}
+        counted = []
+        for identity, entries in states.items():
+            entries += [(stamp, True) for stamp in ended_by_key.get(identity[1], [])]
+            _, undone = max(entries)
+            if undone or (not identity[0] and identity[1] in keys_with_group):
                 continue
-            if item.group is None and key in keys_seen:
-                continue
-            counted[identity] = item
-            keys_seen.add(key)
-        return [*counted.values(), *unkeyed]
+            counted.append(first[identity])
+        return [*counted, *unkeyed]
 
     def split_oversized(self, units: list[Unit]) -> list[Unit]:
         """Cut a unit longer than a shard into paragraph-aligned pieces.
@@ -656,10 +692,19 @@ class BroadRetriever(CompletionRetriever):
             f"Identity attribute (key): {plan.dedup_key or 'none'}\n"
             f"Grouping attribute (group): {plan.group_by or 'none'}\n"
             f"Amount to report (amount): {plan.measure or 'none'}\n"
-            "Undone entries: "
+            f"Ratio condition (matches): {plan.ratio_condition or 'none'}"
             + (
-                "an item later ended (removed, cancelled after it was placed, returned, "
-                "revoked) is listed with undone = true and its key"
+                " — list EVERY item and set matches = true or false for each"
+                if plan.ratio_condition
+                else ""
+            )
+            + "\nUndone entries: "
+            + (
+                "the item's state changes over time; list every entry that records a "
+                "state, with its date in when: undone = true for an entry that ends it "
+                "(resolved, closed, removed, cancelled after it was placed, returned), "
+                "undone = false for one that starts or restarts it (opened, reopened, "
+                "connected, placed). Code keeps the latest entry per item."
                 if plan.reversible
                 else "not applicable; never set undone"
             )
@@ -783,6 +828,11 @@ class BroadRetriever(CompletionRetriever):
     async def get_context_from_objects(self, query: str, retrieved_objects: CountResult) -> str:
         result = retrieved_objects
         plan = result.plan
+        if result.method == "unsupported":
+            return (
+                "This question cannot be answered by counting: "
+                f"{plan.unsupported} Say so plainly, and do not give a number."
+            )
         if result.method == "graph":
             how = (
                 "Counted by code from the knowledge graph: the distinct entities of type "
@@ -822,7 +872,15 @@ class BroadRetriever(CompletionRetriever):
                 "among them could not be removed: the total may be over by up to that many)"
             )
         lines.append(f"TOTAL: {_number(result.total)}")
-        if plan.measure:
+        if plan.ratio_condition:
+            share = 100 * result.total / result.denominator if result.denominator else 0
+            lines.append(
+                f"  = the items meeting the condition, out of {result.denominator} items in all: "
+                f"{share:.1f}% (both counted by code)"
+            )
+        if plan.measure and plan.average:
+            lines.append(f"  = the average {plan.measure} over the listed items")
+        elif plan.measure:
             lines.append(f"  = the sum of {plan.measure} over the listed items")
             if result.amounts_missing:
                 lines.append(f"  ({result.amounts_missing} listed items stated no amount)")

@@ -435,6 +435,79 @@ def test_names_with_digits_are_not_reduced_to_their_digits():
     assert broad_retriever._normalize_key("#921") == "921"
 
 
+def test_the_latest_dated_entry_decides_an_items_state():
+    """Ticket 1: opened, resolved, reopened -> open. Ticket 2: opened, resolved -> gone.
+    Ticket 3: the resolve was read before the open (separate files, no document
+    order), but its date is later -> gone. The open ticket is cited by its opening."""
+    items = [
+        ExtractedItem(unit=0, key="T-1", when="2026-02-02", evidence="opened"),
+        ExtractedItem(unit=1, key="T-1", when="2026-02-05", undone=True, evidence="resolved"),
+        ExtractedItem(unit=2, key="T-1", when="2026-02-09", evidence="reopened"),
+        ExtractedItem(unit=3, key="T-2", when="2026-02-03", evidence="opened"),
+        ExtractedItem(unit=4, key="T-2", when="2026-02-04", undone=True, evidence="resolved"),
+        ExtractedItem(unit=5, key="T-3", when="2026-03-09", undone=True, evidence="resolved"),
+        ExtractedItem(unit=6, key="T-3", when="2026-03-01", evidence="opened"),
+    ]
+
+    kept = BroadRetriever.dedup(items)
+
+    assert [(i.key, i.evidence) for i in kept] == [("T-1", "opened")]
+
+
+@pytest.mark.asyncio
+async def test_a_percentage_is_two_counts_from_one_pass(monkeypatch):
+    shard = ShardItems(
+        items=[
+            ExtractedItem(unit=0, key="T-1", matches=True, evidence="escalated"),
+            ExtractedItem(unit=1, key="T-2", matches=False, evidence="not"),
+            ExtractedItem(unit=2, key="T-3", matches=True, evidence="escalated"),
+            ExtractedItem(unit=3, key="T-4", matches=False, evidence="not"),
+        ]
+    )
+    _stub_llm(monkeypatch, lambda model, _: shard)
+    plan = _plan(ratio_condition="the ticket was escalated", dedup_key="the ticket number")
+
+    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(plan, _units(4, words=2))
+    context = await BroadRetriever().get_context_from_objects("q", result)
+
+    assert (result.total, result.denominator) == (2, 4)
+    assert "out of 4 items in all: 50.0%" in context
+
+
+@pytest.mark.asyncio
+async def test_an_average_divides_the_sum_by_the_items_with_an_amount(monkeypatch):
+    shard = ShardItems(
+        items=[
+            ExtractedItem(unit=0, key="O-1", amount=10, evidence="10"),
+            ExtractedItem(unit=1, key="O-2", amount=30, evidence="30"),
+            ExtractedItem(unit=2, key="O-3", evidence="no amount"),
+        ]
+    )
+    _stub_llm(monkeypatch, lambda model, _: shard)
+    plan = _plan(measure="order value", average=True, dedup_key="the order number")
+
+    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(plan, _units(3, words=2))
+
+    assert result.total == 20
+
+
+@pytest.mark.asyncio
+async def test_an_unsupported_question_is_refused_with_the_reason(monkeypatch):
+    _stub_llm(
+        monkeypatch,
+        lambda model, _: CountPlan(
+            source="text", item="a customer", unsupported="absence across the corpus"
+        ),
+    )
+    _use_graph(monkeypatch, _FakeGraph())
+
+    result = await BroadRetriever().get_retrieved_objects("Who never wrote to support?")
+    context = await BroadRetriever().get_context_from_objects("q", result)
+
+    assert result.method == "unsupported"
+    assert "cannot be answered by counting: absence across the corpus" in context
+
+
 def test_one_item_per_group_and_key_and_a_recap_finds_its_item():
     """A key written "#7" or "7" is one key. Paper 3 by Ann and by Bob is one item of
     each; a recap that names #7 without its group is the item already counted."""
