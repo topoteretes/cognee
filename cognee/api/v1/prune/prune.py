@@ -9,6 +9,11 @@ class prune:
 
     @staticmethod
     async def prune_system(graph=True, vector=True, metadata=False, cache=True):
+        """Drop the backing stores. Note ``metadata`` defaults to False here.
+
+        The default therefore clears the graph, the vectors and the cache while
+        keeping the relational schema (users, datasets, ACLs, migration state).
+        """
         await _prune_system(graph, vector, metadata, cache)
 
 
