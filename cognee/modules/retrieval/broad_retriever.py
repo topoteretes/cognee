@@ -269,6 +269,14 @@ def _one_entry_per_group(items: list[ExtractedItem], relation: bool) -> list[Ext
     return expanded
 
 
+def _is_wording_key(dedup_key: str) -> bool:
+    """A dedup key that is a title, name or wording and names no identifier or date."""
+    key = dedup_key.lower()
+    wording = re.search(r"\b(title|description|wording|text|name)\b", key)
+    identifier = re.search(r"\b(id|identifier|number|no\.|code|date|tag|hash)\b", key)
+    return bool(wording) and not identifier
+
+
 def _canonical_spelling(names: list[str]) -> str:
     """The spelling a group of variants is tallied under: no @, then the longest."""
     return min(names, key=lambda name: (name.startswith("@"), -len(name), name))
@@ -417,6 +425,12 @@ class BroadRetriever(CompletionRetriever):
             raise ValueError(
                 f"BROAD planner named a target ({plan.target!r}) without the attribute it is a "
                 "value of (group_by)."
+            )
+        if plan.dedup_key and _is_wording_key(plan.dedup_key):
+            # A title repeats for different items ("5,000 euros for travel" twice);
+            # the record's date tells them apart. Only an identifier is unique alone.
+            plan = plan.model_copy(
+                update={"dedup_key": f"{plan.dedup_key}, together with the date it appears under"}
             )
         if plan.distinct and (plan.target or not plan.group_by):
             # "Different X" counts group values. A target question counts that one
@@ -615,6 +629,10 @@ class BroadRetriever(CompletionRetriever):
         # changes its state on its own.
         first: dict[tuple[str, str], ExtractedItem] = {}
         states: dict[tuple[str, str], list[tuple[tuple[str, int], bool]]] = {}
+        # A ticket's escalation is its own email: the ratio flag holds if any entry
+        # of the item says so, and an amount comes from whichever entry states it.
+        matched: dict[tuple[str, str], bool] = {}
+        amounts: dict[tuple[str, str], float] = {}
         # "Ticket 7 was resolved" with no group ends ticket 7 under whichever group.
         ended_by_key: dict[str, list[tuple[str, int]]] = {}
         for position, (key, item) in enumerate(keyed):
@@ -625,6 +643,9 @@ class BroadRetriever(CompletionRetriever):
             identity = (item.group or "", key)
             first.setdefault(identity, item)
             states.setdefault(identity, []).append((stamp, item.undone))
+            matched[identity] = matched.get(identity, False) or bool(item.matches)
+            if item.amount is not None:
+                amounts.setdefault(identity, item.amount)
         keys_with_group = {identity[1] for identity in first if identity[0]}
         counted = []
         for identity, entries in states.items():
@@ -632,7 +653,12 @@ class BroadRetriever(CompletionRetriever):
             _, undone = max(entries)
             if undone or (not identity[0] and identity[1] in keys_with_group):
                 continue
-            counted.append(first[identity])
+            item = first[identity]
+            if item.matches is not None or matched[identity]:
+                item = item.model_copy(update={"matches": matched[identity]})
+            if item.amount is None and identity in amounts:
+                item = item.model_copy(update={"amount": amounts[identity]})
+            counted.append(item)
         return [*counted, *unkeyed]
 
     def split_oversized(self, units: list[Unit]) -> list[Unit]:

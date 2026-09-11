@@ -474,6 +474,36 @@ async def test_a_percentage_is_two_counts_from_one_pass(monkeypatch):
     assert "out of 4 items in all: 50.0%" in context
 
 
+def test_a_ratio_flag_holds_if_any_entry_of_the_item_says_so():
+    """The escalation is a separate email from the ticket's opening."""
+    items = [
+        ExtractedItem(unit=0, key="T-1", matches=False, evidence="opened"),
+        ExtractedItem(unit=1, key="T-1", matches=True, evidence="escalated"),
+        ExtractedItem(unit=2, key="T-2", matches=False, evidence="opened"),
+    ]
+
+    kept = BroadRetriever.dedup(items)
+
+    assert [(i.key, i.matches) for i in kept] == [("T-1", True), ("T-2", False)]
+
+
+@pytest.mark.asyncio
+async def test_a_wording_key_gets_the_records_date(monkeypatch):
+    """ "The budget's title" repeats across meetings; the planner's key is widened by code."""
+    _stub_llm(
+        monkeypatch,
+        lambda model, _: CountPlan(
+            source="text", item="a budget line", measure="euros", dedup_key="the budget's title"
+        ),
+    )
+
+    plan = await BroadRetriever().plan("What is the total budget approved?", {})
+
+    assert plan.dedup_key == "the budget's title, together with the date it appears under"
+    assert not broad_retriever._is_wording_key("the ticket number")
+    assert not broad_retriever._is_wording_key("the meeting date and the decision's wording")
+
+
 @pytest.mark.asyncio
 async def test_an_average_divides_the_sum_by_the_items_with_an_amount(monkeypatch):
     shard = ShardItems(
