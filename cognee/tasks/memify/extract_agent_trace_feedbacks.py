@@ -2,6 +2,10 @@ import json
 
 from cognee.context_global_variables import session_user
 from cognee.exceptions import CogneeSystemError
+from cognee.infrastructure.session.agent_trace_persist_watermark import (
+    AgentTracePersistWindow,
+    get_persisted_trace_count,
+)
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -29,6 +33,7 @@ async def extract_agent_trace_feedbacks(
     session_ids: list[str] | None = None,
     raw_trace_content: bool = False,
     last_n_steps: int | None = None,
+    incremental: bool = False,
 ):
     """
     Extract step-level agent trace content for the current user.
@@ -44,9 +49,12 @@ async def extract_agent_trace_feedbacks(
             of ``session_feedback`` summaries.
         last_n_steps: Optional number of most recent trace steps to extract per
             session. When None, all stored steps are used.
+        incremental: When True, extract only steps above the successful-persist watermark
+            and yield ``AgentTracePersistWindow`` values for acknowledgement.
 
     Yields:
-        String containing the session ID and all non-empty extracted entries.
+        A string for legacy extraction, or an ``AgentTracePersistWindow`` when
+        incremental extraction is enabled.
 
     Raises:
         CogneeSystemError: If SessionManager is unavailable or extraction fails.
@@ -83,17 +91,51 @@ async def extract_agent_trace_feedbacks(
                     content_label = (
                         "method_return_value" if raw_trace_content else "session_feedback"
                     )
+                    persisted_trace_count = 0
+                    total_trace_count = 0
+                    steps_to_fetch = last_n_steps
+                    if incremental:
+                        total_trace_count = await session_manager.get_agent_trace_count(
+                            user_id=user_id,
+                            session_id=session_id,
+                        )
+                        persisted_trace_count = await get_persisted_trace_count(
+                            session_manager, user_id, session_id
+                        )
+                        if persisted_trace_count > total_trace_count:
+                            logger.warning(
+                                "Session %s has %d trace steps but watermark is %d; "
+                                "treating watermark as stale and persisting from the start",
+                                session_id,
+                                total_trace_count,
+                                persisted_trace_count,
+                            )
+                            persisted_trace_count = 0
+
+                        pending_trace_count = total_trace_count - persisted_trace_count
+                        if pending_trace_count == 0:
+                            logger.info(
+                                "Session %s trace already persisted up to step %d, nothing new",
+                                session_id,
+                                persisted_trace_count,
+                            )
+                            continue
+                        steps_to_fetch = (
+                            pending_trace_count
+                            if last_n_steps is None
+                            else min(last_n_steps, pending_trace_count)
+                        )
                     if not raw_trace_content:
                         trace_values = await session_manager.get_agent_trace_feedback(
                             user_id=user_id,
                             session_id=session_id,
-                            last_n=last_n_steps,
+                            last_n=steps_to_fetch,
                         )
                     else:
                         trace_session = await session_manager.get_agent_trace_session(
                             user_id=user_id,
                             session_id=session_id,
-                            last_n=last_n_steps,
+                            last_n=steps_to_fetch,
                         )
                         trace_values = [entry.method_return_value for entry in trace_session]
 
@@ -109,7 +151,20 @@ async def extract_agent_trace_feedbacks(
                             len(normalized_trace_values),
                             content_label,
                         )
-                        yield f"Session ID: {session_id}\n\n" + "\n".join(normalized_trace_values)
+                    text = (
+                        f"Session ID: {session_id}\n\n" + "\n".join(normalized_trace_values)
+                        if normalized_trace_values
+                        else ""
+                    )
+                    if incremental:
+                        yield AgentTracePersistWindow(
+                            user_id=user_id,
+                            session_id=session_id,
+                            text=text,
+                            persisted_trace_count=total_trace_count,
+                        )
+                    elif text:
+                        yield text
                 except Exception as error:
                     logger.warning(
                         "Failed to extract agent trace %s for session %s: %s",

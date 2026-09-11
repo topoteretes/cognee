@@ -545,7 +545,8 @@ async def _persist_session_traces(
             dataset=dataset,
             node_set_name="agent_trace_feedbacks",
             raw_trace_content=False,
-            last_n_steps=None,  # persist all stored steps on demand
+            last_n_steps=None,
+            incremental=True,
             run_in_background=run_in_background,
         )
         logger.info(
