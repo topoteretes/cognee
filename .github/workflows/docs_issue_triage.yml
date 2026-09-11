@@ -9,8 +9,9 @@ name: automation | Triage GitHub Docs Issues
 # in the issue's problem sections) sorts issues into `pending_docs_check` or
 # `skipped_*`. Skipped issues cost nothing further.
 #
-# Phase 2 (current): the public docs export (llms-full.txt) is fetched once per
-# run and indexed lexically; each pending issue gets ONE structured LLM call
+# Phase 2: an issue a maintainer has already replied on is left to them with no
+# LLM call. For the rest, the public docs export (llms-full.txt) is fetched once
+# per run and indexed lexically; each pending issue gets ONE structured LLM call
 # over its top three pages. When the site already answers the report
 # and `dry_run` is false, the bot leaves ONE marked comment linking the pages
 # and asking the author to close; a rerun sees the marker and stays silent. Every other verdict is

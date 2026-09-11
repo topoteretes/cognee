@@ -10,7 +10,8 @@ answers the report, and on ``documentation_covered`` posts a single marked comme
 linking those pages and asking the author to close. Phase 3 (this version) takes every ``needs_source``
 issue to the cognee source: a ``git grep`` for the identifiers the issue names and a
 second structured LLM call decide whether the product really has the behaviour and the
-docs miss a small fact. Confirmed gaps become matrix rows for the workflow's draft-docs
+docs miss a small fact. An issue a maintainer has already replied on is left to them before any of this
+runs. Confirmed gaps become matrix rows for the workflow's draft-docs
 job (a Claude edit on topoteretes/cognee-docs, then ``--post-gap-comment``); everything
 uncertain, too big, absent from source, or already being fixed goes to a human-review
 list that is emailed when the SMTP secrets exist. It never labels or closes an issue.
@@ -53,6 +54,9 @@ VERDICTS = (
     "skipped_closed",
     "skipped_filter",
     "pending_docs_check",
+    # A maintainer already replied on the issue; the bot has nothing to add and leaves the
+    # thread to them. Decided before any LLM call. Not in the original plan.
+    "maintainer_replied",
     "not_docs",
     "too_vague",
     "documentation_covered",
@@ -61,14 +65,15 @@ VERDICTS = (
     "too_big",
     "uncertain",
     "small_gap",
-    # Not in the original plan: a linked PR or a volunteer already works on the issue, so a
-    # docs edit describing today's behaviour would be undone. Routed to human review.
+    # Not in the original plan: an open PR already fixes the issue, so a docs edit describing
+    # today's behaviour would be undone. Routed to human review.
     "fix_in_progress",
 )
 
 # Verdicts that feed the draft-docs matrix job (phase 3).
 GAP_VERDICTS: tuple[str, ...] = ("small_gap",)
 # Verdicts a human has to look at; emailed when the SMTP secrets are configured.
+# maintainer_replied is deliberately absent: a maintainer already has the thread.
 HUMAN_REVIEW_VERDICTS: tuple[str, ...] = (
     "not_in_source",
     "too_big",
@@ -184,17 +189,11 @@ MAX_DOCS_FILES = 3
 # Matrix rows carry the issue text base64-encoded, truncated like pr_body_b64 in
 # tools/prepare_merged_branches.py; the draft-docs job decodes it to issue_excerpt.md.
 MATRIX_EXCERPT_MAX_BYTES = 4000
-# A comment like these from a maintainer means someone is already on it. Only comments
-# whose author GitHub marks as an org MEMBER/OWNER, or whose login is in
-# .github/core-team.txt, count: a drive-by "I'd like to work on this" does not.
+# Comments whose author GitHub marks as an org MEMBER/OWNER, or whose login is in
+# .github/core-team.txt, come from maintainers. A maintainer reply hands the thread to
+# them (maintainer_replied); anyone else's comment changes nothing.
 MAINTAINER_ASSOCIATIONS = frozenset({"MEMBER", "OWNER"})
 CORE_TEAM_FILE = Path(".github") / "core-team.txt"
-VOLUNTEER_RE = re.compile(
-    r"\b(working on (this|it)|i(?:'| a)?m on it|assign (?:this |it )?to me|please assign|"
-    r"i(?:'d| would) like to (?:work on|take|pick up)|i can (?:take|work on) this|"
-    r"linked the fix|opened (?:a )?(?:fix )?pr|fix pr)\b",
-    re.IGNORECASE,
-)
 GAP_COMMENT = (
     f"{COMMENT_MARKER}\n"
     "This comment is auto-generated.\n\n"
@@ -711,6 +710,32 @@ def check_issue_against_docs(row: dict[str, Any], index: DocsIndex) -> None:
     row["doc_urls"] = [page["url"] for page in row["doc_pages"]]
 
 
+def issue_comments(repo: str, row: dict[str, Any]) -> list[dict[str, Any]]:
+    """The issue's comments, fetched once per row and reused by every later check."""
+    if "_comments" not in row:
+        row["_comments"] = list_issue_comments(repo, row["number"])
+    return row["_comments"]
+
+
+def is_bot_comment(comment: dict[str, Any]) -> bool:
+    user = comment.get("user") or {}
+    login = (user.get("login") or "").lower()
+    return user.get("type") == "Bot" or login.endswith("[bot]") or login == "github-actions"
+
+
+def maintainer_reply_reason(comments: list[dict[str, Any]], core_team: set[str]) -> str | None:
+    """Why the thread is already in a maintainer's hands, or None."""
+    for comment in comments:
+        body = comment.get("body") or ""
+        if is_bot_comment(comment) or COMMENT_MARKER in body.splitlines():
+            continue
+        if is_maintainer(comment, core_team):
+            login = (comment.get("user") or {}).get("login") or "a maintainer"
+            day = (comment.get("created_at") or "")[:10]
+            return f"maintainer @{login} replied{' on ' + day if day else ''}; left to them"
+    return None
+
+
 def is_bug_report(title: str, labels: list[str]) -> bool:
     """Filed through the bug form: ``[Bug]:`` title prefix or the ``bug`` label."""
     return bool(BUG_TITLE_RE.search(title or "")) or any(
@@ -762,7 +787,7 @@ def maybe_comment_documentation_covered(repo: str, row: dict[str, Any], dry_run:
     if dry_run:
         row["reason"] = f"{row['reason']} (dry run: comment suppressed)"
         return
-    if has_triage_comment(list_issue_comments(repo, row["number"])):
+    if has_triage_comment(issue_comments(repo, row)):
         row["reason"] = f"{row['reason']} (bot comment already present)"
         return
     post_issue_comment(repo, row["number"], row["comment"])
@@ -770,10 +795,20 @@ def maybe_comment_documentation_covered(repo: str, row: dict[str, Any], dry_run:
 
 
 def run_docs_check(
-    repo: str, results: list[dict[str, Any]], dry_run: bool
+    repo: str, results: list[dict[str, Any]], dry_run: bool, repo_root: Path
 ) -> tuple[bool, DocsIndex | None]:
     """Phase 2 over every pending row: (all LLM calls succeeded, the docs index or None)."""
     pending = [row for row in results if row["verdict"] == "pending_docs_check"]
+    if not pending:
+        return True, None
+    # A maintainer who already replied owns the thread: no LLM call, no comment, no PR.
+    core_team = core_team_logins(repo_root)
+    for row in pending:
+        replied = maintainer_reply_reason(issue_comments(repo, row), core_team)
+        if replied:
+            row["verdict"] = "maintainer_replied"
+            row["reason"] = replied
+    pending = [row for row in pending if row["verdict"] == "pending_docs_check"]
     if not pending:
         return True, None
     if not os.environ.get("LLM_API_KEY"):
@@ -872,23 +907,15 @@ def is_maintainer(comment: dict[str, Any], core_team: set[str]) -> bool:
     )
 
 
-def fix_in_progress_reason(repo: str, number: int, repo_root: Path) -> str | None:
-    """Why the issue is already being fixed, or None.
+def fix_in_progress_reason(repo: str, row: dict[str, Any]) -> str | None:
+    """Why the issue is already being fixed, or None: an open linked pull request.
 
-    Only an open linked pull request, or a volunteer comment from a maintainer, counts.
+    Volunteer comments are not checked here: a maintainer's reply already ends the
+    triage as maintainer_replied in phase 2, and anyone else's promise is not a fix.
     """
-    pull_requests = linked_pull_requests(repo, number)
+    pull_requests = linked_pull_requests(repo, row["number"])
     if pull_requests:
         return f"open linked pull request: {', '.join(pull_requests[:3])}"
-    core_team = core_team_logins(repo_root)
-    for comment in list_issue_comments(repo, number):
-        body = comment.get("body") or ""
-        if COMMENT_MARKER in body.splitlines() or not is_maintainer(comment, core_team):
-            continue
-        match = VOLUNTEER_RE.search(body)
-        if match:
-            author = (comment.get("user") or {}).get("login") or "a maintainer"
-            return f"maintainer @{author} volunteered in a comment: {match.group(0)!r}"
     return None
 
 
@@ -1008,7 +1035,7 @@ def run_source_checks(
     ok = True
     for row in pending:
         try:
-            in_progress = fix_in_progress_reason(repo, row["number"], repo_root)
+            in_progress = fix_in_progress_reason(repo, row)
             if in_progress:
                 row["verdict"] = "fix_in_progress"
                 row["reason"] = f"{row['reason']} (not drafting docs: {in_progress})"
@@ -1205,7 +1232,7 @@ def main(argv: list[str] | None = None) -> int:
     exit_code = 0
     email_status = ""
     try:
-        docs_ok, index = run_docs_check(args.repo, results, args.dry_run)
+        docs_ok, index = run_docs_check(args.repo, results, args.dry_run, args.repo_root)
         source_ok = run_source_checks(args.repo, results, index, args.repo_root)
         if not (docs_ok and source_ok):
             exit_code = 1

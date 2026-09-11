@@ -88,9 +88,15 @@ def _fake_api(triage, monkeypatch, responses):
 
     def fake(url, method="GET", payload=None):
         calls.append(url if method == "GET" else (method, url, payload))
+        listing = "/comments" in url or "/timeline" in url
         for needle, response in responses:
-            if needle in url:
+            # an "/issues/N" needle is for the issue itself, not its comment/timeline pages
+            if needle in url and (
+                not listing or any(k in needle for k in ("comments", "timeline", "page="))
+            ):
                 return response
+        if method == "GET" and listing:
+            return []  # no comments unless a test says otherwise; also ends pagination
         raise AssertionError(f"unexpected GitHub API call: {method} {url}")
 
     monkeypatch.setattr(triage, "github_api_json", fake)
@@ -208,7 +214,6 @@ def test_dry_run_never_posts_but_records_the_suggested_comment(triage, monkeypat
     _site_verdict(triage, monkeypatch, "documentation_covered", "covered", [PAGE_SEARCH])
     code, [row] = _run(triage, ["--issue-number", "4656", "--dry-run"], tmp_path)
     assert code == 0 and _posts(calls) == []
-    assert not any("/comments" in c for c in calls)
     assert row["commented"] is False and "dry run" in row["reason"]
     assert row["comment"].splitlines()[0] == triage.COMMENT_MARKER
     assert f"[Search Types]({PAGE_SEARCH})" in row["comment"]
@@ -309,6 +314,42 @@ def test_summary_lists_only_issues_that_passed_the_filter(triage, monkeypatch, t
     assert "**suggested, not posted**" in summary and triage.COMMENT_MARKER not in summary
 
 
+def test_maintainer_reply_leaves_the_thread_to_them_without_an_llm_call(
+    triage, monkeypatch, tmp_path
+):
+    llm_calls = []
+    monkeypatch.setattr(
+        triage,
+        "run_site_check",
+        lambda sp, um: llm_calls.append(um) or ("documentation_covered", "x", [(PAGE_SEARCH, "n")]),
+    )
+    comments = [
+        {"body": "Hello, thanks!", "user": {"login": "github-actions[bot]", "type": "Bot"}},
+        {"body": "Same problem here.", "user": {"login": "someone"}, "author_association": "NONE"},
+    ]
+    calls = _fake_api(
+        triage,
+        monkeypatch,
+        [("comments?per_page=100&page=1", comments), ("/issues/4604", _docs_issue(4604))],
+    )
+    code, [row] = _run(triage, ["--issue-number", "4604", "--dry-run"], tmp_path)
+    assert code == 0 and len(llm_calls) == 1  # bot and contributor comments do not count
+
+    comments.append(
+        {
+            "body": "Thanks for the questions, here are the answers.",
+            "user": {"login": "lxobr"},
+            "author_association": "MEMBER",
+            "created_at": "2026-08-27T09:00:00Z",
+        }
+    )
+    code, [row] = _run(triage, ["--issue-number", "4604"], tmp_path)
+    assert code == 0 and len(llm_calls) == 1  # no second LLM call
+    assert row["verdict"] == "maintainer_replied"
+    assert row["reason"] == "maintainer @lxobr replied on 2026-08-27; left to them"
+    assert row["comment"] == "" and _posts(calls) == []
+
+
 # --- phase 3: source check, human review, draft-docs hand-off ------------------------------
 
 
@@ -386,16 +427,18 @@ def test_human_review_verdicts_are_silent_and_listed_without_smtp(
     assert "email skipped, SMTP not configured" in summary
 
 
-def test_fix_in_progress_needs_an_open_pr_or_a_maintainer_volunteer(phase3, monkeypatch, tmp_path):
+def test_open_linked_pull_request_means_fix_in_progress_without_an_llm_call(
+    phase3, monkeypatch, tmp_path
+):
     _fake_api(phase3, monkeypatch, [("/issues/4632", _bug_issue())])
     llm_calls = _source_verdict(phase3, monkeypatch, "small_gap", "gap", ["a.py"], ["b.mdx"])
-
     monkeypatch.setattr(
         phase3, "linked_pull_requests", lambda repo, number: ["https://x/pull/5000"]
     )
     _, [row] = _run(phase3, ["--issue-number", "4632"], tmp_path)
-    assert row["verdict"] == "fix_in_progress" and "pull/5000" in row["reason"] and llm_calls == []
-
+    assert row["verdict"] == "fix_in_progress" and "pull/5000" in row["reason"]
+    assert llm_calls == []
+    # a contributor's "I'd like to work on this" is not a fix in progress
     monkeypatch.setattr(phase3, "linked_pull_requests", lambda repo, number: [])
     comments = [
         {
@@ -406,21 +449,7 @@ def test_fix_in_progress_needs_an_open_pr_or_a_maintainer_volunteer(phase3, monk
     ]
     monkeypatch.setattr(phase3, "list_issue_comments", lambda repo, number: comments)
     _, [row] = _run(phase3, ["--issue-number", "4632"], tmp_path)
-    assert row["verdict"] == "small_gap"  # a drive-by volunteer does not stop the source check
-
-    comments.append(
-        {"body": "Working on this.", "user": {"login": "core"}, "author_association": "MEMBER"}
-    )
-    _, [row] = _run(phase3, ["--issue-number", "4632"], tmp_path)
-    assert row["verdict"] == "fix_in_progress" and "maintainer @core" in row["reason"]
-
-    (tmp_path / ".github").mkdir()
-    (tmp_path / ".github" / "core-team.txt").write_text("# logins\n@Listed\n")
-    comments[:] = [
-        {"body": "Linked the fix PR.", "user": {"login": "listed"}, "author_association": "NONE"}
-    ]
-    _, [row] = _run(phase3, ["--issue-number", "4632", "--repo-root", str(tmp_path)], tmp_path)
-    assert row["verdict"] == "fix_in_progress" and "@listed" in row["reason"]
+    assert row["verdict"] == "small_gap"
 
 
 def test_closed_pull_requests_do_not_count_as_a_fix_in_progress(triage, monkeypatch):
