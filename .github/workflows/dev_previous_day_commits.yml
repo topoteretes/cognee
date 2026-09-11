@@ -86,10 +86,6 @@ jobs:
       - name: Check out core repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
-          # Pinned for the same reason as prepare-merged-branches, and because
-          # `uv sync --locked` below resolves against the checked-out branch's
-          # uv.lock: on main a lockfile that has drifted from its
-          # pyproject.toml fails every matrix job (RES-41).
           ref: dev
           fetch-depth: 0
 
