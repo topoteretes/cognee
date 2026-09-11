@@ -100,8 +100,9 @@ async def test_text_units_are_every_chunk_and_table_row_with_text():
 
 
 @pytest.mark.asyncio
-async def test_mid_document_chunks_carry_the_documents_first_line(monkeypatch):
-    """A CSV ingested as text has its header only in chunk 0; later chunks get it as context."""
+async def test_a_documents_chunks_are_rejoined_and_later_pieces_carry_its_first_line(monkeypatch):
+    """A CSV ingested as text has its header only in chunk 0. The chunks are rejoined
+    into one document; a piece cut from beyond the header gets it as context."""
     graph = _FakeGraph()
     graph.text_nodes = [
         ("c1", {"type": "DocumentChunk", "chunk_index": 1, "text": "2,bob,no,yes"}),
@@ -119,15 +120,55 @@ async def test_mid_document_chunks_carry_the_documents_first_line(monkeypatch):
         return ShardItems(items=[])
 
     _stub_llm(monkeypatch, respond)
-    retriever = BroadRetriever(shard_tokens=10_000)
+    retriever = BroadRetriever(shard_tokens=10)  # small enough to cut the document
 
     units = await retriever.load_text_units(graph)
+    pieces = retriever.split_oversized(units)
     await retriever.count_by_reading(CountPlan(source="text", item="a row"), units)
 
-    assert [unit.id for unit in units] == ["c0", "c1"]
-    assert units[0].preamble == "" and units[1].preamble == "id,who,review,main"
-    assert seen[0].count("id,who,review,main") == 2  # chunk 0 itself + one context line
-    assert seen[0].count("[document start") == 1
+    assert [unit.id for unit in units] == ["d"]
+    assert units[0].text == "id,who,review,main\n1,ann,yes,no\n2,bob,no,yes"
+    assert len(pieces) == 3  # no sentence ends: the table is cut one line at a time
+    assert pieces[0].preamble == "" and pieces[-1].preamble == "id,who,review,main"
+    assert any("[document start — context only]\nid,who,review,main" in s for s in seen)
+    assert all(s.count("[document start") <= 1 for s in seen)
+
+
+@pytest.mark.asyncio
+async def test_a_record_cut_in_two_by_the_chunker_is_read_whole():
+    """Ingestion cut an episode between its intro (which names the guest) and its
+    turns. Read from separate chunks, the second half has no name for "VAN DIJK:";
+    rejoined, the episode is one paragraph and one piece."""
+    graph = _FakeGraph()
+    intro = (
+        "Episode 21 — Running time: 44 minutes\n[00:00:12] HOST: My guest today is Pieter Van Dijk."
+    )
+    turns = "[00:00:40] VAN DIJK: It started with a failure.\n[00:01:02] HOST: Go on."
+    graph.text_nodes = [
+        ("c0", {"type": "DocumentChunk", "chunk_index": 0, "text": intro}),
+        ("c1", {"type": "DocumentChunk", "chunk_index": 1, "text": turns}),
+        ("d", {"type": "TextDocument", "name": "episodes.txt"}),
+    ]
+    graph.text_edges = [("c0", "d", "is_part_of", {}), ("c1", "d", "is_part_of", {})]
+
+    pieces = BroadRetriever().split_oversized(await BroadRetriever().load_text_units(graph))
+
+    assert len(pieces) == 1
+    assert "Pieter Van Dijk" in pieces[0].text and "VAN DIJK: It started" in pieces[0].text
+
+
+def test_rejoining_chunks_drops_a_chunkers_overlap():
+    """A chunker that repeats the end of one chunk at the start of the next must not
+    make BROAD read that sentence twice."""
+    joined = broad_retriever._rejoin(
+        [
+            "Order 41 shipped. Order 42 shipped on Monday morning.",
+            "Order 42 shipped on Monday morning. Order 43 shipped.",
+        ]
+    )
+
+    assert joined.count("Order 42") == 1
+    assert joined.endswith("Order 43 shipped.")
 
 
 # --- planning --------------------------------------------------------------------

@@ -239,18 +239,44 @@ def _loose_name(name: str) -> str:
     return re.sub(r"[^0-9a-z]+", "", name.lstrip("@").lower())
 
 
+def _rejoin(parts: list[str]) -> str:
+    """A document's chunks back into one text. A chunker that overlaps repeats the
+    end of one chunk at the start of the next; that repeat is dropped so no record
+    is read twice."""
+    text = parts[0]
+    for part in parts[1:]:
+        for size in range(min(len(text), len(part), 500), 20, -1):
+            if text.endswith(part[:size]):
+                part = part[size:]
+                break
+        separator = "" if text.endswith(("\n", " ")) or part.startswith(("\n", " ")) else "\n"
+        text += separator + part
+    return text
+
+
 def _paragraphs(text: str, budget: int, tokenizer) -> list[str]:
     """Cut points for a chunk: blank lines; a paragraph over budget is cut at sentence
     ends; never inside a sentence, so a record is not split into two half-records
     (a half without its identifier cannot be told from the other half)."""
+
+    def fits(part: str) -> bool:
+        return len(tokenizer.extract_tokens(part)) <= budget
+
     pieces = []
     for paragraph in re.split(r"\n\s*\n", text):
         if not paragraph.strip():
             continue
-        if len(tokenizer.extract_tokens(paragraph)) <= budget:
+        if fits(paragraph):
             pieces.append(paragraph)
-        else:
-            pieces += [s for s in re.split(r"(?<=[.!?])\s+", paragraph) if s.strip()]
+            continue
+        for run in re.split(r"(?<=[.!?])\s+", paragraph):
+            if not run.strip():
+                continue
+            if fits(run):
+                pieces.append(run)
+            else:
+                # No sentence ends to cut at (a table written as lines): one line each.
+                pieces += [line for line in run.split("\n") if line.strip()]
     return pieces
 
 
@@ -410,24 +436,30 @@ class BroadRetriever(CompletionRetriever):
         if not chunks:
             raise NoDataError("No data found in the system, please add data first.")
 
-        first_lines = {
-            document_of[node_id]: props["text"].strip().split("\n", 1)[0][:BROAD_PREAMBLE_CHARS]
-            for node_id, props in chunks.items()
-            if node_id in document_of and str(props.get("chunk_index")) == "0"
-        }
-        units = []
-        for node_id, props in sorted(
-            chunks.items(),
-            key=lambda item: (document_of.get(item[0], ""), int(item[1].get("chunk_index") or 0)),
-        ):
-            preamble = first_lines.get(document_of.get(node_id), "")
-            if preamble in props["text"]:
-                preamble = ""
-            units.append(Unit(id=node_id, text=props["text"], preamble=preamble))
+        # A document's chunks are rejoined in order: ingestion cut the text by size,
+        # not by record, so a chunk boundary can fall inside an episode, a match
+        # report or a ticket and leave its second half without the heading that
+        # names it. The whole document is cut again at paragraph ends when read.
+        parts_of: dict[str, list[tuple[int, str, str]]] = {}
+        units: list[Unit] = []
+        for node_id, props in chunks.items():
+            document = document_of.get(node_id)
+            if document is None:
+                units.append(Unit(id=node_id, text=props["text"]))
+            else:
+                index = int(props.get("chunk_index") or 0)
+                parts_of.setdefault(document, []).append((index, node_id, props["text"]))
+        units.sort(key=lambda unit: unit.id)
+        for document, parts in sorted(parts_of.items()):
+            parts.sort()
+            text = _rejoin([part for _, _, part in parts])
+            first_line = text.strip().split("\n", 1)[0][:BROAD_PREAMBLE_CHARS]
+            units.append(Unit(id=document, text=text, preamble=first_line))
         logger.info(
-            "BROAD units: %d, %d carrying their document's first line",
-            len(units),
-            sum(1 for unit in units if unit.preamble),
+            "BROAD units: %d documents from %d chunks, %d table rows",
+            len(parts_of),
+            sum(len(parts) for parts in parts_of.values()),
+            len(chunks) - sum(len(parts) for parts in parts_of.values()),
         )
         return units
 
@@ -708,9 +740,15 @@ class BroadRetriever(CompletionRetriever):
         unit's document-start line so a table header still reaches each one.
         """
         pieces: list[Unit] = []
+
+        def piece(unit_id: str, text: str, source: Unit) -> Unit:
+            # The first line is context for a piece that does not itself contain it.
+            preamble = source.preamble if source.preamble not in text else ""
+            return Unit(unit_id, text, source.name, preamble)
+
         for unit in units:
             if len(self.tokenizer.extract_tokens(unit.text)) <= self.shard_tokens:
-                pieces.append(unit)
+                pieces.append(piece(unit.id, unit.text, unit))
                 continue
             paragraphs = _paragraphs(unit.text, self.shard_tokens, self.tokenizer)
             current: list[str] = []
@@ -718,18 +756,12 @@ class BroadRetriever(CompletionRetriever):
             for paragraph in paragraphs:
                 tokens = len(self.tokenizer.extract_tokens(paragraph))
                 if current and current_tokens + tokens > self.shard_tokens:
-                    pieces.append(
-                        Unit(
-                            f"{unit.id}#{len(pieces)}", "\n".join(current), unit.name, unit.preamble
-                        )
-                    )
+                    pieces.append(piece(f"{unit.id}#{len(pieces)}", "\n".join(current), unit))
                     current, current_tokens = [], 0
                 current.append(paragraph)
                 current_tokens += tokens
             if current:
-                pieces.append(
-                    Unit(f"{unit.id}#{len(pieces)}", "\n".join(current), unit.name, unit.preamble)
-                )
+                pieces.append(piece(f"{unit.id}#{len(pieces)}", "\n".join(current), unit))
         return pieces
 
     def pack_shards(self, units: list[Unit]) -> tuple[list[list[Unit]], int]:
