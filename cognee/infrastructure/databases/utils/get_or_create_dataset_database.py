@@ -1,5 +1,4 @@
 import os
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import select
@@ -39,7 +38,7 @@ async def _get_graph_db_info(dataset_id: UUID, owner: User) -> dict:
 
 async def _existing_dataset_database(
     dataset_id: UUID,
-) -> Optional[DatasetDatabase]:
+) -> DatasetDatabase | None:
     """
     Check if a DatasetDatabase row already exists for the given dataset.
     Return None if it doesn't exist, return the row if it does.

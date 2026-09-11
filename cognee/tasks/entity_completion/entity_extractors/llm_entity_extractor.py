@@ -1,5 +1,3 @@
-from typing import List
-
 from pydantic import BaseModel
 
 from cognee.infrastructure.entities.BaseEntityExtractor import BaseEntityExtractor
@@ -15,7 +13,7 @@ logger = get_logger("llm_entity_extractor")
 class EntityList(BaseModel):
     """Response model containing a list of extracted entities."""
 
-    entities: List[Entity]
+    entities: list[Entity]
 
 
 class LLMEntityExtractor(BaseEntityExtractor):
@@ -42,7 +40,7 @@ class LLMEntityExtractor(BaseEntityExtractor):
 
         return self._entity_type_cache[type_name]
 
-    async def extract_entities(self, text: str) -> List[Entity]:
+    async def extract_entities(self, text: str) -> list[Entity]:
         """Extract entities from text using an LLM."""
         if not text or not isinstance(text, str):
             logger.warning("Invalid input text for entity extraction")
@@ -67,6 +65,6 @@ class LLMEntityExtractor(BaseEntityExtractor):
             logger.info(f"Extracted {len(response.entities)} entities")
             return response.entities
 
-        except Exception as e:
-            logger.error(f"Entity extraction failed: {e!s}")
+        except Exception:
+            logger.exception("Entity extraction failed")
             return []

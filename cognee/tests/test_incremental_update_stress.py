@@ -45,6 +45,7 @@ a mock without them verifies nothing about either.
 
 import asyncio
 import hashlib
+import itertools
 import os
 import re
 from collections import Counter
@@ -90,7 +91,7 @@ def _kind(name: str) -> str:
 def _pairs(text: str) -> set:
     """Consecutive distinct entities in a chunk: the relationships it states."""
     names = _nouns_ordered(text)
-    return {(a, b) for a, b in zip(names, names[1:]) if a != b}
+    return {(a, b) for a, b in itertools.pairwise(names) if a != b}
 
 
 def _setup_environment() -> None:
@@ -99,7 +100,7 @@ def _setup_environment() -> None:
 
     root = Path(tempfile.mkdtemp(prefix="cognee_stress_"))
 
-    import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
+    import cognee  # (cognee's import runs load_dotenv(override=True))
 
     os.environ.update(
         **incremental_test_backend_env(),

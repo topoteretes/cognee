@@ -1,7 +1,6 @@
 import asyncio
 import re
 from time import monotonic
-from typing import Optional
 from uuid import UUID
 
 from cognee.infrastructure.databases.dataset_database_handler import (
@@ -17,6 +16,9 @@ from cognee.infrastructure.databases.graph.get_graph_engine import (
     graph_engine_cache,
 )
 from cognee.modules.users.models import DatasetDatabase, User
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 NEO4J_DATASET_DATABASE_HANDLER = "neo4j"
 NEO4J_SYSTEM_DATABASE = "system"
@@ -48,7 +50,7 @@ class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     """Handler for per-dataset databases in a local/self-hosted Neo4j DBMS."""
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: UUID | None, user: User | None) -> dict:
         graph_config = get_graph_config()
 
         if graph_config.graph_database_provider != "neo4j":
@@ -118,7 +120,7 @@ class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         await cls._drop_neo4j_database(graph_db_name)
 
     @classmethod
-    def _database_name_for_dataset(cls, dataset_id: Optional[UUID]) -> str:
+    def _database_name_for_dataset(cls, dataset_id: UUID | None) -> str:
         if dataset_id is None:
             raise ValueError("dataset_id is required to create a local Neo4j dataset database.")
 
@@ -168,6 +170,10 @@ class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         try:
             records = await cls._run_system_query(driver, NEO4J_EDITION_QUERY)
         except Exception:
+            logger.debug(
+                "Giving up after error in Neo4jDatasetDatabaseHandler._ensure_multi_database_support",
+                exc_info=True,
+            )
             return
 
         edition = records[0].get("edition", "") if records else ""
@@ -285,7 +291,7 @@ class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         )
 
     @classmethod
-    async def _run_system_query(cls, driver, query: str, params: Optional[dict] = None) -> list:
+    async def _run_system_query(cls, driver, query: str, params: dict | None = None) -> list:
         try:
             async with driver.session(database=NEO4J_SYSTEM_DATABASE) as session:
                 result = await session.run(query, parameters=params or {})

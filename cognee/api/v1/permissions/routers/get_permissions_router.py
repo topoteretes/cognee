@@ -1,4 +1,3 @@
-from typing import List, Union
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, Query
@@ -44,7 +43,7 @@ def get_permissions_router() -> APIRouter:
             examples=["read"],
             description="Permission to grant. One of 'read', 'write', 'delete', 'share'.",
         ),
-        dataset_ids: List[UUID] = Body(
+        dataset_ids: list[UUID] = Body(
             ...,
             examples=[["a1b2c3d4-5717-4562-b3fc-2c963f66afa6"]],
             description=(
@@ -103,7 +102,7 @@ def get_permissions_router() -> APIRouter:
     @permissions_router.delete("/datasets/{principal_id}")
     async def revoke_datasets_permission_from_principal(
         permission_name: str,
-        dataset_ids: List[UUID],
+        dataset_ids: list[UUID],
         principal_id: UUID,
         user: User = Depends(get_authenticated_user),
     ):

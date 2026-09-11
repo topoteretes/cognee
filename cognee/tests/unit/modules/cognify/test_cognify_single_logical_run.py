@@ -15,7 +15,7 @@ from uuid import uuid4
 
 import pytest
 
-import cognee.api.v1.cognify.cognify  # noqa: F401 — ensure the module (not the re-exported function) is importable via sys.modules
+import cognee.api.v1.cognify.cognify  # ensure the module (not the re-exported function) is importable via sys.modules
 import cognee.modules.pipelines.operations.run_tasks as run_tasks_module
 from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
 from cognee.modules.pipelines.models.PipelineRunInfo import (
@@ -164,9 +164,11 @@ class TestCognifyMakesOneCall:
         (call,) = calls
         resolver = call["tasks"]
 
-        with patch.object(cognify_module, "cognify_route_for", return_value="UNMAPPED_ROUTE"):
-            with pytest.raises(KeyError):
-                resolver(_text_item())
+        with (
+            patch.object(cognify_module, "cognify_route_for", return_value="UNMAPPED_ROUTE"),
+            pytest.raises(KeyError),
+        ):
+            resolver(_text_item())
 
     @pytest.mark.asyncio
     async def test_temporal_swaps_standard_route_only(self):

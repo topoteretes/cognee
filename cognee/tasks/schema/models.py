@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Dict, List, Optional
 
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
 
@@ -20,10 +19,10 @@ class SchemaTable(DataPoint):
 
     name: str
     columns: str  # Column definitions with types
-    primary_key: Optional[str]
+    primary_key: str | None
     foreign_keys: str  # Foreign key relationships
     sample_rows: str  # Max 3-5 example rows
-    row_count_estimate: Optional[int]  # Actual table size
+    row_count_estimate: int | None  # Actual table size
     description: str
     metadata: dict = {"index_fields": ["description", "name"]}
 

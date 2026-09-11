@@ -1,4 +1,4 @@
-from typing import Any, BinaryIO, List, Optional, Union
+from typing import Any, BinaryIO
 from uuid import UUID
 
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
@@ -33,28 +33,20 @@ logger = get_logger()
 
 
 async def add(
-    data: Union[
-        BinaryIO,
-        list[BinaryIO],
-        str,
-        list[str],
-        DataItem,
-        list[DataItem],
-        Any,  # DltResource, SourceFactory, or other dlt types
-    ],
+    data: BinaryIO | list[BinaryIO] | str | list[str] | DataItem | list[DataItem] | Any,
     dataset_name: str = DEFAULT_DATASET_NAME,
     user: User = None,
-    node_set: Optional[List[str]] = None,
-    vector_db_config: dict = None,
-    graph_db_config: dict = None,
-    dataset_id: Optional[UUID] = None,
-    preferred_loaders: Optional[List[Union[str, dict[str, dict[str, Any]]]]] = None,
+    node_set: list[str] | None = None,
+    vector_db_config: dict | None = None,
+    graph_db_config: dict | None = None,
+    dataset_id: UUID | None = None,
+    preferred_loaders: list[str | dict[str, dict[str, Any]]] | None = None,
     incremental_loading: bool = True,
-    data_per_batch: Optional[int] = 20,
-    importance_weight: Optional[float] = 0.5,
+    data_per_batch: int | None = 20,
+    importance_weight: float | None = 0.5,
     run_in_background: bool = False,
-    llm_config: Optional[LLMConfig] = None,
-    embedding_config: Optional[EmbeddingConfig] = None,
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = True,
     **kwargs,
 ):

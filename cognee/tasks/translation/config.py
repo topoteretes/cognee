@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -42,21 +42,21 @@ class TranslationConfig(BaseSettings):
     )
 
     # Google Translate settings
-    google_translate_api_key: Optional[str] = Field(
+    google_translate_api_key: str | None = Field(
         default=None,
         validation_alias=AliasChoices("GOOGLE_TRANSLATE_API_KEY", "google_translate_api_key"),
     )
-    google_project_id: Optional[str] = Field(
+    google_project_id: str | None = Field(
         default=None,
         validation_alias=AliasChoices("GOOGLE_PROJECT_ID", "google_project_id"),
     )
 
     # Azure Translator settings
-    azure_translator_key: Optional[str] = Field(
+    azure_translator_key: str | None = Field(
         default=None,
         validation_alias=AliasChoices("AZURE_TRANSLATOR_KEY", "azure_translator_key"),
     )
-    azure_translator_region: Optional[str] = Field(
+    azure_translator_region: str | None = Field(
         default=None,
         validation_alias=AliasChoices("AZURE_TRANSLATOR_REGION", "azure_translator_region"),
     )

@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import os
 import warnings
-from typing import Dict
 
 from baml_py import BamlCtxManager, BamlRuntime
 
@@ -28,7 +27,7 @@ DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_CTX = BamlCtxManager(
 )
 
 
-def reset_baml_env_vars(env_vars: Dict[str, str]):
+def reset_baml_env_vars(env_vars: dict[str, str]):
     warnings.warn(
         "reset_baml_env_vars is deprecated and should be removed. Environment variables are now lazily loaded on each function call",
         DeprecationWarning,

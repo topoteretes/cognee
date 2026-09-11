@@ -1,5 +1,5 @@
 import asyncio
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from cognee.infrastructure.databases.provenance import (
     EdgeIdentity,
@@ -68,12 +68,12 @@ def _group_by_extra_keys(owner_map: dict) -> dict:
 
 @task_summary("Stored {n} data point(s)")
 async def add_data_points(
-    data_points: List[DataPoint],
-    custom_edges: Optional[List] = None,
+    data_points: list[DataPoint],
+    custom_edges: list | None = None,
     embed_triplets: bool = False,
     ctx: Optional["PipelineContext"] = None,
     graph_only: bool = False,
-) -> List[DataPoint]:
+) -> list[DataPoint]:
     """
     Add a batch of data points to the graph database by extracting nodes and edges,
     deduplicating them, and indexing them for retrieval.
@@ -454,7 +454,7 @@ def _extract_embeddable_text_from_datapoint(data_point: DataPoint) -> str:
     return " ".join(embeddable_values) if embeddable_values else ""
 
 
-def _create_triplets_from_graph(nodes: List[DataPoint], edges: List[tuple]) -> List[Triplet]:
+def _create_triplets_from_graph(nodes: list[DataPoint], edges: list[tuple]) -> list[Triplet]:
     """
     Create Triplet objects from graph nodes and edges.
 
@@ -473,7 +473,7 @@ def _create_triplets_from_graph(nodes: List[DataPoint], edges: List[tuple]) -> L
     --------
         - List[Triplet]: List of Triplet objects ready for indexing
     """
-    node_map: Dict[str, DataPoint] = {}
+    node_map: dict[str, DataPoint] = {}
     for node in nodes:
         if hasattr(node, "id"):
             node_id = str(node.id)

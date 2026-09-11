@@ -11,8 +11,9 @@ us at social@cognee.ai to explore the options.
 
 import asyncio
 import json
+from collections.abc import Callable
 from contextlib import asynccontextmanager
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import NullPool, text
@@ -43,7 +44,7 @@ from .tables import _meta
 
 
 def _prepare_node_rows(
-    nodes: Union[List[Tuple[str, Dict]], List[DataPoint]],
+    nodes: list[tuple[str, dict]] | list[DataPoint],
 ) -> list[dict[str, Any]]:
     """Copy, sanitize, deduplicate, and sort nodes for one database write."""
     rows_by_id: dict[str, dict[str, Any]] = {}
@@ -70,7 +71,7 @@ def _prepare_node_rows(
 
 
 def _prepare_edge_rows(
-    edges: List[Tuple[str, str, str, Optional[Dict[str, Any]]]],
+    edges: list[tuple[str, str, str, dict[str, Any] | None]],
 ) -> list[dict[str, Any]]:
     """Copy, sanitize, deduplicate, and sort edges for one database write."""
     rows_by_identity: dict[tuple[str, str, str], dict[str, Any]] = {}
@@ -320,7 +321,7 @@ class PostgresDemoAdapter(GraphDBInterface):
                 await conn.run_sync(_meta.create_all, checkfirst=True)
             self._initialized = True
 
-    async def query(self, query_str: str, params: Optional[dict] = None) -> List[Any]:
+    async def query(self, query_str: str, params: dict | None = None) -> list[Any]:
         """Reject raw Cypher; callers must use the typed graph methods."""
         raise NotImplementedError(
             "The Postgres graph backend does not support raw Cypher queries. "
@@ -336,7 +337,7 @@ class PostgresDemoAdapter(GraphDBInterface):
             return not result.scalar()
 
     async def add_node(
-        self, node: Union[DataPoint, str], properties: Optional[Dict[str, Any]] = None
+        self, node: DataPoint | str, properties: dict[str, Any] | None = None
     ) -> None:
         """Add one node, given either a DataPoint or a node id with properties."""
         if isinstance(node, str):
@@ -346,9 +347,9 @@ class PostgresDemoAdapter(GraphDBInterface):
 
     async def add_nodes(
         self,
-        nodes: Union[List[Tuple[str, Dict]], List[DataPoint]],
-        source_ref_key: Optional[str] = None,
-        pipeline_run_id: Optional[str] = None,
+        nodes: list[tuple[str, dict]] | list[DataPoint],
+        source_ref_key: str | None = None,
+        pipeline_run_id: str | None = None,
     ) -> None:
         """Add or replace nodes, optionally attaching one provenance reference."""
         if not nodes:
@@ -411,7 +412,7 @@ class PostgresDemoAdapter(GraphDBInterface):
         """Delete one node. Delegates to delete_nodes."""
         await self.delete_nodes([node_id])
 
-    async def delete_nodes(self, node_ids: List[str]) -> None:
+    async def delete_nodes(self, node_ids: list[str]) -> None:
         """Delete nodes by id; the schema's foreign keys remove their incident edges."""
         if not node_ids:
             return
@@ -422,7 +423,7 @@ class PostgresDemoAdapter(GraphDBInterface):
             )
             await session.commit()
 
-    async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
+    async def get_node(self, node_id: str) -> dict[str, Any] | None:
         """Return one flat node dictionary, or None when the node does not exist."""
         results = await self.get_nodes([node_id])
         return results[0] if results else None
@@ -436,7 +437,7 @@ class PostgresDemoAdapter(GraphDBInterface):
             )
             return bool(result.scalar())
 
-    async def get_nodes(self, node_ids: List[str]) -> List[Dict[str, Any]]:
+    async def get_nodes(self, node_ids: list[str]) -> list[dict[str, Any]]:
         """Return flat node dictionaries, omitting ids that do not exist."""
         if not node_ids:
             return []
@@ -460,7 +461,7 @@ class PostgresDemoAdapter(GraphDBInterface):
         source_id: str,
         target_id: str,
         relationship_name: str,
-        properties: Optional[Dict[str, Any]] = None,
+        properties: dict[str, Any] | None = None,
     ) -> None:
         """Add one directed edge. Delegates to add_edges."""
         await self.add_edges(
@@ -469,9 +470,9 @@ class PostgresDemoAdapter(GraphDBInterface):
 
     async def add_edges(
         self,
-        edges: Union[List[Tuple[str, str, str, Optional[Dict[str, Any]]]], List],
-        source_ref_key: Optional[str] = None,
-        pipeline_run_id: Optional[str] = None,
+        edges: list[tuple[str, str, str, dict[str, Any] | None]] | list,
+        source_ref_key: str | None = None,
+        pipeline_run_id: str | None = None,
     ) -> None:
         """Add or replace edges, optionally attaching one provenance reference."""
         if not edges:
@@ -516,12 +517,12 @@ class PostgresDemoAdapter(GraphDBInterface):
         result = await self.has_edges([(str(source_id), str(target_id), relationship_name)])
         return len(result) > 0
 
-    async def has_edges(self, edges: List[Tuple[str, str, str]]) -> List[Tuple[str, str, str]]:
+    async def has_edges(self, edges: list[tuple[str, str, str]]) -> list[tuple[str, str, str]]:
         """Return the subset of the requested directed triples that exist."""
         if not edges:
             return []
 
-        found: List[Tuple[str, str, str]] = []
+        found: list[tuple[str, str, str]] = []
         statement = text("""
             SELECT EXISTS(
                 SELECT 1 FROM graph_edge
@@ -546,7 +547,7 @@ class PostgresDemoAdapter(GraphDBInterface):
 
         return found
 
-    async def get_edges(self, node_id: str) -> List[Tuple[Dict[str, Any], str, Dict[str, Any]]]:
+    async def get_edges(self, node_id: str) -> list[tuple[dict[str, Any], str, dict[str, Any]]]:
         """Return every incident edge with its directed source and target nodes."""
         rows = await self._fetch_incident_edge_rows(str(node_id))
         edges = []
@@ -591,7 +592,7 @@ class PostgresDemoAdapter(GraphDBInterface):
             )
             return list(result.mappings().all())
 
-    async def get_neighbors(self, node_id: str) -> List[Dict[str, Any]]:
+    async def get_neighbors(self, node_id: str) -> list[dict[str, Any]]:
         """Return unique incident neighbors, including the node for a self-loop."""
         requested_id = str(node_id)
         rows = await self._fetch_incident_edge_rows(requested_id)
@@ -608,8 +609,8 @@ class PostgresDemoAdapter(GraphDBInterface):
         return list(neighbors.values())
 
     async def get_connections(
-        self, node_id: Union[str, UUID]
-    ) -> List[Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]]:
+        self, node_id: str | UUID
+    ) -> list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]:
         """Return every incident source-edge-target connection."""
         rows = await self._fetch_incident_edge_rows(str(node_id))
         connections = []
@@ -703,7 +704,7 @@ class PostgresDemoAdapter(GraphDBInterface):
 
     async def get_graph_data(
         self,
-    ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+    ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]:
         """Return every node as (id, properties) and every edge as (source, target, name, props)."""
         async with self.sessionmaker() as session:
             node_result = await session.execute(
@@ -735,8 +736,8 @@ class PostgresDemoAdapter(GraphDBInterface):
             return nodes, edges
 
     async def get_id_filtered_graph_data(
-        self, target_ids: List[str]
-    ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+        self, target_ids: list[str]
+    ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]:
         """Retrieve the subgraph touching target_ids: edges with either endpoint
         in the set, plus all endpoint nodes of those edges (edge-driven,
         matching the Ladybug/Neo4j contract). Lets CogneeGraph project only the
@@ -759,8 +760,8 @@ class PostgresDemoAdapter(GraphDBInterface):
             return nodes, edges
 
     async def get_filtered_graph_data(
-        self, attribute_filters: List[Dict[str, List[Union[str, int]]]]
-    ) -> Tuple[List[Tuple[str, Dict]], List[Tuple[str, str, str, Dict]]]:
+        self, attribute_filters: list[dict[str, list[str | int]]]
+    ) -> tuple[list[tuple[str, dict]], list[tuple[str, str, str, dict]]]:
         """Return core-field matches and the edges induced by those nodes."""
         if not attribute_filters:
             return await self.get_graph_data()
@@ -793,8 +794,8 @@ class PostgresDemoAdapter(GraphDBInterface):
             return nodes, edges
 
     async def get_nodeset_subgraph(
-        self, node_type: Type[Any], node_name: List[str], node_name_filter_operator: str = "OR"
-    ) -> Tuple[List[Tuple[str, dict]], List[Tuple[str, str, str, dict]]]:
+        self, node_type: type[Any], node_name: list[str], node_name_filter_operator: str = "OR"
+    ) -> tuple[list[tuple[str, dict]], list[tuple[str, str, str, dict]]]:
         """Return matching primary nodes and their qualifying neighbors."""
         if node_name_filter_operator not in {"OR", "AND"}:
             raise ValueError("node_name_filter_operator must be 'OR' or 'AND'")
@@ -821,7 +822,7 @@ class PostgresDemoAdapter(GraphDBInterface):
             edges = await self._fetch_edges_within(session, subgraph_ids)
             return nodes, edges
 
-    async def get_graph_metrics(self, include_optional: bool = False) -> Dict[str, Any]:
+    async def get_graph_metrics(self, include_optional: bool = False) -> dict[str, Any]:
         """Compute the supported graph metrics in Python."""
         async with self.sessionmaker() as session:
             node_result = await session.execute(text("SELECT id FROM graph_node"))
@@ -851,10 +852,10 @@ class PostgresDemoAdapter(GraphDBInterface):
 
     async def get_neighborhood(
         self,
-        node_ids: List[str],
+        node_ids: list[str],
         depth: int = 1,
-        edge_types: Optional[List[str]] = None,
-    ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+        edge_types: list[str] | None = None,
+    ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]:
         """Walk incident edges breadth-first and return the induced subgraph."""
         if depth < 0:
             raise ValueError("depth must be non-negative")
@@ -1324,8 +1325,8 @@ class PostgresDemoAdapter(GraphDBInterface):
 
     async def remove_belongs_to_set_tags(
         self,
-        tags: List[str],
-        node_ids: Optional[List[str]] = None,
+        tags: list[str],
+        node_ids: list[str] | None = None,
     ) -> None:
         """Strip ``tags`` from each node's ``belongs_to_set`` property array.
 
@@ -1379,7 +1380,7 @@ class PostgresDemoAdapter(GraphDBInterface):
                 )
             await session.commit()
 
-    async def get_triplets_batch(self, offset: int, limit: int) -> List[Dict[str, Any]]:
+    async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
         """Return one page of source-edge-target triplets.
 
         Ordering by the full edge identity keeps pagination stable, so exporting

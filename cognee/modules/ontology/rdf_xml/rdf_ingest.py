@@ -35,7 +35,7 @@ thin convenience that persists via the standard storage task.
 
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import IO, Any, Dict, List, Optional, Union
+from typing import IO, Any
 
 from rdflib import OWL, RDF, RDFS, Graph, URIRef
 from rdflib.term import Node as RDFNode
@@ -85,7 +85,7 @@ def _predicate_edge_properties(predicate: URIRef) -> dict[str, Any]:
     }
 
 
-def load_rdf_graph(source: Union[str, List[str], IO, List[IO], Graph]) -> Graph:
+def load_rdf_graph(source: str | list[str] | IO | list[IO] | Graph) -> Graph:
     """Parse ``source`` into an ``rdflib.Graph``.
 
     Accepts an already-parsed ``Graph`` (returned as-is) or any input the
@@ -111,8 +111,8 @@ def _collect_class_uris(rdf_graph: Graph) -> set[URIRef]:
     return {uri for uri in class_uris if isinstance(uri, URIRef)}
 
 
-def _build_class_nodes(rdf_graph: Graph) -> Dict[RDFNode, EntityType]:
-    type_nodes: Dict[RDFNode, EntityType] = {}
+def _build_class_nodes(rdf_graph: Graph) -> dict[RDFNode, EntityType]:
+    type_nodes: dict[RDFNode, EntityType] = {}
     class_uris = _collect_class_uris(rdf_graph)
     for class_uri in class_uris:
         name = _label_or_local_name(rdf_graph, class_uri)
@@ -126,16 +126,16 @@ def _build_class_nodes(rdf_graph: Graph) -> Dict[RDFNode, EntityType]:
     return type_nodes
 
 
-def _attach_subclass_relations(rdf_graph: Graph, type_nodes: Dict[RDFNode, EntityType]) -> None:
+def _attach_subclass_relations(rdf_graph: Graph, type_nodes: dict[RDFNode, EntityType]) -> None:
     for sub_uri, super_uri in rdf_graph.subject_objects(RDFS.subClassOf):
         if sub_uri in type_nodes and super_uri in type_nodes:
             type_nodes[sub_uri].relations.append((_is_a_edge(), type_nodes[super_uri]))
 
 
 def _collect_individual_types(
-    rdf_graph: Graph, type_nodes: Dict[RDFNode, EntityType]
-) -> Dict[RDFNode, List[RDFNode]]:
-    individual_types: Dict[RDFNode, List[RDFNode]] = {}
+    rdf_graph: Graph, type_nodes: dict[RDFNode, EntityType]
+) -> dict[RDFNode, list[RDFNode]]:
+    individual_types: dict[RDFNode, list[RDFNode]] = {}
     for subj, obj in rdf_graph.subject_objects(RDF.type):
         if isinstance(subj, URIRef) and obj in type_nodes:
             individual_types.setdefault(subj, []).append(obj)
@@ -144,10 +144,10 @@ def _collect_individual_types(
 
 def _build_individual_nodes(
     rdf_graph: Graph,
-    individual_types: Dict[RDFNode, List[RDFNode]],
-    type_nodes: Dict[RDFNode, EntityType],
-) -> Dict[RDFNode, Entity]:
-    entity_nodes: Dict[RDFNode, Entity] = {}
+    individual_types: dict[RDFNode, list[RDFNode]],
+    type_nodes: dict[RDFNode, EntityType],
+) -> dict[RDFNode, Entity]:
+    entity_nodes: dict[RDFNode, Entity] = {}
     for ind_uri, types in individual_types.items():
         name = _label_or_local_name(rdf_graph, ind_uri)
         primary_type = type_nodes[types[0]]
@@ -163,9 +163,9 @@ def _build_individual_nodes(
 
 
 def _attach_extra_type_relations(
-    entity_nodes: Dict[RDFNode, Entity],
-    individual_types: Dict[RDFNode, List[RDFNode]],
-    type_nodes: Dict[RDFNode, EntityType],
+    entity_nodes: dict[RDFNode, Entity],
+    individual_types: dict[RDFNode, list[RDFNode]],
+    type_nodes: dict[RDFNode, EntityType],
 ) -> None:
     for ind_uri, types in individual_types.items():
         for extra_type in types[1:]:
@@ -187,7 +187,7 @@ def _build_object_property_edge(
 
 
 def _build_object_property_edges(
-    rdf_graph: Graph, entity_nodes: Dict[RDFNode, Entity]
+    rdf_graph: Graph, entity_nodes: dict[RDFNode, Entity]
 ) -> list[CustomEdge]:
     custom_edges: list[CustomEdge] = []
     for subj, pred, obj in rdf_graph:
@@ -232,7 +232,7 @@ def build_graph_from_rdf(rdf_graph: Graph) -> RDFIngestGraph:
     return RDFIngestGraph(data_points=data_points, custom_edges=custom_edges)
 
 
-def build_datapoints_from_rdf(rdf_graph: Graph) -> List[DataPoint]:
+def build_datapoints_from_rdf(rdf_graph: Graph) -> list[DataPoint]:
     """Compatibility wrapper returning only RDF-ingested ``DataPoint`` nodes."""
     return build_graph_from_rdf(rdf_graph).data_points
 
@@ -244,9 +244,9 @@ def _is_a_edge():
 
 
 async def ingest_rdf(
-    source: Union[str, List[str], IO, List[IO], Graph],
-    ctx: Optional[Any] = None,
-) -> List[DataPoint]:
+    source: str | list[str] | IO | list[IO] | Graph,
+    ctx: Any | None = None,
+) -> list[DataPoint]:
     """Parse ``source`` and persist the resulting nodes/edges into the graph.
 
     Thin convenience over ``build_datapoints_from_rdf`` + the standard

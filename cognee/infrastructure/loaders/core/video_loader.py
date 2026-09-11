@@ -111,9 +111,9 @@ class VideoLoader(LoaderInterface):
         Returns:
             True if file can be handled, False otherwise
         """
-        if extension in self.supported_extensions and mime_type in self.supported_mime_types:
-            return True
-        return False
+        return bool(
+            extension in self.supported_extensions and mime_type in self.supported_mime_types
+        )
 
     async def load(self, file_path: str, **kwargs: Any) -> "str | LoaderResult":
         """
@@ -200,7 +200,7 @@ class VideoLoader(LoaderInterface):
         ]
 
         def run_ffmpeg() -> subprocess.CompletedProcess:
-            return subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            return subprocess.run(command, capture_output=True, check=False)
 
         try:
             result = await asyncio.to_thread(run_ffmpeg)
@@ -232,6 +232,7 @@ class VideoLoader(LoaderInterface):
             logger.debug(
                 "Segmented transcription request failed (%s); retrying without it.",
                 error,
+                exc_info=True,
             )
             result = await LLMGateway.create_transcript(audio_path)
 

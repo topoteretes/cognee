@@ -1,5 +1,5 @@
 from collections import Counter
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.graph.graph_db_interface import EdgeData
@@ -53,7 +53,7 @@ def create_edge_type_datapoints(edges_data) -> list[EdgeType]:
 
 
 async def index_graph_edges(
-    edges_data: Union[List[EdgeData], List[Tuple[str, str, str, Optional[Dict[str, Any]]]]] = None,
+    edges_data: list[EdgeData] | list[tuple[str, str, str, dict[str, Any] | None]] | None = None,
     vector_engine=None,
 ):
     """

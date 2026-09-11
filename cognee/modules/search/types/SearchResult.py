@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -11,5 +11,5 @@ class SearchResultDataset(BaseModel):
 
 class SearchResult(BaseModel):
     search_result: Any
-    dataset_id: Optional[UUID]
-    dataset_name: Optional[str]
+    dataset_id: UUID | None
+    dataset_name: str | None

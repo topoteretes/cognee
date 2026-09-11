@@ -1,5 +1,4 @@
 import re
-from typing import Optional
 
 from cognee.shared.logging_utils import get_logger
 
@@ -80,7 +79,7 @@ def emit_warning(classification: str, model_name: str) -> None:
         )
 
 
-def check_model_support(model_name: Optional[str]) -> None:
+def check_model_support(model_name: str | None) -> None:
     """Check the model name support matrix and emit an advisory warning if necessary."""
     if not model_name:
         return

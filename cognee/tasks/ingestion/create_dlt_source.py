@@ -1,7 +1,6 @@
 import csv
 import os
 import re
-from typing import Optional
 
 DB_CONNECTION_PATTERNS = [
     "postgresql://",
@@ -44,7 +43,7 @@ def csv_source_name(filename: str) -> str:
 
 def create_dlt_source_from_connection_string(
     connection_string: str,
-    query: Optional[str] = None,
+    query: str | None = None,
 ):
     """Auto-generate a dlt source from a database connection string with optional SQL query filtering."""
     import sqlalchemy
@@ -110,7 +109,7 @@ def detect_csv_delimiter(csv_path: str, sample_lines: int = 20) -> str:
     return ","
 
 
-def create_dlt_source_from_csv(csv_path: str, source_name: Optional[str] = None):
+def create_dlt_source_from_csv(csv_path: str, source_name: str | None = None):
     """Auto-generate a dlt resource from a CSV file path.
 
     ``source_name`` overrides the filename-derived resource name — callers

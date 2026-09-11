@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
@@ -61,11 +60,11 @@ def get_visualize_router() -> APIRouter:
             False,
             description="Render the entire graph instead of a bounded subgraph.",
         ),
-        query: Optional[str] = Query(
+        query: str | None = Query(
             None,
             description="Query string whose nearest vector hits seed the subgraph.",
         ),
-        seed_node_ids: Optional[List[str]] = Query(
+        seed_node_ids: list[str] | None = Query(
             None,
             description="Explicit seed node ids for subgraph neighborhood expansion.",
         ),
@@ -166,11 +165,11 @@ def get_visualize_router() -> APIRouter:
             False,
             description="Include the entire graph instead of a bounded subgraph.",
         ),
-        query: Optional[str] = Query(
+        query: str | None = Query(
             None,
             description="Query string whose nearest vector hits seed the subgraph.",
         ),
-        seed_node_ids: Optional[List[str]] = Query(
+        seed_node_ids: list[str] | None = Query(
             None,
             description="Explicit seed node ids for subgraph neighborhood expansion.",
         ),
@@ -271,11 +270,11 @@ def get_visualize_router() -> APIRouter:
             False,
             description="Include the entire graph instead of a bounded subgraph.",
         ),
-        query: Optional[str] = Query(
+        query: str | None = Query(
             None,
             description="Query string whose nearest vector hits seed the subgraph.",
         ),
-        seed_node_ids: Optional[List[str]] = Query(
+        seed_node_ids: list[str] | None = Query(
             None,
             description="Explicit seed node ids for subgraph neighborhood expansion.",
         ),
@@ -491,7 +490,7 @@ def get_visualize_router() -> APIRouter:
             ),
             examples=[""],
         ),
-        since: Optional[datetime] = Query(
+        since: datetime | None = Query(
             None,
             description=(
                 "Cursor from a previous call's response. Omit on the first "
@@ -562,14 +561,14 @@ def get_visualize_router() -> APIRouter:
     async def subscribe_to_dataset_updates(
         websocket: WebSocket,
         dataset_id: UUID,
-        since: Optional[datetime] = Query(
+        since: datetime | None = Query(
             None,
             description=(
                 "Cursor from the last live_events frame of a previous "
                 "connection. Omit to start from every available event."
             ),
         ),
-        user: Optional[User] = Depends(get_authenticated_websocket_user),
+        user: User | None = Depends(get_authenticated_websocket_user),
     ):
         """
         Stream one dataset's live events and graph growth over a WebSocket.
@@ -655,7 +654,7 @@ def get_visualize_router() -> APIRouter:
 
     @router.post("/multi", response_model=None)
     async def visualize_multi(
-        pairs: List[UserDatasetPair],
+        pairs: list[UserDatasetPair],
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -712,8 +711,8 @@ def get_visualize_router() -> APIRouter:
             html_visualization = await visualize_multi_user_graph(user_dataset_pairs)
             return HTMLResponse(html_visualization)
 
-        except Exception as error:
-            logger.error("Multi-user visualization request failed: %s", error)
+        except Exception:
+            logger.exception("Multi-user visualization request failed")
             return JSONResponse(
                 status_code=409, content={"error": "Unable to render visualization."}
             )

@@ -25,8 +25,8 @@ def calculate_aggregates_for_files(json_paths: list[str]) -> None:
             logger.info(f"Calculating aggregate metrics for {json_path}")
             calculate_metrics_statistics(json_path, output_path)
             logger.info(f"Saved aggregate metrics to {output_path}")
-        except Exception as e:
-            logger.error(f"Failed to calculate metrics for {json_path}: {e}")
+        except Exception:
+            logger.exception(f"Failed to calculate metrics for {json_path}")
 
 
 if __name__ == "__main__":

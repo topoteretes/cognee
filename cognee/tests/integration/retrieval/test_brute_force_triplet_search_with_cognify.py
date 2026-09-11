@@ -1,3 +1,4 @@
+import logging
 import pathlib
 
 import pytest
@@ -9,6 +10,8 @@ from cognee.low_level import setup
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.tasks.storage import add_data_points
+
+logger = logging.getLogger(__name__)
 
 
 @pytest_asyncio.fixture
@@ -30,7 +33,7 @@ async def clean_environment():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in clean_environment", exc_info=True)
 
 
 @pytest.mark.asyncio
@@ -129,11 +132,11 @@ async def test_node_feedback_does_not_modify_penalty_placeholder_in_edge_only_re
         ],
     )
 
-    search_kwargs = dict(
-        query=shared_edge_text,
-        top_k=1,
-        collections=["EdgeType_relationship_name"],
-    )
+    search_kwargs = {
+        "query": shared_edge_text,
+        "top_k": 1,
+        "collections": ["EdgeType_relationship_name"],
+    }
 
     top_with_no_feedback = await brute_force_triplet_search(**search_kwargs, feedback_influence=0.0)
     top_with_full_feedback = await brute_force_triplet_search(

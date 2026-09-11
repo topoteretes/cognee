@@ -18,7 +18,7 @@ async def get_all_user_permission_datasets(user: User, permission_type: str) -> 
     Returns:
         list[Dataset]: List of datasets user has permission for
     """
-    datasets = list()
+    datasets = []
     # Get all datasets User has explicit access to
     datasets.extend(await get_principal_datasets(user, permission_type))
 

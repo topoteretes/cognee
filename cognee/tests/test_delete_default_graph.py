@@ -161,7 +161,7 @@ async def main(mock_create_structured_output: AsyncMock):
     maries_data_id = add_marie_result.data_ingestion_info[0]["data_id"]
 
     cognify_result: dict = await cognee.cognify()
-    dataset_id = list(cognify_result.keys())[0]
+    dataset_id = next(iter(cognify_result.keys()))
 
     johns_document = TextDocument(
         id=johns_data_id,

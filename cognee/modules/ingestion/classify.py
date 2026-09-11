@@ -1,7 +1,7 @@
 from io import BufferedReader, BytesIO
 from os import path
 from tempfile import SpooledTemporaryFile
-from typing import BinaryIO, Union
+from typing import BinaryIO
 
 from cognee.modules.ingestion.exceptions import IngestionError
 
@@ -9,8 +9,8 @@ from .data_types import BinaryData, S3BinaryData, TextData
 
 
 def classify(
-    data: Union[str, BinaryIO], filename: str = None
-) -> Union[TextData, BinaryData, S3BinaryData]:
+    data: str | BinaryIO, filename: str | None = None
+) -> TextData | BinaryData | S3BinaryData:
     if isinstance(data, str):
         return TextData(data)
 
@@ -32,9 +32,8 @@ def classify(
     except ImportError:
         S3File = None
 
-    if S3File is not None:
-        if isinstance(data, S3File):
-            return S3BinaryData(s3_path=path.join("s3://", data.bucket, data.key), name=data.key)
+    if S3File is not None and isinstance(data, S3File):
+        return S3BinaryData(s3_path=path.join("s3://", data.bucket, data.key), name=data.key)
 
     raise IngestionError(
         message=f"Type of data sent to classify(data: Union[str, BinaryIO) not supported or s3fs is not installed: {type(data)}"

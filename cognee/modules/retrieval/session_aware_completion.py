@@ -81,9 +81,7 @@ def can_run_as_turn(
         return False
     if only_context:
         return False
-    if retriever_type not in _eligible_retriever_types():
-        return False
-    return True
+    return retriever_type in _eligible_retriever_types()
 
 
 def should_run_concurrent(

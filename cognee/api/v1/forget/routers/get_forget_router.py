@@ -1,4 +1,3 @@
-from typing import Literal, Optional, Union
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -19,19 +18,19 @@ class ForgetPayloadDTO(InDTO):
         json_schema_extra={"examples": [{"dataset": "main_dataset", "memoryOnly": True}]},
     )
 
-    data_id: Optional[UUID] = Field(
+    data_id: UUID | None = Field(
         default=None,
         examples=[""],
         description="UUID of a single data item to remove. "
         "Requires `dataset` or `datasetId` to also be set.",
     )
-    dataset: Optional[str] = Field(
+    dataset: str | None = Field(
         default=None,
         examples=["default_dataset"],
         description="Dataset name to delete (or clear with memoryOnly). "
         "Provide either `dataset` or `datasetId`, not both.",
     )
-    dataset_id: Optional[UUID] = Field(
+    dataset_id: UUID | None = Field(
         default=None,
         examples=[""],
         description="Dataset UUID, alternative to `dataset`. "

@@ -11,7 +11,7 @@ helpers are deliberately strict so tests catch malformed stored data and scoring
 """
 
 from datetime import datetime, timezone
-from typing import List, Protocol, Tuple
+from typing import Protocol
 from uuid import uuid4
 
 from pydantic import TypeAdapter
@@ -27,6 +27,9 @@ from cognee.infrastructure.session.session_context_models import (
     normalize_content,
     valid_sections_for,
 )
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 _AGENT_CANDIDATE_ADAPTER = TypeAdapter(AgentCandidateContextUpdateVariant)
 
@@ -35,14 +38,14 @@ DEFAULT_PER_SECTION_CHAR_BUDGET = 400
 DEFAULT_TOTAL_CHAR_BUDGET = 1200
 
 # Rendered in this fixed order per profile; (section_key, heading_label).
-SECTION_HEADINGS: List[Tuple[str, str]] = [
+SECTION_HEADINGS: list[tuple[str, str]] = [
     ("goals", "Goals"),
     ("rules", "Rules"),
     ("preferences", "Preferences"),
     ("lessons_learned", "Lessons learned"),
 ]
 
-AGENT_SECTION_HEADINGS: List[Tuple[str, str]] = [
+AGENT_SECTION_HEADINGS: list[tuple[str, str]] = [
     ("tool_rules", "Tool rules"),
     ("workflow_state", "Workflow state"),
     ("success_patterns", "Success patterns"),
@@ -56,7 +59,7 @@ HEADINGS_BY_PROFILE = {
 }
 
 
-def headings_for_profile(context_profile: str) -> List[Tuple[str, str]]:
+def headings_for_profile(context_profile: str) -> list[tuple[str, str]]:
     """Ordered (section_key, heading_label) pairs for a profile; falls back to QA."""
     return HEADINGS_BY_PROFILE.get(context_profile, SECTION_HEADINGS)
 
@@ -146,9 +149,9 @@ class DeterministicRanker:
         )
 
 
-def coerce_active_context_entries(raw_entries: list) -> List[SessionContextEntry]:
+def coerce_active_context_entries(raw_entries: list) -> list[SessionContextEntry]:
     """Validate stored rows and keep only active context entries."""
-    entries: List[SessionContextEntry] = []
+    entries: list[SessionContextEntry] = []
     for raw in raw_entries or []:
         if isinstance(raw, SessionContextEntry):
             entry = raw
@@ -164,15 +167,15 @@ def coerce_active_context_entries(raw_entries: list) -> List[SessionContextEntry
 
 def select_context_entries(
     *,
-    entries: List[SessionContextEntry],
+    entries: list[SessionContextEntry],
     query: str,
     ranker: ContextRanker,
     per_section_char_budget: int,
     total_char_budget: int,
     context_profile: str = ContextProfile.QA.value,
-) -> List[SessionContextEntry]:
+) -> list[SessionContextEntry]:
     """Select highest-scoring entries for one profile within total and per-section budgets."""
-    selected: List[SessionContextEntry] = []
+    selected: list[SessionContextEntry] = []
     section_usage = {key: 0 for key, _ in headings_for_profile(context_profile)}
     total_used = 0
 
@@ -197,14 +200,14 @@ def select_context_entries(
 
 
 def fit_preference_lines(
-    preference_lines: List[str],
+    preference_lines: list[str],
     *,
     preferences_used: int,
     total_used: int,
     per_section_char_budget: int,
     total_char_budget: int,
     existing_normalized: set,
-) -> List[str]:
+) -> list[str]:
     """Fit durable preference lines (newest first) into the leftover ``preferences`` budget.
 
     The guidance block has one owner and one size limit, so durable preference
@@ -214,7 +217,7 @@ def fit_preference_lines(
     are kept, and the kept lines are returned oldest first — ready to render
     ahead of this session's entries so later items win conflicts.
     """
-    kept: List[str] = []
+    kept: list[str] = []
     seen = set(existing_normalized)
     for line in preference_lines or []:
         content = (line or "").strip()
@@ -237,7 +240,7 @@ def fit_preference_lines(
 
 
 def render_preference_block(
-    preference_lines: List[str],
+    preference_lines: list[str],
     *,
     per_section_char_budget: int = DEFAULT_PER_SECTION_CHAR_BUDGET,
     total_char_budget: int = DEFAULT_TOTAL_CHAR_BUDGET,
@@ -275,9 +278,9 @@ def _render_entry(entry: SessionContextEntry) -> str:
     return f"[{_time_label(entry.created_at)}] {entry.content.strip()}"
 
 
-def _render_block(grouped_rendered: List[Tuple[str, List[str]]]) -> str:
+def _render_block(grouped_rendered: list[tuple[str, list[str]]]) -> str:
     """Assemble the final block string from (heading_label, [bullet_lines]) groups."""
-    lines: List[str] = [BLOCK_TITLE, CONFLICT_INSTRUCTION]
+    lines: list[str] = [BLOCK_TITLE, CONFLICT_INSTRUCTION]
     for heading_label, bullets in grouped_rendered:
         if not bullets:
             continue
@@ -286,7 +289,7 @@ def _render_block(grouped_rendered: List[Tuple[str, List[str]]]) -> str:
     return "\n".join(lines)
 
 
-async def _stamp_served_entries(*, session_manager, user_id, session_id, entry_ids: List[str]):
+async def _stamp_served_entries(*, session_manager, user_id, session_id, entry_ids: list[str]):
     """Best-effort stamp for entries actually rendered into the active context block."""
     if not entry_ids:
         return
@@ -301,6 +304,7 @@ async def _stamp_served_entries(*, session_manager, user_id, session_id, entry_i
                 merge={"last_served_at": served_at},
             )
         except Exception:
+            logger.debug("Skipping item after error in _stamp_served_entries", exc_info=True)
             continue
 
 
@@ -315,8 +319,8 @@ async def build_active_context_block(
     total_char_budget: int = DEFAULT_TOTAL_CHAR_BUDGET,
     context_profile: str = ContextProfile.QA.value,
     stamp_served: bool = True,
-    preference_lines: List[str] | None = None,
-) -> Tuple[str, List[str]]:
+    preference_lines: list[str] | None = None,
+) -> tuple[str, list[str]]:
     """Load active context entries, rank them, budget-cap, and render a compact block.
 
     Renders only ``context_profile`` entries. ``preference_lines`` (durable stated
@@ -354,7 +358,7 @@ async def build_active_context_block(
         for entry in selected:
             by_section[entry.section].append(entry)
 
-        fitted_preference_lines: List[str] = []
+        fitted_preference_lines: list[str] = []
         preferences_key = ContextSection.PREFERENCES.value
         if preference_lines and preferences_key in by_section:
             fitted_preference_lines = fit_preference_lines(
@@ -371,7 +375,7 @@ async def build_active_context_block(
         if not selected and not fitted_preference_lines:
             return "", []
 
-        grouped_rendered: List[Tuple[str, List[str]]] = []
+        grouped_rendered: list[tuple[str, list[str]]] = []
         for section_key, heading_label in headings:
             section_entries = sorted(
                 by_section.get(section_key, []),
@@ -396,6 +400,7 @@ async def build_active_context_block(
         return block, served_ids
     except Exception:
         # Fail-open: never block answer generation.
+        logger.debug("Falling back after error in build_active_context_block", exc_info=True)
         return "", []
 
 
@@ -511,7 +516,7 @@ async def apply_candidate_updates(
     session_id,
     source_id,
     candidates: list,
-) -> List[str]:
+) -> list[str]:
     """Deterministically apply candidate context updates (qa or agent).
 
     For each candidate: validate section/content/length for its profile, require
@@ -523,7 +528,7 @@ async def apply_candidate_updates(
 
     Returns the list of touched/created entry ids.
     """
-    touched: List[str] = []
+    touched: list[str] = []
     try:
         for candidate in candidates or []:
             try:
@@ -539,7 +544,9 @@ async def apply_candidate_updates(
                     touched.append(entry_id)
             except Exception:
                 # Per-candidate fail-open: skip this candidate, keep going.
+                logger.debug("Skipping item after error in apply_candidate_updates", exc_info=True)
                 continue
         return touched
     except Exception:
+        logger.debug("Falling back after error in apply_candidate_updates", exc_info=True)
         return touched

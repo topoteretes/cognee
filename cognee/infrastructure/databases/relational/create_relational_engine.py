@@ -16,10 +16,10 @@ def create_relational_engine(
     db_username: str,
     db_password: str,
     db_provider: str,
-    database_connect_args: tuple = None,
-    pool_args: tuple = None,
-    db_turso_url: str = None,
-    db_turso_auth_token: str = None,
+    database_connect_args: tuple | None = None,
+    pool_args: tuple | None = None,
+    db_turso_url: str | None = None,
+    db_turso_auth_token: str | None = None,
 ) -> SQLAlchemyAdapter:
     """
     Create a relational database engine based on the specified parameters.
@@ -76,7 +76,7 @@ def create_relational_engine(
         try:
             # libsql-experimental keeps the local replica in sync with a remote
             # Turso database; the query path itself is plain aiosqlite.
-            import libsql_experimental  # noqa: F401
+            import libsql_experimental
         except ImportError:
             raise ImportError(
                 "Turso/libSQL dependencies are not installed. Please install with 'pip install cognee\"[turso]\"' to use Turso functionality."

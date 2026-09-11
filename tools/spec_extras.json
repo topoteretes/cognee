@@ -2,12 +2,18 @@
   "_comment": "Docs-facing extras applied by tools/sync_release_docs.py:enhance_spec(). FastAPI does not emit any of this; Mintlify reads all of it from the published spec. tag_descriptions and request_examples are maintained automatically by the spec extras sync workflow (tools/fix_spec_extras.py) - edit them here, not in the Python source. request_examples is keyed by \"METHOD /path\" rather than FastAPI's operationId: the operationId embeds the handler function name, so renaming a handler silently orphaned its example.",
   "servers": [
     {
-      "url": "https://api.cognee.ai",
-      "description": "Production server (full functionality)"
+      "url": "https://{tenant}.aws.cognee.ai",
+      "description": "Cognee Cloud: your tenant pod, named in the platform.cognee.ai dashboard",
+      "variables": {
+        "tenant": {
+          "default": "your-tenant",
+          "description": "Your tenant name, shown in the Cognee Cloud dashboard"
+        }
+      }
     },
     {
       "url": "http://localhost:8000",
-      "description": "Local development server (requires local setup)"
+      "description": "Self-hosted: a locally running cognee server"
     }
   ],
   "tag_descriptions": {

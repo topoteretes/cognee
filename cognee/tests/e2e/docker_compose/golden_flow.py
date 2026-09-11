@@ -18,7 +18,6 @@ import io
 import time
 import uuid
 from dataclasses import dataclass
-from typing import List, Optional
 
 import requests
 from config import CONFIG
@@ -74,7 +73,7 @@ def add_text(api_url: str, token: str, dataset_name: str, text: str) -> dict:
     return response.json()
 
 
-def find_dataset(api_url: str, token: str, dataset_name: str) -> Optional[dict]:
+def find_dataset(api_url: str, token: str, dataset_name: str) -> dict | None:
     response = requests.get(f"{api_url}/api/v1/datasets", headers=_auth_header(token), timeout=30)
     response.raise_for_status()
     for dataset in response.json():
@@ -88,7 +87,7 @@ def wait_for_dataset(
 ) -> dict:
     """Poll the datasets listing until our dataset shows up after an add."""
     deadline = time.monotonic() + timeout
-    last: Optional[dict] = None
+    last: dict | None = None
     while time.monotonic() < deadline:
         last = find_dataset(api_url, token, dataset_name)
         if last is not None:
@@ -97,7 +96,7 @@ def wait_for_dataset(
     raise AssertionError(f"dataset '{dataset_name}' never appeared after add")
 
 
-def list_dataset_data(api_url: str, token: str, dataset_id: str) -> List[dict]:
+def list_dataset_data(api_url: str, token: str, dataset_id: str) -> list[dict]:
     response = requests.get(
         f"{api_url}/api/v1/datasets/{dataset_id}/data",
         headers=_auth_header(token),
@@ -132,11 +131,11 @@ def cognify_and_search(api_url: str, token: str, dataset_name: str) -> None:
 
 
 def golden_flow(
-    api_url: Optional[str] = None,
+    api_url: str | None = None,
     *,
-    token: Optional[str] = None,
-    dataset_name: Optional[str] = None,
-    run_llm: Optional[bool] = None,
+    token: str | None = None,
+    dataset_name: str | None = None,
+    run_llm: bool | None = None,
 ) -> GoldenFlowResult:
     """Run the end-to-end golden flow against the API and return what was created."""
     api_url = (api_url or CONFIG.api_url).rstrip("/")

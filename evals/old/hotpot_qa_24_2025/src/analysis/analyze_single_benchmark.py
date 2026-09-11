@@ -104,7 +104,7 @@ def analyze_single_benchmark_folder(
             raise FileNotFoundError(f"Evaluated folder not found: {evaluated_folder}")
 
         # Process and validate data from evaluated folder
-        results, transformed = process_and_validate_data(evaluated_folder)
+        _results, transformed = process_and_validate_data(evaluated_folder)
 
         # Create all dataframes
         create_all_dataframes(transformed, analysis_folder)

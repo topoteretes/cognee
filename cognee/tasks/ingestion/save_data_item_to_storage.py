@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Any, BinaryIO, Union
+from typing import Any, BinaryIO
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
@@ -47,7 +47,7 @@ def _resolve_local_file_uri(
 
 
 async def save_data_item_to_storage_detailed(
-    data_item: Union[BinaryIO, str, Any],
+    data_item: BinaryIO | str | Any,
 ) -> StoredFile:
     """Put ``data_item`` in cognee storage and describe what landed there.
 
@@ -137,7 +137,7 @@ async def save_data_item_to_storage_detailed(
     raise IngestionError(message=f"Data type not supported: {type(data_item)}")
 
 
-async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str:
+async def save_data_item_to_storage(data_item: BinaryIO | str | Any) -> str:
     """Put ``data_item`` in cognee storage and return its path.
 
     Thin wrapper over :func:`save_data_item_to_storage_detailed` for callers

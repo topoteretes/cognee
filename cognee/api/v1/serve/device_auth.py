@@ -4,7 +4,6 @@ import asyncio
 import os
 import time
 from dataclasses import dataclass
-from typing import Optional
 
 import aiohttp
 
@@ -21,8 +20,8 @@ DEFAULT_SCOPE = "openid profile email offline_access"
 @dataclass
 class TokenResponse:
     access_token: str
-    refresh_token: Optional[str] = None
-    id_token: Optional[str] = None
+    refresh_token: str | None = None
+    id_token: str | None = None
     token_type: str = "Bearer"
     expires_in: int = 3600
 
@@ -46,9 +45,9 @@ def _get_auth0_audience() -> str:
 
 
 async def device_code_login(
-    domain: Optional[str] = None,
-    client_id: Optional[str] = None,
-    audience: Optional[str] = None,
+    domain: str | None = None,
+    client_id: str | None = None,
+    audience: str | None = None,
     scope: str = DEFAULT_SCOPE,
 ) -> TokenResponse:
     """Run the OAuth 2.0 Device Code Flow against Auth0.
@@ -139,8 +138,8 @@ async def device_code_login(
 
 async def refresh_access_token(
     refresh_token: str,
-    domain: Optional[str] = None,
-    client_id: Optional[str] = None,
+    domain: str | None = None,
+    client_id: str | None = None,
 ) -> TokenResponse:
     """Refresh an expired access token using a refresh token."""
     domain = domain or _get_auth0_domain()
@@ -170,7 +169,7 @@ async def refresh_access_token(
         )
 
 
-def extract_email_from_id_token(id_token: str) -> Optional[str]:
+def extract_email_from_id_token(id_token: str) -> str | None:
     """Decode the JWT payload (without verification) to extract the email claim."""
     import base64
     import json
@@ -184,4 +183,7 @@ def extract_email_from_id_token(id_token: str) -> Optional[str]:
         payload = json.loads(base64.urlsafe_b64decode(payload_b64))
         return payload.get("email")
     except Exception:
+        logger.debug(
+            "Falling back to None after error in extract_email_from_id_token", exc_info=True
+        )
         return None

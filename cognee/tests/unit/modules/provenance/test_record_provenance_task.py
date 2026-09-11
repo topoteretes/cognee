@@ -147,7 +147,7 @@ class TestRecordProvenanceTask:
 
     @pytest.mark.asyncio
     async def test_no_ctx_degrades_to_entries_without_source_ref(self, manager):
-        _, chunk, _, _, data_points = _pipeline_data()
+        _, _chunk, _, _, data_points = _pipeline_data()
         result = await record_provenance(data_points, ctx=None)
         assert result is data_points
 
@@ -190,7 +190,7 @@ class TestRecordProvenanceTask:
     async def test_dataset_scoping_isolates_tenants(self, manager):
         # Same (deterministic) entity ids ingested under two datasets must not
         # share a version chain.
-        document, chunk, entity, _, _ = _pipeline_data()
+        _document, chunk, entity, _, _ = _pipeline_data()
         data_points_a = [FakeSummary(chunk)]
         ctx_a, ctx_b = _ctx(), _ctx()
 

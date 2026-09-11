@@ -267,7 +267,7 @@ jobs:
         env:
           PUSH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
         run: |
-          uvx ruff@0.15.11 format cognee/api
+          uvx ruff@0.16.6 format cognee/api
           git add cognee
           if git diff --cached --quiet; then
             echo "No description changes to commit."

@@ -21,7 +21,6 @@ caller of ``cognee_network_visualization`` or
 import json
 import os
 from dataclasses import asdict
-from typing import Optional
 
 from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
 from cognee.modules.visualization.embedding_join import fetch_node_embeddings, select_nodes
@@ -41,7 +40,7 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger()
 
 
-async def _semantic_payload(pre) -> tuple[Optional[dict], Optional[dict]]:
+async def _semantic_payload(pre) -> tuple[dict | None, dict | None]:
     """Best-effort semantic positions + clusters. Never blocks the classic render.
 
     Returns ``(positions, clusters)`` or ``(None, None)`` when they can't be
@@ -62,14 +61,18 @@ async def _semantic_payload(pre) -> tuple[Optional[dict], Optional[dict]]:
         clusters = compute_clusters(nodes, embeddings)
         return positions, clusters
     except Exception as exc:
-        logger.warning("Semantic map: payload computation failed (%s); tab shows empty state.", exc)
+        logger.warning(
+            "Semantic map: payload computation failed (%s); tab shows empty state.",
+            exc,
+            exc_info=True,
+        )
         return None, None
 
 
 def build_visualization_payload(
     graph_data,
-    schema_data: Optional[dict] = None,
-    search_events: Optional[list] = None,
+    schema_data: dict | None = None,
+    search_events: list | None = None,
 ) -> dict:
     """JSON-safe snapshot of the graph, for a client that renders it itself.
 
@@ -94,7 +97,7 @@ def build_visualization_payload(
     return {**asdict(pre), "search_events": search_events or []}
 
 
-async def build_semantic_payload(graph_data, schema_data: Optional[dict] = None) -> dict:
+async def build_semantic_payload(graph_data, schema_data: dict | None = None) -> dict:
     """Semantic layout for the graph, computed on demand.
 
     Re-runs ``preprocess()`` rather than accepting an already-built ``pre``:
@@ -150,9 +153,9 @@ def _read_template() -> str:
 
 async def cognee_network_visualization(
     graph_data,
-    destination_file_path: Optional[str] = None,
-    schema_data: Optional[dict] = None,
-    search_events: Optional[list] = None,
+    destination_file_path: str | None = None,
+    schema_data: dict | None = None,
+    search_events: list | None = None,
 ) -> str:
     """Render the graph to a self-contained HTML file and return the HTML.
 

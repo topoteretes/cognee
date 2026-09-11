@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from typing import Dict, List, Union
 
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
@@ -24,7 +23,7 @@ class CogneeAbstractGraph(ABC):
         """Retrieve a node by its ID."""
 
     @abstractmethod
-    def get_edges(self, node_id: str) -> List[Edge]:
+    def get_edges(self, node_id: str) -> list[Edge]:
         """Retrieve edges connected to a specific node."""
 
     @abstractmethod

@@ -1,4 +1,4 @@
-from typing import Any, List, Optional, Type, Union
+from typing import Any
 from uuid import UUID
 
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
@@ -12,12 +12,12 @@ logger = get_logger()
 
 
 async def run_custom_pipeline(
-    tasks: Union[List[Task], List[str]] = None,
+    tasks: list[Task] | list[str] | None = None,
     data: Any = None,
-    dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
+    dataset: str | UUID = DEFAULT_DATASET_NAME,
     user: User = None,
-    vector_db_config: Optional[dict] = None,
-    graph_db_config: Optional[dict] = None,
+    vector_db_config: dict | None = None,
+    graph_db_config: dict | None = None,
     use_pipeline_cache: bool = False,
     incremental_loading: bool = False,
     data_per_batch: int = 20,

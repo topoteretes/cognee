@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-from typing import Optional
 from uuid import uuid4
 
 from sqlalchemy import UUID, DateTime, ForeignKey
@@ -16,11 +15,11 @@ class UserApiKey(Base):
         UUID, ForeignKey("principals.id", ondelete="CASCADE"), nullable=False, index=True
     )
     api_key: Mapped[str] = mapped_column(nullable=False)
-    label: Mapped[Optional[str]] = mapped_column(nullable=True)
-    name: Mapped[Optional[str]] = mapped_column(nullable=True)
-    created_at: Mapped[Optional[datetime]] = mapped_column(
+    label: Mapped[str | None] = mapped_column(nullable=True)
+    name: Mapped[str | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=True
     )
     # Touched on successful API-key auth, throttled (see UserManager.get_by_token);
     # gives "last seen" per key even for clients that never create sessions.
-    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

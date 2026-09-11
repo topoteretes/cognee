@@ -105,7 +105,7 @@ async def main(mock_create_structured_output: AsyncMock):
     johns_data_id = add_john_result.data_ingestion_info[0]["data_id"]
 
     johns_cognify_result: dict = await cognee.cognify(datasets=["main_dataset"], user=john)
-    johns_dataset_id = list(johns_cognify_result.keys())[0]
+    johns_dataset_id = next(iter(johns_cognify_result.keys()))
 
     # Maries's context
     maries_dataset = await create_authorized_dataset("main_dataset", marie)
@@ -136,7 +136,7 @@ async def main(mock_create_structured_output: AsyncMock):
     maries_data_id = add_marie_result.data_ingestion_info[0]["data_id"]
 
     maries_cognify_result: dict = await cognee.cognify(datasets=["main_dataset"], user=marie)
-    maries_dataset_id = list(maries_cognify_result.keys())[0]
+    maries_dataset_id = next(iter(maries_cognify_result.keys()))
 
     johns_document = TextDocument(
         id=johns_data_id,

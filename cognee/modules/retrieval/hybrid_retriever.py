@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Dict, List, Optional, Type
+from typing import Any
 
 from cognee.base_config import get_base_config
 from cognee.context_global_variables import session_user
@@ -45,23 +45,23 @@ class HybridRetriever(BaseRetriever):
 
     def __init__(
         self,
-        chunks_top_k: Optional[int] = 5,
-        entities_top_k: Optional[int] = 5,
+        chunks_top_k: int | None = 5,
+        entities_top_k: int | None = 5,
         max_edges_per_entity: int = 10,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
         include_global_context_index: bool = False,
         global_context_index_top_k: int = 3,
-        session_id: Optional[str] = None,
-        response_model: Type = str,
+        session_id: str | None = None,
+        response_model: type = str,
         include_references: bool = False,
         user_prompt_path: str = "hybrid_context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
-        system_prompt: Optional[str] = None,
-        text_summaries_top_k: Optional[int] = None,
+        system_prompt: str | None = None,
+        text_summaries_top_k: int | None = None,
         use_importance_weight: bool = True,
         use_truth_weight: bool = False,
-        facts_top_k: Optional[int] = 5,
+        facts_top_k: int | None = 5,
     ):
         self.chunks_top_k = chunks_top_k if chunks_top_k is not None else 5
         self.entities_top_k = entities_top_k if entities_top_k is not None else 5
@@ -87,7 +87,7 @@ class HybridRetriever(BaseRetriever):
         return bool(user_id and CacheConfig().caching)
 
     async def get_retrieved_objects(
-        self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
+        self, query: str | None = None, query_batch: list[str] | None = None
     ) -> Any:
         validate_retriever_input(query, query_batch, self._use_session_cache())
         self._unified_engine = await get_unified_engine()
@@ -193,8 +193,8 @@ class HybridRetriever(BaseRetriever):
 
     async def get_context_from_objects(
         self,
-        query: Optional[str] = None,
-        query_batch: Optional[List[str]] = None,
+        query: str | None = None,
+        query_batch: list[str] | None = None,
         retrieved_objects: Any = None,
     ) -> Any:
         if query_batch:
@@ -205,7 +205,7 @@ class HybridRetriever(BaseRetriever):
         global_context = await self._build_global_context_section(query)
         return format_hybrid_context(global_context, retrieved_objects)
 
-    async def _build_global_context_section(self, query: Optional[str]) -> str:
+    async def _build_global_context_section(self, query: str | None) -> str:
         if not self.include_global_context_index or not query:
             return ""
 
@@ -227,13 +227,13 @@ class HybridRetriever(BaseRetriever):
 
     async def get_completion_from_context(
         self,
-        query: Optional[str] = None,
-        query_batch: Optional[List[str]] = None,
+        query: str | None = None,
+        query_batch: list[str] | None = None,
         retrieved_objects: Any = None,
         context: Any = None,
-        effective_query: Optional[str] = None,
+        effective_query: str | None = None,
         turn_preparation=None,
-    ) -> List[Any]:
+    ) -> list[Any]:
         prompts = {
             "user_prompt_path": self.user_prompt_path,
             "system_prompt_path": self.system_prompt_path,
@@ -275,7 +275,7 @@ class HybridRetriever(BaseRetriever):
             ]
         return await self.append_references(completions, retrieved_objects)
 
-    async def append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
+    async def append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
         return cite_hybrid_completions(
             completions,
             retrieved_objects,
@@ -291,12 +291,12 @@ class HybridRetriever(BaseRetriever):
             facts_limit=self.facts_top_k,
         )
 
-    def extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+    def extract_context_object_ids(self, retrieved_objects: Any) -> dict[str, list[str]] | None:
         return extract_hybrid_object_ids(retrieved_objects)
 
     async def get_completion(
-        self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
-    ) -> List[Any]:
+        self, query: str | None = None, query_batch: list[str] | None = None
+    ) -> list[Any]:
         validate_retriever_input(query, query_batch, self._use_session_cache())
 
         retrieved_objects = await self.get_retrieved_objects(query=query, query_batch=query_batch)

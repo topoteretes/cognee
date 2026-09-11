@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from threading import RLock
-from typing import Iterable, Optional
 from uuid import UUID
 
 from cognee.modules.agents.models import (
@@ -133,15 +133,15 @@ async def register_agent_connection(
     connection_type: AgentConnectionType = "unknown",
     memory_mode: AgentMemoryMode = "unknown",
     source: AgentSource = "api",
-    agent_id: Optional[str] = None,
-    origin_function: Optional[str] = None,
-    user_id: Optional[UUID] = None,
-    tenant_id: Optional[UUID] = None,
-    session_id: Optional[str] = None,
+    agent_id: str | None = None,
+    origin_function: str | None = None,
+    user_id: UUID | None = None,
+    tenant_id: UUID | None = None,
+    session_id: str | None = None,
     datasets: Iterable[AgentDatasetRef | dict] | None = None,
     status: str = "active",
-    last_active_at: Optional[datetime] = None,
-    metadata: Optional[dict] = None,
+    last_active_at: datetime | None = None,
+    metadata: dict | None = None,
 ) -> AgentConnection:
     dataset_refs = _normalize_datasets(datasets)
     resolved_agent_id = agent_id or build_agent_connection_id(
@@ -183,8 +183,8 @@ async def register_agent_connection(
             from cognee.modules.session_lifecycle.metrics import set_session_agent
 
             await set_session_agent(session_id=session_id, user_id=user_id, agent_id=connection.id)
-        except Exception as error:  # noqa: BLE001 — attribution must not break registration
-            logger.debug("Session agent attribution skipped: %s", error)
+        except Exception as error:  # — attribution must not break registration
+            logger.debug("Session agent attribution skipped: %s", error, exc_info=True)
 
     return connection
 

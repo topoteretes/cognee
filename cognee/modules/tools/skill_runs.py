@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Optional
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from cognee.context_global_variables import set_database_global_context_variables
@@ -69,7 +68,7 @@ async def remember_skill_run_entry(
     entry: SkillRunEntry,
     *,
     dataset_name: str,
-    session_id: Optional[str],
+    session_id: str | None,
     user=None,
 ) -> tuple[SkillRun, object]:
     """Persist a dataset-scoped SkillRun from the remember() typed-entry path."""

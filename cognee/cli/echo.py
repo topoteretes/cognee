@@ -6,7 +6,7 @@ from typing import Any
 import click
 
 
-def echo(message: str = "", color: str = None, err: bool = False) -> None:
+def echo(message: str = "", color: str | None = None, err: bool = False) -> None:
     """Echo a message to stdout or stderr with optional color"""
     click.secho(message, fg=color, err=err)
 

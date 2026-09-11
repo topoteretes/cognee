@@ -40,26 +40,26 @@ def _run(**overrides) -> PipelineRun:
     every attribute the router reads set explicitly here — otherwise a missing
     key would surface as an ORM ``None`` and hide a real serialization bug.
     """
-    fields = dict(
-        id=uuid4(),
-        created_at=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
-        status=None,
-        pipeline_run_id=None,
-        pipeline_name=None,
-        dataset_id=None,
-        user_id=None,
-        operation_name=None,
-        started_at=None,
-        ended_at=None,
-        outcome=None,
-        error_class=None,
-        tokens_in=None,
-        tokens_out=None,
-        origin=None,
-        session_id=None,
-        parent_operation_id=None,
-        background=None,
-    )
+    fields = {
+        "id": uuid4(),
+        "created_at": datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
+        "status": None,
+        "pipeline_run_id": None,
+        "pipeline_name": None,
+        "dataset_id": None,
+        "user_id": None,
+        "operation_name": None,
+        "started_at": None,
+        "ended_at": None,
+        "outcome": None,
+        "error_class": None,
+        "tokens_in": None,
+        "tokens_out": None,
+        "origin": None,
+        "session_id": None,
+        "parent_operation_id": None,
+        "background": None,
+    }
     fields.update(overrides)
     return PipelineRun(**fields)
 

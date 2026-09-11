@@ -22,7 +22,7 @@ def visualize_benchmarks(benchmark_file, output_file=None):
     colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
 
     # Setup plot
-    fig, ax = plt.subplots(figsize=(14, 8))
+    _fig, ax = plt.subplots(figsize=(14, 8))
 
     # Get system names
     systems = [system["system"] for system in data]

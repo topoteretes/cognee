@@ -15,7 +15,7 @@ filter blank entries out of their string-list fields. The JSON schema stays
 ``string/binary`` so Swagger UI keeps rendering a file picker.
 """
 
-from typing import Annotated, List, Optional, Union
+from typing import Annotated
 
 from fastapi import HTTPException
 from fastapi import UploadFile as UF
@@ -28,12 +28,10 @@ _BINARY_SCHEMA = {"type": "string", "format": "binary"}
 UploadFile = Annotated[UF, WithJsonSchema(_BINARY_SCHEMA)]
 
 # For optional upload lists: tolerates blank string parts (see module docstring).
-OptionalUploadFile = Annotated[Union[UF, str], WithJsonSchema(_BINARY_SCHEMA)]
+OptionalUploadFile = Annotated[UF | str, WithJsonSchema(_BINARY_SCHEMA)]
 
 
-def drop_blank_uploads(
-    data: Optional[List[Union[UF, str]]], field_name: str = "data"
-) -> Optional[List[UF]]:
+def drop_blank_uploads(data: list[UF | str] | None, field_name: str = "data") -> list[UF] | None:
     """Return the real uploads in ``data``; ``None`` when there are none.
 
     Blank string parts are dropped. A non-blank string (e.g. Swagger UI's
@@ -43,7 +41,7 @@ def drop_blank_uploads(
     if not data:
         return None
 
-    uploads: List[UF] = []
+    uploads: list[UF] = []
     for item in data:
         if isinstance(item, str):
             if item.strip():

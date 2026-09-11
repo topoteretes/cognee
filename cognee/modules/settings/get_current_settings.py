@@ -39,23 +39,23 @@ def get_current_settings() -> SettingsDict:
     vector_config = get_vectordb_config()
     relational_config = get_relational_config()
 
-    return dict(
-        llm={
+    return {
+        "llm": {
             "provider": llm_config.llm_provider,
             "model": llm_config.llm_model,
         },
-        graph={
+        "graph": {
             "provider": graph_config.graph_database_provider,
             "url": graph_config.graph_database_url or graph_config.graph_file_path,
         },
-        vector={
+        "vector": {
             "provider": vector_config.vector_db_provider,
             "url": vector_config.vector_db_url,
         },
-        relational={
+        "relational": {
             "provider": relational_config.db_provider,
             "url": f"{relational_config.db_host}:{relational_config.db_port}"
             if relational_config.db_host
             else f"{relational_config.db_path}/{relational_config.db_name}",
         },
-    )
+    }

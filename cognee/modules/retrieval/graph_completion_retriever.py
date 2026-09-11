@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Dict, List, Optional, Type, Union
+from typing import Any
 
 from cognee.base_config import get_base_config
 from cognee.context_global_variables import session_user
@@ -51,18 +51,18 @@ class GraphCompletionRetriever(BaseRetriever):
         self,
         user_prompt_path: str = "graph_context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
-        system_prompt: Optional[str] = None,
-        top_k: Optional[int] = 5,
-        node_type: Optional[Type] = None,
-        node_name: Optional[List[str]] = None,
+        system_prompt: str | None = None,
+        top_k: int | None = 5,
+        node_type: type | None = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
-        wide_search_top_k: Optional[int] = 100,
-        triplet_distance_penalty: Optional[float] = 6.5,
+        wide_search_top_k: int | None = 100,
+        triplet_distance_penalty: float | None = 6.5,
         feedback_influence: float = get_base_config().default_feedback_influence,
-        session_id: Optional[str] = None,
-        response_model: Type = str,
-        neighborhood_depth: Optional[int] = None,
-        neighborhood_seed_top_k: Optional[int] = 10,
+        session_id: str | None = None,
+        response_model: type = str,
+        neighborhood_depth: int | None = None,
+        neighborhood_seed_top_k: int | None = 10,
         include_global_context_index: bool = False,
         global_context_index_top_k: int = 3,
         include_references: bool = False,
@@ -97,7 +97,7 @@ class GraphCompletionRetriever(BaseRetriever):
         return bool(user_id and CacheConfig().caching)
 
     @staticmethod
-    def _get_vector_index_collections() -> List[str]:
+    def _get_vector_index_collections() -> list[str]:
         """Collect vector index collection names from all DataPoint subclasses."""
         collections = []
         for subclass in get_all_subclasses(DataPoint):
@@ -111,8 +111,8 @@ class GraphCompletionRetriever(BaseRetriever):
         return collections
 
     async def get_retrieved_objects(
-        self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
-    ) -> Union[List[Edge], List[List[Edge]]]:
+        self, query: str | None = None, query_batch: list[str] | None = None
+    ) -> list[Edge] | list[list[Edge]]:
         """
         Performs a brute-force triplet search on the graph and updates access timestamps.
 
@@ -165,9 +165,9 @@ class GraphCompletionRetriever(BaseRetriever):
 
     async def get_triplets(
         self,
-        query: Optional[str] = None,
-        query_batch: Optional[List[str]] = None,
-    ) -> Union[List[Edge], List[List[Edge]]]:
+        query: str | None = None,
+        query_batch: list[str] | None = None,
+    ) -> list[Edge] | list[list[Edge]]:
         """
         Retrieves relevant graph triplets based on a query string.
 
@@ -209,8 +209,8 @@ class GraphCompletionRetriever(BaseRetriever):
 
     async def get_triplets_batch(
         self,
-        queries: List[str],
-    ) -> List[List[Edge]]:
+        queries: list[str],
+    ) -> list[list[Edge]]:
         """
         Retrieves triplets for a list of queries, using single-query mode when
         possible to enable ID-filtered graph projection.
@@ -229,10 +229,10 @@ class GraphCompletionRetriever(BaseRetriever):
 
     async def get_context_from_objects(
         self,
-        query: Optional[str] = None,
-        query_batch: Optional[List[str]] = None,
+        query: str | None = None,
+        query_batch: list[str] | None = None,
         retrieved_objects=None,
-    ) -> Union[str, List[str]]:
+    ) -> str | list[str]:
         """
         Transforms raw retrieved graph triplets into a textual context string.
 
@@ -280,7 +280,7 @@ class GraphCompletionRetriever(BaseRetriever):
             return prelude
         return f"{prelude}\n\n{graph_context}"
 
-    async def _build_global_context_prelude(self, query: Optional[str]) -> str:
+    async def _build_global_context_prelude(self, query: str | None) -> str:
         if not query:
             return ""
         if getattr(self, "_unified_engine", None) is None:
@@ -300,7 +300,7 @@ class GraphCompletionRetriever(BaseRetriever):
             secondary_reserve=conversational_reserve(self.top_k),
         )
 
-    def extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+    def extract_context_object_ids(self, retrieved_objects: Any) -> dict[str, list[str]] | None:
         """Extract node_ids and edge_ids from list of Edge. Only used for single-query session path."""
         if not isinstance(retrieved_objects, list) or not retrieved_objects:
             return None
@@ -324,10 +324,10 @@ class GraphCompletionRetriever(BaseRetriever):
 
     async def _generate_completion_without_session(
         self,
-        query: Optional[str],
-        query_batch: Optional[List[str]],
+        query: str | None,
+        query_batch: list[str] | None,
         context: str,
-    ) -> List[Any]:
+    ) -> list[Any]:
         """Generate completion(s) without session; returns list of completions."""
         kwargs = self._completion_kwargs(context)
         # Sessionless guidance site: preference text rides the guidance channel
@@ -349,7 +349,7 @@ class GraphCompletionRetriever(BaseRetriever):
         )
         return [completion]
 
-    async def _append_graph_evidence(self, completions: List[Any]) -> List[Any]:
+    async def _append_graph_evidence(self, completions: list[Any]) -> list[Any]:
         """Compatibility no-op; graph evidence is now returned as structured payload data.
 
         The previous implementation embedded every answer and performed another
@@ -358,20 +358,20 @@ class GraphCompletionRetriever(BaseRetriever):
         """
         return completions
 
-    async def append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
+    async def append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
         # Graph evidence is grounded in the answer text, not the retrieved edges, so
         # retrieved_objects is deliberately unused here.
         return await self._append_graph_evidence(completions)
 
     async def get_completion_from_context(
         self,
-        query: Optional[str] = None,
-        query_batch: Optional[List[str]] = None,
-        retrieved_objects: Optional[List[Edge]] = None,
-        context: str = None,
-        effective_query: Optional[str] = None,
+        query: str | None = None,
+        query_batch: list[str] | None = None,
+        retrieved_objects: list[Edge] | None = None,
+        context: str | None = None,
+        effective_query: str | None = None,
         turn_preparation=None,
-    ) -> List[Any]:
+    ) -> list[Any]:
         """
         Generates an LLM response based on the query, context, and conversation history.
         Optionally saves the interaction and updates the session cache.
@@ -423,8 +423,8 @@ class GraphCompletionRetriever(BaseRetriever):
         return await self.append_references(completions, retrieved_objects)
 
     async def get_completion(
-        self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
-    ) -> List[Any]:
+        self, query: str | None = None, query_batch: list[str] | None = None
+    ) -> list[Any]:
         """
         Generates a final output or answer based on the query and retrieved context.
 

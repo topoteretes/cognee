@@ -27,7 +27,7 @@ actual access cut-off.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlencode
 
 import aiohttp
@@ -136,7 +136,7 @@ class GithubIntegration(OAuthIntegration):
     def frontend_base_url(self) -> str:
         return require("frontend_base_url")
 
-    def webhook_verifier(self) -> Optional[WebhookVerifier]:
+    def webhook_verifier(self) -> WebhookVerifier | None:
         return GithubWebhookVerifier()
 
     async def handle_webhook(self, raw_body: bytes, headers: dict[str, str]) -> None:

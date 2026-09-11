@@ -1,7 +1,7 @@
 import io
 import os.path
 from pathlib import PureWindowsPath
-from typing import BinaryIO, Optional, TypedDict
+from typing import BinaryIO, TypedDict
 from urllib.parse import unquote, urlparse
 
 from cognee.infrastructure.files.utils.get_file_content_hash import get_file_content_hash
@@ -12,7 +12,7 @@ from .guess_file_type import guess_file_type
 logger = get_logger("FileMetadata")
 
 
-def _derive_basename(file_path: str) -> Optional[str]:
+def _derive_basename(file_path: str) -> str | None:
     """Derive a clean, extension-less document name from a path or file:// URI.
 
     In the ingestion pipeline ``file.name`` is a percent-encoded ``file://`` URI

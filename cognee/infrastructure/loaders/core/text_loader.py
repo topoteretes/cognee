@@ -46,10 +46,9 @@ class TextLoader(LoaderInterface):
         Returns:
             True if file can be handled, False otherwise
         """
-        if extension in self.supported_extensions and mime_type in self.supported_mime_types:
-            return True
-
-        return False
+        return bool(
+            extension in self.supported_extensions and mime_type in self.supported_mime_types
+        )
 
     async def load(
         self, file_path: str, encoding: str = "utf-8", **kwargs: Any

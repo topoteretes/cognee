@@ -1,4 +1,3 @@
-from typing import Dict, List, Tuple
 from uuid import UUID
 
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -10,9 +9,9 @@ from cognee.tests.utils.get_contains_edge_text import get_contains_edge_text
 
 
 def format_relationship(
-    relationship: Tuple[UUID, UUID, str, Dict],
-    node: Dict,
-    graph_edges_by_key: Dict[Tuple[str, str, str], Dict],
+    relationship: tuple[UUID, UUID, str, dict],
+    node: dict,
+    graph_edges_by_key: dict[tuple[str, str, str], dict],
 ):
     edge_properties = graph_edges_by_key.get(
         (str(relationship[0]), str(relationship[1]), relationship[2]),
@@ -23,18 +22,17 @@ def format_relationship(
         edge_properties.get("relationship_name") or relationship[2],
     )
 
-    if relationship[2] == "contains":
-        if not relationship_name or relationship_name == "contains":
-            relationship_name = get_contains_edge_text(
-                generate_node_name(node["name"]),
-                node["description"],
-            )
+    if relationship[2] == "contains" and (not relationship_name or relationship_name == "contains"):
+        relationship_name = get_contains_edge_text(
+            generate_node_name(node["name"]),
+            node["description"],
+        )
 
     return {str(EdgeType.id_for(relationship_name)): relationship_name}
 
 
 async def assert_edges_vector_index_present(
-    relationships: List[Tuple[UUID, UUID, str, Dict]], convert_to_new_format: bool = True
+    relationships: list[tuple[UUID, UUID, str, dict]], convert_to_new_format: bool = True
 ):
     vector_engine = await get_vector_engine_async()
 

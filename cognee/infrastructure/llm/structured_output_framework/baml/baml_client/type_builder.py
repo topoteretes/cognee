@@ -15,7 +15,7 @@ import typing
 from baml_py import baml_py, type_builder
 
 # These are exports, not used here, hence the linter is disabled
-from baml_py.baml_py import (  # noqa: F401 # pylint: disable=unused-import
+from baml_py.baml_py import (  # pylint: disable=unused-import
     ClassBuilder,
     EnumBuilder,
     EnumValueBuilder,
@@ -28,12 +28,10 @@ from .globals import DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIM
 class TypeBuilder(type_builder.TypeBuilder):
     def __init__(self):
         super().__init__(
-            classes=set(
-                [
-                    "ResponseModel",
-                ]
-            ),
-            enums=set([]),
+            classes={
+                "ResponseModel",
+            },
+            enums=set(),
             runtime=DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME,
         )
 
@@ -64,7 +62,7 @@ class ResponseModelAst:
     def __init__(self, tb: type_builder.TypeBuilder):
         _tb = tb._tb  # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("ResponseModel")
-        self._properties: typing.Set[str] = set([])
+        self._properties: set[str] = set()
         self._props = ResponseModelProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -84,7 +82,7 @@ class ResponseModelBuilder(ResponseModelAst):
             raise ValueError(f"Property {name} already exists.")
         return self._bldr.property(name).type(type)
 
-    def list_properties(self) -> typing.List[typing.Tuple[str, baml_py.ClassPropertyBuilder]]:
+    def list_properties(self) -> list[tuple[str, baml_py.ClassPropertyBuilder]]:
         return self._bldr.list_properties()
 
     def remove_property(self, name: str) -> None:
@@ -95,9 +93,9 @@ class ResponseModelBuilder(ResponseModelAst):
 
 
 class ResponseModelProperties:
-    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: set[str]):
         self.__bldr = bldr
-        self.__properties = properties  # type: ignore (we know how to use this private attribute) # noqa: F821
+        self.__properties = properties  # type: ignore (we know how to use this private attribute)
 
     def __getattr__(self, name: str) -> baml_py.ClassPropertyBuilder:
         if name not in self.__properties:

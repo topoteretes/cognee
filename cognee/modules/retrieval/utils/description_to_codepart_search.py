@@ -1,5 +1,4 @@
 import asyncio
-from typing import List
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
@@ -26,7 +25,7 @@ async def code_description_to_code_part_search(
 
 async def code_description_to_code_part(
     query: str, user: User, top_k: int, include_docs: bool = False
-) -> List[str]:
+) -> list[str]:
     """
     Maps a code description query to relevant code parts using a CodeGraph pipeline.
 
@@ -148,7 +147,7 @@ if __name__ == "__main__":
         user = None
         try:
             results = await code_description_to_code_part_search(query, user)
-            logger.debug("Retrieved Code Parts:", results)
+            logger.debug("Retrieved Code Parts: %s", results)
         except Exception as e:
             logger.error(f"An error occurred: {e}")
             raise

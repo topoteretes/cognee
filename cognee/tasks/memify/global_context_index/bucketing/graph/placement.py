@@ -284,7 +284,7 @@ def _choose_existing_graph_bucket(
     if not scored_candidates:
         return None
 
-    return sorted(scored_candidates, key=lambda item: (item[0], item[1], item[2]))[0][3]
+    return min(scored_candidates, key=lambda item: (item[0], item[1], item[2]))[3]
 
 
 def _place_misc_summary(

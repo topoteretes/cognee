@@ -10,7 +10,7 @@ Pass ``full=True`` to render the entire graph (legacy behavior).
 """
 
 from collections import deque
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from cognee.infrastructure.databases.graph.graph_db_interface import EdgeData, Node
 from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
@@ -36,15 +36,15 @@ _SEED_VECTOR_COLLECTIONS = [
 ]
 
 # (nodes, edges) in the shape get_graph_data()/get_neighborhood() already return.
-GraphData = Tuple[List[Node], List[EdgeData]]
+GraphData = tuple[list[Node], list[EdgeData]]
 
 
-def _unique_preserve_order(node_ids: List[str]) -> List[str]:
+def _unique_preserve_order(node_ids: list[str]) -> list[str]:
     """Order-preserving de-duplication of stringified node ids."""
     return list(dict.fromkeys(str(node_id) for node_id in node_ids))
 
 
-def _coerce_node_ids(value: Any) -> List[str]:
+def _coerce_node_ids(value: Any) -> list[str]:
     """Node ids from a value that is either a ``node_ids`` list or a provenance
     mapping (``{"node_ids": [...]}``). Anything else yields ``[]``."""
     if isinstance(value, dict):
@@ -54,7 +54,7 @@ def _coerce_node_ids(value: Any) -> List[str]:
     return []
 
 
-def resolve_seeds_from_recall(recall_result: Any) -> List[str]:
+def resolve_seeds_from_recall(recall_result: Any) -> list[str]:
     """Seed node ids from a recall/search result's graph provenance.
 
     Handles the shapes cognee results actually carry node ids in: a mapping with
@@ -72,7 +72,7 @@ def resolve_seeds_from_recall(recall_result: Any) -> List[str]:
         return _unique_preserve_order(seeds)
 
     items = recall_result if isinstance(recall_result, (list, tuple)) else [recall_result]
-    node_ids: List[str] = []
+    node_ids: list[str] = []
     for item in items:
         used = (
             item.get("used_graph_element_ids")
@@ -87,7 +87,7 @@ async def resolve_seeds_from_query(
     query: str,
     seed_top_k: int = DEFAULT_SEED_TOP_K,
     wide_search_top_k: int = DEFAULT_WIDE_SEARCH_TOP_K,
-) -> List[str]:
+) -> list[str]:
     """Seed node ids for a query, ranked by vector distance (nearest first).
 
     ``NodeEdgeVectorSearch.extract_relevant_node_ids()`` returns an unordered
@@ -114,7 +114,7 @@ async def resolve_seeds_from_query(
     return _unique_preserve_order([node_id for node_id, _ in scored])[:seed_top_k]
 
 
-async def resolve_seeds_by_degree(graph_engine: Any, top_k: int) -> List[str]:
+async def resolve_seeds_by_degree(graph_engine: Any, top_k: int) -> list[str]:
     """Highest-degree nodes as seeds — the default view when no seed is given.
 
     Uses ``get_graph_data()`` (implemented by every adapter) and counts degree
@@ -126,7 +126,7 @@ async def resolve_seeds_by_degree(graph_engine: Any, top_k: int) -> List[str]:
     if not nodes:
         return []
 
-    degree: Dict[str, int] = {str(node_id): 0 for node_id, _ in nodes}
+    degree: dict[str, int] = {str(node_id): 0 for node_id, _ in nodes}
     for edge in edges:
         source_key, target_key = str(edge[0]), str(edge[1])
         if source_key in degree:
@@ -141,11 +141,11 @@ async def resolve_seeds_by_degree(graph_engine: Any, top_k: int) -> List[str]:
 async def resolve_seed_node_ids(
     graph_engine: Any,
     *,
-    seed_node_ids: Optional[List[str]] = None,
+    seed_node_ids: list[str] | None = None,
     recall_result: Any = None,
-    query: Optional[str] = None,
+    query: str | None = None,
     seed_top_k: int = DEFAULT_SEED_TOP_K,
-) -> Tuple[List[str], str]:
+) -> tuple[list[str], str]:
     """Resolve seeds by priority: explicit ids > recall > query > degree."""
     if seed_node_ids:
         return _unique_preserve_order([str(n) for n in seed_node_ids])[:seed_top_k], "explicit"
@@ -164,11 +164,11 @@ async def resolve_seed_node_ids(
 
 
 def truncate_subgraph(
-    nodes_data: List[Node],
-    edges_data: List[EdgeData],
-    seed_ids: List[str],
+    nodes_data: list[Node],
+    edges_data: list[EdgeData],
+    seed_ids: list[str],
     max_nodes: int,
-) -> Tuple[GraphData, bool]:
+) -> tuple[GraphData, bool]:
     """Cap the subgraph at ``max_nodes``, keeping seeds and their nearest nodes.
 
     Nodes are ranked by hop distance from the seeds (seeds first); edges are
@@ -177,13 +177,13 @@ def truncate_subgraph(
     if max_nodes <= 0 or len(nodes_data) <= max_nodes:
         return (nodes_data, edges_data), False
 
-    adjacency: Dict[str, set] = {}
+    adjacency: dict[str, set] = {}
     for edge in edges_data:
         source_key, target_key = str(edge[0]), str(edge[1])
         adjacency.setdefault(source_key, set()).add(target_key)
         adjacency.setdefault(target_key, set()).add(source_key)
 
-    hop_distance: Dict[str, int] = {}
+    hop_distance: dict[str, int] = {}
     queue: deque = deque()
     for seed_id in seed_ids:
         seed_key = str(seed_id)
@@ -213,8 +213,8 @@ async def fetch_visualization_graph_data(
     graph_engine: Any,
     *,
     full: bool = False,
-    query: Optional[str] = None,
-    seed_node_ids: Optional[List[str]] = None,
+    query: str | None = None,
+    seed_node_ids: list[str] | None = None,
     recall_result: Any = None,
     neighborhood_depth: int = DEFAULT_NEIGHBORHOOD_DEPTH,
     seed_top_k: int = DEFAULT_SEED_TOP_K,

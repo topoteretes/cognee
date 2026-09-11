@@ -67,10 +67,9 @@ class UnstructuredLoader(LoaderInterface):
     def can_handle(self, extension: str, mime_type: str) -> bool:
         """Check if file can be handled by this loader."""
         # Check file extension
-        if extension in self.supported_extensions and mime_type in self.supported_mime_types:
-            return True
-
-        return False
+        return bool(
+            extension in self.supported_extensions and mime_type in self.supported_mime_types
+        )
 
     async def load(
         self, file_path: str, strategy: str = "auto", **kwargs: Any
@@ -126,4 +125,4 @@ class UnstructuredLoader(LoaderInterface):
 
         except Exception as e:
             logger.error(f"Failed to process document {file_path}: {e}")
-            raise Exception(f"Document processing failed: {e}") from e
+            raise RuntimeError(f"Document processing failed: {e}") from e

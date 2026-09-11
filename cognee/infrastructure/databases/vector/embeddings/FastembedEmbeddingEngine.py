@@ -2,7 +2,6 @@ import asyncio
 import logging
 import math
 import os
-from typing import List, Optional
 
 import numpy as np
 
@@ -66,8 +65,8 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
 
     def __init__(
         self,
-        model: Optional[str] = "openai/text-embedding-3-large",
-        dimensions: Optional[int] = 3072,
+        model: str | None = "openai/text-embedding-3-large",
+        dimensions: int | None = 3072,
         max_completion_tokens: int = 512,
         batch_size: int = 100,
     ):
@@ -97,7 +96,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def embed_text(self, text: List[str]) -> List[List[float]]:
+    async def embed_text(self, text: list[str]) -> list[list[float]]:
         """
         Embed the given text into numerical vectors.
 

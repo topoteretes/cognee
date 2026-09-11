@@ -23,7 +23,7 @@ class ApiKeySettings(BaseSettings):
 apiKeySettings = ApiKeySettings()
 
 
-async def create_api_key(user: User, name: str = None):
+async def create_api_key(user: User, name: str | None = None):
     existing_api_keys = await get_api_keys(user)
 
     if len(existing_api_keys) >= apiKeySettings.max_user_api_keys:
@@ -48,8 +48,8 @@ async def create_api_key(user: User, name: str = None):
             await session.commit()
             user_api_key.api_key = api_key  # return raw key so caller can show it once
             return user_api_key
-        except Exception as error:
-            logger.error(f"Failed to create API key for user {user.id}: {error!s}")
+        except Exception:
+            logger.exception(f"Failed to create API key for user {user.id}")
             await session.rollback()
             raise ApiKeyCreationError("Failed to create API key, please try again.")
 

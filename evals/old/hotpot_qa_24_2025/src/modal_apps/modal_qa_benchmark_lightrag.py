@@ -64,8 +64,8 @@ def run_lightrag_benchmark(config_params: dict, dir_suffix: str):
 @app.local_entrypoint()
 async def main(
     runs: int = 45,
-    corpus_limit: int = None,
-    qa_limit: int = None,
+    corpus_limit: int | None = None,
+    qa_limit: int | None = None,
     query_mode: str = "hybrid",
     print_results: bool = True,
 ):
@@ -73,7 +73,7 @@ async def main(
     print(f"🚀 Launching {runs} LightRAG QA benchmark run(s) on Modal...")
 
     # Generate unique timestamp for this benchmark session
-    base_timestamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    base_timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     config_params_list = []
 
     for run_num in range(runs):

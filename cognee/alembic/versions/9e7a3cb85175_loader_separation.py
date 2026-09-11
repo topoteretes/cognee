@@ -6,16 +6,16 @@ Create Date: 2025-08-14 19:18:11.406907
 
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "9e7a3cb85175"
-down_revision: Union[str, None] = "1daae0df1866"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "1daae0df1866"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def _get_column(inspector, table, name, schema=None):

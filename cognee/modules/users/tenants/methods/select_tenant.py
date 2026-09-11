@@ -1,4 +1,3 @@
-from typing import Union
 from uuid import UUID
 
 import sqlalchemy.exc
@@ -12,7 +11,7 @@ from cognee.modules.users.models.UserTenant import UserTenant
 from cognee.modules.users.permissions.methods import get_tenant
 
 
-async def select_tenant(user_id: UUID, tenant_id: Union[UUID, None]) -> User:
+async def select_tenant(user_id: UUID, tenant_id: UUID | None) -> User:
     """
         Set the users active tenant to provided tenant.
 

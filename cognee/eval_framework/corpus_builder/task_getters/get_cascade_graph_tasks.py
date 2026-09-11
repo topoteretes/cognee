@@ -1,5 +1,3 @@
-from typing import List
-
 from pydantic import BaseModel
 
 from cognee.infrastructure.llm import get_max_chunk_tokens
@@ -22,7 +20,7 @@ from cognee.tasks.summarization import summarize_text
 
 async def get_cascade_graph_tasks(
     user: User = None, graph_model: BaseModel = KnowledgeGraph
-) -> List[Task]:
+) -> list[Task]:
     """Retrieve cascade graph tasks asynchronously."""
     if user is None:
         user = await get_default_user()

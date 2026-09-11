@@ -2,9 +2,10 @@
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Type, Union
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import event, text
@@ -24,7 +25,7 @@ logger = get_logger()
 _WRITE_CHUNK_SIZE = 500
 
 
-def _in_params(prefix: str, values: List[str]) -> Tuple[str, Dict[str, str]]:
+def _in_params(prefix: str, values: list[str]) -> tuple[str, dict[str, str]]:
     """Build named params for a SQLite IN clause of small, bounded lists
     (edge types, node names, filter values). SQLite has no ANY(:list) support.
     """
@@ -33,7 +34,7 @@ def _in_params(prefix: str, values: List[str]) -> Tuple[str, Dict[str, str]]:
     return placeholders, params
 
 
-def _id_subquery(prefix: str, ids: List[str]) -> Tuple[str, Dict[str, str]]:
+def _id_subquery(prefix: str, ids: list[str]) -> tuple[str, dict[str, str]]:
     """Build a ``(SELECT value FROM json_each(:prefix))`` subquery and a single
     JSON-array param for an id list.
 
@@ -110,11 +111,11 @@ class TursoAdapter(GraphDBInterface):
         async with self.sessionmaker() as session:
             yield session
 
-    def _serialize_properties(self, props: Dict[str, Any]) -> str:
+    def _serialize_properties(self, props: dict[str, Any]) -> str:
         """Serialize a dict to a JSON string, handling datetimes and UUIDs."""
         return json.dumps(props, cls=JSONEncoder)
 
-    def _parse_node_row(self, row) -> Dict[str, Any]:
+    def _parse_node_row(self, row) -> dict[str, Any]:
         """Convert a (id, name, type, properties) row to a merged dict."""
         data = {"id": row.id, "name": row.name, "type": row.type}
         if row.properties is not None:
@@ -124,7 +125,7 @@ class TursoAdapter(GraphDBInterface):
             data.update(props)
         return data
 
-    async def query(self, query_str: str, params: Optional[dict] = None) -> List[Any]:
+    async def query(self, query_str: str, params: dict | None = None) -> list[Any]:
         """Not supported. Use typed adapter methods or a graph-native backend.
 
         Raises:
@@ -145,7 +146,7 @@ class TursoAdapter(GraphDBInterface):
             return not result.scalar()
 
     async def add_node(
-        self, node: Union[DataPoint, str], properties: Optional[Dict[str, Any]] = None
+        self, node: DataPoint | str, properties: dict[str, Any] | None = None
     ) -> None:
         """Add a single node. Delegates to add_nodes."""
         if isinstance(node, str):
@@ -157,9 +158,9 @@ class TursoAdapter(GraphDBInterface):
 
     async def add_nodes(
         self,
-        nodes: Union[List[Tuple[str, Dict]], List[DataPoint]],
-        source_ref_key: Optional[str] = None,
-        pipeline_run_id: Optional[str] = None,
+        nodes: list[tuple[str, dict]] | list[DataPoint],
+        source_ref_key: str | None = None,
+        pipeline_run_id: str | None = None,
     ) -> None:
         """Add multiple nodes via batch upsert.
 
@@ -222,7 +223,7 @@ class TursoAdapter(GraphDBInterface):
         """Delete a single node. Delegates to delete_nodes."""
         await self.delete_nodes([node_id])
 
-    async def delete_nodes(self, node_ids: List[str]) -> None:
+    async def delete_nodes(self, node_ids: list[str]) -> None:
         """Delete multiple nodes by ID. Cascade-deletes connected edges."""
         if not node_ids:
             return
@@ -231,12 +232,12 @@ class TursoAdapter(GraphDBInterface):
             await session.execute(text(f"DELETE FROM graph_node WHERE id IN {subquery}"), params)
             await session.commit()
 
-    async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
+    async def get_node(self, node_id: str) -> dict[str, Any] | None:
         """Retrieve a single node by ID."""
         results = await self.get_nodes([node_id])
         return results[0] if results else None
 
-    async def get_nodes(self, node_ids: List[str]) -> List[Dict[str, Any]]:
+    async def get_nodes(self, node_ids: list[str]) -> list[dict[str, Any]]:
         """Retrieve multiple nodes by ID."""
         if not node_ids:
             return []
@@ -253,7 +254,7 @@ class TursoAdapter(GraphDBInterface):
         source_id: str,
         target_id: str,
         relationship_name: str,
-        properties: Optional[Dict[str, Any]] = None,
+        properties: dict[str, Any] | None = None,
     ) -> None:
         """Add a single edge. Delegates to add_edges."""
         await self.add_edges(
@@ -262,9 +263,9 @@ class TursoAdapter(GraphDBInterface):
 
     async def add_edges(
         self,
-        edges: Union[List[Tuple[str, str, str, Optional[Dict[str, Any]]]], List],
-        source_ref_key: Optional[str] = None,
-        pipeline_run_id: Optional[str] = None,
+        edges: list[tuple[str, str, str, dict[str, Any] | None]] | list,
+        source_ref_key: str | None = None,
+        pipeline_run_id: str | None = None,
     ) -> None:
         """Add multiple edges via batch upsert.
 
@@ -315,7 +316,7 @@ class TursoAdapter(GraphDBInterface):
         result = await self.has_edges([(str(source_id), str(target_id), relationship_name)])
         return len(result) > 0
 
-    async def has_edges(self, edges: List[Tuple[str, str, str]]) -> List[Tuple[str, str, str]]:
+    async def has_edges(self, edges: list[tuple[str, str, str]]) -> list[tuple[str, str, str]]:
         """Return subset of input edge tuples that exist in the database.
 
         Resolved with a single set-based query (candidates joined against
@@ -342,7 +343,7 @@ class TursoAdapter(GraphDBInterface):
             )
             return [(row[0], row[1], row[2]) for row in result.fetchall()]
 
-    async def get_edges(self, node_id: str) -> List[Tuple[Dict[str, Any], str, Dict[str, Any]]]:
+    async def get_edges(self, node_id: str) -> list[tuple[dict[str, Any], str, dict[str, Any]]]:
         """Retrieve all edges connected to a node as (source_dict, rel_name, target_dict)."""
         async with self._session() as session:
             result = await session.execute(
@@ -369,7 +370,7 @@ class TursoAdapter(GraphDBInterface):
                 edges.append((src, row[4], tgt))
             return edges
 
-    async def get_neighbors(self, node_id: str) -> List[Dict[str, Any]]:
+    async def get_neighbors(self, node_id: str) -> list[dict[str, Any]]:
         """Retrieve all nodes directly connected to a given node."""
         async with self._session() as session:
             result = await session.execute(
@@ -387,8 +388,8 @@ class TursoAdapter(GraphDBInterface):
             return [self._parse_node_row(row) for row in result.fetchall()]
 
     async def get_connections(
-        self, node_id: Union[str, UUID]
-    ) -> List[Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]]:
+        self, node_id: str | UUID
+    ) -> list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]:
         """Retrieve all connections (source, edge, target) for a node."""
         nid = str(node_id)
         async with self._session() as session:
@@ -426,7 +427,7 @@ class TursoAdapter(GraphDBInterface):
 
     async def get_graph_data(
         self,
-    ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+    ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]:
         """Retrieve all nodes as (id, props) and edges as (src, tgt, rel, props)."""
         async with self._session() as session:
             node_result = await session.execute(
@@ -455,8 +456,8 @@ class TursoAdapter(GraphDBInterface):
             return nodes, edges
 
     async def get_id_filtered_graph_data(
-        self, target_ids: List[str]
-    ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+        self, target_ids: list[str]
+    ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]:
         """Retrieve subgraph for edges touching target_ids, plus their endpoint nodes."""
         if not target_ids:
             return [], []
@@ -500,14 +501,14 @@ class TursoAdapter(GraphDBInterface):
             return nodes, edges
 
     async def get_filtered_graph_data(
-        self, attribute_filters: List[Dict[str, List[Union[str, int]]]]
-    ) -> Tuple[List[Tuple[str, Dict]], List[Tuple[str, str, str, Dict]]]:
+        self, attribute_filters: list[dict[str, list[str | int]]]
+    ) -> tuple[list[tuple[str, dict]], list[tuple[str, str, str, dict]]]:
         """Retrieve nodes matching attribute filters, plus edges between them."""
         if not attribute_filters:
             return await self.get_graph_data()
 
         where_parts = []
-        params: Dict[str, Any] = {}
+        params: dict[str, Any] = {}
         for i, filter_dict in enumerate(attribute_filters):
             for attr, filter_values in filter_dict.items():
                 if attr not in self._ALLOWED_FILTER_ATTRS:
@@ -566,15 +567,15 @@ class TursoAdapter(GraphDBInterface):
             return nodes, edges
 
     async def get_nodeset_subgraph(
-        self, node_type: Type[Any], node_name: List[str], node_name_filter_operator: str = "OR"
-    ) -> Tuple[List[Tuple[str, dict]], List[Tuple[str, str, str, dict]]]:
+        self, node_type: type[Any], node_name: list[str], node_name_filter_operator: str = "OR"
+    ) -> tuple[list[tuple[str, dict]], list[tuple[str, str, str, dict]]]:
         """Retrieve subgraph of matching nodes, their neighbors, and interconnecting edges."""
         if not node_name:
             return [], []
         label = node_type.__name__
 
         name_ph, name_params = _in_params("nm", node_name)
-        params: Dict[str, Any] = {**name_params, "label": label}
+        params: dict[str, Any] = {**name_params, "label": label}
 
         if node_name_filter_operator == "OR":
             neighbor_cte = """
@@ -656,7 +657,7 @@ class TursoAdapter(GraphDBInterface):
 
             return nodes, edges
 
-    async def get_graph_metrics(self, include_optional: bool = False) -> Dict[str, Any]:
+    async def get_graph_metrics(self, include_optional: bool = False) -> dict[str, Any]:
         """Compute graph metrics matching the PostgresDemoAdapter output schema."""
         async with self._session() as session:
             n_result = await session.execute(text("SELECT count(*) FROM graph_node"))
@@ -722,23 +723,23 @@ class TursoAdapter(GraphDBInterface):
 
     async def get_neighborhood(
         self,
-        node_ids: List[str],
+        node_ids: list[str],
         depth: int = 1,
-        edge_types: Optional[List[str]] = None,
-    ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+        edge_types: list[str] | None = None,
+    ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]:
         """Get the k-hop neighborhood subgraph around seed nodes."""
         if not node_ids:
             return [], []
 
         edge_filter = ""
-        et_params: Dict[str, Any] = {}
+        et_params: dict[str, Any] = {}
         if edge_types:
             et_ph, et_params = _in_params("et", edge_types)
             edge_filter = f"AND e.relationship_name IN ({et_ph})"
 
         # SQLite has no unnest(); seed the recursion from a JSON array (one bound
         # param, no per-seed variable cap).
-        seed_subquery, seed_params = _id_subquery("seeds", node_ids)
+        _seed_subquery, seed_params = _id_subquery("seeds", node_ids)
 
         query_str = f"""
             WITH RECURSIVE neighborhood(id, hops) AS (
@@ -772,7 +773,7 @@ class TursoAdapter(GraphDBInterface):
               AND ge.target_id IN (SELECT id FROM ids)
         """
 
-        params: Dict[str, Any] = {"depth": depth, **seed_params, **et_params}
+        params: dict[str, Any] = {"depth": depth, **seed_params, **et_params}
 
         async with self._session() as session:
             result = await session.execute(text(query_str), params)
@@ -804,7 +805,7 @@ class TursoAdapter(GraphDBInterface):
             await session.execute(text("DELETE FROM graph_node"))
             await session.commit()
 
-    async def get_triplets_batch(self, offset: int, limit: int) -> List[Dict[str, Any]]:
+    async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
         """Retrieve a batch of (source, relationship, target) triplets."""
         if offset < 0:
             raise ValueError(f"Offset must be non-negative, got {offset}")
@@ -853,8 +854,8 @@ class TursoAdapter(GraphDBInterface):
 
     async def remove_belongs_to_set_tags(
         self,
-        tags: List[str],
-        node_ids: Optional[List[str]] = None,
+        tags: list[str],
+        node_ids: list[str] | None = None,
     ) -> None:
         """Strip ``tags`` from each node's ``belongs_to_set`` property array.
 

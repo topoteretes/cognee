@@ -17,32 +17,28 @@ async def get_formatted_graph_data(dataset_id: UUID, user: User):
         (nodes, edges) = await graph_client.get_graph_data()
 
     return {
-        "nodes": list(
-            map(
-                lambda node: {
-                    "id": str(node[0]),
-                    "label": node[1]["name"]
-                    if ("name" in node[1] and node[1]["name"] != "")
-                    else f"{node[1]['type']}_{node[0]!s}",
-                    "type": node[1]["type"],
-                    "properties": {
-                        key: value
-                        for key, value in node[1].items()
-                        if key not in ["id", "type", "name", "created_at", "updated_at"]
-                        and value is not None
-                    },
+        "nodes": [
+            {
+                "id": str(node[0]),
+                "label": node[1]["name"]
+                if ("name" in node[1] and node[1]["name"] != "")
+                else f"{node[1]['type']}_{node[0]!s}",
+                "type": node[1]["type"],
+                "properties": {
+                    key: value
+                    for key, value in node[1].items()
+                    if key not in ["id", "type", "name", "created_at", "updated_at"]
+                    and value is not None
                 },
-                nodes,
-            )
-        ),
-        "edges": list(
-            map(
-                lambda edge: {
-                    "source": str(edge[0]),
-                    "target": str(edge[1]),
-                    "label": str(edge[2]),
-                },
-                edges,
-            )
-        ),
+            }
+            for node in nodes
+        ],
+        "edges": [
+            {
+                "source": str(edge[0]),
+                "target": str(edge[1]),
+                "label": str(edge[2]),
+            }
+            for edge in edges
+        ],
     }

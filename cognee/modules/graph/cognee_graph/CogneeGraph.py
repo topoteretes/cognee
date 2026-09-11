@@ -1,6 +1,7 @@
 import heapq
 import time
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Type, Union
+from collections.abc import Callable, Iterable
+from typing import Any
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
@@ -26,9 +27,9 @@ class CogneeGraph(CogneeAbstractGraph):
     and project a graph from a database using adapters.
     """
 
-    nodes: Dict[str, Node]
-    edges: List[Edge]
-    edges_by_distance_key: Dict[str, List[Edge]]
+    nodes: dict[str, Node]
+    edges: list[Edge]
+    edges_by_distance_key: dict[str, list[Edge]]
     directed: bool
     triplet_distance_penalty: float
     feedback_influence: float
@@ -72,24 +73,24 @@ class CogneeGraph(CogneeAbstractGraph):
     def get_node(self, node_id: str) -> Node:
         return self.nodes.get(node_id, None)
 
-    def get_edges_from_node(self, node_id: str) -> List[Edge]:
+    def get_edges_from_node(self, node_id: str) -> list[Edge]:
         node = self.get_node(node_id)
         if node:
             return node.skeleton_edges
         else:
             raise EntityNotFoundError(message=f"Node with id {node_id} does not exist.")
 
-    def get_edges(self) -> List[Edge]:
+    def get_edges(self) -> list[Edge]:
         return self.edges
 
-    def reset_distances(self, collection: Iterable[Union[Node, Edge]], query_count: int) -> None:
+    def reset_distances(self, collection: Iterable[Node | Edge], query_count: int) -> None:
         """Reset vector distances for a collection of nodes or edges."""
         for item in collection:
             item.reset_vector_distances(query_count, self.triplet_distance_penalty)
 
     def _normalize_query_distance_lists(
-        self, distances: List, query_list_length: Optional[int] = None, name: str = "distances"
-    ) -> List:
+        self, distances: list, query_list_length: int | None = None, name: str = "distances"
+    ) -> list:
         """Normalize shape: flat list -> single-query; nested list -> multi-query."""
         if not distances:
             return []
@@ -168,8 +169,8 @@ class CogneeGraph(CogneeAbstractGraph):
         self,
         nodes_data,
         edges_data,
-        node_properties_to_project: List[str],
-        edge_properties_to_project: List[str],
+        node_properties_to_project: list[str],
+        edge_properties_to_project: list[str],
         directed: bool,
         node_dimension: int,
         edge_dimension: int,
@@ -231,20 +232,22 @@ class CogneeGraph(CogneeAbstractGraph):
 
     async def project_graph_from_db(
         self,
-        adapter: Union[GraphDBInterface],
-        node_properties_to_project: List[str],
-        edge_properties_to_project: List[str],
+        adapter: GraphDBInterface,
+        node_properties_to_project: list[str],
+        edge_properties_to_project: list[str],
         directed=True,
         node_dimension=1,
         edge_dimension=1,
-        memory_fragment_filter=[],
-        node_type: Optional[Type] = None,
-        node_name: Optional[List[str]] = None,
+        memory_fragment_filter=None,
+        node_type: type | None = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
-        relevant_ids_to_filter: Optional[List[str]] = None,
+        relevant_ids_to_filter: list[str] | None = None,
         triplet_distance_penalty: float = 6.5,
         feedback_influence: float = get_base_config().default_feedback_influence,
     ) -> None:
+        if memory_fragment_filter is None:
+            memory_fragment_filter = []
         if node_dimension < 1 or edge_dimension < 1:
             raise InvalidDimensionsError()
         try:
@@ -282,12 +285,12 @@ class CogneeGraph(CogneeAbstractGraph):
 
     async def project_neighborhood_from_db(
         self,
-        adapter: Union[GraphDBInterface],
-        node_properties_to_project: List[str],
-        edge_properties_to_project: List[str],
-        seed_node_ids: List[str],
+        adapter: GraphDBInterface,
+        node_properties_to_project: list[str],
+        edge_properties_to_project: list[str],
+        seed_node_ids: list[str],
         depth: int = 1,
-        edge_types: Optional[List[str]] = None,
+        edge_types: list[str] | None = None,
         directed: bool = True,
         node_dimension: int = 1,
         edge_dimension: int = 1,
@@ -338,7 +341,7 @@ class CogneeGraph(CogneeAbstractGraph):
     async def map_vector_distances_to_graph_nodes(
         self,
         node_distances,
-        query_list_length: Optional[int] = None,
+        query_list_length: int | None = None,
     ) -> None:
         """Map vector distances to nodes, supporting single- and multi-query input shapes."""
 
@@ -373,7 +376,7 @@ class CogneeGraph(CogneeAbstractGraph):
     async def map_vector_distances_to_graph_edges(
         self,
         edge_distances,
-        query_list_length: Optional[int] = None,
+        query_list_length: int | None = None,
     ) -> None:
         """Map vector distances to graph edges, supporting single- and multi-query input shapes."""
         query_count = query_list_length or 1
@@ -400,7 +403,7 @@ class CogneeGraph(CogneeAbstractGraph):
                         default_penalty=self.triplet_distance_penalty,
                     )
 
-    def apply_personal_weights(self, weights: Dict[str, float]) -> None:
+    def apply_personal_weights(self, weights: dict[str, float]) -> None:
         """Set ``personal_weight`` on nodes matched by id; unknown ids are ignored.
 
         Called after projection and distance mapping. The weight lands in its
@@ -418,8 +421,8 @@ class CogneeGraph(CogneeAbstractGraph):
         self,
         k: int,
         query_index: int = 0,
-        feedback_influence: Optional[float] = None,
-    ) -> List[Edge]:
+        feedback_influence: float | None = None,
+    ) -> list[Edge]:
         """Calculate top k triplet importances for a specific query index."""
         active_feedback_influence = (
             self.feedback_influence if feedback_influence is None else feedback_influence
@@ -507,9 +510,9 @@ class CogneeGraph(CogneeAbstractGraph):
     async def calculate_top_triplet_importances(
         self,
         k: int,
-        query_list_length: Optional[int] = None,
-        feedback_influence: Optional[float] = None,
-    ) -> Union[List[Edge], List[List[Edge]]]:
+        query_list_length: int | None = None,
+        feedback_influence: float | None = None,
+    ) -> list[Edge] | list[list[Edge]]:
         """Calculate top k triplet importances, supporting both single and multi-query modes."""
         query_count = query_list_length or 1
         results = [

@@ -4,7 +4,6 @@ Exposes the skills SDK helpers over HTTP with explicit response schemas and
 caller-scoped authorization, mirroring the schema-inventory router.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -58,14 +57,14 @@ class SkillIngestRequest(BaseModel):
     """JSON body for ingesting a single skill from inline SKILL.md markdown."""
 
     skills_text: str = Field(description="Inline SKILL.md markdown to ingest as a Skill node.")
-    skill_name: Optional[str] = Field(
+    skill_name: str | None = Field(
         default=None, description="Name/slug for the skill (defaults to 'skill')."
     )
-    dataset_name: Optional[str] = Field(
+    dataset_name: str | None = Field(
         default=None,
         description="Target dataset name (created if needed). Required unless dataset_id is given.",
     )
-    dataset_id: Optional[UUID] = Field(
+    dataset_id: UUID | None = Field(
         default=None, description="Target dataset UUID (alternative to dataset_name)."
     )
 

@@ -39,13 +39,11 @@ class BamlAsyncClient:
 
     def with_options(
         self,
-        tb: typing.Optional[type_builder.TypeBuilder] = None,
-        client_registry: typing.Optional[baml_py.baml_py.ClientRegistry] = None,
-        collector: typing.Optional[
-            typing.Union[baml_py.baml_py.Collector, typing.List[baml_py.baml_py.Collector]]
-        ] = None,
-        env: typing.Optional[typing.Dict[str, typing.Optional[str]]] = None,
-        on_tick: typing.Optional[typing.Callable[[str, baml_py.baml_py.FunctionLog], None]] = None,
+        tb: type_builder.TypeBuilder | None = None,
+        client_registry: baml_py.baml_py.ClientRegistry | None = None,
+        collector: baml_py.baml_py.Collector | list[baml_py.baml_py.Collector] | None = None,
+        env: dict[str, str | None] | None = None,
+        on_tick: typing.Callable[[str, baml_py.baml_py.FunctionLog], None] | None = None,
     ) -> "BamlAsyncClient":
         options: BamlCallOptions = {}
         if tb is not None:

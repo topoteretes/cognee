@@ -1,7 +1,6 @@
 import os
 import pathlib
 from contextlib import AsyncExitStack
-from typing import List
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel
@@ -54,7 +53,7 @@ async def main():
 
     class Person(DataPoint):
         name: str
-        works_for: List[Organization]
+        works_for: list[Organization]
         metadata: dict = {"index_fields": ["name"]}
 
     companyA = ForProfit(id=generate_node_id("Company A"), name="Company A")

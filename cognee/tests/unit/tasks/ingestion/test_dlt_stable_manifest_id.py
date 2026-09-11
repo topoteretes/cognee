@@ -111,7 +111,7 @@ async def test_duplicate_source_identity_is_rejected_loudly():
 
     import sys
 
-    import cognee.tasks.ingestion.resolve_dlt_sources  # noqa: F401
+    import cognee.tasks.ingestion.resolve_dlt_sources
 
     # The package __init__ re-exports the FUNCTION under the module's name,
     # so attribute imports resolve to it; grab the real module for patching.
@@ -157,7 +157,7 @@ async def test_csv_paths_pass_through_resolve_untouched():
     pytest.importorskip("dlt")
     import sys
 
-    import cognee.tasks.ingestion.resolve_dlt_sources  # noqa: F401
+    import cognee.tasks.ingestion.resolve_dlt_sources
 
     resolve_module = sys.modules["cognee.tasks.ingestion.resolve_dlt_sources"]
 

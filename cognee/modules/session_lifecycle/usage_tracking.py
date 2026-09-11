@@ -20,7 +20,6 @@ enough for the dashboard's "are we spending?" question on those paths.
 
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from typing import Optional
 from uuid import UUID as UUIDType
 
 # Submodule import on purpose: avoids the cognee.modules.operations
@@ -32,7 +31,7 @@ logger = get_logger("session_usage")
 
 
 # (session_id, user_id) when active, else None.
-_active_session: ContextVar[Optional[tuple[str, UUIDType]]] = ContextVar(
+_active_session: ContextVar[tuple[str, UUIDType] | None] = ContextVar(
     "cognee_session_usage_target", default=None
 )
 
@@ -116,7 +115,7 @@ _PRICING_PER_M_TOKENS = {
 _PRICING_SORTED = sorted(_PRICING_PER_M_TOKENS.items(), key=lambda kv: -len(kv[0]))
 
 
-def _estimate_cost_usd(model: Optional[str], tokens_in: int, tokens_out: int) -> float:
+def _estimate_cost_usd(model: str | None, tokens_in: int, tokens_out: int) -> float:
     if not model:
         return 0.0
     # Normalize: strip provider prefix ("openai/gpt-4o" → "gpt-4o"), drop date suffix.
@@ -127,7 +126,7 @@ def _estimate_cost_usd(model: Optional[str], tokens_in: int, tokens_out: int) ->
     return 0.0
 
 
-def estimate_cost_usd(model: Optional[str], tokens_in: int, tokens_out: int) -> float:
+def estimate_cost_usd(model: str | None, tokens_in: int, tokens_out: int) -> float:
     """Estimate USD cost for a model using Cognee's rough pricing table.
 
     Unrecognized models cost $0 — callers that surface the number should say so.
@@ -139,9 +138,9 @@ async def record_llm_call(
     *,
     input_text: str,
     output_text: str,
-    model: Optional[str] = None,
-    tokens_in_override: Optional[int] = None,
-    tokens_out_override: Optional[int] = None,
+    model: str | None = None,
+    tokens_in_override: int | None = None,
+    tokens_out_override: int | None = None,
 ) -> None:
     """If there's an active session, accumulate this call's usage into it.
 
@@ -182,4 +181,4 @@ async def record_llm_call(
             model=model,
         )
     except Exception as exc:
-        logger.debug("record_llm_call: accumulate failed (%s)", exc)
+        logger.debug("record_llm_call: accumulate failed (%s)", exc, exc_info=True)
