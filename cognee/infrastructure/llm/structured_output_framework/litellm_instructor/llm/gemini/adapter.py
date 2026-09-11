@@ -155,23 +155,23 @@ class GeminiAdapter(GenericAPIAdapter):
             ContentPolicyViolationError,
             InstructorRetryException,
         ) as error:
-            # Classified here because the handler further down is unreachable once
-            # this clause matches, and ahead of the content-policy check because
-            # the model's partial completion is rendered into str(error): a budget
-            # rejection whose completion mentions a content policy would otherwise
-            # be misclassified. Unlike openai/azure, a non-policy-worded
-            # InstructorRetryException never reaches the fallback attempt below
-            # (see the isinstance check right after this), so classifying here
-            # does not skip any failover that would otherwise have been tried.
-            raise_if_budget_exhausted(error)
-
             if (
                 isinstance(error, InstructorRetryException)
                 and "content management policy" not in str(error).lower()
             ):
+                # No failover exists for this shape: classify here, since the
+                # handler further down is unreachable once this clause matches.
+                raise_if_budget_exhausted(error)
                 raise
 
             if not (self.fallback_model and self.fallback_api_key and self.fallback_endpoint):
+                # Nothing left to try, so classify here rather than at the top of
+                # the clause: a policy-worded InstructorRetryException that also
+                # carries budget wording (the model's partial completion is
+                # rendered into str(error)) would otherwise be classified before
+                # ever reaching the fallback attempt below, silently dropping a
+                # failover a differently-keyed fallback could still satisfy.
+                raise_if_budget_exhausted(error)
                 raise ContentPolicyFilterError(
                     f"The provided input contains content that is not aligned with our content policy: {text_input}"
                 )
@@ -201,8 +201,8 @@ class GeminiAdapter(GenericAPIAdapter):
                 ContentPolicyViolationError,
                 InstructorRetryException,
             ) as error:
-                # The fallback capped out too. Checked before the content-policy
-                # branch for the same reason as above.
+                # The fallback capped out too, and there is nothing left to try,
+                # so classify unconditionally here rather than only in one branch.
                 raise_if_budget_exhausted(error)
 
                 if (

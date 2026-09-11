@@ -434,9 +434,11 @@ async def test_bedrock_wrapped_budget_rejection_converts(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_gemini_wrapped_budget_rejection_converts_without_fallback(monkeypatch):
-    """Gemini's structure differs from openai's: a non-policy-worded
-    InstructorRetryException never reaches the fallback attempt regardless of
-    budget, so classification can sit at the very top of the clause."""
+    """A non-policy-worded InstructorRetryException never reaches the fallback
+    attempt on gemini regardless of budget (the isinstance check re-raises it
+    first), so classifying it has no failover to preserve. See the sibling test
+    below for the case that does have one: a policy-worded IRE that also
+    carries budget wording, where the fallback must still be tried."""
     import cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.gemini.adapter as gemini_mod
     from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.gemini.adapter import (
         GeminiAdapter,
@@ -453,6 +455,205 @@ async def test_gemini_wrapped_budget_rejection_converts_without_fallback(monkeyp
         await adapter.acreate_structured_output("input", "system", _SimpleModel)
 
     assert calls["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_gemini_policy_and_budget_worded_rejection_converts_without_fallback(monkeypatch):
+    """Sibling of the two fallback-configured tests below, for the no-fallback
+    branch: a policy-worded InstructorRetryException that also carries budget
+    wording, with no fallback configured at all, must still convert to
+    LLMPaymentRequiredError rather than ContentPolicyFilterError. This branch
+    classifies unconditionally (there is nothing left to try), so it has no
+    failover to preserve, but it is a distinct exit point from the
+    fallback-also-capped case and was previously untested on its own."""
+    import cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.gemini.adapter as gemini_mod
+    from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.gemini.adapter import (
+        GeminiAdapter,
+    )
+
+    monkeypatch.setattr(gemini_mod.instructor, "from_litellm", lambda *a, **kw: object())
+
+    adapter = GeminiAdapter(
+        api_key="test-key", model="gemini/gemini-2.0-flash-exp", max_completion_tokens=1024
+    )
+
+    def _policy_and_budget_worded_error(_n):
+        return InstructorRetryException(
+            "content management policy violation. Budget has been exceeded! "
+            "Current cost: 20.0, Max budget: 10.0",
+            n_attempts=1,
+            total_usage=0,
+        )
+
+    adapter.aclient, calls = _fake_client(_policy_and_budget_worded_error)
+
+    with pytest.raises(LLMPaymentRequiredError):
+        await adapter.acreate_structured_output("input", "system", _SimpleModel)
+
+    assert calls["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_gemini_policy_and_budget_worded_rejection_still_tries_fallback(monkeypatch):
+    """Regression test: classification used to sit at the top of the shared
+    except clause, ahead of the isinstance check below it, so a policy-worded
+    InstructorRetryException that also happens to carry budget wording (the
+    model's partial completion is rendered into str(error)) never reached the
+    fallback attempt, silently dropping a failover a differently-keyed
+    fallback could still satisfy. Classification now sits at the two actual
+    exit points instead, so this shape reaches the fallback like any other
+    policy-worded rejection would."""
+    import cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.gemini.adapter as gemini_mod
+    from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.gemini.adapter import (
+        GeminiAdapter,
+    )
+
+    monkeypatch.setattr(gemini_mod.instructor, "from_litellm", lambda *a, **kw: object())
+
+    adapter = GeminiAdapter(
+        api_key="test-key",
+        model="gemini/gemini-2.0-flash-exp",
+        max_completion_tokens=1024,
+        fallback_model="gemini/fallback",
+        fallback_api_key="fallback-key",
+        fallback_endpoint="https://fallback",
+    )
+
+    def _policy_and_budget_worded_error(_n):
+        return InstructorRetryException(
+            "content management policy violation. Budget has been exceeded! "
+            "Current cost: 20.0, Max budget: 10.0",
+            n_attempts=1,
+            total_usage=0,
+        )
+
+    calls = {"count": 0, "keys": []}
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            calls["count"] += 1
+            calls["keys"].append(kwargs.get("api_key"))
+            if kwargs.get("api_key") == "fallback-key":
+                return "fallback answer"
+            raise _policy_and_budget_worded_error(calls["count"])
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeClient:
+        chat = FakeChat()
+
+    adapter.aclient = FakeClient()
+
+    result = await adapter.acreate_structured_output("input", "system", _SimpleModel)
+
+    assert result == "fallback answer"
+    assert calls["count"] == 2
+    assert calls["keys"] == ["test-key", "fallback-key"]
+
+
+@pytest.mark.asyncio
+async def test_gemini_policy_and_budget_worded_rejection_converts_when_fallback_also_capped(
+    monkeypatch,
+):
+    """Same shape as above, but the fallback is also budget-exhausted: the
+    nested (fallback-failed) handler has to classify too, since it is the one
+    that would otherwise misroute this to ContentPolicyFilterError."""
+    import cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.gemini.adapter as gemini_mod
+    from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.gemini.adapter import (
+        GeminiAdapter,
+    )
+
+    monkeypatch.setattr(gemini_mod.instructor, "from_litellm", lambda *a, **kw: object())
+
+    adapter = GeminiAdapter(
+        api_key="test-key",
+        model="gemini/gemini-2.0-flash-exp",
+        max_completion_tokens=1024,
+        fallback_model="gemini/fallback",
+        fallback_api_key="fallback-key",
+        fallback_endpoint="https://fallback",
+    )
+
+    def _policy_and_budget_worded_error(_n):
+        return InstructorRetryException(
+            "content management policy violation. Budget has been exceeded! "
+            "Current cost: 20.0, Max budget: 10.0",
+            n_attempts=1,
+            total_usage=0,
+        )
+
+    calls = {"count": 0, "keys": []}
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            calls["count"] += 1
+            calls["keys"].append(kwargs.get("api_key"))
+            raise _policy_and_budget_worded_error(calls["count"])
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeClient:
+        chat = FakeChat()
+
+    adapter.aclient = FakeClient()
+
+    with pytest.raises(LLMPaymentRequiredError):
+        await adapter.acreate_structured_output("input", "system", _SimpleModel)
+
+    assert calls["count"] == 2
+    assert calls["keys"] == ["test-key", "fallback-key"]
+
+
+@pytest.mark.asyncio
+async def test_azure_managed_identity_budget_rejection_converts_when_fallback_also_capped(
+    monkeypatch,
+):
+    """The managed-identity branch duplicates openai's exception handling
+    shape rather than delegating to it, so the fallback-also-capped scenario
+    needs its own coverage: the only other managed-identity test in this file
+    runs with no fallback configured, leaving this path untested. Unlike the
+    primary call (which reuses self.aclient), the fallback call builds a
+    fresh instructor client via instructor.from_litellm(litellm.acompletion)
+    each time, so that has to be patched too rather than only adapter.aclient."""
+    import cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.azure_openai.adapter as azure_mod
+    from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.azure_openai.adapter import (
+        AzureOpenAIAdapter,
+    )
+
+    adapter = object.__new__(AzureOpenAIAdapter)
+    adapter.use_managed_identity = True
+    adapter.model = "azure/gpt-4o-mini"
+    adapter.llm_args = {}
+    adapter.fallback_model = "azure/gpt-4o-mini-fallback"
+    adapter.fallback_api_key = "fallback-key"
+
+    calls = {"count": 0, "keys": []}
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            calls["count"] += 1
+            calls["keys"].append(kwargs.get("api_key"))
+            raise _wrapped_budget_error()
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeClient:
+        chat = FakeChat()
+
+    fake_client = FakeClient()
+    adapter.aclient = fake_client
+    monkeypatch.setattr(azure_mod.instructor, "from_litellm", lambda *a, **kw: fake_client)
+
+    with pytest.raises(LLMPaymentRequiredError):
+        await adapter.acreate_structured_output("input", "system", _SimpleModel)
+
+    # The primary managed-identity call strips api_key from kwargs entirely;
+    # only the fallback call passes it explicitly.
+    assert calls["count"] == 2
+    assert calls["keys"] == [None, "fallback-key"]
 
 
 # ---------------------------------------------------------------------------

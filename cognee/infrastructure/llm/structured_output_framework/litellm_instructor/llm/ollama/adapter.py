@@ -1,3 +1,12 @@
+"""Adapter for a generic OpenAI-compatible API backend used for Ollama models.
+
+``import asyncio`` below has no direct caller in this module's own body, but it
+is load-bearing: ``test_ollama_adapter.py`` patches ``asyncio.to_thread`` by
+name on this module's namespace, which requires ``asyncio`` to be importable
+here regardless of whether this file calls it. ``F401`` is ignored repo-wide,
+so nothing else would catch its removal; do not delete it as dead code.
+"""
+
 import asyncio
 import base64
 import logging
@@ -14,7 +23,7 @@ from tenacity import (
 )
 
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
-from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, is_budget_exhausted_error
+from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
 from cognee.infrastructure.llm.retry_config import (
     llm_retry_condition,
     llm_retry_stop_condition,
@@ -162,8 +171,8 @@ class OllamaAPIAdapter(LLMInterface):
 
             return response
         except Exception as e:
-            if is_budget_exhausted_error(e):
-                raise LLMPaymentRequiredError() from e
+            # Same detail-carrying message as the other adapters.
+            raise_if_budget_exhausted(e)
             raise
 
     @observe(as_type="transcription")

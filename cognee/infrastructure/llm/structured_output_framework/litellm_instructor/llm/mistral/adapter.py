@@ -15,7 +15,7 @@ from tenacity import (
 
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.config import get_llm_config
-from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, is_budget_exhausted_error
+from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
 from cognee.infrastructure.llm.retry_config import (
     llm_retry_condition,
     llm_retry_stop_condition,
@@ -151,8 +151,8 @@ class MistralAdapter(GenericAPIAdapter):
             logger.debug(f"Raw response: {e.raw_response}")
             raise ValueError(f"Response failed schema validation: {e!s}")
         except Exception as e:
-            if is_budget_exhausted_error(e):
-                raise LLMPaymentRequiredError() from e
+            # Same detail-carrying message as the other adapters.
+            raise_if_budget_exhausted(e)
             raise
 
     @observe(as_type="transcription")
