@@ -280,6 +280,20 @@ def _paragraphs(text: str, budget: int, tokenizer) -> list[str]:
     return pieces
 
 
+def _drop_attribute_named_groups(
+    items: list[ExtractedItem], group_by: str | None
+) -> list[ExtractedItem]:
+    """A group written as the attribute's own word ("guest" under group_by "guest") is no
+    value: the entry keeps counting, unattributed, instead of building a phantom group."""
+    if not group_by:
+        return items
+    names = {group_by.lower(), group_by.lower().rstrip("s")}
+    for item in items:
+        if item.group and item.group.strip().lower().rstrip("s") in names:
+            item.group = None
+    return items
+
+
 def _one_entry_per_group(items: list[ExtractedItem], relation: bool) -> list[ExtractedItem]:
     """Expand an item listed once with all its group values into one entry per value.
 
@@ -593,6 +607,7 @@ class BroadRetriever(CompletionRetriever):
             [names for _, shard_items in read_shards for names in shard_items.aliases]
         )
         items = _one_entry_per_group(items, relation=plan.relation)
+        items = _drop_attribute_named_groups(items, plan.group_by)
 
         canonical = await self.merge_name_variants(plan, items, aliases)
         if plan.relation and canonical:
@@ -797,8 +812,14 @@ class BroadRetriever(CompletionRetriever):
             f"Item: {plan.item}\n"
             f"Condition: {condition}\n"
             f"Identity attribute (key): {plan.dedup_key or 'none'}\n"
-            f"Grouping attribute (group): {plan.group_by or 'none'}\n"
-            f"Amount to report (amount): {plan.measure or 'none'}\n"
+            f"Grouping attribute (group): {plan.group_by or 'none'}"
+            + (
+                f" — write its value for this item (a name, a place, a category), never "
+                f'the word "{plan.group_by}" itself\n'
+                if plan.group_by
+                else "\n"
+            )
+            + f"Amount to report (amount): {plan.measure or 'none'}\n"
             f"Ratio condition (matches): {plan.ratio_condition or 'none'}"
             + (
                 " — list EVERY item and set matches = true or false for each"

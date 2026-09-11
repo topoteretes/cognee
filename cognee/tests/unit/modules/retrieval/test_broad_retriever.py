@@ -920,6 +920,27 @@ async def test_keyed_items_sharing_a_templated_quote_in_one_piece_all_count(monk
 
 
 @pytest.mark.asyncio
+async def test_a_group_written_as_the_attributes_own_word_is_no_group(monkeypatch):
+    """Ten of 27 guest appearances came back grouped as "guest" under group_by "guest".
+    Such an entry still counts; it is not a guest named "guest"."""
+    shard = ShardItems(
+        items=[
+            ExtractedItem(unit=0, group="Fatima El-Amin", key="Episode 3", evidence="a"),
+            ExtractedItem(unit=0, group="guest", key="Episode 4", evidence="b"),
+            ExtractedItem(unit=0, group="Guests", key="Episode 5", evidence="c"),
+        ]
+    )
+    _stub_llm(monkeypatch, lambda model, _: shard if model is ShardItems else NameGroups(groups=[]))
+
+    result = await BroadRetriever().count_by_reading(
+        _plan(group_by="guest", dedup_key="the episode"), _units(1)
+    )
+
+    assert result.total == 3
+    assert result.groups == [("Fatima El-Amin", 1)]
+
+
+@pytest.mark.asyncio
 async def test_unkeyed_entries_with_identical_quotes_in_one_piece_are_separate_items(monkeypatch):
     """Two sponsor reads of "This episode is brought to you by Ledgerline Accounting."
     in one piece, two "[crosstalk]" interruptions: written the same each time, listed
