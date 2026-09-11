@@ -43,6 +43,9 @@ logger = get_logger("BroadRetriever")
 # on its own, so the smallest call is one full chunk as ingestion stored it.
 BROAD_SHARD_TOKENS = 2_000
 BROAD_MAX_PARALLEL_CALLS = 16
+# A reading call that hangs holds the whole wave: one call stalled for 84 and then
+# for 168 minutes. A call is retried once after this long, then the search fails.
+BROAD_CALL_TIMEOUT_SECONDS = 300
 # Graph node types whose text is read: document chunks and table rows.
 BROAD_TEXT_NODE_TYPES = ("DocumentChunk", "DltRow")
 # Longest document first line (a CSV header, a title) repeated as shard context.
@@ -334,11 +337,13 @@ class BroadRetriever(CompletionRetriever):
     def __init__(
         self,
         shard_tokens: int = BROAD_SHARD_TOKENS,
+        call_timeout: float = BROAD_CALL_TIMEOUT_SECONDS,
         max_parallel_calls: int = BROAD_MAX_PARALLEL_CALLS,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.shard_tokens = shard_tokens
+        self.call_timeout = call_timeout
         self.max_parallel_calls = max_parallel_calls
         self.tokenizer = TikTokenTokenizer()
 
@@ -555,7 +560,19 @@ class BroadRetriever(CompletionRetriever):
 
         async def read(shard: list[Unit]) -> tuple[str, ShardItems]:
             async with semaphore:
-                return shard[0].id, await self.extract(plan, shard)
+                for attempt in (1, 2):
+                    try:
+                        return shard[0].id, await asyncio.wait_for(
+                            self.extract(plan, shard), self.call_timeout
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "BROAD reading call for %s timed out after %.0fs (attempt %d)",
+                            shard[0].id,
+                            self.call_timeout,
+                            attempt,
+                        )
+                raise TimeoutError(f"BROAD: reading call for {shard[0].id} timed out twice")
 
         read_shards = await asyncio.gather(*map(read, shards))
         logger.info(
