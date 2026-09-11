@@ -1,9 +1,9 @@
-import os
 from typing import Any, BinaryIO
 from urllib.parse import urlparse
 from uuid import UUID
 
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.engine.operations.setup import setup
@@ -45,10 +45,11 @@ def _add_pipeline_needs_llm(data: Any, preferred_loaders: list | None) -> bool:
         if not isinstance(data_item, str) or urlparse(data_item).scheme:
             return True
         try:
-            if os.path.exists(data_item):
-                return True
-        except OSError:
+            resolve_local_path(data_item, must_exist=True)
+        except (FileNotFoundError, OSError, ValueError):
             pass
+        else:
+            return True
     return False
 
 
