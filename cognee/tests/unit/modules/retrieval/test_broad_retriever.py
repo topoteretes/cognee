@@ -425,6 +425,22 @@ def test_a_key_keeps_its_kind_so_pr_42_and_issue_42_are_two_items():
     assert normalize("EXP-1004") == "exp-1004" and normalize("2026-03-04") == "2026-03-04"
 
 
+def test_a_bare_number_adopts_the_kind_written_elsewhere_for_it():
+    """Pavel's PR 1032 was keyed "PR 1032" once and "1032" once: one item. PR 42 and
+    issue 42 stay two. A bare 7 with no labelled twin stays bare."""
+    items = [
+        _item("Pavel", "PR 1032"),
+        _item("Pavel", "1032"),
+        _item("Pavel", "PR 42"),
+        _item("Pavel", "issue 42"),
+        _item("Pavel", "7"),
+    ]
+
+    kept = BroadRetriever.dedup(items)
+
+    assert [i.key for i in kept] == ["PR 1032", "PR 42", "issue 42", "7"]
+
+
 def test_names_with_digits_are_not_reduced_to_their_digits():
     """ "raj921" and "RajdeepKushwaha5" are two members, and "@raj921" is raj921; only an
     item identifier ("PR #921") reduces to its digits."""

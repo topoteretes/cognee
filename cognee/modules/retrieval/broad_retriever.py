@@ -269,6 +269,24 @@ def _one_entry_per_group(items: list[ExtractedItem], relation: bool) -> list[Ext
     return expanded
 
 
+def _adopt_labels(keyed: list[tuple[str, ExtractedItem]]) -> list[tuple[str, ExtractedItem]]:
+    """A bare number takes the kind of the labelled key with the same digits.
+
+    "PR 42" and "issue 42" are two items, but "1032" written once bare and once as
+    "PR 1032" is one: a bare number never contradicts a kind. Only when exactly one
+    kind carries those digits in the same group is the adoption unambiguous.
+    """
+    labelled: dict[tuple[str, str], set[str]] = {}
+    for key, item in keyed:
+        if not key.isdigit() and re.search(r"\d", key):
+            labelled.setdefault((item.group or "", key.rsplit("-", 1)[-1]), set()).add(key)
+    adopted = []
+    for key, item in keyed:
+        kinds = labelled.get((item.group or "", key)) if key.isdigit() else None
+        adopted.append((next(iter(kinds)) if kinds and len(kinds) == 1 else key, item))
+    return adopted
+
+
 def _is_wording_key(dedup_key: str) -> bool:
     """A dedup key that is a title, name or wording and names no identifier or date."""
     key = dedup_key.lower()
@@ -622,6 +640,8 @@ class BroadRetriever(CompletionRetriever):
 
         keyed = [(normalize(item.key), item) for item in items if item.key]
         unkeyed = [item for item in items if not item.key and not item.undone]
+        if not by_group:
+            keyed = _adopt_labels(keyed)
         # An item's state is decided by its latest entry: opened, resolved, reopened
         # is open. Entries are ordered by the date they carry, then by reading order
         # (documents ingested as separate files have no order of their own). An
