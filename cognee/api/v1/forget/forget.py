@@ -484,7 +484,12 @@ async def _resolve_dataset_id(dataset_ref: str | UUID, user: Any) -> UUID:
             raise ValueError(f"Dataset {dataset_ref} not found or not accessible.")
         return dataset.id
 
+    from cognee.modules.data.exceptions import DatasetNotFoundError
     from cognee.modules.data.methods import get_authorized_dataset_by_name
 
     dataset = await get_authorized_dataset_by_name(dataset_ref, user, "delete")
+    if dataset is None:
+        # Same message for missing and unauthorized: the name lookup returns None
+        # for both, and distinguishing them would leak which dataset names exist.
+        raise DatasetNotFoundError(message=f"Dataset '{dataset_ref}' not found or not accessible.")
     return dataset.id
