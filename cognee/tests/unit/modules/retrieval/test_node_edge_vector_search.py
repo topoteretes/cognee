@@ -271,3 +271,55 @@ async def test_node_edge_vector_search_has_results_batch_edges_only():
     vector_search.node_distances = {}
 
     assert vector_search.has_results() is True
+
+
+@pytest.mark.asyncio
+async def test_missing_collection_placeholder_rows_are_independent():
+    """The CollectionNotFoundError placeholder must not repeat one list object.
+
+    `[[]] * n` repeats a single list, so extending one query's results extends
+    every query's. `brute_force_triplet_search` does exactly that when expanding
+    a neighborhood: `node_distances[collection][qi].extend(per_query)`.
+    """
+    search = NodeEdgeVectorSearch.__new__(NodeEdgeVectorSearch)
+    search.edge_collection = "EdgeType_relationship_name"
+
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.batch_search = AsyncMock(side_effect=CollectionNotFoundError("missing"))
+    search._get_vector_engine = AsyncMock(return_value=mock_vector_engine)
+
+    query_batch = ["query a", "query b", "query c"]
+    placeholder = await search._search_batch_collection("Entity_name", query_batch)
+
+    assert placeholder == [[], [], []]
+    # Distinct objects, so a per-query mutation stays local.
+    assert len({id(row) for row in placeholder}) == len(query_batch)
+
+
+@pytest.mark.asyncio
+async def test_per_query_extend_does_not_leak_across_queries():
+    """Extending one query slot must leave the other queries empty.
+
+    This is the path brute_force_triplet_search takes, so it pins the actual
+    consequence rather than just the placeholder's shape.
+    """
+    search = NodeEdgeVectorSearch.__new__(NodeEdgeVectorSearch)
+    search.edge_collection = "EdgeType_relationship_name"
+
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.batch_search = AsyncMock(side_effect=CollectionNotFoundError("missing"))
+    search._get_vector_engine = AsyncMock(return_value=mock_vector_engine)
+
+    query_batch = ["query a", "query b", "query c"]
+    placeholder = await search._search_batch_collection("Entity_name", query_batch)
+
+    search.set_distances_from_results(
+        ["Entity_name"], [placeholder], query_list_length=len(query_batch)
+    )
+
+    extra = MockScoredResult("node_for_query_a", 0.91)
+    search.node_distances["Entity_name"][0].extend([extra])
+
+    assert search.node_distances["Entity_name"][0] == [extra]
+    assert search.node_distances["Entity_name"][1] == []
+    assert search.node_distances["Entity_name"][2] == []
