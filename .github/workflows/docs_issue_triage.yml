@@ -4,15 +4,21 @@ name: automation | Triage GitHub Docs Issues
 # problems. Select one open issue by number, or every open issue created in a
 # UTC date range, and run tools/docs_issue_triage.py over the selection.
 #
-# Phase 1 (current): read-only. A cheap, LLM-free filter (the `documentation`
-# label, then the whole words "docs"/"documentation" in the title, then the body)
-# sorts issues into `pending_docs_check` or `skipped_*`, and the result lands in
-# the run summary plus a JSON artifact. Nothing is posted to any issue.
+# Phase 1: a cheap, LLM-free filter (the `documentation` label, a docs title,
+# the documentation issue form, a docs.cognee.ai link, or a claim about the docs
+# in the issue's problem sections) sorts issues into `pending_docs_check` or
+# `skipped_*`. Skipped issues cost nothing further.
 #
-# Later phases add: a public-docs check that may leave one auto-generated
-# comment asking the author to close, a cognee source check, a human-review
-# email, and a draft PR on topoteretes/cognee-docs. `dry_run` (default true)
-# is accepted now so those phases keep the same dispatch form.
+# Phase 2 (current): the public docs export (llms-full.txt) is fetched once per
+# run and indexed lexically; each pending issue gets ONE structured LLM call
+# over its top three pages. When the site already answers the report
+# and `dry_run` is false, the bot leaves ONE marked comment asking the author
+# to close; a rerun sees the marker and stays silent. Every other verdict is
+# silent and only appears in the run summary. Nothing is ever closed.
+#
+# Later phases add: a cognee source check, a human-review email, and a draft
+# PR on topoteretes/cognee-docs. `dry_run` defaults to true so a backlog pass
+# can be supervised before the bot may comment.
 #
 # Deliberately no `schedule` and no `on: issues` trigger. Manual runs come
 # first so a human can watch the backlog in phases; automatic triggers are a
@@ -37,7 +43,7 @@ on:
         default: ""
         type: string
       dry_run:
-        description: No comments and no docs PRs (phase 1 never writes either way)
+        description: No comments and no docs PRs; still runs the docs check and writes the summary
         required: false
         default: true
         type: boolean
@@ -72,10 +78,15 @@ jobs:
       # The CLI exits 2 before any GitHub request when neither selector is
       # given, so an empty dispatch fails here and the artifact step is skipped.
       # workflow_dispatch booleans arrive as the strings "true"/"false".
+      # LLM settings mirror dev_previous_day_commits.yml; the key is only
+      # required when at least one selected issue passes the cheap filter.
       - name: Triage selected issues
         id: run
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY || secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || secrets.LLM_MODEL || 'openai/gpt-4o-mini' }}
           INPUT_ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
           INPUT_SINCE: ${{ github.event.inputs.since }}
           INPUT_UNTIL: ${{ github.event.inputs.until }}
@@ -96,9 +107,14 @@ jobs:
 
           uv run python tools/docs_issue_triage.py "${args[@]}"
 
+      # `always()` rather than `success()`: a failed LLM call marks its row
+      # `uncertain` and exits 1 after writing the results, which are still worth
+      # keeping. A missing-selector failure exits before the file exists, and
+      # `if-no-files-found: ignore` keeps that from turning into a second error.
       - name: Upload triage results
-        if: success()
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: triage-results
           path: triage-results.json
+          if-no-files-found: ignore
