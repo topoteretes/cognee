@@ -23,7 +23,7 @@ from cognee.modules.data.methods import (
 )
 from cognee.modules.data.methods.create_authorized_dataset import create_authorized_dataset
 from cognee.modules.graph.methods import get_formatted_graph_data
-from cognee.modules.pipelines.methods import EffectivePipelineRunStatus
+from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
@@ -67,7 +67,9 @@ StatusPipelineNamesQuery = Annotated[
 
 
 class PipelineRunStatusWithProgress(BaseModel):
-    status: EffectivePipelineRunStatus
+    # The stored status, not the read-time effective one. See the note on
+    # /status below for why these two endpoints stay on the stored value.
+    status: PipelineRunStatus
     # Present only once a run has emitted at least one progress tick (see
     # log_pipeline_run_progress); None before that or for terminal runs that
     # predate this field.
@@ -441,10 +443,16 @@ def get_datasets_router() -> APIRouter:
             for data in dataset_data
         ]
 
+    # Reports the STORED status. ABANDONED is deliberately not surfaced here:
+    # every frontend status path reads this endpoint through one shared mapper
+    # that falls through to "completed" for a value it does not recognise, so
+    # an abandoned dataset with documents would be shown as successfully
+    # processed. Reporting a dead run as still running is also wrong, but it
+    # never claims success. /activity carries the effective status; this
+    # endpoint follows once the frontend has a mapping for it.
     @router.get(
         "/status",
-        response_model=dict[str, EffectivePipelineRunStatus]
-        | dict[str, dict[str, EffectivePipelineRunStatus]],
+        response_model=dict[str, PipelineRunStatus] | dict[str, dict[str, PipelineRunStatus]],
     )
     async def get_dataset_status(
         datasets: StatusDatasetIdsQuery = [],

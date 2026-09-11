@@ -1,12 +1,20 @@
-"""Integration test for GET /v1/datasets/status (SDK-591 follow-up).
+"""Integration test for GET /v1/datasets/status (SDK-591).
 
-A CI bot flagged that this endpoint (and /status/progress) still returned
-the raw stored PipelineRunStatus, so a crashed run read "ABANDONED" on the
-activity feed but "DATASET_PROCESSING_STARTED" here. The fix routes this
-endpoint through get_effective_pipeline_status_by_datasets instead of the
-raw get_pipeline_status (see datasets.py / get_pipeline_status.py) — proven
-here at the router level, the same way test_status_progress_router.py
-proves it for the sibling /status/progress endpoint.
+This endpoint reports the STORED PipelineRunStatus, so a crashed run reads
+"ABANDONED" on the activity feed and "DATASET_PROCESSING_STARTED" here. The
+divergence is deliberate and these tests exist to keep it.
+
+Every frontend status path reads this endpoint through one shared mapper
+(mapProcessingStatus in cognee-frontend/src/app/(app)/datasets/brainsTypes.ts),
+which falls through to "completed" for any value it does not recognise, and
+through a poller whose terminal/in-progress sets do not contain ABANDONED.
+Surfacing ABANDONED here would therefore show an abandoned dataset as
+successfully processed, and hang upload polling until its timeout. Reporting
+a dead run as still running is also wrong, but it never claims success.
+
+The effective status is carried by /activity. This endpoint follows once the
+frontend has a mapping for it, which has to start in cognee-saas-frontend
+since cognee-frontend here is synced from it.
 """
 
 import uuid
@@ -67,11 +75,13 @@ def test_status_requires_authentication(test_client):
     assert response.status_code in (401, 403)
 
 
-def test_status_reports_abandoned_for_a_stale_run_flat_shape(authenticated_client, monkeypatch):
-    """A stale STARTED row must reach the client as ABANDONED, and the
-    Union[dict[str, EffectivePipelineRunStatus], ...] response model must
-    actually accept the value instead of 500ing with a
-    ResponseValidationError."""
+def test_status_reports_the_stored_status_for_a_stale_run_flat_shape(
+    authenticated_client, monkeypatch
+):
+    """A stale STARTED row reaches the client as DATASET_PROCESSING_STARTED,
+    not ABANDONED. The frontend mapper has no branch for ABANDONED and falls
+    through to "completed", so surfacing it here would report a dead run as a
+    successful one."""
     dataset_id = uuid.uuid4()
     _authorize_one_dataset(monkeypatch, dataset_id)
 
@@ -79,15 +89,15 @@ def test_status_reports_abandoned_for_a_stale_run_flat_shape(authenticated_clien
 
     datasets_module = importlib.import_module("cognee.api.v1.datasets.datasets")
 
-    async def _fake_get_effective_pipeline_status_by_datasets(dataset_ids, pipeline_name):
+    async def _fake_get_pipeline_status(dataset_ids, pipeline_name):
         assert dataset_ids == [dataset_id]
         assert pipeline_name == "cognify_pipeline"
-        return {str(dataset_id): "ABANDONED"}
+        return {str(dataset_id): "DATASET_PROCESSING_STARTED"}
 
     monkeypatch.setattr(
         datasets_module,
-        "get_effective_pipeline_status_by_datasets",
-        _fake_get_effective_pipeline_status_by_datasets,
+        "get_pipeline_status",
+        _fake_get_pipeline_status,
     )
 
     response = authenticated_client.get(
@@ -95,10 +105,12 @@ def test_status_reports_abandoned_for_a_stale_run_flat_shape(authenticated_clien
     )
 
     assert response.status_code == 200
-    assert response.json() == {str(dataset_id): "ABANDONED"}
+    assert response.json() == {str(dataset_id): "DATASET_PROCESSING_STARTED"}
 
 
-def test_status_reports_abandoned_for_a_stale_run_nested_shape(authenticated_client, monkeypatch):
+def test_status_reports_the_stored_status_for_a_stale_run_nested_shape(
+    authenticated_client, monkeypatch
+):
     """Same as above, through the nested {dataset_id: {pipeline_name: ...}}
     shape used for multiple requested pipelines — a separate code path in
     _fan_out_by_pipeline from the flat one above."""
@@ -109,13 +121,13 @@ def test_status_reports_abandoned_for_a_stale_run_nested_shape(authenticated_cli
 
     datasets_module = importlib.import_module("cognee.api.v1.datasets.datasets")
 
-    async def _fake_get_effective_pipeline_status_by_datasets(dataset_ids, pipeline_name):
-        return {str(dataset_id): "ABANDONED"}
+    async def _fake_get_pipeline_status(dataset_ids, pipeline_name):
+        return {str(dataset_id): "DATASET_PROCESSING_STARTED"}
 
     monkeypatch.setattr(
         datasets_module,
-        "get_effective_pipeline_status_by_datasets",
-        _fake_get_effective_pipeline_status_by_datasets,
+        "get_pipeline_status",
+        _fake_get_pipeline_status,
     )
 
     response = authenticated_client.get(
@@ -126,8 +138,8 @@ def test_status_reports_abandoned_for_a_stale_run_nested_shape(authenticated_cli
     assert response.status_code == 200
     assert response.json() == {
         str(dataset_id): {
-            "add_pipeline": "ABANDONED",
-            "cognify_pipeline": "ABANDONED",
+            "add_pipeline": "DATASET_PROCESSING_STARTED",
+            "cognify_pipeline": "DATASET_PROCESSING_STARTED",
         }
     }
 
@@ -140,13 +152,13 @@ def test_status_reports_raw_status_for_a_fresh_run(authenticated_client, monkeyp
 
     datasets_module = importlib.import_module("cognee.api.v1.datasets.datasets")
 
-    async def _fake_get_effective_pipeline_status_by_datasets(dataset_ids, pipeline_name):
+    async def _fake_get_pipeline_status(dataset_ids, pipeline_name):
         return {str(dataset_id): "DATASET_PROCESSING_STARTED"}
 
     monkeypatch.setattr(
         datasets_module,
-        "get_effective_pipeline_status_by_datasets",
-        _fake_get_effective_pipeline_status_by_datasets,
+        "get_pipeline_status",
+        _fake_get_pipeline_status,
     )
 
     response = authenticated_client.get(
@@ -168,7 +180,7 @@ def test_status_error_returns_409(authenticated_client, monkeypatch):
     async def _raise(*args, **kwargs):
         raise RuntimeError("db unavailable")
 
-    monkeypatch.setattr(datasets_module, "get_effective_pipeline_status_by_datasets", _raise)
+    monkeypatch.setattr(datasets_module, "get_pipeline_status", _raise)
 
     response = authenticated_client.get(
         "/api/v1/datasets/status", params={"dataset": str(dataset_id)}

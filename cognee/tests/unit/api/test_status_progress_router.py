@@ -77,7 +77,7 @@ def test_status_progress_single_pipeline_flat_shape(authenticated_client, monkey
 
     datasets_module = importlib.import_module("cognee.api.v1.datasets.datasets")
 
-    async def _fake_get_effective_pipeline_progress_by_datasets(dataset_ids, pipeline_name):
+    async def _fake_get_pipeline_progress(dataset_ids, pipeline_name):
         assert dataset_ids == [dataset_id]
         assert pipeline_name == "cognify_pipeline"
         return {
@@ -93,8 +93,8 @@ def test_status_progress_single_pipeline_flat_shape(authenticated_client, monkey
 
     monkeypatch.setattr(
         datasets_module,
-        "get_effective_pipeline_progress_by_datasets",
-        _fake_get_effective_pipeline_progress_by_datasets,
+        "get_pipeline_progress",
+        _fake_get_pipeline_progress,
     )
 
     response = authenticated_client.get(
@@ -125,7 +125,7 @@ def test_status_progress_multiple_pipelines_nested_shape(authenticated_client, m
 
     datasets_module = importlib.import_module("cognee.api.v1.datasets.datasets")
 
-    async def _fake_get_effective_pipeline_progress_by_datasets(dataset_ids, pipeline_name):
+    async def _fake_get_pipeline_progress(dataset_ids, pipeline_name):
         return {
             str(dataset_id): {
                 "status": "DATASET_PROCESSING_COMPLETED",
@@ -135,8 +135,8 @@ def test_status_progress_multiple_pipelines_nested_shape(authenticated_client, m
 
     monkeypatch.setattr(
         datasets_module,
-        "get_effective_pipeline_progress_by_datasets",
-        _fake_get_effective_pipeline_progress_by_datasets,
+        "get_pipeline_progress",
+        _fake_get_pipeline_progress,
     )
 
     response = authenticated_client.get(
@@ -165,7 +165,7 @@ def test_status_progress_error_returns_409(authenticated_client, monkeypatch):
     async def _raise(*args, **kwargs):
         raise RuntimeError("db unavailable")
 
-    monkeypatch.setattr(datasets_module, "get_effective_pipeline_progress_by_datasets", _raise)
+    monkeypatch.setattr(datasets_module, "get_pipeline_progress", _raise)
 
     response = authenticated_client.get(
         "/api/v1/datasets/status/progress", params={"dataset": str(dataset_id)}
@@ -174,14 +174,15 @@ def test_status_progress_error_returns_409(authenticated_client, monkeypatch):
     assert response.status_code == 409
 
 
-def test_status_progress_reports_abandoned_for_a_stale_run_flat_shape(
+def test_status_progress_reports_the_stored_status_for_a_stale_run_flat_shape(
     authenticated_client, monkeypatch
 ):
-    """SDK-591 follow-up: a stale STARTED row must reach the client as
-    ABANDONED here too, not just on the activity feed. Also pins that the
-    response model (PipelineRunStatusWithProgress.status:
-    EffectivePipelineRunStatus) actually accepts the value instead of
-    500ing with a ResponseValidationError."""
+    """A stale STARTED row reaches the client as DATASET_PROCESSING_STARTED,
+    matching /status. ABANDONED stays on the activity feed: the frontend
+    poller that drives uploads has it in neither its terminal nor its
+    in-progress set, so it would spin to the timeout and report a processing
+    error instead of finishing. See test_dataset_status_router.py for the
+    full reasoning."""
     dataset_id = uuid.uuid4()
     _authorize_one_dataset(monkeypatch, dataset_id)
 
@@ -189,13 +190,13 @@ def test_status_progress_reports_abandoned_for_a_stale_run_flat_shape(
 
     datasets_module = importlib.import_module("cognee.api.v1.datasets.datasets")
 
-    async def _fake_get_effective_pipeline_progress_by_datasets(dataset_ids, pipeline_name):
-        return {str(dataset_id): {"status": "ABANDONED", "progress": None}}
+    async def _fake_get_pipeline_progress(dataset_ids, pipeline_name):
+        return {str(dataset_id): {"status": "DATASET_PROCESSING_STARTED", "progress": None}}
 
     monkeypatch.setattr(
         datasets_module,
-        "get_effective_pipeline_progress_by_datasets",
-        _fake_get_effective_pipeline_progress_by_datasets,
+        "get_pipeline_progress",
+        _fake_get_pipeline_progress,
     )
 
     response = authenticated_client.get(
@@ -203,10 +204,12 @@ def test_status_progress_reports_abandoned_for_a_stale_run_flat_shape(
     )
 
     assert response.status_code == 200
-    assert response.json() == {str(dataset_id): {"status": "ABANDONED", "progress": None}}
+    assert response.json() == {
+        str(dataset_id): {"status": "DATASET_PROCESSING_STARTED", "progress": None}
+    }
 
 
-def test_status_progress_reports_abandoned_for_a_stale_run_nested_shape(
+def test_status_progress_reports_the_stored_status_for_a_stale_run_nested_shape(
     authenticated_client, monkeypatch
 ):
     """Same as above, through the nested {dataset_id: {pipeline_name: ...}}
@@ -219,13 +222,13 @@ def test_status_progress_reports_abandoned_for_a_stale_run_nested_shape(
 
     datasets_module = importlib.import_module("cognee.api.v1.datasets.datasets")
 
-    async def _fake_get_effective_pipeline_progress_by_datasets(dataset_ids, pipeline_name):
-        return {str(dataset_id): {"status": "ABANDONED", "progress": None}}
+    async def _fake_get_pipeline_progress(dataset_ids, pipeline_name):
+        return {str(dataset_id): {"status": "DATASET_PROCESSING_STARTED", "progress": None}}
 
     monkeypatch.setattr(
         datasets_module,
-        "get_effective_pipeline_progress_by_datasets",
-        _fake_get_effective_pipeline_progress_by_datasets,
+        "get_pipeline_progress",
+        _fake_get_pipeline_progress,
     )
 
     response = authenticated_client.get(
@@ -236,7 +239,7 @@ def test_status_progress_reports_abandoned_for_a_stale_run_nested_shape(
     assert response.status_code == 200
     assert response.json() == {
         str(dataset_id): {
-            "add_pipeline": {"status": "ABANDONED", "progress": None},
-            "cognify_pipeline": {"status": "ABANDONED", "progress": None},
+            "add_pipeline": {"status": "DATASET_PROCESSING_STARTED", "progress": None},
+            "cognify_pipeline": {"status": "DATASET_PROCESSING_STARTED", "progress": None},
         }
     }

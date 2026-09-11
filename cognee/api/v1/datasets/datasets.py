@@ -22,8 +22,8 @@ from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElem
 from cognee.modules.ingestion import discover_directory_datasets
 from cognee.modules.operations import record_operation
 from cognee.modules.pipelines.operations.get_pipeline_status import (
-    get_effective_pipeline_progress_by_datasets,
-    get_effective_pipeline_status_by_datasets,
+    get_pipeline_progress,
+    get_pipeline_status,
 )
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_default_user
@@ -36,11 +36,17 @@ logger = get_logger()
 async def _fan_out_by_pipeline(dataset_ids: list[UUID], pipeline_names: list[str] | None, fetch):
     """Shared flat/nested shaping for get_status and get_progress.
 
-    ``fetch`` is get_effective_pipeline_status_by_datasets or
-    get_effective_pipeline_progress_by_datasets — only the per-dataset value
-    type differs (a bare status vs. {status, progress});
+    ``fetch`` is get_pipeline_status or get_pipeline_progress — only the
+    per-dataset value type differs (a bare status vs. {status, progress});
     the flat-vs-nested decision based on how many pipeline names were
     requested is identical either way, so it lives here once.
+
+    Both fetch the STORED status, not the read-time effective one. These two
+    endpoints are what every frontend status path reads, and none of them
+    knows ABANDONED: the shared mapper falls through to "completed" for an
+    unrecognised value, so a dead run would be reported as a successful one.
+    Reporting it as still running is wrong too, but it never claims success.
+    The effective status stays on /activity until a frontend mapping lands.
     """
     # Backward-compatible default: cognify-only flat map.
     if not pipeline_names:
@@ -167,9 +173,7 @@ class datasets:
 
     @staticmethod
     async def get_status(dataset_ids: list[UUID], pipeline_names: list[str] | None = None) -> dict:
-        return await _fan_out_by_pipeline(
-            dataset_ids, pipeline_names, get_effective_pipeline_status_by_datasets
-        )
+        return await _fan_out_by_pipeline(dataset_ids, pipeline_names, get_pipeline_status)
 
     @staticmethod
     async def get_progress(
@@ -180,9 +184,7 @@ class datasets:
         rather than a flag on get_status, so get_status's response shape
         never depends on how it was called.
         """
-        return await _fan_out_by_pipeline(
-            dataset_ids, pipeline_names, get_effective_pipeline_progress_by_datasets
-        )
+        return await _fan_out_by_pipeline(dataset_ids, pipeline_names, get_pipeline_progress)
 
     @staticmethod
     async def empty_dataset(dataset_id: UUID, user: User | None = None):
