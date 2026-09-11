@@ -578,9 +578,10 @@ async def test_task_never_calls_llm_extraction_helpers():
     chunks = [_chunk()]
     schema = GlinerSchema({"person": ""}, source="caller")
     extract_graph_module = importlib.import_module("cognee.tasks.graph.extract_graph_from_data")
+    summarize_text_module = importlib.import_module("cognee.tasks.summarization.summarize_text")
     with (
         patch.object(extract_graph_module, "extract_content_graph") as ecg,
-        patch("cognee.tasks.summarization.summarize_text.extract_summary") as es,
+        patch.object(summarize_text_module, "extract_summary") as es,
     ):
         await _run_task(extractor, chunks, schema, GlinerRunStats(), AsyncMock())
     ecg.assert_not_called()
