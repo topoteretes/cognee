@@ -54,7 +54,7 @@ def phase3(triage, monkeypatch):
     """Phase 3 on, offline: git grep, timeline and comment lookups, SMTP and the LLM stubbed."""
     monkeypatch.setattr(triage, "run_source_checks", triage._real_run_source_checks)
     monkeypatch.setattr(triage, "git_grep_hits", lambda tokens, repo_root: "cognee/x.py:1:hit")
-    monkeypatch.setattr(triage, "linked_pull_requests", lambda repo, number: [])
+    monkeypatch.setattr(triage, "linked_pull_requests", lambda repo, number, core_team: [])
     monkeypatch.setattr(triage, "list_issue_comments", lambda repo, number: [])
     monkeypatch.setattr(
         triage,
@@ -235,15 +235,16 @@ def test_cited_page_not_shown_to_the_llm_downgrades_to_needs_source(triage, monk
     ("title", "labels"),
     [("[Bug]: set_graph_model() is inert", []), ("prune wipes tables", ["bug"])],
 )
-def test_bug_reports_never_get_documentation_covered(triage, monkeypatch, tmp_path, title, labels):
+def test_bug_reports_are_not_docs_without_an_llm_call(triage, monkeypatch, tmp_path, title, labels):
     issue = _issue(
         4632, title, body="The config docs list set_graph_model as working.", labels=labels
     )
     calls = _fake_api(triage, monkeypatch, [("/issues/4632", issue)])
-    _site_verdict(triage, monkeypatch, "documentation_covered", "docs describe it", [PAGE_CONFIG])
+    llm_calls = []
+    monkeypatch.setattr(triage, "run_site_check", lambda sp, um: llm_calls.append(um))
     code, [row] = _run(triage, ["--issue-number", "4632"], tmp_path)
-    assert code == 0 and _posts(calls) == []
-    assert row["verdict"] == "needs_source" and "filed as a bug report" in row["reason"]
+    assert code == 0 and _posts(calls) == [] and llm_calls == []
+    assert row["verdict"] == "not_docs" and "bug form" in row["reason"]
     assert row["comment"] == ""
 
 
@@ -353,10 +354,10 @@ def test_maintainer_reply_leaves_the_thread_to_them_without_an_llm_call(
 # --- phase 3: source check, human review, draft-docs hand-off ------------------------------
 
 
-def _bug_issue():
+def _gap_issue():
     return _issue(
         4632,
-        "[Bug]: set_graph_model() is inert",
+        "[Docs]: set_graph_model() is documented but does nothing",
         body="`set_graph_model` is documented as setting the model but `GRAPH_MODEL` is unread.",
     )
 
@@ -366,7 +367,7 @@ def test_small_gap_becomes_a_flat_string_matrix_row_only_on_live_runs(
 ):
     output_file = tmp_path / "output.txt"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output_file))
-    _fake_api(phase3, monkeypatch, [("/issues/4632", _bug_issue())])
+    _fake_api(phase3, monkeypatch, [("/issues/4632", _gap_issue())])
     _source_verdict(
         phase3,
         monkeypatch,
@@ -396,7 +397,7 @@ def test_small_gap_becomes_a_flat_string_matrix_row_only_on_live_runs(
         matrix[0]["number"] == "4632"
         and matrix[0]["docs_files"] == "python-api/config.mdx a.mdx b.mdx"
     )
-    assert base64.b64decode(matrix[0]["body_b64"]).decode().startswith("[Bug]: set_graph_model()")
+    assert base64.b64decode(matrix[0]["body_b64"]).decode().startswith("[Docs]: set_graph_model()")
 
     output_file.write_text("")
     code, [row] = _run(phase3, ["--issue-number", "4632", "--dry-run"], tmp_path)
@@ -407,7 +408,7 @@ def test_small_gap_becomes_a_flat_string_matrix_row_only_on_live_runs(
 
 
 def test_small_gap_without_an_existing_docs_file_is_uncertain(phase3, monkeypatch, tmp_path):
-    _fake_api(phase3, monkeypatch, [("/issues/4632", _bug_issue())])
+    _fake_api(phase3, monkeypatch, [("/issues/4632", _gap_issue())])
     _source_verdict(phase3, monkeypatch, "small_gap", "gap", ["cognee/a.py"], [])
     code, [row] = _run(phase3, ["--issue-number", "4632", "--dry-run"], tmp_path)
     assert code == 0 and row["verdict"] == "uncertain" and row["docs_files"] == []
@@ -419,7 +420,7 @@ def test_human_review_verdicts_are_silent_and_listed_without_smtp(
 ):
     summary_file = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_file))
-    calls = _fake_api(phase3, monkeypatch, [("/issues/4632", _bug_issue())])
+    calls = _fake_api(phase3, monkeypatch, [("/issues/4632", _gap_issue())])
     _source_verdict(phase3, monkeypatch, verdict, "why")
     assert _run(phase3, ["--issue-number", "4632"], tmp_path)[0] == 0 and _posts(calls) == []
     summary = summary_file.read_text()
@@ -427,48 +428,45 @@ def test_human_review_verdicts_are_silent_and_listed_without_smtp(
     assert "email skipped, SMTP not configured" in summary
 
 
-def test_open_linked_pull_request_means_fix_in_progress_without_an_llm_call(
-    phase3, monkeypatch, tmp_path
-):
-    _fake_api(phase3, monkeypatch, [("/issues/4632", _bug_issue())])
+def test_only_an_open_maintainer_pull_request_is_a_fix_in_progress(phase3, monkeypatch, tmp_path):
+    _fake_api(phase3, monkeypatch, [("/issues/4632", _gap_issue())])
     llm_calls = _source_verdict(phase3, monkeypatch, "small_gap", "gap", ["a.py"], ["b.mdx"])
     monkeypatch.setattr(
-        phase3, "linked_pull_requests", lambda repo, number: ["https://x/pull/5000"]
+        phase3,
+        "linked_pull_requests",
+        lambda repo, number, core_team: ["https://x/pull/5000 by @core"],
     )
     _, [row] = _run(phase3, ["--issue-number", "4632"], tmp_path)
-    assert row["verdict"] == "fix_in_progress" and "pull/5000" in row["reason"]
+    assert row["verdict"] == "fix_in_progress" and "pull/5000 by @core" in row["reason"]
     assert llm_calls == []
-    # a contributor's "I'd like to work on this" is not a fix in progress
-    monkeypatch.setattr(phase3, "linked_pull_requests", lambda repo, number: [])
-    comments = [
-        {
-            "body": "I'd like to work on this!",
-            "user": {"login": "newcomer"},
-            "author_association": "CONTRIBUTOR",
+
+
+def test_linked_pull_requests_ignore_closed_and_contributor_prs(triage, monkeypatch):
+    def pr(url, state, login, association):
+        return {
+            "event": "cross-referenced",
+            "source": {
+                "issue": {
+                    "html_url": url,
+                    "pull_request": {},
+                    "state": state,
+                    "user": {"login": login},
+                    "author_association": association,
+                }
+            },
         }
-    ]
-    monkeypatch.setattr(phase3, "list_issue_comments", lambda repo, number: comments)
-    _, [row] = _run(phase3, ["--issue-number", "4632"], tmp_path)
-    assert row["verdict"] == "small_gap"
 
-
-def test_closed_pull_requests_do_not_count_as_a_fix_in_progress(triage, monkeypatch):
     timeline = [
-        {
-            "event": "cross-referenced",
-            "source": {
-                "issue": {"html_url": "https://x/pull/10", "pull_request": {}, "state": "open"}
-            },
-        },
-        {
-            "event": "cross-referenced",
-            "source": {
-                "issue": {"html_url": "https://x/pull/11", "pull_request": {}, "state": "closed"}
-            },
-        },
+        pr("https://x/pull/10", "open", "core", "MEMBER"),
+        pr("https://x/pull/11", "closed", "core", "MEMBER"),
+        pr("https://x/pull/12", "open", "pandasuwu", "FIRST_TIME_CONTRIBUTOR"),
+        pr("https://x/pull/13", "open", "listed", "NONE"),
     ]
     _fake_api(triage, monkeypatch, [("timeline?per_page=100&page=1", timeline), ("&page=2", [])])
-    assert triage.linked_pull_requests("o/r", 4632) == ["https://x/pull/10"]
+    assert triage.linked_pull_requests("o/r", 4632, {"listed"}) == [
+        "https://x/pull/10 by @core",
+        "https://x/pull/13 by @listed",
+    ]
 
 
 def test_human_review_email_goes_out_when_smtp_is_configured(phase3, monkeypatch):
@@ -539,7 +537,7 @@ def test_source_check_failure_marks_uncertain_and_exits_1(phase3, monkeypatch, t
         raise RuntimeError("LLM source check failed: 500")
 
     monkeypatch.setattr(phase3, "run_source_check", boom)
-    _fake_api(phase3, monkeypatch, [("/issues/4632", _bug_issue())])
+    _fake_api(phase3, monkeypatch, [("/issues/4632", _gap_issue())])
     code, [row] = _run(phase3, ["--issue-number", "4632", "--dry-run"], tmp_path)
     assert code == 1 and row["verdict"] == "uncertain" and "500" in row["reason"]
 

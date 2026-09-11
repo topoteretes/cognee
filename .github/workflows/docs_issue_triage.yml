@@ -9,8 +9,9 @@ name: automation | Triage GitHub Docs Issues
 # in the issue's problem sections) sorts issues into `pending_docs_check` or
 # `skipped_*`. Skipped issues cost nothing further.
 #
-# Phase 2: an issue a maintainer has already replied on is left to them with no
-# LLM call. For the rest, the public docs export (llms-full.txt) is fetched once
+# Phase 2: an issue a maintainer has already replied on is left to them, and an
+# issue filed through the bug form is a code change, not a docs edit; neither
+# costs an LLM call. For the rest, the public docs export (llms-full.txt) is fetched once
 # per run and indexed lexically; each pending issue gets ONE structured LLM call
 # over its top three pages. When the site already answers the report
 # and `dry_run` is false, the bot leaves ONE marked comment linking the pages
@@ -19,7 +20,8 @@ name: automation | Triage GitHub Docs Issues
 #
 # Phase 3 (current): `needs_source` issues are checked against the cognee
 # source (git grep + one more LLM call). Issues that are uncertain, too big,
-# not in the product, or already being fixed go to a human-review list that is
+# not in the product, or already being fixed by a maintainer's open PR go to a
+# human-review list that is
 # emailed when the SMTP secrets from dev_previous_day_commits.yml exist.
 # Confirmed small gaps feed the draft-docs matrix job below: one Claude edit
 # per issue on topoteretes/cognee-docs, a draft PR via tools/manage_docs_pr.py,

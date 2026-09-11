@@ -7,7 +7,8 @@ every issue that passed the filter, ranks the public docs pages against it with 
 lexical (BM25) index built once per run from the site's full-text export, hands
 the top pages to one structured LLM call that decides whether the site already
 answers the report, and on ``documentation_covered`` posts a single marked comment
-linking those pages and asking the author to close. Phase 3 (this version) takes every ``needs_source``
+linking those pages and asking the author to close. Issues filed through the bug form are ``not_docs`` without
+an LLM call: they ask for a code change. Phase 3 (this version) takes every ``needs_source``
 issue to the cognee source: a ``git grep`` for the identifiers the issue names and a
 second structured LLM call decide whether the product really has the behaviour and the
 docs miss a small fact. An issue a maintainer has already replied on is left to them before any of this
@@ -65,8 +66,8 @@ VERDICTS = (
     "too_big",
     "uncertain",
     "small_gap",
-    # Not in the original plan: an open PR already fixes the issue, so a docs edit describing
-    # today's behaviour would be undone. Routed to human review.
+    # Not in the original plan: an open maintainer PR already fixes the issue, so a docs edit
+    # describing today's behaviour would be undone. Routed to human review.
     "fix_in_progress",
 )
 
@@ -164,8 +165,9 @@ PAGE_MAX_CHARS = 20_000
 ISSUE_BODY_MAX_CHARS = 8_000
 SITE_CHECK_PROMPT = "docs_issue_site_check.txt"
 SITE_CHECK_VERDICTS = ("not_docs", "too_vague", "documentation_covered", "needs_source")
-# Issues filed through the bug form claim the product misbehaves; no docs page can settle
-# that, so they never get documentation_covered and always reach the source check.
+# Issues filed through the bug form ask for a code change by definition: no docs page can
+# settle them and no docs edit should describe the broken behaviour. They are not_docs
+# before any LLM call.
 BUG_TITLE_RE = re.compile(r"^\s*\[\s*bug\s*\]", re.IGNORECASE)
 BUG_LABEL = "bug"
 
@@ -696,12 +698,6 @@ def check_issue_against_docs(row: dict[str, Any], index: DocsIndex) -> None:
     if verdict == "documentation_covered" and not doc_pages:
         verdict = "needs_source"
         reason = f"{reason} (downgraded: cited pages were not among those provided)"
-    if verdict == "documentation_covered" and is_bug_report(row["title"], row["_labels"]):
-        verdict = "needs_source"
-        reason = (
-            f"{reason} (downgraded: filed as a bug report, so the docs cannot settle it; "
-            "routed to the source check)"
-        )
 
     row["verdict"] = verdict
     row["reason"] = reason
@@ -801,13 +797,17 @@ def run_docs_check(
     pending = [row for row in results if row["verdict"] == "pending_docs_check"]
     if not pending:
         return True, None
-    # A maintainer who already replied owns the thread: no LLM call, no comment, no PR.
+    # Two decisions that need no LLM: a maintainer who already replied owns the thread,
+    # and a bug report asks for a code change, not a docs edit.
     core_team = core_team_logins(repo_root)
     for row in pending:
         replied = maintainer_reply_reason(issue_comments(repo, row), core_team)
         if replied:
             row["verdict"] = "maintainer_replied"
             row["reason"] = replied
+        elif is_bug_report(row["title"], row["_labels"]):
+            row["verdict"] = "not_docs"
+            row["reason"] = "filed through the bug form: a code change, not a docs edit"
     pending = [row for row in pending if row["verdict"] == "pending_docs_check"]
     if not pending:
         return True, None
@@ -860,11 +860,12 @@ def git_grep_hits(tokens: list[str], repo_root: Path) -> str:
     return completed.stdout[:GREP_MAX_CHARS]
 
 
-def linked_pull_requests(repo: str, number: int) -> list[str]:
-    """URLs of OPEN pull requests that reference the issue (timeline cross-references).
+def linked_pull_requests(repo: str, number: int, core_team: set[str]) -> list[str]:
+    """OPEN pull requests by a MAINTAINER that reference the issue, as "url by @login".
 
     A closed or merged PR is not a fix in progress: either the change landed, and the
-    source check will see it, or it was abandoned.
+    source check will see it, or it was abandoned. A contributor's PR may never merge,
+    so it does not count either; the timeline carries the PR author's association.
     """
     urls: list[str] = []
     page = 1
@@ -881,9 +882,12 @@ def linked_pull_requests(repo: str, number: int) -> list[str]:
                 "pull_request" in source_issue
                 and source_issue.get("state") == "open"
                 and source_issue.get("html_url")
-                and source_issue["html_url"] not in urls
+                and is_maintainer(source_issue, core_team)
             ):
-                urls.append(source_issue["html_url"])
+                login = (source_issue.get("user") or {}).get("login") or "a maintainer"
+                entry = f"{source_issue['html_url']} by @{login}"
+                if entry not in urls:
+                    urls.append(entry)
         page += 1
 
 
@@ -907,15 +911,15 @@ def is_maintainer(comment: dict[str, Any], core_team: set[str]) -> bool:
     )
 
 
-def fix_in_progress_reason(repo: str, row: dict[str, Any]) -> str | None:
-    """Why the issue is already being fixed, or None: an open linked pull request.
+def fix_in_progress_reason(repo: str, row: dict[str, Any], repo_root: Path) -> str | None:
+    """Why the issue is already being fixed, or None: an open PR by a maintainer.
 
     Volunteer comments are not checked here: a maintainer's reply already ends the
     triage as maintainer_replied in phase 2, and anyone else's promise is not a fix.
     """
-    pull_requests = linked_pull_requests(repo, row["number"])
+    pull_requests = linked_pull_requests(repo, row["number"], core_team_logins(repo_root))
     if pull_requests:
-        return f"open linked pull request: {', '.join(pull_requests[:3])}"
+        return f"open maintainer pull request: {', '.join(pull_requests[:3])}"
     return None
 
 
@@ -1035,7 +1039,7 @@ def run_source_checks(
     ok = True
     for row in pending:
         try:
-            in_progress = fix_in_progress_reason(repo, row)
+            in_progress = fix_in_progress_reason(repo, row, repo_root)
             if in_progress:
                 row["verdict"] = "fix_in_progress"
                 row["reason"] = f"{row['reason']} (not drafting docs: {in_progress})"
