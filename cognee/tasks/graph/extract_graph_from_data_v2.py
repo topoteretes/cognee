@@ -22,6 +22,7 @@ async def extract_graph_from_data(
     data_chunks: List[DocumentChunk],
     n_rounds: int = 2,
     ontology_resolver: BaseOntologyResolver = None,
+    ctx=None,
 ) -> List[DocumentChunk]:
     """Extract and update graph data from document chunks using cascade extraction.
 
@@ -31,7 +32,9 @@ async def extract_graph_from_data(
     Args:
         data_chunks: List of document chunks to process
         n_rounds: Number of extraction rounds to perform (default: 2)
-        ontology_resolver: Resolver for validating entities against ontology
+        ontology_resolver: Resolver for matching and enriching extracted entities
+            from the ontology (annotation only by default; ONTOLOGY_MODE=strict drops
+            entities with no ontology grounding)
 
     Returns:
         List of updated DocumentChunk objects with extracted graph data
@@ -61,4 +64,5 @@ async def extract_graph_from_data(
         chunk_graphs=chunk_graphs,
         graph_model=KnowledgeGraph,
         ontology_resolver=ontology_resolver,
+        ctx=ctx,
     )

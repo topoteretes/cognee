@@ -47,8 +47,12 @@ def _qualify_model(model: str, provider: str) -> str:
     bare name litellm can already resolve on its own are returned untouched, so
     this cannot re-route a configuration that works today. It only rescues the
     case that currently raises BadRequestError before a request is even sent.
+
+    A slash does not by itself mean the name carries a provider. Ollama accepts
+    namespaced names ("library/phi4") and Hugging Face GGUF paths
+    ("hf.co/user/repo"), so litellm decides instead.
     """
-    if not model or "/" in model:
+    if not model:
         return model
 
     import litellm

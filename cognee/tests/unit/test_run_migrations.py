@@ -165,20 +165,21 @@ class TestStartupMigrationsBootstrap(unittest.TestCase):
         self._schema_patch.stop()
         _reset_startup_flag()
 
-    def test_fresh_db_creates_schema_and_stamps_head(self):
-        """An empty database (no users/alembic_version table) is created with
-        create_all and STAMPED at head — never replaying historical migrations."""
+    def test_fresh_db_is_built_by_create_database_with_no_stamp(self):
+        """An empty database (no users/alembic_version table) is delegated to
+        ``create_database``, which prepares the storage and builds the schema
+        by running the migration chain (the initial revision carries the
+        frozen base). Nothing is ever stamped — alembic_version only records
+        revisions that actually executed."""
         startup = importlib.import_module("cognee.modules.migrations.startup")
 
         relational = AsyncMock()
-        stamp = AsyncMock()
         db_engine = MagicMock()
         db_engine.create_database = AsyncMock()
 
         with (
             patch.object(startup, "_relational_schema_exists", new=AsyncMock(return_value=False)),
             patch.object(startup, "run_relational_migrations", relational),
-            patch.object(startup, "run_relational_stamp", stamp),
             patch(
                 "cognee.infrastructure.databases.relational.get_relational_engine",
                 return_value=db_engine,
@@ -190,18 +191,18 @@ class TestStartupMigrationsBootstrap(unittest.TestCase):
         ):
             asyncio.run(startup.run_migrations())
 
-        db_engine.create_database.assert_awaited_once()
-        stamp.assert_awaited_once_with("head", None)  # ("head", script_location=None)
-        relational.assert_not_awaited()  # never run migrations on a fresh DB
+        # script_location is threaded through so vendored chains stay honored.
+        db_engine.create_database.assert_awaited_once_with(None)
+        relational.assert_not_awaited()  # the chain runs INSIDE create_database
+        self.assertFalse(hasattr(startup, "run_relational_stamp"))  # the stamp is gone
         self.assertTrue(startup._startup_migrations_done)
 
-    def test_existing_db_upgrades_and_does_not_stamp(self):
+    def test_existing_db_upgrades_and_never_creates(self):
         """An existing database (users/alembic_version present) takes the upgrade
         path; a migration failure there is a real error that propagates — we do
-        not create/stamp over it."""
+        not create over it."""
         startup = importlib.import_module("cognee.modules.migrations.startup")
 
-        stamp = AsyncMock()
         db_engine = MagicMock()
         db_engine.create_database = AsyncMock()
 
@@ -212,7 +213,6 @@ class TestStartupMigrationsBootstrap(unittest.TestCase):
                 "run_relational_migrations",
                 new=AsyncMock(side_effect=startup.MigrationError("boom")),
             ),
-            patch.object(startup, "run_relational_stamp", stamp),
             patch(
                 "cognee.infrastructure.databases.relational.get_relational_engine",
                 return_value=db_engine,
@@ -221,7 +221,6 @@ class TestStartupMigrationsBootstrap(unittest.TestCase):
             with self.assertRaises(startup.MigrationError):
                 asyncio.run(startup.run_migrations())
 
-        stamp.assert_not_awaited()
         db_engine.create_database.assert_not_awaited()
         self.assertFalse(startup._startup_migrations_done)
 

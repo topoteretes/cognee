@@ -16,6 +16,7 @@ pre-migration installs; ``None`` means the plugin never had one.
 
 KNOWN_PLUGINS: dict[str, dict] = {
     "claude-code": {"label": "Claude Code", "session_prefix": "cc_"},
+    "desktop": {"label": "Cognee Desktop", "session_prefix": None},
     "codex": {"label": "Codex", "session_prefix": "codex_"},
     "opencode": {"label": "OpenCode", "session_prefix": "opencode_"},
     "openclaw": {"label": "Openclaw", "session_prefix": None},

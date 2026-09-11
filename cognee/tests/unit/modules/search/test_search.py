@@ -311,3 +311,126 @@ async def test_search_passes_retriever_specific_config_to_authorized_search(
     )
 
     assert out
+
+
+@pytest.mark.asyncio
+async def test_prompt_format_fan_out_shares_one_history_reader(monkeypatch, search_mod):
+    """Ten datasets must not mean ten embedding calls: one SharedSessionHistory per search."""
+    from contextlib import asynccontextmanager
+
+    from cognee.modules.retrieval.context_preview import SharedSessionHistory
+
+    user = _make_user()
+    datasets = [_make_dataset(name="ds1"), _make_dataset(name="ds2"), _make_dataset(name="ds3")]
+    captured = []
+
+    @asynccontextmanager
+    async def dummy_context(*_args, **_kwargs):
+        yield
+
+    class _Engine:
+        async def is_empty(self):
+            return False
+
+    async def dummy_get_graph_engine():
+        return _Engine()
+
+    async def dummy_get_retriever_output(query_type, query_text, **kwargs):
+        captured.append(kwargs)
+        dataset = kwargs["dataset"]
+        return SearchResultPayload(
+            context="ctx",
+            only_context=True,
+            context_format=kwargs["context_format"],
+            search_type=query_type,
+            dataset_name=dataset.name,
+            dataset_id=dataset.id,
+            dataset_tenant_id=dataset.tenant_id,
+        )
+
+    monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: True)
+    monkeypatch.setattr(search_mod, "set_database_global_context_variables", dummy_context)
+    monkeypatch.setattr(search_mod, "get_graph_engine", dummy_get_graph_engine)
+    monkeypatch.setattr(search_mod, "get_retriever_output", dummy_get_retriever_output)
+
+    await search_mod.search_in_datasets_context(
+        search_datasets=datasets,
+        query_type=SearchType.GRAPH_COMPLETION,
+        query_text="q",
+        user=user,
+        only_context=True,
+        context_format="prompt",
+        session_id="s1",
+    )
+
+    assert len(captured) == 3
+    shared = captured[0]["shared_history"]
+    assert isinstance(shared, SharedSessionHistory)
+    assert all(call["shared_history"] is shared for call in captured)
+    assert (shared.query, shared.session_id) == ("q", "s1")
+
+
+@pytest.mark.asyncio
+async def test_default_format_fan_out_creates_no_history_reader(monkeypatch, search_mod):
+    from contextlib import asynccontextmanager
+
+    captured = []
+
+    @asynccontextmanager
+    async def dummy_context(*_args, **_kwargs):
+        yield
+
+    class _Engine:
+        async def is_empty(self):
+            return False
+
+    async def dummy_get_graph_engine():
+        return _Engine()
+
+    async def dummy_get_retriever_output(query_type, query_text, **kwargs):
+        captured.append(kwargs)
+        return SearchResultPayload(context="ctx", only_context=True, search_type=query_type)
+
+    monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: True)
+    monkeypatch.setattr(search_mod, "set_database_global_context_variables", dummy_context)
+    monkeypatch.setattr(search_mod, "get_graph_engine", dummy_get_graph_engine)
+    monkeypatch.setattr(search_mod, "get_retriever_output", dummy_get_retriever_output)
+
+    await search_mod.search_in_datasets_context(
+        search_datasets=[_make_dataset(name="ds1")],
+        query_type=SearchType.GRAPH_COMPLETION,
+        query_text="q",
+        user=_make_user(),
+        only_context=True,
+    )
+
+    assert captured[0]["shared_history"] is None
+
+
+def test_prompt_preview_fields_follow_the_requested_format_not_session_state(search_mod):
+    """Verbose key set depends on the request: always three keys for 'prompt', none otherwise."""
+    plain = SearchResultPayload(context="ctx", only_context=True, search_type=SearchType.CHUNKS)
+    assert search_mod._prompt_preview_fields(plain) == {}
+
+    # Non-generative, no session: every value is None — the keys must still be there.
+    empty_prompt = SearchResultPayload(
+        context="ctx", only_context=True, context_format="prompt", search_type=SearchType.CHUNKS
+    )
+    assert search_mod._prompt_preview_fields(empty_prompt) == {
+        "session_context_result": None,
+        "user_prompt_result": None,
+        "system_prompt_result": None,
+    }
+
+    # A real completion with the knob set but only_context off: not an only_context result,
+    # yet the shape rule is about the requested format, so the keys appear (all None).
+    filled = SearchResultPayload(
+        context="ctx",
+        only_context=True,
+        context_format="prompt",
+        session_context="## Active session guidance\n- x",
+        user_prompt="The question is: `q`",
+        system_prompt="## Active session guidance\n- x\nTASK:answer",
+        search_type=SearchType.GRAPH_COMPLETION,
+    )
+    assert search_mod._prompt_preview_fields(filled)["user_prompt_result"] == "The question is: `q`"

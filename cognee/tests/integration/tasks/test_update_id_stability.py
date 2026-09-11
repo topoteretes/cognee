@@ -39,13 +39,38 @@ MARKER = re.compile(r"ENT[A-Z0-9]+")
 
 @pytest.fixture(scope="module")
 def update_env():
-    import os
-
     root = Path(tempfile.mkdtemp(prefix="cognee_update_id_test_"))
 
     import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
 
-    os.environ.update(
+    def clear_config_caches():
+        import importlib
+
+        for module_name, factory_name in [
+            ("cognee.base_config", "get_base_config"),
+            ("cognee.infrastructure.databases.relational.config", "get_relational_config"),
+            (
+                "cognee.infrastructure.databases.relational.get_relational_engine",
+                "get_relational_engine",
+            ),
+            ("cognee.infrastructure.databases.graph.config", "get_graph_config"),
+            ("cognee.infrastructure.databases.vector.config", "get_vectordb_config"),
+            ("cognee.infrastructure.databases.cache.config", "get_cache_config"),
+            ("cognee.infrastructure.databases.cache.get_cache_engine", "create_cache_engine"),
+            ("cognee.infrastructure.databases.vector.embeddings.config", "get_embedding_config"),
+            (
+                "cognee.infrastructure.databases.vector.embeddings.get_embedding_engine",
+                "create_embedding_engine",
+            ),
+            ("cognee.infrastructure.llm.config", "get_llm_config"),
+        ]:
+            try:
+                getattr(importlib.import_module(module_name), factory_name).cache_clear()
+            except (ImportError, AttributeError):
+                pass
+
+    mp = pytest.MonkeyPatch()
+    for key, value in dict(
         DB_PROVIDER="sqlite",
         VECTOR_DB_PROVIDER="lancedb",
         GRAPH_DATABASE_PROVIDER="kuzu",
@@ -55,32 +80,9 @@ def update_env():
         DATA_ROOT_DIRECTORY=str(root / "data"),
         SYSTEM_ROOT_DIRECTORY=str(root / "system"),
         ENABLE_BACKEND_ACCESS_CONTROL="false",
-    )
-
-    import importlib
-
-    for module_name, factory_name in [
-        ("cognee.base_config", "get_base_config"),
-        ("cognee.infrastructure.databases.relational.config", "get_relational_config"),
-        (
-            "cognee.infrastructure.databases.relational.get_relational_engine",
-            "get_relational_engine",
-        ),
-        ("cognee.infrastructure.databases.graph.config", "get_graph_config"),
-        ("cognee.infrastructure.databases.vector.config", "get_vectordb_config"),
-        ("cognee.infrastructure.databases.cache.config", "get_cache_config"),
-        ("cognee.infrastructure.databases.cache.get_cache_engine", "create_cache_engine"),
-        ("cognee.infrastructure.databases.vector.embeddings.config", "get_embedding_config"),
-        (
-            "cognee.infrastructure.databases.vector.embeddings.get_embedding_engine",
-            "create_embedding_engine",
-        ),
-        ("cognee.infrastructure.llm.config", "get_llm_config"),
-    ]:
-        try:
-            getattr(importlib.import_module(module_name), factory_name).cache_clear()
-        except (ImportError, AttributeError):
-            pass
+    ).items():
+        mp.setenv(key, value)
+    clear_config_caches()
 
     from cognee.infrastructure.llm.LLMGateway import LLMGateway
     from cognee.shared.data_models import KnowledgeGraph, Node, SummarizedContent
@@ -104,6 +106,8 @@ def update_env():
     yield root
 
     LLMGateway.acreate_structured_output = original
+    mp.undo()
+    clear_config_caches()
     shutil.rmtree(root, ignore_errors=True)
 
 

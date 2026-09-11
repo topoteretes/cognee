@@ -83,7 +83,15 @@ def get_proposals_router() -> APIRouter:
         ),
         user: User = Depends(get_authenticated_user),
     ):
-        """Return one skill-improvement proposal with its before/after procedures."""
+        """Return one skill-improvement proposal with its before/after procedures.
+
+        ## Path Parameters
+        - **proposal_id** (str): ID of the skill-improvement proposal.
+
+        ## Query Parameters
+        - **dataset_id** (UUID): Dataset UUID the proposal is scoped to. List your datasets via GET
+          /api/v1/datasets to find it.
+        """
         send_telemetry(
             "Skill Proposal Get API Endpoint Invoked",
             user,

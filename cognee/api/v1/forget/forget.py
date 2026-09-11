@@ -165,7 +165,7 @@ async def forget(
                     "Specify dataset, dataset_id, data_id+dataset, or everything=True."
                 )
 
-            # Authorize before entering the dataset's database context: context
+            # Authorize before any dataset database context is entered: context
             # entry provisions per-dataset database registry rows, a write that
             # must never happen for a caller without delete permission (an
             # unauthorized caller used to surface as a UniqueViolation 500 — or,
@@ -173,16 +173,20 @@ async def forget(
             resolved_dataset_id = await _resolve_dataset_id(dataset_ref, user)
             operation_context.set_dataset(resolved_dataset_id)
 
-            async with set_database_global_context_variables(resolved_dataset_id, user.id):
-                if memory_only:
-                    if data_id is not None:
-                        return await _forget_data_memory(data_id, dataset_ref, user)
-                    return await _forget_dataset_memory(dataset_ref, user)
-
+            # No database context here: each path below establishes it AFTER
+            # acquiring the per-dataset lock (the memory helpers directly, the
+            # others via datasets.delete_data/empty_dataset). Entering it first
+            # would hold a dataset-queue slot while waiting on the lock —
+            # the SDK-483 order inversion (canonical: dataset lock -> queue slot).
+            if memory_only:
                 if data_id is not None:
-                    return await _forget_data_item(data_id, dataset_ref, user)
+                    return await _forget_data_memory(data_id, dataset_ref, user)
+                return await _forget_dataset_memory(dataset_ref, user)
 
-                return await _forget_dataset(dataset_ref, user)
+            if data_id is not None:
+                return await _forget_data_item(data_id, dataset_ref, user)
+
+            return await _forget_dataset(dataset_ref, user)
 
 
 async def _forget_everything(user: Any) -> dict:
@@ -270,8 +274,9 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
     Cleanup scope:
     - Graph DB (nodes, edges): yes
     - Vector DB (embeddings): yes
-    - Session cache: yes — sessions attributed to the dataset are deleted
-      (their answers reference the removed graph; non-fatal, best-effort)
+    - Session cache: yes — attributed sessions are deleted; QAs in
+      dataset-unattributed sessions that used the removed graph ids are
+      removed (non-fatal, best-effort)
     - Pipeline status: reset (so cognify re-processes all data)
     - Relational DB (dataset, data records): preserved
     - Raw files: preserved
@@ -291,26 +296,42 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
     dataset_id = await _resolve_dataset_id(dataset_ref, user)
 
     # Same per-dataset lock as pipeline runs: wait for any in-flight pipeline
-    # on this dataset and exclude concurrent deletes.
-    async with dataset_lock(dataset_id):
+    # on this dataset and exclude concurrent deletes. The database context comes
+    # AFTER the lock — canonical order (dataset lock -> queue slot), SDK-483.
+    async with (
+        dataset_lock(dataset_id),
+        set_database_global_context_variables(dataset_id, user.id),
+    ):
         # 1. Delete graph nodes/edges and vector embeddings
-        await delete_dataset_nodes_and_edges(dataset_id, user.id)
+        deleted_elements = await delete_dataset_nodes_and_edges(dataset_id, user.id)
 
-        # 1b. Drop sessions attributed to this dataset: their cached answers
-        # assert graph content that no longer exists, and a re-cognify with
-        # different settings should not replay them (non-fatal).
+        # 1b. Drop sessions attributed to this dataset, then remove tagged
+        # QAs from dataset-unattributed sessions (non-fatal).
         try:
             from cognee.modules.session_lifecycle.invalidate_sessions import (
                 invalidate_sessions_for_dataset,
+                invalidate_sessions_for_deleted_data,
             )
 
             await invalidate_sessions_for_dataset(dataset_id)
+            await invalidate_sessions_for_deleted_data(
+                dataset_id,
+                deleted_elements.node_ids,
+                deleted_elements.edge_ids,
+                user_id=user.id,
+            )
         except Exception as error:
             logger.warning(
                 "forget: session invalidation failed for dataset %s (non-fatal): %s",
                 dataset_id,
                 error,
             )
+
+        # 1c. The edges are gone, so the evidence rows describing them are stale;
+        # the next cognify recaptures them under its own run (non-fatal).
+        from cognee.modules.provenance.edge_evidence import delete_edge_evidence
+
+        await delete_edge_evidence(dataset_id)
 
         # 2. Reset pipeline_status on all data records in this dataset
         db_engine = get_relational_engine()
@@ -382,8 +403,12 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user
     dataset_id = await _resolve_dataset_id(dataset_ref, user)
 
     # Same per-dataset lock as pipeline runs: wait for any in-flight pipeline
-    # on this dataset and exclude concurrent deletes.
-    async with dataset_lock(dataset_id):
+    # on this dataset and exclude concurrent deletes. The database context comes
+    # AFTER the lock — canonical order (dataset lock -> queue slot), SDK-483.
+    async with (
+        dataset_lock(dataset_id),
+        set_database_global_context_variables(dataset_id, user.id),
+    ):
         # 1. Delete graph nodes/edges and vector embeddings for this data item
         deleted_elements = await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
 
@@ -395,7 +420,10 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user
             )
 
             await invalidate_sessions_for_deleted_data(
-                dataset_id, deleted_elements.node_ids, deleted_elements.edge_ids
+                dataset_id,
+                deleted_elements.node_ids,
+                deleted_elements.edge_ids,
+                user_id=user.id,
             )
         except Exception as error:
             logger.warning(
@@ -404,6 +432,11 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user
                 dataset_id,
                 error,
             )
+
+        # 1c. Drop this item's edge evidence with its edges (non-fatal).
+        from cognee.modules.provenance.edge_evidence import delete_edge_evidence
+
+        await delete_edge_evidence(dataset_id, data_id)
 
         # 2. Reset pipeline_status for this data record
         db_engine = get_relational_engine()

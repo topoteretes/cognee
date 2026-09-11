@@ -2,6 +2,7 @@
 
 interface CreditBannersProps {
   creditsSpentPct: number | null;
+  creditsRemainingUsd: number | null;
   showCreditPctBanner: boolean;
   showLowBalanceBanner: boolean;
   showVoucherBanner: boolean;
@@ -30,6 +31,7 @@ const CLOSE_ICON = (
  */
 export function CreditBanners({
   creditsSpentPct,
+  creditsRemainingUsd,
   showCreditPctBanner,
   showLowBalanceBanner,
   showVoucherBanner,
@@ -46,13 +48,13 @@ export function CreditBanners({
         gap: 12, flexWrap: "wrap",
         background: isOut ? "rgba(239,68,68,0.10)" : "rgba(234,179,8,0.10)",
         border: `1px solid ${isOut ? "rgba(239,68,68,0.30)" : "rgba(234,179,8,0.30)"}`,
-        borderRadius: 10, padding: "12px 16px",
+        borderRadius: 0, padding: "12px 16px",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ color: accent }}>{WARN_ICON}</span>
           <span style={{ fontSize: 13, color: textColor }}>
             {isOut
-              ? "Your workspace has used all available credits — agent requests may fail."
+              ? "Your workspace has used all available credits. Agent requests may fail."
               : `Your workspace has used ${creditsSpentPct}% of available credits.`}
           </span>
         </div>
@@ -77,21 +79,37 @@ export function CreditBanners({
   }
 
   if (showLowBalanceBanner) {
+    const balanceLabel = creditsRemainingUsd !== null ? `$${creditsRemainingUsd.toFixed(2)}` : "below $1";
     return (
       <div style={{
-        display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        gap: 12, flexWrap: "wrap",
         background: "rgba(239,68,68,0.10)",
         border: "1px solid rgba(239,68,68,0.30)",
-        borderRadius: 10, padding: "12px 16px",
+        borderRadius: 0, padding: "12px 16px",
       }}>
-        <span style={{ color: "#EF4444" }}>{WARN_ICON}</span>
-        <span style={{ fontSize: 13, color: "#FCA5A5" }}>
-          Your Token Balance is below 1 USD. You can recharge credits{" "}
-          <a href="/billing" style={{ color: "#FCA5A5", textDecoration: "underline", textUnderlineOffset: 3 }}>
-            here
-          </a>
-          .
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ color: "#EF4444" }}>{WARN_ICON}</span>
+          <span style={{ fontSize: 13, color: "#FCA5A5" }}>
+            Your workspace credit balance is {balanceLabel}. Agent requests may fail.
+          </span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          {isOwner ? (
+            <a href="/billing" style={{ fontSize: 13, fontWeight: 500, color: "#FCA5A5", textDecoration: "underline", textUnderlineOffset: 3 }}>
+              Top up credits →
+            </a>
+          ) : (
+            <span style={{ fontSize: 13, color: "rgba(237,236,234,0.5)" }}>Ask the workspace owner to top up.</span>
+          )}
+          <button
+            onClick={onDismiss}
+            aria-label="Dismiss"
+            style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: "rgba(237,236,234,0.4)", lineHeight: 1 }}
+          >
+            {CLOSE_ICON}
+          </button>
+        </div>
       </div>
     );
   }
@@ -103,7 +121,7 @@ export function CreditBanners({
         gap: 12, flexWrap: "wrap",
         background: "var(--color-cognee-lavender-tint-10)",
         border: "1px solid rgba(188,155,255,0.30)",
-        borderRadius: 10, padding: "12px 16px",
+        borderRadius: 0, padding: "12px 16px",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-cognee-lavender)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -118,7 +136,7 @@ export function CreditBanners({
             flexShrink: 0,
             background: "var(--color-cognee-lavender)",
             color: "var(--color-cognee-lavender-text)",
-            borderRadius: 8,
+            borderRadius: 0,
             padding: "8px 16px",
             fontSize: 13,
             fontWeight: 500,

@@ -1,13 +1,19 @@
 from collections import OrderedDict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from threading import Lock
-from typing import Tuple, List, Any, Dict, Optional
+from typing import Tuple, List, Any, Dict, Iterator, Optional
 from cognee.infrastructure.engine import DataPoint, Edge
+from cognee.modules.graph.utils.extract_field_relationships import EdgeTargets, iter_fields
+from cognee.modules.graph.utils.unwrap_transparent_nodes import (
+    is_transparent,
+    unwrap_transparent,
+    unwrap_transparent_targets,
+)
 from cognee.modules.storage.utils import copy_model
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
-
 
 # Memoized simple-node pydantic classes. Without this, every call to
 # ``get_graph_from_model`` — one per DataPoint added to the graph — re-ran
@@ -46,52 +52,6 @@ def _simple_model_for(data_point_type, excluded_fields):
     return model
 
 
-def _extract_field_data(field_value: Any) -> List[Tuple[Optional[Edge], List[DataPoint]]]:
-    """Extract edge metadata and datapoints from a field value."""
-    # Handle single DataPoint
-    if isinstance(field_value, DataPoint):
-        return [(None, [field_value])]
-
-    # Handle list - could contain DataPoints, edge tuples, or mixed
-    if isinstance(field_value, list) and len(field_value) > 0:
-        result = []
-        for item in field_value:
-            # Handle tuple[Edge, DataPoint or list[DataPoint]]
-            if isinstance(item, tuple) and len(item) == 2 and isinstance(item[0], Edge):
-                edge, data_value = item
-                if isinstance(data_value, DataPoint):
-                    result.append((edge, [data_value]))
-                elif (
-                    isinstance(data_value, list)
-                    and len(data_value) > 0
-                    and isinstance(data_value[0], DataPoint)
-                ):
-                    result.append((edge, data_value))
-            # Handle single DataPoint in list
-            elif isinstance(item, DataPoint):
-                result.append((None, [item]))
-        return result
-
-    # Handle tuple[Edge, DataPoint or list[DataPoint]]
-    if (
-        isinstance(field_value, tuple)
-        and len(field_value) == 2
-        and isinstance(field_value[0], Edge)
-    ):
-        edge_metadata, data_value = field_value
-        if isinstance(data_value, DataPoint):
-            return [(edge_metadata, [data_value])]
-        elif (
-            isinstance(data_value, list)
-            and len(data_value) > 0
-            and isinstance(data_value[0], DataPoint)
-        ):
-            return [(edge_metadata, data_value)]
-
-    # Regular property or empty list
-    return []
-
-
 def _create_edge_properties(
     source_id: str, target_id: str, relationship_name: str, edge_metadata: Optional[Edge]
 ) -> Dict[str, Any]:
@@ -118,11 +78,7 @@ def _create_edge_properties(
 
 def _get_relationship_key(field_name: str, edge_metadata: Optional[Edge]) -> str:
     """Extract relationship key from edge metadata or use field name as fallback."""
-    if (
-        edge_metadata
-        and hasattr(edge_metadata, "relationship_type")
-        and edge_metadata.relationship_type
-    ):
+    if edge_metadata and edge_metadata.relationship_type:
         return edge_metadata.relationship_type
     return field_name
 
@@ -132,188 +88,165 @@ def _generate_property_key(data_point_id: str, relationship_key: str, target_id:
     return f"{data_point_id}_{relationship_key}_{target_id}"
 
 
-def _process_datapoint_field(
+def _node_set_names(belongs_to_set: List[Any]) -> List[str]:
+    """Nodeset names as a scalar property, so the vector database can filter on them."""
+    return [
+        node_set if isinstance(node_set, str) else node_set.name
+        for node_set in belongs_to_set
+        if isinstance(node_set, str) or hasattr(node_set, "name")
+    ]
+
+
+def _has_unvisited_target(
     data_point_id: str,
     field_name: str,
-    edge_datapoint_pairs: List[Tuple[Optional[Edge], List[DataPoint]]],
+    edge_targets: List[EdgeTargets],
     visited_properties: Dict[str, bool],
-    properties_to_visit: set,
-    excluded_properties: set,
-) -> None:
-    """Process a field containing DataPoints, always working with lists."""
-    if field_name != "belongs_to_set":
-        excluded_properties.add(field_name)
+) -> bool:
+    """True while any target of this field is still unwalked from this node.
 
-    for edge_metadata, datapoints in edge_datapoint_pairs:
-        relationship_key = _get_relationship_key(field_name, edge_metadata)
-
-        for datapoint in datapoints:
-            property_key = _generate_property_key(
-                data_point_id, relationship_key, str(datapoint.id)
-            )
-            if property_key in visited_properties:
-                continue
-
-            # Always use field_name since we're working with lists
-            properties_to_visit.add(field_name)
-
-
-def _targets_generator(
-    data_point: DataPoint,
-    properties_to_visit: set,
-) -> Tuple[DataPoint, str, Optional[Edge]]:
-    """Generator that yields (target_datapoint, field_name, edge_metadata) tuples."""
-    for field_name in properties_to_visit:
-        field_value = getattr(data_point, field_name)
-        edge_datapoint_pairs = _extract_field_data(field_value)
-
-        if not edge_datapoint_pairs:
-            continue
-
-        for edge_metadata, datapoints in edge_datapoint_pairs:
-            for target_datapoint in datapoints:
-                yield target_datapoint, field_name, edge_metadata
-
-
-async def get_graph_from_model(
-    data_point: DataPoint,
-    added_nodes: Optional[Dict[str, bool]] = None,
-    added_edges: Optional[Dict[str, bool]] = None,
-    visited_properties: Optional[Dict[str, bool]] = None,
-    include_root: bool = True,
-) -> Tuple[List[DataPoint], List[Tuple[str, str, str, Dict[str, Any]]]]:
+    Once every one of them is visited the field is skipped entirely — that is what
+    stops a cycle from being walked a second time.
     """
-    Extract graph representation from a DataPoint model.
-
-    Args:
-        data_point: The DataPoint to extract graph from
-        added_nodes: Dictionary tracking already processed nodes
-        added_edges: Dictionary tracking already processed edges
-        visited_properties: Dictionary tracking visited properties to avoid cycles
-        include_root: Whether to include the root node in results
-
-    Returns:
-        Tuple of (nodes, edges) extracted from the model
-    """
-    if added_nodes is None:
-        added_nodes = {}
-
-    if added_edges is None:
-        added_edges = {}
-
-    if str(data_point.id) in added_nodes:
-        logger.debug(
-            "Skipping already processed DataPoint",
-            extra={"datapoint_id": str(data_point.id)},
+    return any(
+        _generate_property_key(
+            data_point_id, _get_relationship_key(field_name, edge_metadata), str(target.id)
         )
-        return [], []
-
-    nodes = []
-    edges = []
-    visited_properties = visited_properties or {}
-    data_point_id = str(data_point.id)
-
-    logger.debug(
-        "Starting graph extraction for DataPoint",
-        extra={
-            "datapoint_id": data_point_id,
-            "datapoint_type": type(data_point).__name__,
-            "processed_nodes_so_far": len(added_nodes),
-        },
+        not in visited_properties
+        for edge_metadata, targets in edge_targets
+        for target in targets
     )
 
-    data_point_properties = {"id": data_point.id, "type": type(data_point).__name__}
-    excluded_properties = set()
-    properties_to_visit = set()
 
-    # Analyze all fields to categorize them as properties or relationships
-    for field_name, field_value in data_point:
-        if field_name == "metadata":
+def _iter_targets_to_walk(
+    relationship_fields: Dict[str, List[EdgeTargets]],
+) -> Iterator[Tuple[DataPoint, str, Optional[Edge]]]:
+    """Flatten the per-field declarations into (target, field name, edge) triples."""
+    for field_name, edge_targets in relationship_fields.items():
+        for edge_metadata, targets in edge_targets:
+            for target in targets:
+                yield target, field_name, edge_metadata
+
+
+@dataclass
+class _WalkState:
+    """The accumulators every step of one walk shares."""
+
+    added_nodes: Dict[str, bool]
+    added_edges: Dict[str, bool]
+    visited_properties: Dict[str, bool]
+    # When present, collects the original DataPoint behind every node the walk stores.
+    # The returned nodes are ``copy_model`` copies with the relationship fields
+    # stripped, which a caller linking into the graph cannot use.
+    stored_originals: Optional[List[DataPoint]] = None
+
+
+def _split_fields(
+    data_point: DataPoint,
+    data_point_id: str,
+    visited_properties: Dict[str, bool],
+) -> Tuple[Dict[str, Any], set, Dict[str, List[EdgeTargets]]]:
+    """Split a node's fields into what is stored on it and what is walked from it.
+
+    Returns the scalar properties, the field names to strip from the stored copy, and
+    the relationships still worth walking. A relationship whose targets have all been
+    visited is left out of the third but still belongs in the second: it is a
+    relationship either way, and storing it as a property would store DataPoints.
+    """
+    properties: Dict[str, Any] = {"id": data_point.id, "type": type(data_point).__name__}
+    excluded: set = set()
+    relationships: Dict[str, List[EdgeTargets]] = {}
+
+    for field_name, field_value, declared in iter_fields(data_point):
+        if not declared:
+            properties[field_name] = field_value
             continue
 
-        edge_datapoint_pairs = _extract_field_data(field_value)
+        edge_targets = unwrap_transparent_targets(declared)
 
-        if not edge_datapoint_pairs:
-            # Regular property
-            data_point_properties[field_name] = field_value
+        if field_name == "belongs_to_set":
+            properties[field_name] = _node_set_names(field_value)
         else:
-            # DataPoint relationship
-            _process_datapoint_field(
-                data_point_id,
-                field_name,
-                edge_datapoint_pairs,
-                visited_properties,
-                properties_to_visit,
-                excluded_properties,
-            )
+            excluded.add(field_name)
 
-            # We want to enable nodeset filtering on the vector database side
-            if field_name == "belongs_to_set":
-                node_set_names = []
-                for node_set in field_value:
-                    if isinstance(node_set, str):
-                        node_set_names.append(node_set)
-                    elif hasattr(node_set, "name"):
-                        node_set_names.append(node_set.name)
-                data_point_properties[field_name] = node_set_names
+        if _has_unvisited_target(data_point_id, field_name, edge_targets, visited_properties):
+            relationships[field_name] = edge_targets
 
-    # Create node for current DataPoint if needed
-    if include_root and data_point_id not in added_nodes:
-        SimpleDataPointModel = _simple_model_for(type(data_point), excluded_properties)
-        nodes.append(SimpleDataPointModel(**data_point_properties))
-        added_nodes[data_point_id] = True
+    return properties, excluded, relationships
 
-        logger.debug(
-            "Added node to graph",
-            extra={
-                "datapoint_id": data_point_id,
-                "node_type": type(data_point).__name__,
-            },
-        )
 
-    # Process all relationships using generator
-    for target_datapoint, field_name, edge_metadata in _targets_generator(
-        data_point, properties_to_visit
-    ):
+def _walk_data_point(
+    data_point: DataPoint,
+    state: _WalkState,
+) -> Tuple[List[DataPoint], List[Tuple[str, str, str, Dict[str, Any]]]]:
+    """Walk ``data_point``, or each of its children when it is a transparent container.
+
+    Synchronous on purpose: nothing in the walk touches I/O, and the only thing this
+    function ever awaited was itself, so no step of it could ever suspend. The public
+    entry points stay ``async`` so callers do not change.
+
+    Recursion stays here and never re-enters ``get_graph_from_model``, so the resolution
+    below runs on the root only: every target reached from it came through
+    ``_unwrap_transparent_targets``, which already replaced any container it found.
+    """
+    nodes: List[DataPoint] = []
+    edges: List[Tuple[str, str, str, Dict[str, Any]]] = []
+
+    if is_transparent(data_point):
+        for root in unwrap_transparent(data_point):
+            root_nodes, root_edges = _walk_data_point(root, state)
+            nodes.extend(root_nodes)
+            edges.extend(root_edges)
+        return nodes, edges
+
+    data_point_id = str(data_point.id)
+    if data_point_id in state.added_nodes:
+        return nodes, edges
+
+    properties, excluded, relationships = _split_fields(
+        data_point, data_point_id, state.visited_properties
+    )
+
+    SimpleDataPointModel = _simple_model_for(type(data_point), excluded)
+    nodes.append(SimpleDataPointModel(**properties))
+    state.added_nodes[data_point_id] = True
+    if state.stored_originals is not None:
+        state.stored_originals.append(data_point)
+
+    for target, field_name, edge_metadata in _iter_targets_to_walk(relationships):
         relationship_name = _get_relationship_key(field_name, edge_metadata)
+        target_id = str(target.id)
 
-        # Create edge if not already added
-        edge_key = f"{data_point_id}_{target_datapoint.id}_{field_name}"
-        if edge_key not in added_edges:
-            edge_properties = _create_edge_properties(
-                data_point.id, target_datapoint.id, relationship_name, edge_metadata
+        edge_key = f"{data_point_id}_{target_id}_{field_name}"
+        if edge_key not in state.added_edges:
+            edges.append(
+                (
+                    data_point.id,
+                    target.id,
+                    relationship_name,
+                    _create_edge_properties(
+                        data_point.id, target.id, relationship_name, edge_metadata
+                    ),
+                )
             )
-            edges.append((data_point.id, target_datapoint.id, relationship_name, edge_properties))
-            logger.debug("Added edge to graph")
+            state.added_edges[edge_key] = True
 
-            added_edges[edge_key] = True
+        # Marking the property visited is CRITICAL for preventing infinite loops.
+        property_key = _generate_property_key(data_point_id, relationship_name, target_id)
+        state.visited_properties[property_key] = True
 
-        # Mark property as visited - CRITICAL for preventing infinite loops
-        property_key = _generate_property_key(
-            data_point_id, relationship_name, str(target_datapoint.id)
-        )
-        visited_properties[property_key] = True
-
-        # Recursively process target node if not already processed
-        if str(target_datapoint.id) in added_nodes:
+        if target_id in state.added_nodes:
             continue
 
-        logger.debug("Recursing into target DataPoint")
-
-        child_nodes, child_edges = await get_graph_from_model(
-            target_datapoint,
-            include_root=True,
-            added_nodes=added_nodes,
-            added_edges=added_edges,
-            visited_properties=visited_properties,
-        )
+        child_nodes, child_edges = _walk_data_point(target, state)
         nodes.extend(child_nodes)
         edges.extend(child_edges)
 
-    logger.info(
-        "Completed graph extraction for DataPoint",
+    logger.debug(
+        "Extracted graph for DataPoint",
         extra={
             "datapoint_id": data_point_id,
+            "datapoint_type": type(data_point).__name__,
             "nodes_extracted": len(nodes),
             "edges_extracted": len(edges),
         },
@@ -322,18 +255,49 @@ async def get_graph_from_model(
     return nodes, edges
 
 
-def get_own_property_nodes(
-    property_nodes: List[DataPoint], property_edges: List[Tuple[str, str, str, Dict[str, Any]]]
-) -> List[DataPoint]:
+async def get_graph_from_model(
+    data_point: DataPoint,
+    added_nodes: Optional[Dict[str, bool]] = None,
+    added_edges: Optional[Dict[str, bool]] = None,
+    visited_properties: Optional[Dict[str, bool]] = None,
+) -> Tuple[List[DataPoint], List[Tuple[str, str, str, Dict[str, Any]]]]:
     """
-    Filter nodes to return only those that are not destinations of any edges.
+    Extract graph representation from a DataPoint model.
+
+    A transparent ``data_point`` (``metadata["transparent"]``) is replaced by its
+    DataPoint children, so this may return several top-level nodes, or none.
 
     Args:
-        property_nodes: List of all nodes
-        property_edges: List of all edges
+        data_point: The DataPoint to extract graph from
+        added_nodes: Dictionary tracking already processed nodes
+        added_edges: Dictionary tracking already processed edges
+        visited_properties: Dictionary tracking visited properties to avoid cycles
 
     Returns:
-        List of nodes that are not edge destinations
+        Tuple of (nodes, edges) extracted from the model
     """
-    destination_node_ids = {str(edge[1]) for edge in property_edges}
-    return [node for node in property_nodes if str(node.id) not in destination_node_ids]
+    return _walk_data_point(
+        data_point,
+        _WalkState(
+            {} if added_nodes is None else added_nodes,
+            {} if added_edges is None else added_edges,
+            # ``or {}`` rather than ``is None``, and deliberately unlike the two above:
+            # ``add_data_points`` hands every root the same dict, but it is empty at that
+            # point, so each root is given a fresh one and only nodes and edges are shared.
+            visited_properties or {},
+        ),
+    )
+
+
+async def collect_stored_data_points(root: DataPoint) -> List[DataPoint]:
+    """The original DataPoints that storing ``root`` would persist.
+
+    Drives the real storage walk with throwaway accumulators, so this cannot drift from
+    what ``add_data_points`` writes. See ``_walk_data_point`` for why the walk's own
+    ``nodes`` output cannot be used in their place.
+
+    Order follows the walk; treat the result as a set.
+    """
+    stored: List[DataPoint] = []
+    _walk_data_point(root, _WalkState({}, {}, {}, stored))
+    return stored

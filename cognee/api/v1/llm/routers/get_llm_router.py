@@ -1,8 +1,8 @@
 import json
-from typing import Any, Dict, List, Annotated
+from typing import Any, Dict, List
 
 import litellm
-from fastapi import APIRouter, Depends, File, UploadFile as UF, Form
+from fastapi import APIRouter, Depends, File, Form
 from fastapi.responses import JSONResponse
 from pydantic import Field
 from pydantic import ConfigDict, ValidationError
@@ -19,7 +19,7 @@ from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee.shared.utils import send_telemetry
-from pydantic import WithJsonSchema
+from cognee.api.upload_fields import OptionalUploadFile, UploadFile, drop_blank_uploads
 from contextlib import asynccontextmanager
 from pathlib import Path
 import os
@@ -31,10 +31,6 @@ logger = get_logger("api.llm")
 # Keeps the prompt well within typical context windows while providing
 # enough material for the model to identify entity types and relationships.
 _INFER_SCHEMA_MAX_CHARS = 12_000
-
-# NOTE: Needed because of: https://github.com/fastapi/fastapi/discussions/14975
-#       Once issue is resolved on Swagger side it can be removed.
-UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"})]
 
 _ALLOWED_LLM_PARAMS = {"temperature", "max_tokens", "top_p", "seed"}
 _TOKEN_BUDGET_SAFETY_MARGIN = 512
@@ -212,6 +208,10 @@ def get_llm_router() -> APIRouter:
     ):
         """
         Generate a custom extraction prompt from a provided graph model schema JSON.
+
+        ## Request Parameters
+        - **graphModel** (Dict[str, Any]): Graph model schema as JSON object.
+        - **parameters** (Dict[str, Any]): Additional kwargs forwarded to LLMGateway.
         """
         send_telemetry(
             "LLM Custom Prompt Endpoint Invoked",
@@ -246,8 +246,13 @@ def get_llm_router() -> APIRouter:
 
             return CustomPromptGenerationResponseDTO(custom_prompt=llm_output)
         except LLMPaymentRequiredError as error:
+            logger.warning("LLM custom prompt generation hit the token budget: %s", error)
             return JSONResponse(
-                status_code=402, content={"error": "Token budget exhausted", "detail": str(error)}
+                status_code=402,
+                content={
+                    "error": "Token budget exhausted",
+                    "detail": "The configured LLM token budget is exhausted.",
+                },
             )
         except ValueError as error:
             logger.warning("LLM custom prompt generation validation failed: %s", error)
@@ -264,7 +269,7 @@ def get_llm_router() -> APIRouter:
     @router.post("/infer-schema", response_model=InferSchemaResponseDTO)
     @log_usage(function_name="POST /v1/llm/infer-schema", log_type="api_endpoint")
     async def infer_schema(
-        data: List[UploadFile] = File(default=None),
+        data: List[OptionalUploadFile] = File(default=None),
         text: str = Form(default=None),
         parameters: str = Form(
             default="{}",
@@ -276,7 +281,19 @@ def get_llm_router() -> APIRouter:
         Analyze sample text and/or uploaded files, and propose a JSON Schema describing the entity types
         and relationships present. The returned schema can be passed directly to
         ``/v1/llm/custom-prompt`` or ``/v1/cognify``.
+
+        ## Request Parameters
+        - **data** (List[UploadFile]): Files to load and sample as input for schema
+          inference; at least one file or text is required.
+        - **parameters** (str): JSON string of additional kwargs forwarded to LLMGateway. Defaults
+          to '{}'.
+        - **text** (str): Sample text to analyze for schema inference; at least one file or
+          text is required.
         """
+        # Swagger UI submits an untouched file list as one blank part; treat it
+        # as "no uploads" (and reject its "string" placeholder with a clear 400).
+        data = drop_blank_uploads(data)
+
         send_telemetry(
             "LLM Infer Schema Endpoint Invoked",
             user,
@@ -367,8 +384,13 @@ def get_llm_router() -> APIRouter:
                 content={"error": "LLM output did not match expected schema."},
             )
         except LLMPaymentRequiredError as error:
+            logger.warning("LLM schema inference hit the token budget: %s", error)
             return JSONResponse(
-                status_code=402, content={"error": "Token budget exhausted", "detail": str(error)}
+                status_code=402,
+                content={
+                    "error": "Token budget exhausted",
+                    "detail": "The configured LLM token budget is exhausted.",
+                },
             )
         except Exception as error:
             logger.error("LLM schema inference failed: %s", error)

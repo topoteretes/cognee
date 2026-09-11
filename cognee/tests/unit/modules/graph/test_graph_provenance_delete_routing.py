@@ -25,6 +25,7 @@ from cognee.infrastructure.databases.provenance import make_source_ref_key
 from cognee.infrastructure.databases.unified.provenance_delete_planner import (
     SourceRefRemovalResult,
 )
+from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElements
 
 ddne_module = sys.modules["cognee.modules.graph.methods.delete_data_nodes_and_edges"]
 ddsne_module = sys.modules["cognee.modules.graph.methods.delete_dataset_nodes_and_edges"]
@@ -40,6 +41,7 @@ def _unified(graph_provenance_supported=True):
         supports_graph_provenance_delete=lambda: graph_provenance_supported,
         graph=object(),
         delete_by_source_ref=AsyncMock(return_value=SourceRefRemovalResult()),
+        delete_by_document=AsyncMock(return_value=SourceRefRemovalResult()),
         delete_by_dataset_id=AsyncMock(),
     )
 
@@ -61,7 +63,10 @@ async def test_try_delete_data_by_graph_provenance_deletes_marked_graph():
 
     assert isinstance(handled, SourceRefRemovalResult)
     assert handled  # always truthy: "handled, deleted nothing" still reads as handled
-    unified.delete_by_source_ref.assert_awaited_once_with(make_source_ref_key(dataset_id, data_id))
+    # Document deletion must remove v1 AND chunk-scoped v2 refs — that is
+    # delete_by_document's contract; the bare v1 key would strand chunk output.
+    unified.delete_by_document.assert_awaited_once_with(str(dataset_id), str(data_id))
+    unified.delete_by_source_ref.assert_not_called()
 
 
 async def test_try_delete_data_by_graph_provenance_returns_false_when_unsupported():
@@ -76,7 +81,7 @@ async def test_try_delete_data_by_graph_provenance_returns_false_when_unsupporte
 
     assert handled is None
     marker.assert_not_called()
-    unified.delete_by_source_ref.assert_not_called()
+    unified.delete_by_document.assert_not_called()
 
 
 async def test_try_delete_data_by_graph_provenance_returns_false_when_unmarked():
@@ -92,7 +97,7 @@ async def test_try_delete_data_by_graph_provenance_returns_false_when_unmarked()
         handled = await try_delete_module.try_delete_data_by_graph_provenance(dataset_id, data_id)
 
     assert handled is None
-    unified.delete_by_source_ref.assert_not_called()
+    unified.delete_by_document.assert_not_called()
 
 
 async def test_delete_data_routes_graph_provenance():
@@ -133,10 +138,11 @@ async def test_delete_dataset_routes_graph_provenance():
         patch.object(ddsne_module, "stores_provenance_in_graph", AsyncMock(return_value=True)),
         patch.object(ddsne_module, "delete_from_graph_and_vector", AsyncMock()) as legacy_delete,
     ):
-        await ddsne_module.delete_dataset_nodes_and_edges(dataset_id, user_id)
+        result = await ddsne_module.delete_dataset_nodes_and_edges(dataset_id, user_id)
 
     unified.delete_by_dataset_id.assert_awaited_once_with(str(dataset_id))
     legacy_delete.assert_not_called()
+    assert result == DeletedGraphElements()
 
 
 async def test_delete_data_old_graph_uses_legacy():
@@ -192,6 +198,7 @@ async def test_api_delete_data_uses_graph_provenance_when_ledger_has_no_nodes():
         ) as graph_delete,
         patch.object(datasets_module, "delete_data_nodes_and_edges", AsyncMock()) as ledger_delete,
         patch.object(datasets_module, "legacy_delete", AsyncMock()) as legacy_delete,
+        patch.object(data_methods_module, "resolve_data_id", AsyncMock(return_value=None)),
         patch.object(
             datasets_module, "_invalidate_sessions_for_deleted_data_nonfatal", AsyncMock()
         ) as session_invalidate,
@@ -230,6 +237,7 @@ async def test_api_delete_data_uses_legacy_when_no_ledger_nodes_and_unmarked_gra
         ) as graph_delete,
         patch.object(datasets_module, "delete_data_nodes_and_edges", AsyncMock()) as ledger_delete,
         patch.object(datasets_module, "legacy_delete", AsyncMock()) as legacy_delete,
+        patch.object(data_methods_module, "resolve_data_id", AsyncMock(return_value=None)),
         patch.object(
             datasets_module, "_invalidate_sessions_for_deleted_data_nonfatal", AsyncMock()
         ),
@@ -271,6 +279,7 @@ async def test_api_delete_data_uses_ledger_delete_when_ledger_has_nodes():
             AsyncMock(),
         ) as ledger_delete,
         patch.object(datasets_module, "legacy_delete", AsyncMock()) as legacy_delete,
+        patch.object(data_methods_module, "resolve_data_id", AsyncMock(return_value=None)),
         patch.object(
             datasets_module, "_invalidate_sessions_for_deleted_data_nonfatal", AsyncMock()
         ),

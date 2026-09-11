@@ -44,5 +44,5 @@ async def create_user(
 
                     return user
     except UserAlreadyExists as error:
-        print(f"User {email} already exists")
+        print("A user with this email already exists")
         raise error

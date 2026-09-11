@@ -228,12 +228,21 @@ async def fetch_with_keenable(
 
     return_results = {}
     errors = []
-    for url, result in zip(url_list, responses):
+    # URLs and error details can embed credentials — log only positions and
+    # exception class names.
+    for position, (url, result) in enumerate(zip(url_list, responses), start=1):
         if isinstance(result, BaseException):
-            logger.warning(f"Keenable API failed to fetch {url}: {result}")
+            logger.warning(
+                "Keenable API failed to fetch URL %d of %d (%s)",
+                position,
+                len(url_list),
+                type(result).__name__,
+            )
             errors.append(result)
         elif result is None:
-            logger.warning(f"Keenable API returned no content for {url}")
+            logger.warning(
+                "Keenable API returned no content for URL %d of %d", position, len(url_list)
+            )
         else:
             return_results[url] = result
 

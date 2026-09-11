@@ -33,6 +33,10 @@ def get_validate_router() -> APIRouter:
         longer matches cognee's own dedup contract, and nodes present in the
         graph but missing from the vector index (unreachable by semantic
         search). Read-only — never modifies any store.
+
+        ## Query Parameters
+        - **dataset** (List[str]): Dataset name(s) to validate. Omit to validate the default
+          dataset.
         """
         try:
             report = await validate(dataset=dataset, user=user)
@@ -42,7 +46,7 @@ def get_validate_router() -> APIRouter:
             logger.error("validate() failed: %s", error, exc_info=True)
             return JSONResponse(
                 status_code=500,
-                content={"status": "error", "reason": f"validation failed: {str(error)}"},
+                content={"status": "error", "reason": "validation failed; see server logs."},
             )
 
     return validate_router

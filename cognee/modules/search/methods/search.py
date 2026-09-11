@@ -23,9 +23,11 @@ from cognee.modules.observability import (
     new_span,
 )
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
+from cognee.modules.retrieval.context_preview import SharedSessionHistory
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.operations import log_search_history
 from cognee.modules.search.types import (
+    ContextFormat,
     SearchResult,
     SearchType,
 )
@@ -62,6 +64,7 @@ async def search(
     node_name: Optional[List[str]] = None,
     node_name_filter_operator: str = "OR",
     only_context: bool = False,
+    context_format: Union[ContextFormat, str] = ContextFormat.CONTEXT,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = None,
     triplet_distance_penalty: Optional[float] = None,
@@ -120,6 +123,7 @@ async def search(
             node_name=node_name,
             node_name_filter_operator=node_name_filter_operator,
             only_context=only_context,
+            context_format=context_format,
             session_id=session_id,
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
@@ -164,6 +168,7 @@ async def authorized_search(
     node_name: Optional[List[str]] = None,
     node_name_filter_operator: str = "OR",
     only_context: bool = False,
+    context_format: Union[ContextFormat, str] = ContextFormat.CONTEXT,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = None,
     triplet_distance_penalty: Optional[float] = None,
@@ -197,6 +202,7 @@ async def authorized_search(
         node_name=node_name,
         node_name_filter_operator=node_name_filter_operator,
         only_context=only_context,
+        context_format=context_format,
         session_id=session_id,
         wide_search_top_k=wide_search_top_k,
         triplet_distance_penalty=triplet_distance_penalty,
@@ -224,6 +230,7 @@ async def search_in_datasets_context(
     node_name: Optional[List[str]] = None,
     node_name_filter_operator: str = "OR",
     only_context: bool = False,
+    context_format: Union[ContextFormat, str] = ContextFormat.CONTEXT,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = None,
     triplet_distance_penalty: Optional[float] = None,
@@ -251,6 +258,7 @@ async def search_in_datasets_context(
         node_name: Optional[List[str]] = None,
         node_name_filter_operator: str = "OR",
         only_context: bool = False,
+        context_format: Union[ContextFormat, str] = ContextFormat.CONTEXT,
         session_id: Optional[str] = None,
         wide_search_top_k: Optional[int] = None,
         triplet_distance_penalty: Optional[float] = None,
@@ -304,6 +312,8 @@ async def search_in_datasets_context(
                     node_name=node_name,
                     node_name_filter_operator=node_name_filter_operator,
                     only_context=only_context,
+                    context_format=context_format,
+                    shared_history=shared_history,
                     session_id=session_id,
                     wide_search_top_k=wide_search_top_k,
                     triplet_distance_penalty=triplet_distance_penalty,
@@ -336,6 +346,13 @@ async def search_in_datasets_context(
                 dataset_tenant_id=dataset.tenant_id,
             )
 
+    # One conversation-history read — the only billed step of the session layer (it
+    # embeds the query for vector recall) — for the whole fan-out. The guidance block
+    # still renders per dataset because preferences are dataset-scoped.
+    shared_history = None
+    if only_context and ContextFormat.parse(context_format) is ContextFormat.PROMPT:
+        shared_history = SharedSessionHistory(query=query_text, session_id=session_id)
+
     # Search every dataset async based on query and appropriate database configuration
     tasks = []
     soften_code_seed_misses = query_type is SearchType.CODE and len(search_datasets) > 1
@@ -353,6 +370,7 @@ async def search_in_datasets_context(
                     node_name=node_name,
                     node_name_filter_operator=node_name_filter_operator,
                     only_context=only_context,
+                    context_format=context_format,
                     session_id=session_id,
                     wide_search_top_k=wide_search_top_k,
                     triplet_distance_penalty=triplet_distance_penalty,
@@ -381,6 +399,8 @@ async def search_in_datasets_context(
             node_name=node_name,
             node_name_filter_operator=node_name_filter_operator,
             only_context=only_context,
+            context_format=context_format,
+            shared_history=shared_history,
             session_id=session_id,
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
@@ -409,6 +429,23 @@ async def search_in_datasets_context(
     return await asyncio.gather(*tasks)
 
 
+def _prompt_preview_fields(search_result) -> dict:
+    """Prompt-preview keys for verbose output, present exactly when the prompt shape was asked for.
+
+    Gated on ``context_format``, not on whether the values happen to be set: a verbose
+    caller that requested the prompt always gets the three keys (possibly ``None``), and an
+    ordinary search never sees them — the key set depends on the request, not on session
+    state.
+    """
+    if search_result.context_format != ContextFormat.PROMPT:
+        return {}
+    return {
+        "session_context_result": search_result.session_context,
+        "user_prompt_result": search_result.user_prompt,
+        "system_prompt_result": search_result.system_prompt,
+    }
+
+
 def _backwards_compatible_search_results(search_results, verbose: bool):
     """
     Prepares search results in a format compatible with previous versions of the API.
@@ -432,6 +469,10 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                 search_result_dict["text_result"] = search_result.completion
                 search_result_dict["context_result"] = search_result.context
                 search_result_dict["objects_result"] = search_result.result_object
+                search_result_dict.update(_prompt_preview_fields(search_result))
+                search_result_dict["evidence"] = [
+                    reference.model_dump(mode="json") for reference in search_result.evidence
+                ]
             else:
                 # Result attribute handles returning appropriate result based on set flags and outputs
                 search_result_dict["search_result"] = search_result.result
@@ -447,6 +488,10 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                     "text_result": search_result.completion,
                     "context_result": search_result.context,
                     "objects_result": search_result.result_object,
+                    **_prompt_preview_fields(search_result),
+                    "evidence": [
+                        reference.model_dump(mode="json") for reference in search_result.evidence
+                    ],
                 }
                 return_value.append(search_result_dict)
             return return_value

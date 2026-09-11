@@ -3,6 +3,11 @@ name: test | mcp
 on:
   workflow_call:
     inputs:
+      python-version:
+        required: false
+        type: string
+        default: "3.11.x"
+        description: "Python version to run the MCP tests with"
       cognee_version:
         required: false
         type: string

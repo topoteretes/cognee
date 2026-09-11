@@ -57,6 +57,7 @@ def get_agents_router() -> APIRouter:
     async def list_agents_endpoint(
         user: User = Depends(get_authenticated_user),
     ) -> list[AgentDTO]:
+        """List agents endpoint — GET /api/v1/agents/list."""
         agents = await list_agents(user.id)
         return [
             AgentDTO(
@@ -72,6 +73,12 @@ def get_agents_router() -> APIRouter:
         name: str,
         user: User = Depends(get_authenticated_user),
     ) -> AgentWithApiKeyDTO:
+        """Create agent endpoint — POST /api/v1/agents/create.
+
+        ## Query Parameters
+        - **name** (str): Unique name for the new agent user; a conflict is returned if an
+          agent with this name exists.
+        """
         try:
             agent_user, api_key = await create_agent(name, user)
         except UserAlreadyExists:
@@ -108,6 +115,22 @@ def get_agents_router() -> APIRouter:
         offset: int = Query(0, ge=0),
         user: User = Depends(get_authenticated_user),
     ):
+        """List agents connections — GET /api/v1/agents/connections.
+
+        ## Query Parameters
+        - **active_only** (bool): When true, restricts results to connections currently
+          considered active. Defaults to True.
+        - **agent_id** (Optional[UUID]): Filter connections by agent user ID. Only returns
+          connections belonging to this specific agent.
+        - **include_sources** (bool): When true, includes the source breakdown for each
+          returned connection. Defaults to True.
+        - **limit** (int): Maximum number of rows to return. Defaults to 50.
+        - **offset** (int): Number of rows to skip for pagination. Defaults to 0.
+        - **range** (Literal['24h', '7d', '30d', 'all']): One of: '24h', '7d', '30d', 'all'.
+          Defaults to '30d'.
+        - **status** (Optional[Literal['active', 'inactive', 'unknown']]): One of: 'active',
+          'inactive', 'unknown'.
+        """
         response = await list_agent_connections(
             user=user,
             agent_id=agent_id,
@@ -129,6 +152,12 @@ def get_agents_router() -> APIRouter:
         ),
         user: User = Depends(get_authenticated_user),
     ):
+        """Get my connection detail — GET /api/v1/agents/connections/me.
+
+        ## Query Parameters
+        - **agent_session_name** (Optional[str]): Filter by connection name. Uses the authenticated
+          user's ID as the agent ID.
+        """
         response = await get_agent_connection_detail(
             user=user,
             agent_id=user.id,
@@ -147,6 +176,15 @@ def get_agents_router() -> APIRouter:
         ),
         user: User = Depends(get_authenticated_user),
     ):
+        """Get connection detail — GET /api/v1/agents/connections/{agent_id}.
+
+        ## Path Parameters
+        - **agent_id** (UUID): The agent's user ID (from GET /api/v1/agents/list).
+
+        ## Query Parameters
+        - **agent_session_name** (Optional[str]): Filter by connection name within the agent's
+          connections.
+        """
         response = await get_agent_connection_detail(
             user=user,
             agent_id=agent_id,
@@ -161,6 +199,27 @@ def get_agents_router() -> APIRouter:
         request: RegisterAgentRequest,
         user: User = Depends(get_authenticated_user),
     ):
+        """Register agent endpoint — POST /api/v1/agents/register.
+
+        ## Request Parameters
+        - **agent_session_name** (str): A unique name for this agent connection. Combined with the
+          authenticated user's ID to identify the connection.
+        - **dataset_ids** (List[str]): UUIDs of the datasets (from GET /api/v1/datasets).
+        - **dataset_names** (List[str]): Names of the datasets this agent connection reads
+          from and writes to.
+        - **memory_mode** (Literal['session', 'cognee', 'hybrid', 'none', 'unknown']): One of:
+          'session', 'cognee', 'hybrid', 'none', 'unknown'. Defaults to 'unknown'.
+        - **metadata** (Dict[str, Any]): Free-form metadata object.
+        - **origin_function** (Optional[str]): Name of the calling function or tool that
+          triggered the registration, stored on the connection.
+        - **session_id** (Optional[str]): Client-supplied session identifier — the same value passed
+          as session_id to POST /api/v1/remember.
+        - **source** (Literal['agent_memory', 'session_trace', 'serve', 'api_key', 'mcp', 'api']):
+          One of: 'agent_memory', 'session_trace', 'serve', 'api_key', 'mcp', 'api'. Defaults to
+          'api'.
+        - **type** (str): Connection type label recorded for the registered agent. Defaults
+          to 'api'.
+        """
         connection = await register_agent(user, request)
         return jsonable_encoder(connection)
 
@@ -169,6 +228,12 @@ def get_agents_router() -> APIRouter:
         request: UnregisterAgentRequest,
         user: User = Depends(get_authenticated_user),
     ) -> AgentModeDTO:
+        """Unregister agent endpoint — POST /api/v1/agents/unregister.
+
+        ## Request Parameters
+        - **agent_session_name** (str): The name used when registering the connection. Combined with
+          the authenticated user's ID to identify which connection to deactivate.
+        """
         count = await unregister_agent(user, request)
         return AgentModeDTO(active_agents=count)
 
@@ -181,6 +246,11 @@ def get_agents_router() -> APIRouter:
         agent_id: UUID,
         user: User = Depends(get_authenticated_user),
     ) -> AgentDTO:
+        """Get agent endpoint — GET /api/v1/agents/{agent_id}.
+
+        ## Path Parameters
+        - **agent_id** (UUID): The agent's user ID (from GET /api/v1/agents/list).
+        """
         try:
             agent_info = await get_agent(agent_id, user.id)
         except LookupError:
@@ -197,6 +267,11 @@ def get_agents_router() -> APIRouter:
     async def delete_agent_endpoint(
         agent_id: UUID, user: User = Depends(get_authenticated_user)
     ) -> None:
+        """Delete agent endpoint — DELETE /api/v1/agents/{agent_id}.
+
+        ## Path Parameters
+        - **agent_id** (UUID): The agent's user ID (from GET /api/v1/agents/list).
+        """
         try:
             await delete_agent(agent_id, user.id)
         except LookupError:

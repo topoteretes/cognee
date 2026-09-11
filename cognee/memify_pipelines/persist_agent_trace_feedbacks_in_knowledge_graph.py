@@ -1,10 +1,7 @@
 from typing import Optional
 
 from cognee import memify
-from cognee.context_global_variables import (
-    set_database_global_context_variables,
-    set_session_user_context_variable,
-)
+from cognee.context_global_variables import set_session_user_context_variable
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.pipelines.tasks.task import Task
@@ -58,10 +55,11 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
             log=False,
         )
 
-    await set_database_global_context_variables(
-        dataset_to_write[0].id, dataset_to_write[0].owner_id
-    )
-
+    # No set_database_global_context_variables call before memify: the pipeline
+    # enters that context itself under the dataset lock. The legacy await form
+    # used here previously held a dataset-queue slot until task end, so memify's
+    # wait on the dataset lock inverted the canonical order
+    # (dataset lock -> queue slot) and could deadlock the process (SDK-483).
     extraction_tasks = [
         Task(
             extract_agent_trace_feedbacks,

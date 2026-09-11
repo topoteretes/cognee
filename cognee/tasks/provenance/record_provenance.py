@@ -160,11 +160,16 @@ async def record_provenance(
                     visited_properties=generic_visited,
                 )
                 root_id = str(item.id)
+                # The walk may legitimately return a node set that does not include
+                # ``item``. Attribute to it only when it was actually stored.
+                root_source = (
+                    scoped(root_id) if any(str(node.id) == root_id for node in nodes) else ""
+                )
                 for node in nodes:
                     node_id = str(node.id)
                     batch.track_entity(
                         scoped(node_id),
-                        source="" if node_id == root_id else scoped(root_id),
+                        source="" if node_id == root_id else root_source,
                         entity_type="entity",
                         metadata={
                             "name": getattr(node, "name", None),
@@ -177,7 +182,7 @@ async def record_provenance(
                     target_id = scoped(str(edge_target_id))
                     batch.track_relationship(
                         f"rel:{source_id}:{relationship_name}:{target_id}",
-                        source=scoped(root_id),
+                        source=root_source,
                         used_entities=[source_id, target_id],
                         metadata={"relationship_name": relationship_name},
                         **common,

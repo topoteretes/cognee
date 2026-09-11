@@ -117,21 +117,31 @@ async def add_feedback(
     feedback_score: Optional[int] = None,
     user: Optional[User] = None,
 ) -> bool:
+    """Add or update feedback for a QA entry.
+
+    Args:
+        session_id: Session identifier.
+        qa_id: QA entry identifier.
+        feedback_text: Optional free-text feedback.
+        feedback_score: Optional numeric feedback score.
+        user: User that owns the session. If None, uses session/context user or default user.
+
+    Returns:
+        True if the entry was updated, False if the QA entry was not found or
+        caching is disabled. Any other failure (unreachable cache, misconfigured
+        backend, invalid parameters) raises instead of being reported as False.
+    """
     resolved_user = await _resolve_user(user)
     user_id = str(resolved_user.id)
 
-    try:
-        sm = get_session_manager()
-        return await sm.add_feedback(
-            user_id=user_id,
-            session_id=session_id,
-            qa_id=qa_id,
-            feedback_text=feedback_text,
-            feedback_score=feedback_score,
-        )
-    except Exception as e:
-        logger.warning("add_feedback: error from SessionManager: %s", e)
-        return False
+    sm = get_session_manager()
+    return await sm.add_feedback(
+        user_id=user_id,
+        session_id=session_id,
+        qa_id=qa_id,
+        feedback_text=feedback_text,
+        feedback_score=feedback_score,
+    )
 
 
 async def add_frequency_weights(
@@ -158,7 +168,9 @@ async def add_frequency_weights(
         user: User that owns the session. If None, uses session/context user or default user.
 
     Returns:
-        True if updated, False if QA not found or cache unavailable.
+        True if the entry was updated, False if the QA entry was not found or
+        caching is disabled. Any other failure (unreachable cache, misconfigured
+        backend, invalid parameters) raises instead of being reported as False.
     """
     from cognee.tasks.memify.frequency_weights_constants import (
         MEMIFY_METADATA_FREQUENCY_WEIGHTS_APPLIED_KEY,
@@ -173,18 +185,14 @@ async def add_frequency_weights(
     if edge_ids:
         used_graph_element_ids["edge_ids"] = edge_ids
 
-    try:
-        sm = get_session_manager()
-        return await sm.update_qa(
-            user_id=user_id,
-            session_id=session_id,
-            qa_id=qa_id,
-            used_graph_element_ids=used_graph_element_ids if used_graph_element_ids else None,
-            memify_metadata={MEMIFY_METADATA_FREQUENCY_WEIGHTS_APPLIED_KEY: False},
-        )
-    except Exception as e:
-        logger.warning("add_frequency_weights: error from SessionManager: %s", e)
-        return False
+    sm = get_session_manager()
+    return await sm.update_qa(
+        user_id=user_id,
+        session_id=session_id,
+        qa_id=qa_id,
+        used_graph_element_ids=used_graph_element_ids if used_graph_element_ids else None,
+        memify_metadata={MEMIFY_METADATA_FREQUENCY_WEIGHTS_APPLIED_KEY: False},
+    )
 
 
 async def delete_feedback(
@@ -203,18 +211,16 @@ async def delete_feedback(
         user: User that owns the session. If None, uses session/context user or default user.
 
     Returns:
-        True if feedback was cleared, False if QA not found or cache unavailable.
+        True if feedback was cleared, False if the QA entry was not found or
+        caching is disabled. Any other failure (unreachable cache, misconfigured
+        backend, invalid parameters) raises instead of being reported as False.
     """
     resolved_user = await _resolve_user(user)
     user_id = str(resolved_user.id)
 
-    try:
-        sm = get_session_manager()
-        return await sm.delete_feedback(
-            user_id=user_id,
-            session_id=session_id,
-            qa_id=qa_id,
-        )
-    except Exception as e:
-        logger.warning("delete_feedback: error from SessionManager: %s", e)
-        return False
+    sm = get_session_manager()
+    return await sm.delete_feedback(
+        user_id=user_id,
+        session_id=session_id,
+        qa_id=qa_id,
+    )

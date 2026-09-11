@@ -31,6 +31,8 @@ COMMAND_DESCRIPTIONS = {
     "current": "Show each database's stamped migration revision (and last failure, if any)",
     "push": "Upload a local dataset's knowledge graph to Cognee Cloud",
     "report": "Generate a Graph Insight Report (hub nodes, surprising links, confidence tags, suggested questions)",
+    "demo": "Load a bundled demo knowledge graph and search it — no API key needed",
+    "doctor": "Diagnose configuration and local services (config traps, databases, providers)",
 }
 
 # Search type choices
@@ -39,10 +41,12 @@ SEARCH_TYPE_CHOICES = [
     "HYBRID_COMPLETION",
     "RAG_COMPLETION",
     "CHUNKS",
+    "CHUNKS_LEXICAL",
     "SUMMARIES",
     "CODE",
     "CYPHER",
     "GRAPH_REPORT",
+    "SKILLS",
 ]
 
 DEFAULT_SEARCH_TYPE = "HYBRID_COMPLETION"

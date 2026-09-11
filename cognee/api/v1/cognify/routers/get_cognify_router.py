@@ -1,27 +1,29 @@
-import os
 import asyncio
 from uuid import UUID
 from pydantic import Field
 from typing import Dict, List, Optional
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter, WebSocket, Depends, WebSocketDisconnect, status
-from starlette.status import WS_1000_NORMAL_CLOSURE, WS_1008_POLICY_VIOLATION
+from starlette.status import (
+    WS_1000_NORMAL_CLOSURE,
+    WS_1008_POLICY_VIOLATION,
+    WS_1011_INTERNAL_ERROR,
+)
 
 from cognee.api.DTO import InDTO
 from cognee.modules.pipelines.methods import get_pipeline_run
 from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_authenticated_user
-from cognee.modules.users.get_user_db import get_user_db_context
+from cognee.modules.users.methods import get_authenticated_user, get_authenticated_websocket_user
+from cognee.modules.data.exceptions.exceptions import DatasetNotFoundError
+from cognee.modules.data.methods import get_authorized_dataset
 from cognee.modules.graph.methods import get_formatted_graph_data
-from cognee.modules.users.get_user_manager import get_user_manager_context
-from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.users.authentication.default.default_jwt_strategy import DefaultJWTStrategy
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.graph_model_utils import graph_schema_to_graph_model
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
     PipelineRunInfo,
     PipelineRunErrored,
+    PipelineRunProgress,
 )
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
     get_from_queue,
@@ -246,6 +248,10 @@ def get_cognify_router() -> APIRouter:
                 chunk_size=payload.chunk_size,
                 chunks_per_batch=payload.chunks_per_batch,
                 data_per_batch=payload.data_per_batch,
+                # HTTP contract: clients poll run status from the returned run
+                # info (and /datasets/status); an errored run is a valid
+                # response body here, not an exception.
+                raise_on_error=False,
             )
 
             # If any cognify run errored return JSONResponse with proper error status code
@@ -298,40 +304,62 @@ def get_cognify_router() -> APIRouter:
             )
 
     @router.websocket("/subscribe/{pipeline_run_id}")
-    async def subscribe_to_cognify_info(websocket: WebSocket, pipeline_run_id: str):
+    async def subscribe_to_cognify_info(
+        websocket: WebSocket,
+        pipeline_run_id: str,
+        user: Optional[User] = Depends(get_authenticated_websocket_user),
+    ):
+        """
+        Stream one cognify run's progress, then its finished graph.
+
+        ## Path Parameters
+        - **pipeline_run_id** (UUID): the run to follow, as returned by
+          `POST /cognify`. Must belong to a dataset you can read.
+
+        ## Close Codes
+        - **1000**: the run completed and its final payload was sent
+        - **1008**: not authenticated, not a valid run id, no such run, or no
+          read permission on the run's dataset. A retry replays the same
+          rejection, so clients should stop.
+
+        ## Notes
+        - The run's update queue is consumed, not observed: one subscriber per
+          run. Authorization is therefore checked before the queue is touched
+          at all, so a rejected caller cannot disturb the real subscriber.
+        """
         await websocket.accept()
 
-        access_token = websocket.cookies.get(os.getenv("AUTH_TOKEN_COOKIE_NAME", "auth_token"))
-
-        try:
-            secret = os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret")
-
-            strategy = DefaultJWTStrategy(secret, lifetime_seconds=3600)
-
-            db_engine = get_relational_engine()
-
-            async with db_engine.get_async_session() as session:
-                async with get_user_db_context(session) as user_db:
-                    async with get_user_manager_context(user_db) as user_manager:
-                        user = await get_authenticated_user(
-                            cookie=access_token,
-                            strategy_cookie=strategy,
-                            user_manager=user_manager,
-                            bearer=None,
-                        )
-        except Exception as error:
-            logger.error(f"Authentication failed: {str(error)}")
+        if user is None:
             await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Unauthorized")
             return
 
-        pipeline_run_id = UUID(pipeline_run_id)
+        try:
+            run_id = UUID(pipeline_run_id)
+        except ValueError:
+            await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Invalid pipeline run id")
+            return
 
-        pipeline_run = await get_pipeline_run(pipeline_run_id)
+        pipeline_run = await get_pipeline_run(run_id)
 
-        initialize_queue(pipeline_run_id)
+        if pipeline_run is None:
+            await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Pipeline run not found")
+            return
+
+        # Before any queue call, deliberately. Subscribing consumes the run's
+        # queue and `initialize_queue` replaces it outright, so an unauthorized
+        # caller reaching either one could drain or reset another tenant's run
+        # and silently starve its rightful subscriber.
+        if not await get_authorized_dataset(user, pipeline_run.dataset_id):
+            await websocket.close(
+                code=WS_1008_POLICY_VIOLATION,
+                reason="Not authorized to read this pipeline run",
+            )
+            return
+
+        initialize_queue(run_id)
 
         while True:
-            pipeline_run_info = get_from_queue(pipeline_run_id)
+            pipeline_run_info = get_from_queue(run_id)
 
             if not pipeline_run_info:
                 await asyncio.sleep(2)
@@ -341,6 +369,25 @@ def get_cognify_router() -> APIRouter:
                 continue
 
             try:
+                # Progress ticks are cheap and frequent — send the event's own
+                # fields directly instead of recomputing the (expensive) graph
+                # snapshot on every one. That recompute is only meaningful for
+                # Started/Yield/Completed/Errored, where the graph has actually
+                # changed shape.
+                if isinstance(pipeline_run_info, PipelineRunProgress):
+                    await websocket.send_json(
+                        {
+                            "pipeline_run_id": str(pipeline_run_info.pipeline_run_id),
+                            "status": pipeline_run_info.status,
+                            "completed_items": pipeline_run_info.completed_items,
+                            "total_items": pipeline_run_info.total_items,
+                            "current_stage": pipeline_run_info.current_stage,
+                            "stage_index": pipeline_run_info.stage_index,
+                            "stage_total": pipeline_run_info.stage_total,
+                        }
+                    )
+                    continue
+
                 await websocket.send_json(
                     {
                         "pipeline_run_id": str(pipeline_run_info.pipeline_run_id),
@@ -350,11 +397,28 @@ def get_cognify_router() -> APIRouter:
                 )
 
                 if isinstance(pipeline_run_info, PipelineRunCompleted):
-                    remove_queue(pipeline_run_id)
+                    remove_queue(run_id)
                     await websocket.close(code=WS_1000_NORMAL_CLOSURE)
                     break
             except WebSocketDisconnect:
-                remove_queue(pipeline_run_id)
+                remove_queue(run_id)
+                break
+            except DatasetNotFoundError:
+                # get_formatted_graph_data re-authorizes on every frame, so
+                # this is the dataset being deleted, or read access being
+                # revoked, mid-run. The update just popped is already lost;
+                # closing beats raising into the ASGI server.
+                logger.info("Dataset for pipeline run %s is no longer readable", run_id)
+                remove_queue(run_id)
+                await websocket.close(
+                    code=WS_1008_POLICY_VIOLATION,
+                    reason="Not authorized to read this pipeline run",
+                )
+                break
+            except Exception:
+                logger.exception("Pipeline run subscription failed for run %s", run_id)
+                remove_queue(run_id)
+                await websocket.close(code=WS_1011_INTERNAL_ERROR)
                 break
 
     return router

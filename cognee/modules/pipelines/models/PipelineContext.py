@@ -31,6 +31,10 @@ class PipelineContext:
     # DataPoints that were already walked in earlier pipeline stages.
     _provenance_visited: Set[int] = field(default_factory=set, repr=False)
 
+    # Lazily-created relational provenance buffer. Keeping this None for
+    # pipelines without document chunks makes the feature zero-cost there.
+    provenance_buffer: Any = field(default=None, repr=False)
+
     # Ordered list of unique task names in the order they were first seen.
     # Used to derive DataPoint.topological_rank (1-based index into this list)
     # so the visualization can lay nodes out in pipeline order. A task that

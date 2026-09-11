@@ -49,8 +49,6 @@ def _free_port():
 
 @pytest.fixture(scope="module")
 def s3_env():
-    import os
-
     import boto3
 
     port = _free_port()
@@ -82,7 +80,28 @@ def s3_env():
 
     import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
 
-    os.environ.update(
+    def clear_config_caches():
+        import importlib
+
+        for module_name, factory_name in [
+            ("cognee.base_config", "get_base_config"),
+            ("cognee.infrastructure.files.storage.s3_config", "get_s3_config"),
+            ("cognee.infrastructure.databases.relational.config", "get_relational_config"),
+            (
+                "cognee.infrastructure.databases.relational.get_relational_engine",
+                "get_relational_engine",
+            ),
+            ("cognee.infrastructure.databases.cache.config", "get_cache_config"),
+            ("cognee.infrastructure.databases.cache.get_cache_engine", "create_cache_engine"),
+            ("cognee.infrastructure.llm.config", "get_llm_config"),
+        ]:
+            try:
+                getattr(importlib.import_module(module_name), factory_name).cache_clear()
+            except (ImportError, AttributeError):
+                pass
+
+    mp = pytest.MonkeyPatch()
+    for key, value in dict(
         DB_PROVIDER="sqlite",
         CACHE_BACKEND="sqlite",
         MOCK_EMBEDDING="true",
@@ -99,26 +118,9 @@ def s3_env():
         CACHE_ROOT_DIRECTORY=str(root / "cache"),
         ENABLE_BACKEND_ACCESS_CONTROL="false",
         COGNEE_SKIP_CONNECTION_TEST="true",
-    )
-
-    import importlib
-
-    for module_name, factory_name in [
-        ("cognee.base_config", "get_base_config"),
-        ("cognee.infrastructure.files.storage.s3_config", "get_s3_config"),
-        ("cognee.infrastructure.databases.relational.config", "get_relational_config"),
-        (
-            "cognee.infrastructure.databases.relational.get_relational_engine",
-            "get_relational_engine",
-        ),
-        ("cognee.infrastructure.databases.cache.config", "get_cache_config"),
-        ("cognee.infrastructure.databases.cache.get_cache_engine", "create_cache_engine"),
-        ("cognee.infrastructure.llm.config", "get_llm_config"),
-    ]:
-        try:
-            getattr(importlib.import_module(module_name), factory_name).cache_clear()
-        except (ImportError, AttributeError):
-            pass
+    ).items():
+        mp.setenv(key, value)
+    clear_config_caches()
 
     # Count every S3 API call, through both the async client and the sync bridge.
     counts = collections.Counter()
@@ -140,6 +142,8 @@ def s3_env():
 
     s3fs.S3FileSystem._call_s3 = original_async
     s3fs.S3FileSystem.call_s3 = original_sync
+    mp.undo()
+    clear_config_caches()
     moto_proc.terminate()
     shutil.rmtree(root, ignore_errors=True)
 

@@ -1,5 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+
+if TYPE_CHECKING:
+    from cognee.modules.search.models.EvidenceReference import EvidenceReference
 
 
 class BaseRetriever(ABC):
@@ -17,6 +20,12 @@ class BaseRetriever(ABC):
     # That analysis may call an LLM before retrieval, which is not appropriate
     # for search types whose contract is explicitly non-generative.
     supports_session_turn_preparation = True
+
+    # Whether get_completion_from_context sends exactly one prompt built from this
+    # retriever's (user_prompt_path, system_prompt_path). only_context previews render
+    # that pair; retrievers that never prompt an LLM, or that run several rounds on
+    # other templates, opt out so a preview does not invent a prompt for them.
+    supports_prompt_preview = True
 
     @abstractmethod
     async def get_retrieved_objects(self, query: Optional[str], query_batch: Optional[str]) -> Any:
@@ -100,6 +109,18 @@ class BaseRetriever(ABC):
     async def append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
         """Apply retriever-owned references; unsupported retrievers leave answers unchanged."""
         return completions
+
+    def get_context_evidence(
+        self,
+        retrieved_objects: Any,
+        dataset_id: Any = None,
+    ) -> List["EvidenceReference"]:
+        """Return structured identifiers for artifacts included in completion context.
+
+        Retrievers opt in by overriding this pure, synchronous hook. The default
+        intentionally returns no evidence so community retrievers remain compatible.
+        """
+        return []
 
     async def prepare_session_turn_for_retrieval(self, query: str):
         """Analyze a session turn before retrieval and fail open to the original query."""

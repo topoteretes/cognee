@@ -46,13 +46,22 @@ env:
 
 jobs:
   run-unit-tests:
-    name: Unit tests ${{ matrix.python-version }} on ${{ matrix.os }}
+    name: Unit tests ${{ matrix.python-version }} on ${{ matrix.os }} (${{ matrix.shard }}/3)
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
         os: ${{ fromJSON(inputs.os) }}
+        # pytest-split across three jobs, not xdist within one: the shards are
+        # separate processes, so the ~50 unit files that mutate process-global
+        # config (env, lru_cache'd settings) cannot interfere, and it is the
+        # tool the integration suite already shards with. Balanced by
+        # .test_durations with least_duration (greedy bin-packing): the default
+        # duration_based_chunks cuts collection order at 1/3-time boundaries,
+        # and with the slow subprocess tests clustered that gave 1059/131/4207
+        # tests per shard. least_duration gives 1795/1801/1801 at equal time.
+        shard: [1, 2, 3]
       fail-fast: false
     steps:
       - name: Check out
@@ -70,26 +79,37 @@ jobs:
         if: ${{ matrix.os == 'windows-latest' }}
         shell: pwsh
         run: |
-          # Same guard the delete-test jobs already carry. Without it this job
-          # hangs: the step runs under Git for Windows' bash, so its usr\bin
-          # OpenSSL DLLs shadow the ones native extensions load, and the import
-          # deadlocks. pytest then never emits a single line -- --timeout only
-          # covers test execution, so it never engages -- and the job sits until
-          # the 60-minute ceiling cancels it. Observed on 3 of 12 recent runs.
+          # Kept, but its original rationale was wrong and it did not fix the
+          # hang it was added for. PATH is NOT consulted for extension-module
+          # DLL resolution on Python 3.8+ (see cognee_db_workers/_windows_openssl.py),
+          # and after this guard landed (46bd2fe45, 2026-08-21) the Windows unit
+          # and library jobs kept wedging at the same rate, with "Dropped 1 PATH
+          # entry" in the log of every hang. Not deleted here because the
+          # delete-test jobs' original report predates the library finding and
+          # is not reproduced in the logs reviewed for SDK-533.
           $kept = $env:PATH -split ';' | Where-Object { $_ -notmatch 'Git\\usr\\bin' }
           $dropped = ($env:PATH -split ';').Count - $kept.Count
           "PATH=$($kept -join ';')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "Dropped $dropped PATH entry/entries matching Git\usr\bin"
 
       - name: Run unit tests
+        id: unit
         shell: bash
-        run: uv run pytest cognee/tests/unit/ --timeout=300 --timeout-method=thread
+        continue-on-error: true
+        timeout-minutes: 15  # green shards run 3-8 min; a wedge prints nothing after minute one
         env:
           # Unbuffered + faulthandler so a wedged interpreter leaves evidence
           # instead of a 60-minute silent cancel.
           PYTHONUNBUFFERED: 1
           PYTHONFAULTHANDLER: 1
           PYTHONUTF8: 1
+          # Same wedge as the library job, same picture (run 33648260941: a
+          # child python.exe frozen at 3.8 MB for 25 minutes on both attempts,
+          # parent idle at 15 MB). The unit suite spawns the Kuzu/LanceDB
+          # subprocess workers too; it just does not hit the deadlock every
+          # time. Run in-process. The worker bug is SDK-540.
+          GRAPH_DATABASE_SUBPROCESS_ENABLED: "false"
+          VECTOR_DB_SUBPROCESS_ENABLED: "false"
           LLM_PROVIDER: openai
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
@@ -101,6 +121,238 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        run: |
+          set +e
+          rm -f junit-unit.xml
+          # Process-table snapshots from INSIDE the still-running step, so they
+          # reach the log even on a wedge -- an `if: always()` cleanup step
+          # cannot start until this step ends, which on a wedge is never.
+          # Image names only (tasklist), never command lines: the env carries
+          # API keys and this is a public repo. What the snapshot decides on
+          # the next real wedge: uv.exe alive with no python child -> the uv
+          # layer; python.exe running pytest -> interpreter/plugin, py-spy it;
+          # a python.exe worker with a dead parent -> orphaned subprocess
+          # holding the pipe; nothing alive -> the runner's own pipe handling.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            # Pure Python, no coreutils: the PATH guard above drops Git\usr\bin,
+            # which is where sed/grep/tee live on the Windows runner.
+            python -c "import sys,textwrap; exec(textwrap.dedent(sys.stdin.read()))" <<'PY' &
+            import re, subprocess, sys, threading, time
+            def snap():
+                i = 0
+                while True:
+                    time.sleep(300); i += 1
+                    try:
+                        out = subprocess.run(["tasklist", "/FO", "CSV"], capture_output=True, text=True).stdout
+                    except Exception as e:
+                        out = f"snapshot failed: {e!r}"
+                    print("---- process snapshot ----\n" + out, file=sys.stderr, flush=True)
+                    if i < 2:
+                        continue
+                    # Two snapshots in means ten minutes with the step still
+                    # running: this is the wedge. Dump a stack from every
+                    # python so SDK-540 finally gets its mechanism. uvx
+                    # fetches py-spy on demand; every failure is swallowed --
+                    # the watchdog must never become its own hang.
+                    for pid in re.findall(r'"python.exe","(\d+)"', out):
+                        try:
+                            d = subprocess.run(["uvx", "py-spy", "dump", "--pid", pid],
+                                               capture_output=True, text=True, timeout=60)
+                            print(f"---- py-spy pid {pid} ----\n" + (d.stdout or d.stderr), file=sys.stderr, flush=True)
+                        except Exception as e:
+                            print(f"---- py-spy pid {pid} failed: {e!r}", file=sys.stderr, flush=True)
+            threading.Thread(target=snap, daemon=False).start()
+          PY
+            WATCHDOG_PID=$!
+            trap 'kill $WATCHDOG_PID 2>/dev/null || true' EXIT
+          fi
+          # --no-sync: every anomalous run (60-min silent wedge, 14s silent
+          # exit-0, 14s silent exit-127) emitted nothing at all, from an
+          # environment byte-identical to the healthy runs. pytest was
+          # installed in all of them. Taking uv's implicit sync out of the
+          # step removes one layer from the suspect window; it is a hypothesis
+          # test, not a known fix, and the snapshot above names the survivor.
+          uv run --no-sync python -m pytest cognee/tests/unit/ \
+            --splits 3 --group "${{ matrix.shard }}" --splitting-algorithm least_duration \
+            --timeout=300 --timeout-method=thread \
+            -p no:cacheprovider --junitxml=junit-unit.xml --durations=15
+          rc=$?
+          # A Windows unit job has reported SUCCESS in 14 seconds having run
+          # nothing at all (job 97050693924: zero bytes of output, exit 0).
+          # Exit status alone does not prove the suite executed, so assert on
+          # the junit report. A step that produced one ran the suite, so its
+          # failure is a real failure and is never retried. `python -c` on
+          # purpose: the PATH guard above drops Git-for-Windows' usr\bin, which
+          # is where coreutils live.
+          # The floor only has to catch "did not run": the false pass this
+          # guards against reported zero tests. Shards are balanced by TIME
+          # (least_duration), so their test COUNTS legitimately differ, and a
+          # count-based floor near the average is wrong by construction --
+          # the first sharded run had shards of 862 / 105 / 4490 tests, all
+          # green, all failed by a 1200 floor. 50 is far below any real shard.
+          if python -c "import sys,xml.etree.ElementTree as E; \
+            r=E.parse('junit-unit.xml').getroot(); \
+            n=int(r.get('tests') or (r[0].get('tests') if len(r) else 0)); \
+            print('junit tests:', n); \
+            sys.exit(0 if n >= 50 else 1)"; then
+            echo "ran=true" >> "$GITHUB_OUTPUT"
+            exit $rc
+          fi
+          # No (or a short) junit report: the suite did not run, whatever the
+          # exit status says. Fail regardless of rc, so a silent exit-0 is not
+          # a pass and the retry gate below fires.
+          if [ "$rc" = "127" ]; then
+            # 127 = command not found. Say WHAT was missing; builtins and
+            # python only, since coreutils are off PATH here.
+            command -v uv || echo "uv: NOT ON PATH"
+            command -v python || echo "python: NOT ON PATH"
+            python -c "import os; p='.venv/Scripts' if os.name=='nt' else '.venv/bin'; print(p, os.listdir(p)[:12] if os.path.isdir(p) else 'MISSING')" || true
+          fi
+          echo "::error::pytest exited $rc without a usable junit report"
+          exit 1
+
+      - name: Run unit tests (retry - first attempt produced no results)
+        id: unit_retry
+        # Retries ONLY the "emitted nothing / produced no junit" signature: the
+        # wedge, the silent exit-0 and the silent exit-127. A genuine test
+        # failure sets ran=true and is never retried, so no real bug and no
+        # flaky test can hide behind this. Two attempts x 25 min fits the
+        # job's 60-minute ceiling.
+        if: steps.unit.outcome == 'failure' && steps.unit.outputs.ran != 'true'
+        shell: bash
+        continue-on-error: true
+        timeout-minutes: 15
+        env:
+          # Unbuffered + faulthandler so a wedged interpreter leaves evidence
+          # instead of a 60-minute silent cancel.
+          PYTHONUNBUFFERED: 1
+          PYTHONFAULTHANDLER: 1
+          PYTHONUTF8: 1
+          # Same wedge as the library job, same picture (run 33648260941: a
+          # child python.exe frozen at 3.8 MB for 25 minutes on both attempts,
+          # parent idle at 15 MB). The unit suite spawns the Kuzu/LanceDB
+          # subprocess workers too; it just does not hit the deadlock every
+          # time. Run in-process. The worker bug is SDK-540.
+          GRAPH_DATABASE_SUBPROCESS_ENABLED: "false"
+          VECTOR_DB_SUBPROCESS_ENABLED: "false"
+          LLM_PROVIDER: openai
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+
+          EMBEDDING_PROVIDER: openai
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        run: |
+          set +e
+          rm -f junit-unit.xml
+          # Process-table snapshots from INSIDE the still-running step, so they
+          # reach the log even on a wedge -- an `if: always()` cleanup step
+          # cannot start until this step ends, which on a wedge is never.
+          # Image names only (tasklist), never command lines: the env carries
+          # API keys and this is a public repo. What the snapshot decides on
+          # the next real wedge: uv.exe alive with no python child -> the uv
+          # layer; python.exe running pytest -> interpreter/plugin, py-spy it;
+          # a python.exe worker with a dead parent -> orphaned subprocess
+          # holding the pipe; nothing alive -> the runner's own pipe handling.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            # Pure Python, no coreutils: the PATH guard above drops Git\usr\bin,
+            # which is where sed/grep/tee live on the Windows runner.
+            python -c "import sys,textwrap; exec(textwrap.dedent(sys.stdin.read()))" <<'PY' &
+            import re, subprocess, sys, threading, time
+            def snap():
+                i = 0
+                while True:
+                    time.sleep(300); i += 1
+                    try:
+                        out = subprocess.run(["tasklist", "/FO", "CSV"], capture_output=True, text=True).stdout
+                    except Exception as e:
+                        out = f"snapshot failed: {e!r}"
+                    print("---- process snapshot ----\n" + out, file=sys.stderr, flush=True)
+                    if i < 2:
+                        continue
+                    # Two snapshots in means ten minutes with the step still
+                    # running: this is the wedge. Dump a stack from every
+                    # python so SDK-540 finally gets its mechanism. uvx
+                    # fetches py-spy on demand; every failure is swallowed --
+                    # the watchdog must never become its own hang.
+                    for pid in re.findall(r'"python.exe","(\d+)"', out):
+                        try:
+                            d = subprocess.run(["uvx", "py-spy", "dump", "--pid", pid],
+                                               capture_output=True, text=True, timeout=60)
+                            print(f"---- py-spy pid {pid} ----\n" + (d.stdout or d.stderr), file=sys.stderr, flush=True)
+                        except Exception as e:
+                            print(f"---- py-spy pid {pid} failed: {e!r}", file=sys.stderr, flush=True)
+            threading.Thread(target=snap, daemon=False).start()
+          PY
+            WATCHDOG_PID=$!
+            trap 'kill $WATCHDOG_PID 2>/dev/null || true' EXIT
+          fi
+          # --no-sync: every anomalous run (60-min silent wedge, 14s silent
+          # exit-0, 14s silent exit-127) emitted nothing at all, from an
+          # environment byte-identical to the healthy runs. pytest was
+          # installed in all of them. Taking uv's implicit sync out of the
+          # step removes one layer from the suspect window; it is a hypothesis
+          # test, not a known fix, and the snapshot above names the survivor.
+          # No --no-sync here, deliberately: this attempt only runs when the first
+          # produced nothing, and one observed shape of that is uv itself dying
+          # with 127 in seconds (run 33729891452, windows shard 3/3, both
+          # attempts). Letting the retry re-sync gives it a chance to repair a
+          # broken environment instead of replaying the same failure into it.
+          uv run python -m pytest cognee/tests/unit/ \
+            --splits 3 --group "${{ matrix.shard }}" --splitting-algorithm least_duration \
+            --timeout=300 --timeout-method=thread \
+            -p no:cacheprovider --junitxml=junit-unit.xml --durations=15
+          rc=$?
+          # A Windows unit job has reported SUCCESS in 14 seconds having run
+          # nothing at all (job 97050693924: zero bytes of output, exit 0).
+          # Exit status alone does not prove the suite executed, so assert on
+          # the junit report. A step that produced one ran the suite, so its
+          # failure is a real failure and is never retried. `python -c` on
+          # purpose: the PATH guard above drops Git-for-Windows' usr\bin, which
+          # is where coreutils live.
+          # The floor only has to catch "did not run": the false pass this
+          # guards against reported zero tests. Shards are balanced by TIME
+          # (least_duration), so their test COUNTS legitimately differ, and a
+          # count-based floor near the average is wrong by construction --
+          # the first sharded run had shards of 862 / 105 / 4490 tests, all
+          # green, all failed by a 1200 floor. 50 is far below any real shard.
+          if python -c "import sys,xml.etree.ElementTree as E; \
+            r=E.parse('junit-unit.xml').getroot(); \
+            n=int(r.get('tests') or (r[0].get('tests') if len(r) else 0)); \
+            print('junit tests:', n); \
+            sys.exit(0 if n >= 50 else 1)"; then
+            echo "ran=true" >> "$GITHUB_OUTPUT"
+            exit $rc
+          fi
+          # No (or a short) junit report: the suite did not run, whatever the
+          # exit status says. Fail regardless of rc, so a silent exit-0 is not
+          # a pass and the retry gate below fires.
+          if [ "$rc" = "127" ]; then
+            # 127 = command not found. Say WHAT was missing; builtins and
+            # python only, since coreutils are off PATH here.
+            command -v uv || echo "uv: NOT ON PATH"
+            command -v python || echo "python: NOT ON PATH"
+            python -c "import os; p='.venv/Scripts' if os.name=='nt' else '.venv/bin'; print(p, os.listdir(p)[:12] if os.path.isdir(p) else 'MISSING')" || true
+          fi
+          echo "::error::pytest exited $rc without a usable junit report"
+          exit 1
+
+      - name: Assert the unit suite ran
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.unit.outcome }}" = "success" ]; then exit 0; fi
+          if [ "${{ steps.unit_retry.outcome }}" = "success" ]; then
+            echo "::warning::Unit tests passed only on retry - the first attempt produced no test results. Track this."
+            exit 0
+          fi
+          echo "::error::Unit tests failed (attempt1=${{ steps.unit.outcome }} ran=${{ steps.unit.outputs.ran }}; attempt2=${{ steps.unit_retry.outcome }} ran=${{ steps.unit_retry.outputs.ran }})"
+          exit 1
 
   run-library-test:
     name: Library test ${{ matrix.python-version }} on ${{ matrix.os }}
@@ -126,23 +378,41 @@ jobs:
         if: ${{ matrix.os == 'windows-latest' }}
         shell: pwsh
         run: |
-          # Same guard the delete-test jobs already carry. Without it this job
-          # hangs: the step runs under Git for Windows' bash, so its usr\bin
-          # OpenSSL DLLs shadow the ones native extensions load, and the import
-          # deadlocks. pytest then never emits a single line -- --timeout only
-          # covers test execution, so it never engages -- and the job sits until
-          # the 60-minute ceiling cancels it. Observed on 3 of 12 recent runs.
+          # Kept, but its original rationale was wrong and it did not fix the
+          # hang it was added for. PATH is NOT consulted for extension-module
+          # DLL resolution on Python 3.8+ (see cognee_db_workers/_windows_openssl.py),
+          # and after this guard landed (46bd2fe45, 2026-08-21) the Windows unit
+          # and library jobs kept wedging at the same rate, with "Dropped 1 PATH
+          # entry" in the log of every hang. Not deleted here because the
+          # delete-test jobs' original report predates the library finding and
+          # is not reproduced in the logs reviewed for SDK-533.
           $kept = $env:PATH -split ';' | Where-Object { $_ -notmatch 'Git\\usr\\bin' }
           $dropped = ($env:PATH -split ';').Count - $kept.Count
           "PATH=$($kept -join ';')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "Dropped $dropped PATH entry/entries matching Git\usr\bin"
 
       - name: Run default basic pipeline
+        id: library
         shell: bash
+        continue-on-error: true
+        timeout-minutes: 15  # healthy runs are ~3.5 min
         env:
           PYTHONUNBUFFERED: 1
           PYTHONFAULTHANDLER: 1
           PYTHONUTF8: 1
+          # The Windows wedge, finally observed (run 33643256650, job
+          # 100291412286, first run with the in-step watchdog): the script
+          # stops at the auth-posture import line, and every 5-minute process
+          # snapshot for 35 minutes shows the same picture -- the main
+          # python.exe idle at ~15 MB, and a child python.exe frozen at 3.8 MB
+          # that never grows. That is a multiprocessing spawn worker deadlocked
+          # at startup, with the parent blocked on its ready signal. The
+          # Kuzu/LanceDB subprocess workers default on and this test does a
+          # real add/cognify, so it spawns them; the unit job does not, and
+          # does not wedge. Run this job in-process. The worker hang itself is
+          # a real bug on Windows and is tracked separately with this evidence.
+          GRAPH_DATABASE_SUBPROCESS_ENABLED: "false"
+          VECTOR_DB_SUBPROCESS_ENABLED: "false"
           LLM_PROVIDER: openai
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
@@ -154,7 +424,191 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-        run: uv run python ./cognee/tests/test_library.py
+        run: |
+          set +e
+          rm -f library-done.txt
+          # Same in-step process-table watchdog as the unit job; see there.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            # Pure Python, no coreutils: the PATH guard above drops Git\usr\bin,
+            # which is where sed/grep/tee live on the Windows runner.
+            python -c "import sys,textwrap; exec(textwrap.dedent(sys.stdin.read()))" <<'PY' &
+            import re, subprocess, sys, threading, time
+            def snap():
+                i = 0
+                while True:
+                    time.sleep(300); i += 1
+                    try:
+                        out = subprocess.run(["tasklist", "/FO", "CSV"], capture_output=True, text=True).stdout
+                    except Exception as e:
+                        out = f"snapshot failed: {e!r}"
+                    print("---- process snapshot ----\n" + out, file=sys.stderr, flush=True)
+                    if i < 2:
+                        continue
+                    # Two snapshots in means ten minutes with the step still
+                    # running: this is the wedge. Dump a stack from every
+                    # python so SDK-540 finally gets its mechanism. uvx
+                    # fetches py-spy on demand; every failure is swallowed --
+                    # the watchdog must never become its own hang.
+                    for pid in re.findall(r'"python.exe","(\d+)"', out):
+                        try:
+                            d = subprocess.run(["uvx", "py-spy", "dump", "--pid", pid],
+                                               capture_output=True, text=True, timeout=60)
+                            print(f"---- py-spy pid {pid} ----\n" + (d.stdout or d.stderr), file=sys.stderr, flush=True)
+                        except Exception as e:
+                            print(f"---- py-spy pid {pid} failed: {e!r}", file=sys.stderr, flush=True)
+            threading.Thread(target=snap, daemon=False).start()
+          PY
+            WATCHDOG_PID=$!
+            trap 'kill $WATCHDOG_PID 2>/dev/null || true' EXIT
+          fi
+          # This job wedges too (jobs 96994255763 and 100218453165, eleven days
+          # and two runner images apart), and unlike the unit job it is NOT
+          # silent: it streams normally and stops at exactly the same line both
+          # times, "auth posture: authentication=required, multi_tenant=enabled",
+          # emitted at import time by get_authenticated_user.py. Healthy runs
+          # continue past it within seconds. The mechanism is not established;
+          # the snapshot above is what establishes it on the next wedge.
+          uv run --no-sync python ./cognee/tests/test_library.py \
+            && echo "LIBRARY_TEST_DONE" > library-done.txt
+          rc=$?
+          # A completion sentinel plays the junit report's role: a run that
+          # wrote it finished the script, so its failure is real and is never
+          # retried.
+          if python -c "import sys,os; sys.exit(0 if os.path.exists('library-done.txt') else 1)"; then
+            echo "ran=true" >> "$GITHUB_OUTPUT"
+            exit $rc
+          fi
+          # The sentinel is only written on a rc=0 finish, so reaching here
+          # means the script did not finish or failed; either way rc is the
+          # truth. Fail so the retry gate can evaluate it.
+          if [ "$rc" = "127" ]; then
+            # 127 = command not found. Say WHAT was missing; builtins and
+            # python only, since coreutils are off PATH here.
+            command -v uv || echo "uv: NOT ON PATH"
+            command -v python || echo "python: NOT ON PATH"
+            python -c "import os; p='.venv/Scripts' if os.name=='nt' else '.venv/bin'; print(p, os.listdir(p)[:12] if os.path.isdir(p) else 'MISSING')" || true
+          fi
+          exit "${rc:-1}"
+
+      - name: Run default basic pipeline (retry - first attempt did not finish)
+        id: library_retry
+        # Same signature gate as the unit job: only a run that never wrote the
+        # sentinel is retried. A run that finished and failed is a real failure.
+        if: steps.library.outcome == 'failure' && steps.library.outputs.ran != 'true'
+        shell: bash
+        continue-on-error: true
+        timeout-minutes: 15
+        env:
+          PYTHONUNBUFFERED: 1
+          PYTHONFAULTHANDLER: 1
+          PYTHONUTF8: 1
+          # The Windows wedge, finally observed (run 33643256650, job
+          # 100291412286, first run with the in-step watchdog): the script
+          # stops at the auth-posture import line, and every 5-minute process
+          # snapshot for 35 minutes shows the same picture -- the main
+          # python.exe idle at ~15 MB, and a child python.exe frozen at 3.8 MB
+          # that never grows. That is a multiprocessing spawn worker deadlocked
+          # at startup, with the parent blocked on its ready signal. The
+          # Kuzu/LanceDB subprocess workers default on and this test does a
+          # real add/cognify, so it spawns them; the unit job does not, and
+          # does not wedge. Run this job in-process. The worker hang itself is
+          # a real bug on Windows and is tracked separately with this evidence.
+          GRAPH_DATABASE_SUBPROCESS_ENABLED: "false"
+          VECTOR_DB_SUBPROCESS_ENABLED: "false"
+          LLM_PROVIDER: openai
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+
+          EMBEDDING_PROVIDER: openai
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        run: |
+          set +e
+          rm -f library-done.txt
+          # Same in-step process-table watchdog as the unit job; see there.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            # Pure Python, no coreutils: the PATH guard above drops Git\usr\bin,
+            # which is where sed/grep/tee live on the Windows runner.
+            python -c "import sys,textwrap; exec(textwrap.dedent(sys.stdin.read()))" <<'PY' &
+            import re, subprocess, sys, threading, time
+            def snap():
+                i = 0
+                while True:
+                    time.sleep(300); i += 1
+                    try:
+                        out = subprocess.run(["tasklist", "/FO", "CSV"], capture_output=True, text=True).stdout
+                    except Exception as e:
+                        out = f"snapshot failed: {e!r}"
+                    print("---- process snapshot ----\n" + out, file=sys.stderr, flush=True)
+                    if i < 2:
+                        continue
+                    # Two snapshots in means ten minutes with the step still
+                    # running: this is the wedge. Dump a stack from every
+                    # python so SDK-540 finally gets its mechanism. uvx
+                    # fetches py-spy on demand; every failure is swallowed --
+                    # the watchdog must never become its own hang.
+                    for pid in re.findall(r'"python.exe","(\d+)"', out):
+                        try:
+                            d = subprocess.run(["uvx", "py-spy", "dump", "--pid", pid],
+                                               capture_output=True, text=True, timeout=60)
+                            print(f"---- py-spy pid {pid} ----\n" + (d.stdout or d.stderr), file=sys.stderr, flush=True)
+                        except Exception as e:
+                            print(f"---- py-spy pid {pid} failed: {e!r}", file=sys.stderr, flush=True)
+            threading.Thread(target=snap, daemon=False).start()
+          PY
+            WATCHDOG_PID=$!
+            trap 'kill $WATCHDOG_PID 2>/dev/null || true' EXIT
+          fi
+          # This job wedges too (jobs 96994255763 and 100218453165, eleven days
+          # and two runner images apart), and unlike the unit job it is NOT
+          # silent: it streams normally and stops at exactly the same line both
+          # times, "auth posture: authentication=required, multi_tenant=enabled",
+          # emitted at import time by get_authenticated_user.py. Healthy runs
+          # continue past it within seconds. The mechanism is not established;
+          # the snapshot above is what establishes it on the next wedge.
+          # No --no-sync here, deliberately: this attempt only runs when the first
+          # produced nothing, and one observed shape of that is uv itself dying
+          # with 127 in seconds (run 33729891452, windows shard 3/3, both
+          # attempts). Letting the retry re-sync gives it a chance to repair a
+          # broken environment instead of replaying the same failure into it.
+          uv run python ./cognee/tests/test_library.py \
+            && echo "LIBRARY_TEST_DONE" > library-done.txt
+          rc=$?
+          # A completion sentinel plays the junit report's role: a run that
+          # wrote it finished the script, so its failure is real and is never
+          # retried.
+          if python -c "import sys,os; sys.exit(0 if os.path.exists('library-done.txt') else 1)"; then
+            echo "ran=true" >> "$GITHUB_OUTPUT"
+            exit $rc
+          fi
+          # The sentinel is only written on a rc=0 finish, so reaching here
+          # means the script did not finish or failed; either way rc is the
+          # truth. Fail so the retry gate can evaluate it.
+          if [ "$rc" = "127" ]; then
+            # 127 = command not found. Say WHAT was missing; builtins and
+            # python only, since coreutils are off PATH here.
+            command -v uv || echo "uv: NOT ON PATH"
+            command -v python || echo "python: NOT ON PATH"
+            python -c "import os; p='.venv/Scripts' if os.name=='nt' else '.venv/bin'; print(p, os.listdir(p)[:12] if os.path.isdir(p) else 'MISSING')" || true
+          fi
+          exit "${rc:-1}"
+
+      - name: Assert the library test finished
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.library.outcome }}" = "success" ]; then exit 0; fi
+          if [ "${{ steps.library_retry.outcome }}" = "success" ]; then
+            echo "::warning::Library test passed only on retry - the first attempt never finished. Track this."
+            exit 0
+          fi
+          echo "::error::Library test failed (attempt1=${{ steps.library.outcome }} ran=${{ steps.library.outputs.ran }}; attempt2=${{ steps.library_retry.outcome }} ran=${{ steps.library_retry.outputs.ran }})"
+          exit 1
 
   run-build-test:
     name: Build test ${{ matrix.python-version }} on ${{ matrix.os }}
@@ -210,10 +664,14 @@ jobs:
         if: ${{ matrix.os == 'windows-latest' }}
         shell: pwsh
         run: |
-          # Git for Windows ships OpenSSL DLLs in usr\bin that shadow the ones
-          # ladybug loads. The previous version of this step edited PATH in bash
-          # and called `export`, which dies with the step and never reached the
-          # test below; $GITHUB_ENV is what carries an edited PATH forward.
+          # Kept, but its original rationale was wrong and it did not fix the
+          # hang it was added for. PATH is NOT consulted for extension-module
+          # DLL resolution on Python 3.8+ (see cognee_db_workers/_windows_openssl.py),
+          # and after this guard landed (46bd2fe45, 2026-08-21) the Windows unit
+          # and library jobs kept wedging at the same rate, with "Dropped 1 PATH
+          # entry" in the log of every hang. Not deleted here because the
+          # delete-test jobs' original report predates the library finding and
+          # is not reproduced in the logs reviewed for SDK-533.
           $kept = $env:PATH -split ';' | Where-Object { $_ -notmatch 'Git\\usr\\bin' }
           $dropped = ($env:PATH -split ';').Count - $kept.Count
           "PATH=$($kept -join ';')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
@@ -254,9 +712,14 @@ jobs:
         if: ${{ matrix.os == 'windows-latest' }}
         shell: pwsh
         run: |
-          # Same guard as the Soft Delete job: Git for Windows ships OpenSSL
-          # DLLs in usr\bin that shadow the ones ladybug loads. This job runs
-          # the sibling delete test and never had the guard at all.
+          # Kept, but its original rationale was wrong and it did not fix the
+          # hang it was added for. PATH is NOT consulted for extension-module
+          # DLL resolution on Python 3.8+ (see cognee_db_workers/_windows_openssl.py),
+          # and after this guard landed (46bd2fe45, 2026-08-21) the Windows unit
+          # and library jobs kept wedging at the same rate, with "Dropped 1 PATH
+          # entry" in the log of every hang. Not deleted here because the
+          # delete-test jobs' original report predates the library finding and
+          # is not reproduced in the logs reviewed for SDK-533.
           $kept = $env:PATH -split ';' | Where-Object { $_ -notmatch 'Git\\usr\\bin' }
           $dropped = ($env:PATH -split ';').Count - $kept.Count
           "PATH=$($kept -join ';')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8

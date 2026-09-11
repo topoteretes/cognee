@@ -1,16 +1,14 @@
 """Memify pipeline that merges near-duplicate ``Entity`` nodes into one.
 
 Mirrors the structure of the sibling graph-mutating enrichment pipelines (e.g.
-``apply_feedback_weights``): it resolves the target dataset, enters that
-dataset's database context, and runs a single detect (extraction) task followed
-by a single merge (enrichment) task. The shared configuration is bound onto
+``apply_feedback_weights``): it resolves the target dataset and runs a single
+detect (extraction) task followed by a single merge (enrichment) task. The shared configuration is bound onto
 both tasks so detection and merge agree on thresholds and on ``dry_run``.
 """
 
 from typing import List, Optional
 
 from cognee import memify
-from cognee.context_global_variables import set_database_global_context_variables
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.pipelines.tasks.task import Task
@@ -94,18 +92,21 @@ async def consolidate_entities_pipeline(
         "allow_cross_type": allow_cross_type,
     }
 
-    async with set_database_global_context_variables(target.id, target.owner_id):
-        extraction_tasks = [Task(detect_entity_duplicates, config=config)]
-        enrichment_tasks = [Task(merge_entity_duplicates, config=config)]
+    extraction_tasks = [Task(detect_entity_duplicates, config=config)]
+    enrichment_tasks = [Task(merge_entity_duplicates, config=config)]
 
-        result = await memify(
-            extraction_tasks=extraction_tasks,
-            enrichment_tasks=enrichment_tasks,
-            data=[{}],  # placeholder seed; the tasks read entities from the graph
-            dataset=target.id,
-            user=user,
-            run_in_background=run_in_background,
-        )
+    # No set_database_global_context_variables scope around memify: the pipeline
+    # enters it itself under the dataset lock. Holding the scope's queue slot
+    # while memify waits on that lock inverts the canonical order
+    # (dataset lock -> queue slot) and can deadlock the process (SDK-483).
+    result = await memify(
+        extraction_tasks=extraction_tasks,
+        enrichment_tasks=enrichment_tasks,
+        data=[{}],  # placeholder seed; the tasks read entities from the graph
+        dataset=target.id,
+        user=user,
+        run_in_background=run_in_background,
+    )
 
     logger.info(
         "consolidate_entities pipeline finished (dataset=%s, dry_run=%s, threshold=%.2f).",

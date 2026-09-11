@@ -93,7 +93,7 @@ def install_sinks(monkeypatch):
                 await executable(kwargs.get("data"))
         return {"ds": SimpleNamespace(pipeline_run_id="run-123")}
 
-    async def fake_add_data_points(data_points, custom_edges=None, ctx=None):
+    async def fake_add_data_points(data_points, custom_edges=None, ctx=None, graph_only=False):
         sinks.graph_flushes.append({"nodes": list(data_points), "edges": list(custom_edges or [])})
         return data_points
 

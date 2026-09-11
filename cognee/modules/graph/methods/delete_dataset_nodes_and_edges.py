@@ -16,11 +16,12 @@ from cognee.modules.graph.methods import (
 from cognee.modules.graph.methods.delete_from_graph_and_vector import (
     delete_from_graph_and_vector,
 )
+from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElements
 from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
 from cognee.modules.users.methods.get_user import get_user
 
 
-async def delete_dataset_nodes_and_edges(dataset_id: UUID, user_id: UUID) -> None:
+async def delete_dataset_nodes_and_edges(dataset_id: UUID, user_id: UUID) -> DeletedGraphElements:
     user = await get_user(user_id)
     # Check if user has delete permission for the dataset before proceeding with deletion of related graph/vector nodes and edges.
     dataset = await get_authorized_dataset(user, dataset_id, "delete")
@@ -34,7 +35,7 @@ async def delete_dataset_nodes_and_edges(dataset_id: UUID, user_id: UUID) -> Non
         graph_engine = unified.graph
         if await stores_provenance_in_graph(graph_engine):
             await unified.delete_by_dataset_id(str(dataset_id))
-            return
+            return DeletedGraphElements()
 
     if backend_access_control_enabled():
         affected_nodes = await get_dataset_related_nodes(dataset_id)
@@ -57,3 +58,4 @@ async def delete_dataset_nodes_and_edges(dataset_id: UUID, user_id: UUID) -> Non
     # graph/vector nodes needed deletion (e.g. shared nodes across datasets).
     await delete_dataset_related_nodes(dataset_id)
     await delete_dataset_related_edges(dataset_id)
+    return DeletedGraphElements.from_ledger_rows(affected_nodes or [], affected_edges or [])

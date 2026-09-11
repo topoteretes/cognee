@@ -21,12 +21,28 @@ import os
 
 import pytest
 
+import sys
+
+
 pytest.importorskip("ladybug")
 
 from cognee.infrastructure.databases.graph.get_graph_engine import (
     acreate_graph_engine,
     create_graph_engine,
     graph_engine_cache,
+)
+
+# These tests construct subprocess workers explicitly, so the
+# *_SUBPROCESS_ENABLED=false the Windows CI jobs set cannot keep them from
+# spawning. On Windows the spawned child intermittently deadlocks at
+# interpreter startup (a python.exe frozen at ~3.8 MB that never signals
+# ready) and pytest hangs on it until the job timeout -- observed with the
+# watchdog on runs 33643650, 33648260941 and 33729891452. Tracked as
+# SDK-540; unskip these when its fix lands. Full coverage continues on the
+# ubuntu and macOS legs.
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="explicit worker spawn deadlocks intermittently on Windows (SDK-540)",
 )
 
 

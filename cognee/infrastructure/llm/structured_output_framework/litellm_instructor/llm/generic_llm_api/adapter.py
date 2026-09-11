@@ -20,6 +20,8 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
+from cognee.infrastructure.llm.streaming.stream_completion import stream_text_completion
+from cognee.infrastructure.llm.streaming.token_sink import TokenSink, get_active_token_sink
 from cognee.infrastructure.llm.retry_config import (
     llm_retry_condition,
     llm_retry_stop_condition,
@@ -31,8 +33,7 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
 )
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
-    LLMPaymentRequiredError,
-    is_budget_exhausted_error,
+    raise_if_budget_exhausted,
 )
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
@@ -89,6 +90,14 @@ class GenericAPIAdapter(LLMInterface):
     Type[BaseModel]) -> BaseModel
     """
 
+    # True for this class and for OpenAIAdapter, which reach the shared
+    # streaming path through this class's acreate_str_output. NOT inherited in
+    # practice by Anthropic, Gemini, Mistral or managed-identity Azure: each
+    # overrides acreate_structured_output without a plain-text branch, so each
+    # declares False for itself. Adding streaming to one means routing its
+    # plain-text call through stream_text_completion and flipping its flag.
+    supports_answer_streaming = True
+
     MAX_RETRIES = 2
     default_instructor_mode = get_instructor_mode("generic")
 
@@ -137,7 +146,22 @@ class GenericAPIAdapter(LLMInterface):
         llama.cpp-compatible servers don't honour, causing repeated parse
         failures and retry storms. A plain string needs no schema, so call
         litellm directly using this adapter's own connection config.
+
+        Returns the complete answer either way — streaming only changes whether
+        the tokens are *also* pushed to a listening sink on the way past, so no
+        caller of this method needs to know which path ran.
         """
+        # No second flag check: the promotion site already decided. Reading the
+        # config again here can disagree with it — search_in_datasets_context
+        # sets a per-dataset llm_config ContextVar — and a promotion whose
+        # adapter then refuses to stream is exactly how a request ends up
+        # promoted, claimed, and silent.
+        sink = get_active_token_sink()
+        if sink is not None:
+            return await self._acreate_str_output_streaming(
+                sink, text_input, system_prompt, **merged_kwargs
+            )
+
         async with llm_rate_limiter_context_manager():
             response = await litellm.acompletion(
                 model=self.model,
@@ -150,7 +174,28 @@ class GenericAPIAdapter(LLMInterface):
                 api_version=self.api_version,
                 **merged_kwargs,
             )
+        # Guarded for the same reason the streaming loop is: content-filter
+        # refusals and some proxy error envelopes come back with choices == [],
+        # and a bare IndexError is not retryable and says nothing useful.
+        if not response.choices:
+            raise ValueError(f"{self.name} returned no choices for a plain-text completion")
         return response.choices[0].message.content or ""
+
+    async def _acreate_str_output_streaming(
+        self, sink: TokenSink, text_input: str, system_prompt: str, **merged_kwargs: Any
+    ) -> str:
+        """Stream into ``sink`` and return the same string the blocking call would."""
+        return await stream_text_completion(
+            sink=sink,
+            model=self.model,
+            system_prompt=system_prompt,
+            text_input=text_input,
+            api_key=self.api_key,
+            endpoint=self.endpoint,
+            api_version=self.api_version,
+            adapter_name=self.name,
+            **merged_kwargs,
+        )
 
     @observe(as_type="generation")
     @retry(
@@ -223,6 +268,13 @@ class GenericAPIAdapter(LLMInterface):
             ContentPolicyViolationError,
             InstructorRetryException,
         ) as error:
+            # Budget exhaustion arrives wrapped in InstructorRetryException, so it has to
+            # be classified here: the handler further down is unreachable once this clause
+            # matches. Checked before the content-policy branch because the model's partial
+            # completion is rendered into str(error), so a budget rejection whose completion
+            # happens to mention a content policy would otherwise be misrouted to fallback.
+            raise_if_budget_exhausted(error)
+
             if (
                 isinstance(error, InstructorRetryException)
                 and "content management policy" not in str(error).lower()
@@ -262,6 +314,8 @@ class GenericAPIAdapter(LLMInterface):
                 ContentPolicyViolationError,
                 InstructorRetryException,
             ) as error:
+                raise_if_budget_exhausted(error)
+
                 if (
                     isinstance(error, InstructorRetryException)
                     and "content management policy" not in str(error).lower()
@@ -272,8 +326,8 @@ class GenericAPIAdapter(LLMInterface):
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"
                     ) from error
         except Exception as e:
-            if is_budget_exhausted_error(e):
-                raise LLMPaymentRequiredError() from e
+            # Same detail-carrying message as the wrapped-error path above.
+            raise_if_budget_exhausted(e)
             raise
 
     @observe(as_type="transcription")

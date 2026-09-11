@@ -24,13 +24,81 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunErrored,
     PipelineRunYield,
     PipelineRunAlreadyCompleted,
+    PipelineRunProgress,
 )
 from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.operations.run_tasks_with_telemetry import run_tasks_with_telemetry
+from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
 from ..tasks.task import Task
+from cognee.modules.provenance.edge_evidence.persistence import flush_context_provenance
 
 logger = get_logger("run_tasks_data_item")
+
+
+def _push_stage_progress(
+    yielded: PipelineRunYield,
+    ctx: Optional[PipelineContext],
+    tasks: list[Task],
+    pipeline_run_id: str,
+    progress_state: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Turn one intermediate PipelineRunYield into a PipelineRunProgress event
+    and push it to this run's queue, so backgrounded runs surface per-stage
+    progress over the /subscribe WebSocket instead of only the terminal event.
+
+    ``ctx.task_sequence`` (populated by handle_task in run_tasks_base.py as
+    each task executes) already names which stage just ran and its 1-based
+    position — no separate stage-tracking state needed here. push_to_queue
+    is a no-op when no queue exists for this pipeline_run_id (blocking mode),
+    so this is safe to call unconditionally.
+
+    ``progress_state`` (when given) is a dict owned by run_tasks.py, holding
+    only ``current_stage`` — this function is its sole writer. run_tasks.py
+    reads it back (alongside its own separately-tracked completed_items/
+    total_items counters) when calling log_pipeline_run_progress, so /status
+    (not just the WebSocket) can surface the current stage too.
+    """
+    current_stage = ctx.task_sequence[-1] if ctx and ctx.task_sequence else None
+    stage_index = len(ctx.task_sequence) if ctx else None
+    if progress_state is not None:
+        progress_state["current_stage"] = current_stage
+    # pipeline_run_id is sourced from the function's own parameter (the queue
+    # key), not yielded.pipeline_run_id, so the event body can never disagree
+    # with the subscription it's delivered under.
+    push_to_queue(
+        pipeline_run_id,
+        PipelineRunProgress(
+            pipeline_run_id=pipeline_run_id,
+            dataset_id=yielded.dataset_id,
+            dataset_name=yielded.dataset_name,
+            current_stage=current_stage,
+            stage_index=stage_index,
+            stage_total=len(tasks),
+        ),
+    )
+
+
+async def _drain_item_events(
+    events: AsyncGenerator[Any, None],
+    ctx: Optional[PipelineContext],
+    tasks: list[Task],
+    pipeline_run_id: str,
+    progress_state: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Consume one run_tasks_data_item_incremental/_regular generator to its end.
+
+    Every intermediate ``PipelineRunYield`` is forwarded to stage-progress
+    tracking; the one non-yield item — a ``{"run_info": ..., "data_id": ...}``
+    dict — is the item's final result, returned once the generator is exhausted.
+    """
+    result = None
+    async for item in events:
+        if isinstance(item, PipelineRunYield):
+            _push_stage_progress(item, ctx, tasks, pipeline_run_id, progress_state)
+        else:
+            result = item
+    return result
 
 
 async def run_tasks_data_item_incremental(
@@ -187,13 +255,22 @@ async def run_tasks_data_item_incremental(
         logger.error(
             f"Exception caught while processing data: {error}.\n Data processing failed for data item: {data_item}."
         )
+        from cognee.modules.operations import scrub_error_message
+
         yield {
             "run_info": PipelineRunErrored(
                 pipeline_run_id=pipeline_run_id,
                 payload=repr(error),
                 dataset_id=dataset.id,
                 dataset_name=dataset.name,
+                error_class=type(error).__name__,
+                error_message=scrub_error_message(error),
             ),
+            # In-memory handle to the root cause, so run_tasks can record and
+            # surface WHAT failed even on the non-raising path — otherwise the
+            # run ends as a generic "Pipeline run failed. Data item could not
+            # be processed." with a NULL error column.
+            "error": error,
             "data_id": data_id,
         }
 
@@ -263,6 +340,7 @@ async def run_tasks_data_item(
     user: User,
     incremental_loading: bool,
     data_cache: bool,
+    progress_state: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Process a single data item, choosing between incremental and regular processing.
@@ -281,15 +359,19 @@ async def run_tasks_data_item(
         user: User performing the operation
         incremental_loading: Whether to use incremental processing
         data_cache: Whether to use incremental processing (data caching)
+        progress_state: Optional shared dict (owned by run_tasks.py) that this
+            item's stage-progress ticks record ``current_stage`` into, so the
+            item-level progress log picks up the most recent stage name.
 
     Returns:
         Dict containing the final processing result, or None if processing was skipped
     """
-    # Go through async generator and return data item processing result. Result can be PipelineRunAlreadyCompleted when data item is skipped,
-    # PipelineRunCompleted when processing was successful and PipelineRunErrored if there were issues
-    result = None
+    # Result can be PipelineRunAlreadyCompleted when data item is skipped,
+    # PipelineRunCompleted when processing was successful, or PipelineRunErrored
+    # if there were issues — _drain_item_events pulls that final result out of
+    # the generator while forwarding every intermediate stage tick.
     if data_cache or incremental_loading:
-        async for result in run_tasks_data_item_incremental(
+        events = run_tasks_data_item_incremental(
             data_item=data_item,
             dataset=dataset,
             tasks=tasks,
@@ -298,10 +380,9 @@ async def run_tasks_data_item(
             pipeline_run_id=pipeline_run_id,
             ctx=ctx,
             user=user,
-        ):
-            pass
+        )
     else:
-        async for result in run_tasks_data_item_regular(
+        events = run_tasks_data_item_regular(
             data_item=data_item,
             dataset=dataset,
             tasks=tasks,
@@ -309,7 +390,22 @@ async def run_tasks_data_item(
             pipeline_run_id=pipeline_run_id,
             ctx=ctx,
             user=user,
-        ):
-            pass
+        )
 
+    try:
+        result = await _drain_item_events(events, ctx, tasks, pipeline_run_id, progress_state)
+    except Exception:
+        # Preserve the original pipeline exception if flushing already-written
+        # edge evidence also fails; rollback still has graph-native run refs.
+        try:
+            await flush_context_provenance(ctx)
+        except Exception as provenance_error:
+            logger.error(
+                "Failed to persist provenance for an errored data item: %s",
+                provenance_error,
+                exc_info=True,
+            )
+        raise
+
+    await flush_context_provenance(ctx)
     return result

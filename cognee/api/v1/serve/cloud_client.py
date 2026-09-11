@@ -7,6 +7,7 @@ from uuid import UUID
 
 import aiohttp
 
+from cognee.modules.search.types import ContextFormat
 from cognee.modules.ingestion.data_types.TextData import create_text_data
 from cognee.shared.logging_utils import get_logger
 
@@ -69,6 +70,20 @@ class CloudClient:
         except Exception:
             return False
 
+    async def _auth_check(self) -> Optional[int]:
+        """Status of an authenticated probe, or None when unreachable.
+
+        ``/health`` is unauthenticated, so it cannot tell a working API key
+        from a rejected one. Probing an authenticated endpoint lets serve()
+        fail at connect time instead of on the first real operation.
+        """
+        try:
+            session = await self._get_session()
+            async with session.get(f"{self.service_url}/api/v1/datasets") as resp:
+                return resp.status
+        except Exception:
+            return None
+
     # ----- V2 Operations -----
 
     async def remember(self, data: Any, dataset_name: str = "main_dataset", **kwargs) -> dict:
@@ -96,14 +111,14 @@ class CloudClient:
         if kwargs.get("import_mode") is not None:
             form.add_field("import_mode", str(kwargs["import_mode"]))
 
-        # Code repos travel as spec strings in the 'repositories' form field —
+        # Code repos travel as spec strings in the 'raw_data' form field —
         # the server clones git URLs itself and reads local paths from its own
         # filesystem (only useful when it shares the caller's filesystem).
         # Nothing is uploaded.
         if content_type_kw == "code":
             specs = data if isinstance(data, list) else [data]
             for spec in specs:
-                form.add_field("repositories", str(spec))
+                form.add_field("raw_data", str(spec))
             if kwargs.get("index_vectors"):
                 form.add_field("index_vectors", "true")
         # Skills are local SKILL.md files. The server's add_skills() reads
@@ -218,6 +233,10 @@ class CloudClient:
             payload["node_name"] = kwargs["node_name"]
         if kwargs.get("only_context"):
             payload["only_context"] = kwargs["only_context"]
+        # Only the non-default shape is worth sending: an older instance ignores the
+        # field, and omitting it keeps the request identical to what it always was.
+        if ContextFormat.parse(kwargs.get("context_format")) is ContextFormat.PROMPT:
+            payload["context_format"] = ContextFormat.PROMPT.value
         if kwargs.get("verbose"):
             payload["verbose"] = kwargs["verbose"]
         if kwargs.get("session_id"):
@@ -307,6 +326,74 @@ class CloudClient:
                 raise RuntimeError(f"Remote add failed ({resp.status}): {body}")
             return await resp.json()
 
+    async def update(
+        self,
+        data_id: UUID,
+        data: Any,
+        dataset_id: UUID,
+        node_set: Optional[list] = None,
+        chunk_level_diff: bool = True,
+    ) -> dict:
+        """PATCH /api/v1/update — replace one document in place on the remote.
+
+        Mirrors the route: ``data_id``, ``dataset_id`` and ``chunk_level_diff``
+        travel as query params, the new content as the multipart ``data`` file,
+        ``node_set`` as repeated form fields. The server keeps the document's
+        id across the update, so this is a real replace.
+        """
+        # update() replaces exactly one document; the local implementation
+        # unwraps single-item lists and DataItem wrappers the same way.
+        if isinstance(data, list):
+            if len(data) != 1:
+                raise ValueError(f"update() replaces exactly one document; got {len(data)} items.")
+            data = data[0]
+        if hasattr(data, "data") and hasattr(data, "data_id") and not hasattr(data, "read"):
+            data = data.data
+
+        session = await self._get_session()
+
+        form = aiohttp.FormData()
+        if isinstance(data, str):
+            form.add_field(
+                "data",
+                io.BytesIO(data.encode("utf-8")),
+                filename=_text_upload_filename(data),
+                content_type="text/plain",
+            )
+        elif hasattr(data, "read"):
+            name = getattr(data, "name", "upload")
+            form.add_field("data", data, filename=Path(name).name or "upload")
+        else:
+            raise TypeError(
+                f"update() over serve() accepts text or a file object; got {type(data)}"
+            )
+        for tag in node_set or []:
+            if tag:
+                form.add_field("node_set", str(tag))
+
+        params = {
+            "data_id": str(data_id),
+            "dataset_id": str(dataset_id),
+            "chunk_level_diff": "true" if chunk_level_diff else "false",
+        }
+        async with session.patch(
+            f"{self.service_url}/api/v1/update", params=params, data=form
+        ) as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Remote update failed ({resp.status}): {body}")
+            return await resp.json()
+
+    async def list_data(self, dataset_id: UUID) -> list:
+        """GET /api/v1/datasets/{dataset_id}/data — the documents in a dataset."""
+        session = await self._get_session()
+
+        async with session.get(f"{self.service_url}/api/v1/datasets/{dataset_id}/data") as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Remote list_data failed ({resp.status}): {body}")
+            return await resp.json()
+
     async def cognify(self, datasets: Any = None, **kwargs) -> dict:
         """POST /api/v1/cognify — build the knowledge graph."""
         session = await self._get_session()
@@ -357,6 +444,8 @@ class CloudClient:
             payload["nodeName"] = kwargs["node_name"]
         if kwargs.get("only_context") is not None:
             payload["onlyContext"] = kwargs["only_context"]
+        if ContextFormat.parse(kwargs.get("context_format")) is ContextFormat.PROMPT:
+            payload["contextFormat"] = ContextFormat.PROMPT.value
         if kwargs.get("verbose") is not None:
             payload["verbose"] = kwargs["verbose"]
         if kwargs.get("skills") is not None:

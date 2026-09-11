@@ -31,11 +31,16 @@ from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.graph.config import get_graph_context_config
 from cognee.modules.retrieval.base_retriever import BaseRetriever
+from cognee.modules.retrieval.code_graph_diagram import DIAGRAM_FORMATS, render_result_diagram
 
 
 CODE_NODE_TYPES = (
     "ApiEndpoint",
+    "CodeAssociation",
+    "CodeExtractionAccount",
     "CodeInsight",
+    "CodeIntent",
+    "CodeLintFinding",
     "CodeModule",
     "CodeService",
     "CodeSymbol",
@@ -47,7 +52,11 @@ CODE_NODE_TYPES = (
 
 _KIND_BY_TYPE = {
     "ApiEndpoint": "route",
+    "CodeAssociation": "association",
+    "CodeExtractionAccount": "extraction",
     "CodeInsight": "insight",
+    "CodeIntent": "intent",
+    "CodeLintFinding": "lint",
     "CodeModule": "module",
     "CodeService": "service",
     "CodeSymbol": "symbol",
@@ -63,8 +72,17 @@ _OPERATIONS = {
     "traverse",
     "find_path",
     "impact_analysis",
+    "insights",
+    "architecture",
     "delta",
 }
+# The node kinds an architecture overview shows by default: the module
+# structure plus what it exposes (routes), persists to (storage) and deploys
+# as (services). Symbols, import edges and declared packages are rolled up
+# into module-to-module edges rather than drawn.
+_ARCHITECTURE_DEFAULT_TYPES = {"CodeModule", "ApiEndpoint", "StorageResource", "CodeService"}
+# Edges that describe containment or synthesis rather than a dependency.
+_ARCHITECTURE_SKIPPED_EDGE_TYPES = {"part_of", "has_method", "evidences"}
 _TYPE_SYMBOL_KINDS = {"struct", "class", "interface", "type"}
 _CODE_EXTENSIONS = {
     "c",
@@ -202,6 +220,24 @@ def _offset(value: Any) -> int:
     return value
 
 
+def _confidence(value: Any, *, field: str) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
+        raise CodeSearchValidationError(f"CODE {field} must be a number between 0 and 1.")
+    return float(value)
+
+
+def _optional_bool(value: Any, *, field: str) -> Optional[bool]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().lower() in {"true", "false"}:
+        return value.strip().lower() == "true"
+    raise CodeSearchValidationError(f"CODE {field} must be a boolean.")
+
+
 def _direction(value: Any, *, default: str) -> str:
     direction = str(value or default).lower()
     if direction not in {"forward", "reverse", "both"}:
@@ -313,12 +349,22 @@ class _CodeGraphSnapshot:
         self.by_name: dict[str, set[str]] = defaultdict(set)
         self.by_file: dict[str, set[str]] = defaultdict(set)
         self.by_repo: dict[str, set[str]] = defaultdict(set)
+        # enola's own fact id (32 hex chars) -> cognee node id, so callers can
+        # seed operations with ids copied from facts.jsonl or from enola's MCP
+        # tools. Several enola ids may collapse onto one node; the node keeps
+        # the first, so only that one is addressable here.
+        self.by_enola_id: dict[str, str] = {}
         self.by_property: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
-        for node_id, node in self.nodes.items():
+        for node_id, node in sorted(
+            self.nodes.items(), key=lambda item: self.node_sort_key(item[0])
+        ):
             self.by_type[str(node.get("type", ""))].add(node_id)
             self.by_name[str(node.get("name", ""))].add(node_id)
             self.by_file[self.file_of(node)].add(node_id)
             self.by_repo[str(node.get("repo", ""))].add(node_id)
+            enola_id = node.get("enola_id")
+            if isinstance(enola_id, str) and enola_id:
+                self.by_enola_id.setdefault(enola_id, node_id)
             for key, value in node.items():
                 if key != "fact_properties":
                     self._index_property(node_id, key, value)
@@ -394,10 +440,12 @@ class _CodeGraphSnapshot:
         aliases = {
             "file": self.file_of(node),
             "line": node.get("line"),
+            "end_line": node.get("end_line"),
             "repo": node.get("repo"),
             "path": node.get("path"),
             "description": node.get("description"),
             "symbol_kind": node.get("symbol_kind"),
+            "enola_id": node.get("enola_id"),
         }
         result.update({key: value for key, value in aliases.items() if value not in (None, "")})
         properties = self.properties_of(node)
@@ -445,6 +493,9 @@ class _CodeGraphSnapshot:
     ) -> str:
         if node_id:
             normalized_id = str(node_id)
+            if normalized_id not in self.nodes and normalized_id in self.by_enola_id:
+                # An enola fact id (from facts.jsonl or enola's own tools).
+                normalized_id = self.by_enola_id[normalized_id]
             if normalized_id not in self.nodes:
                 raise CodeSeedNotFoundError(f"CODE could not resolve {role} id {normalized_id!r}.")
             if repo and self.nodes[normalized_id].get("repo") != repo:
@@ -770,6 +821,28 @@ class CodeRetriever(BaseRetriever):
             )
         self.operation = operation
         self.config = combined
+        self.diagram_format = self._diagram_format(combined.get("diagram"), operation)
+
+    @staticmethod
+    def _diagram_format(value: Any, operation: str) -> Optional[str]:
+        """Which diagram to attach to the result, if any.
+
+        ``diagram`` may be a format name ("mermaid", "dot"), True (Mermaid) or
+        False/None (none). The architecture overview draws itself by default,
+        since a picture is the point of it; every other operation is opt-in.
+        """
+        if value is None:
+            return "mermaid" if operation == "architecture" else None
+        if value is False:
+            return None
+        if value is True:
+            return "mermaid"
+        if isinstance(value, str) and value.strip().lower() in DIAGRAM_FORMATS:
+            return value.strip().lower()
+        raise CodeSearchValidationError(
+            f"Unsupported CODE diagram {value!r}; expected one of "
+            f"{', '.join(DIAGRAM_FORMATS)}, or a boolean."
+        )
 
     async def prepare_session_turn_for_retrieval(self, query: str):
         """Bypass session interpretation, which may use LLMs or vector search."""
@@ -799,7 +872,10 @@ class CodeRetriever(BaseRetriever):
             raise CodeSearchValidationError("SearchType.CODE does not support batched queries.")
         snapshot = await self._snapshot()
         handler = getattr(self, f"_{self.operation}")
-        return handler(snapshot, query or "")
+        result = handler(snapshot, query or "")
+        if self.diagram_format is not None:
+            result["diagram"] = render_result_diagram(result, self.diagram_format)
+        return result
 
     async def get_context_from_objects(
         self,
@@ -841,9 +917,222 @@ class CodeRetriever(BaseRetriever):
                     "repo": repo_name,
                     "last_snapshot_id": node.get("last_snapshot_id"),
                     "delta": node.get("last_delta"),
+                    # receipt.json projection stamped with the snapshot: format
+                    # and enola versions, git provenance, counts and the
+                    # extraction-quality block (parse errors, files parsed vs
+                    # seen, skip census). None before receipt stamping existed.
+                    "receipt": _normalize_value(node.get("last_receipt")),
                 }
             )
         return {"operation": "delta", "repositories": repositories}
+
+    def _architecture(self, graph: _CodeGraphSnapshot, query: str) -> dict[str, Any]:
+        """Module-level overview of the code graph, drawn as a diagram by default.
+
+        Shows modules plus the routes, storage and services they declare
+        (``node_types`` overrides the set), and rolls every other edge up to
+        the modules that declare its endpoints: two symbols calling across
+        modules become one ``calls`` edge between the modules, carrying a
+        ``count``. Edges internal to one module are dropped. ``repo`` narrows
+        to one repository; ``max_nodes`` (default 80) keeps the picture
+        readable by keeping the best-connected nodes and reporting
+        ``truncated``.
+        """
+        repo = self.config.get("repo")
+        node_types = _node_types(self.config.get("node_types")) or set(_ARCHITECTURE_DEFAULT_TYPES)
+        max_nodes = _bounded_int(
+            self.config.get("max_nodes"), field="max_nodes", default=80, maximum=300
+        )
+        relation_types = self._relation_types()
+
+        def in_scope(node_id: str) -> bool:
+            node = graph.nodes[node_id]
+            return node.get("type") in node_types and (repo is None or node.get("repo") == repo)
+
+        module_cache: dict[str, Optional[str]] = {}
+
+        def module_of(node_id: str) -> Optional[str]:
+            """The module that declares a fact: its `declares` edge, else its file's directory."""
+            if node_id in module_cache:
+                return module_cache[node_id]
+            node = graph.nodes[node_id]
+            found: Optional[str] = None
+            if node.get("type") == "CodeModule":
+                found = node_id
+            else:
+                for edge in graph.forward.get(node_id, []):
+                    if (
+                        edge["type"] == "declares"
+                        and graph.nodes[edge["target_id"]].get("type") == "CodeModule"
+                    ):
+                        found = edge["target_id"]
+                        break
+                if found is None:
+                    directory = (
+                        graph.file_of(node).rsplit("/", 1)[0] if "/" in graph.file_of(node) else "."
+                    )
+                    while found is None:
+                        candidates = sorted(
+                            candidate
+                            for candidate in graph.by_name.get(directory, set())
+                            if graph.nodes[candidate].get("type") == "CodeModule"
+                            and graph.nodes[candidate].get("repo") == node.get("repo")
+                        )
+                        if candidates:
+                            found = candidates[0]
+                        elif directory in (".", ""):
+                            break
+                        else:
+                            directory = directory.rsplit("/", 1)[0] if "/" in directory else "."
+            module_cache[node_id] = found
+            return found
+
+        def endpoint(node_id: str) -> Optional[str]:
+            return node_id if in_scope(node_id) else module_of(node_id)
+
+        rolled: dict[tuple[str, str, str], int] = defaultdict(int)
+        for edge in graph.edges:
+            if edge["type"] in _ARCHITECTURE_SKIPPED_EDGE_TYPES:
+                continue
+            if relation_types is not None and edge["type"] not in relation_types:
+                continue
+            source = endpoint(edge["source_id"])
+            target = endpoint(edge["target_id"])
+            if source is None or target is None or source == target:
+                continue
+            if not in_scope(source) or not in_scope(target):
+                continue
+            if edge["type"] == "declares" and graph.nodes[source].get("type") != "CodeModule":
+                # A route/storage fact declares its module; draw it the way an
+                # architecture reads — the module declares (exposes) the fact.
+                source, target = target, source
+            rolled[(source, target, edge["type"])] += 1
+
+        degree: dict[str, int] = defaultdict(int)
+        for source, target, _type in rolled:
+            degree[source] += 1
+            degree[target] += 1
+        candidates = [node_id for node_id in graph.nodes if in_scope(node_id)]
+        candidates.sort(key=lambda node_id: (-degree[node_id], graph.node_sort_key(node_id)))
+        kept = candidates[:max_nodes]
+        kept_set = set(kept)
+        kept.sort(key=graph.node_sort_key)
+
+        edges = []
+        for (source, target, edge_type), count in sorted(
+            rolled.items(),
+            key=lambda item: (
+                item[0][2],
+                graph.node_sort_key(item[0][0]),
+                graph.node_sort_key(item[0][1]),
+            ),
+        ):
+            if source in kept_set and target in kept_set:
+                edges.append(
+                    {
+                        "source_id": source,
+                        "source": graph.nodes[source].get("name"),
+                        "target_id": target,
+                        "target": graph.nodes[target].get("name"),
+                        "type": edge_type,
+                        "count": count,
+                    }
+                )
+        repos = sorted({str(graph.nodes[node_id].get("repo") or "") for node_id in kept})
+        return {
+            "operation": "architecture",
+            "repos": [item for item in repos if item],
+            "nodes": [graph.fact(node_id, include_relations=False) for node_id in kept],
+            "edges": edges,
+            "stats": {
+                "nodes_total": len(candidates),
+                "nodes_shown": len(kept),
+                "edges_shown": len(edges),
+                "truncated": len(candidates) > len(kept),
+            },
+        }
+
+    def _insights(self, graph: _CodeGraphSnapshot, query: str) -> dict[str, Any]:
+        """Explainer findings (CodeInsight nodes) with the facts they cite.
+
+        Filters: ``source``/``sources`` (explainer names such as cycles,
+        hotspots, god-class), ``min_confidence`` (0-1; enola scores
+        structural findings 1.0 and heuristic ones below), ``informational``
+        (True keeps only describe-the-graph findings, False drops them),
+        ``repo``, and a title substring via ``name`` (or the query text when
+        no other filter is set). Each insight carries ``evidence``: the facts
+        its ``evidences`` edges resolve to. Ordered by confidence descending,
+        then the stable node order; paginated like query_facts.
+        """
+        sources = set(_as_strings(self.config.get("sources"), "sources"))
+        if self.config.get("source"):
+            sources.add(str(self.config["source"]))
+        min_confidence = _confidence(self.config.get("min_confidence"), field="min_confidence")
+        informational = _optional_bool(self.config.get("informational"), field="informational")
+        repo = self.config.get("repo")
+        query_name = query if set(self.config).issubset({"operation"}) else ""
+        substring = str(self.config.get("name") or query_name).strip().casefold()
+
+        def confidence_of(node_id: str) -> Optional[float]:
+            value = graph.properties_of(graph.nodes[node_id]).get("confidence")
+            return (
+                float(value)
+                if isinstance(value, (int, float)) and not isinstance(value, bool)
+                else None
+            )
+
+        matched = []
+        for node_id in graph.by_type.get("CodeInsight", set()):
+            node = graph.nodes[node_id]
+            properties = graph.properties_of(node)
+            if sources and properties.get("source") not in sources:
+                continue
+            if min_confidence is not None:
+                confidence = confidence_of(node_id)
+                if confidence is None or confidence < min_confidence:
+                    continue
+            if informational is not None and bool(properties.get("informational")) != informational:
+                continue
+            if repo is not None and node.get("repo") != repo:
+                continue
+            if substring and substring not in str(node.get("name") or "").casefold():
+                continue
+            matched.append(node_id)
+
+        matched.sort(
+            key=lambda node_id: (
+                -(confidence_of(node_id) if confidence_of(node_id) is not None else -1.0),
+                graph.node_sort_key(node_id),
+            )
+        )
+        by_source: dict[str, int] = defaultdict(int)
+        for node_id in matched:
+            by_source[
+                str(graph.properties_of(graph.nodes[node_id]).get("source") or "unknown")
+            ] += 1
+
+        total = len(matched)
+        offset = _offset(self.config.get("offset"))
+        limit = _bounded_int(self.config.get("limit"), field="limit", default=50, maximum=500)
+        page = matched[offset : offset + limit]
+        insights = []
+        for node_id in page:
+            insight = graph.fact(node_id, include_relations=False)
+            insight["evidence"] = [
+                graph.fact(edge["target_id"], include_relations=False)
+                for edge in graph.forward.get(node_id, [])
+                if edge["type"] == "evidences"
+            ]
+            insights.append(insight)
+        return {
+            "operation": "insights",
+            "insights": insights,
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "has_more": offset + len(page) < total,
+            "by_source": dict(sorted(by_source.items())),
+        }
 
     def _query_facts(self, graph: _CodeGraphSnapshot, query: str) -> dict[str, Any]:
         kinds = _as_strings(self.config.get("kinds"), "kinds")

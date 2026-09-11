@@ -98,3 +98,18 @@ async def test_get_permitted_dataset_ids_empty_when_no_datasets(monkeypatch):
     result = await permitted_ids_module.get_permitted_dataset_ids(_user_id())
 
     assert result == []
+
+
+def test_permission_denied_error_threads_log_kwargs(caplog):
+    """The zero-datasets raise is expected and handled — it must be quietable.
+
+    PermissionDeniedError has to accept the base class's log/log_level kwargs
+    (COG-6268); without the passthrough, log_level="DEBUG" raised TypeError and
+    every zero-dataset lookup emitted a spurious ERROR at construction time.
+    """
+    import logging
+
+    with caplog.at_level(logging.ERROR):
+        PermissionDeniedError(message="no datasets", log_level="DEBUG")
+
+    assert not [r for r in caplog.records if "PermissionDeniedError" in r.getMessage()]

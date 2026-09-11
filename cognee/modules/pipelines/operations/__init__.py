@@ -2,4 +2,5 @@ from .log_pipeline_run_initiated import log_pipeline_run_initiated
 from .log_pipeline_run_start import log_pipeline_run_start
 from .log_pipeline_run_complete import log_pipeline_run_complete
 from .log_pipeline_run_error import log_pipeline_run_error
+from .log_pipeline_run_progress import log_pipeline_run_progress
 from .pipeline import run_pipeline

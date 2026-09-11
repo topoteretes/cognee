@@ -40,8 +40,14 @@ async def get_specific_user_permission_datasets(
         search_datasets = user_permission_access_datasets
 
     if len(search_datasets) == 0:
+        # A user with zero datasets is a normal state (fresh install, heartbeat
+        # recall before first ingestion) and get_readable_datasets converts this
+        # raise into an empty list — log at DEBUG so it doesn't surface as a
+        # spurious ERROR on every such call. The line-36 raise above stays at
+        # ERROR: requesting specific unpermitted datasets is a real denial.
         raise PermissionDeniedError(
-            f"Request owner does not have permission: [{permission_type}] for any dataset."
+            f"Request owner does not have permission: [{permission_type}] for any dataset.",
+            log_level="DEBUG",
         )
 
     return search_datasets

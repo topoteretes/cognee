@@ -7,6 +7,22 @@ from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 
 
+@pytest.fixture(autouse=True)
+def _no_real_llm_calls():
+    """Keep every test in this file off the network.
+
+    ``get_completion_from_context`` calls ``generate_completion``, which
+    test_get_context_success does not patch, so the call escaped to the real
+    provider once the suite was sharded and the accidental upstream patch
+    was no longer in the same process. Per-test patches override this one.
+    """
+    with patch(
+        "cognee.modules.retrieval.triplet_retriever.generate_completion",
+        new=AsyncMock(return_value="Generated answer"),
+    ):
+        yield
+
+
 @pytest.fixture
 def mock_vector_engine():
     """Create a mock vector engine."""

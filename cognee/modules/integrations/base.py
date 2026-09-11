@@ -117,6 +117,47 @@ class OAuthIntegration(ABC):
     def frontend_base_url(self) -> str:
         """Where the browser lands once the OAuth round-trip completes."""
 
+    async def exchange_callback(self, code: str, params: dict[str, str]) -> dict[str, Any]:
+        """Exchange one provider callback into the raw token response.
+
+        Default delegates to ``exchange_code`` — the plain OAuth2 shape where
+        ``code`` is the only thing the callback carries. Override when the
+        provider sends more than a code (GitHub App installs carry an
+        ``installation_id`` alongside it); ``params`` is the callback's full
+        query string, minus nothing — the adapter picks what it trusts.
+        """
+        return await self.exchange_code(code)
+
+    def webhook_verifier(self) -> Optional["WebhookVerifier"]:
+        """The verifier for this provider's inbound webhooks, if it has any.
+
+        Default ``None``: the generic ``POST /{provider}/events`` route
+        rejects deliveries for a provider that doesn't opt in. Returning a
+        verifier turns that route on for this provider; pair it with a
+        ``handle_webhook`` override that actually does something.
+        """
+        return None
+
+    async def handle_webhook(self, raw_body: bytes, headers: dict[str, str]) -> None:
+        """Process one verified webhook delivery.
+
+        Called off the request path (the route acks the provider first), so
+        implementations may do slow work but must not assume a live request.
+        ``headers`` are lower-cased — providers put the event name in a
+        header (GitHub's ``x-github-event``), not the body.
+        """
+        return None
+
+    async def on_installed(self, credential: IntegrationCredential) -> None:
+        """Post-install hook, fired in the background after a successful connect.
+
+        Default no-op. Override for providers whose connect should kick off
+        work beyond storing the credential (an initial content sync, say).
+        Runs detached from the callback request — failures log, they never
+        break the install redirect.
+        """
+        return None
+
     async def revoke_remote(self, credential: IntegrationCredential) -> None:
         """Best-effort remote token revoke, called on disconnect.
 

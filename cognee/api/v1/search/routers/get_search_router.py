@@ -11,7 +11,7 @@ from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse, InDTO, OutDTO
 from cognee.exceptions import CogneeApiError
 from cognee.modules.search.operations import get_history
-from cognee.modules.search.types import SearchResult, SearchType
+from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.usage_logger import log_usage
@@ -46,7 +46,11 @@ class SearchPayloadDTO(InDTO):
             " When provided, the datasets name list is ignored."
         ),
     )
-    query: str = Field(default="What is in the document?")
+    query: str = Field(
+        ...,
+        examples=["What is in the document?"],
+        description="The question to answer. Required; there is no default query.",
+    )
     system_prompt: Optional[str] = Field(
         default="Answer the question using the provided context. Be as brief as possible."
     )
@@ -60,6 +64,25 @@ class SearchPayloadDTO(InDTO):
     )
     top_k: Optional[int] = Field(default=15)
     only_context: bool = Field(default=False)
+    context_format: ContextFormat = Field(
+        default=ContextFormat.CONTEXT,
+        examples=[ContextFormat.CONTEXT.value],
+        description=(
+            "Shape of an only_context result. 'context' returns the bare retrieval"
+            " context; 'prompt' returns the full envelope a completion would have"
+            " received — session guidance, conversation history, and the rendered"
+            " user and system prompts. The session layer comes from session_id"
+            " (the default session when omitted). Ignored unless only_context is true."
+        ),
+    )
+    session_id: Optional[str] = Field(
+        default=None,
+        examples=[None],
+        description=(
+            "Session whose history and guidance feed the completion (or the"
+            " only_context prompt preview). Omit to use the default session."
+        ),
+    )
     verbose: bool = Field(
         default=False,
         description=(
@@ -98,7 +121,10 @@ class SearchPayloadDTO(InDTO):
         default=None,
         description=(
             "Structured arguments for search_type=CODE. Set operation to query_facts, "
-            "explore, traverse, find_path, or impact_analysis."
+            "explore, traverse, find_path, impact_analysis, insights, architecture, or "
+            "delta. Add diagram='mermaid' (or 'dot', or true) to receive the result "
+            "rendered as diagram source under search_result[0].diagram; architecture "
+            "includes a Mermaid diagram unless diagram=false."
         ),
     )
 
@@ -186,6 +212,8 @@ def get_search_router() -> APIRouter:
         - **node_name** Optional[list[str]]: Filter results to specific node_sets defined in the add pipeline (for targeted search).
         - **top_k** (Optional[int]): Maximum number of results to return (default: 15)
         - **only_context** bool: Set to true to only return context Cognee will be sending to LLM in Completion type searches. This will be returned instead of LLM calls for completion type searches.
+        - **context_format** str: Shape of an only_context result — "context" (default, the bare retrieval context) or "prompt" (the full envelope a completion would receive: session guidance, conversation history, and the rendered user and system prompts).
+        - **session_id** (Optional[str]): Session whose history and guidance feed the completion or the prompt preview; the default session when omitted.
         - **verbose** (bool): Return detailed result information including the graph representation when available (default: false)
         - **skills** (Optional[List[str]]): Skill names to load into the agentic retriever (AGENTIC_COMPLETION only)
         - **tools** (Optional[List[str]]): Tool whitelist for AGENTIC_COMPLETION searches
@@ -222,6 +250,8 @@ def get_search_router() -> APIRouter:
                 "node_name": len(payload.node_name or []),
                 "top_k": payload.top_k,
                 "only_context": payload.only_context,
+                "context_format": payload.context_format,
+                "session_id": payload.session_id,
                 "verbose": payload.verbose,
                 "skills": payload.skills,
                 "tools": payload.tools,
@@ -248,6 +278,8 @@ def get_search_router() -> APIRouter:
                 top_k=payload.top_k,
                 verbose=payload.verbose,
                 only_context=payload.only_context,
+                context_format=payload.context_format,
+                session_id=payload.session_id,
                 skills=payload.skills,
                 tools=payload.tools,
                 max_iter=payload.max_iter,

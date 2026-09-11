@@ -67,10 +67,27 @@ async def resolve_dlt_sources(
         from dlt.extract import DltResource, SourceFactory
         from dlt.extract.source import DltSource
     except ImportError:
-        # dlt not installed — nothing to resolve. Warn when inputs would have
-        # matched the auto-detection below: they silently degrade to plain
-        # (LLM-processed) document ingestion otherwise.
-        _log_structured_inputs_without_dlt(data if isinstance(data, list) else [data])
+        # dlt not installed — nothing to resolve. Inputs that would have matched the
+        # auto-detection below otherwise degrade to plain document ingestion.
+        #
+        # For a connection string that degradation is a credential leak, not just a
+        # loss of function: the DSN is returned unchanged, ingested as a text
+        # document, and written verbatim to disk by LocalFileStorage.store(). A DSN
+        # like postgresql://user:pw@host/db -- the form .env.template itself uses --
+        # lands in clear text on the filesystem, and the user does not get the table
+        # contents they asked for either. Refuse instead.
+        items = data if isinstance(data, list) else [data]
+        _log_structured_inputs_without_dlt(items)
+        if any(isinstance(item, str) and is_connection_string(item) for item in items):
+            from cognee.exceptions import CogneeValidationError
+
+            raise CogneeValidationError(
+                message="A database connection string was passed but the 'dlt' extra is "
+                "not installed, so it cannot be read. Install it with "
+                "`pip install cognee[dlt]`. Refusing to ingest the connection string "
+                "as a plain document: it would be stored on disk in clear text.",
+                name="DltExtraNotInstalled",
+            )
         return data, None
 
     primary_key = kwargs["primary_key"] if "primary_key" in kwargs else None
@@ -243,23 +260,29 @@ def _normalize_structured_inputs(data_list: list, query: Optional[str]) -> list:
 
 def _log_structured_inputs_without_dlt(data_list: list) -> None:
     """Warn when inputs that would auto-route to the DLT path are about to be
-    ingested as plain documents because dlt is not installed."""
-    names = []
+    ingested as plain documents because dlt is not installed. Only counts are
+    logged — the inputs themselves may embed credentials (connection strings)."""
+    csv_paths = 0
+    connection_strings = 0
+    csv_uploads = 0
     for item in data_list:
         if isinstance(item, str) and is_csv_path(item):
-            names.append(item)
+            csv_paths += 1
         elif isinstance(item, str) and is_connection_string(item):
-            # Never log the string itself — it may embed credentials.
-            names.append("<connection string>")
+            connection_strings += 1
         elif is_csv_upload(item):
-            names.append(getattr(item, "filename", None) or getattr(item, "name", "<upload>"))
-    if names:
+            csv_uploads += 1
+    total = csv_paths + connection_strings + csv_uploads
+    if total:
         logger.warning(
-            "dlt is not installed: %d structured input(s) (%s) will be ingested as plain "
-            "documents through the standard LLM pipeline instead of the DLT manifest path. "
-            'Install the dlt extra (pip install "cognee[dlt]") to route them through DLT.',
-            len(names),
-            ", ".join(str(name) for name in names[:5]),
+            "dlt is not installed: %d structured input(s) (%d CSV path(s), %d connection "
+            "string(s), %d CSV upload(s)) will be ingested as plain documents through the "
+            "standard LLM pipeline instead of the DLT manifest path. Install the dlt extra "
+            '(pip install "cognee[dlt]") to route them through DLT.',
+            total,
+            csv_paths,
+            connection_strings,
+            csv_uploads,
         )
 
 
@@ -736,7 +759,10 @@ async def _delete_dlt_orphans(
                     )
 
                     await invalidate_sessions_for_deleted_data(
-                        dataset.id, deleted_elements.node_ids, deleted_elements.edge_ids
+                        dataset.id,
+                        deleted_elements.node_ids,
+                        deleted_elements.edge_ids,
+                        user_id=user.id,
                     )
                 except Exception:
                     logger.warning(

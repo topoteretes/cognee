@@ -9,13 +9,11 @@ import {
 
 // Per-integration session_id prefix. Detection is coarse on purpose — any session
 // whose id starts with the prefix counts as connected. Keep these in sync with
-// the shipped integrations (claude-code → "cc_", codex → "codex_", opencode →
-// "opencode_" as emitted by their plugins' _generate_session_id). Openclaw and
-// API/MCP have no fixed prefix.
-const INTEGRATION_SESSION_PREFIX: Record<string, string> = {
+// the shipped integrations (claude-code → "cc_", codex → "codex_" as emitted by
+// the plugins' _generate_session_id). Openclaw and API/MCP have no fixed prefix.
+export const INTEGRATION_SESSION_PREFIX: Record<string, string> = {
   "claude-code": "cc_",
   codex: "codex_",
-  opencode: "opencode_",
 };
 
 /**

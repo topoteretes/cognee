@@ -270,7 +270,9 @@ async def test_cognify_rollback_integration_keeps_preexisting_data_when_pipeline
 
     monkeypatch.setattr(cognify_module, "get_default_tasks", _patched_get_default_tasks)
 
-    cognify_result = await cognee.cognify(datasets=[dataset_name], user=user)
+    # raise_on_error=False: this test inspects the errored run info directly;
+    # the default would raise CognifyFailedError here (COG-6276).
+    cognify_result = await cognee.cognify(datasets=[dataset_name], user=user, raise_on_error=False)
     run_info = cognify_result[dataset.id]
     assert run_info.status == "PipelineRunErrored"
 

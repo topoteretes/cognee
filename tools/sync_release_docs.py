@@ -4,8 +4,21 @@ Sync release docs artifacts into a checked-out cognee-docs repository.
 
 This script is intended for CI usage from the core `cognee` repository:
 1) Generate OpenAPI spec from the current codebase.
-2) Copy spec to docs repo.
-3) Prepend changelog entry for the release.
+2) Enhance it with the docs-facing extras (servers, tag descriptions, request
+   examples, security schemes) — see `enhance_spec`.
+3) Copy spec to docs repo.
+4) Prepend changelog entry for the release.
+
+This script is the *single* generator of `cognee_openapi_spec.json`. The docs
+repo used to regenerate the same file on a Wednesday cron
+(`.github/scripts/generate-api-docs.sh`) and add step 2 itself, so every
+release stripped what the cron had added and every cron put it back. That
+script is gone; the docs repo now only fetches this output and opens a PR.
+Anything the published API reference needs that FastAPI does not emit belongs
+in `enhance_spec` below.
+
+Note that the extras live here rather than in the FastAPI app, so a running
+server's `/openapi.json` does not carry them — only the published spec does.
 """
 
 from __future__ import annotations
@@ -28,9 +41,142 @@ Cognee releases with highlights and links to the full release notes on GitHub.
 """
 
 
+# Docs-facing extras. FastAPI does not emit any of this, and Mintlify reads all
+# of it from the spec: `servers` drives the interactive playground's base URL,
+# `tag_descriptions` supplies the sidebar group blurbs, and `request_examples`
+# gives each endpoint a runnable sample body.
+#
+# They live in a JSON data file rather than as literals here because two of the
+# three are machine-maintained: the spec extras sync workflow rewrites them via
+# tools/fix_spec_extras.py. Editing JSON is a load-mutate-dump, with no source
+# splicing and nothing for the formatter to disagree with.
+EXTRAS_PATH = Path(__file__).resolve().parent / "spec_extras.json"
+
+
+def load_extras() -> dict:
+    """The extras data file. Fails loudly — a silent default would publish a
+    spec missing its servers and blurbs, which is worse than a failed release."""
+    try:
+        with EXTRAS_PATH.open(encoding="utf-8") as handle:
+            extras = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Could not read docs extras from {EXTRAS_PATH}: {exc}") from exc
+
+    missing = {"servers", "tag_descriptions", "request_examples"} - extras.keys()
+    if missing:
+        raise RuntimeError(f"{EXTRAS_PATH} is missing required key(s): {sorted(missing)}")
+    return extras
+
+
+_EXTRAS = load_extras()
+
+# Base URLs for the docs playground. Not machine-maintained — a new hosted API
+# URL is a human decision — but checked for shape by tools/check_spec_extras.py.
+SERVERS = _EXTRAS["servers"]
+
+# Sidebar blurbs, keyed by the tag as it appears on the route. A tag with no
+# entry still groups correctly, it just renders without a description.
+TAG_DESCRIPTIONS = _EXTRAS["tag_descriptions"]
+
+# Sample request bodies, keyed by "METHOD /path" — the API contract, which is
+# stable across handler renames. Keying by FastAPI's generated operationId
+# instead would embed the function name, so a rename would silently orphan the
+# example. A key whose path or method no longer exists is a real API change and
+# `enhance_spec` raises rather than dropping the sample quietly.
+REQUEST_EXAMPLES = _EXTRAS["request_examples"]
+
+
+def _cookie_scheme() -> dict:
+    """The cookie auth scheme, with the cookie name the app actually sets.
+
+    Read from the transport rather than hardcoded: the docs cron used to publish
+    ``fastapiusersauth`` (fastapi-users' default) while cognee's transport sets
+    ``auth_token``, so the reference documented a cookie that never existed.
+    """
+    from cognee.modules.users.authentication.default import default_transport
+
+    return {"type": "apiKey", "in": "cookie", "name": default_transport.cookie_name}
+
+
+def enhance_spec(spec: dict) -> dict:
+    """Add the docs-facing extras FastAPI does not generate. Mutates and returns spec.
+
+    Assignment order matters: `servers` and `tags` are appended after the keys
+    FastAPI produced, which is the key order the published spec already has.
+    """
+    spec["servers"] = SERVERS
+
+    # All three transports are real: APIKeyHeader (X-Api-Key), BearerTransport,
+    # and CookieTransport. The app declares the first two; the cookie one is
+    # only ever reflected in the published spec, so it is added here.
+    schemes = spec.setdefault("components", {}).setdefault("securitySchemes", {})
+    schemes["ApiKeyAuth"] = {"type": "apiKey", "in": "header", "name": "X-Api-Key"}
+    schemes["BearerAuth"] = {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}
+    schemes["CookieAuth"] = _cookie_scheme()
+
+    operations = [
+        operation
+        for methods in spec.get("paths", {}).values()
+        for operation in methods.values()
+        if isinstance(operation, dict)
+    ]
+
+    # Tag anything untagged so it does not land in an unnamed sidebar group.
+    for path, methods in spec.get("paths", {}).items():
+        for operation in methods.values():
+            if not isinstance(operation, dict) or operation.get("tags"):
+                continue
+            operation["tags"] = (
+                ["health"] if path == "/" or path.startswith("/health") else ["untagged"]
+            )
+
+    used_tags = {tag for operation in operations for tag in operation.get("tags", [])}
+    spec["tags"] = [
+        {"name": tag, "description": TAG_DESCRIPTIONS.get(tag, "")} for tag in sorted(used_tags)
+    ]
+
+    # Neither of these is fatal — the reference still builds — but both mean the
+    # sidebar quietly lost a blurb, which is exactly the drift this script exists
+    # to stop. Nothing else watches TAG_DESCRIPTIONS, so say it out loud.
+    if undescribed := sorted(used_tags - TAG_DESCRIPTIONS.keys()):
+        print(
+            f"WARNING: {len(undescribed)} tag(s) have no description in "
+            f"TAG_DESCRIPTIONS: {', '.join(undescribed)}",
+            file=sys.stderr,
+        )
+    if stale := sorted(TAG_DESCRIPTIONS.keys() - used_tags):
+        print(
+            f"WARNING: TAG_DESCRIPTIONS describes tag(s) no route uses: {', '.join(stale)}",
+            file=sys.stderr,
+        )
+
+    # An example pinned to a path/method the API no longer exposes would vanish
+    # from the reference without a trace. Fail the release sync instead.
+    by_route = {
+        f"{method.upper()} {path}": operation
+        for path, methods in spec.get("paths", {}).items()
+        for method, operation in methods.items()
+        if isinstance(operation, dict)
+    }
+    if orphaned := sorted(REQUEST_EXAMPLES.keys() - by_route.keys()):
+        raise RuntimeError(
+            f"request_examples references route(s) absent from the spec: {', '.join(orphaned)}. "
+            f"The path or method changed — update request_examples in {EXTRAS_PATH.name}."
+        )
+    for route, example in REQUEST_EXAMPLES.items():
+        content = by_route[route].get("requestBody", {}).get("content", {})
+        for media in content.values():
+            media.setdefault("example", example)
+
+    return spec
+
+
 def generate_openapi_spec(output_path: Path) -> None:
     """
-    Generate OpenAPI schema from cognee FastAPI app and write it to output_path.
+    Generate the enhanced OpenAPI schema from the cognee FastAPI app.
+
+    The app's own schema plus the docs-facing extras from `enhance_spec` — this
+    is the file the published API reference is built from.
     """
     try:
         # Avoid prod-only initialization behavior for CI schema generation.
@@ -39,7 +185,7 @@ def generate_openapi_spec(output_path: Path) -> None:
     except Exception as exc:  # pragma: no cover - runtime import environment specific
         raise RuntimeError(f"Failed to import cognee API app: {exc}") from exc
 
-    spec = app.openapi()
+    spec = enhance_spec(app.openapi())
     output_path.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
 
 

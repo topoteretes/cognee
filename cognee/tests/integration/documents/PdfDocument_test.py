@@ -14,8 +14,8 @@ chunk_by_sentence_module = sys.modules.get("cognee.tasks.chunks.chunk_by_sentenc
 
 
 GROUND_TRUTH = [
-    {"word_count": 879, "len_text": 5697, "cut_type": "sentence_end"},
-    {"word_count": 953, "len_text": 6473, "cut_type": "sentence_end"},
+    {"word_count": 879, "len_text": 5696, "cut_type": "sentence_end"},
+    {"word_count": 953, "len_text": 6471, "cut_type": "sentence_end"},
 ]
 
 

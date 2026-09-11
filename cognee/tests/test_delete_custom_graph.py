@@ -6,7 +6,9 @@ from pydantic import BaseModel
 
 import cognee
 from cognee.api.v1.datasets import datasets
+from contextlib import AsyncExitStack
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.locks import dataset_lock
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.engine.operations.setup import setup
@@ -69,6 +71,11 @@ async def main():
     data1 = CustomData(id=uuid4())
     data2 = CustomData(id=uuid4())
 
+    # Canonical lock order (SDK-483): hold the dataset lock before the legacy
+    # context call below acquires its queue slot; nested add/cognify/delete
+    # re-enter via held_datasets instead of re-acquiring the lock.
+    _lock_stack = AsyncExitStack()
+    await _lock_stack.enter_async_context(dataset_lock(dataset.id))
     await set_database_global_context_variables(dataset.id, dataset.owner_id)
 
     from cognee.modules.pipelines.models import PipelineContext

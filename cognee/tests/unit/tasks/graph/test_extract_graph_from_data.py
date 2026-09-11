@@ -66,6 +66,28 @@ async def test_chunk_contains_entities_after_integration(mock_find_existing):
 
 @pytest.mark.asyncio
 @patch.object(egd_module, "find_existing_edge_identities", new_callable=AsyncMock)
+async def test_integration_forwards_pipeline_context_for_existing_edge_provenance(
+    mock_find_existing,
+):
+    mock_find_existing.return_value = set()
+    chunk = _make_chunk()
+    graph = _two_node_graph()
+    ctx = MagicMock()
+
+    await integrate_chunk_graphs(
+        [chunk],
+        [graph],
+        KnowledgeGraph,
+        _mock_resolver(),
+        ctx=ctx,
+    )
+
+    mock_find_existing.assert_awaited_once()
+    assert mock_find_existing.await_args.kwargs["ctx"] is ctx
+
+
+@pytest.mark.asyncio
+@patch.object(egd_module, "find_existing_edge_identities", new_callable=AsyncMock)
 async def test_entity_relations_populated_after_integration(mock_find_existing):
     mock_find_existing.return_value = set()
     chunk = _make_chunk()
@@ -265,7 +287,9 @@ async def test_integrate_chunk_graphs_selects_the_ontology_constructor(
     await integrate_chunk_graphs([chunk], [graph], KnowledgeGraph, resolver)
 
     mock_construct.assert_not_called()
-    mock_construct_with_ontology.assert_called_once_with([chunk], [graph], resolver)
+    mock_construct_with_ontology.assert_called_once_with(
+        [chunk], [graph], resolver, ontology_mode=None
+    )
 
 
 @pytest.mark.asyncio
@@ -349,3 +373,193 @@ async def test_stub_resolver_reaches_graph_construction_via_task(mock_find_exist
     _, entity = chunk.contains[0]
     assert entity.name == "alice"
     assert entity.ontology_valid is True
+
+
+# --- chunk_attachment (SDK-163) -------------------------------------------------
+
+from typing import Any, List, Optional  # noqa: E402
+
+from cognee.infrastructure.engine import DataPoint  # noqa: E402
+from cognee.modules.graph.utils import (  # noqa: E402
+    ensure_default_edge_properties,
+    get_graph_from_model,
+)
+
+
+class _Activity(DataPoint):
+    name: str
+    metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+
+class _Person(DataPoint):
+    name: str
+    likes: Optional[List[_Activity]] = None
+    metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+
+class _Directory(DataPoint):
+    people: List[_Person]
+    metadata: dict = {"index_fields": []}
+
+
+class _TransparentDirectory(DataPoint):
+    people: List[_Person]
+    metadata: dict = {"index_fields": [], "transparent": True}
+
+
+class _AttachmentChunk(DataPoint):
+    """A DocumentChunk-shaped node, so the real walk can mint the contains edges."""
+
+    text: str
+    contains: Any = None
+    metadata: dict = {"index_fields": ["text"]}
+
+
+def _directory_fixture(wrapper_class):
+    biking = _Activity(name="Biking")
+    basketball = _Activity(name="Basketball")
+    alice = _Person(name="Alice", likes=[biking])
+    bob = _Person(name="Bob", likes=[basketball])
+    return wrapper_class(people=[alice, bob]), (alice, bob, biking, basketball)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("attachment", [None, "direct"])
+async def test_direct_attachment_leaves_the_root_assignment_untouched(attachment):
+    graph, _ = _directory_fixture(_Directory)
+    chunk = _make_chunk()
+
+    await integrate_chunk_graphs(
+        [chunk], [graph], _Directory, _mock_resolver(), chunk_attachment=attachment
+    )
+
+    assert chunk.contains is graph
+
+
+@pytest.mark.asyncio
+async def test_all_attachment_lists_every_stored_node_in_order():
+    graph, (alice, bob, biking, basketball) = _directory_fixture(_Directory)
+    chunk = _make_chunk()
+
+    await integrate_chunk_graphs(
+        [chunk], [graph], _Directory, _mock_resolver(), chunk_attachment="all"
+    )
+
+    # A set: the walk's traversal order is not part of the contract.
+    assert {str(node.id) for node in chunk.contains} == {
+        str(graph.id),
+        str(alice.id),
+        str(bob.id),
+        str(biking.id),
+        str(basketball.id),
+    }
+
+
+@pytest.mark.asyncio
+async def test_all_attachment_excludes_a_transparent_wrapper():
+    graph, (alice, bob, biking, basketball) = _directory_fixture(_TransparentDirectory)
+    chunk = _make_chunk()
+
+    await integrate_chunk_graphs(
+        [chunk], [graph], _TransparentDirectory, _mock_resolver(), chunk_attachment="all"
+    )
+
+    assert {str(node.id) for node in chunk.contains} == {
+        str(alice.id),
+        str(bob.id),
+        str(biking.id),
+        str(basketball.id),
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "wrapper_class,attachment,expected_targets",
+    [
+        (_Directory, None, {"root"}),
+        (_Directory, "direct", {"root"}),
+        (_Directory, "all", {"root", "alice", "bob", "biking", "basketball"}),
+        (_TransparentDirectory, None, {"alice", "bob"}),
+        (_TransparentDirectory, "all", {"alice", "bob", "biking", "basketball"}),
+    ],
+)
+async def test_attachment_matrix_over_the_real_walk(wrapper_class, attachment, expected_targets):
+    graph, (alice, bob, biking, basketball) = _directory_fixture(wrapper_class)
+    by_name = {
+        "root": graph,
+        "alice": alice,
+        "bob": bob,
+        "biking": biking,
+        "basketball": basketball,
+    }
+    chunk = _AttachmentChunk(text="Alice likes biking. Bob likes basketball.")
+
+    await integrate_chunk_graphs(
+        [chunk], [graph], wrapper_class, _mock_resolver(), chunk_attachment=attachment
+    )
+    nodes, edges = await get_graph_from_model(chunk)
+    edges = ensure_default_edge_properties(edges, nodes=nodes)
+
+    contains = [edge for edge in edges if edge[2] == "contains"]
+    assert {str(edge[1]) for edge in contains} == {
+        str(by_name[name].id) for name in expected_targets
+    }
+    # One edge per target, and the shared policy supplied the label.
+    assert len(contains) == len(expected_targets)
+    assert all(edge[3].get("edge_text") for edge in contains)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("wrapper_class", [_Directory, _TransparentDirectory])
+async def test_attachment_never_changes_a_non_contains_edge(wrapper_class):
+    # One extraction, two chunks: chunk_attachment must only decide which nodes the
+    # chunk links to, never touch the graph the model itself describes.
+    graph, _ = _directory_fixture(wrapper_class)
+
+    results = []
+    for chunk_attachment in (None, "all"):
+        chunk = _AttachmentChunk(text="Alice likes biking. Bob likes basketball.")
+        await integrate_chunk_graphs(
+            [chunk], [graph], wrapper_class, _mock_resolver(), chunk_attachment=chunk_attachment
+        )
+        _, edges = await get_graph_from_model(chunk)
+        results.append({(str(s), str(t), name) for s, t, name, _ in edges if name != "contains"})
+
+    assert results[0] == results[1]
+    assert results[0]  # the model's own edges are actually present
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chunk_graph", [None, "not-a-datapoint"])
+async def test_all_attachment_falls_back_for_a_non_datapoint_extraction(chunk_graph):
+    from pydantic import BaseModel
+
+    class CustomModel(BaseModel):
+        pass
+
+    chunk = _make_chunk()
+
+    await integrate_chunk_graphs(
+        [chunk], [chunk_graph], CustomModel, _mock_resolver(), chunk_attachment="all"
+    )
+
+    assert chunk.contains is chunk_graph
+
+
+@pytest.mark.asyncio
+@patch.object(egd_module, "get_configured_ontology_resolver")
+@patch.object(egd_module, "integrate_chunk_graphs", new_callable=AsyncMock)
+@patch.object(egd_module, "extract_content_graph", new_callable=AsyncMock)
+async def test_chunk_attachment_reaches_integration_by_keyword_only(
+    mock_extract, mock_integrate, mock_get_resolver
+):
+    mock_get_resolver.return_value = None
+    mock_integrate.side_effect = lambda *a, **kw: a[0]
+    mock_extract.return_value = _two_node_graph()
+    chunk = _make_chunk()
+
+    await extract_graph_from_data([chunk], KnowledgeGraph, chunk_attachment="all")
+
+    assert mock_integrate.await_args.kwargs["chunk_attachment"] == "all"
+    # It must never reach the LLM call, which swallows unknown kwargs silently.
+    assert "chunk_attachment" not in mock_extract.await_args.kwargs

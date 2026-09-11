@@ -2,6 +2,9 @@ from uuid import uuid4, UUID
 from typing import Optional, Iterator, Tuple
 from .chunk_by_word import chunk_by_word
 from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 def get_word_size(word: str) -> int:
@@ -90,10 +93,21 @@ def chunk_by_sentence(
             sentence_size += word_size
 
     if len(sentence) > 0:
-        if maximum_size and sentence_size > maximum_size:
-            raise ValueError(f"Input word {word} longer than chunking size {maximum_size}.")
-
         section_end = "sentence_cut" if word_type_state == "word" else word_type_state
+
+        if maximum_size and sentence_size > maximum_size:
+            # A trailing run with no sentence or paragraph boundary (a protein sequence, a
+            # base64 blob, a glyph run left by PDF extraction) can exceed the chunk size. An
+            # oversized run in the middle of a document is already emitted as a single chunk;
+            # raising only when it is the last one made the whole document unprocessable, and
+            # with no partial-commit mode that failed the entire pipeline run.
+            logger.warning(
+                "Trailing run of %d tokens exceeds the chunk size of %d; "
+                "emitting it as a single oversized chunk.",
+                sentence_size,
+                maximum_size,
+            )
+
         yield (
             paragraph_id,
             sentence,

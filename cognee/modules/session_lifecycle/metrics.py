@@ -64,13 +64,14 @@ async def ensure_and_touch_session(
     session_id: str,
     user_id: UUIDType,
     dataset_id: Optional[UUIDType] = None,
+    agent_id: Optional[str] = None,
 ) -> None:
     """Upsert the session row in one round trip.
 
     Creates the row if absent (status=running). If present AND still
     running, bumps ``last_activity_at``. Terminal sessions are left
     untouched so a late straggler can't accidentally resurrect them.
-    Also fills in ``dataset_id`` when currently null.
+    Also fills in ``dataset_id`` / ``agent_id`` when currently null.
     """
     now = datetime.now(timezone.utc)
     engine = get_relational_engine()
@@ -83,6 +84,7 @@ async def ensure_and_touch_session(
             "session_id": session_id,
             "user_id": user_id,
             "dataset_id": dataset_id,
+            "agent_id": agent_id,
             "status": SessionStatus.RUNNING.value,
             "started_at": now,
             "last_activity_at": now,
@@ -96,10 +98,14 @@ async def ensure_and_touch_session(
             insert = sqlite_insert if dialect == "sqlite" else pg_insert
             stmt = insert(SessionRecord).values(**values)
             set_ = {"last_activity_at": now}
-            # Back-fill a previously-unset dataset_id.
+            # Back-fill a previously-unset dataset_id / agent_id.
             set_["dataset_id"] = case(
                 (SessionRecord.dataset_id.is_(None), dataset_id),
                 else_=SessionRecord.dataset_id,
+            )
+            set_["agent_id"] = case(
+                (SessionRecord.agent_id.is_(None), agent_id),
+                else_=SessionRecord.agent_id,
             )
             stmt = stmt.on_conflict_do_update(
                 index_elements=["session_id", "user_id"],
@@ -127,6 +133,38 @@ async def ensure_and_touch_session(
             existing.last_activity_at = now
             if existing.dataset_id is None and dataset_id is not None:
                 existing.dataset_id = dataset_id
+            if existing.agent_id is None and agent_id is not None:
+                existing.agent_id = agent_id
+        await session.commit()
+
+
+async def set_session_agent(
+    *,
+    session_id: str,
+    user_id: UUIDType,
+    agent_id: str,
+) -> None:
+    """Attribute an existing session to an agent connection (fill-if-null).
+
+    First agent to claim a session wins — re-registration of the same
+    connection is a no-op, and a second agent cannot overwrite the
+    attribution. Missing rows are left alone (the session may not have
+    started yet; ``ensure_and_touch_session`` carries agent_id for that
+    case).
+    """
+    engine = get_relational_engine()
+    async with engine.get_async_session() as session:
+        await session.execute(
+            update(SessionRecord)
+            .where(
+                and_(
+                    SessionRecord.session_id == session_id,
+                    SessionRecord.user_id == user_id,
+                    SessionRecord.agent_id.is_(None),
+                )
+            )
+            .values(agent_id=agent_id)
+        )
         await session.commit()
 
 
@@ -483,6 +521,27 @@ async def list_sessions_for_dataset(dataset_id: UUIDType) -> list[tuple[UUIDType
                         SessionRecord.dataset_id == dataset_id,
                         SessionRecord.session_id.endswith(suffix),
                     )
+                )
+            )
+        ).all()
+    return [(row.user_id, row.session_id) for row in rows]
+
+
+async def list_unattributed_sessions() -> list[tuple[UUIDType, str]]:
+    """Return (user_id, session_id) pairs for sessions with no dataset attribution.
+
+    A search that spans multiple datasets (or resolves none) runs in the plain
+    default session, whose SessionRecord row carries no ``dataset_id`` and no
+    dataset suffix — so dataset-scoped invalidation can never find it. Data-level
+    invalidation matches turns by deleted element ids, which is precise, so these
+    sessions are safe to over-scan (COG-6292).
+    """
+    engine = get_relational_engine()
+    async with engine.get_async_session() as session:
+        rows = (
+            await session.execute(
+                select(SessionRecord.user_id, SessionRecord.session_id).where(
+                    SessionRecord.dataset_id.is_(None),
                 )
             )
         ).all()

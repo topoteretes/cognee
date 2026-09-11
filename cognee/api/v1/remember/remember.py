@@ -66,6 +66,7 @@ class RememberKwargs(TypedDict, total=False):
     content_type: Literal["skills", "code"]
     skill_improvement: dict[str, Any]
     index_vectors: bool
+    repo_credentials: str
     skills_text: str
     skill_name: str
     primary_key: str
@@ -167,10 +168,14 @@ async def _add_to_session(session_id: str, data, user):
     stripped = text.strip()
     if not stripped:
         return
-    if any(stripped.startswith(prefix) for prefix in _SESSION_PLACEHOLDER_PREFIXES):
+    matched_prefix = next(
+        (prefix for prefix in _SESSION_PLACEHOLDER_PREFIXES if stripped.startswith(prefix)), None
+    )
+    if matched_prefix is not None:
+        # Log only the constant prefix — the payload itself must never reach the logs.
         logger.debug(
-            "remember: skipping session write for placeholder-only payload (%.40s…)",
-            stripped,
+            "remember: skipping session write for placeholder-only payload (%s…)",
+            matched_prefix,
         )
         return
 
@@ -661,6 +666,7 @@ async def remember(
     self_improvement: bool = True,
     session_ids: Optional[List[str]] = None,
     dry_run: bool = False,
+    raise_on_error: bool = True,
     **kwargs: Unpack[RememberKwargs],
 ) -> Union["RememberResult", "DryRunEstimate"]:
     """Store data in memory.
@@ -789,6 +795,11 @@ async def remember(
                     "cognee_version": cognee_version,
                 },
             )
+            # index_vectors=False imports the archive's graph without touching
+            # the vector/embedding stack (same kwarg the code route uses), so a
+            # bundled archive restores with no API key. Vector-independent
+            # search (CHUNKS_LEXICAL) still works over such an import.
+            graph_only = not kwargs.pop("index_vectors", True)
             return await import_memory_source(
                 data,
                 dataset_name=dataset_name,
@@ -797,6 +808,7 @@ async def remember(
                 chunker=chunker,
                 custom_prompt=custom_prompt,
                 self_improvement=self_improvement,
+                graph_only=graph_only,
                 **kwargs,
             )
 
@@ -884,6 +896,7 @@ async def remember(
             self_improvement=self_improvement,
             session_ids=session_ids,
             span=span,
+            raise_on_error=raise_on_error,
             **kwargs,
         )
 
@@ -939,6 +952,7 @@ async def _remember_inner(
     self_improvement,
     session_ids,
     span,
+    raise_on_error: bool = True,
     **kwargs,
 ) -> "RememberResult":
     from cognee.api.v1.serve.state import get_remote_client
@@ -957,6 +971,13 @@ async def _remember_inner(
             **kwargs,
         )
 
+    # Fail loudly on inconsistent LLM/embedding provider config before any DB
+    # or ingestion work — otherwise the mismatch surfaces minutes later as an
+    # opaque auth error mid-cognify. Cheap (no network), once per process.
+    from cognee.modules.preflight import validate_provider_config
+
+    validate_provider_config()
+
     # Run vector migrations lazily on the first local SDK call.
     # This ensures stale LanceDB schemas are migrated before any
     # writes, even when the API server was never started. Scoped to the
@@ -974,8 +995,12 @@ async def _remember_inner(
     # normal remember), so they must be consumed here regardless of content_type.
     skills_text = kwargs.pop("skills_text", None)
     skill_name = kwargs.pop("skill_name", None)
-    # code-only kwarg, consumed here for the same reason as the skills ones.
+    # code-only kwargs, consumed here for the same reason as the skills ones.
     index_vectors = kwargs.pop("index_vectors", None)
+    # Out-of-band auth token for private https remotes (e.g. a GitHub App
+    # installation token). Kept out of the repo URLs so no secret ever rides
+    # a loggable string — see resolve_repo_source.
+    repo_credentials = kwargs.pop("repo_credentials", None)
 
     def _requested_node_set(default: str) -> str:
         requested_node_set = kwargs.get("node_set") or [default]
@@ -993,6 +1018,8 @@ async def _remember_inner(
         )
     if index_vectors is not None and content_type != "code":
         raise ValueError("index_vectors is supported only for content_type='code'.")
+    if repo_credentials is not None and content_type != "code":
+        raise ValueError("repo_credentials is supported only for content_type='code'.")
     if content_type == "code" and session_id is not None:
         raise ValueError(
             "session_id is not applicable to content_type='code'; code graphs are "
@@ -1006,7 +1033,7 @@ async def _remember_inner(
         from cognee.modules.run_custom_pipeline import run_custom_pipeline
         from cognee.shared.utils import send_telemetry
         from cognee.tasks.code_graph import get_code_graph_tasks
-        from cognee.tasks.code_graph.resolve_repo import resolve_repo_source
+        from cognee.tasks.code_graph.resolve_repo import redact_repo_spec, resolve_repo_source
 
         repo_specs = data if isinstance(data, list) else [data]
         if not repo_specs or not all(isinstance(spec, (str, _Path)) for spec in repo_specs):
@@ -1060,8 +1087,14 @@ async def _remember_inner(
                     result.error = f"code_graph_pipeline errored for repository '{item['source']}'"
 
         async def _run_one_repo(spec) -> dict:
-            repo_path = await resolve_repo_source(spec)
-            item = {"kind": "code_repository", "source": str(spec), "path": str(repo_path)}
+            repo_path = await resolve_repo_source(spec, credentials=repo_credentials)
+            # redact: connector-supplied URLs may carry a token in the
+            # userinfo, which must not surface in results or logs.
+            item = {
+                "kind": "code_repository",
+                "source": redact_repo_spec(spec),
+                "path": str(repo_path),
+            }
             pipeline_result = await run_custom_pipeline(
                 tasks=get_code_graph_tasks(str(repo_path), index_vectors=bool(index_vectors)),
                 data=str(repo_path),
@@ -1092,18 +1125,24 @@ async def _remember_inner(
                 # One failing repo must not abort the rest of the batch — record
                 # the failure per item and keep going.
                 errors: list = []
-                for spec in repo_specs:
+                for position, spec in enumerate(repo_specs, start=1):
                     try:
                         item = await _run_one_repo(spec)
                     except Exception as exc:
-                        logger.exception("Background code-graph run failed for '%s'", spec)
+                        source = redact_repo_spec(spec)
+                        # Specs can embed URL credentials — never log spec-derived values.
+                        logger.exception(
+                            "Background code-graph run failed for repo %d of %d",
+                            position,
+                            len(repo_specs),
+                        )
                         item = {
                             "kind": "code_repository",
-                            "source": str(spec),
+                            "source": source,
                             "status": "errored",
                             "error": str(exc),
                         }
-                        errors.append(f"{spec}: {exc}")
+                        errors.append(f"{source}: {exc}")
                     result.items.append(item)
                 result.items_processed = len(
                     [item for item in result.items if item.get("status") != "errored"]
@@ -1366,6 +1405,14 @@ async def _remember_inner(
                 chunk_size=chunk_size,
                 custom_prompt=custom_prompt,
                 run_in_background=False,
+                # Loud-by-default: a failed build raises CognifyFailedError
+                # (typed, classified, with a remedy) out of blocking remember()
+                # instead of returning a silently "errored" result nobody
+                # inspects. In background remember() a raise has nowhere to go
+                # and would skip _resolve(), losing pipeline_run_id/dataset_id/
+                # raw_result — so take the errored-run-info path there and let
+                # _resolve() record the failure on the result.
+                raise_on_error=raise_on_error and not run_in_background,
                 **shared_kwargs,
                 **cognify_kwargs,
             )

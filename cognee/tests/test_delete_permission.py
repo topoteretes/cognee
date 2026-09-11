@@ -6,7 +6,9 @@ from pydantic import BaseModel
 
 import cognee
 from cognee.api.v1.datasets import datasets
+from contextlib import AsyncExitStack
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.locks import dataset_lock
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.methods import create_authorized_dataset
@@ -71,6 +73,11 @@ async def main():
     data1 = CustomData(id=uuid4())
     data2 = CustomData(id=uuid4())
 
+    # Canonical lock order (SDK-483): hold the dataset lock before the legacy
+    # context call below acquires its queue slot; nested add/cognify/delete
+    # re-enter via held_datasets instead of re-acquiring the lock.
+    _lock_stack = AsyncExitStack()
+    await _lock_stack.enter_async_context(dataset_lock(dataset.id))
     await set_database_global_context_variables(dataset.id, dataset.owner_id)
 
     from cognee.modules.pipelines.models import PipelineContext
@@ -120,7 +127,19 @@ async def main():
     nodes, edges = await graph_engine.get_graph_data()
     assert len(nodes) == 2 and len(edges) == 1, "Nodes and edges are not deleted properly."
 
-    await datasets.delete_data(dataset.id, data2.id, user2)
+    # Regression for #4829: the dataset_database row is keyed by dataset_id alone,
+    # so an ACL-granted non-owner must get the owner's existing row back instead
+    # of a false negative that crashes on a duplicate INSERT.
+    from cognee.infrastructure.databases.utils import get_or_create_dataset_database
+
+    dataset_database = await get_or_create_dataset_database(dataset.id, user2)
+    assert dataset_database.owner_id == user1.id, (
+        "get_or_create_dataset_database must return the owner's existing row for a grantee."
+    )
+
+    # Regression for #4829: forget() as an ACL-granted non-owner must work end-to-end
+    # (it used to crash provisioning a duplicate dataset_database row on context entry).
+    await cognee.forget(data_id=data2.id, dataset_id=dataset.id, user=user2)
 
     nodes, edges = await graph_engine.get_graph_data()
     assert len(nodes) == 0 and len(edges) == 0, "Nodes and edges are not deleted."

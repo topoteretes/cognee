@@ -17,7 +17,9 @@ class ForgetCommand(SupportsCliCommand):
 Remove data from the knowledge graph.
 
 Use --everything (alias --all) to delete all user data, --dataset/--dataset-id
-to delete a dataset, or dataset + --data-id to delete a single item.
+to delete a dataset, or dataset + --data-id to delete a single item. Add
+--memory-only to clear graph/vector memory while keeping raw files and data
+records, so the dataset (or item) can be re-cognified later.
     """
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
@@ -36,6 +38,16 @@ to delete a dataset, or dataset + --data-id to delete a single item.
             action="store_true",
             default=False,
             help="Delete all datasets and data",
+        )
+        parser.add_argument(
+            "--memory-only",
+            action="store_true",
+            default=False,
+            help=(
+                "Delete only graph/vector memory (requires --dataset or --dataset-id); "
+                "raw files and data records are preserved so the dataset can be "
+                "re-cognified with different settings"
+            ),
         )
 
     def execute(self, args: argparse.Namespace) -> None:
@@ -56,6 +68,18 @@ to delete a dataset, or dataset + --data-id to delete a single item.
                 )
                 return
 
+            if data_id and not dataset and not dataset_id:
+                fmt.error("Specify --dataset or --dataset-id when using --data-id.")
+                return
+
+            if args.everything and args.memory_only:
+                fmt.error(
+                    "--memory-only has no effect with --everything: everything deletes all "
+                    "datasets and data outright. Specify --dataset or --dataset-id with "
+                    "--memory-only instead."
+                )
+                return
+
             async def run_forget():
                 try:
                     return await cognee.forget(
@@ -63,6 +87,7 @@ to delete a dataset, or dataset + --data-id to delete a single item.
                         dataset=dataset,
                         dataset_id=dataset_id,
                         everything=args.everything,
+                        memory_only=args.memory_only,
                     )
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to forget: {str(e)}") from e

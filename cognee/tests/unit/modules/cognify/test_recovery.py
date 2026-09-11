@@ -9,29 +9,9 @@ from cognee.modules.cognify import recovery as recovery_module
 from cognee.modules.pipelines.models import PipelineRunStatus
 
 
-class _FakeScalarsResult:
-    def __init__(self, items):
-        self._items = items
-
-    def all(self):
-        return self._items
-
-
-class _FakeExecuteResult:
-    def __init__(self, items):
-        self._items = items
-
-    def scalars(self):
-        return _FakeScalarsResult(self._items)
-
-
 class _FakeSession:
-    def __init__(self, execute_result=None, dataset=None):
-        self._execute_result = execute_result
+    def __init__(self, dataset=None):
         self._dataset = dataset
-
-    async def execute(self, _statement):
-        return self._execute_result
 
     async def get(self, _model, _dataset_id):
         return self._dataset
@@ -71,9 +51,8 @@ async def test_recover_stale_cognify_runs_executes_rollback_for_latest_candidate
     )
     dataset = SimpleNamespace(id=dataset_id, owner_id=owner_id)
 
-    discovery_session = _FakeSession(execute_result=_FakeExecuteResult([stale_run]))
     dataset_session = _FakeSession(dataset=dataset)
-    engine = _FakeEngine([discovery_session, dataset_session])
+    engine = _FakeEngine([dataset_session])
 
     rollback_calls = []
     reset_calls = []
@@ -84,7 +63,11 @@ async def test_recover_stale_cognify_runs_executes_rollback_for_latest_candidate
     async def _reset_status(**kwargs):
         reset_calls.append(kwargs)
 
+    async def _fake_latest_runs(_dataset_ids, _pipeline_name):
+        return {dataset_id: stale_run}
+
     monkeypatch.setattr(recovery_module, "get_relational_engine", lambda: engine)
+    monkeypatch.setattr(recovery_module, "get_latest_pipeline_runs_by_datasets", _fake_latest_runs)
     monkeypatch.setattr(recovery_module, "set_database_global_context_variables", _no_op_context)
     monkeypatch.setattr(recovery_module, "cognify_rollback_handler", _rollback_handler)
     monkeypatch.setattr(recovery_module, "reset_pipeline_run_status", _reset_status)
@@ -111,16 +94,19 @@ async def test_recover_stale_cognify_runs_skips_missing_dataset(monkeypatch):
         created_at=datetime.now(timezone.utc) - timedelta(hours=2),
     )
 
-    discovery_session = _FakeSession(execute_result=_FakeExecuteResult([stale_run]))
     dataset_session = _FakeSession(dataset=None)
-    engine = _FakeEngine([discovery_session, dataset_session])
+    engine = _FakeEngine([dataset_session])
 
     rollback_calls = []
 
     async def _rollback_handler(**kwargs):
         rollback_calls.append(kwargs)
 
+    async def _fake_latest_runs(_dataset_ids, _pipeline_name):
+        return {dataset_id: stale_run}
+
     monkeypatch.setattr(recovery_module, "get_relational_engine", lambda: engine)
+    monkeypatch.setattr(recovery_module, "get_latest_pipeline_runs_by_datasets", _fake_latest_runs)
     monkeypatch.setattr(recovery_module, "set_database_global_context_variables", _no_op_context)
     monkeypatch.setattr(recovery_module, "cognify_rollback_handler", _rollback_handler)
 
@@ -142,16 +128,19 @@ async def test_recover_stale_cognify_runs_skips_recent_run(monkeypatch):
         created_at=datetime.now(timezone.utc),
     )
 
-    discovery_session = _FakeSession(execute_result=_FakeExecuteResult([recent_run]))
     # No dataset session is consumed because the run is skipped before lookup.
-    engine = _FakeEngine([discovery_session])
+    engine = _FakeEngine([])
 
     rollback_calls = []
 
     async def _rollback_handler(**kwargs):
         rollback_calls.append(kwargs)
 
+    async def _fake_latest_runs(_dataset_ids, _pipeline_name):
+        return {dataset_id: recent_run}
+
     monkeypatch.setattr(recovery_module, "get_relational_engine", lambda: engine)
+    monkeypatch.setattr(recovery_module, "get_latest_pipeline_runs_by_datasets", _fake_latest_runs)
     monkeypatch.setattr(recovery_module, "set_database_global_context_variables", _no_op_context)
     monkeypatch.setattr(recovery_module, "cognify_rollback_handler", _rollback_handler)
     monkeypatch.setattr(recovery_module, "STALE_RUN_MIN_AGE_SECONDS", 3600)

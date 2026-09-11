@@ -16,6 +16,7 @@ Two event kinds are emitted per the renderer's contract:
 """
 
 from typing import Any, Dict, List, Optional
+from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
 
@@ -68,16 +69,50 @@ def map_session_entries_to_events(session_id: str, entries: List[Any]) -> List[D
     return events
 
 
-async def _list_recent_session_ids(user_uuid, limit: int) -> List[str]:
+async def _list_recent_session_ids(
+    user_uuid, limit: int, dataset_id: Optional[UUID] = None
+) -> List[str]:
     """Most recently active session ids for a user, from the lifecycle table.
 
     ``user_uuid`` must be the raw UUID (the column is UUID-typed; a string
     fails the SQLAlchemy bind with "'str' object has no attribute 'hex'").
+
+    ``dataset_id`` narrows the listing to sessions attributed to one dataset,
+    by the same best-effort rule ``list_sessions_for_dataset`` uses: the row's
+    own ``dataset_id``, or the per-dataset default session's
+    ``{default_session_id}_{dataset_id}`` suffix, which is how sessions
+    written before dataset threading existed are still found. Sessions with
+    neither are left out — see ``collect_session_events`` for why.
+
+    This is attribution per *session*, which is all the session layer records:
+    ``SessionQAEntry`` carries no dataset, and ``ensure_and_touch_session``
+    only fills ``dataset_id`` while it is NULL, so a session id reused across
+    datasets keeps whichever one touched it first. A caller-supplied id used
+    that way (the ``cc_*`` ids from the Claude Code plugin, for instance) puts
+    all of its turns on that first dataset's timeline and none on the others'.
+    Fixing that needs a per-entry ``dataset_id`` on ``SessionQAEntry``.
+
+    The predicate stays inside this query rather than filtering afterwards so
+    ``ORDER BY last_activity_at DESC LIMIT`` still picks the newest sessions
+    *for that dataset*; filtering an already-limited list would silently drop
+    recent sessions in favor of whichever rows the global limit happened to
+    catch.
     """
-    from sqlalchemy import select
+    from sqlalchemy import or_, select
 
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.session_lifecycle.models import SessionRecord
+
+    filters = [SessionRecord.user_id == user_uuid]
+    if dataset_id is not None:
+        filters.append(
+            or_(
+                SessionRecord.dataset_id == dataset_id,
+                # autoescape, or the leading underscore is a LIKE
+                # single-char wildcard rather than a literal.
+                SessionRecord.session_id.endswith(f"_{dataset_id}", autoescape=True),
+            )
+        )
 
     engine = get_relational_engine()
     async with engine.get_async_session() as session:
@@ -85,7 +120,7 @@ async def _list_recent_session_ids(user_uuid, limit: int) -> List[str]:
             (
                 await session.execute(
                     select(SessionRecord)
-                    .where(SessionRecord.user_id == user_uuid)
+                    .where(*filters)
                     .order_by(SessionRecord.last_activity_at.desc())
                     .limit(limit)
                 )
@@ -100,8 +135,25 @@ async def collect_session_events(
     user=None,
     session_ids: Optional[List[str]] = None,
     max_sessions: int = MAX_SESSIONS_SCANNED,
+    dataset_id: Optional[UUID] = None,
 ) -> List[Dict[str, Any]]:
     """Best-effort collection of search/improve events from the session cache.
+
+    ``dataset_id`` scopes the auto-discovered recent sessions to one dataset,
+    so a dataset's timeline shows that dataset's activity instead of every
+    dataset the caller has queried. Sessions carrying no attribution to any
+    dataset are left out of a scoped listing: such a session may belong to
+    any context the caller has searched, so showing it under every dataset
+    would reopen the same over-disclosure. Narrowing silently is the right
+    failure direction here, and matches the best-effort attribution contract
+    ``invalidate_sessions`` already documents.
+
+    An explicit ``session_ids`` list is an intentional override and is used
+    as given — the caller has already decided which sessions it wants.
+
+    Known limitation: attribution is per session, not per QA turn, so a
+    session id reused across datasets keeps the first dataset it touched and
+    carries all of its turns there. See ``_list_recent_session_ids``.
 
     Never raises: any unavailable layer (cache disabled, no lifecycle table,
     no sessions) degrades to an empty list so visualization always renders.
@@ -121,7 +173,9 @@ async def collect_session_events(
 
         if session_ids is None:
             try:
-                session_ids = await _list_recent_session_ids(user.id, max_sessions)
+                session_ids = await _list_recent_session_ids(
+                    user.id, max_sessions, dataset_id=dataset_id
+                )
             except Exception as error:  # noqa: BLE001 — lifecycle table may not exist
                 logger.debug("Session listing unavailable (%s); no events collected.", error)
                 return []

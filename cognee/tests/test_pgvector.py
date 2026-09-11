@@ -218,7 +218,14 @@ async def test_vector_nodeset_filtering_retriever_integration():
 
 async def main():
     cognee.config.set_vector_db_config(
-        {"vector_db_url": "", "vector_db_key": "", "vector_db_provider": "pgvector"}
+        {
+            "vector_db_url": "",
+            "vector_db_key": "",
+            "vector_db_provider": "pgvector",
+            # Derived from the provider only when the provider comes from the
+            # environment, so a config dict has to name it.
+            "vector_dataset_database_handler": "pgvector",
+        }
     )
     cognee.config.set_relational_db_config(
         {
@@ -340,6 +347,22 @@ async def main():
         dataset_1_id=add_1_payload.dataset_id,
         dataset_2_id=add_2_payload.dataset_id,
     )
+
+    # remember() / recall() reach this store the way an SDK caller does;
+    # everything above drives add() / cognify() / search() instead. Kept after
+    # the search-history assert, since recall() adds to that history too.
+    remember_dataset = "store_remember_check"
+    await cognee.remember(
+        ["Cognee keeps embeddings in the vector store and entities in the graph store."],
+        dataset_name=remember_dataset,
+        self_improvement=False,
+    )
+    recall_results = await cognee.recall(
+        query_text="Where does cognee keep embeddings?",
+        query_type=SearchType.CHUNKS,
+        datasets=[remember_dataset],
+    )
+    assert recall_results, "recall() returned nothing after remember() on PGVector"
 
     await cognee.prune.prune_data()
     data_root_directory = get_storage_config()["data_root_directory"]

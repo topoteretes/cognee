@@ -35,6 +35,7 @@ from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageR
 from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
 from cognee.modules.retrieval.code_retriever import CodeRetriever
 from cognee.modules.retrieval.graph_report_retriever import GraphReportRetriever
+from cognee.modules.retrieval.skills_retriever import SkillsRetriever
 from cognee.context_global_variables import session_user
 
 
@@ -91,6 +92,7 @@ async def get_search_type_retriever_instance(
     neighborhood_depth = kwargs.get("neighborhood_depth")
     neighborhood_seed_top_k = kwargs.get("neighborhood_seed_top_k")
     include_references = kwargs.get("include_references", False)
+    dataset = kwargs.get("dataset")
 
     # Registry mapping search types to their corresponding retriever classes and input parameters
     search_core_registry: dict[SearchType, Tuple[BaseRetriever, dict]] = {
@@ -99,6 +101,16 @@ async def get_search_type_retriever_instance(
             {"config": retriever_specific_config},
         ),
         SearchType.SUMMARIES: (SummariesRetriever, {"top_k": top_k, "session_id": session_id}),
+        SearchType.SKILLS: (
+            SkillsRetriever,
+            {
+                "top_k": top_k,
+                # SKILLS is single-dataset by invariant; SkillsRetriever raises
+                # QueryValidationError when no dataset reaches the factory.
+                "dataset_id": dataset.id if dataset is not None else None,
+                "session_id": session_id,
+            },
+        ),
         SearchType.CHUNKS: (
             ChunksRetriever,
             {
@@ -350,7 +362,6 @@ async def get_search_type_retriever_instance(
         )
 
     if query_type is SearchType.AGENTIC_COMPLETION:
-        dataset = kwargs.get("dataset")
         dataset_id = dataset.id if dataset is not None else None
         user = kwargs.get("user")
         try:

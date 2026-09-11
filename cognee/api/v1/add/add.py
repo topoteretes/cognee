@@ -77,6 +77,12 @@ async def add(
             * File URLs: "file:///path/to/document.pdf" or "file://relative/path.txt"
             * S3 paths: "s3://bucket-name/path/to/file.pdf"
         - **Binary file objects**: File handles/streams (BinaryIO)
+        - **Web URLs**: "https://example.com/page" is fetched and ingested as a page
+        - **Code repository URLs**: "https://github.com/<owner>/<repo>" (or a gitlab.com
+          project, or any URL ending in .git) is shallow-cloned and ingested as ONE
+          code-repo item that cognify runs through the enola code graph pipeline
+          (cross-file edges), plus the repo's documents; same as adding a local code
+          project directory. Requires ALLOW_HTTP_REQUESTS and git on PATH.
         - **Lists**: Multiple files or text strings in a single call
 
     Supported File Formats:
@@ -102,7 +108,8 @@ async def add(
             - S3 path: "s3://my-bucket/documents/file.pdf"
             - List of mixed types: ["text content", "/path/file.pdf", "file://doc.txt", file_handle]
             - Binary file object: open("file.txt", "rb")
-            - url: A web link url (https or http)
+            - url: A web link url (https or http); a GitHub/GitLab repository URL is
+              cloned and indexed as a code graph instead of fetched as a page
         dataset_name: Name of the dataset to store data in. Defaults to "main_dataset".
                     Create separate datasets to organize different knowledge domains.
         user: User object for authentication and permissions. Uses default user if None.
@@ -222,6 +229,13 @@ async def add(
             else:
                 transformed[item] = {}
         preferred_loaders = transformed
+
+    # Fail loudly on inconsistent LLM/embedding provider config before any DB
+    # or ingestion work — otherwise the mismatch surfaces minutes later as an
+    # opaque auth error mid-cognify. Cheap (no network), once per process.
+    from cognee.modules.preflight import validate_provider_config
+
+    validate_provider_config()
 
     await setup()
 

@@ -60,7 +60,10 @@ async def purge_stale_dlt_source_artifacts(
             )
 
             await invalidate_sessions_for_deleted_data(
-                ctx.dataset.id, deleted_elements.node_ids, deleted_elements.edge_ids
+                ctx.dataset.id,
+                deleted_elements.node_ids,
+                deleted_elements.edge_ids,
+                user_id=ctx.user.id,
             )
         except Exception as error:
             logger.warning("Session invalidation after DLT purge failed (non-fatal): %s", error)

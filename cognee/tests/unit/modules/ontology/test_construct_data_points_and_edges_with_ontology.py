@@ -1,6 +1,9 @@
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+
+import cognee.modules.ontology.construct_data_points_and_edges_with_ontology as ontology_module
 
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
@@ -9,6 +12,7 @@ from cognee.modules.ontology.construct_data_points_and_edges_with_ontology impor
     canonicalize_extracted_graphs,
     construct_data_points_and_edges_with_ontology,
 )
+from cognee.modules.ontology.exceptions import EmptyOntologyInStrictModeError
 from cognee.modules.ontology.models import AttachedOntologyNode
 from cognee.shared.data_models import Edge as KGEdge
 from cognee.shared.data_models import KnowledgeGraph, Node
@@ -184,3 +188,117 @@ def test_construct_data_points_and_edges_with_ontology_uses_the_pure_constructor
     assert widget.is_a is gadget
     assert widget.ontology_valid is True
     assert gadget.ontology_valid is True
+
+
+def _make_graph_with_ungrounded_node():
+    return KnowledgeGraph(
+        nodes=[
+            Node(id="typed-1", name="Nomatch", type="Gadget", description="class match"),
+            Node(id="named-1", name="Widget", type="Unmatched", description="individual match"),
+            Node(id="ghost-1", name="Ghost", type="Phantom", description="ungrounded"),
+        ],
+        edges=[
+            KGEdge(
+                source_node_id="named-1",
+                target_node_id="ghost-1",
+                relationship_name="haunted_by",
+            )
+        ],
+    )
+
+
+def test_strict_mode_drops_ungrounded_nodes_and_their_edges():
+    graph = _make_graph_with_ungrounded_node()
+
+    canonicalize_extracted_graphs([_make_chunk()], [graph], _StubResolver(), strict=True)
+
+    assert [node.id for node in graph.nodes] == ["typed-1", "named-1"]
+    assert graph.edges == []
+
+
+def test_annotate_mode_retains_ungrounded_nodes_and_their_edges():
+    graph = _make_graph_with_ungrounded_node()
+
+    canonicalize_extracted_graphs([_make_chunk()], [graph], _StubResolver())
+
+    assert [node.id for node in graph.nodes] == ["typed-1", "named-1", "ghost-1"]
+    assert len(graph.edges) == 1
+    assert graph.edges[0].target_node_id == "ghost-1"
+
+
+def test_construct_data_points_and_edges_with_ontology_reads_strict_mode_from_config(monkeypatch):
+    monkeypatch.setattr(
+        ontology_module,
+        "get_ontology_env_config",
+        lambda: SimpleNamespace(ontology_mode="strict"),
+    )
+    chunk = _make_chunk()
+    chunk.contains = None
+    graph = _make_graph_with_ungrounded_node()
+
+    data_points_by_id, _ = construct_data_points_and_edges_with_ontology(
+        [chunk],
+        [graph],
+        _StubResolver(),
+    )
+
+    assert str(Entity.id_for("widget_canonical")) in data_points_by_id
+    assert str(Entity.id_for("ghost")) not in data_points_by_id
+    assert [node.id for node in graph.nodes] == ["typed-1", "named-1"]
+
+
+def test_per_call_ontology_mode_overrides_env(monkeypatch):
+    monkeypatch.setattr(
+        ontology_module,
+        "get_ontology_env_config",
+        lambda: SimpleNamespace(ontology_mode="annotate"),
+    )
+    chunk = _make_chunk()
+    chunk.contains = None
+    graph = _make_graph_with_ungrounded_node()
+
+    construct_data_points_and_edges_with_ontology(
+        [chunk],
+        [graph],
+        _StubResolver(),
+        ontology_mode="strict",
+    )
+
+    assert [node.id for node in graph.nodes] == ["typed-1", "named-1"]
+
+
+class _EmptyLookupResolver(_StubResolver):
+    def __init__(self):
+        super().__init__()
+        self.lookup = {"classes": {}, "individuals": {}}
+
+
+def test_strict_mode_with_empty_ontology_lookup_raises():
+    resolver = _EmptyLookupResolver()
+    graph = _make_graph_with_ungrounded_node()
+
+    with pytest.raises(EmptyOntologyInStrictModeError):
+        canonicalize_extracted_graphs([_make_chunk()], [graph], resolver, strict=True)
+
+    # Annotate mode over the same empty resolver must keep working.
+    canonicalize_extracted_graphs([_make_chunk()], [graph], resolver)
+    assert len(graph.nodes) == 3
+
+
+def test_strict_mode_logs_one_aggregate_drop_summary(monkeypatch):
+    mock_logger = MagicMock()
+    monkeypatch.setattr(ontology_module, "logger", mock_logger)
+    graphs = [_make_graph_with_ungrounded_node(), _make_graph()]
+
+    canonicalize_extracted_graphs(
+        [_make_chunk(), _make_chunk()],
+        graphs,
+        _StubResolver(),
+        strict=True,
+    )
+
+    assert mock_logger.warning.call_count == 1
+    warning_args = mock_logger.warning.call_args[0]
+    # 1 of 4 nodes dropped, 1 of 1 edges dropped, across 2 graphs.
+    assert warning_args[1:3] == (1, 4)
+    assert warning_args[4:7] == (1, 1, 2)

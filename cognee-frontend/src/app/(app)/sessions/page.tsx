@@ -8,6 +8,7 @@ import {
   listSessions,
   getSessionStats,
   getSessionDetail,
+  estimateCostUsd,
   type SessionRow,
   type SessionStats,
   type SessionDetail,
@@ -400,7 +401,7 @@ function SessionDetailPanel({ detail, refreshNonce }: { detail: SessionDetail; r
         <StatCard label="Observations" value={String(detail.msg_count ?? 0)} />
         <StatCard label="Tool calls" value={String(detail.tool_calls ?? 0)} />
         <StatCard label="Tokens" value={tokens.toLocaleString()} />
-        <StatCard label="Cost" value={`$${(detail.cost_usd ?? 0).toFixed(4)}`} />
+        <StatCard label="Cost" value={`$${estimateCostUsd(detail.tokens_in ?? 0, detail.tokens_out ?? 0).toFixed(4)}`} />
         <StatCard label="Duration" value={formatDuration(dur)} />
       </div>
 
@@ -506,7 +507,7 @@ export default function SessionsPage() {
                 <SkeletonBar width={50} />
               </>
             ) : stats ? (
-              <span>{` · ${stats.sessions} sessions · ${Math.round(stats.success_rate * 100)}% success · $${stats.total_spend_usd.toFixed(2)}`}</span>
+              <span>{` · ${stats.sessions} sessions · ${Math.round(stats.success_rate * 100)}% success · $${estimateCostUsd(stats.tokens_in, stats.tokens_out).toFixed(2)}`}</span>
             ) : null}
           </p>
         </div>

@@ -10,7 +10,6 @@ from tenacity import (
     retry,
     stop_after_delay,
     wait_exponential_jitter,
-    retry_if_not_exception_type,
     before_sleep_log,
 )
 import litellm
@@ -23,6 +22,10 @@ from cognee.infrastructure.databases.exceptions import (
     EmbeddingException,
 )
 
+from cognee.infrastructure.databases.vector.embeddings.retry_config import (
+    embedding_retry_condition,
+)
+from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
 from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 from cognee.infrastructure.databases.vector.embeddings.utils import (
@@ -38,8 +41,15 @@ logger = get_logger("LiteLLMEmbeddingEngine")
 # BadRequestError (e.g. OpenAI 400 "maximum input length is 8192 tokens"). Match
 # those by message so the split/pool recovery below can handle them too. Kept
 # narrow to length/token-limit phrasings so genuinely-bad requests still fail fast.
+# Vertex reports oversized batches two ways depending on which limit is hit:
+# the per-prediction instance cap ("2048 instance(s) is allowed per prediction")
+# and the per-model batch cap ("a batchSize value of 1234 but the supported
+# range is from 1 (inclusive) to 251 (exclusive)" -- "too many instances").
 _EMBED_LENGTH_ERROR_RE = re.compile(
-    r"maximum\s+input\s+length|instance\(s\)\s+is\s+allowed\s+per\s+prediction",
+    r"maximum\s+input\s+length"
+    r"|instance\(s\)\s+is\s+allowed\s+per\s+prediction"
+    r"|too\s+many\s+instances"
+    r"|batchsize\s+value\s+of",
     re.IGNORECASE,
 )
 
@@ -152,14 +162,14 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         # ~2 minutes of user wall clock on a mis-typed API key. Superset of
         # the LLM adapter exclusion set (adds PermissionDeniedError); see
         # cognee/infrastructure/llm/structured_output_framework/litellm_instructor/llm/openai/adapter.py.
-        retry=retry_if_not_exception_type(
-            (
-                EmbeddingContextWindowTooSmallError,
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                litellm.exceptions.PermissionDeniedError,
-                asyncio.CancelledError,
-            )
+        # Budget exhaustion is terminal as well, but it is classified by
+        # predicate rather than by class: see embeddings/retry_config.py.
+        retry=embedding_retry_condition(
+            EmbeddingContextWindowTooSmallError,
+            litellm.exceptions.NotFoundError,
+            litellm.exceptions.AuthenticationError,
+            litellm.exceptions.PermissionDeniedError,
+            asyncio.CancelledError,
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
@@ -248,12 +258,24 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 return handle_embedding_response(text, embedding_response, self.dimensions)
 
         except litellm.exceptions.BadRequestError as error:
+            # A spend cap can arrive as a 400 depending on how the proxy maps it, and this
+            # clause catches every BadRequestError before the conversion further down, so
+            # without this the same failure surfaces as a raw provider error on one
+            # transport status and as the 402 on another. Ahead of the length check because
+            # a budget rejection carries no length wording, so it would fall through to the
+            # bare re-raise below and never reach any conversion at all.
+            raise_if_budget_exhausted(error)
+
             # ContextWindowExceededError subclasses BadRequestError. litellm raises
             # it for chat context-length errors, but the embeddings API returns a
             # plain BadRequestError for over-length input (OpenAI 400: "maximum input
-            # length is 8192 tokens"; Vertex AI 400: "2048 instance(s) is allowed per
-            # prediction"). Recover (split + pool) for both; re-raise any
-            # other BadRequest unchanged so genuinely bad requests still fail fast.
+            # length is 8192 tokens"). Vertex words batch-limit 400s differently
+            # depending on which cap is hit: the per-prediction instance cap
+            # ("2048 instance(s) is allowed per prediction") or the per-model
+            # batch cap ("too many instances" / "batchSize value of 1234 but the
+            # supported range is ... to 251 (exclusive)"). Recover (split + pool)
+            # for all of these; re-raise any other BadRequest unchanged so
+            # genuinely bad requests still fail fast.
             if not (
                 isinstance(error, litellm.exceptions.ContextWindowExceededError)
                 or _EMBED_LENGTH_ERROR_RE.search(str(error))
@@ -319,7 +341,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             litellm.exceptions.PermissionDeniedError,
         ):
             # Terminal auth failures must reach tenacity unwrapped so
-            # ``retry_if_not_exception_type`` can short-circuit the backoff
+            # ``embedding_retry_condition`` can short-circuit the backoff
             # ladder. Deliberately diverges from the EmbeddingException
             # contract of the other branches: keeping the litellm class (and
             # its message) intact lets the CLI's first-run remediation match
@@ -335,6 +357,13 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             raise EmbeddingException(f"Failed to index data points using model {self.model}") from e
 
         except Exception as error:
+            # A proxy spend cap lands here, either as litellm's own
+            # BudgetExceededError or as the plain RateLimitError the client gets
+            # for a proxy 429. Raise the same actionable 402 the LLM path does,
+            # so the failure is not buried under the endpoint-and-settings
+            # message below, which points at the wrong problem entirely.
+            raise_if_budget_exhausted(error)
+
             # Fall back to a clear, actionable message for connectivity/misconfiguration issues
             logger.error(
                 "Error embedding text: %s. EMBEDDING_ENDPOINT='%s'.",

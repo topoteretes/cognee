@@ -15,7 +15,9 @@ import pytest_asyncio
 from uuid import UUID, uuid4, uuid5, NAMESPACE_OID
 
 import cognee
+from contextlib import AsyncExitStack
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.locks import dataset_lock
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.relational.create_relational_engine import (
@@ -89,6 +91,11 @@ async def test_get_data_related_nodes_excludes_shared():
     dataset = await create_dataset("test_shared_nodes", user=user)
     dataset_id = dataset.id
 
+    # Canonical lock order (SDK-483): hold the dataset lock before the legacy
+    # context call below acquires its queue slot; nested add/cognify/delete
+    # re-enter via held_datasets instead of re-acquiring the lock.
+    _lock_stack = AsyncExitStack()
+    await _lock_stack.enter_async_context(dataset_lock(dataset_id))
     await set_database_global_context_variables(dataset_id, user.id)
 
     # Create unique data IDs
@@ -228,6 +235,11 @@ async def test_delete_data_nodes_and_edges_removes_from_all_systems():
     dataset = await create_authorized_dataset("test_delete_complete", user=user)
     dataset_id = dataset.id
 
+    # Canonical lock order (SDK-483): hold the dataset lock before the legacy
+    # context call below acquires its queue slot; nested add/cognify/delete
+    # re-enter via held_datasets instead of re-acquiring the lock.
+    _lock_stack = AsyncExitStack()
+    await _lock_stack.enter_async_context(dataset_lock(dataset_id))
     await set_database_global_context_variables(dataset_id, user.id)
 
     # Create data ID
@@ -403,6 +415,11 @@ async def test_get_global_data_related_nodes_scopes_by_dataset():
     alfa_dataset_id = dataset.id
     beta_dataset_id = uuid4()  # synthetic second dataset for ledger-only scenario
 
+    # Canonical lock order (SDK-483): hold the dataset lock before the legacy
+    # context call below acquires its queue slot; nested add/cognify/delete
+    # re-enter via held_datasets instead of re-acquiring the lock.
+    _lock_stack = AsyncExitStack()
+    await _lock_stack.enter_async_context(dataset_lock(alfa_dataset_id))
     await set_database_global_context_variables(alfa_dataset_id, user.id)
 
     maria_data_id = uuid4()
@@ -511,6 +528,11 @@ async def test_get_shared_slugs_losing_dataset_anchor():
     alfa_dataset_id = dataset.id
     beta_dataset_id = uuid4()  # ledger-only: simulate second dataset's rows
 
+    # Canonical lock order (SDK-483): hold the dataset lock before the legacy
+    # context call below acquires its queue slot; nested add/cognify/delete
+    # re-enter via held_datasets instead of re-acquiring the lock.
+    _lock_stack = AsyncExitStack()
+    await _lock_stack.enter_async_context(dataset_lock(alfa_dataset_id))
     await set_database_global_context_variables(alfa_dataset_id, user.id)
 
     maria_data_id = uuid4()
@@ -595,6 +617,11 @@ async def test_get_orphaned_nodeset_labels_for_dataset():
     dataset = await create_dataset("test_orphaned_nodeset_labels", user=user)
     alfa_dataset_id = dataset.id
 
+    # Canonical lock order (SDK-483): hold the dataset lock before the legacy
+    # context call below acquires its queue slot; nested add/cognify/delete
+    # re-enter via held_datasets instead of re-acquiring the lock.
+    _lock_stack = AsyncExitStack()
+    await _lock_stack.enter_async_context(dataset_lock(alfa_dataset_id))
     await set_database_global_context_variables(alfa_dataset_id, user.id)
 
     maria_data_id = uuid4()
