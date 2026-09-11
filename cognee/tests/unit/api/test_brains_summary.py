@@ -21,6 +21,7 @@ from cognee.api.v1.visualize.visualize import (
     build_brains_summary_payload as _build_brains_summary_payload,
 )
 from cognee.modules.data.methods import DatasetGraphCounts
+from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.visualization.cognee_network_visualization import build_brain_summary_payload
 
 visualize_module = sys.modules["cognee.api.v1.visualize.visualize"]
@@ -152,7 +153,16 @@ async def test_a_warm_count_cache_makes_the_summary_cost_no_graph_access_at_all(
         patch.object(
             counts_module,
             "_get_latest_cognify_runs",
-            AsyncMock(return_value={dataset.id: SimpleNamespace(pipeline_run_id=run_id)}),
+            AsyncMock(
+                return_value={
+                    dataset.id: SimpleNamespace(
+                        pipeline_run_id=run_id,
+                        # A count cache only describes a finished run, so the
+                        # status is what decides whether it may be served.
+                        status=PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+                    )
+                }
+            ),
         ),
         patch.object(
             counts_module, "_get_cached_metrics", AsyncMock(return_value={run_id: cached})
@@ -184,7 +194,16 @@ async def test_a_cold_count_cache_costs_one_count_query_and_no_traversal():
         patch.object(
             counts_module,
             "_get_latest_cognify_runs",
-            AsyncMock(return_value={dataset.id: SimpleNamespace(pipeline_run_id=run_id)}),
+            AsyncMock(
+                return_value={
+                    dataset.id: SimpleNamespace(
+                        pipeline_run_id=run_id,
+                        # A count cache only describes a finished run, so the
+                        # status is what decides whether it may be served.
+                        status=PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+                    )
+                }
+            ),
         ),
         patch.object(counts_module, "_get_cached_metrics", AsyncMock(return_value={})),
         patch.object(counts_module, "set_database_global_context_variables", _no_op_context),
