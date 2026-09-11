@@ -1,9 +1,12 @@
 [project]
 name = "cognee-mcp"
-version = "0.5.5"
+version = "0.5.6"
 description = "Cognee MCP server"
 readme = "README.md"
-requires-python = ">=3.10"
+# Upper bound is real, not defensive: cognee[docs] -> unstructured -> spacy, and
+# spacy ships no cp314 wheel and no sdist, so `uv sync` hard-fails on 3.14 even
+# though `uv lock --check` passes. Verified installing on 3.10-3.13.
+requires-python = ">=3.10,<3.14"
 
 dependencies = [
     # For local cognee repo usage remove comment below and add absolute path to cognee. Then run `uv sync --reinstall` in the mcp folder on local cognee changes.
@@ -75,6 +78,9 @@ torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 # split inside its [fastembed] extra, but cognee-mcp doesn't pull that
 # extra, so we must mirror the constraint here to keep `uv lock --upgrade`
 # from picking a 1.24.x for python<3.14.
+# The >=3.14 arm is currently unreachable — requires-python caps at <3.14
+# because spacy has no cp314 wheel. Kept so lifting that cap is a one-line
+# change once spacy publishes one.
 constraint-dependencies = [
     "onnxruntime<=1.23.2 ; python_version < '3.14'",
     "onnxruntime>=1.24.1 ; python_version >= '3.14'",

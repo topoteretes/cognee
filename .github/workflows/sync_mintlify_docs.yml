@@ -4,6 +4,22 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+  # release.yml calls this directly, because the release event cannot be
+  # relied on. release.yml creates AND publishes the release itself, and
+  # GitHub deliberately does not fire `release: published` for an event
+  # created with the default Actions token — so no release-triggered run has
+  # happened since v1.0.4 (2026-05-03) and the published spec went stale
+  # without anything failing. Being called removes the token from the path.
+  workflow_call:
+    inputs:
+      tag:
+        description: >-
+          Tag of an already published release to sync. Its presence is what
+          marks a run as release-equivalent, because github.event_name
+          reports the CALLER's event for workflow_call and so cannot be used
+          to tell the two apart.
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -19,6 +35,11 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           fetch-depth: 0
+          # Called runs generate the spec from the tag that was released, not
+          # from whatever main has drifted to during the release (this job
+          # starts several minutes in). Empty for every other trigger, which
+          # leaves checkout on its default ref.
+          ref: ${{ inputs.tag }}
 
       # Normalize release metadata so the sync script can run unchanged for
       # published releases, manual dispatches, and branch-push preview runs.
@@ -28,6 +49,10 @@ jobs:
         id: release_meta
         env:
           EVENT_NAME: ${{ github.event_name }}
+          # Empty unless this workflow was called by another one; see the
+          # workflow_call input comment above for why this is the discriminator.
+          CALLED_TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
           REF_NAME: ${{ github.ref_name }}
           COMMIT_SHA: ${{ github.sha }}
           RELEASE_BODY: ${{ github.event.release.body }}
@@ -39,16 +64,37 @@ jobs:
         run: |
           BODY_FILE="$(mktemp)"
           if [ "${EVENT_NAME}" = "release" ]; then
+            RELEASE_MODE=true
             TAG="${RELEASE_TAG}"
             RELEASE_LINK="${RELEASE_URL}"
             PUBLISHED_AT="${RELEASE_PUBLISHED_AT}"
             DOCS_BRANCH_NAME="automation/sync-mintlify-docs-${RELEASE_TAG}"
             printf "%s" "${RELEASE_BODY}" > "${BODY_FILE}"
+          elif [ -n "${CALLED_TAG}" ]; then
+            RELEASE_MODE=true
+            TAG="${CALLED_TAG}"
+            # Read the release back from the API rather than threading its
+            # notes through job outputs and workflow_call inputs. The release
+            # already exists: the caller depends on the job that created it.
+            RELEASE_JSON="$(mktemp)"
+            gh release view "${CALLED_TAG}" \
+              --repo "${REPOSITORY}" \
+              --json body,url,publishedAt,isPrerelease > "${RELEASE_JSON}"
+            if [ "$(jq -r '.isPrerelease' "${RELEASE_JSON}")" = "true" ]; then
+              echo "::error::${CALLED_TAG} is a prerelease; refusing to publish it to docs."
+              exit 1
+            fi
+            RELEASE_LINK="$(jq -r '.url' "${RELEASE_JSON}")"
+            PUBLISHED_AT="$(jq -r '.publishedAt' "${RELEASE_JSON}")"
+            jq -r '.body' "${RELEASE_JSON}" > "${BODY_FILE}"
+            DOCS_BRANCH_NAME="automation/sync-mintlify-docs-${CALLED_TAG}"
           else
-            TAG="test-sync-${REF_NAME}-${COMMIT_SHA::7}"
+            RELEASE_MODE=false
+            TAG="test-sync-${REF_NAME//\//-}-${COMMIT_SHA::7}"
             RELEASE_LINK="${SERVER_URL}/${REPOSITORY}/commit/${COMMIT_SHA}"
             PUBLISHED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-            DOCS_BRANCH_NAME="${REF_NAME}"
+            # Never the bare ref: a dispatch from main force-pushes cognee-docs' main.
+            DOCS_BRANCH_NAME="automation/sync-mintlify-docs-${REF_NAME//\//-}-${COMMIT_SHA::7}"
             printf "%s\n\n- Source commit: \`%s\`\n- Workflow event: \`%s\`\n- Commit URL: %s\n" \
               "Automated docs sync test run from branch \`${REF_NAME}\`." \
               "${COMMIT_SHA}" \
@@ -63,6 +109,7 @@ jobs:
           echo "release_url=${RELEASE_LINK}" >> "$GITHUB_OUTPUT"
           echo "published_at=${PUBLISHED_AT}" >> "$GITHUB_OUTPUT"
           echo "docs_branch_name=${SAFE_DOCS_BRANCH_NAME}" >> "$GITHUB_OUTPUT"
+          echo "release_mode=${RELEASE_MODE}" >> "$GITHUB_OUTPUT"
 
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
@@ -82,13 +129,22 @@ jobs:
           path: docs-repo
 
       - name: Sync OpenAPI and changelog
+        env:
+          RELEASE_MODE: ${{ steps.release_meta.outputs.release_mode }}
         run: |
+          # Only a real release writes changelog history; a preview tag is synthetic.
+          SKIP_CHANGELOG=()
+          if [ "${RELEASE_MODE}" != "true" ]; then
+            SKIP_CHANGELOG=(--skip-changelog)
+          fi
+
           uv run python tools/sync_release_docs.py \
             --docs-repo "${GITHUB_WORKSPACE}/docs-repo" \
             --tag "${{ steps.release_meta.outputs.tag }}" \
             --release-url "${{ steps.release_meta.outputs.release_url }}" \
             --published-at "${{ steps.release_meta.outputs.published_at }}" \
-            --release-body-file "${{ steps.release_meta.outputs.body_file }}"
+            --release-body-file "${{ steps.release_meta.outputs.body_file }}" \
+            "${SKIP_CHANGELOG[@]}"
 
       - name: Commit docs changes
         id: commit_docs
@@ -120,13 +176,13 @@ jobs:
         if: ${{ steps.commit_docs.outputs.changes_made == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
-          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_MODE: ${{ steps.release_meta.outputs.release_mode }}
           RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
           RELEASE_URL: ${{ steps.release_meta.outputs.release_url }}
           TARGET_REPO: topoteretes/cognee-docs
           HEAD_BRANCH: ${{ steps.commit_docs.outputs.branch_name }}
         run: |
-          if [ "${EVENT_NAME}" = "release" ]; then
+          if [ "${RELEASE_MODE}" = "true" ]; then
             PR_TITLE="docs: sync release ${RELEASE_TAG}"
             PR_BODY=$(cat <<EOF
           Automated sync for release \`${RELEASE_TAG}\`.
