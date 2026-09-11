@@ -1,113 +1,21 @@
-import asyncio
+"""Custom graph models as JSON schema: a model to a schema, and a schema to a model.
+
+This is the serialization boundary for custom graph models — what the HTTP API moves
+across the wire. The LLM boundary (what an LLM is asked to answer for a model,
+and how the answer becomes DataPoints again) lives in ``cognee.shared.llm_graph_model``.
+"""
+
 import re
 import sys
 import types
-from pprint import pprint
-from typing import Any, Union, cast, get_args, get_origin
+from typing import cast
 
 from datamodel_code_generator import DataModelType, GenerateConfig, InputFileType, generate
-from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import BaseModel
 from pydantic._internal._core_utils import CoreSchemaOrField, is_core_schema
 from pydantic.json_schema import GenerateJsonSchema
-from pydantic_core import PydanticUndefined
 
-import cognee
-from cognee.api.v1.search import SearchType
-from cognee.infrastructure.engine import DataPoint
-from cognee.shared.logging_utils import ERROR, setup_logging
-
-
-def datapoint_model_to_basemodel(
-    model: type[BaseModel], *, strip_metadata: bool = False
-) -> type[BaseModel]:
-    """
-    Convert a DataPoint-derived model into a plain BaseModel-derived model at runtime.
-
-    Keeps domain fields from the model and its custom DataPoint parents. Drops fields
-    defined on DataPoint itself (id, version, metadata, and other infrastructure).
-    """
-
-    def _replace_datapoint_types(
-        annotation: Any, cache: dict[type[BaseModel], type[BaseModel]]
-    ) -> Any:
-        origin = get_origin(annotation)
-        args = get_args(annotation)
-
-        if origin is None:
-            if (
-                isinstance(annotation, type)
-                and issubclass(annotation, BaseModel)
-                and issubclass(annotation, DataPoint)
-            ):
-                return _to_base_model(annotation, cache)
-            return annotation
-
-        if origin in (list, set, frozenset):
-            inner = _replace_datapoint_types(args[0], cache)
-            return origin[inner]
-
-        if origin is tuple:
-            if len(args) == 2 and args[1] is Ellipsis:
-                return tuple[_replace_datapoint_types(args[0], cache), ...]  # ty:ignore[invalid-type-form]
-            return tuple[tuple(_replace_datapoint_types(arg, cache) for arg in args)]  # ty:ignore[invalid-type-form]
-
-        if origin is dict:
-            key_type = _replace_datapoint_types(args[0], cache)
-            value_type = _replace_datapoint_types(args[1], cache)
-            return dict[key_type, value_type]
-
-        if origin in (Union, types.UnionType):
-            return Union[tuple(_replace_datapoint_types(arg, cache) for arg in args)]  # noqa: UP007 - runtime tuple
-
-        return annotation
-
-    def _to_base_model(
-        model_type: type[BaseModel], cache: dict[type[BaseModel], type[BaseModel]]
-    ) -> type[BaseModel]:
-        if model_type in cache:
-            return cache[model_type]
-        # Break potential cycles in nested model graphs (A -> B -> A).
-        cache[model_type] = model_type
-
-        class ConfiguredBase(BaseModel):
-            model_config = ConfigDict(arbitrary_types_allowed=True)
-
-        model_fields = model_type.model_fields
-
-        # Keep merged domain fields; drop DataPoint infrastructure (including metadata).
-        if issubclass(model_type, DataPoint):
-            field_names = [name for name in model_fields if name not in DataPoint.model_fields]
-        else:
-            field_names = list(model_fields.keys())
-
-        if strip_metadata:
-            field_names = [name for name in field_names if name != "metadata"]
-
-        converted_fields: dict[str, Any] = {}
-        for field_name in field_names:
-            field_info = model_fields[field_name]
-            default_value = (
-                Field(default_factory=field_info.default_factory)
-                if field_info.default_factory is not None
-                else field_info.default
-            )
-            converted_fields[field_name] = (
-                _replace_datapoint_types(field_info.annotation, cache),
-                default_value if default_value is not PydanticUndefined else PydanticUndefined,
-            )
-
-        converted_model = create_model(
-            model_type.__name__, __base__=ConfiguredBase, **converted_fields
-        )
-        converted_model.model_rebuild()
-        cache[model_type] = converted_model
-
-        return converted_model
-
-    if not issubclass(model, DataPoint):
-        return model
-
-    return _to_base_model(model, {})
+from cognee.shared.llm_graph_model import datapoint_model_to_basemodel
 
 
 def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
@@ -170,6 +78,12 @@ def graph_model_to_graph_schema(graph_model: type[BaseModel]) -> dict:
 
 
 if __name__ == "__main__":
+    import asyncio
+    from pprint import pprint
+
+    import cognee
+    from cognee.api.v1.search import SearchType
+    from cognee.shared.logging_utils import ERROR, setup_logging
 
     async def main():
         # Create a clean slate for cognee -- reset data and system state
@@ -235,7 +149,7 @@ if __name__ == "__main__":
         await visualize_graph()
         print("Visualization saved to ~/graph_visualization.html")
 
-    logger = setup_logging(log_level=ERROR)
+    setup_logging(log_level=ERROR)
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
