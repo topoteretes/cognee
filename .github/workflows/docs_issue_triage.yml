@@ -25,6 +25,15 @@ name: automation | Triage GitHub Docs Issues
 # separate decision once those runs look right.
 
 on:
+  # TEMPORARY, remove before merge: GitHub only registers a workflow_dispatch
+  # workflow once it is on the default branch or has had a run, so this one
+  # cannot be dispatched from a feature branch. A push of this file on this
+  # branch runs a single hardcoded full-backlog DRY RUN to register it.
+  push:
+    branches:
+      - feature/res-27-add-a-manual-github-issue-docs-triage-automation
+    paths:
+      - .github/workflows/docs_issue_triage.yml
   workflow_dispatch:
     inputs:
       issue_number:
@@ -103,6 +112,17 @@ jobs:
           )
           if [ "${INPUT_DRY_RUN}" = "true" ]; then
             args+=(--dry-run)
+          fi
+          # TEMPORARY, remove with the push trigger above: the registration run has
+          # no inputs, so it triages the whole open backlog as a dry run.
+          if [ "${{ github.event_name }}" = "push" ]; then
+            args=(
+              --repo "${{ github.repository }}"
+              --since 2020-01-01
+              --until "$(date -u +%F)"
+              --results-json triage-results.json
+              --dry-run
+            )
           fi
 
           uv run python tools/docs_issue_triage.py "${args[@]}"
