@@ -224,7 +224,7 @@ async def _scenario():
     await _assert_stack_under_id(graph, vector_engine, original_id, "ENTORIG")
 
     # --- 1. update by own id: id stable, whole stack follows --------------- #
-    await cognee.update(original_id, text_v2, dataset.id, user=user)
+    await cognee.update(data_id=original_id, data=text_v2, dataset_id=dataset.id, user=user)
     row = await _sole_row(dataset.id)
     assert row.id == original_id, "update() must NOT change the document's data_id"
     assert row.legacy_id is None
@@ -236,13 +236,17 @@ async def _scenario():
 
     # --- 2. repeated updates: the id never moves --------------------------- #
     for round_tag in ("r1", "r2"):
-        await cognee.update(original_id, _text("a", "b", round_tag), dataset.id, user=user)
+        await cognee.update(
+            data_id=original_id, data=_text("a", "b", round_tag), dataset_id=dataset.id, user=user
+        )
         row = await _sole_row(dataset.id)
         assert row.id == original_id
     assert await _read_text(row) == _text("a", "b", "r2")
 
     # --- 3. update with unchanged content: same id, nothing duplicated ----- #
-    await cognee.update(original_id, _text("a", "b", "r2"), dataset.id, user=user)
+    await cognee.update(
+        data_id=original_id, data=_text("a", "b", "r2"), dataset_id=dataset.id, user=user
+    )
     row = await _sole_row(dataset.id)
     assert row.id == original_id
     assert await _read_text(row) == _text("a", "b", "r2")
@@ -255,7 +259,7 @@ async def _scenario():
     assert len(rows) == 2
     other_id = next(r.id for r in rows if r.id != original_id)
 
-    await cognee.update(original_id, other_text, dataset.id, user=user)
+    await cognee.update(data_id=original_id, data=other_text, dataset_id=dataset.id, user=user)
     rows = await get_dataset_data(dataset.id)
     assert {r.id for r in rows} == {original_id, other_id}, (
         "update with duplicate content must not collapse documents or change ids"
@@ -271,7 +275,9 @@ async def _scenario():
     ghost_id = uuid4()
     rows_before = {r.id for r in await get_dataset_data(dataset.id)}
     try:
-        await cognee.update(ghost_id, _text("g", "h"), dataset.id, user=user)
+        await cognee.update(
+            data_id=ghost_id, data=_text("g", "h"), dataset_id=dataset.id, user=user
+        )
     except UpdateTargetNotFoundError as error:
         assert str(ghost_id) in str(error), "the error names the missing id"
         assert getattr(error, "status_code", None) == 404
@@ -281,12 +287,14 @@ async def _scenario():
     assert rows_after == rows_before, "a refused update must not create or remove documents"
 
     # --- 6. single-element list unwraps; multi-item list refused ----------- #
-    await cognee.update(other_id, [_text("g", "h", "i")], dataset.id, user=user)
+    await cognee.update(
+        data_id=other_id, data=[_text("g", "h", "i")], dataset_id=dataset.id, user=user
+    )
     other_row = next(r for r in await get_dataset_data(dataset.id) if r.id == other_id)
     assert await _read_text(other_row) == _text("g", "h", "i")
 
     try:
-        await cognee.update(other_id, ["one", "two"], dataset.id, user=user)
+        await cognee.update(data_id=other_id, data=["one", "two"], dataset_id=dataset.id, user=user)
     except IngestionError:
         pass
     else:
@@ -304,13 +312,17 @@ async def _scenario():
         await session.commit()
 
     # Update by the PRE-FORK id: canonical id kept, lineage restored.
-    await cognee.update(pre_fork_id, _text("a", "f1"), dataset.id, user=user)
+    await cognee.update(
+        data_id=pre_fork_id, data=_text("a", "f1"), dataset_id=dataset.id, user=user
+    )
     row = next(r for r in await get_dataset_data(dataset.id) if r.id == original_id)
     assert str(row.legacy_id) == str(pre_fork_id), "fork lineage survives the update"
     assert await _read_text(row) == _text("a", "f1")
 
     # Update by the CANONICAL id: same row, lineage still intact.
-    await cognee.update(original_id, _text("a", "f2"), dataset.id, user=user)
+    await cognee.update(
+        data_id=original_id, data=_text("a", "f2"), dataset_id=dataset.id, user=user
+    )
     row = next(r for r in await get_dataset_data(dataset.id) if r.id == original_id)
     assert str(row.legacy_id) == str(pre_fork_id)
     assert await _read_text(row) == _text("a", "f2")

@@ -131,7 +131,9 @@ async def test_a_failed_rebuild_keeps_the_document_and_the_next_cognify_restores
     monkeypatch.setattr(update_module, "add", _boom)
     report.write_text("Report ENTBETA, version two.\n")
     with pytest.raises(RuntimeError, match="simulated failure"):
-        await cognee.update(row.id, str(report), dataset.id, user=user, chunk_level_diff=False)
+        await cognee.update(
+            str(report), dataset.id, data_id=row.id, user=user, chunk_level_diff=False
+        )
     monkeypatch.undo()
 
     # The document is still there under its id, with its stored content, and
@@ -146,7 +148,9 @@ async def test_a_failed_rebuild_keeps_the_document_and_the_next_cognify_restores
     assert "entalpha" in await _entity_names(dataset.id, user.id)
 
     # And the update itself works once the cause is gone: same id, new content.
-    result = await cognee.update(row.id, str(report), dataset.id, user=user, chunk_level_diff=False)
+    result = await cognee.update(
+        str(report), dataset.id, data_id=row.id, user=user, chunk_level_diff=False
+    )
     assert result["status"] == "full_rebuild" and result["data_id"] == row.id
     (updated,) = await get_dataset_data(dataset.id)
     assert updated.id == row.id and updated.content_hash != row.content_hash

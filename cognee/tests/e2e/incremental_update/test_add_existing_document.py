@@ -149,7 +149,7 @@ async def test_re_adding_a_changed_file_is_refused_and_update_is_the_way(add_env
     assert len(await get_dataset_data(dataset.id)) == 2, "a refused add must write nothing"
 
     # The way to do it: update() keeps the id and takes the new content.
-    result = await cognee.update(rows["report"].id, str(report), dataset.id, user=user)
+    result = await cognee.update(str(report), dataset.id, data_id=rows["report"].id, user=user)
     assert result["data_id"] == rows["report"].id
     assert result["status"] in ("incremental", "full_rebuild"), result
     after = {row.name: row for row in await get_dataset_data(dataset.id)}

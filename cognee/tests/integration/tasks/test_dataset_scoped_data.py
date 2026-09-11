@@ -294,7 +294,7 @@ async def _scenario():
     # SAME canonical id, with the fork lineage restored, so both ids the user
     # ever held keep resolving.
     text_v3 = text_v1.replace("ENTA", "ENTA3", 1)
-    await cognee.update(pre_fork_id, text_v3, beta.id, user=user)
+    await cognee.update(data_id=pre_fork_id, data=text_v3, dataset_id=beta.id, user=user)
     beta_rows = await get_dataset_data(beta.id)
     assert len(beta_rows) == 1
     replacement = beta_rows[0]
@@ -311,7 +311,7 @@ async def _scenario():
 
     # A normal (unforked) row updated by its own id: same id, no lineage.
     text_v4 = text_v2.replace("ENTB", "ENTB4", 1)
-    await cognee.update(alpha_data.id, text_v4, alpha.id, user=user)
+    await cognee.update(data_id=alpha_data.id, data=text_v4, dataset_id=alpha.id, user=user)
     alpha_updated = await _sole_data(alpha.id)
     assert alpha_updated.id == alpha_data.id, "update() must NOT change the document's data_id"
     assert alpha_updated.legacy_id is None
@@ -319,7 +319,9 @@ async def _scenario():
 
     # Replacing one document with several items is ambiguous — refused.
     try:
-        await cognee.update(alpha_data.id, ["one", "two"], alpha.id, user=user)
+        await cognee.update(
+            data_id=alpha_data.id, data=["one", "two"], dataset_id=alpha.id, user=user
+        )
     except IngestionError:
         pass
     else:

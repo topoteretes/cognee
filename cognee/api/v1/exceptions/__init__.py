@@ -12,4 +12,5 @@ from .exceptions import (
     DocumentSubgraphNotFoundError,
     DocumentUpdateRequiredError,
     UpdateTargetNotFoundError,
+    UpdateTargetNotInferredError,
 )

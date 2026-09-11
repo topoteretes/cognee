@@ -68,6 +68,7 @@ SAMPLE_ARGUMENTS = {
     "provider": "sample-provider",
     "search_type": "sample-search",
     "status_code": 400,
+    "unresolved": [{"input": "report.txt", "reason": "no document in the dataset came from it"}],
     "value": 1,
 }
 

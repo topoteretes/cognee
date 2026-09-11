@@ -293,7 +293,10 @@ async def test_entity_orphaned_by_update_is_deleted(ownership_env):
     queen_node_id = before.entities["queen"]
 
     result = await cognee.update(
-        data_id, "Hole met Rabbit.\n\nRabbit met Alice.\n\nNothing remains.", dataset.id, user=user
+        "Hole met Rabbit.\n\nRabbit met Alice.\n\nNothing remains.",
+        dataset.id,
+        data_id=data_id,
+        user=user,
     )
     assert result["status"] == "incremental", result
 
@@ -323,7 +326,7 @@ async def test_fact_survives_loss_of_its_first_producer(ownership_env):
     )
 
     result = await cognee.update(
-        data_id, "Alice met Queen.\n\nAlice met Queen again today.", dataset.id, user=user
+        "Alice met Queen.\n\nAlice met Queen again today.", dataset.id, data_id=data_id, user=user
     )
     assert result["status"] == "incremental", result
     stated_twice = await _view(user, dataset)
@@ -331,7 +334,7 @@ async def test_fact_survives_loss_of_its_first_producer(ownership_env):
     ownership_before = stated_twice.describe_edge("alice", "queen")
 
     result = await cognee.update(
-        data_id, "Nothing here.\n\nAlice met Queen again today.", dataset.id, user=user
+        "Nothing here.\n\nAlice met Queen again today.", dataset.id, data_id=data_id, user=user
     )
     assert result["status"] == "incremental", result
     after = await _view(user, dataset)

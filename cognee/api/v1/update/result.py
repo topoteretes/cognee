@@ -10,6 +10,10 @@ The result is a dict on every path, and a superset of the chunk-level summary
 that shipped before: the same keys with the same values, plus the fields below.
 This model is its schema — the HTTP route validates and documents the body
 with it, and the remote client normalizes what it receives through it.
+
+A batch (a list of inputs, or a directory) answers with ``UpdateBatchResult``:
+the per-document results plus the counts a caller renders as
+"N updated, N unchanged, N failed".
 """
 
 from typing import Literal
@@ -66,3 +70,48 @@ class UpdateResult(BaseModel):
     pipeline_run_id: UUID | None = None
     fallback: Fallback | None = None
     error: UpdateError | None = None
+
+
+class UpdateBatchResult(BaseModel):
+    """Outcome of ``update()`` over several documents.
+
+    ``results`` holds one ``UpdateResult`` per input, in input order; a
+    document whose update raised is recorded there with ``status``
+    ``failed`` and the error, and the batch carries on with the rest, so a
+    caller retries the failed ones by their ``data_id``. The counts summarize
+    them: ``updated`` is every document whose content was replaced
+    (``incremental`` or ``full_rebuild``). ``status`` is ``completed`` when
+    nothing failed, ``partial`` when some documents failed and ``failed`` when
+    every one did.
+    """
+
+    status: Literal["completed", "partial", "failed"]
+    total: int
+    updated: int
+    unchanged: int
+    failed: int
+    dataset_id: UUID
+    duration_seconds: float
+    results: list[UpdateResult]
+
+    @classmethod
+    def of(
+        cls, results: list[dict], dataset_id: UUID, duration_seconds: float
+    ) -> "UpdateBatchResult":
+        """Aggregate per-document result dicts."""
+        statuses = [result["status"] for result in results]
+        failed = statuses.count("failed")
+        return cls(
+            status="failed"
+            if results and failed == len(results)
+            else "partial"
+            if failed
+            else "completed",
+            total=len(results),
+            updated=statuses.count("incremental") + statuses.count("full_rebuild"),
+            unchanged=statuses.count("unchanged"),
+            failed=failed,
+            dataset_id=dataset_id,
+            duration_seconds=duration_seconds,
+            results=[UpdateResult.model_validate(result) for result in results],
+        )

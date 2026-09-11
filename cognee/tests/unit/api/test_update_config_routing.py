@@ -160,13 +160,13 @@ async def test_custom_extraction_config_skips_the_incremental_path(config_kwargs
 
 
 async def test_multi_item_input_is_rejected_not_multiplied():
-    """update() is the ONLY place that rejects a multi-item list.
+    """One data_id with several inputs is refused before any work.
 
-    The incremental engine used to re-check this and raise
-    IncrementalUpdateNotPossible — which means "fall back", so a two-item
-    update would have been routed into a full flow that had already unwrapped
-    it. That copy is gone, which makes this check the only thing standing
-    between a caller and a silently multiplied update.
+    A list is a batch, one document per input, and a single id cannot name
+    them all — applying it to each would silently multiply the update. The
+    incremental engine used to re-check this and raise
+    IncrementalUpdateNotPossible, which means "fall back"; that copy is gone,
+    so this check in update() is the only thing standing in the way.
     """
     from cognee.modules.ingestion.exceptions import IngestionError
 

@@ -695,7 +695,9 @@ async def main():
         expect_run = new_text != text
 
         runs_before = await _incremental_run_count(dataset.id)
-        summary = await cognee.update(data_id, new_text, dataset.id, user=user)
+        summary = await cognee.update(
+            data_id=data_id, data=new_text, dataset_id=dataset.id, user=user
+        )
         doc_texts[data_id] = new_text
 
         state = await _verify(

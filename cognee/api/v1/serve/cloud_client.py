@@ -2,6 +2,7 @@
 
 import io
 import json
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -29,15 +30,32 @@ def _text_upload_filename(text: str) -> str:
 
 def _failed_update_result(body: str) -> dict | None:
     """Parse a 500 body as an update result when it is one with status "failed"."""
-    from cognee.api.v1.update.result import UpdateResult
+    from cognee.api.v1.update.result import UpdateBatchResult, UpdateResult
 
     try:
         payload = json.loads(body)
     except ValueError:
         return None
-    if isinstance(payload, dict) and payload.get("status") == "failed" and "data_id" in payload:
+    if not isinstance(payload, dict) or payload.get("status") != "failed":
+        return None
+    if "results" in payload:
+        return UpdateBatchResult.model_validate(payload).model_dump()
+    if "data_id" in payload:
         return UpdateResult.model_validate(payload).model_dump()
     return None
+
+
+def _local_file(item: Any) -> Path | None:
+    """The existing local file ``item`` names, or None for text and file objects."""
+    if not isinstance(item, (str, Path)):
+        return None
+    from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+
+    try:
+        path = resolve_local_path(item, must_exist=True)
+    except (FileNotFoundError, OSError, ValueError):
+        return None
+    return path if path.is_file() else None
 
 
 class CloudClient:
@@ -348,71 +366,95 @@ class CloudClient:
 
     async def update(
         self,
-        data_id: UUID,
         data: Any,
         dataset_id: UUID,
+        data_id: UUID | None = None,
         node_set: list | None = None,
         chunk_level_diff: bool = True,
     ) -> dict:
-        """PATCH /api/v1/update — replace one document in place on the remote.
+        """PATCH /api/v1/update — replace documents in place on the remote.
 
-        Mirrors the route: ``data_id``, ``dataset_id`` and ``chunk_level_diff``
-        travel as query params, the new content as the multipart ``data`` file,
-        ``node_set`` as repeated form fields. The server keeps the document's
-        id across the update, so this is a real replace.
+        Mirrors the route: ``dataset_id``, ``data_id`` and ``chunk_level_diff``
+        travel as query params, the new content as multipart ``data`` files,
+        ``node_set`` as repeated form fields. A local file path is sent as a
+        file part under its filename, so the server can infer the document
+        without ``data_id`` the way a local call does; a directory is sent
+        as its files. The server keeps the document's id across the update,
+        so this is a real replace.
         """
-        # update() replaces exactly one document; the local implementation
-        # unwraps single-item lists and DataItem wrappers the same way.
-        if isinstance(data, list):
-            if len(data) != 1:
-                raise ValueError(f"update() replaces exactly one document; got {len(data)} items.")
-            data = data[0]
-        if hasattr(data, "data") and hasattr(data, "data_id") and not hasattr(data, "read"):
-            data = data.data
+        from cognee.api.v1.update.result import UpdateBatchResult, UpdateResult
+        from cognee.modules.ingestion.identify_by_origin import expand_directories
+
+        items = expand_directories(data if isinstance(data, list) else [data])
+        # A DataItem's own id is the document; the route carries one id, so a
+        # batch of pinned items has no wire form and is refused up front.
+        unwrapped = []
+        for item in items:
+            if hasattr(item, "data") and hasattr(item, "data_id") and not hasattr(item, "read"):
+                if item.data_id is not None:
+                    if len(items) != 1:
+                        raise ValueError(
+                            "per-document data_ids cannot travel over serve(); call update() "
+                            "once per document, or send a batch without ids to match by filename."
+                        )
+                    data_id = data_id or item.data_id
+                item = item.data
+            unwrapped.append(item)
 
         session = await self._get_session()
 
-        form = aiohttp.FormData()
-        if isinstance(data, str):
-            form.add_field(
-                "data",
-                io.BytesIO(data.encode("utf-8")),
-                filename=_text_upload_filename(data),
-                content_type="text/plain",
-            )
-        elif hasattr(data, "read"):
-            name = getattr(data, "name", "upload")
-            form.add_field("data", data, filename=Path(name).name or "upload")
-        else:
-            raise TypeError(
-                f"update() over serve() accepts text or a file object; got {type(data)}"
-            )
-        for tag in node_set or []:
-            if tag:
-                form.add_field("node_set", str(tag))
+        # Local files stay open until the request is sent; ExitStack closes them.
+        with ExitStack() as files:
+            form = aiohttp.FormData()
+            for item in unwrapped:
+                local = _local_file(item)
+                if local is not None:
+                    handle = files.enter_context(open(local, "rb"))
+                    form.add_field("data", handle, filename=local.name)
+                elif isinstance(item, str):
+                    form.add_field(
+                        "data",
+                        io.BytesIO(item.encode("utf-8")),
+                        filename=_text_upload_filename(item),
+                        content_type="text/plain",
+                    )
+                elif hasattr(item, "read"):
+                    name = getattr(item, "name", "upload")
+                    form.add_field("data", item, filename=Path(name).name or "upload")
+                else:
+                    raise TypeError(
+                        f"update() over serve() accepts text, a file path or a file object; "
+                        f"got {type(item)}"
+                    )
+            for tag in node_set or []:
+                if tag:
+                    form.add_field("node_set", str(tag))
 
-        params = {
-            "data_id": str(data_id),
-            "dataset_id": str(dataset_id),
-            "chunk_level_diff": "true" if chunk_level_diff else "false",
-        }
-        from cognee.api.v1.update.result import UpdateResult
+            params = {
+                "dataset_id": str(dataset_id),
+                "chunk_level_diff": "true" if chunk_level_diff else "false",
+            }
+            if data_id is not None:
+                params["data_id"] = str(data_id)
 
-        async with session.patch(
-            f"{self.service_url}/api/v1/update", params=params, data=form
-        ) as resp:
-            if resp.status >= 400:
-                body = await resp.text()
-                # A failed rebuild travels with a 500 but is still a result, in
-                # the same shape the local path returns, so the caller can read
-                # the error and retry. Anything else is a remote error.
-                failed = _failed_update_result(body)
-                if failed is not None:
-                    return failed
-                raise RuntimeError(f"Remote update failed ({resp.status}): {body}")
-            # Through the schema so the dict matches the local result exactly:
-            # UUIDs as UUID objects, the fallback reason as its enum member.
-            return UpdateResult.model_validate(await resp.json()).model_dump()
+            async with session.patch(
+                f"{self.service_url}/api/v1/update", params=params, data=form
+            ) as resp:
+                if resp.status >= 400:
+                    body = await resp.text()
+                    # A failed rebuild (or a batch in which every document
+                    # failed) travels with a 500 but is still a result, in the
+                    # same shape the local path returns, so the caller can read
+                    # the errors and retry. Anything else is a remote error.
+                    failed = _failed_update_result(body)
+                    if failed is not None:
+                        return failed
+                    raise RuntimeError(f"Remote update failed ({resp.status}): {body}")
+                # Through the schema so the dict matches the local result exactly:
+                # UUIDs as UUID objects, the fallback reason as its enum member.
+                payload = await resp.json()
+                model = UpdateBatchResult if "results" in payload else UpdateResult
+                return model.model_validate(payload).model_dump()
 
     async def list_data(self, dataset_id: UUID) -> list:
         """GET /api/v1/datasets/{dataset_id}/data — the documents in a dataset."""

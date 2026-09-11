@@ -68,7 +68,10 @@ async def main():
     assert names_v1, "the DLT route emitted no row nodes"
 
     result = await cognee.update(
-        manifest.id, dlt.resource(ROWS_V2, name="people", primary_key="id"), dataset.id, user=user
+        dlt.resource(ROWS_V2, name="people", primary_key="id"),
+        dataset.id,
+        data_id=manifest.id,
+        user=user,
     )
     assert result["status"] == "full_rebuild", result
     assert result["fallback"]["reason"] == "no_baseline", result["fallback"]
@@ -90,9 +93,9 @@ async def main():
 
     try:
         await cognee.update(
-            manifest.id,
             dlt.resource(ROWS_V2, name="staff", primary_key="id"),
             dataset.id,
+            data_id=manifest.id,
             user=user,
         )
     except CogneeValidationError as error:

@@ -596,6 +596,133 @@ class TestUpdateEndpoint:
         assert resp.status_code == 500
         assert resp.json()["error"] == "Internal server error"
 
+    def test_update_without_data_id_hands_one_upload_to_update_to_infer(self, client):
+        import cognee.api.v1.update as update_pkg
+        from cognee.api.v1.update import UpdateResult
+
+        result = UpdateResult(
+            status="unchanged",
+            **dict.fromkeys(("regions", "deleted_chunks", "added_chunks", "reused_chunks"), 0),
+            kept_chunks=2,
+            reindexed_chunks=0,
+            total_chunks=2,
+            data_id=uuid4(),
+            dataset_id=MOCK_DATASET_ID,
+            duration_seconds=0.1,
+        ).model_dump()
+        update_pkg.update = AsyncMock(return_value=result)
+
+        resp = client.patch(
+            "/update",
+            params={"dataset_id": str(MOCK_DATASET_ID)},
+            files={"data": ("report.txt", b"same content", "text/plain")},
+            data={"node_set": ""},
+        )
+
+        assert resp.status_code == 200
+        kwargs = update_pkg.update.await_args.kwargs
+        assert kwargs["data_id"] is None and kwargs["dataset_id"] == MOCK_DATASET_ID
+        assert not isinstance(kwargs["data"], list), "one upload is one document, not a batch"
+        assert kwargs["data"].filename == "report.txt"
+
+    def test_update_not_inferred_returns_422_with_the_endpoints_to_use(self, client):
+        import cognee.api.v1.update as update_pkg
+        from cognee.api.v1.exceptions import UpdateTargetNotInferredError
+
+        update_pkg.update = AsyncMock(
+            side_effect=UpdateTargetNotInferredError(
+                [
+                    {
+                        "input": "report_final.txt",
+                        "reason": "no document in the dataset came from it",
+                    }
+                ],
+                MOCK_DATASET_ID,
+            )
+        )
+
+        resp = client.patch(
+            "/update",
+            params={"dataset_id": str(MOCK_DATASET_ID)},
+            files={"data": ("report_final.txt", b"new content", "text/plain")},
+            data={"node_set": ""},
+        )
+
+        assert resp.status_code == 422
+        body = resp.json()
+        assert body["error"] == "Document to update could not be determined; pass data_id"
+        assert f"GET /api/v1/datasets/{MOCK_DATASET_ID}/data" in body["detail"]
+        assert "report_final.txt: no document in the dataset came from it" in body["detail"]
+        assert "cognee.datasets" not in body["detail"], "HTTP callers get endpoints, not SDK calls"
+
+    @staticmethod
+    def _batch(statuses):
+        from cognee.api.v1.update import UpdateBatchResult, UpdateResult
+
+        results = [
+            UpdateResult(
+                status=s,
+                data_id=uuid4(),
+                dataset_id=MOCK_DATASET_ID,
+                duration_seconds=0.2,
+                pipeline_run_id=None if s == "unchanged" else MOCK_PIPELINE_RUN_ID,
+                fallback={"reason": "no_baseline", "detail": "x"} if s != "unchanged" else None,
+                error={"error_class": "RuntimeError", "message": "boom"} if s == "failed" else None,
+            ).model_dump()
+            for s in statuses
+        ]
+        return UpdateBatchResult.of(results, MOCK_DATASET_ID, 0.7).model_dump()
+
+    def test_update_with_several_files_is_a_batch(self, client):
+        import cognee.api.v1.update as update_pkg
+        from cognee.api.v1.update import UpdateBatchResult
+
+        batch = self._batch(["full_rebuild", "unchanged", "failed"])
+        update_pkg.update = AsyncMock(return_value=batch)
+
+        resp = client.patch(
+            "/update",
+            params={"dataset_id": str(MOCK_DATASET_ID)},
+            files=[
+                ("data", ("a.txt", b"A", "text/plain")),
+                ("data", ("b.txt", b"B", "text/plain")),
+                ("data", ("c.txt", b"C", "text/plain")),
+            ],
+            data={"node_set": ""},
+        )
+
+        assert resp.status_code == 200, "a partial batch is a result, not an error"
+        body = resp.json()
+        assert body == UpdateBatchResult.model_validate(batch).model_dump(mode="json")
+        assert (body["status"], body["updated"], body["unchanged"], body["failed"]) == (
+            "partial",
+            1,
+            1,
+            1,
+        )
+        sent = update_pkg.update.await_args.kwargs["data"]
+        assert [upload.filename for upload in sent] == ["a.txt", "b.txt", "c.txt"]
+
+    def test_update_batch_in_which_every_document_failed_returns_500_with_the_body(self, client):
+        import cognee.api.v1.update as update_pkg
+        from cognee.api.v1.update import UpdateBatchResult
+
+        batch = self._batch(["failed", "failed"])
+        update_pkg.update = AsyncMock(return_value=batch)
+
+        resp = client.patch(
+            "/update",
+            params={"dataset_id": str(MOCK_DATASET_ID)},
+            files=[
+                ("data", ("a.txt", b"A", "text/plain")),
+                ("data", ("b.txt", b"B", "text/plain")),
+            ],
+            data={"node_set": ""},
+        )
+
+        assert resp.status_code == 500
+        assert resp.json() == UpdateBatchResult.model_validate(batch).model_dump(mode="json")
+
 
 # ---------------------------------------------------------------------------
 # Datasets endpoint – regression: server errors must return 500, not 418

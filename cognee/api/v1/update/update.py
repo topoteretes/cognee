@@ -13,7 +13,7 @@ from cognee.api.v1.update.incremental import (
     incremental_update,
     recorded_chunk_budget,
 )
-from cognee.api.v1.update.result import Fallback, UpdateError, UpdateResult
+from cognee.api.v1.update.result import Fallback, UpdateBatchResult, UpdateError, UpdateResult
 from cognee.modules.chunking.chunk_policy import DEFAULT_CHUNK_POLICY, ChunkPolicy
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
@@ -26,9 +26,9 @@ logger = get_logger("update")
 
 
 async def update(
-    data_id: UUID,
-    data: BinaryIO | list[BinaryIO] | str | list[str],
+    data: BinaryIO | list[BinaryIO] | str | list[str] | Any,
     dataset_id: UUID,
+    data_id: UUID | None = None,
     user: User = None,
     node_set: list[str] | None = None,
     vector_db_config: dict | None = None,
@@ -46,16 +46,34 @@ async def update(
     Update existing data in Cognee.
 
     The document keeps its ``data_id`` across updates — on EVERY path. The
-    incoming id is resolved first (exact, or the recorded pre-fork
-    ``legacy_id``), the chunk-level incremental path operates on the resolved
-    row in place, and the full rebuild drops the document's memory and
-    refreshes the same row with a pinned re-add — the row is never deleted, so
-    externally held id mappings never break and a failed rebuild leaves a
-    document to re-cognify rather than a document that is gone.
-    Exactly one document is replaced per call — lists of more than one item
-    are rejected. An id that resolves to no document raises
-    ``UpdateTargetNotFoundError`` (404) — update() never creates documents;
-    use add() for that.
+    target is resolved first (from ``data_id``, exact or the recorded pre-fork
+    ``legacy_id``, or inferred from the input's origin), the chunk-level
+    incremental path operates on the resolved row in place, and the full
+    rebuild drops the document's memory and refreshes the same row with a
+    pinned re-add — the row is never deleted, so externally held id mappings
+    never break and a failed rebuild leaves a document to re-cognify rather
+    than a document that is gone. update() never creates documents; use add()
+    for that.
+
+    Which document: ``data_id`` names it. Without one, update() infers it from
+    the input's origin — a local file by its path, an upload by its filename —
+    against the dataset's documents. Raw text (stored
+    under a content-hash name), a renamed or moved file, an origin no document
+    came from, or one that several documents share cannot be matched and raise
+    ``UpdateTargetNotInferredError`` (422) before anything is written; the
+    message says how to list the dataset's documents and pass ``data_id``. An
+    id that resolves to no document raises ``UpdateTargetNotFoundError`` (404).
+
+    Batches: a list of several inputs, or a directory, updates one document
+    per file and returns ``UpdateBatchResult`` — the per-document results plus
+    the counts for "N updated, N unchanged, N failed" (a one-item list is that
+    one document, as before). Every target is resolved
+    before the first document is touched, so an input that cannot be matched
+    fails the whole call with nothing written; a document whose update raises
+    after that is recorded as ``failed`` with the error and the batch carries
+    on, so the caller retries it by ``data_id``. A single ``data_id`` goes
+    with a single input; per-document ids travel as ``DataItem(data=...,
+    data_id=...)``.
 
     Supported Input Types:
         - **Text strings**: Direct text content (str) - any string not starting with "/" or "file://"
@@ -63,6 +81,7 @@ async def update(
             * Absolute paths: "/path/to/document.pdf"
             * File URLs: "file:///path/to/document.pdf" or "file://relative/path.txt"
             * S3 paths: "s3://bucket-name/path/to/file.pdf"
+        - **Directories**: every file under the directory, as a batch
         - **Binary file objects**: File handles/streams (BinaryIO)
 
     Supported File Formats:
@@ -74,7 +93,6 @@ async def update(
         - Office documents (.docx, .pptx)
 
     Args:
-        data_id: UUID of existing data to update (current or pre-fork)
         data: The latest version of the data. ``data_id`` names the document, so the
             replacement may carry any filename; the new name lands on the row. Can be:
             - Single text string: "Your text content here"
@@ -84,7 +102,12 @@ async def update(
             - File URL: "file:///absolute/path/to/document.pdf" or "file://relative/path.txt"
             - S3 path: "s3://my-bucket/documents/file.pdf"
             - Binary file object: open("file.txt", "rb")
+            - A directory path, or a list of any of the above: a batch
         dataset_id: UUID of the dataset holding the document (required).
+        data_id: UUID of the document to replace (current or pre-fork). Optional
+            for a local file or an upload, whose document is inferred from the
+            path or filename; required for raw text and for a file that was
+            renamed or moved. Only with a single input.
         user: User object for authentication and permissions. Uses default user if None.
               Default user: "default_user@example.com" (created automatically on first use).
               Users can only access datasets they have permissions for.
@@ -114,8 +137,8 @@ async def update(
                  Chunk-level path only; not exposed on the HTTP route.
 
     Returns:
-        One dict on every path (schema: ``UpdateResult``), a superset of the
-        chunk-level summary returned before:
+        For a single input, one dict on every path (schema: ``UpdateResult``), a
+        superset of the chunk-level summary returned before:
             - ``status``: "incremental" (chunks replaced), "unchanged" (no content
               change), "full_rebuild" (memory dropped and rebuilt from the new
               content) or "failed"
@@ -131,10 +154,23 @@ async def update(
               why the chunk-level path did not run — the caller switched it off, an
               unsupported parameter, or one of the engine's refusals.
             - ``error``: ``error_class`` and ``message`` when ``status`` is "failed".
+        For a list of several inputs or a directory, a dict with schema
+        ``UpdateBatchResult``:
+            - ``status``: "completed" (nothing failed), "partial" or "failed" (every
+              document failed).
+            - ``total``, ``updated`` (incremental or full_rebuild), ``unchanged``,
+              ``failed``: the counts.
+            - ``dataset_id``, ``duration_seconds`` of the whole batch.
+            - ``results``: one ``UpdateResult`` per input, in input order.
     """
+    if isinstance(data, UUID):
+        raise TypeError(
+            "update() takes the new content first: update(data, dataset_id, data_id=...)"
+        )
+
     # Route to the remote instance when connected via serve(). This must come
     # before any local work: the paths below resolve the LOCAL default user and
-    # delete/re-add locally, which against a remote dataset id fails with
+    # write locally, which against a remote dataset id fails with
     # "Dataset not found" while the remote document stays untouched.
     from cognee.api.v1.serve.state import get_remote_client
 
@@ -160,9 +196,9 @@ async def update(
                 ", ".join(dropped),
             )
         return await client.update(
-            data_id=data_id,
             data=data,
             dataset_id=dataset_id,
+            data_id=data_id,
             node_set=node_set,
             chunk_level_diff=chunk_level_diff,
         )
@@ -171,31 +207,165 @@ async def update(
     if not user:
         user = await get_default_user()
 
-    from cognee.modules.data.methods import reset_data_pipeline_status, resolve_data_id
     from cognee.modules.ingestion.exceptions import IngestionError
+    from cognee.modules.ingestion.identify_by_origin import expand_directories
+
+    given = data if isinstance(data, list) else [data]
+    items = expand_directories(given)
+    if not items:
+        raise IngestionError("update() got no documents to update.")
+    if data_id is not None and len(items) != 1:
+        raise IngestionError(
+            f"data_id names one document; got {len(items)} inputs with it. Pass a single "
+            "input, or per-document ids as DataItem(data=..., data_id=...)."
+        )
+    # Every target is known before the first document is touched: an input
+    # that names no document fails the call with nothing written.
+    targets = await _resolve_targets(items, dataset_id, data_id, user)
+
+    options = {
+        "dataset_id": dataset_id,
+        "user": user,
+        "node_set": node_set,
+        "vector_db_config": vector_db_config,
+        "graph_db_config": graph_db_config,
+        "preferred_loaders": preferred_loaders,
+        "incremental_loading": incremental_loading,
+        "data_cache": data_cache,
+        "chunk_level_diff": chunk_level_diff,
+        "graph_model": graph_model,
+        "custom_prompt": custom_prompt,
+        "chunker": chunker,
+        "policy": policy,
+    }
+    # A one-item list is that one document, as it always was (the shape the
+    # HTTP router sends); a list of several, or a directory, is a batch.
+    if len(given) == 1 and items == given:
+        return await _update_one(items[0], targets[0], **options)
+
+    results = []
+    for item, pinned_id in zip(items, targets):
+        item_started = perf_counter()
+        try:
+            results.append(await _update_one(item, pinned_id, **options))
+        except Exception as error:
+            # One document's failure must not lose the others' results: it is
+            # recorded, with its id, for the caller to retry on its own.
+            logger.exception("update of document %s in dataset %s failed", pinned_id, dataset_id)
+            results.append(
+                UpdateResult(
+                    status="failed",
+                    data_id=pinned_id,
+                    dataset_id=dataset_id,
+                    duration_seconds=round(perf_counter() - item_started, 3),
+                    error=UpdateError(error_class=type(error).__name__, message=str(error)),
+                ).model_dump()
+            )
+    return UpdateBatchResult.of(
+        results, dataset_id, round(perf_counter() - started, 3)
+    ).model_dump()
+
+
+def _describe_input(item) -> str:
+    """An input as a person would name it, for the refusal message."""
+    if isinstance(item, str):
+        return f"text {item[:40]!r}{'…' if len(item) > 40 else ''}"
+    return f"{type(item).__name__} input"
+
+
+async def _resolve_targets(
+    items: list, dataset_id: UUID, data_id: UUID | None, user: User
+) -> list[UUID]:
+    """The document each input replaces, in input order.
+
+    An explicit id (``data_id``, or ``DataItem.data_id``) is resolved exactly
+    or through the recorded pre-fork ``legacy_id``; a stale or mistyped id is
+    a caller error, never a create. Everything else is inferred from the
+    input's origin with one batched lookup; whatever cannot be matched is
+    refused together, with its reason, so the caller fixes the call once.
+    """
+    from cognee.api.v1.exceptions import UpdateTargetNotFoundError, UpdateTargetNotInferredError
+    from cognee.modules.data.methods import resolve_data_id
+    from cognee.modules.ingestion.exceptions import IngestionError
+    from cognee.modules.ingestion.identify_by_origin import Origin, find_by_origin, origin_of
+    from cognee.tasks.ingestion.data_item import DataItem
+
+    targets: list[UUID | None] = [None] * len(items)
+    unresolved: list[dict] = []
+    inferred: list[tuple[int, Origin]] = []
+    for index, item in enumerate(items):
+        explicit = data_id
+        if explicit is None and isinstance(item, DataItem):
+            explicit = item.data_id
+        if explicit is not None:
+            resolved = await resolve_data_id(dataset_id, explicit)
+            if resolved is None:
+                raise UpdateTargetNotFoundError(data_id=explicit, dataset_id=dataset_id)
+            targets[index] = resolved
+            continue
+        content = item.data if isinstance(item, DataItem) else item
+        origin = await origin_of(content)
+        if origin is None:
+            reason = (
+                "raw text has no origin to match"
+                if isinstance(content, str)
+                else "not a local file or an upload, so it has no origin to match"
+            )
+            unresolved.append({"input": _describe_input(content), "reason": reason})
+        else:
+            inferred.append((index, origin))
+
+    matches = await find_by_origin([origin for _, origin in inferred], user, dataset_id)
+    for index, origin in inferred:
+        found = matches[origin]
+        if len(found) == 1:
+            targets[index] = found[0].data_id
+        elif not found:
+            unresolved.append(
+                {"input": origin.label, "reason": "no document in the dataset came from it"}
+            )
+        else:
+            unresolved.append(
+                {"input": origin.label, "reason": f"{len(found)} documents came from it"}
+            )
+    if unresolved:
+        raise UpdateTargetNotInferredError(unresolved, dataset_id)
+
+    resolved = [target for target in targets if target is not None]
+    seen: dict[UUID, int] = {}
+    for index, target in enumerate(resolved):
+        if target in seen:
+            raise IngestionError(
+                f"inputs {seen[target] + 1} and {index + 1} both target document {target}; "
+                "a batch updates each document once."
+            )
+        seen[target] = index
+    return resolved
+
+
+async def _update_one(
+    data,
+    pinned_id: UUID,
+    dataset_id: UUID,
+    user: User,
+    node_set,
+    vector_db_config,
+    graph_db_config,
+    preferred_loaders,
+    incremental_loading,
+    data_cache,
+    chunk_level_diff,
+    graph_model,
+    custom_prompt,
+    chunker,
+    policy,
+) -> dict:
+    """Replace the document ``pinned_id`` with ``data``; the single-document path."""
+    started = perf_counter()
+
+    from cognee.modules.data.methods import reset_data_pipeline_status
     from cognee.tasks.ingestion.data_item import DataItem
     from cognee.tasks.ingestion.resolve_dlt_sources import check_dlt_replacement, is_dlt_input
-
-    if isinstance(data, list):
-        if len(data) != 1:
-            raise IngestionError(
-                f"update() replaces exactly one document; got a list of {len(data)} items."
-            )
-        data = data[0]
-
-    # The document KEEPS its data_id through updates. Resolve the incoming id
-    # (exact, then pre-fork legacy_id) once, up front: the incremental path
-    # operates on the resolved row, and the fallback re-ingests pinned to it.
-    # An id that resolves to nothing is a caller error, not a create: ids are
-    # random uuid4s now, so a stale or mistyped id can never match — silently
-    # creating a second document would hide the mistake as duplication.
-    # add() is the path for new documents.
-    resolved_id = await resolve_data_id(dataset_id, data_id)
-    if resolved_id is None:
-        from cognee.api.v1.exceptions import UpdateTargetNotFoundError
-
-        raise UpdateTargetNotFoundError(data_id=data_id, dataset_id=dataset_id)
-    pinned_id = resolved_id
 
     # Why the chunk-level path is not taken, if it is not. Every full rebuild
     # names its cause in the result, so an update that took far longer than

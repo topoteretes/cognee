@@ -193,7 +193,7 @@ async def test_incremental_update_full_flow(incremental_env):
     insertion = " ".join(f"ENTNEW{j:03d} fresh{j:03d}" for j in range(75))
     text_v2 = text_v1[:edit_start] + insertion + " CHANGED " + text_v1[mid_next:]
 
-    result = await update_like_an_api_request(data_id, text_v2, dataset.id, user=user)
+    result = await update_like_an_api_request(text_v2, dataset.id, data_id=data_id, user=user)
     assert result["status"] == "incremental", f"chunk-level path did not run: {result}"
     assert result["deleted_chunks"] == 2
     assert result["kept_chunks"] == len(old_nodes) - 2
@@ -225,7 +225,9 @@ async def test_incremental_update_full_flow(incremental_env):
         + text_v2[len(text_v2) // 2 :]
         + "MULTI TAIL LINE\n"
     )
-    result_multi = await update_like_an_api_request(data_id, text_multi, dataset.id, user=user)
+    result_multi = await update_like_an_api_request(
+        text_multi, dataset.id, data_id=data_id, user=user
+    )
     assert result_multi["status"] == "incremental"
     assert result_multi["regions"] == 3, f"expected three regions: {result_multi}"
     assert result_multi["kept_chunks"] >= total_before - 6, (
@@ -257,8 +259,8 @@ async def test_incremental_update_full_flow(incremental_env):
     text_v3 = text_v2.replace("CHANGED", "CHANGED-A ENTV3A", 1)
     text_v4 = text_v2.replace("CHANGED", "CHANGED-B ENTV3B", 1)
     results = await asyncio.gather(
-        update_like_an_api_request(data_id, text_v3, dataset.id, user=user),
-        update_like_an_api_request(data_id, text_v4, dataset.id, user=user),
+        update_like_an_api_request(text_v3, dataset.id, data_id=data_id, user=user),
+        update_like_an_api_request(text_v4, dataset.id, data_id=data_id, user=user),
         return_exceptions=True,
     )
     assert all(not isinstance(r, Exception) for r in results), f"concurrent updates: {results}"
@@ -280,13 +282,13 @@ async def test_incremental_update_full_flow(incremental_env):
     text_v5 = final_text.replace("Paragraph 7", "Paragraph 7 ENTV5", 1)
     try:
         with pytest.raises(RuntimeError, match="simulated crash"):
-            await update_like_an_api_request(data_id, text_v5, dataset.id, user=user)
+            await update_like_an_api_request(text_v5, dataset.id, data_id=data_id, user=user)
     finally:
         incremental_module.delete_chunks_incremental = original_delete
 
     # Retry with the same content: stored chunks no longer tile the stored
     # text (old + new region chunks coexist), so the full update takes over.
-    retry = await update_like_an_api_request(data_id, text_v5, dataset.id, user=user)
+    retry = await update_like_an_api_request(text_v5, dataset.id, data_id=data_id, user=user)
     assert retry["status"] == "full_rebuild", "retry after crash must fall back to the full update"
     assert retry["fallback"]["reason"] == "chunks_not_tiling", retry["fallback"]
     # The full update is pinned to the existing row too, so callers keep the
@@ -315,7 +317,7 @@ async def test_incremental_update_full_flow(incremental_env):
     # The upload carries another filename: data_id names the document, so the
     # replacement still updates it chunk-level, and the new name lands on the row.
     upload = _upload(text_v6.encode("utf-8"), "renamed_by_the_client.txt")
-    result6 = await update_like_an_api_request(data_id, [upload], dataset.id, user=user)
+    result6 = await update_like_an_api_request([upload], dataset.id, data_id=data_id, user=user)
     assert result6["status"] == "incremental", (
         f"single-UploadFile update must run chunk-level: {result6}"
     )
@@ -330,7 +332,7 @@ async def test_incremental_update_full_flow(incremental_env):
     intruder = await create_user(f"intruder_{uuid4().hex[:8]}@example.com", "pw")
     with pytest.raises(Exception) as denied:
         await update_like_an_api_request(
-            data_id, healed_text + " HACKED", dataset.id, user=intruder
+            healed_text + " HACKED", dataset.id, data_id=data_id, user=intruder
         )
     assert (
         "Permission" in type(denied.value).__name__ or "Unauthorized" in type(denied.value).__name__
@@ -347,7 +349,7 @@ async def test_incremental_update_full_flow(incremental_env):
         _upload(b"second file", "b.txt"),
     ]
     with pytest.raises(IngestionError):
-        await update_like_an_api_request(data_id, uploads, dataset.id, user=user)
+        await update_like_an_api_request(uploads, dataset.id, data_id=data_id, user=user)
     assert await _stored_text(user, data_id) == healed_text, (
         "a refused multi-item update must not touch the stored document"
     )

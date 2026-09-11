@@ -6,6 +6,7 @@ the remote dataset id, failing with "Dataset not found" while the remote
 document stayed untouched."""
 
 import importlib
+import io
 import json
 from contextlib import asynccontextmanager
 from unittest.mock import MagicMock
@@ -15,7 +16,7 @@ import pytest
 
 from cognee.api.v1.serve import state as state_mod
 from cognee.api.v1.serve.cloud_client import CloudClient
-from cognee.api.v1.update import UpdateResult
+from cognee.api.v1.update import UpdateBatchResult, UpdateResult
 
 # ``cognee.api.v1.update`` re-exports the update() *function* under the same
 # name as its module, so a plain ``from ... import update`` yields the
@@ -182,23 +183,114 @@ async def test_cloud_client_update_matches_the_route_contract(monkeypatch):
     assert _field_names(captured["form"]) == ["data", "node_set", "node_set"]
 
 
+def _batch_payload(statuses):
+    results = [
+        _result_payload(
+            status=s,
+            **({} if s == "incremental" else dict.fromkeys(COUNTERS)),
+            error={"error_class": "RuntimeError", "message": "boom"} if s == "failed" else None,
+            fallback=None if s == "incremental" else {"reason": "no_baseline", "detail": "x"},
+        )
+        for s in statuses
+    ]
+    failed = statuses.count("failed")
+    return {
+        "status": "failed" if failed == len(statuses) else "partial" if failed else "completed",
+        "total": len(statuses),
+        "updated": len(statuses) - failed,
+        "unchanged": 0,
+        "failed": failed,
+        "dataset_id": str(uuid4()),
+        "duration_seconds": 1.5,
+        "results": results,
+    }
+
+
+COUNTERS = (
+    "regions",
+    "deleted_chunks",
+    "added_chunks",
+    "reused_chunks",
+    "kept_chunks",
+    "reindexed_chunks",
+    "total_chunks",
+)
+
+
 @pytest.mark.asyncio
-async def test_cloud_client_update_unwraps_single_item_list_and_data_item(monkeypatch):
+async def test_cloud_client_update_single_data_item_id_travels_as_the_query_param(monkeypatch):
     from cognee.tasks.ingestion.data_item import DataItem
 
     client, captured = _client_with_fake_patch(monkeypatch, _FakeResponse())
+    doc = uuid4()
 
-    await client.update(data_id=uuid4(), data=[DataItem(data="wrapped")], dataset_id=uuid4())
+    await client.update(data=DataItem(data="wrapped", data_id=doc), dataset_id=uuid4())
 
     assert _field_names(captured["form"]) == ["data"]
+    assert captured["params"]["data_id"] == str(doc)
 
 
 @pytest.mark.asyncio
-async def test_cloud_client_update_rejects_multiple_documents(monkeypatch):
+async def test_cloud_client_update_without_data_id_sends_none_so_the_server_infers(monkeypatch):
+    client, captured = _client_with_fake_patch(monkeypatch, _FakeResponse())
+
+    await client.update(data="new text", dataset_id=uuid4())
+
+    assert "data_id" not in captured["params"]
+
+
+@pytest.mark.asyncio
+async def test_cloud_client_update_sends_a_local_file_under_its_filename(monkeypatch, tmp_path):
+    """The server infers the document by filename, as a local call does by path."""
+    report = tmp_path / "report.txt"
+    report.write_bytes(b"edited")
+    client, captured = _client_with_fake_patch(monkeypatch, _FakeResponse())
+
+    await client.update(data=str(report), dataset_id=uuid4())
+
+    (options, _headers, value), *_ = captured["form"]._fields
+    assert options["filename"] == "report.txt"
+    assert not isinstance(value, io.BytesIO), "the file itself is sent, not its path as text"
+
+
+@pytest.mark.asyncio
+async def test_cloud_client_update_sends_a_list_as_a_batch_and_parses_the_batch(monkeypatch):
+    payload = _batch_payload(["incremental", "failed"])
+    client, captured = _client_with_fake_patch(monkeypatch, _FakeResponse(payload=payload))
+
+    result = await client.update(data=["one", "two"], dataset_id=uuid4())
+
+    assert _field_names(captured["form"]) == ["data", "data"]
+    assert "data_id" not in captured["params"]
+    assert result == UpdateBatchResult.model_validate(payload).model_dump()
+    assert (result["status"], result["failed"]) == ("partial", 1)
+    assert result["results"][1]["data_id"] == UUID(payload["results"][1]["data_id"])
+
+
+@pytest.mark.asyncio
+async def test_cloud_client_update_refuses_per_document_ids_in_a_batch(monkeypatch):
+    from cognee.tasks.ingestion.data_item import DataItem
+
     client, _ = _client_with_fake_patch(monkeypatch, _FakeResponse())
 
-    with pytest.raises(ValueError, match="exactly one document"):
-        await client.update(data_id=uuid4(), data=["one", "two"], dataset_id=uuid4())
+    with pytest.raises(ValueError, match="per-document data_ids cannot travel"):
+        await client.update(
+            data=[DataItem(data="a", data_id=uuid4()), DataItem(data="b", data_id=uuid4())],
+            dataset_id=uuid4(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_cloud_client_update_returns_a_failed_batch_instead_of_raising(monkeypatch):
+    payload = _batch_payload(["failed", "failed"])
+    client, _ = _client_with_fake_patch(
+        monkeypatch, _FakeResponse(status=500, text=json.dumps(payload))
+    )
+
+    result = await client.update(data=["one", "two"], dataset_id=uuid4())
+
+    assert result == UpdateBatchResult.model_validate(payload).model_dump()
+    assert (result["status"], result["failed"]) == ("failed", 2)
 
 
 @pytest.mark.asyncio
