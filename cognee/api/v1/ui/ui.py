@@ -484,16 +484,13 @@ def start_ui(
     """
     logger.info("Starting cognee UI...")
 
-    ports_to_check = [(port, "Frontend UI")]
+    required_ports = [(port, "Frontend UI")]
 
     if start_backend:
-        ports_to_check.append((backend_port, "Backend API"))
-
-    if start_mcp:
-        ports_to_check.append((mcp_port, "MCP Server"))
+        required_ports.append((backend_port, "Backend API"))
 
     logger.info("Checking port availability...")
-    all_ports_available, unavailable_services = _check_required_ports(ports_to_check)
+    all_ports_available, unavailable_services = _check_required_ports(required_ports)
 
     if not all_ports_available:
         error_msg = f"Cannot start cognee UI: The following services have ports already in use: {', '.join(unavailable_services)}"
@@ -501,7 +498,18 @@ def start_ui(
         logger.error("Please stop the conflicting services or change the port configuration.")
         return None
 
-    logger.info("✓ All required ports are available")
+    if start_mcp:
+        mcp_port_available, unavailable_mcp_services = _check_required_ports(
+            [(mcp_port, "MCP Server")]
+        )
+        if not mcp_port_available:
+            logger.warning(
+                "The optional MCP server port is already in use: "
+                f"{', '.join(unavailable_mcp_services)}. Skipping MCP server startup."
+            )
+            start_mcp = False
+
+    logger.info("✓ All required UI ports are available")
     backend_process = None
 
     if start_mcp:
