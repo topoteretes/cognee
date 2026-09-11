@@ -38,13 +38,19 @@ def _fake_fetch_text(url, max_chars=None):
 
 
 def _offline(module, monkeypatch):
-    """Phase 2 network: neither the docs site nor an LLM is ever touched from unit tests."""
+    """Neither the docs site, GitHub timelines, git, an LLM nor SMTP is touched from unit tests.
+
+    Phase 3 is switched off as a whole so phase 2 tests see phase 2 output; the ``phase3``
+    fixture switches it back on with its own stubs.
+    """
     monkeypatch.setattr(module, "fetch_text", _fake_fetch_text)
     monkeypatch.setattr(
         module,
         "run_site_check",
         lambda system_prompt, user_message: ("needs_source", "default fake verdict", []),
     )
+    module._real_run_source_checks = module.run_source_checks
+    monkeypatch.setattr(module, "run_source_checks", lambda repo, results, index, repo_root: True)
 
 
 PAGE_SEARCH = "https://docs.cognee.ai/python-api/search-type"
@@ -198,10 +204,12 @@ def test_single_docs_issue_is_pending_and_has_spec_shape(triage, monkeypatch, tm
         "reason": "default fake verdict",
         "signals": ["title prefix"],
         "pages_shown": [PAGE_SEARCH],
+        "doc_pages": [],
         "doc_urls": [],
         "source_files": [],
         "docs_files": [],
         "commented": False,
+        "comment": "",
     }
 
 
@@ -264,7 +272,7 @@ def test_github_output_and_step_summary_are_written(triage, monkeypatch, tmp_pat
     summary = summary_file.read_text()
     assert "## Docs issue triage" in summary
     assert "issue #4604" in summary
-    assert "| Issue | Signals | Verdict | Reason | Pages shown to the LLM | Commented |" in summary
+    assert "| Issue | Signals | Verdict | Reason | Pages shown to the LLM | Comment |" in summary
     assert "[#4604](https://github.com/topoteretes/cognee/issues/4604)" in summary
     assert "`needs_source`" in summary
     assert "default fake verdict" in summary
@@ -292,11 +300,13 @@ def _docs_issue(number=4656, body="The search-type documentation does not mentio
 
 
 def _set_verdict(triage, monkeypatch, verdict, reason="r", urls=()):
+    """Stub the LLM. ``urls`` may be plain URLs or (url, note) pairs."""
     seen = []
+    covering = [(u, "states the relevant fact") if isinstance(u, str) else u for u in urls]
 
     def fake(system_prompt, user_message):
         seen.append(user_message)
-        return verdict, reason, list(urls)
+        return verdict, reason, list(covering)
 
     monkeypatch.setattr(triage, "run_site_check", fake)
     return seen
@@ -355,13 +365,13 @@ def test_pick_pages_prefers_pages_the_issue_links_and_trims_weak_tail(triage):
     assert triage.pick_pages(index, [], ["https://docs.cognee.ai"]) == []  # site root is no page
 
 
-def test_already_answered_posts_one_marked_comment(triage, monkeypatch, tmp_path):
+def test_documentation_covered_posts_one_marked_comment(triage, monkeypatch, tmp_path):
     calls = _install_fake_api(
         triage,
         monkeypatch,
         [("/issues/4656/comments", []), ("/issues/4656", _docs_issue())],
     )
-    seen = _set_verdict(triage, monkeypatch, "already_answered", "page says so", [PAGE_SEARCH])
+    seen = _set_verdict(triage, monkeypatch, "documentation_covered", "page says so", [PAGE_SEARCH])
     out = tmp_path / "r.json"
     assert triage.main(["--issue-number", "4656", "--results-json", str(out)]) == 0
 
@@ -372,13 +382,17 @@ def test_already_answered_posts_one_marked_comment(triage, monkeypatch, tmp_path
     body = payload["body"]
     assert body.splitlines()[0] == triage.COMMENT_MARKER
     assert "This comment is auto-generated." in body
-    assert f"- {PAGE_SEARCH}" in body
+    assert f"- [Search Types]({PAGE_SEARCH}): states the relevant fact" in body
     assert "please close this issue" in body and "will not auto-close" in body
 
     [row] = json.loads(out.read_text())
-    assert row["verdict"] == "already_answered"
+    assert row["verdict"] == "documentation_covered"
     assert row["doc_urls"] == [PAGE_SEARCH]
+    assert row["doc_pages"] == [
+        {"title": "Search Types", "url": PAGE_SEARCH, "note": "states the relevant fact"}
+    ]
     assert row["commented"] is True
+    assert row["comment"] == body  # the row records exactly what was posted
     assert "_body" not in row
     # the LLM saw the issue, the ranked candidate list and the page text
     assert "GitHub issue #4656" in seen[0]
@@ -397,7 +411,7 @@ def test_rerun_with_marker_present_does_not_comment_again(triage, monkeypatch, t
             ("/issues/4656", _docs_issue()),
         ],
     )
-    _set_verdict(triage, monkeypatch, "already_answered", "still answered", [PAGE_SEARCH])
+    _set_verdict(triage, monkeypatch, "documentation_covered", "still answered", [PAGE_SEARCH])
     out = tmp_path / "r.json"
     assert triage.main(["--issue-number", "4656", "--results-json", str(out)]) == 0
     assert not [c for c in calls if isinstance(c, tuple)]
@@ -412,20 +426,24 @@ def test_marker_must_be_its_own_line(triage):
 
 def test_dry_run_never_posts(triage, monkeypatch, tmp_path):
     calls = _install_fake_api(triage, monkeypatch, [("/issues/4656", _docs_issue())])
-    _set_verdict(triage, monkeypatch, "already_answered", "answered", [PAGE_SEARCH])
+    _set_verdict(triage, monkeypatch, "documentation_covered", "answered", [PAGE_SEARCH])
     out = tmp_path / "r.json"
     assert triage.main(["--issue-number", "4656", "--dry-run", "--results-json", str(out)]) == 0
     assert all(not isinstance(c, tuple) for c in calls)
     assert not any("/comments" in c for c in calls)  # no need to list comments on dry run
     [row] = json.loads(out.read_text())
-    assert row["verdict"] == "already_answered" and row["commented"] is False
+    assert row["verdict"] == "documentation_covered" and row["commented"] is False
     assert "dry run" in row["reason"]
+    # the comment a live run would have posted is recorded for review
+    assert row["comment"].splitlines()[0] == triage.COMMENT_MARKER
+    assert f"[Search Types]({PAGE_SEARCH})" in row["comment"]
+    assert "please close this issue" in row["comment"]
 
 
 def test_unprovided_url_downgrades_to_needs_source(triage, monkeypatch, tmp_path):
     calls = _install_fake_api(triage, monkeypatch, [("/issues/4656", _docs_issue())])
     _set_verdict(
-        triage, monkeypatch, "already_answered", "cites", ["https://docs.cognee.ai/made-up"]
+        triage, monkeypatch, "documentation_covered", "cites", ["https://docs.cognee.ai/made-up"]
     )
     out = tmp_path / "r.json"
     assert triage.main(["--issue-number", "4656", "--results-json", str(out)]) == 0
@@ -439,11 +457,11 @@ def test_url_match_ignores_md_suffix_and_fragment(triage, monkeypatch, tmp_path)
     _install_fake_api(
         triage, monkeypatch, [("/issues/4656/comments", []), ("/issues/4656", _docs_issue())]
     )
-    _set_verdict(triage, monkeypatch, "already_answered", "ok", [f"{PAGE_SEARCH}.md#triplet"])
+    _set_verdict(triage, monkeypatch, "documentation_covered", "ok", [f"{PAGE_SEARCH}.md#triplet"])
     out = tmp_path / "r.json"
     assert triage.main(["--issue-number", "4656", "--results-json", str(out)]) == 0
     [row] = json.loads(out.read_text())
-    assert row["verdict"] == "already_answered" and row["doc_urls"] == [PAGE_SEARCH]
+    assert row["verdict"] == "documentation_covered" and row["doc_urls"] == [PAGE_SEARCH]
 
 
 @pytest.mark.parametrize("verdict", ["not_docs", "too_vague", "needs_source"])
@@ -542,7 +560,7 @@ def test_summary_lists_only_rows_that_passed_the_filter(triage, monkeypatch, tmp
         _issue(15, "Another crash", body="no docs words here"),
     ]
     _install_fake_api(triage, monkeypatch, [("&page=1&", page_one), ("&page=2&", [])])
-    _set_verdict(triage, monkeypatch, "already_answered", "answered", [PAGE_SEARCH])
+    _set_verdict(triage, monkeypatch, "documentation_covered", "answered", [PAGE_SEARCH])
     assert triage.main(["--since", "2026-08-21", "--until", "2026-08-24", "--dry-run"]) == 0
     summary = summary_file.read_text()
     assert "- Issues selected: 3" in summary
@@ -550,6 +568,8 @@ def test_summary_lists_only_rows_that_passed_the_filter(triage, monkeypatch, tmp
     assert "- No documentation signal, not listed: 2" in summary
     assert "#13" in summary and "#12" not in summary and "#15" not in summary
     assert "**python-api/search-type (cited)**" in summary  # pages shown, cited one marked
+    assert "**suggested, not posted**<br>This comment is auto-generated." in summary
+    assert triage.COMMENT_MARKER not in summary  # the marker line is left out of the table
 
 
 def test_pick_pages_caps_at_four(triage):
@@ -561,3 +581,427 @@ def test_pick_pages_caps_at_four(triage):
         PAGE_CONFIG,
         PAGE_VECTOR,
     ]
+
+
+@pytest.mark.parametrize(
+    ("title", "labels"),
+    [
+        ("[Bug]: set_graph_model() is inert", []),
+        ("[bug] prune wipes tables", []),
+        ("prune wipes tables", ["bug"]),
+    ],
+)
+def test_bug_reports_never_get_documentation_covered(triage, monkeypatch, tmp_path, title, labels):
+    issue = _issue(
+        4632, title, body="The config docs list set_graph_model as working.", labels=labels
+    )
+    calls = _install_fake_api(triage, monkeypatch, [("/issues/4632", issue)])
+    _set_verdict(
+        triage, monkeypatch, "documentation_covered", "docs describe the setter", [PAGE_CONFIG]
+    )
+    out = tmp_path / "r.json"
+    assert triage.main(["--issue-number", "4632", "--results-json", str(out)]) == 0
+    assert all(not isinstance(c, tuple) for c in calls)  # nothing posted
+    [row] = json.loads(out.read_text())
+    assert row["verdict"] == "needs_source"
+    assert "filed as a bug report" in row["reason"]
+    assert row["doc_urls"] == [] and row["comment"] == ""
+
+
+def test_docs_form_issue_is_not_treated_as_a_bug_report(triage):
+    assert (
+        triage.is_bug_report("[Docs]: TRIPLET_COMPLETION prerequisite", ["documentation"]) is False
+    )
+    assert triage.is_bug_report("Debugging tips", []) is False  # "bug" inside a word does not count
+    assert triage.is_bug_report("[Bug]: x", []) is True
+    assert triage.is_bug_report("x", ["Bug"]) is True
+
+
+def test_comment_links_pages_by_title_with_the_note(triage):
+    comment = triage.documentation_covered_comment(
+        [
+            {"title": "Search Types", "url": PAGE_SEARCH, "note": "states that X needs Y"},
+            {"title": "Prune", "url": PAGE_PRUNE, "note": ""},
+        ]
+    )
+    assert (
+        f"- [Search Types]({PAGE_SEARCH}): states that X needs Y\n- [Prune]({PAGE_PRUNE})\n"
+        in comment
+    )
+
+
+# --- phase 3: source check, human review, draft-docs hand-off ------------------------------
+
+
+@pytest.fixture
+def phase3(triage, monkeypatch):
+    """Phase 3 on, offline: no git grep, no timeline/comment lookups, no email, LLM stubbed."""
+    monkeypatch.setattr(triage, "run_source_checks", triage._real_run_source_checks)
+    monkeypatch.setattr(triage, "git_grep_hits", lambda tokens, repo_root: "cognee/x.py:1:hit")
+    monkeypatch.setattr(triage, "linked_pull_requests", lambda repo, number: [])
+    monkeypatch.setattr(triage, "list_issue_comments", lambda repo, number: [])
+    monkeypatch.setattr(
+        triage,
+        "run_source_check",
+        lambda system_prompt, user_message: ("uncertain", "default source verdict", [], []),
+    )
+    for name in triage.SMTP_ENV + ("SMTP_PORT", "SMTP_USE_TLS"):
+        monkeypatch.delenv(name, raising=False)
+    return triage
+
+
+def _set_source_verdict(phase3, monkeypatch, verdict, reason="r", source=(), docs=()):
+    seen = []
+
+    def fake(system_prompt, user_message):
+        seen.append(user_message)
+        return verdict, reason, list(source), list(docs)
+
+    monkeypatch.setattr(phase3, "run_source_check", fake)
+    return seen
+
+
+def _needs_source_issue(number=4632, title="[Bug]: set_graph_model() is inert", labels=()):
+    return _issue(
+        number,
+        title,
+        body="`cognee.config.set_graph_model(MyModel)` is documented as setting the model. "
+        "`GRAPH_DATABASE_PROVIDER` and SearchType.GRAPH_COMPLETION are unrelated.",
+        labels=labels,
+    )
+
+
+def test_issue_identifiers_are_code_like_tokens_longest_first(phase3):
+    tokens = phase3.issue_identifiers(
+        "[Bug]: HUGGINGFACE_TOKENIZER ignored",
+        "See `resolve_embedding_tokenizer` and `create_embedding_engine`; `x` is too short; "
+        "SearchType.TRIPLET_COMPLETION works. `two words` is skipped.",
+    )
+    assert tokens[:2] == ["SearchType.TRIPLET_COMPLETION", "resolve_embedding_tokenizer"]
+    assert tokens == sorted(tokens, key=len, reverse=True)
+    assert "HUGGINGFACE_TOKENIZER" in tokens and "create_embedding_engine" in tokens
+    assert "x" not in tokens and "two words" not in tokens
+    assert len(tokens) == len(set(tokens)) <= phase3.GREP_MAX_TOKENS
+
+
+def test_git_grep_hits_runs_one_fixed_string_grep(triage, monkeypatch, tmp_path):
+    calls = []
+
+    class Completed:
+        returncode = 1  # no match
+        stdout = ""
+        stderr = ""
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return Completed()
+
+    monkeypatch.setattr(triage.subprocess, "run", fake_run)
+    assert triage.git_grep_hits(["prune_system", "PGVector"], tmp_path) == ""
+    [command] = calls
+    assert command[:5] == ["git", "-C", str(tmp_path), "grep", "-I"]
+    assert command.count("-e") == 2 and "-F" in command
+    assert "--" in command and "cognee" in command and ":(exclude)cognee/tests" in command
+    assert triage.git_grep_hits([], tmp_path) == "" and len(calls) == 1  # no tokens, no grep
+
+
+def test_git_grep_failure_other_than_no_match_raises(triage, monkeypatch, tmp_path):
+    class Completed:
+        returncode = 128
+        stdout = ""
+        stderr = "fatal: not a git repository"
+
+    monkeypatch.setattr(triage.subprocess, "run", lambda *a, **k: Completed())
+    with pytest.raises(RuntimeError, match="git grep failed"):
+        triage.git_grep_hits(["x"], tmp_path)
+
+
+def test_small_gap_becomes_matrix_row_and_needs_no_email(phase3, monkeypatch, tmp_path):
+    output_file = tmp_path / "output.txt"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output_file))
+    _install_fake_api(phase3, monkeypatch, [("/issues/4632", _needs_source_issue())])
+    seen = _set_source_verdict(
+        phase3,
+        monkeypatch,
+        "small_gap",
+        "setter is inert, config page should say so",
+        source=["cognee/api/v1/config/config.py"],
+        docs=[
+            "python-api/config.mdx",
+            "https://docs.cognee.ai/not-a-path",
+            "a/b.mdx",
+            "c.mdx",
+            "d.mdx",
+        ],
+    )
+    out = tmp_path / "r.json"
+    assert phase3.main(["--issue-number", "4632", "--results-json", str(out)]) == 0
+    [row] = json.loads(out.read_text())
+    assert row["verdict"] == "small_gap"
+    assert row["source_files"] == ["cognee/api/v1/config/config.py"]
+    assert row["docs_files"] == ["python-api/config.mdx", "a/b.mdx", "c.mdx"]  # URL dropped, cap 3
+    assert row["comment"] == ""  # the gap comment is posted by the draft-docs job, not here
+    # the source LLM saw the issue, the docs pages already checked, and the grep hits
+    assert "git grep hits" in seen[0] and "cognee/x.py:1:hit" in seen[0]
+
+    output = output_file.read_text()
+    assert "has_gaps=true\n" in output
+    [matrix] = [
+        json.loads(line.split("=", 1)[1])
+        for line in output.splitlines()
+        if line.startswith("matrix=")
+    ]
+    assert matrix == [
+        {
+            "number": "4632",
+            "title": "[Bug]: set_graph_model() is inert",
+            "body_b64": matrix[0]["body_b64"],
+            "source_files": "cognee/api/v1/config/config.py",
+            "docs_files": "python-api/config.mdx a/b.mdx c.mdx",
+        }
+    ]
+    import base64
+
+    excerpt = base64.b64decode(matrix[0]["body_b64"]).decode()
+    assert excerpt.startswith("[Bug]: set_graph_model() is inert\n\n`cognee.config")
+
+
+def test_dry_run_keeps_small_gap_out_of_the_matrix(phase3, monkeypatch, tmp_path):
+    output_file = tmp_path / "output.txt"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output_file))
+    _install_fake_api(phase3, monkeypatch, [("/issues/4632", _needs_source_issue())])
+    _set_source_verdict(phase3, monkeypatch, "small_gap", "gap", ["cognee/a.py"], ["guides/a.mdx"])
+    out = tmp_path / "r.json"
+    assert phase3.main(["--issue-number", "4632", "--dry-run", "--results-json", str(out)]) == 0
+    [row] = json.loads(out.read_text())
+    assert row["verdict"] == "small_gap"  # still visible in the summary and artifact
+    assert (
+        "has_gaps=false\n" in output_file.read_text() and "matrix=[]\n" in output_file.read_text()
+    )
+
+
+def test_small_gap_without_docs_file_is_uncertain(phase3, monkeypatch, tmp_path):
+    _install_fake_api(phase3, monkeypatch, [("/issues/4632", _needs_source_issue())])
+    _set_source_verdict(phase3, monkeypatch, "small_gap", "gap", ["cognee/a.py"], [])
+    out = tmp_path / "r.json"
+    assert phase3.main(["--issue-number", "4632", "--dry-run", "--results-json", str(out)]) == 0
+    [row] = json.loads(out.read_text())
+    assert row["verdict"] == "uncertain" and "no existing docs file" in row["reason"]
+    assert row["source_files"] == [] and row["docs_files"] == []
+
+
+@pytest.mark.parametrize("verdict", ["not_in_source", "too_big", "uncertain"])
+def test_human_review_verdicts_are_silent_and_listed(phase3, monkeypatch, tmp_path, verdict):
+    summary_file = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_file))
+    calls = _install_fake_api(phase3, monkeypatch, [("/issues/4632", _needs_source_issue())])
+    _set_source_verdict(phase3, monkeypatch, verdict, "why")
+    assert phase3.main(["--issue-number", "4632"]) == 0
+    assert all(not isinstance(c, tuple) for c in calls)
+    summary = summary_file.read_text()
+    assert "### Human review" in summary and f"`{verdict}`" in summary
+    assert "email skipped, SMTP not configured" in summary
+
+
+def test_open_linked_pull_request_means_fix_in_progress(phase3, monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        phase3,
+        "linked_pull_requests",
+        lambda repo, number: ["https://github.com/topoteretes/cognee/pull/5000"],
+    )
+    llm_calls = _set_source_verdict(phase3, monkeypatch, "small_gap", "gap", ["a.py"], ["b.mdx"])
+    _install_fake_api(phase3, monkeypatch, [("/issues/4632", _needs_source_issue())])
+    out = tmp_path / "r.json"
+    assert phase3.main(["--issue-number", "4632", "--results-json", str(out)]) == 0
+    [row] = json.loads(out.read_text())
+    assert row["verdict"] == "fix_in_progress"
+    assert "open linked pull request" in row["reason"] and "pull/5000" in row["reason"]
+    assert llm_calls == []  # no second LLM call when a fix is already under way
+
+
+def test_only_maintainer_volunteers_mean_fix_in_progress(phase3, monkeypatch, tmp_path):
+    comments = [
+        {"body": f"{phase3.COMMENT_MARKER}\nbot text: working on this", "user": {"login": "bot"}},
+        {
+            "body": "Hi, I'd like to work on this issue!",
+            "user": {"login": "newcomer"},
+            "author_association": "CONTRIBUTOR",
+        },
+    ]
+    monkeypatch.setattr(phase3, "list_issue_comments", lambda repo, number: comments)
+    _install_fake_api(phase3, monkeypatch, [("/issues/4632", _needs_source_issue())])
+    out = tmp_path / "r.json"
+    assert phase3.main(["--issue-number", "4632", "--results-json", str(out)]) == 0
+    [row] = json.loads(out.read_text())
+    assert row["verdict"] == "uncertain"  # the drive-by volunteer did not stop the source check
+
+    comments.append(
+        {
+            "body": "Working on this.",
+            "user": {"login": "coreperson"},
+            "author_association": "MEMBER",
+        }
+    )
+    assert phase3.main(["--issue-number", "4632", "--results-json", str(out)]) == 0
+    [row] = json.loads(out.read_text())
+    assert row["verdict"] == "fix_in_progress" and "maintainer @coreperson" in row["reason"]
+
+
+def test_core_team_file_marks_volunteers_as_maintainers(phase3, monkeypatch, tmp_path):
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "core-team.txt").write_text("# logins\n@Milenko\nlxobr\n")
+    assert phase3.core_team_logins(tmp_path) == {"milenko", "lxobr"}
+    assert phase3.core_team_logins(tmp_path / "nowhere") == set()
+    comments = [
+        {"body": "Linked the fix PR.", "user": {"login": "milenko"}, "author_association": "NONE"}
+    ]
+    monkeypatch.setattr(phase3, "list_issue_comments", lambda repo, number: comments)
+    _install_fake_api(phase3, monkeypatch, [("/issues/4632", _needs_source_issue())])
+    out = tmp_path / "r.json"
+    assert (
+        phase3.main(
+            ["--issue-number", "4632", "--repo-root", str(tmp_path), "--results-json", str(out)]
+        )
+        == 0
+    )
+    [row] = json.loads(out.read_text())
+    assert row["verdict"] == "fix_in_progress" and "@milenko" in row["reason"]
+
+
+def test_linked_pull_requests_reads_cross_reference_events(triage, monkeypatch):
+    timeline = [
+        {"event": "labeled"},
+        {"event": "cross-referenced", "source": {"issue": {"html_url": "https://x/issues/9"}}},
+        {
+            "event": "cross-referenced",
+            "source": {
+                "issue": {"html_url": "https://x/pull/10", "pull_request": {}, "state": "open"}
+            },
+        },
+        {
+            "event": "cross-referenced",
+            "source": {
+                "issue": {"html_url": "https://x/pull/11", "pull_request": {}, "state": "closed"}
+            },
+        },
+    ]
+    _install_fake_api(
+        triage, monkeypatch, [("timeline?per_page=100&page=1", timeline), ("&page=2", [])]
+    )
+    assert triage.linked_pull_requests("o/r", 4632) == ["https://x/pull/10"]  # closed #11 ignored
+
+
+def test_human_review_email_is_sent_when_smtp_is_configured(phase3, monkeypatch):
+    sent = {}
+
+    class FakeSMTP:
+        def __init__(self, server, port, timeout):
+            sent["server"] = (server, port)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def starttls(self):
+            sent["tls"] = True
+
+        def login(self, user, password):
+            sent["login"] = user
+
+        def send_message(self, message):
+            sent["message"] = message
+
+    monkeypatch.setattr(phase3.smtplib, "SMTP", FakeSMTP)
+    for name in phase3.SMTP_ENV:
+        monkeypatch.setenv(name, f"{name.lower()}@example.test")
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "topoteretes/cognee")
+    monkeypatch.setenv("GITHUB_RUN_ID", "123")
+    rows = [
+        {
+            "number": 4632,
+            "title": "[Bug]: x | y",
+            "html_url": "https://github.com/topoteretes/cognee/issues/4632",
+            "verdict": "uncertain",
+            "reason": "r",
+        }
+    ]
+    status = phase3.send_human_review_email(rows, dry_run=True)
+    assert status.startswith("emailed 1 human-review item(s)")
+    assert sent["server"] == ("smtp_server@example.test", 587) and sent["tls"] is True
+    message = sent["message"]
+    assert message["Subject"] == "docs issue triage: 1 item(s) need human review"
+    body = message.get_content()
+    assert "DRY RUN" in body and "actions/runs/123" in body
+    assert "| #4632 [Bug]: x \\| y | `uncertain` | r |" in body
+    assert "https://github.com/topoteretes/cognee/issues/4632" in body
+
+
+def test_email_is_skipped_without_smtp_and_never_raises(phase3):
+    status = phase3.send_human_review_email([{"number": 1}], dry_run=False)
+    assert status.startswith("1 item(s) need human review; email skipped")
+    assert phase3.send_human_review_email([], dry_run=False) == "no items need human review"
+
+
+def test_post_gap_comment_posts_once_and_never_leaks_urls(triage, monkeypatch):
+    calls = _install_fake_api(
+        triage,
+        monkeypatch,
+        [("/issues/4632/comments?per_page=100&page=1", []), ("/issues/4632/comments", [])],
+    )
+    assert triage.main(["--post-gap-comment", "4632"]) == 0
+    posts = [c for c in calls if isinstance(c, tuple)]
+    assert len(posts) == 1
+    body = posts[0][2]["body"]
+    assert body.splitlines()[0] == triage.COMMENT_MARKER
+    assert "a documentation change may be prepared" in body
+    assert "github.com/topoteretes/cognee-docs" not in body  # never the private PR
+    assert "docs.cognee.ai" not in body and "/pull/" not in body
+
+
+def test_post_gap_comment_respects_marker_and_dry_run(triage, monkeypatch, capsys):
+    existing = [{"body": f"{triage.COMMENT_MARKER}\nold"}]
+    calls = _install_fake_api(
+        triage,
+        monkeypatch,
+        [
+            ("/issues/4632/comments?per_page=100&page=1", existing),
+            ("/issues/4632/comments?per_page=100&page=2", []),
+        ],
+    )
+    assert triage.main(["--post-gap-comment", "4632"]) == 0
+    assert all(not isinstance(c, tuple) for c in calls)
+    assert "already carries the bot comment" in capsys.readouterr().out
+
+    calls = _install_fake_api(triage, monkeypatch, [])
+    assert triage.main(["--post-gap-comment", "4632", "--dry-run"]) == 0
+    assert calls == []  # dry run does not even list comments
+    assert "not posted" in capsys.readouterr().out
+
+
+def test_post_gap_comment_ignores_selectors_and_llm(triage, monkeypatch):
+    monkeypatch.delenv("LLM_API_KEY")
+    _install_fake_api(triage, monkeypatch, [("/issues/7/comments", [])])
+    assert triage.main(["--post-gap-comment", "7", "--since", "2020-01-01"]) == 0
+
+
+def test_source_check_failure_marks_uncertain_and_exits_1(phase3, monkeypatch, tmp_path):
+    def boom(system_prompt, user_message):
+        raise RuntimeError("LLM source check failed: 500")
+
+    monkeypatch.setattr(phase3, "run_source_check", boom)
+    _install_fake_api(phase3, monkeypatch, [("/issues/4632", _needs_source_issue())])
+    out = tmp_path / "r.json"
+    assert phase3.main(["--issue-number", "4632", "--dry-run", "--results-json", str(out)]) == 1
+    [row] = json.loads(out.read_text())
+    assert row["verdict"] == "uncertain" and "500" in row["reason"]
+
+
+def test_documentation_covered_rows_skip_the_source_check(phase3, monkeypatch, tmp_path):
+    _install_fake_api(phase3, monkeypatch, [("/issues/4656", _docs_issue())])
+    _set_verdict(phase3, monkeypatch, "documentation_covered", "covered", [PAGE_SEARCH])
+    source_calls = _set_source_verdict(phase3, monkeypatch, "small_gap")
+    assert phase3.main(["--issue-number", "4656", "--dry-run"]) == 0
+    assert source_calls == []
