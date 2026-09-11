@@ -1,8 +1,10 @@
 name: automation | Triage GitHub Docs Issues
 
-# Hand-dispatched triage of GitHub issues that may really be docs.cognee.ai
-# problems. Select one open issue by number, or every open issue created in a
-# UTC date range, and run tools/docs_issue_triage.py over the selection.
+# Triage of GitHub issues that may really be docs.cognee.ai problems, run by
+# tools/docs_issue_triage.py. Twice a week on a schedule over the issues opened
+# in the last seven days (the overlap covers a missed run; the comment marker
+# makes a second pass over the same issue a no-op), or by hand over one issue
+# number or a UTC created_at date range.
 #
 # Phase 1: a cheap, LLM-free filter (the `documentation` label, a docs title,
 # the documentation issue form, a docs.cognee.ai link, or a claim about the docs
@@ -26,14 +28,19 @@ name: automation | Triage GitHub Docs Issues
 # Confirmed small gaps feed the draft-docs matrix job below: one Claude edit
 # per issue on topoteretes/cognee-docs, a draft PR via tools/manage_docs_pr.py,
 # and only once that PR exists one defensive comment on the public issue. The
-# comment never carries the private PR URL. `dry_run` defaults to true so a
-# backlog pass can be supervised before the bot may comment or open PRs.
+# comment never carries the private PR URL. Manual runs are live by default;
+# pass dry_run=true to see every decision and the exact comment text without
+# posting anything, which is how the first five backlog passes were reviewed.
 #
-# Deliberately no `schedule` and no `on: issues` trigger. Manual runs come
-# first so a human can watch the backlog in phases; automatic triggers are a
-# separate decision once those runs look right.
+# Scheduled runs are always live. GitHub fires `schedule` only from the
+# default branch, so the cron is active once this file is on main. No
+# `on: issues` trigger: a fresh issue is picked up by the next scheduled run.
 
 on:
+  # Monday and Thursday 06:00 UTC (08:00 CET/CEST): early enough that the
+  # summary and any human-review email are waiting at the start of the day.
+  schedule:
+    - cron: "0 6 * * 1,4"
   workflow_dispatch:
     inputs:
       issue_number:
@@ -54,7 +61,7 @@ on:
       dry_run:
         description: No comments and no docs PRs; still runs the docs check and writes the summary
         required: false
-        default: true
+        default: false
         type: boolean
 
 permissions:
@@ -90,8 +97,10 @@ jobs:
       - name: Install workflow dependencies
         run: uv sync --locked
 
-      # The CLI exits 2 before any GitHub request when neither selector is
-      # given, so an empty dispatch fails here and the artifact step is skipped.
+      # A scheduled run has no inputs: it triages the issues created in the
+      # last seven days, live. A manual run passes its inputs through; the CLI
+      # exits 2 before any GitHub request when neither selector is given, so an
+      # empty dispatch fails here and the artifact step is skipped.
       # workflow_dispatch booleans arrive as the strings "true"/"false".
       # LLM settings mirror dev_previous_day_commits.yml; the key is only
       # required when at least one selected issue passes the cheap filter.
@@ -119,15 +128,24 @@ jobs:
         run: |
           set -euo pipefail
 
-          args=(
-            --repo "${{ github.repository }}"
-            --issue-number "${INPUT_ISSUE_NUMBER}"
-            --since "${INPUT_SINCE}"
-            --until "${INPUT_UNTIL}"
-            --results-json triage-results.json
-          )
-          if [ "${INPUT_DRY_RUN}" = "true" ]; then
-            args+=(--dry-run)
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            args=(
+              --repo "${{ github.repository }}"
+              --since "$(date -u -d '7 days ago' +%F)"
+              --until "$(date -u +%F)"
+              --results-json triage-results.json
+            )
+          else
+            args=(
+              --repo "${{ github.repository }}"
+              --issue-number "${INPUT_ISSUE_NUMBER}"
+              --since "${INPUT_SINCE}"
+              --until "${INPUT_UNTIL}"
+              --results-json triage-results.json
+            )
+            if [ "${INPUT_DRY_RUN}" = "true" ]; then
+              args+=(--dry-run)
+            fi
           fi
 
           uv run python tools/docs_issue_triage.py "${args[@]}"
@@ -144,7 +162,8 @@ jobs:
           path: triage-results.json
           if-no-files-found: ignore
 
-  # One matrix job per confirmed small gap, never on a dry run. Mirrors the
+  # One matrix job per confirmed small gap, never on a dry run (scheduled runs
+  # are never dry). Mirrors the
   # create-docs-prs job of dev_previous_day_commits.yml: docs repo checkout with
   # the PAT, a branch per issue, one Claude edit, tools/manage_docs_pr.py, and
   # the public comment only when a PR number came back. Runs one at a time so
@@ -152,7 +171,7 @@ jobs:
   # from tools/ is stdlib-only.
   draft-docs:
     needs: triage
-    if: ${{ github.event.inputs.dry_run != 'true' && needs.triage.outputs.has_gaps == 'true' }}
+    if: ${{ (github.event_name == 'schedule' || github.event.inputs.dry_run != 'true') && needs.triage.outputs.has_gaps == 'true' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     permissions:
