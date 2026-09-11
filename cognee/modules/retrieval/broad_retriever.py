@@ -38,16 +38,18 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("BroadRetriever")
 
-# Tokens of source text per reading call. Small enough that the model lists every
-# match in its shard; the corpus size only changes how many shards run. Measured:
-# 2,000 CSV rows as text gave the top assignee 84/91 at 12k-token shards, 91/91 at
-# 4k; a dense 18-page prose report gave 99/102 shipments at 4k and 102/102 at 2k.
+# Small units (table rows, short chunks) are packed into one reading call up to
+# this many tokens. A chunk is never split: one larger than this is read whole,
+# on its own, so the smallest call is one full chunk as ingestion stored it.
 BROAD_SHARD_TOKENS = 2_000
 BROAD_MAX_PARALLEL_CALLS = 16
 # Graph node types whose text is read: document chunks and table rows.
 BROAD_TEXT_NODE_TYPES = ("DocumentChunk", "DltRow")
 # Longest document first line (a CSV header, a title) repeated as shard context.
 BROAD_PREAMBLE_CHARS = 400
+# Longest tail of the previous chunk shown as context before a chunk read without
+# it: the record a chunk boundary cut in two keeps the heading that names it.
+BROAD_CONTEXT_CHARS = 1_500
 # Entity types offered to the planner, most frequent first.
 BROAD_MAX_PLANNER_TYPES = 200
 # Name variants are merged in one LLM call; above this many names it is skipped.
@@ -140,6 +142,10 @@ class Unit:
     name: str = ""
     # First line of the unit's document (e.g. a CSV header) when the unit lacks it.
     preamble: str = ""
+    # The end of the previous chunk of the same document, shown as context when that
+    # chunk is not read in the same call; and that chunk's id.
+    context: str = ""
+    previous_id: str = ""
 
 
 @dataclass
@@ -234,50 +240,15 @@ def _normalize_key(value: str) -> str:
     return "-".join(tokens)
 
 
+def _tail(text: str) -> str:
+    """The final paragraph of a chunk (its last record, whole or cut), capped."""
+    paragraph = re.split(r"\n\s*\n", text.rstrip())[-1]
+    return paragraph[-BROAD_CONTEXT_CHARS:]
+
+
 def _loose_name(name: str) -> str:
     """A name keeps its letters and digits ("raj921" is not "921"); only @ and punctuation go."""
     return re.sub(r"[^0-9a-z]+", "", name.lstrip("@").lower())
-
-
-def _rejoin(parts: list[str]) -> str:
-    """A document's chunks back into one text. A chunker that overlaps repeats the
-    end of one chunk at the start of the next; that repeat is dropped so no record
-    is read twice."""
-    text = parts[0]
-    for part in parts[1:]:
-        for size in range(min(len(text), len(part), 500), 20, -1):
-            if text.endswith(part[:size]):
-                part = part[size:]
-                break
-        separator = "" if text.endswith(("\n", " ")) or part.startswith(("\n", " ")) else "\n"
-        text += separator + part
-    return text
-
-
-def _paragraphs(text: str, budget: int, tokenizer) -> list[str]:
-    """Cut points for a chunk: blank lines; a paragraph over budget is cut at sentence
-    ends; never inside a sentence, so a record is not split into two half-records
-    (a half without its identifier cannot be told from the other half)."""
-
-    def fits(part: str) -> bool:
-        return len(tokenizer.extract_tokens(part)) <= budget
-
-    pieces = []
-    for paragraph in re.split(r"\n\s*\n", text):
-        if not paragraph.strip():
-            continue
-        if fits(paragraph):
-            pieces.append(paragraph)
-            continue
-        for run in re.split(r"(?<=[.!?])\s+", paragraph):
-            if not run.strip():
-                continue
-            if fits(run):
-                pieces.append(run)
-            else:
-                # No sentence ends to cut at (a table written as lines): one line each.
-                pieces += [line for line in run.split("\n") if line.strip()]
-    return pieces
 
 
 def _drop_attribute_named_groups(
@@ -450,10 +421,10 @@ class BroadRetriever(CompletionRetriever):
         if not chunks:
             raise NoDataError("No data found in the system, please add data first.")
 
-        # A document's chunks are rejoined in order: ingestion cut the text by size,
-        # not by record, so a chunk boundary can fall inside an episode, a match
-        # report or a ticket and leave its second half without the heading that
-        # names it. The whole document is cut again at paragraph ends when read.
+        # One unit per chunk, as ingestion stored it: a chunk is never split or
+        # rejoined. A chunk from the middle of a document carries that document's
+        # first line (a CSV header lives only in chunk 0) and the end of the chunk
+        # before it (a record cut in two keeps the heading that names it).
         parts_of: dict[str, list[tuple[int, str, str]]] = {}
         units: list[Unit] = []
         for node_id, props in chunks.items():
@@ -466,13 +437,25 @@ class BroadRetriever(CompletionRetriever):
         units.sort(key=lambda unit: unit.id)
         for document, parts in sorted(parts_of.items()):
             parts.sort()
-            text = _rejoin([part for _, _, part in parts])
-            first_line = text.strip().split("\n", 1)[0][:BROAD_PREAMBLE_CHARS]
-            units.append(Unit(id=document, text=text, preamble=first_line))
+            first_line = parts[0][2].strip().split("\n", 1)[0][:BROAD_PREAMBLE_CHARS]
+            previous: tuple[str, str] | None = None
+            for _, node_id, text in parts:
+                preamble = "" if first_line in text else first_line
+                context = _tail(previous[1]) if previous else ""
+                units.append(
+                    Unit(
+                        id=node_id,
+                        text=text,
+                        preamble=preamble,
+                        context=context,
+                        previous_id=previous[0] if previous else "",
+                    )
+                )
+                previous = (node_id, text)
         logger.info(
-            "BROAD units: %d documents from %d chunks, %d table rows",
-            len(parts_of),
+            "BROAD units: %d chunks in %d documents, %d table rows",
             sum(len(parts) for parts in parts_of.values()),
+            len(parts_of),
             len(chunks) - sum(len(parts) for parts in parts_of.values()),
         )
         return units
@@ -791,45 +774,14 @@ class BroadRetriever(CompletionRetriever):
             counted.append(item)
         return [*counted, *unkeyed]
 
-    def split_oversized(self, units: list[Unit]) -> list[Unit]:
-        """Cut a unit longer than a shard into paragraph-aligned pieces.
-
-        A PDF chunk can be ~5k tokens of dense prose; read whole, it is denser
-        than the shard budget allows and the model skips items. Pieces keep the
-        unit's document-start line so a table header still reaches each one.
-        """
-        pieces: list[Unit] = []
-
-        def piece(unit_id: str, text: str, source: Unit) -> Unit:
-            # The first line is context for a piece that does not itself contain it.
-            preamble = source.preamble if source.preamble not in text else ""
-            return Unit(unit_id, text, source.name, preamble)
-
-        for unit in units:
-            if len(self.tokenizer.extract_tokens(unit.text)) <= self.shard_tokens:
-                pieces.append(piece(unit.id, unit.text, unit))
-                continue
-            paragraphs = _paragraphs(unit.text, self.shard_tokens, self.tokenizer)
-            current: list[str] = []
-            current_tokens = 0
-            for paragraph in paragraphs:
-                tokens = len(self.tokenizer.extract_tokens(paragraph))
-                if current and current_tokens + tokens > self.shard_tokens:
-                    pieces.append(piece(f"{unit.id}#{len(pieces)}", "\n".join(current), unit))
-                    current, current_tokens = [], 0
-                current.append(paragraph)
-                current_tokens += tokens
-            if current:
-                pieces.append(piece(f"{unit.id}#{len(pieces)}", "\n".join(current), unit))
-        return pieces
-
     def pack_shards(self, units: list[Unit]) -> tuple[list[list[Unit]], int]:
-        """Group units into shards of at most ``shard_tokens``; returns (shards, tokens)."""
+        """Pack whole units into calls of at most ``shard_tokens``; a unit larger than
+        that is a call by itself. Returns (shards, tokens)."""
         shards: list[list[Unit]] = []
         total_tokens = 0
         current: list[Unit] = []
         current_tokens = 0
-        for unit in self.split_oversized(units):
+        for unit in units:
             tokens = len(self.tokenizer.extract_tokens(unit.text))
             if current and current_tokens + tokens > self.shard_tokens:
                 shards.append(current)
@@ -889,12 +841,16 @@ class BroadRetriever(CompletionRetriever):
                 else "no"
             )
         )
-        # Unit markers let items be traced back; units are read in full. A
-        # document's first line is shown once per shard, before its first unit.
+        # Unit markers let items be traced back; units are read whole. A document's
+        # first line is shown once per call; the end of the previous chunk is shown
+        # before a chunk read without it.
         blocks: list[str] = []
         shown: set[str] = set()
+        in_call = {unit.id for unit in shard}
         for index, unit in enumerate(shard):
             block = f"[unit {index}]\n{unit.text}"
+            if unit.context and unit.previous_id not in in_call:
+                block = f"[end of the previous chunk — context only]\n{unit.context}\n\n{block}"
             if unit.preamble and unit.preamble not in shown:
                 shown.add(unit.preamble)
                 block = f"[document start — context only]\n{unit.preamble}\n\n{block}"

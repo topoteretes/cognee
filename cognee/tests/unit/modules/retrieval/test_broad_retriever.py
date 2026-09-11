@@ -100,17 +100,44 @@ async def test_text_units_are_every_chunk_and_table_row_with_text():
 
 
 @pytest.mark.asyncio
-async def test_a_documents_chunks_are_rejoined_and_later_pieces_carry_its_first_line(monkeypatch):
-    """A CSV ingested as text has its header only in chunk 0. The chunks are rejoined
-    into one document; a piece cut from beyond the header gets it as context."""
+async def test_a_chunk_is_never_split_and_a_large_one_is_a_call_by_itself():
+    """The smallest reading call is one full chunk as ingestion stored it; small units
+    pack together up to the budget."""
+    retriever = BroadRetriever(shard_tokens=10)
+    big = Unit(id="big", text="word " * 200)
+    small = [Unit(id=f"r{i}", text="row " * 3) for i in range(4)]
+
+    shards, _ = retriever.pack_shards([big, *small])
+
+    assert [unit.id for unit in shards[0]] == ["big"]  # whole, alone
+    assert shards[0][0].text == big.text
+    assert [len(shard) for shard in shards[1:]] == [2, 2]  # 4 tokens each, budget 10
+
+
+@pytest.mark.asyncio
+async def test_a_mid_document_chunk_carries_the_first_line_and_the_previous_chunks_end(monkeypatch):
+    """A CSV header lives only in chunk 0; an episode's intro can end one chunk while
+    its turns start the next. Both travel as context-only blocks to a chunk read in
+    a call that does not hold the chunk before it, and not otherwise."""
     graph = _FakeGraph()
     graph.text_nodes = [
-        ("c1", {"type": "DocumentChunk", "chunk_index": 1, "text": "2,bob,no,yes"}),
         (
             "c0",
-            {"type": "DocumentChunk", "chunk_index": 0, "text": "id,who,review,main\n1,ann,yes,no"},
+            {
+                "type": "DocumentChunk",
+                "chunk_index": 0,
+                "text": "id,who\n1,ann\n\nEpisode 21\nHOST: My guest is Pieter Van Dijk.",
+            },
         ),
-        ("d", {"type": "TextDocument", "name": "triage.txt"}),
+        (
+            "c1",
+            {
+                "type": "DocumentChunk",
+                "chunk_index": 1,
+                "text": "VAN DIJK: It started with a failure.",
+            },
+        ),
+        ("d", {"type": "TextDocument", "name": "mixed.txt"}),
     ]
     graph.text_edges = [("c0", "d", "is_part_of", {}), ("c1", "d", "is_part_of", {})]
     seen = []
@@ -120,55 +147,24 @@ async def test_a_documents_chunks_are_rejoined_and_later_pieces_carry_its_first_
         return ShardItems(items=[])
 
     _stub_llm(monkeypatch, respond)
-    retriever = BroadRetriever(shard_tokens=10)  # small enough to cut the document
+    units = await BroadRetriever().load_text_units(graph)
 
-    units = await retriever.load_text_units(graph)
-    pieces = retriever.split_oversized(units)
-    await retriever.count_by_reading(CountPlan(source="text", item="a row"), units)
+    assert [unit.id for unit in units] == ["c0", "c1"]
+    assert units[1].preamble == "id,who" and units[1].previous_id == "c0"
+    assert units[1].context == "Episode 21\nHOST: My guest is Pieter Van Dijk."
 
-    assert [unit.id for unit in units] == ["d"]
-    assert units[0].text == "id,who,review,main\n1,ann,yes,no\n2,bob,no,yes"
-    assert len(pieces) == 3  # no sentence ends: the table is cut one line at a time
-    assert pieces[0].preamble == "" and pieces[-1].preamble == "id,who,review,main"
-    assert any("[document start — context only]\nid,who,review,main" in s for s in seen)
-    assert all(s.count("[document start") <= 1 for s in seen)
-
-
-@pytest.mark.asyncio
-async def test_a_record_cut_in_two_by_the_chunker_is_read_whole():
-    """Ingestion cut an episode between its intro (which names the guest) and its
-    turns. Read from separate chunks, the second half has no name for "VAN DIJK:";
-    rejoined, the episode is one paragraph and one piece."""
-    graph = _FakeGraph()
-    intro = (
-        "Episode 21 — Running time: 44 minutes\n[00:00:12] HOST: My guest today is Pieter Van Dijk."
+    await BroadRetriever(shard_tokens=8).count_by_reading(
+        CountPlan(source="text", item="a turn"), units
     )
-    turns = "[00:00:40] VAN DIJK: It started with a failure.\n[00:01:02] HOST: Go on."
-    graph.text_nodes = [
-        ("c0", {"type": "DocumentChunk", "chunk_index": 0, "text": intro}),
-        ("c1", {"type": "DocumentChunk", "chunk_index": 1, "text": turns}),
-        ("d", {"type": "TextDocument", "name": "episodes.txt"}),
-    ]
-    graph.text_edges = [("c0", "d", "is_part_of", {}), ("c1", "d", "is_part_of", {})]
+    apart = [s for s in seen if "VAN DIJK" in s]
+    assert len(apart) == 1 and "[end of the previous chunk — context only]\nEpisode 21" in apart[0]
+    assert "[document start — context only]\nid,who" in apart[0]
 
-    pieces = BroadRetriever().split_oversized(await BroadRetriever().load_text_units(graph))
-
-    assert len(pieces) == 1
-    assert "Pieter Van Dijk" in pieces[0].text and "VAN DIJK: It started" in pieces[0].text
-
-
-def test_rejoining_chunks_drops_a_chunkers_overlap():
-    """A chunker that repeats the end of one chunk at the start of the next must not
-    make BROAD read that sentence twice."""
-    joined = broad_retriever._rejoin(
-        [
-            "Order 41 shipped. Order 42 shipped on Monday morning.",
-            "Order 42 shipped on Monday morning. Order 43 shipped.",
-        ]
+    seen.clear()
+    await BroadRetriever(shard_tokens=10_000).count_by_reading(
+        CountPlan(source="text", item="a turn"), units
     )
-
-    assert joined.count("Order 42") == 1
-    assert joined.endswith("Order 43 shipped.")
+    assert len(seen) == 1 and "context only]\nEpisode 21" not in seen[0]  # c0 is in the same call
 
 
 # --- planning --------------------------------------------------------------------
@@ -290,24 +286,6 @@ def test_shards_respect_the_token_budget_and_keep_every_unit():
         size = sum(len(retriever.tokenizer.extract_tokens(u.text)) for u in shard)
         assert size <= 200 or len(shard) == 1
     assert tokens == sum(len(retriever.tokenizer.extract_tokens(u.text)) for u in units)
-
-
-def test_a_unit_longer_than_a_shard_is_split_at_paragraphs():
-    """A 5k-token PDF chunk read whole is denser than the shard budget: cut it up."""
-    retriever = BroadRetriever(shard_tokens=40)
-    paragraphs = [f"paragraph {i} " + "word " * 20 for i in range(6)]
-    unit = Unit(id="c7", text="\n\n".join(paragraphs), preamble="Header line")
-
-    shards, _ = retriever.pack_shards([unit, Unit(id="c8", text="short")])
-    pieces = [piece for shard in shards for piece in shard]
-
-    assert len(pieces) > 2 and pieces[-1].id == "c8"
-    assert all(
-        piece.id.startswith("c7#") and piece.preamble == "Header line" for piece in pieces[:-1]
-    )
-    assert "\n".join(p.text for p in pieces[:-1]).split() == unit.text.split()  # nothing lost
-    for piece in pieces[:-1]:
-        assert len(retriever.tokenizer.extract_tokens(piece.text)) <= 40 or "\n" not in piece.text
 
 
 @pytest.mark.asyncio
@@ -835,19 +813,6 @@ async def test_only_read_names_reach_the_model_as_stated_aliases(monkeypatch):
 
     assert "Stated" not in seen[0]
     assert set(result.groups) == {("Pavel Horák", 1), ("Anna Lund", 1), ("Esme Nkemelu", 1)}
-
-
-def test_a_long_paragraph_is_cut_at_sentence_ends_never_inside_one():
-    retriever = BroadRetriever(shard_tokens=30)
-    sentences = [f"Record {i} was opened by someone for issue {i}." for i in range(12)]
-    unit = Unit(id="c1", text=" ".join(sentences))  # pypdf text: no blank lines at all
-
-    pieces = retriever.split_oversized([unit])
-
-    assert len(pieces) > 1
-    for piece in pieces:
-        assert piece.text.endswith(".")
-        assert all(s in " ".join(p.text for p in pieces) for s in sentences)
 
 
 @pytest.mark.asyncio
