@@ -142,8 +142,9 @@ class CountResult:
     amounts_missing: int = 0
     # For a plan with a target: the corpus names matched to it; empty when none matched.
     target_names: list[str] = field(default_factory=list)
-    # For a plan with a dedup key: listed entries that carried no key and were not counted.
-    unkeyed_dropped: int = 0
+    # For a plan with a dedup key: counted entries that carried no key, so could not be
+    # checked for repeats. The most the total could be over by.
+    unkeyed: int = 0
     names_merged: bool = True
     items_listed: int = 0
     llm_calls: int = 0
@@ -173,6 +174,17 @@ def _alias_groups(raw: list[list[str]]) -> list[list[str]]:
 
 def _stated_aliases(aliases: list[list[str]]) -> list[str]:
     return sorted({" = ".join(group) for group in aliases})
+
+
+def _match_stated(aliases: list[list[str]], names: set[str]) -> list[list[str]]:
+    """Each stated alias group as the read names it covers, matched by loose spelling."""
+    by_spelling: dict[str, list[str]] = {}
+    for name in names:
+        by_spelling.setdefault(_loose_name(name), []).append(name)
+    return [
+        [name for alias in group for name in by_spelling.get(_loose_name(alias), [])]
+        for group in aliases
+    ]
 
 
 def _normalize_key(value: str) -> str:
@@ -475,12 +487,13 @@ class BroadRetriever(CompletionRetriever):
                 if item.key:
                     item.key = canonical.get(item.key, item.key)
 
-        unkeyed_dropped = 0
+        unkeyed = 0
         if plan.dedup_key:
-            # An entry without its identifier cannot be told from one already
-            # counted (a record cut across two pieces yields such halves), so it is
-            # not counted; the answer says how many were left out.
-            unkeyed_dropped = sum(1 for item in items if not item.key and not item.undone)
+            # An entry without its identifier cannot be checked against the ones
+            # already counted. It counts (a model omits keys more often than a
+            # record is halved, and pieces end at sentences), and the answer says how
+            # many such entries there were: the most the count could be over by.
+            unkeyed = sum(1 for item in items if not item.key and not item.undone)
             items = self.dedup(items, by_group=plan.relation)
         else:
             # Without an identity an undone entry cannot name what it undoes.
@@ -506,6 +519,10 @@ class BroadRetriever(CompletionRetriever):
             items = [item for item in items if item.group in target_names]
         if plan.distinct and not plan.target:
             total: float = len(groups)
+        elif plan.relation and not plan.target:
+            # "How many connections were removed": each relation once, not once per
+            # participant; the per-participant tally stays for "who has the most".
+            total = len({frozenset((item.group, item.key)) for item in items if item.key})
         else:
             total = sum(weight(item) for item in items)
         return CountResult(
@@ -523,7 +540,7 @@ class BroadRetriever(CompletionRetriever):
             ),
             names_merged=canonical is not None,
             target_names=target_names,
-            unkeyed_dropped=unkeyed_dropped,
+            unkeyed=unkeyed,
             llm_calls=len(shards),
             tokens_read=tokens_read,
         )
@@ -537,8 +554,9 @@ class BroadRetriever(CompletionRetriever):
         The identity is the key: the planner defines it as unique across the corpus,
         so two entries with one key are one item however their group was spelled.
         For a relation listed once per participant (``by_group``) the identity is
-        (participant, other). An entry without a key is not counted. An entry marked
-        undone removes the item it names instead of counting.
+        (participant, other). An entry without a key counts once (it cannot be
+        checked for repeats). An entry marked undone removes the item it names
+        instead of counting.
         """
 
         # A relation's key is the other participant, a name; otherwise an identifier.
@@ -548,6 +566,7 @@ class BroadRetriever(CompletionRetriever):
             return ((item.group or "") if by_group else "", normalize(item.key))
 
         keyed = [item for item in items if item.key]
+        unkeyed = [item for item in items if not item.key and not item.undone]
         # An item is undone wherever the removal was read, before or after the item.
         undone = {identity(item) for item in keyed if item.undone}
         undone_keys = {identity(item)[1] for item in keyed if item.undone and item.group is None}
@@ -559,7 +578,7 @@ class BroadRetriever(CompletionRetriever):
             if (group, key) in undone or key in undone_keys or (group, key) in counted:
                 continue
             counted[(group, key)] = item
-        return list(counted.values())
+        return [*counted.values(), *unkeyed]
 
     def split_oversized(self, units: list[Unit]) -> list[Unit]:
         """Cut a unit longer than a shard into paragraph-aligned pieces.
@@ -678,12 +697,15 @@ class BroadRetriever(CompletionRetriever):
             response_model=NameGroups,
         )
         canonical = {name: name for name in names}
-        for group in result.groups:
-            members = [variant for variant in group if variant in canonical]
+        # What the text itself declares equal ("Arthur Bennett (usually called Art)")
+        # is applied by code; the model's groups add what it is sure of on top.
+        for group in [*_match_stated(aliases, names), *result.groups]:
+            members = {canonical[variant] for variant in group if variant in canonical}
             if len(members) > 1:
-                head = _canonical_spelling(members)
-                for variant in members:
-                    canonical[variant] = head
+                head = _canonical_spelling(sorted(members))
+                for variant, current in canonical.items():
+                    if current in members:
+                        canonical[variant] = head
         logger.info(
             "BROAD name merge: %d names, %d merged into another spelling",
             len(names),
@@ -774,10 +796,10 @@ class BroadRetriever(CompletionRetriever):
             lines.append(f"Condition: {plan.condition}")
         if plan.dedup_key:
             lines.append(f"Repeated mentions of one item removed by: {plan.dedup_key}")
-        if result.unkeyed_dropped:
+        if result.unkeyed:
             lines.append(
-                f"({result.unkeyed_dropped} listed entries carried no {plan.dedup_key} and "
-                "were not counted, since they could be repeats)"
+                f"({result.unkeyed} counted entries carried no {plan.dedup_key}, so repeats "
+                "among them could not be removed: the total may be over by up to that many)"
             )
         lines.append(f"TOTAL: {_number(result.total)}")
         if plan.measure:

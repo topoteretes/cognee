@@ -434,25 +434,15 @@ def test_one_key_is_one_item_however_its_group_was_spelled():
     assert [(i.group, i.key) for i in kept] == [("Ann", "PR #7"), ("Bob", "9")]
 
 
-def test_an_entry_without_its_key_is_not_counted_and_is_reported():
-    """A record cut across two pieces yields a half without its identifier; counting it
-    could count the record twice, so it is left out and the answer says so."""
-    plan = _plan(dedup_key="the PR number")
-    items = [_item(None, "20142"), _item(None, None), _item(None, "20143")]
-
-    kept = BroadRetriever.dedup(items)
-
-    assert [i.key for i in kept] == ["20142", "20143"]
-    assert plan.dedup_key  # the reported count is checked through the context below
-
-
 @pytest.mark.asyncio
-async def test_unkeyed_entries_are_counted_in_the_context_not_the_total(monkeypatch):
+async def test_unkeyed_entries_count_and_bound_the_possible_overcount(monkeypatch):
+    """An entry without its key cannot be checked for repeats. It counts, and the answer
+    context states how many such entries there were: the most the total is over by."""
     shard = ShardItems(
         items=[
             _item(None, "1"),
-            ExtractedItem(unit=0, evidence="half a record, its number cut off"),
-            ExtractedItem(unit=1, evidence="another half without a number"),
+            ExtractedItem(unit=0, evidence="an order whose number the model left out"),
+            ExtractedItem(unit=1, evidence="another with no number given"),
         ]
     )
     _stub_llm(monkeypatch, lambda model, _: shard)
@@ -461,8 +451,46 @@ async def test_unkeyed_entries_are_counted_in_the_context_not_the_total(monkeypa
     result = await BroadRetriever().count_by_reading(plan, _units(1))
     context = await BroadRetriever().get_context_from_objects("q", result)
 
-    assert result.total == 1 and result.unkeyed_dropped == 2
-    assert "2 listed entries carried no the order number and were not counted" in context
+    assert result.total == 3 and result.unkeyed == 2
+    assert "2 counted entries carried no the order number" in context
+    assert "over by up to that many" in context
+
+
+def test_a_relation_without_a_target_counts_each_pair_once():
+    """ "How many connections were removed": Arthur–Priya is one connection, listed
+    for both of them."""
+    items = [_item("Arthur", "Priya"), _item("Priya", "Arthur"), _item("Mei", "Priya")]
+    plan = _plan(group_by="member", relation=True, dedup_key="the other member")
+
+    kept = BroadRetriever.dedup(items, by_group=True)
+    pairs = {frozenset((i.group, i.key)) for i in kept}
+
+    assert len(kept) == 3 and len(pairs) == 2
+    assert plan.relation  # the total uses the pair count; the groups keep the per-member tally
+
+
+@pytest.mark.asyncio
+async def test_stated_aliases_merge_by_code_even_when_the_model_does_not(monkeypatch):
+    """The roster says "Arthur Bennett (usually called Art)". With no target to anchor
+    on, the model merge may miss it; the stated alias joins the groups regardless."""
+    shard = ShardItems(
+        items=[
+            _item("Arthur Bennett", "1"),
+            _item("Art", "2"),
+            _item("Yuki Sato", "3"),
+        ],
+        aliases=[["Arthur Bennett", "Art"]],
+    )
+
+    def respond(model, _):
+        return shard if model is ShardItems else NameGroups(groups=[])
+
+    _stub_llm(monkeypatch, respond)
+    plan = _plan(group_by="member", dedup_key="the connection")
+
+    result = await BroadRetriever().count_by_reading(plan, _units(1))
+
+    assert result.groups == [("Arthur Bennett", 2), ("Yuki Sato", 1)]
 
 
 def test_a_long_paragraph_is_cut_at_sentence_ends_never_inside_one():
