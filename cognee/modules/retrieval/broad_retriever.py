@@ -188,15 +188,19 @@ def _match_stated(aliases: list[list[str]], names: set[str]) -> list[list[str]]:
 
 
 def _normalize_key(value: str) -> str:
-    """One item, one key: "PR #20142", "#20142" and "20142" are the same identifier.
+    """One item, one key: "#20142", "20142" and "no. 20142" are the same identifier,
+    and so are "PR-42", "PR #42" and "pr 42"; but "PR 42" and "issue 42" are two
+    items when a question spans several kinds of contribution.
 
-    A key with digits is its digit runs (a label such as PR, WO or EXP is dropped:
-    one question counts one kind of identifier); a key without digits is its letters.
+    A key with digits is its leading word label (if any) plus its digit runs; a key
+    without digits is its letters.
     """
     digits = re.findall(r"\d+", value)
-    if digits:
-        return "-".join(digits)
-    return re.sub(r"[^0-9a-z]+", "", value.lower())
+    if not digits:
+        return re.sub(r"[^0-9a-z]+", "", value.lower())
+    label = re.match(r"\s*([A-Za-z]+)", value)
+    parts = [label.group(1).lower()] if label and label.group(1).lower() != "no" else []
+    return "-".join(parts + digits)
 
 
 def _loose_name(name: str) -> str:

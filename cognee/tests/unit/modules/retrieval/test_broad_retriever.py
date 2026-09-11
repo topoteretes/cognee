@@ -293,8 +293,8 @@ async def test_repeated_mentions_of_one_item_are_counted_once(monkeypatch):
     """A recap that repeats PR #7 must not count it twice (dedup by key)."""
     items = [
         ExtractedItem(unit=0, key="#7", group="ann", evidence="Ann opened PR #7"),
-        ExtractedItem(unit=0, key="PR 8", group="bob", evidence="Bob opened PR 8"),
-        ExtractedItem(unit=0, key="PR #7", group="ann", evidence="recap: PR #7 by Ann"),
+        ExtractedItem(unit=0, key="8", group="bob", evidence="Bob opened PR 8"),
+        ExtractedItem(unit=0, key="7", group="ann", evidence="recap: PR #7 by Ann"),
     ]
 
     def respond(model, _):
@@ -414,6 +414,17 @@ async def test_a_relation_listed_under_one_side_counts_for_both(monkeypatch):
     assert sorted(entry.split(":")[0] for entry in result.evidence) == ["Helga Menon", "Priya Nair"]
 
 
+def test_a_key_keeps_its_kind_so_pr_42_and_issue_42_are_two_items():
+    """Mixed contributions: "PR 42" and "issue 42" differ; "PR #42", "PR-42" and "pr 42"
+    are one; a bare "#42" is the number alone."""
+    normalize = broad_retriever._normalize_key
+
+    assert normalize("PR #42") == normalize("PR-42") == normalize("pr 42") == "pr-42"
+    assert normalize("issue 42") == "issue-42" and normalize("issue 42") != normalize("PR 42")
+    assert normalize("#42") == normalize("42") == normalize("no. 42") == "42"
+    assert normalize("EXP-1004") == "exp-1004" and normalize("2026-03-04") == "2026-03-04"
+
+
 def test_names_with_digits_are_not_reduced_to_their_digits():
     """ "raj921" and "RajdeepKushwaha5" are two members, and "@raj921" is raj921; only an
     item identifier ("PR #921") reduces to its digits."""
@@ -421,24 +432,24 @@ def test_names_with_digits_are_not_reduced_to_their_digits():
 
     assert len(BroadRetriever.dedup(items, by_group=True)) == 2
     assert broad_retriever._loose_name("@raj921") == "raj921"
-    assert broad_retriever._normalize_key("PR #921") == "921"
+    assert broad_retriever._normalize_key("#921") == "921"
 
 
 def test_one_item_per_group_and_key_and_a_recap_finds_its_item():
-    """A key written "PR #7", "#7" or "7" is one key. Paper 3 by Ann and by Bob is one
-    item of each; a recap that names #7 without its group is the item already counted."""
+    """A key written "#7" or "7" is one key. Paper 3 by Ann and by Bob is one item of
+    each; a recap that names #7 without its group is the item already counted."""
     items = [
-        _item("Ann", "PR #7"),
+        _item("Ann", "#7"),
         _item(None, "7"),
         _item("Ann", "Paper 3"),
         _item("Bob", "Paper 3"),
-        _item("Ann", "#7"),
+        _item("Ann", "7"),
     ]
 
     kept = BroadRetriever.dedup(items)
 
     assert [(i.group, i.key) for i in kept] == [
-        ("Ann", "PR #7"),
+        ("Ann", "#7"),
         ("Ann", "Paper 3"),
         ("Bob", "Paper 3"),
     ]
