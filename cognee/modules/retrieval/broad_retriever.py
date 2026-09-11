@@ -459,14 +459,26 @@ class BroadRetriever(CompletionRetriever):
                 return shard[0].id, await self.extract(plan, shard)
 
         read_shards = await asyncio.gather(*map(read, shards))
+        logger.info(
+            "BROAD read %d pieces; items per piece: %s",
+            len(shards),
+            [len(shard_items.items) for _, shard_items in read_shards],
+        )
 
-        # The model may list one occurrence twice; identical quotes from different
-        # units (table rows repeating a value) are different items.
+        # The model may list one occurrence twice. Without a key the quote is the
+        # only identity, and only within one unit: identical quotes from different
+        # units (table rows repeating a value) are different items. With a key,
+        # fifty records in one piece may share a templated sentence ("The run
+        # failed") and are still fifty items; the key tells them apart.
         seen: set[tuple[str, int, str]] = set()
         items: list[ExtractedItem] = []
         for shard_id, shard_items in read_shards:
             for item in shard_items.items:
-                marker = (shard_id, item.unit, item.evidence.strip().lower())
+                marker = (
+                    shard_id,
+                    item.unit,
+                    (item.group, item.key) if item.key else item.evidence.strip().lower(),
+                )
                 if marker not in seen:
                     seen.add(marker)
                     if item.undone and not plan.reversible:
@@ -649,9 +661,10 @@ class BroadRetriever(CompletionRetriever):
             )
             + "\nRelation: "
             + (
-                "the item relates two or more things of one kind; list it ONCE with every "
-                "participant in groups. One that was only requested, proposed or declined "
-                "is not the relation."
+                "the item relates two or more things of one kind; list it ONCE, with EVERY "
+                "participant in groups (a paper by four authors: all four names), whatever "
+                "their number. One that was only requested, proposed or declined is not "
+                "the relation."
                 if plan.relation
                 else "no"
             )

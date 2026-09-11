@@ -591,6 +591,28 @@ async def test_every_occurrence_counts_without_a_dedup_key(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_keyed_items_sharing_a_templated_quote_in_one_piece_all_count(monkeypatch):
+    """Fifty experiments in one piece each say "The run failed": distinct keys, distinct
+    items. Only a keyless repeat of the same quote in the same unit is one occurrence."""
+    shard = ShardItems(
+        items=[
+            *[_item(None, f"EXP-{n}") for n in range(50)],
+            ExtractedItem(unit=0, evidence="the same quote"),
+            ExtractedItem(unit=0, evidence="the same quote"),
+        ]
+    )
+    for n in range(50):
+        shard.items[n].evidence = "The run failed."
+    _stub_llm(monkeypatch, lambda model, _: shard)
+
+    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(
+        _plan(dedup_key="the experiment id"), _units(1)
+    )
+
+    assert result.total == 51
+
+
+@pytest.mark.asyncio
 async def test_identical_quotes_from_different_rows_are_different_items(monkeypatch):
     """Table rows repeat values: "worth_reviewing: yes" on 40 rows is 40 items."""
     shard = ShardItems(
