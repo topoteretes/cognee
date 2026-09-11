@@ -10,6 +10,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
+from cognee.modules.pipelines.methods import (
+    get_abandon_cutoff,
+    get_effective_pipeline_status,
+)
 from cognee.modules.users.methods.get_authenticated_user import get_authenticated_user
 from cognee.modules.users.methods.get_visible_user_ids import get_visible_user_ids
 from cognee.modules.users.models import User
@@ -58,6 +62,34 @@ def get_activity_router() -> APIRouter:
         - `"pipeline"` — a pipeline run (`pipeline_name` is set).
         - `"operation"` — a single-row operation record (`pipeline_name` and
           `status` are NULL, so these are invisible to status-based readers).
+
+        `status` for a `"pipeline"` row is one of
+        `PipelineRunStatus` (`DATASET_PROCESSING_INITIATED` /
+        `_STARTED` / `_COMPLETED` / `_ERRORED`), plus one value computed
+        at read time: **`"ABANDONED"`**. A row stuck at
+        `DATASET_PROCESSING_STARTED` for longer than
+        `PIPELINE_RUN_ABANDON_AFTER_SECONDS` (default 1800, i.e. 30 min)
+        is reported as `"ABANDONED"` instead — this covers a worker that
+        crashed mid-run and never wrote a terminal status. This is a
+        heuristic, not a certainty: a pipeline genuinely still running past
+        the threshold (a very large dataset, slow LLM calls) reads
+        identically to a crashed one, since `PipelineRun` rows carry no
+        mid-run heartbeat. Treat `"ABANDONED"` as "likely stuck," not a
+        guarantee.
+
+        This is decided per *run*, not per row. The writers
+        (`log_pipeline_run_start`/`_complete`/`_error`) always INSERT a new
+        row rather than UPDATE the existing one, so a finished run still has
+        its original STARTED row sitting in the table alongside its terminal
+        row, both sharing `pipeline_run_id`, and this endpoint returns both
+        with no dedup. A STARTED row only reads `"ABANDONED"` when no
+        `"DATASET_PROCESSING_COMPLETED"`/`"_ERRORED"` row shares its
+        `pipeline_run_id` yet — the query checks this directly rather than
+        relying on age alone. Once a straggler worker's terminal row lands,
+        the old STARTED row goes back to reading
+        `"DATASET_PROCESSING_STARTED"`, it does not stay `"ABANDONED"`. See
+        the aggregation caveats below for deduplicating by `pipeline_run_id`.
+        `"operation"` rows have no status column and are unaffected.
 
         ## Request Parameters
         - **dataset_id** (Optional[UUID]): Restrict to one dataset (403 if not readable).
@@ -113,11 +145,12 @@ def get_activity_router() -> APIRouter:
         2. `parent_operation_id` forms a tree whose token counts already chain
            into the parent. Summing across levels double-counts; sum one level.
         """
-        from sqlalchemy import or_, outerjoin, select
+        from sqlalchemy import exists, or_, outerjoin, select
+        from sqlalchemy.orm import aliased
 
         from cognee.infrastructure.databases.relational import get_relational_engine
         from cognee.modules.data.models.Dataset import Dataset
-        from cognee.modules.pipelines.models import PipelineRun
+        from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
         from cognee.modules.users.models import User
 
         if dataset_id is not None:
@@ -142,6 +175,29 @@ def get_activity_router() -> APIRouter:
                 visibility_terms.append(PipelineRun.dataset_id.in_(permitted_dataset_id_set))
             visibility = or_(*visibility_terms)
 
+        # A pipeline run is several rows sharing one pipeline_run_id
+        # (log_pipeline_run_start/_complete/_error each INSERT, none ever
+        # UPDATE), and this query applies no dedup — a finished run's
+        # STARTED row and its terminal row both come back as separate
+        # results. get_effective_pipeline_status must not read that STARTED
+        # row as ABANDONED just because it is old; it needs to know a
+        # terminal sibling exists. Aliased rather than reusing PipelineRun
+        # itself, so the subquery keeps its own FROM — sharing the outer
+        # table would let SQLAlchemy correlate it and silently turn the
+        # check into "this row is not itself terminal".
+        sibling = aliased(PipelineRun)
+        run_has_terminal_row = exists(
+            select(sibling.id).where(
+                sibling.pipeline_run_id == PipelineRun.pipeline_run_id,
+                sibling.status.in_(
+                    [
+                        PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+                        PipelineRunStatus.DATASET_PROCESSING_ERRORED,
+                    ]
+                ),
+            )
+        ).label("run_has_terminal_row")
+
         db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:
             # Join pipeline runs → dataset → owner user for agent attribution
@@ -151,6 +207,7 @@ def get_activity_router() -> APIRouter:
                     Dataset.name.label("ds_name"),
                     Dataset.owner_id,
                     User.email.label("owner_email"),
+                    run_has_terminal_row,
                 )
                 .select_from(
                     outerjoin(PipelineRun, Dataset, PipelineRun.dataset_id == Dataset.id).outerjoin(
@@ -171,6 +228,10 @@ def get_activity_router() -> APIRouter:
             result = await session.execute(stmt)
             rows = result.all()
 
+        # One cutoff for the whole page, so the first and last row of a
+        # response are judged against the same clock.
+        abandon_cutoff = get_abandon_cutoff()
+
         return [
             {
                 "id": str(run.id),
@@ -178,7 +239,12 @@ def get_activity_router() -> APIRouter:
                 # sets it. Derived here so clients need not know that convention.
                 "kind": "pipeline" if run.pipeline_name is not None else "operation",
                 "pipeline_name": run.pipeline_name,
-                "status": run.status.value if run.status else None,
+                # "ABANDONED" is never stored — see get_effective_pipeline_status.
+                "status": get_effective_pipeline_status(
+                    run,
+                    run_has_terminal_row=bool(has_terminal_row),
+                    abandon_cutoff=abandon_cutoff,
+                ),
                 "dataset_id": str(run.dataset_id) if run.dataset_id else None,
                 # The row itself is visible via the user_id term even when its
                 # dataset_id is not in permitted_dataset_id_set (the caller has
@@ -214,7 +280,7 @@ def get_activity_router() -> APIRouter:
                 if run.parent_operation_id
                 else None,
             }
-            for run, ds_name, owner_id, owner_email in rows
+            for run, ds_name, owner_id, owner_email, has_terminal_row in rows
         ]
 
     @router.get("/spans")

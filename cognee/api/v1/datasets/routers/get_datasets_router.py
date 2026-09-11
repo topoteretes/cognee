@@ -67,6 +67,8 @@ StatusPipelineNamesQuery = Annotated[
 
 
 class PipelineRunStatusWithProgress(BaseModel):
+    # The stored status, not the read-time effective one. See the note on
+    # /status below for why these two endpoints stay on the stored value.
     status: PipelineRunStatus
     # Present only once a run has emitted at least one progress tick (see
     # log_pipeline_run_progress); None before that or for terminal runs that
@@ -441,6 +443,13 @@ def get_datasets_router() -> APIRouter:
             for data in dataset_data
         ]
 
+    # Reports the STORED status. ABANDONED is deliberately not surfaced here:
+    # every frontend status path reads this endpoint through one shared mapper
+    # that falls through to "completed" for a value it does not recognise, so
+    # an abandoned dataset with documents would be shown as successfully
+    # processed. Reporting a dead run as still running is also wrong, but it
+    # never claims success. /activity carries the effective status; this
+    # endpoint follows once the frontend has a mapping for it.
     @router.get(
         "/status",
         response_model=dict[str, PipelineRunStatus] | dict[str, dict[str, PipelineRunStatus]],
@@ -475,10 +484,18 @@ def get_datasets_router() -> APIRouter:
         - Multiple pipelines: {dataset_id: {pipeline_name: status}}
 
         Status values:
-        - **pending**: Dataset is queued for processing
-        - **running**: Dataset is currently being processed
-        - **completed**: Dataset processing completed successfully
-        - **failed**: Dataset processing encountered an error
+        - **DATASET_PROCESSING_INITIATED**: Dataset is queued for processing
+        - **DATASET_PROCESSING_STARTED**: Dataset is currently being processed
+        - **DATASET_PROCESSING_COMPLETED**: Dataset processing completed successfully
+        - **DATASET_PROCESSING_ERRORED**: Dataset processing encountered an error
+        - **ABANDONED**: computed at read time, not stored. A dataset stuck at
+          DATASET_PROCESSING_STARTED for longer than
+          PIPELINE_RUN_ABANDON_AFTER_SECONDS (default 1800s) is reported as
+          ABANDONED instead, covering a worker that crashed mid-run and never
+          wrote a terminal status. This is a heuristic, not a certainty: a
+          pipeline genuinely still running past the threshold (a very large
+          dataset, slow LLM calls) reads identically to a crashed one, since
+          pipeline runs carry no mid-run heartbeat.
 
         For in-flight progress (files completed / total, current stage), see
         **GET /v1/datasets/status/progress** — a separate endpoint with its own
@@ -536,6 +553,12 @@ def get_datasets_router() -> APIRouter:
         status value is always an object {status, progress} instead of a bare
         status — a dedicated endpoint rather than a flag on /status, so neither
         endpoint's response shape ever depends on how it was called.
+
+        `status` uses the same values as **GET /v1/datasets/status**, including
+        the read-time-only **ABANDONED** value for a dataset stuck at
+        DATASET_PROCESSING_STARTED past PIPELINE_RUN_ABANDON_AFTER_SECONDS
+        (default 1800s) — see that endpoint's docstring for the heuristic
+        caveat (a genuinely slow pipeline reads the same as a crashed one).
 
         ## Query Parameters
         - **dataset** (List[UUID]): Dataset UUIDs to check (from GET /api/v1/datasets). Omit to get

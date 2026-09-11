@@ -40,6 +40,13 @@ async def _fan_out_by_pipeline(dataset_ids: list[UUID], pipeline_names: list[str
     per-dataset value type differs (a bare status vs. {status, progress});
     the flat-vs-nested decision based on how many pipeline names were
     requested is identical either way, so it lives here once.
+
+    Both fetch the STORED status, not the read-time effective one. These two
+    endpoints are what every frontend status path reads, and none of them
+    knows ABANDONED: the shared mapper falls through to "completed" for an
+    unrecognised value, so a dead run would be reported as a successful one.
+    Reporting it as still running is wrong too, but it never claims success.
+    The effective status stays on /activity until a frontend mapping lands.
     """
     # Backward-compatible default: cognify-only flat map.
     if not pipeline_names:
