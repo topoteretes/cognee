@@ -435,3 +435,134 @@ def test_prompt_preview_fields_follow_the_requested_format_not_session_state(sea
         search_type=SearchType.GRAPH_COMPLETION,
     )
     assert search_mod._prompt_preview_fields(filled)["user_prompt_result"] == "The question is: `q`"
+
+
+# ---------------------------------------------------------------------------
+# Per-search-type permissions: CYPHER and NATURAL_LANGUAGE need write, not just read
+# ---------------------------------------------------------------------------
+
+
+def test_required_permissions_by_search_type():
+    cypher_types = {SearchType.CYPHER, SearchType.NATURAL_LANGUAGE}
+    for search_type in SearchType:
+        expected = ("read", "write") if search_type in cypher_types else ("read",)
+        assert search_type.required_permissions == expected, search_type
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query_type", [SearchType.CYPHER, SearchType.NATURAL_LANGUAGE])
+async def test_cypher_types_deny_read_only_datasets(monkeypatch, search_mod, query_type):
+    """A read-only share is not enough to run Cypher against a dataset."""
+    from cognee.modules.users.exceptions import PermissionDeniedError
+
+    user = _make_user()
+    ds = _make_dataset(name="shared-read-only")
+    requested = []
+
+    async def dummy_get_authorized_existing_datasets(*, datasets, permission_type, user):
+        requested.append(permission_type)
+        if permission_type == "read":
+            return [ds]
+        raise PermissionDeniedError(f"missing {permission_type}")
+
+    async def dummy_search_in_datasets_context(**_kwargs):
+        raise AssertionError("search must not run without write permission")
+
+    monkeypatch.setattr(
+        search_mod, "get_authorized_existing_datasets", dummy_get_authorized_existing_datasets
+    )
+    monkeypatch.setattr(search_mod, "search_in_datasets_context", dummy_search_in_datasets_context)
+
+    with pytest.raises(PermissionDeniedError):
+        await search_mod.authorized_search(
+            query_type=query_type,
+            query_text="MATCH (n) DETACH DELETE n",
+            user=user,
+            dataset_ids=[ds.id],
+        )
+
+    assert requested == ["read", "write"]
+
+
+@pytest.mark.asyncio
+async def test_cypher_runs_with_write_permission(monkeypatch, search_mod):
+    user = _make_user()
+    ds = _make_dataset(name="shared-writable")
+    seen = {}
+
+    async def dummy_get_authorized_existing_datasets(*, datasets, permission_type, user):
+        return [ds]
+
+    async def dummy_search_in_datasets_context(**kwargs):
+        seen["datasets"] = kwargs["search_datasets"]
+        return []
+
+    monkeypatch.setattr(
+        search_mod, "get_authorized_existing_datasets", dummy_get_authorized_existing_datasets
+    )
+    monkeypatch.setattr(search_mod, "search_in_datasets_context", dummy_search_in_datasets_context)
+
+    out = await search_mod.authorized_search(
+        query_type=SearchType.CYPHER,
+        query_text="MATCH (n) RETURN n LIMIT 1",
+        user=user,
+        dataset_ids=[ds.id],
+    )
+
+    assert out == []
+    assert seen["datasets"] == [ds]
+
+
+@pytest.mark.asyncio
+async def test_cypher_without_explicit_datasets_targets_only_writable_ones(monkeypatch, search_mod):
+    user = _make_user()
+    readable = _make_dataset(name="read-only")
+    writable = _make_dataset(name="writable")
+    seen = {}
+
+    async def dummy_get_authorized_existing_datasets(*, datasets, permission_type, user):
+        assert datasets is None
+        return [readable, writable] if permission_type == "read" else [writable]
+
+    async def dummy_search_in_datasets_context(**kwargs):
+        seen["datasets"] = kwargs["search_datasets"]
+        return []
+
+    monkeypatch.setattr(
+        search_mod, "get_authorized_existing_datasets", dummy_get_authorized_existing_datasets
+    )
+    monkeypatch.setattr(search_mod, "search_in_datasets_context", dummy_search_in_datasets_context)
+
+    await search_mod.authorized_search(
+        query_type=SearchType.NATURAL_LANGUAGE,
+        query_text="remove every node",
+        user=user,
+        dataset_ids=None,
+    )
+
+    assert seen["datasets"] == [writable]
+
+
+@pytest.mark.asyncio
+async def test_read_only_search_types_never_ask_for_write(monkeypatch, search_mod):
+    user = _make_user()
+    ds = _make_dataset(name="ds1")
+    requested = []
+
+    async def dummy_get_authorized_existing_datasets(*, datasets, permission_type, user):
+        requested.append(permission_type)
+        return [ds]
+
+    async def dummy_search_in_datasets_context(**_kwargs):
+        return []
+
+    monkeypatch.setattr(
+        search_mod, "get_authorized_existing_datasets", dummy_get_authorized_existing_datasets
+    )
+    monkeypatch.setattr(search_mod, "search_in_datasets_context", dummy_search_in_datasets_context)
+
+    await search_mod.authorized_search(
+        query_type=SearchType.GRAPH_COMPLETION, query_text="q", user=user, dataset_ids=[ds.id]
+    )
+
+    assert requested == ["read"]
