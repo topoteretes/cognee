@@ -5,7 +5,6 @@ import time
 from datetime import datetime, timezone
 from enum import Enum
 from io import BytesIO
-from typing import Dict
 
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -34,7 +33,7 @@ class HealthResponse(BaseModel):
     timestamp: str
     version: str
     uptime: int
-    components: Dict[str, ComponentHealth]
+    components: dict[str, ComponentHealth]
 
 
 class HealthChecker:
@@ -187,6 +186,9 @@ class HealthChecker:
                 details="Storage accessible",
             )
         except Exception as e:
+            logger.debug(
+                "Falling back after error in HealthChecker.check_file_storage", exc_info=True
+            )
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(
                 status=HealthStatus.UNHEALTHY,
@@ -240,6 +242,9 @@ class HealthChecker:
                 details="Embedding generation working",
             )
         except Exception as e:
+            logger.debug(
+                "Falling back after error in HealthChecker.check_embedding_service", exc_info=True
+            )
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(
                 status=HealthStatus.DEGRADED,

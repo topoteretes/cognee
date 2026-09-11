@@ -1,4 +1,4 @@
-from typing import List, Literal, Optional, Union
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
@@ -19,17 +19,17 @@ logger = get_logger()
 
 
 class MemifyPayloadDTO(InDTO):
-    extraction_tasks: Optional[List[str]] = Field(
+    extraction_tasks: list[str] | None = Field(
         default=None,
         examples=[[]],
     )
-    enrichment_tasks: Optional[List[str]] = Field(default=None, examples=[[]])
-    data: Optional[str] = Field(default=None)
-    dataset_name: Optional[str] = Field(default=None)
+    enrichment_tasks: list[str] | None = Field(default=None, examples=[[]])
+    data: str | None = Field(default=None)
+    dataset_name: str | None = Field(default=None)
     # Note: Literal is needed for Swagger use
-    dataset_id: Union[UUID, Literal[""], None] = Field(default=None, examples=[""])
-    node_name: Optional[List[str]] = Field(default=None, examples=[[]])
-    run_in_background: Optional[bool] = Field(default=False)
+    dataset_id: UUID | Literal[""] | None = Field(default=None, examples=[""])
+    node_name: list[str] | None = Field(default=None, examples=[[]])
+    run_in_background: bool | None = Field(default=False)
 
 
 def get_memify_router() -> APIRouter:

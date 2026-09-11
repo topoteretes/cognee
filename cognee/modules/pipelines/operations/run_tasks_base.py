@@ -1,5 +1,3 @@
-from typing import Optional
-
 from cognee import __version__ as cognee_version
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.observability import (
@@ -155,7 +153,7 @@ async def handle_task(
     leftover_tasks: list[Task],
     next_task_batch_size: int,
     user: User,
-    ctx: Optional[PipelineContext] = None,
+    ctx: PipelineContext | None = None,
 ):
     """Handle common task workflow with logging, telemetry, and error handling."""
     task_type = running_task.task_type
@@ -265,7 +263,7 @@ async def run_tasks_base(
     tasks: list[Task],
     data=None,
     user: User = None,
-    ctx: Optional[PipelineContext] = None,
+    ctx: PipelineContext | None = None,
 ):
     """Base function to execute tasks in a pipeline, handling task type detection and execution."""
     if len(tasks) == 0:

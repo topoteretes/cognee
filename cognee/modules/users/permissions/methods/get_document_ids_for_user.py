@@ -9,7 +9,9 @@ from cognee.modules.data.models import Dataset
 from ...models import ACL, Permission
 
 
-async def get_document_ids_for_user(user_id: UUID, dataset_ids: list[UUID] = None) -> list[str]:
+async def get_document_ids_for_user(
+    user_id: UUID, dataset_ids: list[UUID] | None = None
+) -> list[str]:
     """
         Return a list of document ids for which the user has read permission.
         If dataset_ids are specified, return only documents from those datasets

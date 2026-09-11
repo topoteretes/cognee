@@ -33,7 +33,7 @@ shallow clone (``resolve_code_repository_url``): the clone directory is the
 import hashlib
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.resolve_repo import (
@@ -157,7 +157,7 @@ def _document_extensions() -> frozenset:
     return frozenset(extensions - SUPPORTED_CODE_EXTENSIONS)
 
 
-def partition_repo_files(directory: Path) -> tuple[List[Path], List[Path], List[Path]]:
+def partition_repo_files(directory: Path) -> tuple[list[Path], list[Path], list[Path]]:
     """Partition a project tree into (covered, documents, skipped) files.
 
     covered: source files + project manifests — represented by the single
@@ -170,9 +170,9 @@ def partition_repo_files(directory: Path) -> tuple[List[Path], List[Path], List[
     from cognee.infrastructure.loaders.core.code_loader import SUPPORTED_CODE_EXTENSIONS
 
     document_extensions = _document_extensions()
-    covered: List[Path] = []
-    documents: List[Path] = []
-    skipped: List[Path] = []
+    covered: list[Path] = []
+    documents: list[Path] = []
+    skipped: list[Path] = []
 
     for file_path in sorted(directory.rglob("*")):
         # is_file() follows symlinks, and read_bytes() below would then pull the
@@ -202,7 +202,7 @@ def partition_repo_files(directory: Path) -> tuple[List[Path], List[Path], List[
     return covered, documents, skipped
 
 
-def build_repo_manifest(directory: Path, covered: List[Path]) -> str:
+def build_repo_manifest(directory: Path, covered: list[Path]) -> str:
     """The repo item's raw data: covered files + a combined content hash.
 
     The hash covers every covered file's content, so the manifest text — and
@@ -230,7 +230,7 @@ def build_repo_manifest(directory: Path, covered: List[Path]) -> str:
 
 
 async def resolve_code_repository(
-    directory: Path, user=None, dataset_id=None, source_url: Optional[str] = None
+    directory: Path, user=None, dataset_id=None, source_url: str | None = None
 ):
     """Build the repo-level DataItem (and the document file list) for a project.
 
@@ -363,7 +363,7 @@ async def extract_code_repo_graph(
     return data_documents
 
 
-def get_code_repo_tasks() -> List:
+def get_code_repo_tasks() -> list:
     """The cognify CODE_REPO-route task list: one adapter task, no LLM stages."""
     from cognee.modules.pipelines.tasks.task import Task
 

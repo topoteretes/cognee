@@ -1,5 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any
+
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 if TYPE_CHECKING:
     from cognee.modules.search.models.EvidenceReference import EvidenceReference
@@ -28,7 +32,7 @@ class BaseRetriever(ABC):
     supports_prompt_preview = True
 
     @abstractmethod
-    async def get_retrieved_objects(self, query: Optional[str], query_batch: Optional[str]) -> Any:
+    async def get_retrieved_objects(self, query: str | None, query_batch: str | None) -> Any:
         """
         Retrieves the raw data points from the underlying storage (Graph or Vector DB).
 
@@ -44,10 +48,10 @@ class BaseRetriever(ABC):
     @abstractmethod
     async def get_context_from_objects(
         self,
-        query: Optional[str] = None,
-        query_batch: Optional[str] = None,
+        query: str | None = None,
+        query_batch: str | None = None,
         retrieved_objects: Any = None,
-    ) -> Union[str, List[str]]:
+    ) -> str | list[str]:
         """
         Transforms raw retrieved objects into a structured context for the LLM.
 
@@ -64,11 +68,11 @@ class BaseRetriever(ABC):
     @abstractmethod
     async def get_completion_from_context(
         self,
-        query: Optional[str] = None,
-        query_batch: Optional[List[str]] = None,
+        query: str | None = None,
+        query_batch: list[str] | None = None,
         retrieved_objects: Any = None,
         context: Any = None,
-    ) -> Union[List[str], List[dict]]:
+    ) -> list[str] | list[dict]:
         """
         Generates a final output or answer based on the query and retrieved context.
 
@@ -83,7 +87,7 @@ class BaseRetriever(ABC):
             List[Any]: A list containing the generated completions or response objects.
         """
 
-    def extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+    def extract_context_object_ids(self, retrieved_objects: Any) -> dict[str, list[str]] | None:
         """
         Extract node_ids and edge_ids from retrieved_objects for session QA.
         Override in retrievers that use session and have graph elements to store.
@@ -103,7 +107,7 @@ class BaseRetriever(ABC):
         """
         return primary if primary is not None else secondary
 
-    async def append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
+    async def append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
         """Apply retriever-owned references; unsupported retrievers leave answers unchanged."""
         return completions
 
@@ -111,7 +115,7 @@ class BaseRetriever(ABC):
         self,
         retrieved_objects: Any,
         dataset_id: Any = None,
-    ) -> List["EvidenceReference"]:
+    ) -> list["EvidenceReference"]:
         """Return structured identifiers for artifacts included in completion context.
 
         Retrievers opt in by overriding this pure, synchronous hook. The default
@@ -134,11 +138,15 @@ class BaseRetriever(ABC):
                 query=query,
             )
         except Exception:
+            logger.debug(
+                "Falling back after error in BaseRetriever.prepare_session_turn_for_retrieval",
+                exc_info=True,
+            )
             from cognee.infrastructure.session.session_manager import SessionTurnPreparation
 
             return SessionTurnPreparation(should_answer=True, effective_query=query or "")
 
-    async def get_completion(self, query: str) -> Union[List[str], List[dict]]:
+    async def get_completion(self, query: str) -> list[str] | list[dict]:
         """
         Generates a final output or answer based on the query and retrieved context.
 

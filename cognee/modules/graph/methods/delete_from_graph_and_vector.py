@@ -1,5 +1,3 @@
-from typing import Dict, List
-
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_engine_async
 from cognee.modules.engine.utils import generate_node_id
@@ -26,10 +24,10 @@ def _get_remaining_edge_retrieval_text(edge) -> str:
 
 
 async def delete_from_graph_and_vector(
-    affected_nodes: List[Node],
-    affected_edges: List[Edge],
-    is_legacy_node: List[bool],
-    is_legacy_edge: List[bool],
+    affected_nodes: list[Node],
+    affected_edges: list[Edge],
+    is_legacy_node: list[bool],
+    is_legacy_edge: list[bool],
 ) -> None:
     """Delete non-legacy nodes/edges from graph DB, vector DB, and mark ledger entries.
 
@@ -70,7 +68,7 @@ async def delete_from_graph_and_vector(
         await graph_engine.delete_nodes([str(node.slug) for node in unique_nodes])
 
     # Delete from vector DB - group by collection
-    affected_vector_collections: Dict[str, List[Node]] = {}
+    affected_vector_collections: dict[str, list[Node]] = {}
     for node in unique_nodes:
         for indexed_field in node.indexed_fields:
             collection_name = f"{node.type}_{indexed_field}"
@@ -113,7 +111,7 @@ async def delete_from_graph_and_vector(
                 await vector_engine.delete_data_points("Triplet_text", triplet_ids)
             except Exception:
                 # Triplet collection might not exist if triplet embedding was never enabled
-                pass
+                logger.debug("Ignoring exception in delete_from_graph_and_vector", exc_info=True)
 
     # Clean up orphaned EdgeType nodes from the graph.
     # EdgeType nodes are created by index_graph_edges for each unique edge
@@ -149,7 +147,7 @@ async def delete_from_graph_and_vector(
                     len(orphaned_edge_type_ids),
                 )
         except Exception as e:
-            logger.warning("EdgeType cleanup failed (non-fatal): %s", e)
+            logger.warning("EdgeType cleanup failed (non-fatal): %s", e, exc_info=True)
 
     # Strip now-orphaned NodeSet tags from surviving rows/nodes so shared
     # entities stop advertising membership in a dataset that no longer
@@ -162,12 +160,12 @@ async def delete_from_graph_and_vector(
                 graph_engine = await get_graph_engine()
             await graph_engine.remove_belongs_to_set_tags(tags_to_remove)
         except Exception as e:
-            logger.warning("Graph NodeSet tag cleanup failed (non-fatal): %s", e)
+            logger.warning("Graph NodeSet tag cleanup failed (non-fatal): %s", e, exc_info=True)
 
         try:
             await vector_engine.remove_belongs_to_set_tags(tags_to_remove)
         except Exception as e:
-            logger.warning("Vector NodeSet tag cleanup failed (non-fatal): %s", e)
+            logger.warning("Vector NodeSet tag cleanup failed (non-fatal): %s", e, exc_info=True)
 
     # Mark ledger entries as deleted
     await mark_ledger_nodes_as_deleted([node.slug for node in non_legacy_nodes])

@@ -67,9 +67,9 @@ class OAuthInstallation:
     provider_account_id: str
     token_payload: dict[str, Any]
     provider_metadata: dict[str, Any] = field(default_factory=dict)
-    account_label: Optional[str] = None
-    scopes: Optional[str] = None
-    token_expires_at: Optional[datetime] = None
+    account_label: str | None = None
+    scopes: str | None = None
+    token_expires_at: datetime | None = None
     auth_type: str = "oauth2"
 
 

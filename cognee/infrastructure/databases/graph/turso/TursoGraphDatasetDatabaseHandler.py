@@ -1,5 +1,4 @@
 import os
-from typing import Optional
 from uuid import UUID
 
 from cognee.base_config import get_base_config
@@ -19,7 +18,7 @@ class TursoGraphDatasetDatabaseHandler:
     """
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: UUID | None, user: User | None) -> dict:
         graph_config = get_graph_config()
 
         if graph_config.graph_database_provider != "turso":

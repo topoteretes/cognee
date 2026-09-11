@@ -7,7 +7,6 @@ import asyncio
 import hashlib
 import os
 from dataclasses import dataclass
-from typing import Optional
 
 import aiohttp
 
@@ -39,7 +38,7 @@ def _email_to_tenant_name(email: str) -> str:
 async def get_current_tenant(
     management_url: str,
     access_token: str,
-) -> Optional[Tenant]:
+) -> Tenant | None:
     """GET /api/tenants/current — returns the user's active tenant or None."""
     async with (
         aiohttp.ClientSession() as session,

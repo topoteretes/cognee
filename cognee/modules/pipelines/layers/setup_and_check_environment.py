@@ -22,8 +22,8 @@ _first_run_lock = asyncio.Lock()
 
 
 async def setup_and_check_environment(
-    vector_db_config: dict = None,
-    graph_db_config: dict = None,
+    vector_db_config: dict | None = None,
+    graph_db_config: dict | None = None,
     skip_connection_test: bool = False,
 ):
     if vector_db_config:

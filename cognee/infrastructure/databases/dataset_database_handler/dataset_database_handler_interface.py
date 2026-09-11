@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from typing import Optional
 from uuid import UUID
 
 from cognee.modules.users.models.DatasetDatabase import DatasetDatabase
@@ -9,7 +8,7 @@ from cognee.modules.users.models.User import User
 class DatasetDatabaseHandlerInterface(ABC):
     @classmethod
     @abstractmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: UUID | None, user: User | None) -> dict:
         """
         Return a dictionary with database connection/resolution info for a graph or vector database for the given dataset.
         Function can auto handle deploying of the actual database if needed, but is not necessary.

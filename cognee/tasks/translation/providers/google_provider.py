@@ -1,5 +1,4 @@
 import asyncio
-from typing import Optional
 
 from cognee.shared.logging_utils import get_logger
 
@@ -49,14 +48,14 @@ class GoogleTranslationProvider(TranslationProvider):
             self._get_client()
             return True
         except Exception as e:
-            logger.debug(f"Google Translate not available: {e}")
+            logger.debug(f"Google Translate not available: {e}", exc_info=True)
             return False
 
     async def translate(
         self,
         text: str,
         target_language: str = "en",
-        source_language: Optional[str] = None,
+        source_language: str | None = None,
     ) -> TranslationResult:
         """
         Translate text using Google Translate API.
@@ -105,7 +104,7 @@ class GoogleTranslationProvider(TranslationProvider):
         self,
         texts: list[str],
         target_language: str = "en",
-        source_language: Optional[str] = None,
+        source_language: str | None = None,
     ) -> list[TranslationResult]:
         """
         Translate multiple texts using Google Translate API.

@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import SkipValidation
 
@@ -9,10 +9,10 @@ from cognee.modules.engine.models.Timestamp import Timestamp
 
 class Event(DataPoint):
     name: str
-    description: Optional[str] = None
-    at: Optional[Timestamp] = None
-    during: Optional[Interval] = None
-    location: Optional[str] = None
+    description: str | None = None
+    at: Timestamp | None = None
+    during: Interval | None = None
+    location: str | None = None
     attributes: SkipValidation[Any] = None
 
     metadata: dict = {"index_fields": ["name"]}

@@ -1,4 +1,3 @@
-from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy import and_, desc, select
@@ -7,7 +6,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.sync.models import SyncOperation, SyncStatus
 
 
-async def get_sync_operation(run_id: str) -> Optional[SyncOperation]:
+async def get_sync_operation(run_id: str) -> SyncOperation | None:
     """
     Get a sync operation by its run_id.
 
@@ -27,7 +26,7 @@ async def get_sync_operation(run_id: str) -> Optional[SyncOperation]:
 
 async def get_user_sync_operations(
     user_id: UUID, limit: int = 50, offset: int = 0
-) -> List[SyncOperation]:
+) -> list[SyncOperation]:
     """
     Get sync operations for a specific user, ordered by most recent first.
 
@@ -55,7 +54,7 @@ async def get_user_sync_operations(
 
 async def get_sync_operations_by_dataset(
     dataset_id: UUID, limit: int = 50, offset: int = 0
-) -> List[SyncOperation]:
+) -> list[SyncOperation]:
     """
     Get sync operations for a specific dataset.
 
@@ -81,7 +80,7 @@ async def get_sync_operations_by_dataset(
         return list(result.scalars().all())
 
 
-async def get_running_sync_operations_for_user(user_id: UUID) -> List[SyncOperation]:
+async def get_running_sync_operations_for_user(user_id: UUID) -> list[SyncOperation]:
     """
     Get all currently running sync operations for a specific user.
     Checks for operations with STARTED or IN_PROGRESS status.

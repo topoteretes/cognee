@@ -2,7 +2,6 @@ import asyncio
 import logging
 import math
 import os
-from typing import List, Optional
 
 import aiohttp
 import aiohttp.http_exceptions
@@ -63,10 +62,10 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
 
     def __init__(
         self,
-        model: Optional[str] = "avr/sfr-embedding-mistral:latest",
-        dimensions: Optional[int] = 1024,
+        model: str | None = "avr/sfr-embedding-mistral:latest",
+        dimensions: int | None = 1024,
         max_completion_tokens: int = 512,
-        endpoint: Optional[str] = "http://localhost:11434/api/embed",
+        endpoint: str | None = "http://localhost:11434/api/embed",
         huggingface_tokenizer: str = "Salesforce/SFR-Embedding-Mistral",
         batch_size: int = 100,
     ):
@@ -83,7 +82,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             enable_mocking = str(enable_mocking).lower()
         self.mock = enable_mocking in ("true", "1", "yes")
 
-    async def embed_text(self, text: List[str]) -> List[List[float]]:
+    async def embed_text(self, text: list[str]) -> list[list[float]]:
         """
         Generate embedding vectors for a list of text prompts.
 
@@ -183,7 +182,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def _get_embedding(self, prompt: str) -> List[float]:
+    async def _get_embedding(self, prompt: str) -> list[float]:
         """
         Internal method to call the Ollama embeddings endpoint for a single prompt.
         """
@@ -201,34 +200,34 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
 
         ssl_context = create_secure_ssl_context()
         connector = aiohttp.TCPConnector(ssl=ssl_context)
-        async with aiohttp.ClientSession(connector=connector) as session:
-            async with embedding_rate_limiter_context_manager():
-                async with session.post(
-                    self.endpoint, json=payload, headers=headers, timeout=60.0
-                ) as response:
-                    data = await response.json()
+        async with (
+            aiohttp.ClientSession(connector=connector) as session,
+            embedding_rate_limiter_context_manager(),
+            session.post(self.endpoint, json=payload, headers=headers, timeout=60.0) as response,
+        ):
+            data = await response.json()
 
-                    if "error" in data:
-                        # The body shape varies by server: Ollama sends a string,
-                        # an OpenAI-compatible proxy sends an object, and either
-                        # can send null. Coerce before the membership tests below,
-                        # which would otherwise test dict keys (always False) or
-                        # raise TypeError on None, turning a terminal over-length
-                        # error into a retryable one that burns the full ladder.
-                        error_msg = str(data["error"])
-                        logger.error(f"Ollama embedding error: {error_msg}")
-                        if "context length" in error_msg or "input length" in error_msg:
-                            raise ValueError(f"Text too long for embedding model: {error_msg}")
-                        raise RuntimeError(f"Ollama embedding API error: {error_msg}")
+            if "error" in data:
+                # The body shape varies by server: Ollama sends a string,
+                # an OpenAI-compatible proxy sends an object, and either
+                # can send null. Coerce before the membership tests below,
+                # which would otherwise test dict keys (always False) or
+                # raise TypeError on None, turning a terminal over-length
+                # error into a retryable one that burns the full ladder.
+                error_msg = str(data["error"])
+                logger.error(f"Ollama embedding error: {error_msg}")
+                if "context length" in error_msg or "input length" in error_msg:
+                    raise ValueError(f"Text too long for embedding model: {error_msg}")
+                raise RuntimeError(f"Ollama embedding API error: {error_msg}")
 
-                    if "embeddings" in data:
-                        return data["embeddings"][0]
-                    elif "embedding" in data:
-                        return data["embedding"]
-                    elif "data" in data and len(data["data"]) > 0:
-                        return data["data"][0]["embedding"]
-                    else:
-                        raise ValueError(f"Unexpected response format from Ollama: {data}")
+            if "embeddings" in data:
+                return data["embeddings"][0]
+            elif "embedding" in data:
+                return data["embedding"]
+            elif "data" in data and len(data["data"]) > 0:
+                return data["data"][0]["embedding"]
+            else:
+                raise ValueError(f"Unexpected response format from Ollama: {data}")
 
     def get_vector_size(self) -> int:
         """

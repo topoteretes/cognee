@@ -64,8 +64,8 @@ def get_delete_router() -> APIRouter:
             )
             return result
 
-        except Exception as error:
-            logger.error("Error during deletion by data_id: %s", error)
+        except Exception:
+            logger.exception("Error during deletion by data_id")
             return JSONResponse(status_code=409, content={"error": "Unable to delete data."})
 
     return router

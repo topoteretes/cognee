@@ -89,7 +89,7 @@ async def _ingest():
     d1 = UUID(str(r1.data_ingestion_info[0]["data_id"]))
     d2 = UUID(str(r2.data_ingestion_info[0]["data_id"]))
     cognify_result = await cognee.cognify()
-    dataset_id = UUID(str(list(cognify_result.keys())[0]))
+    dataset_id = UUID(str(next(iter(cognify_result.keys()))))
     return dataset_id, d1, d2
 
 

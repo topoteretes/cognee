@@ -32,15 +32,19 @@ class TestRelationalConfig:
 
     def test_database_connect_args_invalid_json(self):
         """Test that invalid JSON in DATABASE_CONNECT_ARGS raises ValidationError."""
-        with patch.dict(os.environ, {"DATABASE_CONNECT_ARGS": '{"timeout": 60'}):
-            with pytest.raises(ValidationError):
-                RelationalConfig()
+        with (
+            patch.dict(os.environ, {"DATABASE_CONNECT_ARGS": '{"timeout": 60'}),
+            pytest.raises(ValidationError),
+        ):
+            RelationalConfig()
 
     def test_database_connect_args_non_dict_json(self):
         """Test that non-dict JSON in DATABASE_CONNECT_ARGS raises ValidationError."""
-        with patch.dict(os.environ, {"DATABASE_CONNECT_ARGS": '["list", "instead", "of", "dict"]'}):
-            with pytest.raises(ValidationError):
-                RelationalConfig()
+        with (
+            patch.dict(os.environ, {"DATABASE_CONNECT_ARGS": '["list", "instead", "of", "dict"]'}),
+            pytest.raises(ValidationError),
+        ):
+            RelationalConfig()
 
     def test_database_connect_args_to_dict(self):
         """Test that database_connect_args is included in to_dict() output."""

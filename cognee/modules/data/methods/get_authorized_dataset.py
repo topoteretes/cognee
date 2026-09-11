@@ -1,4 +1,3 @@
-from typing import Optional
 from uuid import UUID
 
 from cognee.modules.data.methods.get_authorized_existing_datasets import (
@@ -11,7 +10,7 @@ from ..models import Dataset
 
 async def get_authorized_dataset(
     user: User, dataset_id: UUID, permission_type="read"
-) -> Optional[Dataset]:
+) -> Dataset | None:
     """
     Get a specific dataset with permissions for a user.
 

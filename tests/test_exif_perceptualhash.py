@@ -2,11 +2,14 @@
 Standalone tests for EXIF and perceptual-hash helpers extracted from ImageLoader.
 """
 
+import logging
 import os
 import tempfile
 
 import pytest
 from PIL import Image
+
+logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------
 #  Standalone helper functions (copied from what would be added to image_loader.py)
@@ -66,6 +69,7 @@ def _format_gps_info(gps_dict: dict) -> str | None:
         lat = _to_decimal(gps_dict.get(2), gps_dict.get(1, "N"))
         lon = _to_decimal(gps_dict.get(4), gps_dict.get(3, "E"))
     except Exception:
+        logger.debug("Falling back to None after error in _format_gps_info", exc_info=True)
         return None
 
     parts = []
@@ -86,6 +90,7 @@ def _extract_exif_metadata(file_path: str) -> str | None:
         with Image.open(file_path) as img:
             exif_data = img._getexif()
     except Exception:
+        logger.debug("Falling back to None after error in _extract_exif_metadata", exc_info=True)
         return None
 
     if exif_data is None:
@@ -180,6 +185,7 @@ def jpeg_with_exif():
             img.save(f, format="JPEG", exif=exif.tobytes())
         except Exception:
             # Fallback: save without EXIF
+            logger.debug("Ignoring exception in jpeg_with_exif", exc_info=True)
             img.save(f, format="JPEG")
         path = f.name
     yield path
@@ -299,7 +305,7 @@ class TestPerceptualHash:
         h2 = _dhash(Image.open(path))
         os.unlink(path)
         # Hamming distance should be small
-        diff = bin(int(h1, 16) ^ int(h2, 16)).count("1")
+        diff = (int(h1, 16) ^ int(h2, 16)).bit_count()
         assert diff < 20, f"Should be similar: Hamming distance = {diff}"
 
 

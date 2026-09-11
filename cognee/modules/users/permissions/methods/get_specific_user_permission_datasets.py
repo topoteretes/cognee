@@ -1,4 +1,3 @@
-from typing import Optional
 from uuid import UUID
 
 from cognee.modules.data.models.Dataset import Dataset
@@ -10,7 +9,7 @@ from cognee.modules.users.permissions.methods.get_all_user_permission_datasets i
 
 
 async def get_specific_user_permission_datasets(
-    user_id: UUID, permission_type: str, dataset_ids: Optional[list[UUID]] = None
+    user_id: UUID, permission_type: str, dataset_ids: list[UUID] | None = None
 ) -> list[Dataset]:
     """
         Return a list of datasets user has given permission for. If a list of datasets is provided,

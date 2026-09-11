@@ -1,4 +1,3 @@
-from typing import List, Tuple
 from uuid import UUID
 
 from sqlalchemy import and_, select
@@ -15,7 +14,7 @@ BATCH_SIZE = 1000
 
 
 @with_async_session
-async def has_nodes_in_legacy_ledger(nodes: List[Node], session: AsyncSession):
+async def has_nodes_in_legacy_ledger(nodes: list[Node], session: AsyncSession):
     node_ids = [node.slug for node in nodes]
 
     legacy_nodes = []
@@ -55,7 +54,7 @@ async def has_nodes_in_legacy_ledger(nodes: List[Node], session: AsyncSession):
 
 
 async def confirm_nodes_in_graph(
-    legacy_nodes: List[Tuple[str, UUID]],
+    legacy_nodes: list[tuple[str, UUID]],
 ):
     graph_engine = await get_graph_engine()
 

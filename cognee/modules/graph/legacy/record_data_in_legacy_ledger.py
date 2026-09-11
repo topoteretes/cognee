@@ -1,4 +1,3 @@
-from typing import Dict, List, Tuple
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,8 +10,8 @@ from .GraphRelationshipLedger import GraphRelationshipLedger
 
 @with_async_session
 async def record_data_in_legacy_ledger(
-    nodes: List[DataPoint],
-    edges: List[Tuple[UUID, UUID, str, Dict]],
+    nodes: list[DataPoint],
+    edges: list[tuple[UUID, UUID, str, dict]],
     session: AsyncSession,
 ) -> None:
     relationships = [

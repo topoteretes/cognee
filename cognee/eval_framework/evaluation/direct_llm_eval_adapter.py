@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -24,7 +24,7 @@ class DirectLLMEvalAdapter(BaseEvalAdapter):
 
     async def evaluate_correctness(
         self, question: str, answer: str, golden_answer: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         args = {"question": question, "answer": answer, "golden_answer": golden_answer}
 
         user_prompt = render_prompt(self.eval_prompt_path, args)
@@ -39,8 +39,8 @@ class DirectLLMEvalAdapter(BaseEvalAdapter):
         return {"score": evaluation.score, "reason": evaluation.explanation}
 
     async def evaluate_answers(
-        self, answers: List[Dict[str, Any]], evaluator_metrics: List[str]
-    ) -> List[Dict[str, Any]]:
+        self, answers: list[dict[str, Any]], evaluator_metrics: list[str]
+    ) -> list[dict[str, Any]]:
         """Evaluate a list of answers using specified metrics."""
         if not answers or not evaluator_metrics:
             return []

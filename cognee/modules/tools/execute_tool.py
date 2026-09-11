@@ -10,7 +10,7 @@ Permission is gated by get_authorized_existing_datasets — the same function
 used by the search API — so tool execution inherits the existing ACL path.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID
 
 from cognee.modules.data.methods.get_authorized_existing_datasets import (
@@ -30,10 +30,10 @@ logger = get_logger("cognee.tools.execute_tool")
 
 async def execute_tool(
     user: User,
-    dataset_id: Optional[UUID],
+    dataset_id: UUID | None,
     tool_name: str,
-    args: Optional[Dict[str, Any]] = None,
-    allowed_tools: Optional[List[str]] = None,
+    args: dict[str, Any] | None = None,
+    allowed_tools: list[str] | None = None,
 ) -> Any:
     """
     Execute a tool call with permission and scope enforcement.

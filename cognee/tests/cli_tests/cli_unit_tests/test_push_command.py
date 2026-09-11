@@ -244,7 +244,7 @@ class TestPushCommand:
 
         def fail(coro):
             coro.close()  # avoid "coroutine never awaited" warnings
-            raise Exception("Push error")
+            raise RuntimeError("Push error")
 
         mock_asyncio_run.side_effect = fail
 

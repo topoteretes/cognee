@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 from uuid import NAMESPACE_OID, UUID, uuid5
 
 from fastapi.encoders import jsonable_encoder
@@ -18,13 +18,13 @@ UPSERT_BATCH_SIZE = 1000
 # ``@with_async_session`` opens one and commits it.
 @with_async_session
 async def upsert_edges(
-    edges: List[Tuple[UUID, UUID, str, Dict[str, Any]]],
+    edges: list[tuple[UUID, UUID, str, dict[str, Any]]],
     tenant_id: UUID,
     user_id: UUID,
     data_id: UUID,
     dataset_id: UUID,
     session: AsyncSession,
-    pipeline_run_id: Optional[UUID] = None,
+    pipeline_run_id: UUID | None = None,
 ):
     """
     Adds edges to the edges table.

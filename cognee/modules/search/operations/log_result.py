@@ -1,5 +1,4 @@
 import os
-from typing import Optional
 from uuid import UUID
 
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -13,7 +12,7 @@ async def log_result(
     query_id: UUID,
     result: str,
     user_id: UUID,
-    dataset_id: Optional[UUID] = None,
+    dataset_id: UUID | None = None,
 ):
     if not _LOG_ENABLED:
         return

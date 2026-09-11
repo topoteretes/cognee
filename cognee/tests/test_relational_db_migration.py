@@ -251,7 +251,7 @@ async def test_schema_only_migration():
             edge_counts[rel_type] = rows[0][0]
 
     elif graph_db_provider == "networkx":
-        nodes, edges = await graph_engine.get_graph_data()
+        _nodes, edges = await graph_engine.get_graph_data()
         for _, _, key, _ in edges:
             if key in edge_counts:
                 edge_counts[key] += 1

@@ -1,7 +1,6 @@
 import html
 import json
 from collections import defaultdict
-from typing import Dict, List, Tuple
 
 import plotly.graph_objects as go
 
@@ -12,7 +11,7 @@ metrics_fields = {
 default_metrics_fields = ["question", "answer", "golden_answer"]
 
 
-def create_distribution_plots(metrics_data: Dict[str, List[float]]) -> List[str]:
+def create_distribution_plots(metrics_data: dict[str, list[float]]) -> list[str]:
     """Create distribution histogram plots for each metric."""
     figures = []
     for metric, scores in metrics_data.items():
@@ -30,7 +29,7 @@ def create_distribution_plots(metrics_data: Dict[str, List[float]]) -> List[str]
     return figures
 
 
-def create_ci_plot(ci_results: Dict[str, Tuple[float, float, float]]) -> str:
+def create_ci_plot(ci_results: dict[str, tuple[float, float, float]]) -> str:
     """Create confidence interval bar plot."""
     fig = go.Figure()
     for metric, (mean_score, lower, upper) in ci_results.items():
@@ -38,12 +37,12 @@ def create_ci_plot(ci_results: Dict[str, Tuple[float, float, float]]) -> str:
             go.Bar(
                 x=[metric],
                 y=[mean_score],
-                error_y=dict(
-                    type="data",
-                    array=[upper - mean_score],
-                    arrayminus=[mean_score - lower],
-                    visible=True,
-                ),
+                error_y={
+                    "type": "data",
+                    "array": [upper - mean_score],
+                    "arrayminus": [mean_score - lower],
+                    "visible": True,
+                },
                 name=metric,
             )
         )
@@ -57,7 +56,7 @@ def create_ci_plot(ci_results: Dict[str, Tuple[float, float, float]]) -> str:
     return fig.to_html(full_html=False)
 
 
-def generate_details_html(metrics_data: List[Dict]) -> List[str]:
+def generate_details_html(metrics_data: list[dict]) -> list[str]:
     """Generate HTML for detailed metric information."""
     details_html = []
     metric_details = {}
@@ -77,7 +76,7 @@ def generate_details_html(metrics_data: List[Dict]) -> List[str]:
             )
 
     for metric, details in metric_details.items():
-        formatted_column_names = [key.replace("_", " ").title() for key in details[0].keys()]
+        formatted_column_names = [key.replace("_", " ").title() for key in details[0]]
         details_html.append(f"<h3>{html.escape(str(metric))} Details</h3>")
         details_html.append(f"""
             <table class="metric-table">
@@ -96,7 +95,7 @@ def generate_details_html(metrics_data: List[Dict]) -> List[str]:
 
 
 def get_dashboard_html_template(
-    figures: List[str], details_html: List[str], benchmark: str = ""
+    figures: list[str], details_html: list[str], benchmark: str = ""
 ) -> str:
     """Generate the complete HTML dashboard template."""
     benchmark = html.escape(str(benchmark))

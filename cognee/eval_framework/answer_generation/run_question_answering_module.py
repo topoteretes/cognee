@@ -1,5 +1,4 @@
 import json
-from typing import List, Optional
 
 from cognee.eval_framework.answer_generation.answer_generation_executor import (
     AnswerGeneratorExecutor,
@@ -35,8 +34,8 @@ async def create_and_insert_answers_table(questions_payload):
 
 
 async def run_question_answering(
-    params: dict, system_prompt="answer_simple_question_benchmark.txt", top_k: Optional[int] = None
-) -> List[dict]:
+    params: dict, system_prompt="answer_simple_question_benchmark.txt", top_k: int | None = None
+) -> list[dict]:
     if params.get("answering_questions"):
         logger.info("Question answering started...")
         try:

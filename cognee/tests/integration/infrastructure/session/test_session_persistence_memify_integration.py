@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import pathlib
 import sys
@@ -22,6 +23,8 @@ from cognee.memify_pipelines.persist_sessions_in_knowledge_graph import (
 from cognee.modules.engine.models import NodeSet
 from cognee.modules.users.methods import get_default_user
 
+logger = logging.getLogger(__name__)
+
 
 def _reset_cache_backend_caches():
     from cognee.infrastructure.databases.cache.config import get_cache_config
@@ -39,7 +42,7 @@ async def _reset_engines_and_prune() -> None:
         if hasattr(vector_engine, "engine") and hasattr(vector_engine.engine, "dispose"):
             await vector_engine.engine.dispose(close=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _reset_engines_and_prune", exc_info=True)
 
     from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
     from cognee.infrastructure.databases.relational.create_relational_engine import (
@@ -166,7 +169,7 @@ async def session_persistence_env(event_loop):
         try:
             await _reset_engines_and_prune()
         except Exception:
-            pass
+            logger.debug("Ignoring exception in session_persistence_env", exc_info=True)
         finally:
             _reset_cache_backend_caches()
 

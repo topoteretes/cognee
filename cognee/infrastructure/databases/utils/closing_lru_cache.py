@@ -93,7 +93,6 @@ import weakref
 from collections import OrderedDict
 from functools import wraps
 from threading import Lock
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +191,7 @@ def _run_close_coro_blocking(coro, value_type) -> None:
 _KW_MARK = object()
 
 
-def _start_close(value) -> Optional[concurrent.futures.Future]:
+def _start_close(value) -> concurrent.futures.Future | None:
     """Begin closing a value and return a ``concurrent.futures.Future`` that
     resolves once the close (including any async worker-process teardown) has
     completed — or ``None`` when there is nothing to wait for (no ``close()``,
@@ -466,7 +465,7 @@ class ClosingLRUCache:
     still cleaning up detached entries once they are genuinely unused.
     """
 
-    def __init__(self, maxsize: Optional[int] = 128, lease: bool = True, pinned_predicate=None):
+    def __init__(self, maxsize: int | None = 128, lease: bool = True, pinned_predicate=None):
         """``maxsize`` semantics mirror ``functools.lru_cache``:
 
         - ``int > 0`` — bounded LRU. The least-recently-used entry is evicted
@@ -940,7 +939,7 @@ class ClosingLRUCache:
             return CacheInfo(size=len(self._cache), maxsize=self._maxsize)
 
 
-def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True, pinned_predicate=None):
+def closing_lru_cache(maxsize: int | None = 128, lease: bool = True, pinned_predicate=None):
     """Decorator that caches return values in a :class:`ClosingLRUCache`.
 
     Drop-in replacement for ``@functools.lru_cache`` that closes values once

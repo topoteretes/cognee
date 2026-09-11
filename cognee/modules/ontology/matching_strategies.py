@@ -1,13 +1,12 @@
 import difflib
 from abc import ABC, abstractmethod
-from typing import List, Optional
 
 
 class MatchingStrategy(ABC):
     """Abstract base class for ontology entity matching strategies."""
 
     @abstractmethod
-    def find_match(self, name: str, candidates: List[str]) -> Optional[str]:
+    def find_match(self, name: str, candidates: list[str]) -> str | None:
         """Find the best match for a given name from a list of candidates.
 
         Args:
@@ -30,7 +29,7 @@ class FuzzyMatchingStrategy(MatchingStrategy):
         """
         self.cutoff = cutoff
 
-    def find_match(self, name: str, candidates: List[str]) -> Optional[str]:
+    def find_match(self, name: str, candidates: list[str]) -> str | None:
         """Find the closest fuzzy match for a given name.
 
         Args:

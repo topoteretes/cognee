@@ -1,5 +1,5 @@
 import asyncio
-from typing import AsyncGenerator, Union
+from collections.abc import AsyncGenerator
 from uuid import uuid5
 
 from cognee.infrastructure.engine import DataPoint
@@ -10,7 +10,7 @@ from .models import CodeSummary
 
 async def summarize_code(
     code_graph_nodes: list[DataPoint],
-) -> AsyncGenerator[Union[DataPoint, CodeSummary], None]:
+) -> AsyncGenerator[DataPoint | CodeSummary, None]:
     if len(code_graph_nodes) == 0:
         return
 

@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Type, Union
+from typing import Any
 
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
@@ -28,12 +28,12 @@ class TripletRetriever(BaseRetriever):
         self,
         user_prompt_path: str = "context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
-        system_prompt: Optional[str] = None,
-        top_k: Optional[int] = 5,
-        session_id: Optional[str] = None,
-        response_model: Type = str,
+        system_prompt: str | None = None,
+        top_k: int | None = 5,
+        session_id: str | None = None,
+        response_model: type = str,
         include_references: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
     ):
         """Initialize retriever with optional custom prompt paths."""
@@ -99,7 +99,7 @@ class TripletRetriever(BaseRetriever):
             secondary_reserve=conversational_reserve(self.top_k),
         )
 
-    def extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+    def extract_context_object_ids(self, retrieved_objects: Any) -> dict[str, list[str]] | None:
         """Triplets are non-elementary graph objects; do not report IDs for session QA - object ids cannot be resolved"""
         return None
 
@@ -122,13 +122,13 @@ class TripletRetriever(BaseRetriever):
             "response_model": self.response_model,
         }
 
-    async def _generate_completion_without_session(self, query: str, context: str) -> List[Any]:
+    async def _generate_completion_without_session(self, query: str, context: str) -> list[Any]:
         """Generate completion without session; returns list of one completion."""
         kwargs = self._completion_kwargs(context)
         completion = await generate_completion(query=query, **kwargs)
         return [completion]
 
-    async def append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
+    async def append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
         return append_chunk_evidence(
             completions,
             retrieved_objects,
@@ -140,9 +140,9 @@ class TripletRetriever(BaseRetriever):
         query: str,
         retrieved_objects: Any,
         context: Any,
-        effective_query: Optional[str] = None,
+        effective_query: str | None = None,
         turn_preparation=None,
-    ) -> Union[List[str], List[dict]]:
+    ) -> list[str] | list[dict]:
         """
         Generates an LLM completion using the context.
 

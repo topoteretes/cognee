@@ -35,7 +35,7 @@ class Retailer:
         handling_fee: float,
         processing_days: int,
         origin_post_office_id: str | None = None,
-    ) -> "Retailer":
+    ) -> Retailer:
         return cls(
             retailer_id=retailer_id,
             name=name,

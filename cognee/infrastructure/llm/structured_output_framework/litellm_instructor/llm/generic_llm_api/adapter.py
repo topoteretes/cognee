@@ -1,6 +1,5 @@
 """Adapter for Generic API LLM provider API"""
 
-import asyncio
 import base64
 import logging
 import mimetypes
@@ -15,7 +14,6 @@ from pydantic import BaseModel
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_not_exception_type,
     stop_after_attempt,
     wait_exponential_jitter,
 )
@@ -73,7 +71,7 @@ def _enrich_llm_span(model: str, name: str) -> None:
             if stage:
                 current_span.set_attribute(COGNEE_PIPELINE_STAGE, stage)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _enrich_llm_span", exc_info=True)
 
 
 class GenericAPIAdapter(LLMInterface):
@@ -333,13 +331,7 @@ class GenericAPIAdapter(LLMInterface):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-            )
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
@@ -395,13 +387,7 @@ class GenericAPIAdapter(LLMInterface):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-            )
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from cognee.api.v1.serve.cloud_client import CloudClient
@@ -15,13 +15,13 @@ logger = get_logger("serve")
 
 
 async def serve(
-    url: Optional[str] = None,
-    api_key: Optional[str] = None,
+    url: str | None = None,
+    api_key: str | None = None,
     *,
-    management_url: Optional[str] = None,
-    auth0_domain: Optional[str] = None,
-    auth0_client_id: Optional[str] = None,
-    auth0_audience: Optional[str] = None,
+    management_url: str | None = None,
+    auth0_domain: str | None = None,
+    auth0_client_id: str | None = None,
+    auth0_audience: str | None = None,
 ) -> CloudClient:
     """Connect the local Cognee SDK to a remote or local Cognee instance.
 
@@ -136,10 +136,10 @@ async def _serve_direct(service_url: str, api_key: str = "") -> CloudClient:
 
 
 async def _serve_cloud(
-    management_url: Optional[str] = None,
-    auth0_domain: Optional[str] = None,
-    auth0_client_id: Optional[str] = None,
-    auth0_audience: Optional[str] = None,
+    management_url: str | None = None,
+    auth0_domain: str | None = None,
+    auth0_client_id: str | None = None,
+    auth0_audience: str | None = None,
 ) -> CloudClient:
     """Full cloud flow: Auth0 Device Code → tenant discovery → API key → connect."""
     from cognee.api.v1.serve.cloud_client import CloudClient
@@ -182,7 +182,7 @@ async def _serve_cloud(
                 print(f"  Connected to Cognee Cloud at {creds.service_url}")
                 return client
         except Exception as e:
-            logger.warning("Immediate health check failed: %s", e)
+            logger.warning("Immediate health check failed: %s", e, exc_info=True)
         await client.close()
 
         if not is_token_expired(creds):
@@ -215,7 +215,7 @@ async def _serve_cloud(
                     return client
                 await client.close()
             except Exception as e:
-                logger.warning("Token refresh failed, re-authenticating: %s", e)
+                logger.warning("Token refresh failed, re-authenticating: %s", e, exc_info=True)
 
     # Step 2: Device Code Flow — only possible with an Auth0 device client ID.
     # Fail loudly here rather than mid-flow: a bare serve() with nothing saved

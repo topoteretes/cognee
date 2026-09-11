@@ -1,5 +1,4 @@
 from functools import lru_cache
-from typing import Optional
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -17,7 +16,7 @@ logger = get_logger("embedding_config")
 _FALLBACK_DIMENSIONS = 3072
 
 
-def _resolve_embedding_dimensions(provider: Optional[str], model: Optional[str]) -> Optional[int]:
+def _resolve_embedding_dimensions(provider: str | None, model: str | None) -> int | None:
     """Best-effort lookup of the embedding dimensionality for a provider+model.
 
     Returns the dimension count if we can confidently determine it, or None
@@ -43,7 +42,7 @@ def _resolve_embedding_dimensions(provider: Optional[str], model: Optional[str])
                     if dim:
                         return int(dim)
         except Exception:
-            pass
+            logger.debug("Ignoring exception in _resolve_embedding_dimensions", exc_info=True)
         # Fall through to litellm in case the model is dual-registered
         # (rare, but cheap to try).
 
@@ -55,7 +54,7 @@ def _resolve_embedding_dimensions(provider: Optional[str], model: Optional[str])
             if info and "output_vector_size" in info:
                 return int(info["output_vector_size"])
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _resolve_embedding_dimensions", exc_info=True)
 
     return None
 
@@ -69,36 +68,36 @@ class EmbeddingConfig(BaseSettings):
     - to_dict: Serialize the configuration settings to a dictionary.
     """
 
-    embedding_provider: Optional[str] = "openai"
-    embedding_model: Optional[str] = "openai/text-embedding-3-large"
+    embedding_provider: str | None = "openai"
+    embedding_model: str | None = "openai/text-embedding-3-large"
     # Resolved in model_post_init when not set explicitly. Was hard-defaulted
     # to 3072, which silently broke every non-OpenAI-text-embedding-3-large
     # embedder by causing a Vector(3072) / 384-dim (etc.) mismatch on first
     # write into the vector store.
-    embedding_dimensions: Optional[int] = None
+    embedding_dimensions: int | None = None
     # Also accepted as EMBEDDING_API_BASE — the name the litellm/OpenAI
     # ecosystem uses (issue #4871: with only EMBEDDING_ENDPOINT recognized and
     # extra="allow" swallowing unknowns, a custom base set via API_BASE was
     # silently ignored and requests 404'd against api.openai.com).
     # EMBEDDING_ENDPOINT wins when both are set.
-    embedding_endpoint: Optional[str] = Field(
+    embedding_endpoint: str | None = Field(
         default=None,
         validation_alias=AliasChoices("EMBEDDING_ENDPOINT", "EMBEDDING_API_BASE"),
     )
-    embedding_api_key: Optional[str] = None
-    embedding_api_version: Optional[str] = None
-    embedding_max_completion_tokens: Optional[int] = 8191
-    embedding_batch_size: Optional[int] = None
+    embedding_api_key: str | None = None
+    embedding_api_version: str | None = None
+    embedding_max_completion_tokens: int | None = 8191
+    embedding_batch_size: int | None = None
     # Total data points allowed in flight to the embedding engine during indexing.
     # Concurrent embedding requests = max(1, this // embedding_batch_size).
     embedding_max_concurrent_data_points: int = 150
-    huggingface_tokenizer: Optional[str] = None
+    huggingface_tokenizer: str | None = None
     # Some providers (e.g. NVIDIA NIM's nv-embed family) require an
     # "input_type" field in the embedding request body (typically "query" or
     # "passage"/"document"). This is not part of the OpenAI embeddings spec,
     # so it has no effect on providers that don't recognize it. Configure via
     # the EMBEDDING_INPUT_TYPE env var.
-    embedding_input_type: Optional[str] = None
+    embedding_input_type: str | None = None
     # Rate-limiting for embedding requests. Lives here (not in LLMConfig) so the
     # knobs sit with the embedding settings they govern.
     embedding_rate_limit_enabled: bool = False
@@ -107,7 +106,7 @@ class EmbeddingConfig(BaseSettings):
     embedding_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
     model_config = SettingsConfigDict(env_file=".env", extra="allow", populate_by_name=True)
 
-    def model_post_init(self, __context) -> None:
+    def model_post_init(self, context, /) -> None:
         if self.embedding_dimensions is None:
             derived = _resolve_embedding_dimensions(self.embedding_provider, self.embedding_model)
             if derived is not None:

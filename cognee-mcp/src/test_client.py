@@ -2,12 +2,15 @@
 """Smoke-test the public Cognee MCP memory tools."""
 
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+
+logger = logging.getLogger(__name__)
 
 try:
     from .server import registry
@@ -43,10 +46,12 @@ class CogneeTestClient:
             env=os.environ.copy(),
         )
 
-        async with stdio_client(server_params) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                yield session
+        async with (
+            stdio_client(server_params) as (read, write),
+            ClientSession(read, write) as session,
+        ):
+            await session.initialize()
+            yield session
 
     @staticmethod
     def _content_text(result) -> str:
@@ -77,6 +82,9 @@ class CogneeTestClient:
             }
             print(f"PASS tool discovery: {', '.join(sorted(available_tools))}")
         except Exception as e:
+            logger.debug(
+                "Ignoring exception in CogneeTestClient.test_tool_discovery", exc_info=True
+            )
             self.test_results["tool_discovery"] = {
                 "status": "FAIL",
                 "error": str(e),
@@ -110,6 +118,10 @@ class CogneeTestClient:
             }
             print("PASS hidden tool reachability")
         except Exception as e:
+            logger.debug(
+                "Ignoring exception in CogneeTestClient.test_hidden_tool_is_still_callable",
+                exc_info=True,
+            )
             self.test_results["hidden_tool"] = {
                 "status": "FAIL",
                 "error": str(e),
@@ -155,6 +167,7 @@ class CogneeTestClient:
             }
             print("PASS memory tools")
         except Exception as e:
+            logger.debug("Ignoring exception in CogneeTestClient.test_memory_tools", exc_info=True)
             self.test_results["memory_tools"] = {
                 "status": "FAIL",
                 "error": str(e),

@@ -7,9 +7,9 @@ import sys
 import tempfile
 import traceback
 from collections.abc import MutableMapping
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 import structlog
 
@@ -118,7 +118,7 @@ def resolve_logs_dir() -> Path | None:
         logs_root_directory.mkdir(parents=True, exist_ok=True)
         if os.access(logs_root_directory, os.W_OK):
             return logs_root_directory
-    except Exception:
+    except OSError:  # not writable here, try the next candidate
         pass
 
     try:
@@ -126,7 +126,7 @@ def resolve_logs_dir() -> Path | None:
         tmp_log_path.mkdir(parents=True, exist_ok=True)
         if os.access(tmp_log_path, os.W_OK):
             return tmp_log_path
-    except Exception:
+    except OSError:  # not writable here, fall through to the next candidate
         pass
 
     return None
@@ -136,8 +136,8 @@ def resolve_logs_dir() -> Path | None:
 MAX_LOG_FILES = 10
 
 # Log rotation defaults — override via COGNEE_LOG_MAX_BYTES / COGNEE_LOG_BACKUP_COUNT
-LOG_MAX_BYTES = int(os.getenv("COGNEE_LOG_MAX_BYTES", 50 * 1024 * 1024))  # 50 MB
-LOG_BACKUP_COUNT = int(os.getenv("COGNEE_LOG_BACKUP_COUNT", 5))  # 5 backups → 300 MB cap
+LOG_MAX_BYTES = int(os.getenv("COGNEE_LOG_MAX_BYTES", "52428800"))  # 50 MB
+LOG_BACKUP_COUNT = int(os.getenv("COGNEE_LOG_BACKUP_COUNT", "5"))  # 5 backups → 300 MB cap
 
 # Version information
 PYTHON_VERSION = platform.python_version()
@@ -200,7 +200,7 @@ class PlainFileHandler(logging.handlers.RotatingFileHandler):
                 logger_name = record.msg.get("logger", record.name)
 
                 # Format timestamp
-                timestamp = datetime.now().strftime(get_timestamp_format())
+                timestamp = datetime.now(timezone.utc).strftime(get_timestamp_format())
 
                 # Create the log entry
                 log_entry = f"{timestamp} [{record.levelname.ljust(8)}] {message}{context_str} [{logger_name}]\n"
@@ -299,7 +299,7 @@ def log_database_configuration(logger) -> None:
         logger.info(f"Database storage: {databases_path}")
 
     except Exception as e:
-        logger.debug(f"Could not retrieve database configuration: {e!s}")
+        logger.debug(f"Could not retrieve database configuration: {e!s}", exc_info=True)
 
 
 def cleanup_old_logs(logs_dir, max_files) -> bool:
@@ -328,17 +328,17 @@ def cleanup_old_logs(logs_dir, max_files) -> bool:
                     # Only log individual files in non-CLI mode
                     if os.getenv("COGNEE_CLI_MODE") != "true":
                         logger.info(f"Deleted old log file: {old_file}")
-                except Exception as e:
+                except Exception:
                     # Always log errors
-                    logger.error(f"Failed to delete old log file {old_file}: {e}")
+                    logger.exception(f"Failed to delete old log file {old_file}")
 
             # In CLI mode, show compact summary
             if os.getenv("COGNEE_CLI_MODE") == "true" and deleted_count > 0:
                 logger.info(f"Cleaned up {deleted_count} old log files")
 
         return True
-    except Exception as e:
-        logger.error(f"Error cleaning up log files: {e}")
+    except Exception:
+        logger.exception("Error cleaning up log files")
         return False
 
 
@@ -450,9 +450,9 @@ def setup_logging(log_level=None, name=None) -> bool:
         if event_dict.get("exc_info"):
             # If it's already a tuple, use it directly
             if isinstance(event_dict["exc_info"], tuple):
-                exc_type, exc_value, tb = event_dict["exc_info"]
+                exc_type, exc_value, _tb = event_dict["exc_info"]
             else:
-                exc_type, exc_value, tb = sys.exc_info()
+                exc_type, exc_value, _tb = sys.exc_info()
 
             if exc_type and hasattr(exc_type, "__name__"):
                 event_dict["exception_type"] = exc_type.__name__
@@ -495,6 +495,9 @@ def setup_logging(log_level=None, name=None) -> bool:
                 exc_info=(exc_type, exc_value, tb),
             )
         except Exception:
+            logging.getLogger(__name__).debug(
+                "Rich traceback rendering failed, printing the plain traceback", exc_info=True
+            )
             print("\n[Warning] Could not render rich traceback. Falling back to plain traceback.\n")
             traceback.print_exception(exc_type, exc_value, tb)
             sys.__excepthook__(exc_type, exc_value, tb)
@@ -574,7 +577,7 @@ def setup_logging(log_level=None, name=None) -> bool:
         log_file_path = os.environ.get("LOG_FILE_NAME")
         if not log_file_path and logs_dir is not None:
             # Create a new log file name with the cognee start time
-            start_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            start_time = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
             log_file_path = str((logs_dir / f"{start_time}.log").resolve())
             os.environ["LOG_FILE_NAME"] = log_file_path
 
@@ -592,7 +595,8 @@ def setup_logging(log_level=None, name=None) -> bool:
         except Exception as e:
             # Logging to file is not mandatory — warn on console and continue.
             root_logger.warning(
-                f"Warning: Could not create log file handler at {log_file_path}: {e}"
+                f"Warning: Could not create log file handler at {log_file_path}: {e}",
+                exc_info=True,
             )
 
     if log_level > logging.DEBUG:
@@ -645,6 +649,7 @@ def _log_deferred_info(logger) -> None:
         base_config = get_base_config()
         databases_path = os.path.join(base_config.system_root_directory, "databases")
     except Exception:
+        logger.debug("Could not resolve the databases path for the startup log", exc_info=True)
         databases_path = "unknown"
 
     logger.info(
@@ -676,14 +681,14 @@ def get_timestamp_format() -> str:
     try:
         # We call datetime.now() here to test if microseconds are supported.
         # If they are not supported a ValueError will be raised
-        datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
+        datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")
         return "%Y-%m-%dT%H:%M:%S.%f"
     except Exception as e:
-        logger.debug(f"Exception caught: {e}")
+        logger.debug(f"Exception caught: {e}", exc_info=True)
         logger.debug(
             "Could not use microseconds for the logging timestamp, defaulting to use hours minutes and seconds only"
         )
         # We call datetime.now() here to test if won't break.
-        datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
         # We return the timestamp format without microseconds as they are not supported
         return "%Y-%m-%dT%H:%M:%S"

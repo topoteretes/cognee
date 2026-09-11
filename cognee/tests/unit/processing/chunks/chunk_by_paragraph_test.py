@@ -64,9 +64,7 @@ Third paragraph is cut and is missing the dot at the end""",
     chunk_by_sentence_module, "get_embedding_engine", side_effect=mock_get_embedding_engine
 )
 def run_chunking_test(test_text, expected_chunks, mock_engine):
-    chunks = []
-    for chunk_data in chunk_by_paragraph(data=test_text, batch_paragraphs=False, max_chunk_size=12):
-        chunks.append(chunk_data)
+    chunks = list(chunk_by_paragraph(data=test_text, batch_paragraphs=False, max_chunk_size=12))
 
     assert len(chunks) == 3
 

@@ -2,7 +2,7 @@
 
 import io
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 import aiohttp
@@ -36,7 +36,7 @@ class CloudClient:
     def __init__(self, service_url: str, api_key: str):
         self.service_url = service_url.rstrip("/")
         self.api_key = api_key
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: aiohttp.ClientSession | None = None
 
     # Default for ordinary API calls: aiohttp's standard 5-minute total,
     # with connect failures surfacing quickly.
@@ -68,9 +68,12 @@ class CloudClient:
             async with session.get(f"{self.service_url}/health") as resp:
                 return resp.status == 200
         except Exception:
+            logger.debug(
+                "Falling back to False after error in CloudClient._health_check", exc_info=True
+            )
             return False
 
-    async def _auth_check(self) -> Optional[int]:
+    async def _auth_check(self) -> int | None:
         """Status of an authenticated probe, or None when unreachable.
 
         ``/health`` is unauthenticated, so it cannot tell a working API key
@@ -82,6 +85,9 @@ class CloudClient:
             async with session.get(f"{self.service_url}/api/v1/datasets") as resp:
                 return resp.status
         except Exception:
+            logger.debug(
+                "Falling back to None after error in CloudClient._auth_check", exc_info=True
+            )
             return None
 
     # ----- V2 Operations -----
@@ -186,8 +192,8 @@ class CloudClient:
         self,
         entry,
         dataset_name: str = "main_dataset",
-        session_id: Optional[str] = None,
-        skill_improvement: Optional[dict] = None,
+        session_id: str | None = None,
+        skill_improvement: dict | None = None,
     ) -> dict:
         """POST /api/v1/remember/entry — store a typed MemoryEntry.
 
@@ -214,7 +220,7 @@ class CloudClient:
                 raise RuntimeError(f"Remote remember_entry failed ({resp.status}): {body}")
             return await resp.json()
 
-    async def recall(self, query_text: str, query_type: Optional[str] = None, **kwargs) -> list:
+    async def recall(self, query_text: str, query_type: str | None = None, **kwargs) -> list:
         """POST /api/v1/recall — query the knowledge graph and/or session cache."""
         session = await self._get_session()
 
@@ -331,7 +337,7 @@ class CloudClient:
         data_id: UUID,
         data: Any,
         dataset_id: UUID,
-        node_set: Optional[list] = None,
+        node_set: list | None = None,
         chunk_level_diff: bool = True,
     ) -> dict:
         """PATCH /api/v1/update — replace one document in place on the remote.

@@ -1,5 +1,4 @@
 import asyncio
-from typing import List
 
 from pydantic import BaseModel
 
@@ -12,7 +11,7 @@ class MiniEntity(BaseModel):
 
 
 class MiniGraph(BaseModel):
-    nodes: List[MiniEntity]
+    nodes: list[MiniEntity]
 
 
 async def main():

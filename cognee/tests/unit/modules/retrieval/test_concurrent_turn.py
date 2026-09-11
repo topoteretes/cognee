@@ -236,7 +236,7 @@ async def test_analysis_runs_alongside_retrieval_and_commits_after_both():
 
     # The analysis does not wait on retrieval, and the commit waits on both.
     assert order == ["analysis", "retrieval", "answer"]
-    retrieved_objects, context, completion = result
+    _retrieved_objects, context, completion = result
     assert completion == ["answer with references"]
     assert context == "context"
     assert commit.await_args.kwargs["analysis"] is analysis

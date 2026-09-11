@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import Field
 
@@ -16,13 +16,13 @@ class CodeRepository(DataPoint):
 
     name: str
     path: str
-    last_snapshot_id: Optional[str] = None
-    last_delta: Optional[dict] = None
+    last_snapshot_id: str | None = None
+    last_delta: dict | None = None
     # Projection of the snapshot's receipt.json (format_version, enola version,
     # git provenance, counts and the extraction-quality block) stamped with
     # the snapshot id, so SearchType.CODE's delta operation can report how the
     # graph was produced and how complete the extraction was.
-    last_receipt: Optional[dict] = None
+    last_receipt: dict | None = None
     metadata: dict = {"index_fields": ["name"]}
 
 
@@ -40,15 +40,15 @@ class CodeGraphEntity(DataPoint):
 
     name: str
     kind: str
-    file_path: Optional[str] = None
-    line: Optional[int] = None
-    end_line: Optional[int] = None
-    repo: Optional[str] = None
-    enola_id: Optional[str] = None
-    description: Optional[str] = None
+    file_path: str | None = None
+    line: int | None = None
+    end_line: int | None = None
+    repo: str | None = None
+    enola_id: str | None = None
+    description: str | None = None
     fact_properties: dict[str, Any] = Field(default_factory=dict)
-    fact_hash: Optional[str] = None
-    part_of: Optional[CodeRepository] = None
+    fact_hash: str | None = None
+    part_of: CodeRepository | None = None
     metadata: dict = {"index_fields": ["name"]}
 
 
@@ -64,7 +64,7 @@ class CodeSymbol(CodeGraphEntity):
     newer extractors add (e.g. document/section for markdown pages).
     """
 
-    symbol_kind: Optional[str] = None
+    symbol_kind: str | None = None
 
 
 class ApiEndpoint(CodeGraphEntity):

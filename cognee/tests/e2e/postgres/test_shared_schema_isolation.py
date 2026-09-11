@@ -12,6 +12,7 @@ Postgres relational backend (DB_PROVIDER=postgres), since the shared handlers
 anchor to the relational configuration; it skips otherwise.
 """
 
+import logging
 import os
 import uuid
 
@@ -26,15 +27,17 @@ from cognee.infrastructure.databases.postgres import (
     drop_pg_schema_if_exists,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _db() -> dict:
-    return dict(
-        host=os.environ.get("DB_HOST", "localhost"),
-        port=os.environ.get("DB_PORT", "5432"),
-        username=os.environ.get("DB_USERNAME", "cognee"),
-        password=os.environ.get("DB_PASSWORD", "cognee"),
-        name=os.environ.get("DB_NAME", "cognee_db"),
-    )
+    return {
+        "host": os.environ.get("DB_HOST", "localhost"),
+        "port": os.environ.get("DB_PORT", "5432"),
+        "username": os.environ.get("DB_USERNAME", "cognee"),
+        "password": os.environ.get("DB_PASSWORD", "cognee"),
+        "name": os.environ.get("DB_NAME", "cognee_db"),
+    }
 
 
 def _base_url() -> str:
@@ -69,6 +72,7 @@ async def _postgres_reachable() -> bool:
             await conn.execute(text("SELECT 1"))
         return True
     except Exception:
+        logger.debug("Falling back to False after error in _postgres_reachable", exc_info=True)
         return False
     finally:
         await engine.dispose()

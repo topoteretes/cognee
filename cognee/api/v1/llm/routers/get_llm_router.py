@@ -3,7 +3,7 @@ import os
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import litellm
 from fastapi import APIRouter, Depends, File, Form
@@ -78,6 +78,7 @@ def _count_tokens(text: str, model: str) -> int | None:
     try:
         return litellm.token_counter(model=model, text=text)
     except Exception:
+        logger.debug("Falling back to None after error in _count_tokens", exc_info=True)
         return None
 
 
@@ -142,6 +143,7 @@ def _model_aware_sample_text(
 
         return sample
     except Exception:
+        logger.debug("Falling back after error in _model_aware_sample_text", exc_info=True)
         return _sample_text(text)
 
 
@@ -171,8 +173,8 @@ async def upload_to_temp_path(upload: UploadFile):
 
 
 class CustomPromptGenerationPayloadDTO(InDTO):
-    graph_model: Dict[str, Any] = Field(..., description="Graph model schema as JSON object.")
-    parameters: Dict[str, Any] = Field(
+    graph_model: dict[str, Any] = Field(..., description="Graph model schema as JSON object.")
+    parameters: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional kwargs forwarded to LLMGateway.",
     )
@@ -183,15 +185,15 @@ class CustomPromptGenerationResponseDTO(OutDTO):
 
 
 class InferSchemaResponseDTO(OutDTO):
-    graph_schema: Dict[str, Any]
+    graph_schema: dict[str, Any]
 
 
 class InferredGraphSchemaDTO(OutDTO):
     title: str
     type: str
-    properties: Dict[str, Any]
-    required: List[str] = Field(default_factory=list)
-    defs: Dict[str, Any] = Field(default_factory=dict, alias="$defs")
+    properties: dict[str, Any]
+    required: list[str] = Field(default_factory=list)
+    defs: dict[str, Any] = Field(default_factory=dict, alias="$defs")
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
@@ -258,8 +260,8 @@ def get_llm_router() -> APIRouter:
             return JSONResponse(
                 status_code=400, content={"error": "Invalid custom prompt request."}
             )
-        except Exception as error:
-            logger.error("LLM custom prompt generation request failed: %s", error)
+        except Exception:
+            logger.exception("LLM custom prompt generation request failed")
             return JSONResponse(
                 status_code=500,
                 content={"error": "LLM custom prompt generation failed."},
@@ -268,7 +270,7 @@ def get_llm_router() -> APIRouter:
     @router.post("/infer-schema", response_model=InferSchemaResponseDTO)
     @log_usage(function_name="POST /v1/llm/infer-schema", log_type="api_endpoint")
     async def infer_schema(
-        data: List[OptionalUploadFile] = File(default=None),
+        data: list[OptionalUploadFile] = File(default=None),
         text: str = Form(default=None),
         parameters: str = Form(
             default="{}",
@@ -391,8 +393,8 @@ def get_llm_router() -> APIRouter:
                     "detail": "The configured LLM token budget is exhausted.",
                 },
             )
-        except Exception as error:
-            logger.error("LLM schema inference failed: %s", error)
+        except Exception:
+            logger.exception("LLM schema inference failed")
             return JSONResponse(status_code=500, content={"error": "LLM schema inference failed."})
 
     return router

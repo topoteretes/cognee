@@ -45,14 +45,14 @@ pytestmark = pytest.mark.skipif(
 
 
 def _config(tmp_path) -> dict:
-    return dict(
-        graph_database_provider="ladybug",
-        graph_file_path=os.path.join(str(tmp_path), "graphdir"),
-        graph_database_subprocess_enabled=True,
+    return {
+        "graph_database_provider": "ladybug",
+        "graph_file_path": os.path.join(str(tmp_path), "graphdir"),
+        "graph_database_subprocess_enabled": True,
         # Small pools keep the worker cheap to spawn in tests.
-        kuzu_buffer_pool_size=1 << 28,
-        kuzu_max_db_size=1 << 30,
-    )
+        "kuzu_buffer_pool_size": 1 << 28,
+        "kuzu_max_db_size": 1 << 30,
+    }
 
 
 async def _evict_after_use(cfg, *, use_async):

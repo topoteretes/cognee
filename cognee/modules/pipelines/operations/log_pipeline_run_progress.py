@@ -1,4 +1,3 @@
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import select
@@ -14,7 +13,7 @@ async def log_pipeline_run_progress(
     dataset_id: UUID,
     completed_items: int,
     total_items: int,
-    current_stage: Optional[str] = None,
+    current_stage: str | None = None,
 ):
     """Persist an in-flight progress snapshot for this run.
 

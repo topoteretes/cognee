@@ -1,6 +1,6 @@
+import builtins
 import csv
 import io
-from typing import Type
 
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.modules.chunking.Chunker import Chunker
@@ -12,7 +12,7 @@ class CsvDocument(Document):
     type: str = "csv"
     mime_type: str = "text/csv"
 
-    async def read(self, chunker_cls: Type[Chunker], max_chunk_size: int):
+    async def read(self, chunker_cls: builtins.type[Chunker], max_chunk_size: int):
         async def get_text():
             async with open_data_file(
                 self.raw_data_location, mode="r", encoding="utf-8", newline=""

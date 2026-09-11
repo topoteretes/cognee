@@ -1,6 +1,5 @@
 import asyncio
 import random
-from typing import List
 from uuid import NAMESPACE_OID, uuid5
 
 import pytest
@@ -18,8 +17,8 @@ class Repository(DataPoint):
 
 class CodeFile(DataPoint):
     part_of: Repository
-    contains: List["CodePart"] = []
-    depends_on: List["CodeFile"] = []
+    contains: list["CodePart"] = []
+    depends_on: list["CodeFile"] = []
     source_code: str
     metadata: dict = {"index_fields": []}
 

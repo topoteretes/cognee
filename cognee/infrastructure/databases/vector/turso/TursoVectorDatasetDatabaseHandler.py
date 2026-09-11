@@ -1,5 +1,4 @@
 import os
-from typing import Optional
 from uuid import UUID
 
 from cognee.base_config import get_base_config
@@ -23,7 +22,7 @@ class TursoVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     """
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: UUID | None, user: User | None) -> dict:
         """Create local Turso dataset connection details for a user's dataset."""
         vector_config = get_vectordb_config()
         base_config = get_base_config()

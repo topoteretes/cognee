@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any
 
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
@@ -11,7 +11,7 @@ from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
 
-retriever_options: Dict[str, Any] = {
+retriever_options: dict[str, Any] = {
     "cognee_graph_completion": GraphCompletionRetriever,
     "cognee_graph_completion_cot": GraphCompletionCotRetriever,
     "cognee_graph_completion_context_extension": GraphCompletionContextExtensionRetriever,
@@ -23,9 +23,9 @@ retriever_options: Dict[str, Any] = {
 class AnswerGeneratorExecutor:
     async def question_answering_non_parallel(
         self,
-        questions: List[Dict[str, str]],
+        questions: list[dict[str, str]],
         retriever: BaseRetriever,
-    ) -> List[Dict[str, str]]:
+    ) -> list[dict[str, str]]:
         answers = []
         for instance in questions:
             query_text = instance["question"]

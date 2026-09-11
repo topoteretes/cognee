@@ -1,4 +1,4 @@
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
@@ -21,19 +21,19 @@ class EvidenceReference(BaseModel):
     artifact_id: str
     role: EvidenceRole = "used_as_context"
 
-    dataset_id: Optional[str] = None
-    source_ref_key: Optional[str] = None
+    dataset_id: str | None = None
+    source_ref_key: str | None = None
 
-    data_id: Optional[str] = None
-    chunk_id: Optional[str] = None
-    chunk_index: Optional[int] = None
-    document_name: Optional[str] = None
+    data_id: str | None = None
+    chunk_id: str | None = None
+    chunk_index: int | None = None
+    document_name: str | None = None
 
-    source_node_id: Optional[str] = None
-    target_node_id: Optional[str] = None
-    relationship_name: Optional[str] = None
-    assertion_id: Optional[str] = None
-    label: Optional[str] = None
+    source_node_id: str | None = None
+    target_node_id: str | None = None
+    relationship_name: str | None = None
+    assertion_id: str | None = None
+    label: str | None = None
 
-    rank: Optional[int] = None
-    score: Optional[float] = None
+    rank: int | None = None
+    score: float | None = None

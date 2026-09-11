@@ -38,7 +38,7 @@ MARKER = re.compile(r"ENT[A-Z0-9]+")
 def scoped_env():
     root = Path(tempfile.mkdtemp(prefix="cognee_scoped_data_test_"))
 
-    import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
+    import cognee  # (cognee's import runs load_dotenv(override=True))
 
     def clear_config_caches():
         import importlib
@@ -67,17 +67,17 @@ def scoped_env():
                 pass
 
     mp = pytest.MonkeyPatch()
-    for key, value in dict(
-        DB_PROVIDER="sqlite",
-        VECTOR_DB_PROVIDER="lancedb",
-        GRAPH_DATABASE_PROVIDER="kuzu",
-        CACHE_BACKEND="sqlite",
-        MOCK_EMBEDDING="true",
-        TELEMETRY_DISABLED="1",
-        DATA_ROOT_DIRECTORY=str(root / "data"),
-        SYSTEM_ROOT_DIRECTORY=str(root / "system"),
-        ENABLE_BACKEND_ACCESS_CONTROL="false",
-    ).items():
+    for key, value in {
+        "DB_PROVIDER": "sqlite",
+        "VECTOR_DB_PROVIDER": "lancedb",
+        "GRAPH_DATABASE_PROVIDER": "kuzu",
+        "CACHE_BACKEND": "sqlite",
+        "MOCK_EMBEDDING": "true",
+        "TELEMETRY_DISABLED": "1",
+        "DATA_ROOT_DIRECTORY": str(root / "data"),
+        "SYSTEM_ROOT_DIRECTORY": str(root / "system"),
+        "ENABLE_BACKEND_ACCESS_CONTROL": "false",
+    }.items():
         mp.setenv(key, value)
     clear_config_caches()
 

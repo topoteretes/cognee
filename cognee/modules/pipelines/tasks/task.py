@@ -1,5 +1,6 @@
 import inspect
-from typing import Any, AsyncGenerator, Callable, Coroutine, Generator, Union
+from collections.abc import AsyncGenerator, Callable, Coroutine, Generator
+from typing import Any
 
 from cognee.pipelines.types import _Drop
 
@@ -170,12 +171,12 @@ def task_summary(template: str):
 
 
 class Task:
-    executable: Union[
-        Callable[..., Any],
-        Callable[..., Coroutine[Any, Any, Any]],
-        Generator[Any, Any, Any],
-        AsyncGenerator[Any, Any],
-    ]
+    executable: (
+        Callable[..., Any]
+        | Callable[..., Coroutine[Any, Any, Any]]
+        | Generator[Any, Any, Any]
+        | AsyncGenerator[Any, Any]
+    )
     task_config: dict[str, Any] = {
         "batch_size": 1,
     }

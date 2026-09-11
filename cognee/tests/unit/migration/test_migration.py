@@ -69,7 +69,7 @@ class TestParseTimestamp:
             2024, 3, 1, 12, 0, tzinfo=timezone.utc
         )
         assert parse_timestamp("2024-03-01") == datetime(2024, 3, 1, tzinfo=timezone.utc)
-        assert parse_timestamp(datetime(2024, 3, 1, 12, 0)) == datetime(
+        assert parse_timestamp(datetime(2024, 3, 1, 12, 0)) == datetime(  # noqa: DTZ001 - naive input is the case under test
             2024, 3, 1, 12, 0, tzinfo=timezone.utc
         )
 
@@ -532,7 +532,7 @@ class TestTranslateRecords:
         assert {"Alice", "Berlin", "Person"} <= node_names
 
         assert len(batch["edges"]) == 1
-        source_id, target_id, relationship, properties = batch["edges"][0]
+        source_id, _target_id, relationship, properties = batch["edges"][0]
         assert relationship == "lives_in"
         assert properties["edge_text"] == "Alice lives in Berlin"
         assert properties["valid_at"].startswith("2024-02-01")

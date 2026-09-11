@@ -1,7 +1,7 @@
 import asyncio
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from cognee.eval_framework.beam.eval.metrics.beam_rubric import BEAMRubricMetric
 from cognee.eval_framework.beam.eval.metrics.kendall_tau import KendallTauMetric
@@ -15,9 +15,9 @@ class BeamLLMTestCase:
     input: str
     actual_output: str
     expected_output: str
-    retrieval_context: Optional[list[str]] = None
-    context: Optional[list[str]] = None
-    additional_metadata: Optional[dict[str, Any]] = None
+    retrieval_context: list[str] | None = None
+    context: list[str] | None = None
+    additional_metadata: dict[str, Any] | None = None
 
 
 class BeamEvalAdapter(BaseEvalAdapter):
@@ -27,7 +27,7 @@ class BeamEvalAdapter(BaseEvalAdapter):
     answers concurrently with fresh metric instances per task.
     """
 
-    def __init__(self, max_concurrent_evaluations: Optional[int] = None):
+    def __init__(self, max_concurrent_evaluations: int | None = None):
         env_override = os.getenv("COGNEE_BEAM_EVAL_MAX_CONCURRENT")
         if max_concurrent_evaluations is None and env_override:
             try:
@@ -43,7 +43,7 @@ class BeamEvalAdapter(BaseEvalAdapter):
             "kendall_tau": KendallTauMetric,
         }
 
-    def _build_test_case(self, answer: Dict[str, Any]) -> BeamLLMTestCase:
+    def _build_test_case(self, answer: dict[str, Any]) -> BeamLLMTestCase:
         additional_metadata = {}
         if "rubric" in answer:
             additional_metadata["rubric"] = answer["rubric"]
@@ -66,7 +66,7 @@ class BeamEvalAdapter(BaseEvalAdapter):
         metric_name: str,
         test_case: BeamLLMTestCase,
         semaphore: asyncio.Semaphore,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         metric = self._metric_factories[metric_name]()
 
         async with semaphore:
@@ -82,10 +82,10 @@ class BeamEvalAdapter(BaseEvalAdapter):
 
     async def _evaluate_single_answer(
         self,
-        answer: Dict[str, Any],
-        evaluator_metrics: List[str],
+        answer: dict[str, Any],
+        evaluator_metrics: list[str],
         semaphore: asyncio.Semaphore,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         test_case = self._build_test_case(answer)
         metric_names = list(evaluator_metrics)
         metric_tasks = [
@@ -102,8 +102,8 @@ class BeamEvalAdapter(BaseEvalAdapter):
         }
 
     async def evaluate_answers(
-        self, answers: List[Dict[str, Any]], evaluator_metrics: List[str]
-    ) -> List[Dict[str, Any]]:
+        self, answers: list[dict[str, Any]], evaluator_metrics: list[str]
+    ) -> list[dict[str, Any]]:
         if not answers:
             return []
 

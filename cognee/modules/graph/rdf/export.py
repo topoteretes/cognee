@@ -15,7 +15,7 @@ edges without ``predicate_uri`` keep minted cognee predicate IRIs. Nothing is
 collapsed into a closed local vocabulary.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 from urllib.parse import quote
 
 from rdflib import RDF, RDFS, Graph, Literal, Namespace, URIRef
@@ -27,9 +27,9 @@ logger = get_logger("RDFExport")
 # Base IRI for minted (non-ontology-grounded) cognee identifiers.
 DEFAULT_BASE_IRI = "https://cognee.ai/graph/"
 
-NodeData = Dict[str, Any]
-Node = Tuple[str, NodeData]
-EdgeData = Tuple[str, str, str, Dict[str, Any]]
+NodeData = dict[str, Any]
+Node = tuple[str, NodeData]
+EdgeData = tuple[str, str, str, dict[str, Any]]
 
 # Relationship names that carry native RDF semantics rather than a minted
 # cognee predicate. ``is_a`` links an individual to its class (rdf:type) or a
@@ -67,8 +67,8 @@ def _is_entity_type(props: NodeData) -> bool:
 
 
 def graph_data_to_rdf(
-    nodes: List[Node],
-    edges: List[EdgeData],
+    nodes: list[Node],
+    edges: list[EdgeData],
     base_iri: str = DEFAULT_BASE_IRI,
 ) -> Graph:
     """Build an RDF graph from property-graph ``(nodes, edges)``.
@@ -90,7 +90,7 @@ def graph_data_to_rdf(
     g.bind("cognee", Namespace(base_iri))
     g.bind("cprop", Namespace(f"{base_iri}prop/"))
 
-    node_props: Dict[str, NodeData] = {str(nid): (props or {}) for nid, props in nodes}
+    node_props: dict[str, NodeData] = {str(nid): (props or {}) for nid, props in nodes}
 
     for node_id, props in nodes:
         props = props or {}
@@ -120,7 +120,7 @@ def graph_data_to_rdf(
 
 async def export_memory_graph_to_rdf(
     base_iri: str = DEFAULT_BASE_IRI,
-    graph_engine: Optional[Any] = None,
+    graph_engine: Any | None = None,
 ) -> Graph:
     """Read the whole memory graph and return it as an ``rdflib.Graph``.
 
@@ -142,7 +142,7 @@ async def export_memory_graph_to_rdf(
 async def serialize_memory_graph(
     rdf_format: str = "turtle",
     base_iri: str = DEFAULT_BASE_IRI,
-    graph_engine: Optional[Any] = None,
+    graph_engine: Any | None = None,
 ) -> str:
     """Serialize the memory graph to an RDF string (turtle by default)."""
     graph = await export_memory_graph_to_rdf(base_iri=base_iri, graph_engine=graph_engine)
@@ -152,8 +152,8 @@ async def serialize_memory_graph(
 async def query_memory_graph_sparql(
     query: str,
     base_iri: str = DEFAULT_BASE_IRI,
-    graph_engine: Optional[Any] = None,
-) -> List[Any]:
+    graph_engine: Any | None = None,
+) -> list[Any]:
     """Run a SPARQL query against an RDF view of the memory graph.
 
     Materializes the graph into an in-memory rdflib store and executes the

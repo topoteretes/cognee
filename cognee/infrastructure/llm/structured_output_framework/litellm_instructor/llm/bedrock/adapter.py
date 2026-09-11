@@ -11,9 +11,8 @@ from tenacity import before_sleep_log, retry, wait_exponential_jitter
 from cognee.infrastructure.files.storage.s3_config import get_s3_config
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
-    LLMPaymentRequiredError,
     MissingSystemPromptPathError,
-    is_budget_exhausted_error,
+    raise_if_budget_exhausted,
 )
 from cognee.infrastructure.llm.prompts.read_query_prompt import read_query_prompt
 from cognee.infrastructure.llm.retry_config import (
@@ -139,6 +138,13 @@ class BedrockAdapter(LLMInterface):
             ContentPolicyViolationError,
             InstructorRetryException,
         ) as error:
+            # Classified here because the handler further down is unreachable once
+            # this clause matches, and ahead of the content-policy check because
+            # the model's partial completion is rendered into str(error): a budget
+            # rejection whose completion mentions a content policy would otherwise
+            # be misclassified. No fallback path exists here, unlike openai/azure.
+            raise_if_budget_exhausted(error)
+
             if (
                 isinstance(error, InstructorRetryException)
                 and "content management policy" not in str(error).lower()
@@ -149,8 +155,8 @@ class BedrockAdapter(LLMInterface):
                 f"The provided input contains content that is not aligned with our content policy: {text_input}"
             )
         except Exception as e:
-            if is_budget_exhausted_error(e):
-                raise LLMPaymentRequiredError() from e
+            # Same detail-carrying message as the wrapped-error path above.
+            raise_if_budget_exhausted(e)
             raise
 
     async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType | None:

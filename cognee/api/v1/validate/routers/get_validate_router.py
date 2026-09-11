@@ -1,8 +1,7 @@
-from typing import List
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
-from typing_extensions import Annotated
 
 from cognee.api.v1.validate.validate import ValidationReport, ValidationStatus, validate
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
@@ -19,7 +18,7 @@ def get_validate_router() -> APIRouter:
     @validate_router.get("", response_model=ValidationReport)
     async def run_validate(
         dataset: Annotated[
-            List[str],
+            list[str],
             Query(
                 description=("Dataset name(s) to validate. Omit to validate the default dataset."),
             ),

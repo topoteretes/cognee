@@ -88,7 +88,7 @@ def _fake_aiohttp(monkeypatch, session):
 
 def test_authorize_url_is_the_agent_install_flow():
     url = LinearIntegration().authorize_url("the-state")
-    scheme_host_path, query = url.split("?", 1)
+    scheme_host_path, _query = url.split("?", 1)
 
     assert scheme_host_path == "https://linear.app/oauth/authorize"
     params = parse_qs(urlsplit(url).query)
