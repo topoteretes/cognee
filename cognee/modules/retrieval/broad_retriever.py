@@ -600,55 +600,6 @@ class BroadRetriever(CompletionRetriever):
                 if item.key:
                     item.key = canonical.get(item.key, item.key)
 
-        target_names: list[str] = []
-        if plan.target:
-            # The question's name is matched against the names actually read, so a
-            # nickname or partial name finds its person and an unknown name counts zero.
-            target_names = await self.match_target(
-                plan.target,
-                sorted({item.group for item in items if item.group}),
-                aliases,
-                canonical or {},
-            )
-            if plan.dedup_key and target_names:
-                # One reading misses an item now and then, and for a named person or
-                # thing the misses do not average out: read the pieces that mention
-                # any of its spellings once more. Entries already listed are removed
-                # by the markers and the dedup, so the union can only add a miss.
-                spellings = {_loose_name(plan.target)} | {
-                    _loose_name(name)
-                    for name, head in (canonical or {}).items()
-                    if head in target_names or name in target_names
-                }
-                mentioning = [
-                    shard
-                    for shard in shards
-                    if any(s in _loose_name(" ".join(u.text for u in shard)) for s in spellings)
-                ]
-                again = await asyncio.gather(*map(read, mentioning))
-                extra: list[ExtractedItem] = []
-                for shard_id, shard_items in again:
-                    for item in shard_items.items:
-                        marker = (shard_id, item.unit, item.group, item.key)
-                        if item.key and marker not in seen:
-                            seen.add(marker)
-                            extra.append(item)
-                extra = _one_entry_per_group(extra, relation=plan.relation)
-                extra = _drop_attribute_named_groups(extra, plan.group_by)
-                for item in extra:
-                    if canonical:
-                        item.group = canonical.get(item.group, item.group)
-                        if plan.relation and item.key:
-                            item.key = canonical.get(item.key, item.key)
-                logger.info(
-                    "BROAD second pass for target %r: %d pieces mention it, %d entries not "
-                    "listed before",
-                    plan.target,
-                    len(mentioning),
-                    len(extra),
-                )
-                items += extra
-
         unkeyed = 0
         entries_read = len(items)
         if plan.dedup_key:
@@ -672,7 +623,13 @@ class BroadRetriever(CompletionRetriever):
                 group_totals[item.group] += weight(item)
         groups = group_totals.most_common()
         items_listed = len(items)
+        target_names: list[str] = []
         if plan.target:
+            # The question's name is matched against the names actually read, so a
+            # nickname or partial name finds its person and an unknown name counts zero.
+            target_names = await self.match_target(
+                plan.target, [name for name, _ in groups], aliases, canonical or {}
+            )
             items = [item for item in items if item.group in target_names]
         denominator = 0
         if plan.ratio_condition:

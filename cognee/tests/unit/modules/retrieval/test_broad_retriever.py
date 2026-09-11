@@ -1006,43 +1006,6 @@ async def test_aliases_stated_in_the_text_reach_the_merge_step(monkeypatch):
 # --- one named target -----------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_a_named_targets_pieces_are_read_twice_and_the_union_counts(monkeypatch):
-    """26 goals came back 25, 24 and 26 across runs: a reading misses an item now and
-    then. Pieces that mention the target are read again; a goal the first pass
-    skipped is added, a goal it listed is not counted twice, and a piece that never
-    mentions the target is not read again."""
-    calls: list[str] = []
-
-    def respond(model, text_input):
-        if model is ShardItems:
-            calls.append(text_input)
-            first = "Rojas scored" in text_input
-            items = [_item("Ciaran Rojas", "Matchday 1, 4th minute")]
-            if first and calls.count(text_input) == 2:  # the second reading finds one more
-                items.append(_item("Ciaran Rojas", "Matchday 1, 30th minute"))
-            return ShardItems(items=items if "Rojas scored" in text_input else [])
-        if model is TargetMatch:
-            return TargetMatch(names=["Ciaran Rojas"])
-        return NameGroups(groups=[])
-
-    _stub_llm(monkeypatch, respond)
-    retriever = BroadRetriever(shard_tokens=8)  # one unit per piece
-    units = [
-        Unit(id="a", text="Ciaran Rojas scored twice today."),
-        Unit(id="b", text="Nobody scored at all."),
-    ]
-    plan = _plan(group_by="scorer", target="Ciaran Rojas", dedup_key="the match and minute")
-
-    result = await retriever.count_by_reading(plan, units)
-
-    assert result.total == 2
-    assert (
-        sum("Rojas scored" in c for c in calls) == 2
-        and sum("Nobody scored" in c for c in calls) == 1
-    )
-
-
 def _assignments(*pairs: tuple[str, str]) -> ShardItems:
     return ShardItems(
         items=[
