@@ -15,7 +15,9 @@ import { SEARCH_SESSION_PREFIX } from "@/modules/sessions/getSessions";
 export interface PipelineRun {
   id: string;
   pipeline_name: string | null;
-  status: string;
+  // The activity API serializes status as null when run.status is unset
+  // (get_activity_router.py), so every .includes(...) read must coalesce.
+  status: string | null;
   dataset_id: string | null;
   dataset_name: string | null;
   owner_id: string | null;
@@ -422,7 +424,7 @@ export function AgentActivityTerminal({
       return ev.kind === "agentQuery";
     }
     if (termFilter === "errors") {
-      if (ev.kind === "run") return ev.r.status.includes("ERRORED");
+      if (ev.kind === "run") return (ev.r.status ?? "").includes("ERRORED");
       if (ev.kind === "session") return ev.s.effective_status === "failed" || ev.s.error_count > 0;
       return false;
     }
@@ -836,8 +838,8 @@ export function AgentActivityTerminal({
               // ── Operational pipeline run: a compact, non-expandable marker ──
               if (ev.kind === "run") {
                 const r = ev.r;
-                const isError = r.status.includes("ERRORED");
-                const isRunning = r.status.includes("STARTED") || r.status.includes("INITIATED");
+                const isError = (r.status ?? "").includes("ERRORED");
+                const isRunning = (r.status ?? "").includes("STARTED") || (r.status ?? "").includes("INITIATED");
                 const outcome: Outcome = isRunning ? "running" : isError ? "error" : "done";
                 // Defensive fallback only — the push above already guarantees
                 // pipeline_name is set for every "run" event reaching here.
