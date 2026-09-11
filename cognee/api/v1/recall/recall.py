@@ -790,8 +790,14 @@ async def recall(
                 # /v1/search records every question it answers; recall never did,
                 # because it calls authorized_search() directly and skips the
                 # logging that search() wraps around it. Agents recall through this
-                # endpoint, so their questions were absent from history entirely.
-                await log_search_history(query_text, local_query_type.value, user.id, graph_results)
+                # endpoint too — but their UserPromptSubmit hooks fire on EVERY
+                # conversational turn, so logging unconditionally flooded the
+                # search history with agent prompts. Only questions whose session
+                # is an explicit web-search session (search-ui- prefix, the id
+                # the search UI mints) belong in that history.
+                is_search_ui = bool(session_id) and str(session_id).startswith("search-ui-")
+                if is_search_ui:
+                    await log_search_history(query_text, local_query_type.value, user.id, graph_results)
 
                 tagged = []
                 for r in graph_results:

@@ -123,7 +123,10 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
                 embeddings = [[0.0] * self.dimensions for _ in sanitized_text]
             else:
                 async with embedding_rate_limiter_context_manager():
-                    embeddings = self.embedding_model.embed(
+                    # fastembed/onnxruntime inference is CPU-bound and synchronous; run it in a
+                    # worker thread so it doesn't block the event loop while batches embed.
+                    embeddings = await asyncio.to_thread(
+                        self.embedding_model.embed,
                         sanitized_text,
                         batch_size=len(sanitized_text),
                         parallel=None,
