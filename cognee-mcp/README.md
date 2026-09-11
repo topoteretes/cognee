@@ -144,7 +144,7 @@ If you'd rather run cognee-mcp in a container, you have two options:
       - `postgres` / `postgres-binary` - PostgreSQL database support
       - `neo4j` - Neo4j graph database support
       - `neptune` - AWS Neptune support
-      - `chromadb` - ChromaDB vector store support
+      - `turso` - Turso vector/graph store support
       - `scraping` - Web scraping capabilities
       - `langchain` - LangChain integration
       - `llama-index` - LlamaIndex integration
@@ -260,7 +260,35 @@ docker run \
 
 After starting your Cognee MCP server with Docker, you need to configure your MCP client to connect to it.
 
-### **SSE Transport Configuration** (Recommended)
+> ### ⚠️ Host/Origin protection (why you might get HTTP 421 or 403)
+>
+> Both the **http** and **sse** transports validate the `Host` and `Origin` headers to
+> block DNS-rebinding attacks, on every bind address including loopback — rebinding
+> targets loopback services specifically, so `127.0.0.1` is not a mitigation.
+>
+> * A `Host` the server does not recognise returns **`421 Misdirected Request`**
+> * An `Origin` it does not recognise returns **`403 Forbidden`**
+>
+> When you bind a non-loopback address (`--host 0.0.0.0`, which is what the Docker
+> entrypoint does), only `localhost` / `127.0.0.1` / `[::1]` are accepted by default, so
+> reaching the server by **LAN IP or a custom hostname returns 421** — the guard working,
+> not a bug.
+>
+> Allow specific hosts (the `:*` port glob is required):
+> ```bash
+> -e MCP_ALLOWED_HOSTS="192.168.1.50:*,myserver.local:*"
+> ```
+> Or turn the guard off entirely (only on a trusted network):
+> ```bash
+> -e MCP_DISABLE_DNS_REBINDING_PROTECTION=true
+> ```
+>
+> **Implementation note.** FastMCP installs this guard on its streamable-http app only —
+> `create_sse_app()` accepts no such option, so the allow-lists were silently dropped for
+> SSE. cognee-mcp mounts the same middleware on the SSE app itself, with the same
+> allow-lists, so both transports behave identically.
+
+### **SSE Transport Configuration** (Legacy — prefer HTTP below; both are guarded)
 
 **Start the server with SSE transport:**
 ```bash
@@ -311,7 +339,7 @@ cognee-sse: http://localhost:8000/sse (SSE) - ✓ Connected
 }
 ```
 
-### **HTTP Transport Configuration** (Alternative)
+### **HTTP Transport Configuration** (Recommended)
 
 **Start the server with HTTP transport:**
 ```bash
@@ -572,21 +600,38 @@ forget(dataset="main_dataset")
 
 ### Debugging
 
-To use debugger, run:
-    ```bash
-    mcp dev src/server.py
-    ```
+Use the **`fastmcp`** CLI, not `mcp`. Since the FastMCP 3 migration this server is a
+standalone `fastmcp.FastMCP` instance, which the `mcp` CLI does not recognise —
+`mcp dev src/server.py` fails with *"Ignoring object 'src/server.py:mcp' as it's not a
+valid server object"*.
 
-Open inspector with timeout passed:
-    ```
-    http://localhost:5173?timeout=120000
-    ```
+Inspect the server without launching anything (fast sanity check — name, version, tool count):
 
-To apply new changes while developing cognee you need to do:
+```bash
+uv run fastmcp inspect src/server.py:mcp
+```
 
-1. Update dependencies in cognee folder if needed
-2. `uv sync --dev --all-extras --reinstall`
-3. `mcp dev src/server.py`
+Run it against the MCP Inspector UI:
+
+```bash
+uv run fastmcp dev src/server.py:mcp
+```
+
+Open the inspector with a longer timeout — cognee's first call can be slow while the
+databases initialise:
+
+```
+http://localhost:5173?timeout=120000
+```
+
+To apply new changes while developing cognee:
+
+1. Update dependencies in the cognee folder if needed
+2. `uv sync --group dev --reinstall`
+3. `uv run fastmcp dev src/server.py:mcp`
+
+> The `:mcp` suffix names the server object in the file. Without it the CLI has to guess,
+> and the guess is not reliable across FastMCP versions.
 
 ### Development
 
@@ -594,14 +639,22 @@ In order to use local cognee:
 
 1. Uncomment the following line in the cognee-mcp [`pyproject.toml`](pyproject.toml) file and set the cognee root path.
     ```
-    #"cognee[postgres,codegraph,gemini,huggingface,docs,neo4j] @ file:/Users/<username>/Desktop/cognee"
+    #"cognee[postgres-binary,docs,neo4j] @ file:/path/to/your/cognee"
     ```
-    Remember to replace `file:/Users/<username>/Desktop/cognee` with your actual cognee root path.
+    Replace `/path/to/your/cognee` with the absolute path to your cognee checkout, and
+    comment out the released `"cognee[...]>=1.5.0,<2.0.0"` line directly below it —
+    otherwise both requirements apply and uv resolves the published package instead.
 
 2. Install dependencies with uv in the mcp folder
     ```
     uv sync --reinstall
     ```
+
+    Re-run this after every change to the local cognee checkout.
+
+> **Note:** editing that line modifies the tracked `pyproject.toml` and rewrites
+> `uv.lock` with a machine-local absolute path. Revert both before committing —
+> `git checkout -- pyproject.toml uv.lock` — or the path leaks into the repo.
 
 ## Code of Conduct
 
