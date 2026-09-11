@@ -2,6 +2,7 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import Field
 
@@ -61,6 +62,18 @@ def get_improve_router() -> APIRouter:
         - **sessionIds** (Optional[List[str]]): Session identifiers whose cached memory
           entries are used as input for enrichment.
 
+        ## Response
+        A completed blocking run answers with the pipeline run info keyed by
+        dataset id (the memify shape). With ``sessionIds`` the answer can instead
+        be a status object — always HTTP 200, so clients need not special-case it:
+        - ``{"status": "no_op", "reason": ...}``: nothing above the session
+          watermarks; no LLM call, no pipeline run, no operation record.
+        - ``{"status": "busy", "holder_age_seconds": ..., "rerun_requested": true}``:
+          another improve of that session is in flight; it will run one more
+          pass over the newer tail before releasing, so do not retry.
+        - ``{"status": "accepted", "background": true, "pending_stages": [...]}``:
+          ``runInBackground`` was set and the ordered stage sequence is running.
+
         ## Error Codes
         - **400 Bad Request**: Neither dataset_id nor dataset_name provided
         - **409 Conflict**: Error during processing
@@ -97,6 +110,10 @@ def get_improve_router() -> APIRouter:
 
             if isinstance(improve_run, PipelineRunErrored):
                 return JSONResponse(status_code=420, content=improve_run)
+            if isinstance(improve_run, dict) and isinstance(improve_run.get("status"), str):
+                # busy / no_op / accepted: not a pipeline-run mapping, so it
+                # bypasses the response model on purpose.
+                return JSONResponse(status_code=200, content=jsonable_encoder(improve_run))
             return improve_run
         except CogneeApiError:
             # Cognee errors carry their own status code and actionable message;

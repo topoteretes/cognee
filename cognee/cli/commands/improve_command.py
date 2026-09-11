@@ -4,6 +4,7 @@ import asyncio
 import cognee.cli.echo as fmt
 from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.improve_output import echo_improve_result
 from cognee.cli.reference import SupportsCliCommand
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
@@ -80,15 +81,7 @@ tasks on an existing knowledge graph to add context, rules, and connections.
 
             result = asyncio.run(run_improve())
 
-            if args.background:
-                fmt.success("Improvement started in background!")
-            else:
-                fmt.success("Knowledge graph improved successfully!")
-
-            if result and isinstance(result, dict):
-                for ds_id, run_info in result.items():
-                    status = getattr(run_info, "status", str(run_info))
-                    fmt.echo(f"  Dataset {ds_id}: {status}")
+            echo_improve_result(result, background=bool(args.background))
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
