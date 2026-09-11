@@ -232,6 +232,7 @@ def schema_from_ontology(ontology_file_path: str | None = None) -> GlinerSchema:
         return EMPTY_SCHEMA
 
     from rdflib import Graph
+    from rdflib.exceptions import ParserError
 
     graph = Graph()
     parsed = False
@@ -240,7 +241,7 @@ def schema_from_ontology(ontology_file_path: str | None = None) -> GlinerSchema:
             graph.parse(path, format=fmt)
             parsed = True
             break
-        except Exception as error:  # noqa: BLE001 - try the next format
+        except (OSError, ParserError, SyntaxError) as error:
             logger.debug("Ontology parse with format=%s failed: %s", fmt, error)
     if not parsed:
         logger.warning("Could not parse ontology file %s; GLiNER schema falls through", path)
