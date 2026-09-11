@@ -135,7 +135,7 @@ def test_single_docs_issue_is_pending_and_has_spec_shape(triage, monkeypatch, tm
         "title": "[Docs]: TRIPLET_COMPLETION needs memify",
         "html_url": "https://github.com/topoteretes/cognee/issues/4656",
         "verdict": "pending_docs_check",
-        "reason": "title mentions docs",
+        "reason": "title prefix",
         "doc_urls": [],
         "source_files": [],
         "docs_files": [],
