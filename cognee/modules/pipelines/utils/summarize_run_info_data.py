@@ -9,18 +9,27 @@ from cognee.modules.data.models import Data
 # instead so a single run cannot balloon the table.
 MAX_RUN_INFO_DATA_CHARS = 512
 
+# The same reasoning applies to lists of ``Data`` records: ``cognify`` passes
+# every record of the dataset, so an unbounded id list makes each run's
+# ``run_info`` grow with the corpus. Keep a preview of the same order of
+# magnitude as the character cap.
+MAX_RUN_INFO_IDS = 25
+
 
 def summarize_run_info_data(data: Any):
     """Return a compact, size-bounded description of pipeline-run input data.
 
-    Lists of ``Data`` records are reduced to their ids; any other payload is
-    stringified and truncated so a single pipeline run cannot persist an
-    arbitrarily large ``run_info`` blob.
+    Lists of ``Data`` records are reduced to a bounded preview of their ids; any
+    other payload is stringified and truncated so a single pipeline run cannot
+    persist an arbitrarily large ``run_info`` blob.
     """
     if not data:
         return "None"
     if isinstance(data, list) and all(isinstance(item, Data) for item in data):
-        return [str(item.id) for item in data]
+        ids = [str(item.id) for item in data]
+        if len(ids) > MAX_RUN_INFO_IDS:
+            return ids[:MAX_RUN_INFO_IDS] + [f"... [truncated, {len(ids)} ids total]"]
+        return ids
 
     text = str(data)
     if len(text) > MAX_RUN_INFO_DATA_CHARS:
