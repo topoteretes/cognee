@@ -183,6 +183,11 @@ async def add(
         (Tavily takes precedence if both keys are set.)
         await cognee.add("https://example.com")
 
+        # Add a single url and serply fetch ingestion method
+        Make sure to set SERPLY_API_KEY = YOUR_SERPLY_API_KEY as a environment variable
+        (Tavily and Keenable take precedence if their keys are set.)
+        await cognee.add("https://example.com")
+
         # Add multiple urls
         await cognee.add(["https://example.com","https://books.toscrape.com"])
         ```
@@ -200,6 +205,7 @@ async def add(
         - GRAPH_DATABASE_PROVIDER: "ladybug" (default), "neo4j"
         - TAVILY_API_KEY: YOUR_TAVILY_API_KEY
         - KEENABLE_API_KEY: YOUR_KEENABLE_API_KEY
+        - SERPLY_API_KEY: YOUR_SERPLY_API_KEY
 
     """
     # Route to remote instance if connected via serve()

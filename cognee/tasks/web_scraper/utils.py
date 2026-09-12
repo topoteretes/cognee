@@ -1,7 +1,8 @@
-"""Utilities for fetching web content using BeautifulSoup, Tavily, or Keenable.
+"""Utilities for fetching web content using BeautifulSoup, Tavily, Keenable, or Serply.
 
 This module provides functions to fetch and extract content from web pages, supporting
-BeautifulSoup for custom extraction rules and Tavily or Keenable for API-based scraping.
+BeautifulSoup for custom extraction rules and Tavily, Keenable, or Serply for API-based
+scraping.
 """
 
 import asyncio
@@ -12,7 +13,7 @@ import httpx
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.web_scraper.types import UrlsToHtmls
 
-from .config import DefaultCrawlerConfig, KeenableConfig, TavilyConfig
+from .config import DefaultCrawlerConfig, KeenableConfig, SerplyConfig, TavilyConfig
 from .default_url_crawler import DefaultUrlCrawler
 
 logger = get_logger(__name__)
@@ -23,24 +24,28 @@ async def fetch_page_content(
     preferred_tool: str | None = None,
     tavily_config: TavilyConfig | None = None,
     keenable_config: KeenableConfig | None = None,
+    serply_config: SerplyConfig | None = None,
     soup_crawler_config: DefaultCrawlerConfig | None = None,
 ) -> UrlsToHtmls:
     """Fetch content from one or more URLs using the specified tool.
 
     This function retrieves web page content using BeautifulSoup (with custom
-    extraction rules), Tavily, or Keenable (API-based scraping). It handles single URLs
-    or lists of URLs and returns a dictionary mapping URLs to their extracted content.
+    extraction rules), Tavily, Keenable, or Serply (API-based scraping). It handles
+    single URLs or lists of URLs and returns a dictionary mapping URLs to their
+    extracted content.
 
     When preferred_tool is not given, the backend is auto-selected from the
     environment: Tavily if TAVILY_API_KEY is set, otherwise Keenable if
-    KEENABLE_API_KEY is set, otherwise the default crawler.
+    KEENABLE_API_KEY is set, otherwise Serply if SERPLY_API_KEY is set, otherwise
+    the default crawler.
 
     Args:
         urls: A single URL (str) or a list of URLs (List[str]) to scrape.
-        preferred_tool: The scraping tool to use ("tavily", "keenable", or
+        preferred_tool: The scraping tool to use ("tavily", "keenable", "serply", or
             "beautifulsoup"). Defaults to environment-based auto-selection.
         tavily_config: Configuration for Tavily API, including API key.
         keenable_config: Configuration for the Keenable API.
+        serply_config: Configuration for the Serply API.
         soup_crawler_config: Configuration for the default (BeautifulSoup) crawler.
 
     Returns:
@@ -57,6 +62,8 @@ async def fetch_page_content(
             preferred_tool = "tavily"
         elif os.getenv("KEENABLE_API_KEY"):
             preferred_tool = "keenable"
+        elif os.getenv("SERPLY_API_KEY"):
+            preferred_tool = "serply"
         else:
             preferred_tool = "beautifulsoup"
 
@@ -66,6 +73,9 @@ async def fetch_page_content(
     elif preferred_tool == "keenable":
         logger.info("Using Keenable API for url fetching")
         return await fetch_with_keenable(urls, keenable_config=keenable_config)
+    elif preferred_tool == "serply":
+        logger.info("Using Serply API for url fetching")
+        return await fetch_with_serply(urls, serply_config=serply_config)
     elif preferred_tool == "beautifulsoup":
         logger.info("Using default crawler for content extraction")
 
@@ -107,7 +117,7 @@ async def fetch_page_content(
     else:
         raise ValueError(
             f"Unknown preferred_tool '{preferred_tool}'. "
-            "Expected 'tavily', 'keenable', or 'beautifulsoup'."
+            "Expected 'tavily', 'keenable', 'serply', or 'beautifulsoup'."
         )
 
 
@@ -251,4 +261,87 @@ async def fetch_with_keenable(
         raise errors[0]
 
     logger.info(f"Successfully fetched content from {len(return_results)} URL(s) via Keenable")
+    return return_results
+
+
+async def fetch_with_serply(
+    urls: str | list[str], serply_config: SerplyConfig | None = None
+) -> UrlsToHtmls:
+    """Fetch content from URLs using the Serply API.
+
+    Uses Serply's /v1/request endpoint (https://serply.io/docs) to fetch each URL and
+    return it as markdown (default) or as the raw HTML of the page. Requires an API key
+    (SERPLY_API_KEY or serply_config.api_key).
+
+    Args:
+        urls: A single URL (str) or a list of URLs (List[str]) to scrape.
+        serply_config: Configuration for the Serply API. Defaults to
+            environment-based configuration (SERPLY_API_KEY, SERPLY_BASE_URL).
+
+    Returns:
+        Dict[str, str]: A dictionary mapping each requested URL to its fetched
+            content. URLs that fail to fetch are omitted with a warning.
+
+    Raises:
+        Exception: If every requested URL fails to fetch (e.g., invalid API key).
+    """
+    serply_config = serply_config or SerplyConfig()
+    url_list = [urls] if isinstance(urls, str) else urls
+
+    headers = {}
+    if serply_config.api_key:
+        headers["X-Api-Key"] = serply_config.api_key
+
+    logger.info(
+        f"Sending fetch requests to Serply API for {len(url_list)} URL(s) "
+        f"(response_type={serply_config.response_type}, timeout={serply_config.timeout}s)"
+    )
+
+    semaphore = asyncio.Semaphore(serply_config.concurrency)
+
+    async with httpx.AsyncClient(
+        base_url=serply_config.base_url,
+        headers=headers,
+        timeout=serply_config.timeout,
+    ) as client:
+
+        async def fetch_one(url: str):
+            payload = {"url": url, "response_type": serply_config.response_type}
+            async with semaphore:
+                response = await client.post("/v1/request", json=payload)
+            response.raise_for_status()
+            if serply_config.response_type == "full":
+                # The "full" response is a JSON envelope with the page HTML under "data".
+                return response.json().get("data") or None
+            # The "markdown" response is the converted page as plain text.
+            return response.text or None
+
+        responses = await asyncio.gather(
+            *(fetch_one(url) for url in url_list), return_exceptions=True
+        )
+
+    return_results = {}
+    errors = []
+    # URLs and error details can embed credentials, so log only positions and
+    # exception class names.
+    for position, (url, result) in enumerate(zip(url_list, responses), start=1):
+        if isinstance(result, BaseException):
+            logger.warning(
+                "Serply API failed to fetch URL %d of %d (%s)",
+                position,
+                len(url_list),
+                type(result).__name__,
+            )
+            errors.append(result)
+        elif result is None:
+            logger.warning(
+                "Serply API returned no content for URL %d of %d", position, len(url_list)
+            )
+        else:
+            return_results[url] = result
+
+    if url_list and not return_results and errors:
+        raise errors[0]
+
+    logger.info(f"Successfully fetched content from {len(return_results)} URL(s) via Serply")
     return return_results

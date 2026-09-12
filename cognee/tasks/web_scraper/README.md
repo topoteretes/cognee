@@ -2,13 +2,14 @@
 
 ## Overview
 
-The `web_scraper` module provides tools for scraping web content and storing structured data in cognee's graph database. It supports three scraping backends:
+The `web_scraper` module provides tools for scraping web content and storing structured data in cognee's graph database. It supports four scraping backends:
 
 1. **Default Crawler** - Uses `httpx` for HTTP requests with optional Playwright for JavaScript rendering
 2. **Tavily API** - Uses Tavily for content extraction (requires `TAVILY_API_KEY` environment variable)
 3. **Keenable API** - Uses [Keenable](https://docs.keenable.ai) for clean markdown extraction (requires `KEENABLE_API_KEY` environment variable)
+4. **Serply API** - Uses [Serply](https://serply.io/docs) to fetch pages as markdown or raw HTML (requires `SERPLY_API_KEY` environment variable)
 
-The module automatically selects the backend: Tavily if `TAVILY_API_KEY` is set, otherwise Keenable if `KEENABLE_API_KEY` is set, otherwise the default crawler. Pass `preferred_tool` to `fetch_page_content` to select one explicitly.
+The module automatically selects the backend: Tavily if `TAVILY_API_KEY` is set, otherwise Keenable if `KEENABLE_API_KEY` is set, otherwise Serply if `SERPLY_API_KEY` is set, otherwise the default crawler. Pass `preferred_tool` to `fetch_page_content` to select one explicitly.
 
 ## Components
 
@@ -28,6 +29,7 @@ The module automatically selects the backend: Tavily if `TAVILY_API_KEY` is set,
 | `DefaultCrawlerConfig` | Configuration for default crawler (concurrency, timeouts, Playwright) |
 | `TavilyConfig` | Configuration for Tavily API (API key, extract depth, timeout) |
 | `KeenableConfig` | Configuration for Keenable API (API key, live fetch, extraction prompt, timeout) |
+| `SerplyConfig` | Configuration for Serply API (API key, response type, concurrency, timeout) |
 
 ### Data Models (extend `DataPoint`)
 
@@ -126,6 +128,16 @@ await cognee.cognify()
 | `base_url` | `KEENABLE_BASE_URL` env or `https://api.keenable.ai` | Keenable API base URL |
 | `live` | `KEENABLE_LIVE_FETCH` env or `False` | Fetch the live page instead of Keenable's indexed copy |
 | `prompt` | `None` | Optional LLM extraction instruction (max 2000 chars) |
+| `concurrency` | `5` | Max concurrent fetch requests |
+| `timeout` | `30` | Request timeout (1-120s) |
+
+### SerplyConfig
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `api_key` | `SERPLY_API_KEY` env | Serply API key (required) |
+| `base_url` | `SERPLY_BASE_URL` env or `https://api.serply.io` | Serply API base URL |
+| `response_type` | `"markdown"` | `"markdown"` for converted text or `"full"` for the raw page HTML |
 | `concurrency` | `5` | Max concurrent fetch requests |
 | `timeout` | `30` | Request timeout (1-120s) |
 

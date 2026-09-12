@@ -20,6 +20,14 @@ class KeenableConfig(BaseModel):
     timeout: int | None = Field(default=30, ge=1, le=120)
 
 
+class SerplyConfig(BaseModel):
+    api_key: str | None = os.getenv("SERPLY_API_KEY")
+    base_url: str = os.getenv("SERPLY_BASE_URL", "https://api.serply.io")
+    response_type: Literal["markdown", "full"] = "markdown"
+    concurrency: int = Field(default=5, ge=1)
+    timeout: int | None = Field(default=30, ge=1, le=120)
+
+
 class DefaultCrawlerConfig(BaseModel):
     concurrency: int = 5
     crawl_delay: float = 0.5

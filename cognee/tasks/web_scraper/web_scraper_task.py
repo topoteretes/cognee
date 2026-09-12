@@ -18,7 +18,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage.index_data_points import index_data_points
 from cognee.tasks.storage.index_graph_edges import index_graph_edges
 
-from .config import DefaultCrawlerConfig, KeenableConfig, TavilyConfig
+from .config import DefaultCrawlerConfig, KeenableConfig, SerplyConfig, TavilyConfig
 from .models import ScrapingJob, WebPage, WebSite
 from .utils import fetch_page_content
 
@@ -50,6 +50,7 @@ async def cron_web_scraper_task(
     soup_crawler_config: DefaultCrawlerConfig = None,
     tavily_config: TavilyConfig = None,
     keenable_config: KeenableConfig = None,
+    serply_config: SerplyConfig = None,
     job_name: str = "scraping",
     ctx=None,
 ):
@@ -68,6 +69,8 @@ async def cron_web_scraper_task(
         tavily_config: Configuration for Tavily API.
         keenable_config: Configuration for Keenable API. Defaults to KEENABLE_API_KEY
             environment variable when set.
+        serply_config: Configuration for Serply API. Defaults to SERPLY_API_KEY
+            environment variable when set (Tavily and Keenable take precedence).
         job_name: Name of the scraping job. Defaults to "scraping".
 
     Returns:
@@ -96,6 +99,7 @@ async def cron_web_scraper_task(
                 "soup_crawler_config": soup_crawler_config,
                 "tavily_config": tavily_config,
                 "keenable_config": keenable_config,
+                "serply_config": serply_config,
                 "job_name": job_name,
                 "ctx": ctx,
             },
@@ -118,6 +122,7 @@ async def cron_web_scraper_task(
         soup_crawler_config=soup_crawler_config,
         tavily_config=tavily_config,
         keenable_config=keenable_config,
+        serply_config=serply_config,
         job_name=job_name,
         ctx=ctx,
     )
@@ -132,6 +137,7 @@ async def web_scraper_task(
     soup_crawler_config: DefaultCrawlerConfig = None,
     tavily_config: TavilyConfig = None,
     keenable_config: KeenableConfig = None,
+    serply_config: SerplyConfig = None,
     job_name: str | None = None,
     ctx=None,
 ):
@@ -152,6 +158,8 @@ async def web_scraper_task(
         tavily_config: Configuration for Tavily API.
         keenable_config: Configuration for Keenable API. Defaults to KEENABLE_API_KEY
             environment variable when set.
+        serply_config: Configuration for Serply API. Defaults to SERPLY_API_KEY
+            environment variable when set (Tavily and Keenable take precedence).
         job_name: Name of the scraping job. Defaults to a timestamp-based name.
 
     Returns:
@@ -167,8 +175,15 @@ async def web_scraper_task(
     if isinstance(url, str):
         url = [url]
 
-    soup_crawler_config, tavily_config, keenable_config, preferred_tool = check_arguments(
-        tavily_api_key, extraction_rules, tavily_config, soup_crawler_config, keenable_config
+    soup_crawler_config, tavily_config, keenable_config, serply_config, preferred_tool = (
+        check_arguments(
+            tavily_api_key,
+            extraction_rules,
+            tavily_config,
+            soup_crawler_config,
+            keenable_config,
+            serply_config,
+        )
     )
     now = datetime.now(timezone.utc)
     job_name = job_name or f"scrape_{now.strftime('%Y%m%d_%H%M%S')}"
@@ -216,6 +231,7 @@ async def web_scraper_task(
         preferred_tool=preferred_tool,
         tavily_config=tavily_config,
         keenable_config=keenable_config,
+        serply_config=serply_config,
         soup_crawler_config=soup_crawler_config,
     )
     for page_url, content in results.items():
@@ -352,7 +368,12 @@ async def web_scraper_task(
 
 
 def check_arguments(
-    tavily_api_key, extraction_rules, tavily_config, soup_crawler_config, keenable_config=None
+    tavily_api_key,
+    extraction_rules,
+    tavily_config,
+    soup_crawler_config,
+    keenable_config=None,
+    serply_config=None,
 ):
     """Validate and configure arguments for web_scraper_task.
 
@@ -362,11 +383,13 @@ def check_arguments(
         tavily_config: Configuration for Tavily API.
         soup_crawler_config: Configuration for BeautifulSoup crawler.
         keenable_config: Configuration for Keenable API.
+        serply_config: Configuration for Serply API.
 
     Returns:
-        Tuple[DefaultCrawlerConfig, TavilyConfig, KeenableConfig, str]: Configured
-            soup_crawler_config, tavily_config, keenable_config, and preferred_tool
-            ("tavily", "keenable", or "beautifulsoup").
+        Tuple[DefaultCrawlerConfig, TavilyConfig, KeenableConfig, SerplyConfig, str]:
+            Configured soup_crawler_config, tavily_config, keenable_config,
+            serply_config, and preferred_tool ("tavily", "keenable", "serply", or
+            "beautifulsoup").
 
     Raises:
         TypeError: If no scraping configuration is provided.
@@ -390,10 +413,20 @@ def check_arguments(
         if not extraction_rules and not soup_crawler_config:
             preferred_tool = "keenable"
 
-    if not tavily_config and not keenable_config and not soup_crawler_config:
+    if (
+        not tavily_api_key
+        and not keenable_config
+        and (serply_config or os.getenv("SERPLY_API_KEY"))
+    ):
+        if not serply_config:
+            serply_config = SerplyConfig()
+        if not extraction_rules and not soup_crawler_config:
+            preferred_tool = "serply"
+
+    if not tavily_config and not keenable_config and not serply_config and not soup_crawler_config:
         raise TypeError("Make sure you pass arguments for web_scraper_task")
 
-    return soup_crawler_config, tavily_config, keenable_config, preferred_tool
+    return soup_crawler_config, tavily_config, keenable_config, serply_config, preferred_tool
 
 
 def get_path_after_base(base_url: str, url: str) -> str:

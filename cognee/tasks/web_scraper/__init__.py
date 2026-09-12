@@ -2,7 +2,7 @@
 
 This module provides tools for scraping web content, managing scraping jobs, and storing
 data in a graph database. It includes classes and functions for crawling web pages using
-BeautifulSoup, Tavily, or Keenable, defining data models, and handling scraping
+BeautifulSoup, Tavily, Keenable, or Serply, defining data models, and handling scraping
 configurations.
 """
 
