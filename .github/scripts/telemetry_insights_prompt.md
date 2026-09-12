@@ -14,6 +14,8 @@ You are running inside a scheduled GitHub Action for the cognee repository. Your
 - `search_type_daily.csv` — day, SearchType enum, version, events
 - `version_lifecycle.csv` — version, self_hosted, first_seen/last_seen, events, identities
 
+Provider/model values containing identifier-shaped text are grouped into a `redacted` bucket before counting. These rows still contribute to run and distinct-identity totals; treat `redacted` as a mixed set of private configurations, not a specific provider or model.
+
 These are **fully anonymized aggregates**. There are no user identifiers, no query texts, no dataset names — and you must not attempt to obtain any. `distinct_identities` counts deployments (LLM-key hash → machine-stable persistent_id → user_id fallback); note that persistent_id only exists on events from ~April 2026 builds onward, so identity counts on older-version rows skew high — treat cross-version identity comparisons accordingly. You have **no warehouse access and no credentials**; do not try to query MotherDuck or any external data source. Work only from the CSVs and the git history/PRs of this repository.
 
 ## Analyses to run (compute, don't guess)
