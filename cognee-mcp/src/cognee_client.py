@@ -79,11 +79,21 @@ class CogneeClient:
         If None, uses direct cognee function calls.
     api_token : str, optional
         Authentication token for the API (optional, required if API has authentication enabled).
+    api_auth_scheme : str, optional
+        Authentication scheme: "bearer" (default for non-tenant URLs) or "x-api-key"
+        (required for self-hosted API keys). Can also be set via COGNEE_API_AUTH_SCHEME env var.
     """
 
-    def __init__(self, api_url: str | None = None, api_token: str | None = None):
+    def __init__(
+        self,
+        api_url: str | None = None,
+        api_token: str | None = None,
+        api_auth_scheme: str | None = None,
+    ):
         self.api_url = api_url.rstrip("/") if api_url else None
         self.api_token = api_token
+        resolved_scheme = api_auth_scheme or os.environ.get("COGNEE_API_AUTH_SCHEME")
+        self.api_auth_scheme = resolved_scheme.lower().strip() if resolved_scheme else None
         self.use_api = bool(api_url)
 
         # Extract tenant ID from tenant URL pattern: tenant-<uuid>.*.cognee.ai
@@ -116,16 +126,20 @@ class CogneeClient:
     def _get_headers(self, include_content_type: bool = True) -> dict[str, str]:
         """Get headers for API requests.
 
-        Uses X-Api-Key + X-Tenant-Id for tenant APIs (cloud),
-        falls back to Bearer token for local/self-hosted backends.
+        Uses X-Api-Key (+ optional X-Tenant-Id) when api_auth_scheme is "x-api-key"
+        or for tenant APIs (cloud), and falls back to Bearer token when
+        api_auth_scheme is "bearer" or by default for local/self-hosted backends.
         """
         headers: dict[str, str] = {}
         if include_content_type:
             headers["Content-Type"] = "application/json"
         if self.api_token:
-            if self.tenant_id:
+            if self.api_auth_scheme == "x-api-key" or (
+                self.api_auth_scheme is None and self.tenant_id
+            ):
                 headers["X-Api-Key"] = self.api_token
-                headers["X-Tenant-Id"] = self.tenant_id
+                if self.tenant_id:
+                    headers["X-Tenant-Id"] = self.tenant_id
             else:
                 headers["Authorization"] = f"Bearer {self.api_token}"
         return headers
