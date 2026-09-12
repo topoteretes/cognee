@@ -54,6 +54,9 @@ jobs:
       - name: Install duckdb client
         run: pip install "duckdb>=1.1"
 
+      - name: Test aggregate extraction and privacy guards
+        run: python cognee/tests/unit/test_telemetry_aggregate_extract.py
+
       - name: Extract anonymized aggregates (only step with warehouse access)
         env:
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
