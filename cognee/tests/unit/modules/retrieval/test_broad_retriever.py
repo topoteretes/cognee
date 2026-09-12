@@ -1507,3 +1507,36 @@ async def test_distinct_names_are_counted_as_groups_and_keys_are_never_merged(mo
     assert result.total == 2  # the answer is the number of different responders
     assert "TOTAL: 2" in context and "number of different responder values" in context
     assert all("INC-" not in text for text in merge_inputs)  # keys never reach the merge step
+
+
+@pytest.mark.asyncio
+async def test_target_match_sees_passages_where_the_name_is_written(monkeypatch):
+    """Records name a poster by id; the name is declared only in a users file. The match
+    call is given the passages that write the name, so it can tie the id to it."""
+    from cognee.modules.retrieval.broad_retriever import _passages_naming
+
+    units = [
+        Unit(id="msg", text='{"user": "U03CCC", "text": "Anyone looked at the deploy?"}'),
+        Unit(
+            id="users", text='[{"id": "U03CCC", "name": "priya.n", "real_name": "Priya Natarajan"}]'
+        ),
+        Unit(id="other", text="Priyanka Natarajan is someone else; so is Natarajan Priya"),
+    ]
+    assert _passages_naming("Priya Natarajan", units) == [
+        '[{"id": "U03CCC", "name": "priya.n", "real_name": "Priya Natarajan"}]'
+    ]
+    assert _passages_naming("", units) == []
+
+    prompts = []
+
+    def respond(response_model, text_input):
+        prompts.append(text_input)
+        return TargetMatch(names=["U03CCC"])
+
+    _stub_llm(monkeypatch, respond)
+    retriever = BroadRetriever()
+    matched = await retriever.match_target("Priya Natarajan", ["U03CCC", "U06FFF"], [], {}, units)
+
+    assert matched == ["U03CCC"]
+    assert "Passages where the question's name is written:" in prompts[0]
+    assert '"real_name": "Priya Natarajan"' in prompts[0]

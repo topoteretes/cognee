@@ -66,6 +66,11 @@ BROAD_EVIDENCE_SHOWN = 50
 BROAD_TARGET_ITEMS_SHOWN = 1_000
 # Longest list appended to an answer that asks to list the counted items.
 BROAD_MAX_LISTED = 10_000
+# Passages where the question's name itself appears, shown to the target match: where
+# records name a person by an id, code or handle, the name is declared elsewhere (a
+# roster, a users file, a legend), and the match needs that declaration.
+BROAD_TARGET_PASSAGES = 6
+BROAD_TARGET_PASSAGE_CHARS = 160
 _ENTITY_DESCRIPTION_CHARS = 200
 
 
@@ -252,6 +257,24 @@ def _tail(text: str) -> str:
 def _loose_name(name: str) -> str:
     """A name keeps its letters and digits ("raj921" is not "921"); only @ and punctuation go."""
     return re.sub(r"[^0-9a-z]+", "", name.lstrip("@").lower())
+
+
+def _passages_naming(target: str, units: list["Unit"]) -> list[str]:
+    """Short passages, from distinct units, in which the target's name is written out."""
+    words = [re.escape(word) for word in target.lstrip("@").split()]
+    if not words:
+        return []
+    pattern = re.compile(r"(?<!\w)" + r"\W+".join(words) + r"(?!\w)", re.IGNORECASE)
+    passages: list[str] = []
+    for unit in units:
+        match = pattern.search(unit.text)
+        if match:
+            start = max(match.start() - BROAD_TARGET_PASSAGE_CHARS, 0)
+            end = match.end() + BROAD_TARGET_PASSAGE_CHARS
+            passages.append(" ".join(unit.text[start:end].split()))
+            if len(passages) >= BROAD_TARGET_PASSAGES:
+                break
+    return passages
 
 
 def _drop_attribute_named_groups(
@@ -645,7 +668,7 @@ class BroadRetriever(CompletionRetriever):
             # The question's name is matched against the names actually read, so a
             # nickname or partial name finds its person and an unknown name counts zero.
             target_names = await self.match_target(
-                plan.target, [name for name, _ in groups], aliases, canonical or {}
+                plan.target, [name for name, _ in groups], aliases, canonical or {}, units
             )
             items = [item for item in items if item.group in target_names]
         denominator = 0
@@ -894,13 +917,19 @@ class BroadRetriever(CompletionRetriever):
         return canonical
 
     async def match_target(
-        self, target: str, names: list[str], aliases: list[list[str]], canonical: dict[str, str]
+        self,
+        target: str,
+        names: list[str],
+        aliases: list[list[str]],
+        canonical: dict[str, str],
+        units: list[Unit] | None = None,
     ) -> list[str]:
         """The names read from the corpus that are the person or thing ``target`` names.
 
         Matched by code when the question's name is a spelling that was read, or
         one the text declares equal to it; a model call only resolves the rest
-        (a nickname, a translation), against the names actually present.
+        (a nickname, a translation, an id declared in another document), against
+        the names actually present and the passages that write the name out.
         """
         if not names:
             return []
@@ -924,6 +953,11 @@ class BroadRetriever(CompletionRetriever):
         stated = _stated_aliases(aliases)
         if stated:
             text_input += "\n\nStated in the text to be the same:\n" + "\n".join(stated)
+        passages = _passages_naming(target, units or [])
+        if passages:
+            text_input += "\n\nPassages where the question's name is written:\n" + "\n".join(
+                f"- {passage}" for passage in passages
+            )
         result = await LLMGateway.acreate_structured_output(
             text_input=text_input,
             system_prompt=_read_prompt("broad_match_target.txt"),
