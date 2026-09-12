@@ -7,6 +7,11 @@ from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
+from cognee.modules.retrieval.broad_retriever import (
+    BROAD_MAX_PARALLEL_CALLS,
+    BROAD_SHARD_TOKENS,
+    BroadRetriever,
+)
 
 # Retrievers
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
@@ -275,6 +280,21 @@ async def get_search_type_retriever_instance(
                 "neighborhood_depth": neighborhood_depth,
                 "neighborhood_seed_top_k": neighborhood_seed_top_k,
                 "include_references": include_references,
+            },
+        ),
+        # No top_k: BROAD counts over every unit of the dataset (SDK-324).
+        SearchType.BROAD: (
+            BroadRetriever,
+            {
+                "system_prompt_path": system_prompt_path,
+                "system_prompt": system_prompt,
+                "session_id": session_id,
+                "response_model": retriever_specific_config.get("response_model", str),
+                "include_references": include_references,
+                "shard_tokens": retriever_specific_config.get("shard_tokens", BROAD_SHARD_TOKENS),
+                "max_parallel_calls": retriever_specific_config.get(
+                    "max_parallel_calls", BROAD_MAX_PARALLEL_CALLS
+                ),
             },
         ),
         SearchType.GRAPH_SUMMARY_COMPLETION: (
