@@ -167,6 +167,33 @@ async def test_a_mid_document_chunk_carries_the_first_line_and_the_previous_chun
     assert len(seen) == 1 and "context only]\nEpisode 21" not in seen[0]  # c0 is in the same call
 
 
+@pytest.mark.asyncio
+async def test_a_hung_reading_call_is_retried_once_then_fails(monkeypatch):
+    """A single stalled call held a question for 84 and then 168 minutes. A call that
+    exceeds the timeout is retried once; a second timeout ends the search."""
+    import asyncio as aio
+
+    attempts = []
+
+    async def fake(text_input, system_prompt, response_model, **kwargs):
+        attempts.append(1)
+        if len(attempts) == 1:
+            await aio.sleep(10)  # hangs on the first attempt
+        return ShardItems(items=[ExtractedItem(unit=0, evidence="x")])
+
+    monkeypatch.setattr(broad_retriever.LLMGateway, "acreate_structured_output", fake)
+
+    result = await BroadRetriever(call_timeout=0.05).count_by_reading(_plan(), _units(1))
+    assert result.total == 1 and len(attempts) == 2
+
+    async def always_hangs(text_input, system_prompt, response_model, **kwargs):
+        await aio.sleep(10)
+
+    monkeypatch.setattr(broad_retriever.LLMGateway, "acreate_structured_output", always_hangs)
+    with pytest.raises(TimeoutError, match="timed out twice"):
+        await BroadRetriever(call_timeout=0.05).count_by_reading(_plan(), _units(1))
+
+
 # --- planning --------------------------------------------------------------------
 
 
@@ -882,6 +909,26 @@ async def test_keyed_items_sharing_a_templated_quote_in_one_piece_all_count(monk
     )
 
     assert result.total == 52
+
+
+@pytest.mark.asyncio
+async def test_the_extract_spec_asks_for_the_groups_value_never_a_description(monkeypatch):
+    """Read whole, dense chunks returned "an emergency room nurse" as a guest: the
+    appositive that follows a name. The spec names the value and rules out a description."""
+    seen = []
+
+    def respond(model, text_input):
+        seen.append(text_input)
+        return ShardItems(items=[])
+
+    _stub_llm(monkeypatch, respond)
+
+    await BroadRetriever().count_by_reading(_plan(group_by="guest"), _units(1))
+
+    spec = seen[0]
+    assert "Grouping attribute (group): guest" in spec
+    assert 'never the word "guest" itself' in spec
+    assert "never a description of the same thing" in spec
 
 
 @pytest.mark.asyncio

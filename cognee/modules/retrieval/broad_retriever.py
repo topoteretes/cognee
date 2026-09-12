@@ -783,8 +783,9 @@ class BroadRetriever(CompletionRetriever):
             f"Identity attribute (key): {plan.dedup_key or 'none'}\n"
             f"Grouping attribute (group): {plan.group_by or 'none'}"
             + (
-                f" — write its value for this item (a name, a place, a category), never "
-                f'the word "{plan.group_by}" itself\n'
+                f" — write its value for this item (a name, a place, a category) exactly as "
+                f'written, never the word "{plan.group_by}" itself and never a description '
+                f"of the same thing (a person's role, a place's region): the name\n"
                 if plan.group_by
                 else "\n"
             )
