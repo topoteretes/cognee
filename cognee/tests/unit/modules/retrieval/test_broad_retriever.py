@@ -769,6 +769,19 @@ async def test_merged_names_are_tallied_under_the_spelling_the_corpus_uses_most(
     assert result.groups == [("Ciaran Rojas", 5), ("Yusuf Demir", 1)]
 
 
+def test_a_label_form_never_stands_in_for_a_name():
+    """A transcript writes "ORTIZ" on 50 turns and "Dr. Lena Ortiz" once; a handle is used
+    on every row. The tally reads the name, however rarely it is spelled out."""
+    from collections import Counter
+
+    from cognee.modules.retrieval.broad_retriever import _canonical_spelling
+
+    assert _canonical_spelling(["ORTIZ", "Dr. Lena Ortiz"], Counter(ORTIZ=50)) == "Dr. Lena Ortiz"
+    assert _canonical_spelling(["@ann", "Ann Lee"], Counter({"@ann": 9, "Ann Lee": 1})) == "Ann Lee"
+    assert _canonical_spelling(["REID", "@reid"], Counter(REID=3)) == "REID"
+    assert _canonical_spelling(["PR-7", "pr-7"], Counter({"PR-7": 2})) == "pr-7"  # only the capitals form is a label
+
+
 @pytest.mark.asyncio
 async def test_the_answer_states_how_many_listed_entries_dedup_removed(monkeypatch):
     """54 drawn matches once shrank to 25 in silence. The context now says how many

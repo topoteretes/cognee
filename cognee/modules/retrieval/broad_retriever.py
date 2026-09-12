@@ -348,10 +348,18 @@ def _is_wording_key(dedup_key: str) -> bool:
     return bool(wording) and not identifier
 
 
+def _is_label(name: str) -> bool:
+    """A handle or an all-capitals form ("@ann", "ORTIZ:") is how a name is rendered in a
+    header or a speaker label, not a spelling of it."""
+    return name.startswith("@") or (name.isupper() and any(c.isalpha() for c in name))
+
+
 def _canonical_spelling(names: list[str], used: Counter) -> str:
-    """The spelling a group of variants is tallied under: the one the corpus uses most
-    (so a nickname does not stand in for the name); on a tie, no @, then the longest."""
-    return min(names, key=lambda name: (-used[name], name.startswith("@"), -len(name), name))
+    """The spelling a group of variants is tallied under: a name over a label form, then
+    the one the corpus uses most (so a nickname does not stand in for the name), then the
+    longest. A transcript writes "ORTIZ:" on every turn and "Dr. Lena Ortiz" once; the
+    tally reads the name."""
+    return min(names, key=lambda name: (_is_label(name), -used[name], -len(name), name))
 
 
 class BroadRetriever(CompletionRetriever):
