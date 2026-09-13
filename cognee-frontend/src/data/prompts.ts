@@ -63,7 +63,7 @@ Content-Type: application/json
 Body: {"query": "<user question>", "session_id": "<session-id>"}
 \`\`\`
 
-For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION (default), GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
+The query is auto-routed to a search strategy by default. For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION, GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
 
 ### List datasets
 \`\`\`
@@ -135,7 +135,7 @@ curl -X POST $COGNEE_BASE_URL/api/v1/recall \\
   -d '{"query": "<user question>", "session_id": "<session-id>"}'
 \`\`\`
 
-For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION (default), GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
+The query is auto-routed to a search strategy by default. For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION, GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
 
 ### List datasets
 \`\`\`bash
@@ -206,7 +206,7 @@ curl -X POST $COGNEE_BASE_URL/api/v1/recall \\
   -d '{"query": "<user question>", "session_id": "<session-id>"}'
 \`\`\`
 
-For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION (default), GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
+The query is auto-routed to a search strategy by default. For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION, GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
 
 ## Behavior Guidelines
 1. If a Cognee plugin or MCP server is active, memory is automatic — do NOT call the API manually, and do NOT narrate routine recalls/saves. The rest applies only to the HTTP-API fallback.
@@ -282,7 +282,7 @@ curl -X POST $COGNEE_BASE_URL/api/v1/recall \\
   -d '{"query": "<user question>", "session_id": "<session-id>"}'
 \`\`\`
 
-For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION (default), GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
+The query is auto-routed to a search strategy by default. For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION, GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
 
 ### List datasets
 \`\`\`bash
@@ -360,7 +360,7 @@ curl -X POST $COGNEE_BASE_URL/api/v1/recall \\
   -d '{"query": "<user question>", "session_id": "<session-id>"}'
 \`\`\`
 
-For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION (default), GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
+The query is auto-routed to a search strategy by default. For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION, GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
 
 ### List datasets
 \`\`\`bash
@@ -431,7 +431,7 @@ curl -X POST $COGNEE_BASE_URL/api/v1/recall \\
   -d '{"query": "<user question>", "session_id": "<session-id>"}'
 \`\`\`
 
-For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION (default), GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
+The query is auto-routed to a search strategy by default. For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION, GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
 
 ### List datasets
 \`\`\`bash
