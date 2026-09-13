@@ -180,11 +180,12 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
         from cognee.infrastructure.files.utils.local_path_safety import (
             ALLOWED_LOCAL_FILE_ROOTS_ENV,
         )
+        from cognee.modules.presort.local_paths import get_presort_roots
 
         existing = os.environ.get(ALLOWED_LOCAL_FILE_ROOTS_ENV)
-        if not existing:
-            return  # An unset allowlist already permits all local paths.
-        roots = existing.split(os.pathsep)
+        roots = (
+            existing.split(os.pathsep) if existing else [str(root) for root in get_presort_roots()]
+        )
         roots.extend(str(Path(path).expanduser()) for path in paths)
         os.environ[ALLOWED_LOCAL_FILE_ROOTS_ENV] = os.pathsep.join(dict.fromkeys(roots))
 

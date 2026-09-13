@@ -424,11 +424,9 @@ async def test_graph_only_apply_preserves_database_options(sample_report):
 def test_report_path_must_be_allowed_before_file_probe(tmp_path, monkeypatch):
     from pathlib import Path
 
-    from cognee.infrastructure.files.utils import local_path_safety
+    from cognee.modules.presort import local_paths
 
-    monkeypatch.setattr(
-        local_path_safety, "get_allowed_local_file_roots", lambda: (tmp_path / "allowed",)
-    )
+    monkeypatch.setattr(local_paths, "get_presort_roots", lambda: (tmp_path / "allowed",))
     with (
         patch.object(Path, "is_file") as is_file,
         pytest.raises(ValueError, match="outside allowed roots"),
@@ -440,12 +438,10 @@ def test_report_path_must_be_allowed_before_file_probe(tmp_path, monkeypatch):
 def test_auto_presort_checks_allowlist_before_probing_folder(tmp_path, monkeypatch):
     from pathlib import Path
 
-    from cognee.infrastructure.files.utils import local_path_safety
+    from cognee.modules.presort import local_paths
 
     monkeypatch.setenv("PRESORT_FOLDERS_ENABLED", "true")
-    monkeypatch.setattr(
-        local_path_safety, "get_allowed_local_file_roots", lambda: (tmp_path / "allowed",)
-    )
+    monkeypatch.setattr(local_paths, "get_presort_roots", lambda: (tmp_path / "allowed",))
     with patch.object(Path, "is_dir") as is_dir:
         assert not remember_module._should_auto_presort(
             tmp_path / "outside", "main_dataset", None, None, {}

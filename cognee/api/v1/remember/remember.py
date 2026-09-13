@@ -149,10 +149,10 @@ def _should_auto_presort(data, dataset_name, dataset_id, session_id, kwargs) -> 
     text = str(data)
     if text.startswith(("s3://", "http://", "https://", "file://")):
         return False
-    from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+    from cognee.modules.presort.local_paths import resolve_presort_path
 
     try:
-        path = resolve_local_path(text, must_exist=True)
+        path = resolve_presort_path(text, must_exist=True)
         if not path.is_dir():
             return False
     except (OSError, ValueError):
@@ -182,9 +182,9 @@ def _maybe_presort_report(data) -> "PresortReport | None":
     if looks_like_presort_report(data):
         return PresortReport.from_json(data) if isinstance(data, dict) else data
     if isinstance(data, (str, Path)) and str(data).endswith(REPORT_FILE_SUFFIX):
-        from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+        from cognee.modules.presort.local_paths import resolve_presort_path
 
-        candidate = resolve_local_path(data)
+        candidate = resolve_presort_path(data)
         if candidate.is_file():
             return PresortReport.from_json(candidate)
     return None

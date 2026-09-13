@@ -22,6 +22,7 @@ from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_authenticated_user
 
 forget_pkg = importlib.import_module("cognee.api.v1.forget")
+forget_router = importlib.import_module("cognee.api.v1.forget.routers.get_forget_router")
 
 
 @pytest.fixture(scope="module")
@@ -49,7 +50,7 @@ def test_unknown_dataset_name_returns_404(client):
     """forget(dataset=<unknown name>) must surface as 404, not a 500 NoneType crash."""
     with (
         patch.object(forget_pkg, "forget", new_callable=AsyncMock) as mock_forget,
-        patch("cognee.api.v1.forget.routers.get_forget_router.send_telemetry"),
+        patch.object(forget_router, "send_telemetry"),
     ):
         mock_forget.side_effect = DatasetNotFoundError(
             message="Dataset 'does-not-exist' not found or not accessible."
@@ -66,7 +67,7 @@ def test_permission_denied_no_longer_masked_as_500(client):
     """PermissionDeniedError carries status_code=403 and must reach the client as 403."""
     with (
         patch.object(forget_pkg, "forget", new_callable=AsyncMock) as mock_forget,
-        patch("cognee.api.v1.forget.routers.get_forget_router.send_telemetry"),
+        patch.object(forget_router, "send_telemetry"),
     ):
         mock_forget.side_effect = PermissionDeniedError(
             message="You do not have permission to delete this dataset."

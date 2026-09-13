@@ -182,13 +182,13 @@ class PresortReport(BaseModel):
     @classmethod
     def from_json(cls, source: str | Path | dict) -> "PresortReport":
         """Load a report from a dict, a JSON string, or a path to a report file."""
-        from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+        from cognee.modules.presort.local_paths import resolve_presort_path
 
         if isinstance(source, dict):
             return cls.model_validate(source)
         text = str(source)
         if isinstance(source, Path) or not text.lstrip().startswith(("{", "[")):
-            candidate = resolve_local_path(source, must_exist=True)
+            candidate = resolve_presort_path(source, must_exist=True)
             text = candidate.read_text(encoding="utf-8")
         return cls.model_validate(json.loads(text))
 

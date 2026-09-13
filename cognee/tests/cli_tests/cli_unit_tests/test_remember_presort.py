@@ -54,13 +54,17 @@ def test_conflicting_modes_rejected(command_parser, argv):
         parser.parse_args(argv)
 
 
-def test_allow_root_preserves_unrestricted_default(command_parser, monkeypatch, tmp_path):
+def test_allow_root_extends_presort_defaults(command_parser, monkeypatch, tmp_path):
     import os
 
     command, _ = command_parser
     monkeypatch.delenv("COGNEE_ALLOWED_LOCAL_FILE_ROOTS", raising=False)
     command._extend_allowed_roots([tmp_path])
-    assert "COGNEE_ALLOWED_LOCAL_FILE_ROOTS" not in os.environ
+    from pathlib import Path
+
+    roots = os.environ["COGNEE_ALLOWED_LOCAL_FILE_ROOTS"].split(os.pathsep)
+    assert str(Path.cwd()) in roots
+    assert str(tmp_path) in roots
 
 
 def test_apply_report_can_extend_existing_allowlist(command_parser, monkeypatch, tmp_path):

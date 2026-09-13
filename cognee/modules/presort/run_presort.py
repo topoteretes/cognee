@@ -16,10 +16,10 @@ from pathlib import Path
 
 from cognee.infrastructure.files.utils.local_path_safety import (
     ALLOWED_LOCAL_FILE_ROOTS_ENV,
-    resolve_local_path,
 )
 from cognee.modules.graph_models import GraphSchemaSpec
 from cognee.modules.presort.llm_availability import LLM_MISSING_SCAN_WARNING, llm_is_configured
+from cognee.modules.presort.local_paths import resolve_presort_path
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("presort")
@@ -39,7 +39,7 @@ def _resolve_root(data_path: str | Path | list) -> Path:
         raise ValueError("presort expects a folder path (str or Path).")
 
     try:
-        root = resolve_local_path(data_path, must_exist=True)
+        root = resolve_presort_path(data_path, must_exist=True)
     except ValueError:
         raise ValueError(
             "Path is outside the allowed local file roots. Add the folder to "
