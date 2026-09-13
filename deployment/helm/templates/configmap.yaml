@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cognee.fullname" . }}-config
+  labels:
+    {{- include "cognee.labels" . | nindent 4 }}
+data:
+  ENV: {{ .Values.cognee.env | quote }}
+  PYTHONPATH: "."
+  DB_PROVIDER: "postgres"
+  DB_HOST: {{ include "cognee.postgres.fullname" . }}
+  DB_PORT: {{ .Values.postgres.port | quote }}
+  DB_NAME: {{ .Values.postgres.auth.database | quote }}
+  DB_USERNAME: {{ .Values.postgres.auth.username | quote }}
+  VECTOR_DB_PROVIDER: {{ .Values.cognee.vectorDbProvider | quote }}
+  LLM_PROVIDER: {{ .Values.cognee.llmProvider | quote }}
+  LLM_MODEL: {{ .Values.cognee.llmModel | quote }}
+  ENABLE_BACKEND_ACCESS_CONTROL: {{ .Values.cognee.enableBackendAccessControl | quote }}

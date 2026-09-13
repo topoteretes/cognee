@@ -16,7 +16,7 @@ Slack retry, never a better outcome for a payload this app doesn't act on.
 
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import parse_qs
 
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
@@ -26,6 +26,7 @@ from cognee.modules.integrations.slack.handle_cognee_ask import (
     handle_cognee_ask_discard,
     handle_cognee_ask_share,
 )
+from cognee.modules.integrations.slack.handle_slack_link import NOT_LINKED_MESSAGE
 from cognee.modules.integrations.slack.persistence import (
     get_by_team,
     is_active,
@@ -106,13 +107,7 @@ async def _handle_remember_this(payload: dict[str, Any]) -> None:
     # installer" as a stopgap).
     owner_user_id = await resolve_owner_user_id(credential, team_id, invoking_slack_user_id)
     if owner_user_id is None:
-        await post_to_response_url(
-            response_url,
-            _ephemeral(
-                "Link your own Cognee account first: `/cognee-link <api_key>` "
-                "(create a key from your Cognee account's API Keys settings)."
-            ),
-        )
+        await post_to_response_url(response_url, _ephemeral(NOT_LINKED_MESSAGE))
         return
 
     message = payload.get("message") or {}
@@ -123,8 +118,8 @@ async def _handle_remember_this(payload: dict[str, Any]) -> None:
         )
         return
 
-    channel_name: Optional[str] = (payload.get("channel") or {}).get("name")
-    author_id: Optional[str] = message.get("user")
+    channel_name: str | None = (payload.get("channel") or {}).get("name")
+    author_id: str | None = message.get("user")
 
     try:
         await remember_message(
@@ -139,7 +134,7 @@ async def _handle_remember_this(payload: dict[str, Any]) -> None:
             ),
         )
         return
-    except Exception:  # noqa: BLE001 - any remember failure must degrade to a chat message, not a crash
+    except Exception:  # any remember failure must degrade to a chat message, not a crash
         logger.exception("Failed to remember a Slack message for team %s", team_id)
         await post_to_response_url(
             response_url, _ephemeral("Could not save that message. Please try again.")

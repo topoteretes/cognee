@@ -445,7 +445,7 @@ def sleep_and_retry_sync(
                     )
                     logger.warning(
                         f"Rate limit hit, retrying in {backoff_time:.2f}s "
-                        f"(attempt {attempt}/{max_retries}): {str(e)}"
+                        f"(attempt {attempt}/{max_retries}): {e!s}"
                     )
                     time.sleep(backoff_time)
 
@@ -530,7 +530,7 @@ def sleep_and_retry_async(
                     )
                     logger.warning(
                         f"Rate limit hit, retrying in {backoff_time:.2f}s "
-                        f"(attempt {attempt}/{max_retries}): {str(e)}"
+                        f"(attempt {attempt}/{max_retries}): {e!s}"
                     )
                     await asyncio.sleep(backoff_time)
 

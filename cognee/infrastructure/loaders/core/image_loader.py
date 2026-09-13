@@ -1,14 +1,15 @@
 import asyncio
 import os
 from functools import lru_cache
-from typing import Any, Optional
+from typing import Any
 
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
 from cognee.infrastructure.llm.config import get_llm_config
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
-from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
+from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface, LoaderResult
+from cognee.infrastructure.loaders.store_derived_text import store_derived_text
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
@@ -78,12 +79,11 @@ class ImageLoader(LoaderInterface):
 
     def can_handle(self, extension: str, mime_type: str) -> bool:
         """Check if file can be handled by this loader."""
-        if extension in self.supported_extensions and mime_type in self.supported_mime_types:
-            return True
+        return bool(
+            extension in self.supported_extensions and mime_type in self.supported_mime_types
+        )
 
-        return False
-
-    async def load(self, file_path: str, **kwargs: Any) -> str:
+    async def load(self, file_path: str, **kwargs: Any) -> "str | LoaderResult":
         """
         Transcribe the image and return the extracted text.
 
@@ -166,7 +166,7 @@ class ImageLoader(LoaderInterface):
         data_root_directory = storage_config["data_root_directory"]
         storage = get_file_storage(data_root_directory)
 
-        full_file_path = await storage.store(storage_file_name, combined_content)
+        result = await store_derived_text(storage, storage_file_name, combined_content)
 
         # If dedup is enabled, store the hash for future comparison
         if (
@@ -175,7 +175,7 @@ class ImageLoader(LoaderInterface):
         ):
             self._store_hash(image_hash)
 
-        return full_file_path
+        return result
 
     def _ocr_enabled(self) -> bool:
         """Whether OCR extraction is enabled via the IMAGE_OCR_ENABLED env flag."""
@@ -223,8 +223,8 @@ class ImageLoader(LoaderInterface):
         try:
             # RapidOCR is blocking CPU work; offload it so the event loop stays free.
             ocr_result, _ = await asyncio.to_thread(engine, file_path)
-        except Exception as e:
-            logger.error(f"OCR failed for {file_path}: {e}")
+        except Exception:
+            logger.exception(f"OCR failed for {file_path}")
             return ""
         if not ocr_result:
             return ""
@@ -239,7 +239,7 @@ class ImageLoader(LoaderInterface):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _extract_exif_metadata(file_path: str) -> Optional[str]:
+    def _extract_exif_metadata(file_path: str) -> str | None:
         """
         Extract human-readable EXIF metadata from an image file.
 
@@ -254,8 +254,15 @@ class ImageLoader(LoaderInterface):
 
         try:
             with Image.open(file_path) as img:
-                exif_data = img._getexif()
+                # _getexif exists only on the JPEG plugin; other formats fall through to None
+                # exactly as the AttributeError did before.
+                get_exif = getattr(img, "_getexif", None)
+                exif_data = get_exif() if callable(get_exif) else None
         except Exception:
+            logger.debug(
+                "Falling back to None after error in ImageLoader._extract_exif_metadata",
+                exc_info=True,
+            )
             return None
 
         if exif_data is None:
@@ -302,7 +309,7 @@ class ImageLoader(LoaderInterface):
     _seen_hashes: set[str] = set()
 
     @staticmethod
-    def _compute_perceptual_hash(file_path: str) -> Optional[str]:
+    def _compute_perceptual_hash(file_path: str) -> str | None:
         """
         Compute a 64-bit perceptual (difference) hash for the image using
         only PIL — no external ``imagehash`` dependency required.
@@ -318,6 +325,10 @@ class ImageLoader(LoaderInterface):
             with Image.open(file_path) as img:
                 return _dhash(img)
         except Exception:
+            logger.debug(
+                "Falling back to None after error in ImageLoader._compute_perceptual_hash",
+                exc_info=True,
+            )
             return None
 
     @classmethod
@@ -348,7 +359,7 @@ def _dhash(image, hash_size: int = 8) -> str:
     """
     from PIL import Image  # ty: ignore[unresolved-import]
 
-    image = image.convert("L").resize((hash_size + 1, hash_size), Image.LANCZOS)
+    image = image.convert("L").resize((hash_size + 1, hash_size), Image.Resampling.LANCZOS)
     pixels = list(image.getdata())
     # pixels now has (hash_size+1) * hash_size entries, row-major
     bits: list[str] = []
@@ -366,14 +377,14 @@ def _dhash(image, hash_size: int = 8) -> str:
     return "".join(hex_digits)
 
 
-def _format_gps_info(gps_dict: dict) -> Optional[str]:
+def _format_gps_info(gps_dict: dict) -> str | None:
     """Format GPSInfo dict (tag 34853) into human-readable coordinates."""
     try:
         from PIL.ExifTags import GPSTAGS  # ty: ignore[unresolved-import]
     except ImportError:
         return None
 
-    def _to_decimal(values, ref: str) -> Optional[float]:
+    def _to_decimal(values, ref: str) -> float | None:
         """Convert (degrees, minutes, seconds) tuple to decimal degrees."""
         if not values or len(values) < 3:
             return None
@@ -390,6 +401,7 @@ def _format_gps_info(gps_dict: dict) -> Optional[str]:
         lat = _to_decimal(gps_dict.get(2), gps_dict.get(1, "N"))  # GPSLatitude, GPSLatitudeRef
         lon = _to_decimal(gps_dict.get(4), gps_dict.get(3, "E"))  # GPSLongitude, GPSLongitudeRef
     except Exception:
+        logger.debug("Falling back to None after error in _format_gps_info", exc_info=True)
         return None
 
     parts = []

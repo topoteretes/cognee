@@ -7,8 +7,8 @@ are monkeypatched so each test asserts exactly which of them fire per mode.
 
 import asyncio
 import importlib
+from collections.abc import AsyncIterator
 from types import SimpleNamespace
-from typing import AsyncIterator
 from uuid import uuid4
 
 import pytest
@@ -93,7 +93,7 @@ def install_sinks(monkeypatch):
                 await executable(kwargs.get("data"))
         return {"ds": SimpleNamespace(pipeline_run_id="run-123")}
 
-    async def fake_add_data_points(data_points, custom_edges=None, ctx=None):
+    async def fake_add_data_points(data_points, custom_edges=None, ctx=None, graph_only=False):
         sinks.graph_flushes.append({"nodes": list(data_points), "edges": list(custom_edges or [])})
         return data_points
 

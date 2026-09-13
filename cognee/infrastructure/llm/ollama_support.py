@@ -1,5 +1,5 @@
 import re
-from typing import Optional
+
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("ollama_support")
@@ -26,8 +26,7 @@ def normalize_model_name(model_name: str) -> str:
         return ""
     normalized = model_name.strip().lower()
     # Remove provider prefix (e.g., "ollama/")
-    if normalized.startswith("ollama/"):
-        normalized = normalized[len("ollama/") :]
+    normalized = normalized.removeprefix("ollama/")
     return normalized
 
 
@@ -80,7 +79,7 @@ def emit_warning(classification: str, model_name: str) -> None:
         )
 
 
-def check_model_support(model_name: Optional[str]) -> None:
+def check_model_support(model_name: str | None) -> None:
     """Check the model name support matrix and emit an advisory warning if necessary."""
     if not model_name:
         return

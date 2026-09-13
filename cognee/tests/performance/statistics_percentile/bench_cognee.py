@@ -20,12 +20,30 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import os
 import sys
 import time
 from pathlib import Path
 
 from dotenv import dotenv_values
+
+# Mock loading/replay lives in the shared mock-ingestion module
+# (cognee/tests/utils/mock_ingestion) so other suites — e.g. the large-scale
+# migration release test — build systems the exact same way. The private
+# aliases keep this file's call sites and capture_mock.py's imports stable.
+from cognee.tests.utils.mock_ingestion import (
+    install_mocks as _install_mocks,
+)
+from cognee.tests.utils.mock_ingestion import (
+    load_memories,
+    memory_to_text,
+)
+from cognee.tests.utils.mock_ingestion import (
+    load_mock_data as _load_mock_data,
+)
+
+logger = logging.getLogger(__name__)
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
 
@@ -37,6 +55,17 @@ DEFAULT_EMBEDDING_PROVIDER = "openai"
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 DEFAULT_EMBEDDING_DIMS = 1536
 DATASET_NAME = "bench_memories"
+SEARCH_QUERY = "What is in the document"
+
+# Search types timed in Phase 3, in run order: `(metric suffix, SearchType name)`.
+# Each gets its own metric so the nightly report can compare retrieval
+# strategies side by side — GRAPH_COMPLETION is the default graph traversal,
+# HYBRID_COMPLETION the chunk+entity blend. Both the local and the cloud
+# benchmark iterate this list, so the two modes always report the same types.
+BENCHMARKED_SEARCH_TYPES = (
+    ("graph_completion", "GRAPH_COMPLETION"),
+    ("hybrid_completion", "HYBRID_COMPLETION"),
+)
 
 ENV_FILE = Path(__file__).resolve().parents[4] / ".env"
 
@@ -102,74 +131,6 @@ def _resolve_cloud_config(args: argparse.Namespace) -> dict:
 # ── Mock LLM / Embedding ────────────────────────────────────────────────────
 
 
-def _load_mock_data(path: Path) -> dict:
-    with open(path) as f:
-        raw = json.load(f)
-    by_title: dict[str, dict] = {}
-    for entry in raw["memories"]:
-        by_title[entry["title"]] = entry
-    return by_title
-
-
-def _install_mocks(mock_data: dict[str, dict], mock_embeddings: bool = True) -> None:
-    """Mock the LLM (structured-output replay) and, by default, embeddings via
-    cognee's built-in MOCK_EMBEDDING switch.
-
-    Pass ``mock_embeddings=False`` when the document-embedding replay
-    (--mock-document-embeddings) manages embeddings instead.
-    """
-    import importlib
-
-    from cognee.infrastructure.llm.LLMGateway import LLMGateway
-    from cognee.shared.data_models import KnowledgeGraph, SummarizedContent
-
-    emb_mod = importlib.import_module(
-        "cognee.infrastructure.databases.vector.embeddings.get_embedding_engine"
-    )
-    vec_mod = importlib.import_module("cognee.infrastructure.databases.vector.create_vector_engine")
-
-    def _match_memory(text_input: str) -> dict | None:
-        for title, entry in mock_data.items():
-            if title in text_input:
-                return entry
-        return None
-
-    @staticmethod
-    async def _mock_acreate(text_input, system_prompt, response_model, **kwargs):
-        entry = _match_memory(text_input)
-
-        if response_model is KnowledgeGraph or (
-            isinstance(response_model, type) and issubclass(response_model, KnowledgeGraph)
-        ):
-            if entry:
-                return KnowledgeGraph(**entry["knowledge_graph"])
-            return KnowledgeGraph(nodes=[], edges=[])
-
-        if response_model is SummarizedContent or (
-            isinstance(response_model, type) and issubclass(response_model, SummarizedContent)
-        ):
-            if entry:
-                return SummarizedContent(**entry["summary"])
-            return SummarizedContent(summary="Mock summary.", description="")
-
-        return response_model()
-
-    LLMGateway.acreate_structured_output = _mock_acreate
-
-    if mock_embeddings:
-        # Mock embeddings via cognee's built-in MOCK_EMBEDDING switch instead of
-        # monkey-patching the engine. The real embedding engine is still constructed,
-        # so it keeps its real tokenizer — chunk boundaries are decided by
-        # embedding_engine.tokenizer.count_tokens() in chunk_by_sentence, and a stub
-        # without a tokenizer would silently re-chunk the text (one-token-per-word),
-        # shifting boundaries and breaking title-substring matching for multi-chunk
-        # documents. With the flag set, embed_text skips the API and returns zero
-        # vectors. Clear cached engines so the flag takes effect.
-        os.environ["MOCK_EMBEDDING"] = "true"
-    emb_mod.create_embedding_engine.cache_clear()
-    vec_mod._create_vector_engine.cache_clear()
-
-
 # Stats for --mock-document-embeddings, surfaced in the results JSON:
 # how many embed inputs were served from the store vs embedded live.
 _DOC_EMBED_STATS = {"served": 0, "embedded_live": 0}
@@ -229,26 +190,6 @@ def _install_document_embedding_mock(embeddings_file: Path) -> None:
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def load_memories(path: Path) -> list[dict]:
-    with open(path) as f:
-        memories = json.load(f)
-    if not isinstance(memories, list) or not memories:
-        sys.exit(f"Error: {path} must contain a non-empty JSON array")
-    for i, m in enumerate(memories):
-        if "content" not in m:
-            sys.exit(f"Error: memory {i} is missing a 'content' key")
-    return memories
-
-
-def memory_to_text(mem: dict) -> str:
-    title = mem.get("title", "Untitled")
-    content = mem["content"]
-    refs = mem.get("references", "none")
-    if isinstance(refs, list):
-        refs = ", ".join(refs) if refs else "none"
-    return f"Title: {title}\n\n{content}\n\nReferences: {refs}"
-
-
 # ── Benchmark ────────────────────────────────────────────────────────────────
 
 
@@ -257,12 +198,12 @@ async def run_benchmark(
     *,
     config: dict,
 ) -> dict:
-    import cognee
-
     # Register community adapters before any engine is created. Comma-separated
     # module names; a module-level register() is called if present (some
     # adapters register on import alone).
     import importlib
+
+    import cognee
 
     for module_name in filter(None, os.environ.get("COGNEE_REGISTER_ADAPTERS", "").split(",")):
         module = importlib.import_module(module_name)
@@ -304,14 +245,14 @@ async def run_benchmark(
         "db_setup": "success",
         "add": "success",
         "cognify": "success",
-        "search": "success",
         "dataset_delete": "success",
+        **{f"search_{key}": "success" for key, _ in BENCHMARKED_SEARCH_TYPES},
     }
     t_prune = 0.0
     t_db_setup = 0.0
     t_add = 0.0
     t_cognify = 0.0
-    t_search = 0.0
+    t_search = {key: 0.0 for key, _ in BENCHMARKED_SEARCH_TYPES}
     t_dataset_delete = 0.0
 
     # ── Prune (clean slate) ──────────────────────────────────────────────
@@ -323,6 +264,7 @@ async def run_benchmark(
         t_prune = time.time() - t_prune_start
         print(f"  Prune completed in {t_prune:.2f}s")
     except Exception as e:
+        logger.debug("Ignoring exception in run_benchmark", exc_info=True)
         t_prune = time.time() - t_prune_start
         status["prune"] = f"failed: {e}"
         print(f"  Prune FAILED: {e}")
@@ -335,6 +277,7 @@ async def run_benchmark(
         await setup()
         t_db_setup = time.time() - t_db_setup_start
     except Exception as e:
+        logger.debug("Ignoring exception in run_benchmark", exc_info=True)
         t_db_setup = time.time() - t_db_setup_start
         status["db_setup"] = f"failed: {e}"
         print(f"  DB setup FAILED: {e}")
@@ -348,6 +291,7 @@ async def run_benchmark(
         await cognee.add(text_list, dataset_name=DATASET_NAME)
         t_add = time.time() - t_add_start
     except Exception as e:
+        logger.debug("Ignoring exception in run_benchmark", exc_info=True)
         t_add = time.time() - t_add_start
         status["add"] = f"failed: {e}"
         print(f"  Add FAILED: {e}")
@@ -359,6 +303,7 @@ async def run_benchmark(
         await cognee.cognify(data_per_batch=n, chunks_per_batch=10000)
         t_cognify = time.time() - t_cognify_start
     except Exception as e:
+        logger.debug("Ignoring exception in run_benchmark", exc_info=True)
         t_cognify = time.time() - t_cognify_start
         status["cognify"] = f"failed: {e}"
         print(f"  Cognify FAILED: {e}")
@@ -366,15 +311,27 @@ async def run_benchmark(
     t_total = t_add + t_cognify
 
     # ── Phase 3: cognee.search() ─────────────────────────────────────────
-    print("\nPhase 3: Running search queries...")
-    try:
-        t_q_start = time.time()
-        await cognee.search(query_text="What is in the document", only_context=True)
-        t_search = time.time() - t_q_start
-    except Exception as e:
-        t_search = time.time() - t_q_start
-        status["search"] = f"failed: {e}"
-        print(f"  Search FAILED: {e}")
+    # One timing per benchmarked search type. `only_context=True` keeps every
+    # number a measure of retrieval rather than answer generation, so the types
+    # stay comparable to each other and to the previous single-search metric.
+    if not _ingest_succeeded(status):
+        _skip_search_phase(status, t_search)
+    else:
+        print("\nPhase 3: Running search queries...")
+        for metric_key, search_type in BENCHMARKED_SEARCH_TYPES:
+            t_q_start = time.time()
+            try:
+                await cognee.search(
+                    query_text=SEARCH_QUERY,
+                    query_type=cognee.SearchType[search_type],
+                    only_context=True,
+                )
+                t_search[metric_key] = time.time() - t_q_start
+            except Exception as e:
+                logger.debug("Ignoring exception in run_benchmark", exc_info=True)
+                t_search[metric_key] = time.time() - t_q_start
+                status[f"search_{metric_key}"] = f"failed: {_err(e)}"
+                print(f"  Search {search_type} FAILED: {_err(e)}")
 
     # ── Phase 4: dataset delete (populated) ──────────────────────────────
     # Deleting the dataset AFTER the graph is built measures the meaningful
@@ -394,11 +351,15 @@ async def run_benchmark(
         t_dataset_delete = time.time() - t_dataset_delete_start
         print(f"  Dataset deleted in {t_dataset_delete:.2f}s")
     except Exception as e:
+        logger.debug("Ignoring exception in run_benchmark", exc_info=True)
         t_dataset_delete = time.time() - t_dataset_delete_start
         status["dataset_delete"] = f"failed: {e}"
         print(f"  Dataset delete FAILED: {e}")
 
-    all_ok = all(v == "success" for v in status.values())
+    # "skipped" only ever appears when add/cognify already carries "failed:",
+    # so this changes no pass/fail outcome -- it only stops a skipped search
+    # from being counted as a second failure.
+    all_ok = all(v in ("success", "skipped") for v in status.values())
 
     # ── Report ───────────────────────────────────────────────────────────
     results = {
@@ -408,7 +369,14 @@ async def run_benchmark(
         "total_ingest_time_s": round(t_total, 3),
         "prune_time_s": round(t_prune, 3),
         "db_setup_time_s": round(t_db_setup, 3),
-        "search_time": t_search,
+        # A skipped search has no timing. Omit it rather than write 0.0 --
+        # the file's own rule is elapsed-until-failure, never a fabricated
+        # zero, and the report tolerates a missing metric.
+        **{
+            f"search_time_{key}": t_search[key]
+            for key, _ in BENCHMARKED_SEARCH_TYPES
+            if t_search.get(key) is not None
+        },
         "dataset_delete_time_s": round(t_dataset_delete, 3),
         "status": status,
         "success": all_ok,
@@ -431,7 +399,10 @@ async def run_benchmark(
     print(f"  cognee.add() time : {t_add:.2f}s  ({t_add / n:.2f}s per memory)  [{status['add']}]")
     print(f"  cognify() time    : {t_cognify:.2f}s  [{status['cognify']}]")
     print(f"  Total ingest time : {t_total:.2f}s  ({t_total / n:.2f}s per memory)")
-    print(f"  Search total      : {t_search:.2f}s  [{status['search']}]")
+    for metric_key, search_type in BENCHMARKED_SEARCH_TYPES:
+        timing = t_search.get(metric_key)
+        shown = f"{timing:.2f}s" if timing is not None else "n/a  "
+        print(f"  Search {search_type:<18}: {shown}  [{status[f'search_{metric_key}']}]")
     print(f"  DB setup time     : {t_db_setup:.2f}s  [{status['db_setup']}]")
     print(f"  Prune time        : {t_prune:.2f}s  [{status['prune']}]")
     print(f"  Dataset delete    : {t_dataset_delete:.2f}s  [{status['dataset_delete']}]")
@@ -456,6 +427,66 @@ def _err(e: Exception) -> str:
     return str(e) or repr(e)
 
 
+def _ingest_succeeded(status: dict) -> bool:
+    """Phase 3 only means something on a graph that was actually built."""
+    return status.get("add") == "success" and status.get("cognify") == "success"
+
+
+def _skip_search_phase(status: dict, t_search: dict) -> None:
+    """Record every benchmarked search as skipped, with no timing.
+
+    A search against a graph that never got built returns fast without
+    raising, so without this the phase reports SUCCESS and a real-looking
+    float for work it did not do -- and those floats became the p50/p90/p99
+    uploaded to S3 and posted to Slack (job 100109026857: three 402s on
+    cognify, each followed by 'Search GRAPH_COMPLETION : 2.30s [success]').
+    """
+    print("\nPhase 3: SKIPPED (ingest did not succeed)")
+    for metric_key, _ in BENCHMARKED_SEARCH_TYPES:
+        status[f"search_{metric_key}"] = "skipped"
+        t_search[metric_key] = None
+
+
+# Transient-reset retries for tenant creation (see _create_cloud_tenant).
+_TENANT_CREATE_ATTEMPTS = 3
+
+# The POST can die with its tenant already committed server-side (the row and
+# its UserTenant membership are committed BEFORE provisioning starts), so a
+# retry re-POSTs a name that now exists and gets a 503. This timeout does NOT
+# fix that -- it only shortens the wasted wait, because half the observed deaths
+# are an intermediary reset at ~272s, below aiohttp's 300s default.
+_TENANT_POST_TIMEOUT_S = 120.0
+
+
+class TenantCreateFailed(RuntimeError):
+    """Tenant creation failed. Carries the id of anything that exists so the
+    caller's teardown can still reach it."""
+
+    def __init__(self, message: str, tenant_id: str | None = None):
+        super().__init__(message)
+        self.tenant_id = tenant_id
+
+
+async def _find_tenant_by_name(session, management_url: str, name: str) -> str | None:
+    """Resolve a tenant id by name.
+
+    GET /api/v1/tenants/me/with-status issues the byte-identical query to the
+    duplicate check that produces the 503, so whenever that 503 fires this
+    lookup must find the tenant.
+    """
+    async with session.get(f"{management_url}/api/v1/tenants/me/with-status") as resp:
+        if resp.status >= 400:
+            return None
+        matches = [t["id"] for t in (await resp.json()) if t.get("name") == name]
+    if len(matches) > 1:
+        print(
+            f"  WARNING: {len(matches)} tenants named '{name}' -- the controller's "
+            f"check-then-act is not atomic; taking {matches[0]}",
+            flush=True,
+        )
+    return matches[0] if matches else None
+
+
 async def _create_cloud_tenant(
     management_url: str, api_key: str, tenant_name: str, ready_timeout_s: float = 600.0
 ) -> tuple[str, str, float]:
@@ -465,26 +496,117 @@ async def _create_cloud_tenant(
     call PLUS the wait until the tenant reports healthy — the number that
     matters is "time until a usable tenant", not just the POST round trip.
     """
-    import aiohttp
     from urllib.parse import urlsplit
+
+    import aiohttp
 
     t0 = time.time()
     async with aiohttp.ClientSession(headers={"X-Api-Key": api_key}) as session:
-        async with session.post(
-            f"{management_url}/api/v1/tenants", params={"tenant_name": tenant_name}
-        ) as resp:
-            if resp.status >= 400:
-                body = await resp.text()
-                raise RuntimeError(f"Tenant creation failed ({resp.status}): {body}")
-            tenant_id = (await resp.json())["tenant_id"]
+        # The POST commits the tenant row BEFORE provisioning starts, so a lost
+        # response leaves a real tenant behind. Both failure shapes therefore
+        # resolve by name and adopt rather than re-POSTing:
+        #   * transport death (reset at ~272-294s, or aiohttp's 300s timeout)
+        #   * HTTP 503 "already exists" from our own previous attempt
+        # A genuine rejection (400 bad name, 401/403) still fails immediately.
+        last_exc = None
+        tenant_id = None
+        for attempt in range(_TENANT_CREATE_ATTEMPTS):
+            try:
+                async with session.post(
+                    f"{management_url}/api/v1/tenants",
+                    params={"tenant_name": tenant_name},
+                    timeout=aiohttp.ClientTimeout(total=_TENANT_POST_TIMEOUT_S),
+                ) as resp:
+                    if resp.status >= 400:
+                        body = await resp.text()
+                        if resp.status == 409 or "already exists" in body:
+                            existing = await _find_tenant_by_name(
+                                session, management_url, tenant_name
+                            )
+                            if existing is not None:
+                                print(
+                                    f"  Tenant '{tenant_name}' already exists -- adopting {existing}",
+                                    flush=True,
+                                )
+                                tenant_id = existing
+                                break
+                        raise TenantCreateFailed(f"Tenant creation failed ({resp.status}): {body}")
+                    tenant_id = (await resp.json())["tenant_id"]
+                break
+            except (aiohttp.ClientError, OSError, asyncio.TimeoutError) as exc:
+                last_exc = exc
+                existing = await _find_tenant_by_name(session, management_url, tenant_name)
+                if existing is not None:
+                    print(
+                        f"  Tenant create lost its response ({_err(exc)}); adopting {existing}",
+                        flush=True,
+                    )
+                    tenant_id = existing
+                    break
+                if attempt == _TENANT_CREATE_ATTEMPTS - 1:
+                    raise TenantCreateFailed(f"Tenant creation failed: {_err(exc)}") from exc
+                backoff = 2**attempt
+                print(
+                    f"  Tenant creation attempt {attempt + 1}/{_TENANT_CREATE_ATTEMPTS} failed "
+                    f"({_err(exc)}); retrying in {backoff}s",
+                    flush=True,
+                )
+                await asyncio.sleep(backoff)
+        if tenant_id is None:  # pragma: no cover - defensive
+            raise TenantCreateFailed(f"Tenant creation failed: {_err(last_exc)}")
 
         deadline = time.time() + ready_timeout_s
         while True:
-            async with session.get(f"{management_url}/api/v1/tenants/{tenant_id}/status") as resp:
-                if resp.status < 400 and (await resp.json()).get("status") == "healthy":
-                    break
+            # A transient reset while polling is not "unhealthy" -- keep polling
+            # until the deadline rather than failing the run on one bad packet.
+            try:
+                async with session.get(
+                    f"{management_url}/api/v1/tenants/{tenant_id}/status"
+                ) as resp:
+                    if resp.status in (403, 404):
+                        # The id we hold is gone. That does NOT mean nothing
+                        # exists: the controller's rollback deletes the row and
+                        # its own @retry then re-creates the SAME NAME under a
+                        # NEW id, which may go healthy. Re-resolve before giving
+                        # up, or we abandon a live, billed tenant.
+                        replacement = await _find_tenant_by_name(
+                            session, management_url, tenant_name
+                        )
+                        if replacement is not None and replacement != tenant_id:
+                            print(
+                                f"  Tenant {tenant_id} was rolled back; controller re-created "
+                                f"'{tenant_name}' as {replacement} -- following it",
+                                flush=True,
+                            )
+                            tenant_id = replacement
+                        elif replacement is None and time.time() > deadline:
+                            raise TenantCreateFailed(
+                                f"Tenant {tenant_id} disappeared while waiting "
+                                f"(status {resp.status})",
+                                tenant_id=None,
+                            )
+                    elif resp.status < 400:
+                        reported = (await resp.json()).get("status")
+                        if reported == "healthy":
+                            break
+                        if reported == "failed":
+                            raise TenantCreateFailed(
+                                f"Tenant {tenant_id} provisioning failed", tenant_id=tenant_id
+                            )
+            except (aiohttp.ClientError, OSError, asyncio.TimeoutError) as exc:
+                if time.time() > deadline:
+                    raise TenantCreateFailed(
+                        f"Tenant {tenant_id} not healthy after {ready_timeout_s:.0f}s "
+                        f"(last error: {_err(exc)})",
+                        tenant_id=await _find_tenant_by_name(session, management_url, tenant_name),
+                    ) from exc
             if time.time() > deadline:
-                raise TimeoutError(f"Tenant {tenant_id} not healthy after {ready_timeout_s:.0f}s")
+                # A fresh by-name lookup rather than the possibly-stale local
+                # id, so teardown deletes whatever actually exists.
+                raise TenantCreateFailed(
+                    f"Tenant {tenant_id} not healthy after {ready_timeout_s:.0f}s",
+                    tenant_id=await _find_tenant_by_name(session, management_url, tenant_name),
+                )
             await asyncio.sleep(2)
 
     # Service URL convention: api.<domain> hosts the controller and
@@ -499,13 +621,13 @@ async def _delete_cloud_tenant(management_url: str, api_key: str, tenant_id: str
     import aiohttp
 
     t0 = time.time()
-    async with aiohttp.ClientSession(headers={"X-Api-Key": api_key}) as session:
-        async with session.delete(
-            f"{management_url}/api/v1/tenants", params={"tenant_id": tenant_id}
-        ) as resp:
-            if resp.status >= 400:
-                body = await resp.text()
-                raise RuntimeError(f"Tenant deletion failed ({resp.status}): {body}")
+    async with (
+        aiohttp.ClientSession(headers={"X-Api-Key": api_key}) as session,
+        session.delete(f"{management_url}/api/v1/tenants", params={"tenant_id": tenant_id}) as resp,
+    ):
+        if resp.status >= 400:
+            body = await resp.text()
+            raise RuntimeError(f"Tenant deletion failed ({resp.status}): {body}")
     return time.time() - t0
 
 
@@ -591,12 +713,12 @@ async def run_benchmark_cloud(
         "db_setup": "success",  # server-side, nothing to set up from the client
         "add": "success",
         "cognify": "success",
-        "search": "success",
+        **{f"search_{key}": "success" for key, _ in BENCHMARKED_SEARCH_TYPES},
     }
     t_prune = 0.0
     t_add = 0.0
     t_cognify = 0.0
-    t_search = 0.0
+    t_search = {key: 0.0 for key, _ in BENCHMARKED_SEARCH_TYPES}
     t_tenant_create = 0.0
     t_tenant_delete = 0.0
     t_dataset_delete = 0.0
@@ -625,9 +747,17 @@ async def run_benchmark_cloud(
         except Exception as e:
             # Record elapsed-until-failure like every other phase (0.0 would
             # skew failed-run percentiles low).
+            logger.debug("Ignoring exception in run_benchmark_cloud", exc_info=True)
             t_tenant_create = time.time() - t_tenant_create_start
+            # TenantCreateFailed carries the id of whatever exists; without
+            # this, teardown (gated on tenant_id) was unreachable on exactly
+            # the branch that leaks a real, billed tenant.
+            tenant_id = getattr(e, "tenant_id", None)
             status["tenant_create"] = f"failed: {_err(e)}"
-            for phase in ("prune", "add", "cognify", "search"):
+            skipped_phases = ("prune", "add", "cognify") + tuple(
+                f"search_{key}" for key, _ in BENCHMARKED_SEARCH_TYPES
+            )
+            for phase in skipped_phases:
                 status[phase] = "skipped"
             tenant_ready = False
             print(f"  Tenant creation FAILED: {_err(e)}")
@@ -652,6 +782,7 @@ async def run_benchmark_cloud(
                 t_prune = time.time() - t_prune_start
                 print(f"  Prune completed in {t_prune:.2f}s")
             except Exception as e:
+                logger.debug("Ignoring exception in run_benchmark_cloud", exc_info=True)
                 t_prune = time.time() - t_prune_start
                 status["prune"] = f"failed: {_err(e)}"
                 print(f"  Prune FAILED: {_err(e)}")
@@ -664,6 +795,7 @@ async def run_benchmark_cloud(
             await client.add(text_list, dataset_name=dataset_name)
             t_add = time.time() - t_add_start
         except Exception as e:
+            logger.debug("Ignoring exception in run_benchmark_cloud", exc_info=True)
             t_add = time.time() - t_add_start
             status["add"] = f"failed: {_err(e)}"
             print(f"  Add FAILED: {_err(e)}")
@@ -678,24 +810,34 @@ async def run_benchmark_cloud(
             await _wait_for_cloud_cognify(client, cognify_response)
             t_cognify = time.time() - t_cognify_start
         except Exception as e:
+            logger.debug("Ignoring exception in run_benchmark_cloud", exc_info=True)
             t_cognify = time.time() - t_cognify_start
             status["cognify"] = f"failed: {_err(e)}"
             print(f"  Cognify FAILED: {_err(e)}")
 
         # ── Phase 3: search ──────────────────────────────────────────────
+        # One timing per benchmarked search type, matching the local mode.
         # Scoped to this suite's dataset so a concurrently-running suite on
         # the same tenant cannot contaminate the search timing or results.
-        print("\nPhase 3: Running remote search query...")
-        t_q_start = time.time()
-        try:
-            await client.search(
-                "What is in the document", datasets=[dataset_name], only_context=True
-            )
-            t_search = time.time() - t_q_start
-        except Exception as e:
-            t_search = time.time() - t_q_start
-            status["search"] = f"failed: {_err(e)}"
-            print(f"  Search FAILED: {_err(e)}")
+        if not _ingest_succeeded(status):
+            _skip_search_phase(status, t_search)
+        else:
+            print("\nPhase 3: Running remote search queries...")
+            for metric_key, search_type in BENCHMARKED_SEARCH_TYPES:
+                t_q_start = time.time()
+                try:
+                    await client.search(
+                        SEARCH_QUERY,
+                        search_type=search_type,
+                        datasets=[dataset_name],
+                        only_context=True,
+                    )
+                    t_search[metric_key] = time.time() - t_q_start
+                except Exception as e:
+                    logger.debug("Ignoring exception in run_benchmark_cloud", exc_info=True)
+                    t_search[metric_key] = time.time() - t_q_start
+                    status[f"search_{metric_key}"] = f"failed: {_err(e)}"
+                    print(f"  Search {search_type} FAILED: {_err(e)}")
 
         # ── Phase 4 (cloud-only metric): delete the POPULATED dataset ────
         # Only meaningful with a graph in it, hence after cognify/search and
@@ -709,6 +851,7 @@ async def run_benchmark_cloud(
                 t_dataset_delete = time.time() - t_dataset_delete_start
                 print(f"  Dataset deleted in {t_dataset_delete:.2f}s")
             except Exception as e:
+                logger.debug("Ignoring exception in run_benchmark_cloud", exc_info=True)
                 t_dataset_delete = time.time() - t_dataset_delete_start
                 status["dataset_delete"] = f"failed: {_err(e)}"
                 print(f"  Dataset deletion FAILED: {_err(e)}")
@@ -727,6 +870,7 @@ async def run_benchmark_cloud(
             )
             print(f"  Tenant deleted in {t_tenant_delete:.2f}s")
         except Exception as e:
+            logger.debug("Ignoring exception in run_benchmark_cloud", exc_info=True)
             t_tenant_delete = time.time() - t_tenant_delete_start
             status["tenant_delete"] = f"failed: {_err(e)}"
             print(f"  Tenant deletion FAILED (manual cleanup needed for {tenant_id}): {e}")
@@ -741,7 +885,14 @@ async def run_benchmark_cloud(
         "total_ingest_time_s": round(t_total, 3),
         "prune_time_s": round(t_prune, 3),
         "db_setup_time_s": 0.0,
-        "search_time": t_search,
+        # A skipped search has no timing. Omit it rather than write 0.0 --
+        # the file's own rule is elapsed-until-failure, never a fabricated
+        # zero, and the report tolerates a missing metric.
+        **{
+            f"search_time_{key}": t_search[key]
+            for key, _ in BENCHMARKED_SEARCH_TYPES
+            if t_search.get(key) is not None
+        },
         "status": status,
         "success": all_ok,
         "config": {
@@ -777,7 +928,10 @@ async def run_benchmark_cloud(
     print(f"  add time          : {t_add:.2f}s  ({t_add / n:.2f}s per memory)  [{status['add']}]")
     print(f"  cognify time      : {t_cognify:.2f}s  [{status['cognify']}]")
     print(f"  Total ingest time : {t_total:.2f}s  ({t_total / n:.2f}s per memory)")
-    print(f"  Search total      : {t_search:.2f}s  [{status['search']}]")
+    for metric_key, search_type in BENCHMARKED_SEARCH_TYPES:
+        timing = t_search.get(metric_key)
+        shown = f"{timing:.2f}s" if timing is not None else "n/a  "
+        print(f"  Search {search_type:<18}: {shown}  [{status[f'search_{metric_key}']}]")
     print(f"  Prune time        : {t_prune:.2f}s  [{status['prune']}]")
     print(f"  Overall           : {'ALL OK' if all_ok else 'SOME FAILURES'}")
     print("=" * 60)

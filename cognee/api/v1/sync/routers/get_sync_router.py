@@ -1,18 +1,17 @@
 from uuid import UUID
-from typing import Optional, List
+
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-
-from cognee.api.DTO import InDTO
-from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_authenticated_user
-from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
-from cognee.modules.sync.methods import get_running_sync_operations_for_user, get_sync_operation
-from cognee.shared.utils import send_telemetry
-from cognee.shared.logging_utils import get_logger
-from cognee.api.v1.sync import SyncResponse
 from cognee import __version__ as cognee_version
+from cognee.api.DTO import InDTO
+from cognee.api.v1.sync import SyncResponse
+from cognee.modules.sync.methods import get_running_sync_operations_for_user, get_sync_operation
+from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.models import User
+from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
+from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import send_telemetry
 
 logger = get_logger()
 
@@ -20,7 +19,7 @@ logger = get_logger()
 class SyncRequest(InDTO):
     """Request model for sync operations."""
 
-    dataset_ids: Optional[List[UUID]] = None
+    dataset_ids: list[UUID] | None = None
 
 
 def get_sync_router() -> APIRouter:
@@ -96,7 +95,7 @@ def get_sync_router() -> APIRouter:
         """
         send_telemetry(
             "Cloud Sync API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/sync",
                 "cognee_version": cognee_version,
@@ -152,8 +151,8 @@ def get_sync_router() -> APIRouter:
         except ConnectionError as e:
             logger.error("Cloud service unavailable during sync: %s", e)
             return JSONResponse(status_code=409, content={"error": "Cloud service unavailable."})
-        except Exception as e:
-            logger.error(f"Cloud sync operation failed: {str(e)}")
+        except Exception:
+            logger.exception("Cloud sync operation failed")
             return JSONResponse(status_code=409, content={"error": "Cloud sync operation failed."})
 
     @router.get("/status")
@@ -204,7 +203,7 @@ def get_sync_router() -> APIRouter:
         """
         send_telemetry(
             "Sync Status Overview API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/sync/status",
                 "cognee_version": cognee_version,
@@ -235,8 +234,8 @@ def get_sync_router() -> APIRouter:
 
             return response
 
-        except Exception as e:
-            logger.error(f"Failed to get sync status overview: {str(e)}")
+        except Exception:
+            logger.exception("Failed to get sync status overview")
             return JSONResponse(
                 status_code=500, content={"error": "Failed to get sync status overview"}
             )

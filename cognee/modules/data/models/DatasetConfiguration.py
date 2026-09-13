@@ -1,8 +1,10 @@
-from uuid import uuid4
 from datetime import datetime, timezone
+from uuid import uuid4
+
+from sqlalchemy import UUID, Column, DateTime, ForeignKey, Text
 from sqlalchemy.orm import relationship
-from sqlalchemy import Column, ForeignKey, DateTime, Text, UUID
 from sqlalchemy.types import JSON as GenericJSON
+
 from cognee.infrastructure.databases.relational import Base
 
 

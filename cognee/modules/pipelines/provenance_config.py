@@ -27,7 +27,6 @@ from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 ProvenanceMode = Literal["lightweight", "deep", "disabled"]
 
 _VALID_MODES: frozenset[str] = frozenset({"lightweight", "deep", "disabled"})

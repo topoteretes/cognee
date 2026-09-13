@@ -10,7 +10,7 @@ Unlike DeepEval's GEval, this metric:
   - Does not require deepeval's GEval infrastructure
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from cognee.shared.logging_utils import get_logger
 
@@ -56,11 +56,11 @@ class RubricMetric:
         # and a "rubric" field (list of strings) in additional_metadata
     """
 
-    def __init__(self, model: Optional[str] = None):
+    def __init__(self, model: str | None = None):
         self.model = model
-        self.score: Optional[float] = None
-        self.reason: Optional[str] = None
-        self._verdicts: List[Dict[str, Any]] = []
+        self.score: float | None = None
+        self.reason: str | None = None
+        self._verdicts: list[dict[str, Any]] = []
 
     def measure(self, test_case) -> float:
         """Synchronous measure — runs the async version in a loop.
@@ -94,7 +94,7 @@ class RubricMetric:
 
         # Get rubric from additional_metadata
         metadata = getattr(test_case, "additional_metadata", {}) or {}
-        rubric: List[str] = metadata.get("rubric", [])
+        rubric: list[str] = metadata.get("rubric", [])
 
         if not rubric:
             self.score = 0.0
@@ -137,7 +137,9 @@ class RubricMetric:
                 )
 
             except Exception as e:
-                logger.warning(f"Rubric judge failed for criterion: {criterion}: {e}")
+                logger.warning(
+                    f"Rubric judge failed for criterion: {criterion}: {e}", exc_info=True
+                )
                 verdicts.append(
                     {
                         "criterion": criterion,
@@ -159,6 +161,6 @@ class RubricMetric:
         return self.score
 
     @property
-    def verdicts(self) -> List[Dict[str, Any]]:
+    def verdicts(self) -> list[dict[str, Any]]:
         """Per-criterion verdicts from the last evaluation."""
         return self._verdicts

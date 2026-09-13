@@ -41,13 +41,19 @@ DATASET_NAME = "aurora_robotics_distillation_demo"
 SESSION_ID = "aurora_distillation_session"
 
 DOCUMENTS = [
-    "Aurora Robotics builds two products: the VoltaArm industrial gripper and the "
-    "TerraScout warehouse rover.",
-    "The VoltaArm gripper uses firmware version 4 and a calibration routine that maps "
-    "joint torque to grip strength.",
+    (
+        "Aurora Robotics builds two products: the VoltaArm industrial gripper and the "
+        "TerraScout warehouse rover."
+    ),
+    (
+        "The VoltaArm gripper uses firmware version 4 and a calibration routine that maps "
+        "joint torque to grip strength."
+    ),
     "The TerraScout rover navigates warehouses using lidar maps and charging dock beacons.",
-    "Aurora Robotics releases firmware through the HALT test suite, a hardware abuse "
-    "test that runs overnight.",
+    (
+        "Aurora Robotics releases firmware through the HALT test suite, a hardware abuse "
+        "test that runs overnight."
+    ),
     "Dana Voss leads the VoltaArm firmware team at Aurora Robotics.",
     "Calibration data for the VoltaArm gripper is stored in a battery-backed memory bank.",
 ]
@@ -81,8 +87,7 @@ async def setup_demo_data():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
     progress(f"Ingesting {len(DOCUMENTS)} Aurora Robotics facts.")
-    await cognee.add(DOCUMENTS, dataset_name=DATASET_NAME)
-    await cognee.cognify(datasets=[DATASET_NAME])
+    await cognee.remember(DOCUMENTS, dataset_name=DATASET_NAME, self_improvement=False)
     progress("Ingestion complete.")
 
 

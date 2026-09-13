@@ -7,19 +7,19 @@ and add_edges_with_vectors must chunk by embedding_engine.get_batch_size()
 before calling embed_data, mirroring index_data_points.
 """
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
-import json
 
 import pytest
 
 pytest.importorskip("asyncpg", reason="PostgresHybridAdapter requires the postgres extra")
 pytest.importorskip("pgvector", reason="PostgresHybridAdapter requires the postgres extra")
 
-from cognee.infrastructure.engine import DataPoint  # noqa: E402
-from cognee.infrastructure.databases.hybrid.postgres.adapter import (  # noqa: E402
+from cognee.infrastructure.databases.hybrid.postgres.adapter import (
     PostgresHybridAdapter,
 )
+from cognee.infrastructure.engine import DataPoint
 
 
 class _Node(DataPoint):
@@ -50,7 +50,7 @@ def _make_fake_hybrid(batch_size: int):
 
     fake._graph = MagicMock()
     fake._graph.initialize = AsyncMock()
-    fake._graph._session = MagicMock(return_value=session_cm)
+    fake._graph.sessionmaker = MagicMock(return_value=session_cm)
 
     async def embed_data(texts):
         # batch_size <= 0 means "no per-call cap" — the production code is expected
@@ -72,7 +72,7 @@ def _make_fake_hybrid(batch_size: int):
 
 
 def _session_from_fake_hybrid(adapter):
-    return adapter._graph._session.return_value.__aenter__.return_value
+    return adapter._graph.sessionmaker.return_value.__aenter__.return_value
 
 
 @pytest.mark.asyncio

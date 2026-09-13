@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List, Optional, Type, Union
-
-from cognee.modules.observability import OtelStatusCode as StatusCode
+from typing import TYPE_CHECKING
 
 from cognee.base_config import get_base_config
+from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
@@ -16,10 +15,10 @@ from cognee.modules.observability import (
     COGNEE_VECTOR_RESULT_COUNT,
     new_span,
 )
+from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
 from cognee.modules.retrieval.utils.validate_queries import validate_queries
 from cognee.shared.logging_utils import ERROR, get_logger
-from cognee.exceptions import CogneeValidationError
 
 if TYPE_CHECKING:
     from cognee.infrastructure.databases.unified import UnifiedStoreEngine
@@ -48,17 +47,17 @@ def format_triplets(edges):
 
 
 async def get_memory_fragment(
-    properties_to_project: Optional[List[str]] = None,
-    node_type: Optional[Type] = None,
-    node_name: Optional[List[str]] = None,
+    properties_to_project: list[str] | None = None,
+    node_type: type | None = None,
+    node_name: list[str] | None = None,
     node_name_filter_operator: str = "OR",
-    relevant_ids_to_filter: Optional[List[str]] = None,
-    memory_fragment_filter: Optional[List[dict]] = None,
-    triplet_distance_penalty: Optional[float] = 6.5,
+    relevant_ids_to_filter: list[str] | None = None,
+    memory_fragment_filter: list[dict] | None = None,
+    triplet_distance_penalty: float | None = 6.5,
     feedback_influence: float = get_base_config().default_feedback_influence,
     graph_engine=None,
-    neighborhood_depth: Optional[int] = None,
-    neighborhood_seed_top_k: Optional[int] = 10,
+    neighborhood_depth: int | None = None,
+    neighborhood_seed_top_k: int | None = 10,
 ) -> CogneeGraph:
     """Creates and initializes a CogneeGraph memory fragment with optional property projections."""
     if properties_to_project is None:
@@ -111,28 +110,29 @@ async def get_memory_fragment(
             )
     except EntityNotFoundError:
         pass
-    except Exception as e:
-        logger.error(f"Error during memory fragment creation: {str(e)}")
+    except Exception:
+        logger.exception("Error during memory fragment creation")
 
     return memory_fragment
 
 
 async def _get_top_triplet_importances(
-    memory_fragment: Optional[CogneeGraph],
+    memory_fragment: CogneeGraph | None,
     vector_search: NodeEdgeVectorSearch,
-    properties_to_project: Optional[List[str]],
-    node_type: Optional[Type],
-    node_name: Optional[List[str]],
+    properties_to_project: list[str] | None,
+    node_type: type | None,
+    node_name: list[str] | None,
     node_name_filter_operator: str,
     triplet_distance_penalty: float,
     feedback_influence: float,
-    wide_search_limit: Optional[int],
+    wide_search_limit: int | None,
     top_k: int,
-    query_list_length: Optional[int] = None,
+    query_list_length: int | None = None,
     graph_engine=None,
-    neighborhood_depth: Optional[int] = None,
-    neighborhood_seed_top_k: Optional[int] = 10,
-) -> Union[List[Edge], List[List[Edge]]]:
+    neighborhood_depth: int | None = None,
+    neighborhood_seed_top_k: int | None = 10,
+    personal_weights: dict[str, float] | None = None,
+) -> list[Edge] | list[list[Edge]]:
     """Creates memory fragment (if needed), maps distances, and calculates top triplet importances.
 
     Args:
@@ -144,6 +144,8 @@ async def _get_top_triplet_importances(
             instead of projecting the full or ID-filtered graph.
         neighborhood_seed_top_k: Maximum number of seed nodes to use for neighborhood
             extraction. (default 10)
+        personal_weights: Optional per-node ``prefers`` weights (node id -> weight in
+            [0, 1]) applied to matching nodes so the triplet scorer can nudge ranking.
 
     Returns:
         List[Edge]: For single-query mode (query_list_length is None).
@@ -207,6 +209,11 @@ async def _get_top_triplet_importances(
         edge_distances=vector_search.edge_distances, query_list_length=query_list_length
     )
 
+    # After projection and distance mapping so the weights land on the nodes
+    # that actually made it into the fragment.
+    if personal_weights:
+        memory_fragment.apply_personal_weights(personal_weights)
+
     return await memory_fragment.calculate_top_triplet_importances(
         k=top_k,
         query_list_length=query_list_length,
@@ -215,22 +222,23 @@ async def _get_top_triplet_importances(
 
 
 async def brute_force_triplet_search(
-    query: Optional[str] = None,
-    query_batch: Optional[List[str]] = None,
+    query: str | None = None,
+    query_batch: list[str] | None = None,
     top_k: int = 5,
-    collections: Optional[List[str]] = None,
-    properties_to_project: Optional[List[str]] = None,
-    memory_fragment: Optional[CogneeGraph] = None,
-    node_type: Optional[Type] = None,
-    node_name: Optional[List[str]] = None,
+    collections: list[str] | None = None,
+    properties_to_project: list[str] | None = None,
+    memory_fragment: CogneeGraph | None = None,
+    node_type: type | None = None,
+    node_name: list[str] | None = None,
     node_name_filter_operator: str = "OR",
-    wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 6.5,
+    wide_search_top_k: int | None = 100,
+    triplet_distance_penalty: float | None = 6.5,
     feedback_influence: float = get_base_config().default_feedback_influence,
-    unified_engine: Optional[UnifiedStoreEngine] = None,
-    neighborhood_depth: Optional[int] = None,
-    neighborhood_seed_top_k: Optional[int] = 10,
-) -> Union[List[Edge], List[List[Edge]]]:
+    unified_engine: UnifiedStoreEngine | None = None,
+    neighborhood_depth: int | None = None,
+    neighborhood_seed_top_k: int | None = 10,
+    personal_weights: dict[str, float] | None = None,
+) -> list[Edge] | list[list[Edge]]:
     """
     Performs a brute force search to retrieve the top triplets from the graph.
 
@@ -247,6 +255,8 @@ async def brute_force_triplet_search(
             Ignored in batch mode (always None to project full graph).
         triplet_distance_penalty (Optional[float]): Default distance penalty in graph projection
         feedback_influence (float): Weight of feedback influence in range [0, 1]
+        personal_weights (Optional[Dict[str, float]]): Per-node prefers weights
+            (node id -> weight in [0, 1]) that nudge triplet ranking for the active user.
 
     Returns:
         List[Edge]: The top triplet results for single query mode (flat list).
@@ -285,7 +295,16 @@ async def brute_force_triplet_search(
                 "TextSummary_text",
                 "EntityType_name",
                 "DocumentChunk_text",
+                # DLT rows live in their own collection — chunk search
+                # is documents-only, but graph completion covers row text too.
+                "DltRow_text",
             ]
+        else:
+            # Copy so the caller's list is never mutated. Callers such as
+            # TripletSearchContextProvider pass a persistent ``self.collections``
+            # that is shared across concurrent per-entity searches; appending the
+            # edge collection in place would leak into that shared list.
+            collections = list(collections)
 
         if "EdgeType_relationship_name" not in collections:
             collections.append("EdgeType_relationship_name")
@@ -331,6 +350,7 @@ async def brute_force_triplet_search(
                 graph_engine=graph_engine,
                 neighborhood_depth=neighborhood_depth,
                 neighborhood_seed_top_k=neighborhood_seed_top_k,
+                personal_weights=personal_weights,
             )
 
             result_count = sum(len(r) for r in results) if query_list_length else len(results)
@@ -352,4 +372,4 @@ async def brute_force_triplet_search(
                 query_batch if query_list_length else [query],
                 error,
             )
-            raise error
+            raise

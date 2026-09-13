@@ -45,10 +45,12 @@ is the primary surface. All SDK functions are async. Minimal end-to-end script:
 import asyncio
 import cognee
 
+
 async def main():
     await cognee.remember("Cognee turns documents into AI memory.")
     results = await cognee.recall("What does cognee do?")
     print(results)
+
 
 asyncio.run(main())
 ```
@@ -73,7 +75,7 @@ session cache, which is on by default (`CACHING=true`); setting
 `CACHING=false` disables it entirely and makes `remember(session_id=...)`
 raise.
 
-Start with `examples/demos/remember_recall_improve_example.py`, which walks
+Start with `examples/advanced_guides/remember_recall_improve_example.py`, which walks
 through permanent memory, session memory, and the sync between them.
 
 The `add()` / `cognify()` / `search()` / `memify()` primitives still exist and

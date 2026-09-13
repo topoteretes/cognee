@@ -1,23 +1,12 @@
 from __future__ import annotations
 
-from typing import Optional, Union
 from uuid import UUID
 
-from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_default_user
-from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.modules.users.permissions.methods import give_permission_on_dataset
-from cognee.modules.data.methods import get_authorized_dataset, get_datasets_by_name
-from cognee.modules.agents.create_agent import create_agent
-from cognee.modules.agents.list_agents import list_agents
-from cognee.modules.agents.get_agent import get_agent
-from cognee.modules.agents.delete_agent import delete_agent
 from cognee.modules.agents.agent_mode import register_agent, unregister_agent
-from cognee.modules.agents.operations import (
-    RangeLiteral,
-    list_agent_connections,
-    get_agent_connection_detail,
-)
+from cognee.modules.agents.create_agent import create_agent
+from cognee.modules.agents.delete_agent import delete_agent
+from cognee.modules.agents.get_agent import get_agent
+from cognee.modules.agents.list_agents import list_agents
 from cognee.modules.agents.models import (
     AgentConnectionType,
     AgentMemoryMode,
@@ -25,6 +14,16 @@ from cognee.modules.agents.models import (
     RegisterAgentRequest,
     UnregisterAgentRequest,
 )
+from cognee.modules.agents.operations import (
+    RangeLiteral,
+    get_agent_connection_detail,
+    list_agent_connections,
+)
+from cognee.modules.data.methods import get_authorized_dataset, get_datasets_by_name
+from cognee.modules.users.exceptions import PermissionDeniedError
+from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
+from cognee.modules.users.permissions.methods import give_permission_on_dataset
 
 
 def _display_email(email: str) -> str:
@@ -64,8 +63,8 @@ class agents:
     @staticmethod
     async def create(
         name: str,
-        datasets: Optional[list[Union[str, UUID]]] = None,
-        user: Optional[User] = None,
+        datasets: list[str | UUID] | None = None,
+        user: User | None = None,
     ) -> dict:
         if user is None:
             user = await get_default_user()
@@ -105,7 +104,7 @@ class agents:
         }
 
     @staticmethod
-    async def list(user: Optional[User] = None) -> list[dict]:
+    async def list(user: User | None = None) -> list[dict]:
         if user is None:
             user = await get_default_user()
 
@@ -121,7 +120,7 @@ class agents:
         ]
 
     @staticmethod
-    async def get(agent_id: Union[str, UUID], user: Optional[User] = None) -> dict:
+    async def get(agent_id: str | UUID, user: User | None = None) -> dict:
         if user is None:
             user = await get_default_user()
 
@@ -141,7 +140,7 @@ class agents:
         }
 
     @staticmethod
-    async def delete(agent_id: Union[str, UUID], user: Optional[User] = None) -> None:
+    async def delete(agent_id: str | UUID, user: User | None = None) -> None:
         if user is None:
             user = await get_default_user()
 
@@ -157,15 +156,15 @@ class agents:
     @staticmethod
     async def register(
         agent_session_name: str,
-        user: Optional[User] = None,
+        user: User | None = None,
         type: AgentConnectionType = "api",
         memory_mode: AgentMemoryMode = "unknown",
-        session_id: Optional[str] = None,
-        dataset_ids: Optional[list[str]] = None,
-        dataset_names: Optional[list[str]] = None,
+        session_id: str | None = None,
+        dataset_ids: list[str] | None = None,
+        dataset_names: list[str] | None = None,
         source: AgentSource = "api",
-        origin_function: Optional[str] = None,
-        metadata: Optional[dict] = None,
+        origin_function: str | None = None,
+        metadata: dict | None = None,
     ) -> dict:
         if user is None:
             user = await get_default_user()
@@ -202,7 +201,7 @@ class agents:
         return connection.model_dump(mode="json")
 
     @staticmethod
-    async def unregister(agent_session_name: str, user: Optional[User] = None) -> int:
+    async def unregister(agent_session_name: str, user: User | None = None) -> int:
         if user is None:
             user = await get_default_user()
 
@@ -212,10 +211,10 @@ class agents:
 
     @staticmethod
     async def list_connections(
-        user: Optional[User] = None,
-        agent_id: Optional[Union[str, UUID]] = None,
+        user: User | None = None,
+        agent_id: str | UUID | None = None,
         range_key: RangeLiteral = "30d",
-        status_filter: Optional[str] = None,
+        status_filter: str | None = None,
         include_sources: bool = True,
         active_only: bool = True,
         limit: int = 50,
@@ -255,10 +254,10 @@ class agents:
 
     @staticmethod
     async def get_connection(
-        agent_id: Union[str, UUID],
-        user: Optional[User] = None,
-        agent_session_name: Optional[str] = None,
-    ) -> Optional[dict]:
+        agent_id: str | UUID,
+        user: User | None = None,
+        agent_session_name: str | None = None,
+    ) -> dict | None:
         if user is None:
             user = await get_default_user()
 

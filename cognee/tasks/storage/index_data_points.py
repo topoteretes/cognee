@@ -1,9 +1,9 @@
 import asyncio
 
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_context_config
 from cognee.infrastructure.engine import DataPoint
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("index_data_points")
 
@@ -50,7 +50,7 @@ async def index_data_points(data_points: list[DataPoint], vector_engine=None):
                 await vector_engine.create_vector_index(type_name, field_name)
                 data_points_by_type[type_name][field_name] = []
 
-            indexed_data_point = data_point.model_copy()
+            indexed_data_point = data_point.model_copy(deep=True)
             indexed_data_point.metadata["index_fields"] = [field_name]
             data_points_by_type[type_name][field_name].append(indexed_data_point)
 
@@ -83,7 +83,7 @@ async def get_data_points_from_model(
 
     for field_name, field_value in data_point:
         if isinstance(field_value, DataPoint):
-            property_key = f"{str(data_point.id)}{field_name}{str(field_value.id)}"
+            property_key = f"{data_point.id!s}{field_name}{field_value.id!s}"
 
             if property_key in visited_properties:
                 return []
@@ -105,7 +105,7 @@ async def get_data_points_from_model(
             and isinstance(field_value[0], DataPoint)
         ):
             for field_value_item in field_value:
-                property_key = f"{str(data_point.id)}{field_name}{str(field_value_item.id)}"
+                property_key = f"{data_point.id!s}{field_name}{field_value_item.id!s}"
 
                 if property_key in visited_properties:
                     return []

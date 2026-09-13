@@ -7,6 +7,7 @@ path for every DLT connector. This drives the real add pipeline twice against
 local stores (no LLM) and asserts a hard-deleted row is purged from cognee.
 """
 
+import logging
 import pathlib
 
 import pytest
@@ -18,6 +19,8 @@ from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.users.methods import get_default_user
+
+logger = logging.getLogger(__name__)
 
 DATASET = "widgets_ds"
 
@@ -59,7 +62,7 @@ async def clean_env(tmp_path, monkeypatch):
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in clean_env", exc_info=True)
 
 
 def _dlt_source(rows):
@@ -79,23 +82,35 @@ def _dlt_source(rows):
 
 
 async def _dlt_page_ids(user):
+    """Primary keys of all live DLT rows in the dataset.
+
+    Relational sources are stored as one manifest Data record per source
+    (source == "dlt_source") whose JSON carries the rows; legacy per-row
+    records (source == "dlt") are read directly.
+    """
+    from cognee.tasks.ingestion.dlt_utils import load_dlt_manifest
+
     dataset = (
         await get_authorized_existing_datasets(
             user=user, permission_type="read", datasets=[DATASET]
         )
     )[0]
     rows = await get_dataset_data(dataset.id)
-    return sorted(
-        d.external_metadata.get("primary_key_value")
-        for d in rows
-        if isinstance(d.external_metadata, dict) and d.external_metadata.get("source") == "dlt"
-    )
+    pks = []
+    for d in rows:
+        ext = d.system_metadata if isinstance(d.system_metadata, dict) else {}
+        if ext.get("source") == "dlt_source":
+            manifest = await load_dlt_manifest(d.raw_data_location)
+            pks.extend(row["primary_key_value"] for row in manifest.get("rows", []))
+        elif ext.get("source") == "dlt":
+            pks.append(ext.get("primary_key_value"))
+    return sorted(pks)
 
 
 @pytest.mark.asyncio
 async def test_foreground_add_runs_deferred_orphan_cleanup(clean_env):
     user = await get_default_user()
-    kwargs = dict(primary_key="id", write_disposition="merge", max_rows_per_table=0)
+    kwargs = {"primary_key": "id", "write_disposition": "merge", "max_rows_per_table": 0}
 
     # Backfill two rows via the real (foreground) add pipeline.
     await cognee.add(

@@ -437,7 +437,7 @@ def test_agents_command_parser_configures_actions():
 
     # parsing a "list" invocation succeeds and selects the list action
     args = parser.parse_args(["list"])
-    assert getattr(args, "agents_action") == "list"
+    assert args.agents_action == "list"
 
 
 def test_agents_command_execute_list(monkeypatch):

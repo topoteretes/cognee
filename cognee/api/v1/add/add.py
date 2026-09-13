@@ -1,60 +1,52 @@
+from typing import Any, BinaryIO
 from uuid import UUID
-from typing import Union, BinaryIO, List, Optional, Any
 
-from cognee.modules.users.models import User
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
-from cognee.modules.pipelines import Task, run_pipeline
-from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
-    resolve_authorized_user_dataset,
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+from cognee.modules.engine.operations.setup import setup
+from cognee.modules.observability import (
+    COGNEE_DATASET_NAME,
+    MEMORY_COLLECTION,
+    MEMORY_OPERATION,
+    MEMORY_SYSTEM,
+    increment_items_stored,
+    new_span,
+    record_operation_duration,
 )
+from cognee.modules.pipelines import Task, run_pipeline
+from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
     reset_dataset_pipeline_run_status,
 )
-from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
-from cognee.modules.engine.operations.setup import setup
+from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
+    resolve_authorized_user_dataset,
+)
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.resolve_dlt_sources import resolve_dlt_sources
 from cognee.tasks.ingestion.utils import materialize_stream_for_background
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.data.constants import DEFAULT_DATASET_NAME
-from cognee.modules.observability import (
-    new_span,
-    MEMORY_SYSTEM,
-    MEMORY_OPERATION,
-    MEMORY_COLLECTION,
-    COGNEE_DATASET_NAME,
-    record_operation_duration,
-    increment_items_stored,
-)
 
 logger = get_logger()
 
 
 async def add(
-    data: Union[
-        BinaryIO,
-        list[BinaryIO],
-        str,
-        list[str],
-        DataItem,
-        list[DataItem],
-        Any,  # DltResource, SourceFactory, or other dlt types
-    ],
+    data: BinaryIO | list[BinaryIO] | str | list[str] | DataItem | list[DataItem] | Any,
     dataset_name: str = DEFAULT_DATASET_NAME,
     user: User = None,
-    node_set: Optional[List[str]] = None,
-    vector_db_config: dict = None,
-    graph_db_config: dict = None,
-    dataset_id: Optional[UUID] = None,
-    preferred_loaders: Optional[List[Union[str, dict[str, dict[str, Any]]]]] = None,
+    node_set: list[str] | None = None,
+    vector_db_config: dict | None = None,
+    graph_db_config: dict | None = None,
+    dataset_id: UUID | None = None,
+    preferred_loaders: list[str | dict[str, dict[str, Any]]] | None = None,
     incremental_loading: bool = True,
-    data_per_batch: Optional[int] = 2000,
-    importance_weight: Optional[float] = 0.5,
+    data_per_batch: int | None = 20,
+    importance_weight: float | None = 0.5,
     run_in_background: bool = False,
-    llm_config: Optional[LLMConfig] = None,
-    embedding_config: Optional[EmbeddingConfig] = None,
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = True,
     **kwargs,
 ):
@@ -77,6 +69,12 @@ async def add(
             * File URLs: "file:///path/to/document.pdf" or "file://relative/path.txt"
             * S3 paths: "s3://bucket-name/path/to/file.pdf"
         - **Binary file objects**: File handles/streams (BinaryIO)
+        - **Web URLs**: "https://example.com/page" is fetched and ingested as a page
+        - **Code repository URLs**: "https://github.com/<owner>/<repo>" (or a gitlab.com
+          project, or any URL ending in .git) is shallow-cloned and ingested as ONE
+          code-repo item that cognify runs through the enola code graph pipeline
+          (cross-file edges), plus the repo's documents; same as adding a local code
+          project directory. Requires ALLOW_HTTP_REQUESTS and git on PATH.
         - **Lists**: Multiple files or text strings in a single call
 
     Supported File Formats:
@@ -102,7 +100,8 @@ async def add(
             - S3 path: "s3://my-bucket/documents/file.pdf"
             - List of mixed types: ["text content", "/path/file.pdf", "file://doc.txt", file_handle]
             - Binary file object: open("file.txt", "rb")
-            - url: A web link url (https or http)
+            - url: A web link url (https or http); a GitHub/GitLab repository URL is
+              cloned and indexed as a code graph instead of fetched as a page
         dataset_name: Name of the dataset to store data in. Defaults to "main_dataset".
                     Create separate datasets to organize different knowledge domains.
         user: User object for authentication and permissions. Uses default user if None.
@@ -223,20 +222,21 @@ async def add(
                 transformed[item] = {}
         preferred_loaders = transformed
 
-    tasks = [
-        Task(resolve_data_directories, include_subdirectories=True),
-        Task(
-            ingest_data,
-            dataset_name,
-            user,
-            node_set,
-            dataset_id,
-            preferred_loaders,
-            importance_weight,
-        ),
-    ]
+    # Fail loudly on inconsistent LLM/embedding provider config before any DB
+    # or ingestion work — otherwise the mismatch surfaces minutes later as an
+    # opaque auth error mid-cognify. Cheap (no network), once per process.
+    from cognee.modules.preflight import validate_provider_config
+
+    validate_provider_config()
 
     await setup()
+
+    # The pipeline-run log writers INSERT the operation-record columns
+    # (user_id, outcome, tokens, ...), so an existing database must be at the
+    # current Alembic head before the first write — same gate as cognify().
+    from cognee.modules.migrations.startup import run_migrations_and_block
+
+    await run_migrations_and_block(dataset_id or dataset_name, user)
 
     import time as _time
 
@@ -252,6 +252,23 @@ async def add(
         dataset_name=dataset_name, dataset_id=dataset_id, user=user
     )
 
+    # The dataset is resolved (created if needed) and write-checked above; hand
+    # its id to the ingestion task so it does not resolve the name again on
+    # every item (the pipeline also passes the dataset via ctx — this keeps the
+    # non-pipeline fallback on the cheap branch too).
+    tasks = [
+        Task(resolve_data_directories, include_subdirectories=True),
+        Task(
+            ingest_data,
+            dataset_name,
+            user,
+            node_set,
+            authorized_dataset.id,
+            preferred_loaders,
+            importance_weight,
+        ),
+    ]
+
     # Expand DLT resources (and auto-detected CSV/connection strings) into
     # standard DataItems before the pipeline sees them. orphan_cleanup (when
     # not None) deletes dlt rows no longer present in the source; it is
@@ -261,6 +278,7 @@ async def add(
         data,
         dataset_name=dataset_name,
         user=user,
+        dataset_id=authorized_dataset.id,
         **kwargs,
     )
 
@@ -276,7 +294,9 @@ async def add(
         data = await materialize_stream_for_background(data)
 
     await reset_dataset_pipeline_run_status(
-        authorized_dataset.id, user, pipeline_names=["add_pipeline", "cognify_pipeline"]
+        authorized_dataset.id,
+        user,
+        pipeline_names=["add_pipeline", "cognify_pipeline"],
     )
 
     pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)

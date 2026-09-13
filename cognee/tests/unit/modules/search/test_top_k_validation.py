@@ -3,7 +3,6 @@ import pytest
 from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
 from cognee.modules.search.types import SearchType
 
-
 # ── invalid top_k values are rejected at the factory level ────────────────────
 
 

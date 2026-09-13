@@ -1,29 +1,27 @@
 import asyncio
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any
 from uuid import UUID
-from typing import AsyncIterator, Awaitable, Callable, Optional, Union
 
-from cognee.infrastructure.locks import get_dataset_lock, held_datasets
-from cognee.modules.pipelines.layers.setup_and_check_environment import (
-    setup_and_check_environment,
-)
-
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.data.methods.get_dataset_data import get_dataset_data
-from cognee.modules.data.models import Data, Dataset
-from cognee.modules.pipelines.operations.run_tasks import run_tasks
-from cognee.modules.pipelines.layers import validate_pipeline_tasks
-from cognee.modules.pipelines.tasks.task import Task
-from cognee.modules.users.models import User
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
-
-from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
-    resolve_authorized_user_datasets,
-)
+from cognee.infrastructure.locks import get_dataset_lock, held_datasets
+from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+from cognee.modules.data.models import Data, Dataset
+from cognee.modules.pipelines.layers import validate_pipeline_tasks
 from cognee.modules.pipelines.layers.check_pipeline_run_qualification import (
     check_pipeline_run_qualification,
 )
-from typing import Any
+from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
+    resolve_authorized_user_datasets,
+)
+from cognee.modules.pipelines.layers.setup_and_check_environment import (
+    setup_and_check_environment,
+)
+from cognee.modules.pipelines.operations.run_tasks import run_tasks
+from cognee.modules.pipelines.tasks.task import Task
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("cognee.pipeline")
 
@@ -59,23 +57,31 @@ async def _drive_marking_held(dataset_id: UUID, source: AsyncIterator[Any]) -> A
 
 
 async def run_pipeline(
-    tasks: list[Task],
+    tasks: list[Task] | Callable[[Any], list[Task]] | None = None,
     data=None,
-    datasets: Optional[Union[str, list[str], list[UUID]]] = None,
-    user: Optional[User] = None,
+    datasets: str | list[str] | list[UUID] | None = None,
+    user: User | None = None,
     pipeline_name: str = "custom_pipeline",
     use_pipeline_cache: bool = False,
-    vector_db_config: Optional[dict] = None,
-    graph_db_config: Optional[dict] = None,
+    vector_db_config: dict | None = None,
+    graph_db_config: dict | None = None,
     incremental_loading: bool = False,
     data_per_batch: int = 20,
-    rollback_handler: Optional[Callable[..., Awaitable[None]]] = None,
-    llm_config: Optional[LLMConfig] = None,
-    embedding_config: Optional[EmbeddingConfig] = None,
+    rollback_handler: Callable[..., Awaitable[None]] | None = None,
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = False,
     skip_connection_test: bool = False,
 ):
-    validate_pipeline_tasks(tasks)
+    """``tasks`` is either the task list every data item runs, or a callable
+    mapping one item to its task list (a task resolver — see ``run_tasks``);
+    items resolved to different lists still share one run per dataset."""
+    if tasks is None:
+        raise ValueError(
+            "run_pipeline requires tasks: a task list or a per-item task resolver callable"
+        )
+    if not callable(tasks):
+        validate_pipeline_tasks(tasks)
     await setup_and_check_environment(
         vector_db_config, graph_db_config, skip_connection_test=skip_connection_test
     )
@@ -105,15 +111,15 @@ async def run_pipeline(
 async def run_pipeline_per_dataset(
     dataset: Dataset,
     user: User,
-    tasks: list[Task],
-    data: Optional[list[Data]] = None,
+    tasks: list[Task] | Callable[[Any], list[Task]] | None = None,
+    data: list[Data] | None = None,
     pipeline_name: str = "custom_pipeline",
     use_pipeline_cache=False,
     incremental_loading=False,
     data_per_batch: int = 20,
-    rollback_handler: Optional[Callable[..., Awaitable[None]]] = None,
-    llm_config: Optional[LLMConfig] = None,
-    embedding_config: Optional[EmbeddingConfig] = None,
+    rollback_handler: Callable[..., Awaitable[None]] | None = None,
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
     data_cache=False,
 ):
     # The actual work of a single run, factored out so it can run either under

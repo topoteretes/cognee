@@ -33,7 +33,7 @@ jobs:
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'kuzu') }}
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           fetch-depth: 0
 
@@ -95,7 +95,7 @@ jobs:
           --health-retries 5
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           fetch-depth: 0
 
@@ -114,6 +114,19 @@ jobs:
           DB_PASSWORD: cognee
           DB_NAME: cognee_db
         run: uv run pytest cognee/tests/e2e/postgres/test_postgres_adapter.py -v
+
+      - name: Run Shared Schema Isolation Tests
+        env:
+          DB_PROVIDER: postgres
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USERNAME: cognee
+          DB_PASSWORD: cognee
+          DB_NAME: cognee_db
+          VECTOR_DB_PROVIDER: pgvector
+          GRAPH_DATABASE_PROVIDER: postgres
+          GRAPH_DATABASE_URL: "postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db"
+        run: uv run pytest cognee/tests/e2e/postgres/test_shared_schema_isolation.py -v
 
       - name: Run Postgres Graph E2E Test
         env:
@@ -178,7 +191,7 @@ jobs:
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'neo4j') }}
     steps:
       - name: Check out
-        uses: actions/checkout@master
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup

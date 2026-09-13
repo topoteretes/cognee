@@ -23,6 +23,13 @@ class LLMInterface(ABC):
 
     max_completion_tokens: int
 
+    # Whether a plain-text answer from this adapter reaches a listening
+    # TokenSink. Declared rather than inferred because "will not stream" and
+    # "has not streamed yet" are indistinguishable at the promotion site, and
+    # guessing wrong means announcing a stream that never produces a token.
+    # Default False: an adapter opts in by routing through stream_text_completion.
+    supports_answer_streaming: bool = False
+
     @abstractmethod
     async def acreate_structured_output(
         self, text_input: str, system_prompt: str, response_model: type[T]

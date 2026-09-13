@@ -1,25 +1,16 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { notifications } from "@mantine/notifications";
-import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
+import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
 import type { Dataset } from "@/ui/layout/FilterContext";
 import { trackEvent } from "@/modules/analytics";
-import rememberData from "@/modules/ingestion/rememberData";
 import { MAX_FILES_PER_UPLOAD } from "@/modules/ingestion/uploadLimits";
+import { useBrainUpload } from "@/modules/ingestion/useBrainUpload";
 import createDataset from "@/modules/datasets/createDataset";
-import pollDatasetStatus from "@/modules/datasets/pollDatasetStatus";
-import { datasetStatusQueryKey } from "@/modules/datasets/useDatasetStatuses";
-import {
-  loadGraphModelsConfig,
-  findModelForDataset,
-  findPromptForDataset,
-  findOntologyForDataset,
-} from "@/modules/configuration/userConfiguration";
-import { toCleanSchema } from "@/modules/graphModels/types";
-import { toGraphModelSchema } from "@/modules/graphModels/toGraphModelSchema";
+import { loadGraphModelsConfig } from "@/modules/configuration/userConfiguration";
+import buildCognifyOptions from "@/modules/configuration/buildCognifyOptions";
 
 export interface UploadDoneState {
   datasetName: string;
@@ -40,11 +31,9 @@ export interface DatasetUploadState {
 
 export function useDatasetUpload(): DatasetUploadState {
   const { cogniInstance } = useCogniInstance();
-  const { tenant } = useTenant();
   const { datasets, setSelectedDataset, refreshDatasets } = useFilter();
-  const queryClient = useQueryClient();
+  const { isUploading, upload } = useBrainUpload(cogniInstance);
 
-  const [isUploading, setIsUploading] = useState(false);
   const [showDatasetPicker, setShowDatasetPicker] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [showUploadDoneModal, setShowUploadDoneModal] = useState<UploadDoneState | null>(null);
@@ -52,83 +41,68 @@ export function useDatasetUpload(): DatasetUploadState {
   async function uploadToDataset(ds: Dataset, files: File[]): Promise<void> {
     if (!cogniInstance) return;
 
-    if (files.length > MAX_FILES_PER_UPLOAD) {
-      notifications.show({
-        title: "Too many files",
-        message: `You selected ${files.length} files. Please upload ${MAX_FILES_PER_UPLOAD} or fewer at a time.`,
-        color: "red",
-      });
-      return;
-    }
-
-    setIsUploading(true);
-    try {
-      const cfg = await loadGraphModelsConfig(cogniInstance);
-      const rememberOpts: { graphModel?: object; customPrompt?: string; ontologyKey?: string[] } = {};
-
-      const assignedModel = findModelForDataset(cfg.models, ds.id);
-      if (assignedModel) {
-        rememberOpts.graphModel = toGraphModelSchema(toCleanSchema(assignedModel.schema));
-      }
-      const promptName = findPromptForDataset(cfg.promptAssignments ?? {}, ds.id);
-      if (promptName && cfg.customPrompts?.[promptName]) {
-        rememberOpts.customPrompt = cfg.customPrompts[promptName];
-      }
-      const ontologyKey = findOntologyForDataset(cfg.ontologyAssignments ?? {}, ds.id);
-      if (ontologyKey) rememberOpts.ontologyKey = [ontologyKey];
-
-      // The add itself is done once this call returns — anything that fails after
-      // this point (status polling) must not be reported as an upload failure.
-      await rememberData({ id: ds.id }, files, cogniInstance, rememberOpts);
-    } catch (err) {
-      console.error("Dashboard upload failed:", err);
+    const showUploadFailed = (error: unknown): void => {
+      console.error("Dashboard upload failed:", error);
       notifications.show({
         title: "Upload failed",
-        message: err instanceof Error ? err.message : String(err),
+        message: error instanceof Error ? error.message : String(error),
         color: "red",
       });
-      setIsUploading(false);
+    };
+
+    // Graph-model / prompt / ontology assignments are best-effort enrichment;
+    // if the config can't be read, fail the upload the same way the old inline
+    // flow did (it ran this inside the upload try/catch).
+    let options;
+    try {
+      options = buildCognifyOptions(await loadGraphModelsConfig(cogniInstance), ds.id);
+    } catch (error) {
+      showUploadFailed(error);
       return;
     }
 
-    trackEvent({
-      pageName: "Dashboard",
-      eventName: "dashboard_files_uploaded",
-      additionalProperties: {
-        dataset_id: ds.id,
-        dataset_name: ds.name,
-        file_count: String(files.length),
+    await upload({
+      datasetId: ds.id,
+      files,
+      options,
+      onLimitExceeded: (selected) =>
+        notifications.show({
+          title: "Too many files",
+          message: `You selected ${selected.length} files. Please upload ${MAX_FILES_PER_UPLOAD} or fewer at a time.`,
+          color: "red",
+        }),
+      onUploadError: showUploadFailed,
+      onUploaded: () => {
+        trackEvent({
+          pageName: "Dashboard",
+          eventName: "dashboard_files_uploaded",
+          additionalProperties: {
+            dataset_id: ds.id,
+            dataset_name: ds.name,
+            file_count: String(files.length),
+          },
+        });
+        notifications.show({
+          title: `Files uploaded to "${ds.name}"`,
+          message: `${files.length} file(s) added. Cognify running.`,
+          color: "blue",
+          autoClose: 5000,
+        });
+      },
+      onProcessed: () => {
+        refreshDatasets();
+        setShowUploadDoneModal({ datasetName: ds.name, datasetId: ds.id });
+      },
+      onProcessingError: (error) => {
+        console.error("Dataset processing failed:", error);
+        refreshDatasets();
+        notifications.show({
+          title: "Knowledge graph build failed",
+          message: `Files were added, but building the knowledge graph failed: ${error instanceof Error ? error.message : String(error)}`,
+          color: "red",
+        });
       },
     });
-    notifications.show({
-      title: `Files uploaded to "${ds.name}"`,
-      message: `${files.length} file(s) added. Cognify running.`,
-      color: "blue",
-      autoClose: 5000,
-    });
-
-    try {
-      // Files were already added successfully by this point — this only tracks
-      // knowledge-graph build progress, so its failure is reported separately.
-      await pollDatasetStatus(ds.id, cogniInstance, { intervalMs: 5000 });
-      // Any open Datasets/Detail/Knowledge Graph page shares this query key —
-      // invalidate so they reflect the finished upload immediately instead of
-      // waiting for their own next poll tick.
-      queryClient.invalidateQueries({ queryKey: datasetStatusQueryKey(tenant?.tenant_id) });
-      refreshDatasets();
-      setShowUploadDoneModal({ datasetName: ds.name, datasetId: ds.id });
-    } catch (err) {
-      console.error("Dataset processing failed:", err);
-      queryClient.invalidateQueries({ queryKey: datasetStatusQueryKey(tenant?.tenant_id) });
-      refreshDatasets();
-      notifications.show({
-        title: "Knowledge graph build failed",
-        message: `Files were added, but building the knowledge graph failed: ${err instanceof Error ? err.message : String(err)}`,
-        color: "red",
-      });
-    } finally {
-      setIsUploading(false);
-    }
   }
 
   const handleDashboardUpload = useCallback(

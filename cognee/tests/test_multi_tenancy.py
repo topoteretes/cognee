@@ -1,19 +1,14 @@
-import cognee
 import pytest
 
-from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.modules.users.tenants.methods import select_tenant
-from cognee.modules.users.methods import get_user
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.search.types import SearchType
-from cognee.modules.users.methods import create_user
-from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
-from cognee.modules.users.roles.methods import add_user_to_role
-from cognee.modules.users.roles.methods import create_role
-from cognee.modules.users.tenants.methods import create_tenant
-from cognee.modules.users.tenants.methods import add_user_to_tenant
+import cognee
 from cognee.modules.engine.operations.setup import setup
-from cognee.shared.logging_utils import setup_logging, CRITICAL
+from cognee.modules.search.types import SearchType
+from cognee.modules.users.exceptions import PermissionDeniedError
+from cognee.modules.users.methods import create_user, get_user
+from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
+from cognee.modules.users.roles.methods import add_user_to_role, create_role
+from cognee.modules.users.tenants.methods import add_user_to_tenant, create_tenant, select_tenant
+from cognee.shared.logging_utils import CRITICAL, get_logger, setup_logging
 
 logger = get_logger()
 
@@ -48,7 +43,7 @@ async def main():
     # Extract dataset_ids from cognify results
     def extract_dataset_id_from_cognify(cognify_result):
         """Extract dataset_id from cognify output dictionary"""
-        for dataset_id, pipeline_result in cognify_result.items():
+        for dataset_id in cognify_result:
             return dataset_id  # Return the first dataset_id
         return None
 

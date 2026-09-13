@@ -1,15 +1,16 @@
-from typing import Any, Dict, List, Optional, Type, Union
+from typing import Any
 
-from cognee.shared.logging_utils import get_logger
+from cognee.context_global_variables import session_user
+from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.vector import get_vector_engine_async
-from cognee.modules.retrieval.utils.completion import generate_completion
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
-from cognee.context_global_variables import session_user
-from cognee.infrastructure.databases.cache.config import CacheConfig
+from cognee.modules.retrieval.utils.completion import generate_completion
+from cognee.modules.retrieval.utils.merge_results import conversational_reserve, merge_ranked
 from cognee.modules.retrieval.utils.references import append_chunk_evidence
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("TripletRetriever")
 
@@ -27,12 +28,12 @@ class TripletRetriever(BaseRetriever):
         self,
         user_prompt_path: str = "context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
-        system_prompt: Optional[str] = None,
-        top_k: Optional[int] = 5,
-        session_id: Optional[str] = None,
-        response_model: Type = str,
+        system_prompt: str | None = None,
+        top_k: int | None = 5,
+        session_id: str | None = None,
+        response_model: type = str,
         include_references: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
     ):
         """Initialize retriever with optional custom prompt paths."""
@@ -90,7 +91,15 @@ class TripletRetriever(BaseRetriever):
             logger.error("Triplet_text collection not found")
             raise NoDataError("No data found in the system, please add data first.") from error
 
-    def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+    def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
+        return merge_ranked(
+            primary,
+            secondary,
+            limit=self.top_k,
+            secondary_reserve=conversational_reserve(self.top_k),
+        )
+
+    def extract_context_object_ids(self, retrieved_objects: Any) -> dict[str, list[str]] | None:
         """Triplets are non-elementary graph objects; do not report IDs for session QA - object ids cannot be resolved"""
         return None
 
@@ -113,20 +122,27 @@ class TripletRetriever(BaseRetriever):
             "response_model": self.response_model,
         }
 
-    async def _generate_completion_without_session(self, query: str, context: str) -> List[Any]:
+    async def _generate_completion_without_session(self, query: str, context: str) -> list[Any]:
         """Generate completion without session; returns list of one completion."""
         kwargs = self._completion_kwargs(context)
         completion = await generate_completion(query=query, **kwargs)
         return [completion]
+
+    async def append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
+        return append_chunk_evidence(
+            completions,
+            retrieved_objects,
+            enabled=self.include_references and self.response_model is str,
+        )
 
     async def get_completion_from_context(
         self,
         query: str,
         retrieved_objects: Any,
         context: Any,
-        effective_query: Optional[str] = None,
+        effective_query: str | None = None,
         turn_preparation=None,
-    ) -> Union[List[str], List[dict]]:
+    ) -> list[str] | list[dict]:
         """
         Generates an LLM completion using the context.
 
@@ -155,7 +171,7 @@ class TripletRetriever(BaseRetriever):
 
         if use_session:
             sm = get_session_manager()
-            used_graph_element_ids = self._extract_context_object_ids(retrieved_objects)
+            used_graph_element_ids = self.extract_context_object_ids(retrieved_objects)
             completion = await sm.generate_completion_with_session(
                 session_id=self.session_id,
                 query=query,
@@ -175,8 +191,4 @@ class TripletRetriever(BaseRetriever):
             completions = await self._generate_completion_without_session(query, context)
 
         # Both the session/cache branch and the non-session branch rejoin here.
-        return append_chunk_evidence(
-            completions,
-            retrieved_objects,
-            enabled=self.include_references and self.response_model is str,
-        )
+        return await self.append_references(completions, retrieved_objects)
