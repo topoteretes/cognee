@@ -149,7 +149,11 @@ class LexicalRetriever(BaseRetriever):
               empty string if none are found.
         """
         if retrieved_objects:
-            payload_texts = [payload["text"] for payload in retrieved_objects]
+            # With with_scores=True, get_retrieved_objects() returns (payload, score)
+            # pairs; otherwise plain payloads. Normalize both shapes so context
+            # extraction does not index into a tuple as if it were a dict.
+            payloads = [item[0] if isinstance(item, tuple) else item for item in retrieved_objects]
+            payload_texts = [payload["text"] for payload in payloads]
             return "\n".join(payload_texts)
         else:
             return ""
