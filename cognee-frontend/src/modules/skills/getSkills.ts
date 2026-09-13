@@ -12,6 +12,7 @@ export default function getSkills(
 ): Promise<Skill[]> {
   const params = new URLSearchParams({ dataset_id: datasetId });
   if (includeInactive) params.set("include_inactive", "true");
+  params.set("limit", "1000");
 
   return instance
     .fetch(`/v1/skills/?${params.toString()}`, {
