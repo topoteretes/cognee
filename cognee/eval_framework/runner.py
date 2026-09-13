@@ -19,11 +19,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
-from cognee.shared.logging_utils import get_logger
 from cognee.eval_framework.eval_config import EvalConfig
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
@@ -53,21 +54,21 @@ class EvalResult:
 
     benchmark: str
     engine: str
-    config: Dict[str, Any]
+    config: dict[str, Any]
     config_path: str
     questions_path: str
     answers_path: str
     metrics_path: str
     aggregate_metrics_path: str
-    dashboard_path: Optional[str] = None
-    aggregate_metrics: Dict[str, Any] = field(default_factory=dict)
+    dashboard_path: str | None = None
+    aggregate_metrics: dict[str, Any] = field(default_factory=dict)
 
 
 def _slugify(value: str) -> str:
     return "".join(c if c.isalnum() else "_" for c in str(value)).strip("_") or "run"
 
 
-def resolve_run_paths(config: EvalConfig) -> Dict[str, str]:
+def resolve_run_paths(config: EvalConfig) -> dict[str, str]:
     """Resolve artifact paths for a run.
 
     When ``results_dir`` is set, artifacts are namespaced under
@@ -98,7 +99,7 @@ def resolve_run_paths(config: EvalConfig) -> Dict[str, str]:
     return resolved
 
 
-def _load_json(path: str) -> Dict[str, Any]:
+def _load_json(path: str) -> dict[str, Any]:
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -110,13 +111,13 @@ def _load_json(path: str) -> Dict[str, Any]:
 # at module top) keeps ``import cognee.eval_framework.runner`` - and therefore
 # ``cognee eval --help`` - free of the optional ``eval`` extra. They are also the
 # seams the tests patch to exercise orchestration without an LLM or database.
-async def _corpus_step(params: Dict[str, Any]) -> Any:
+async def _corpus_step(params: dict[str, Any]) -> Any:
     from cognee.eval_framework.corpus_builder.run_corpus_builder import run_corpus_builder
 
     return await run_corpus_builder(params)
 
 
-async def _answer_step(params: Dict[str, Any]) -> Any:
+async def _answer_step(params: dict[str, Any]) -> Any:
     from cognee.eval_framework.answer_generation.run_question_answering_module import (
         run_question_answering,
     )
@@ -124,7 +125,7 @@ async def _answer_step(params: Dict[str, Any]) -> Any:
     return await run_question_answering(params)
 
 
-async def _evaluation_step(params: Dict[str, Any]) -> Any:
+async def _evaluation_step(params: dict[str, Any]) -> Any:
     from cognee.eval_framework.evaluation.run_evaluation_module import run_evaluation
 
     return await run_evaluation(params)
@@ -144,7 +145,7 @@ def _import_dashboard() -> Callable[..., str]:
     return create_dashboard
 
 
-def _create_dashboard(params: Dict[str, Any]) -> str:
+def _create_dashboard(params: dict[str, Any]) -> str:
     """Generate the HTML dashboard."""
     create_dashboard = _import_dashboard()
     create_dashboard(
@@ -156,7 +157,7 @@ def _create_dashboard(params: Dict[str, Any]) -> str:
     return params["dashboard_path"]
 
 
-async def run_eval(config: Optional[EvalConfig] = None) -> EvalResult:
+async def run_eval(config: EvalConfig | None = None) -> EvalResult:
     """Run the full eval pipeline for a single config and return an EvalResult.
 
     Chains corpus -> answers -> evaluation -> (optional) dashboard, writing the
@@ -278,7 +279,7 @@ def add_eval_arguments(parser: argparse.ArgumentParser) -> None:
 
 def config_from_namespace(args: argparse.Namespace) -> EvalConfig:
     """Build an EvalConfig from parsed CLI args, applying only provided overrides."""
-    overrides: Dict[str, Any] = {}
+    overrides: dict[str, Any] = {}
 
     if getattr(args, "benchmark", None) is not None:
         overrides["benchmark"] = args.benchmark
@@ -304,7 +305,7 @@ def config_from_namespace(args: argparse.Namespace) -> EvalConfig:
     return config
 
 
-def summarize_result(result: EvalResult) -> List[str]:
+def summarize_result(result: EvalResult) -> list[str]:
     """Human-readable summary lines for a completed run."""
     lines = [
         f"Benchmark: {result.benchmark}",

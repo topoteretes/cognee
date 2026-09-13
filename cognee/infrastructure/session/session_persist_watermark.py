@@ -31,9 +31,10 @@ The legacy ``get_persisted_qa_count`` / ``save_persisted_qa_count`` functions
 are kept as thin wrappers over ``SESSION_PERSIST_WATERMARK``.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Iterable, Optional, Union
+from typing import Any, Optional, Union
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
@@ -76,7 +77,7 @@ class StateRowWatermark:
 
     # -- lookup ------------------------------------------------------------
 
-    def find_row(self, raw_entries: Optional[Iterable]) -> Optional[dict]:
+    def find_row(self, raw_entries: Iterable | None) -> dict | None:
         """Find this watermark's state row among already-loaded context rows."""
         rows = [raw for raw in (raw_entries or []) if isinstance(raw, dict)]
         for raw in rows:
@@ -88,7 +89,7 @@ class StateRowWatermark:
                     return raw
         return None
 
-    def count_from_rows(self, raw_entries: Optional[Iterable]) -> int:
+    def count_from_rows(self, raw_entries: Iterable | None) -> int:
         """Parse the count out of already-loaded rows; missing or malformed -> 0."""
         row = self.find_row(raw_entries)
         if row is None:
@@ -98,7 +99,7 @@ class StateRowWatermark:
         except (TypeError, ValueError):
             return 0
 
-    def value_from_rows(self, raw_entries: Optional[Iterable]) -> Any:
+    def value_from_rows(self, raw_entries: Iterable | None) -> Any:
         """Return the raw stored value, or None when the row is missing."""
         row = self.find_row(raw_entries)
         if row is None:
@@ -123,7 +124,7 @@ class StateRowWatermark:
 
     # -- storage -----------------------------------------------------------
 
-    async def read_row(self, session_manager, user_id: str, session_id: str) -> Optional[dict]:
+    async def read_row(self, session_manager, user_id: str, session_id: str) -> dict | None:
         raw_entries = await session_manager.get_session_context_entries(
             user_id=user_id, session_id=session_id
         )
@@ -249,7 +250,7 @@ async def save_persisted_trace_count(
 # -- Stage 5: distilled context entries, per (session, dataset) --------------
 
 
-def distill_watermark(dataset_id: Union[str, UUID]) -> StateRowWatermark:
+def distill_watermark(dataset_id: str | UUID) -> StateRowWatermark:
     """The distillation watermark for one target dataset.
 
     Gated context entries are not append-only (an entry can be gated in later
@@ -268,7 +269,7 @@ def distill_watermark(dataset_id: Union[str, UUID]) -> StateRowWatermark:
 
 
 async def get_distilled_entry_ids(
-    session_manager, user_id: str, session_id: str, dataset_id: Union[str, UUID]
+    session_manager, user_id: str, session_id: str, dataset_id: str | UUID
 ) -> set[str]:
     """Ids of the gated context entries already distilled into ``dataset_id``."""
     value = await distill_watermark(dataset_id).read_value(session_manager, user_id, session_id)
@@ -281,7 +282,7 @@ async def save_distilled_entry_ids(
     session_manager,
     user_id: str,
     session_id: str,
-    dataset_id: Union[str, UUID],
+    dataset_id: str | UUID,
     entry_ids: Iterable[str],
 ) -> None:
     """Record the gated entry ids covered by a finished distillation run.

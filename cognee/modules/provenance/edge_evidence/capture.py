@@ -1,6 +1,7 @@
 """Hot-path facade: capture in memory and flush only at a bounded threshold."""
 
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.chunking.models import DocumentChunk

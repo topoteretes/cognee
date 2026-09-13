@@ -19,6 +19,8 @@ from cognee.infrastructure.session.session_embeddings import (
 from cognee.infrastructure.session.session_turn import (
     SessionTurnPreparation,
     generate_session_answer,
+)
+from cognee.infrastructure.session.session_turn import (
     prepare_session_turn as _prepare_turn,
 )
 from cognee.modules.observability import (
@@ -306,7 +308,7 @@ class SessionManager:
                 session_id=session_id,
             )
         except Exception as error:
-            logger.warning("Agent-context extraction skipped: %s", error)
+            logger.warning("Agent-context extraction skipped: %s", error, exc_info=True)
 
     def is_session_available_for_completion(self, user_id: str | None) -> bool:
         """Return True if session (history + save) is available for completion."""
@@ -795,7 +797,9 @@ class SessionManager:
             await self._cache.create_session_context_entry(user_id, session_id, entry_dump)
             return True
         except Exception as e:
-            logger.warning("SessionManager: create_session_context_entry failed: %s", e)
+            logger.warning(
+                "SessionManager: create_session_context_entry failed: %s", e, exc_info=True
+            )
             return False
 
     async def get_session_context_entries(
@@ -819,7 +823,9 @@ class SessionManager:
         try:
             return await self._cache.get_session_context_entries(user_id, session_id)
         except Exception as e:
-            logger.warning("SessionManager: get_session_context_entries failed: %s", e)
+            logger.warning(
+                "SessionManager: get_session_context_entries failed: %s", e, exc_info=True
+            )
             return []
 
     async def update_session_context_entry(
@@ -847,7 +853,9 @@ class SessionManager:
                 user_id, session_id, entry_id, merge
             )
         except Exception as e:
-            logger.warning("SessionManager: update_session_context_entry failed: %s", e)
+            logger.warning(
+                "SessionManager: update_session_context_entry failed: %s", e, exc_info=True
+            )
             return False
 
     async def delete_session_context_entry(
@@ -872,7 +880,9 @@ class SessionManager:
         try:
             return await self._cache.delete_session_context_entry(user_id, session_id, entry_id)
         except Exception as e:
-            logger.warning("SessionManager: delete_session_context_entry failed: %s", e)
+            logger.warning(
+                "SessionManager: delete_session_context_entry failed: %s", e, exc_info=True
+            )
             return False
 
     async def delete_session_context(
@@ -896,7 +906,7 @@ class SessionManager:
         try:
             return await self._cache.delete_session_context(user_id, session_id)
         except Exception as e:
-            logger.warning("SessionManager: delete_session_context failed: %s", e)
+            logger.warning("SessionManager: delete_session_context failed: %s", e, exc_info=True)
             return False
 
     async def delete_session(self, *, user_id: str, session_id: str | None = None) -> bool:
@@ -925,18 +935,20 @@ class SessionManager:
                 try:
                     del self._cache._cache[graph_key]
                 except Exception:
-                    pass
+                    logger.debug(
+                        "Ignoring exception in SessionManager.delete_session", exc_info=True
+                    )
             except Exception:
-                pass
+                logger.debug("Ignoring exception in SessionManager.delete_session", exc_info=True)
         except Exception:
-            pass
+            logger.debug("Ignoring exception in SessionManager.delete_session", exc_info=True)
 
         # Also clear the active session-context list (fail-open; adapter.delete_session may also
         # clear it, but this guarantees no leak if the adapter does not).
         try:
             await self._cache.delete_session_context(user_id, session_id)
         except Exception:
-            pass
+            logger.debug("Ignoring exception in SessionManager.delete_session", exc_info=True)
 
         deleted = await self._cache.delete_session(
             user_id=user_id,

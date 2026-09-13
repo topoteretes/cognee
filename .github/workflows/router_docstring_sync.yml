@@ -44,8 +44,7 @@ on:
     - cron: "0 5 * * 3"
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 # Queue rather than cancel: a run cancelled between the branch push and the
 # PR update would leave the fix PR half-refreshed.
@@ -55,6 +54,9 @@ concurrency:
 
 jobs:
   sync-docstrings:
+    permissions:
+      contents: write
+      pull-requests: write
     name: Detect and fix router docstring drift
     runs-on: ubuntu-22.04
     timeout-minutes: 30
@@ -69,19 +71,19 @@ jobs:
       # dependency tree), and nothing that runs there should be able to read
       # a token off disk. The push/PR steps receive the PAT explicitly.
       - name: Check out dev
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           ref: dev
           persist-credentials: false
 
       - name: Check out sync machinery from the triggering ref
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           path: automation-src
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
 
       - name: Install Python
         run: uv python install
@@ -203,6 +205,9 @@ jobs:
           fi
 
   describe-params:
+    permissions:
+      contents: write
+      pull-requests: write
     name: Generate missing parameter descriptions with Claude
     runs-on: ubuntu-22.04
     timeout-minutes: 15
@@ -229,21 +234,21 @@ jobs:
 
       - name: Check out the fix branch
         if: ${{ steps.branch.outputs.exists == 'true' }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           ref: automation/fix-router-docstrings
           persist-credentials: false
 
       - name: Check out describe machinery from the triggering ref
         if: ${{ steps.branch.outputs.exists == 'true' }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           path: automation-src
           persist-credentials: false
 
       - name: Install uv
         if: ${{ steps.branch.outputs.exists == 'true' }}
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
 
       # The script works on text and AST only — no cognee environment needed,
       # just the anthropic SDK in an ephemeral interpreter. Versions pinned:
@@ -262,7 +267,7 @@ jobs:
         env:
           PUSH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
         run: |
-          uvx ruff@0.15.11 format cognee/api
+          uvx ruff@0.16.6 format cognee/api
           git add cognee
           if git diff --cached --quiet; then
             echo "No description changes to commit."

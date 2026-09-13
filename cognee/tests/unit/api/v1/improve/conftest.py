@@ -10,7 +10,7 @@ fake stages (orchestration tests) or patch the module a real stage calls into
 import importlib
 import types
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional
+from typing import Any
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -23,7 +23,7 @@ from cognee.modules.improve.stage import BaseStage
 
 class DummySpan:
     def __init__(self):
-        self.attributes: Dict[str, Any] = {}
+        self.attributes: dict[str, Any] = {}
 
     def __enter__(self):
         return self
@@ -45,9 +45,9 @@ class FakeStage(BaseStage):
         kind: str = "graph",
         fatal: bool = False,
         after=(),
-        gate_reason: Optional[str] = None,
+        gate_reason: str | None = None,
         run=None,
-        calls: Optional[List[Any]] = None,
+        calls: list[Any] | None = None,
     ):
         self.name = name
         self.kind = kind
@@ -86,8 +86,8 @@ class ImproveHarness:
         self.user = types.SimpleNamespace(id=uuid4(), tenant_id=None)
         self.dataset = types.SimpleNamespace(id=uuid4(), name="docs", owner_id=self.user.id)
         self.span = DummySpan()
-        self.telemetry: List[dict] = []
-        self.resolve_calls: List[Any] = []
+        self.telemetry: list[dict] = []
+        self.resolve_calls: list[Any] = []
         self.config = ImproveConfig()
         self.capabilities = GraphCapabilities.assume_supported("FakeAdapter")
         self._install()

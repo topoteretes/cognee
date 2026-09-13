@@ -56,7 +56,7 @@ class RecordingImproveClient:
 
 @pytest.mark.asyncio
 async def test_mcp_improve_forwards_every_option(monkeypatch):
-    import src.server as server
+    from src import server
 
     fake_client = RecordingImproveClient()
     monkeypatch.setattr(server, "cognee_client", fake_client)
@@ -82,7 +82,7 @@ async def test_mcp_improve_forwards_every_option(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_mcp_improve_summarizes_every_stage(monkeypatch):
-    import src.server as server
+    from src import server
 
     monkeypatch.setattr(server, "cognee_client", RecordingImproveClient())
 
@@ -96,7 +96,7 @@ async def test_mcp_improve_summarizes_every_stage(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_mcp_improve_reports_errored_stages_and_failures(monkeypatch):
-    import src.server as server
+    from src import server
 
     payload = _improve_payload(
         status="errored",
@@ -124,7 +124,7 @@ async def test_mcp_improve_reports_errored_stages_and_failures(monkeypatch):
 
 
 def test_mcp_improve_docstring_no_longer_promises_a_session_sync():
-    import src.server as server
+    from src import server
 
     doc = (server.improve.__doc__ or "").lower()
     assert "sync" not in doc
@@ -133,7 +133,7 @@ def test_mcp_improve_docstring_no_longer_promises_a_session_sync():
 
 
 def test_format_improve_result_handles_running_and_legacy_payloads():
-    import src.server as server
+    from src import server
 
     running = server.format_improve_result(
         _improve_payload(status="running", stages=[], finished=False), "ds"
@@ -261,7 +261,7 @@ class RecordingRememberClient:
 
 @pytest.mark.asyncio
 async def test_mcp_remember_forwards_self_improvement(monkeypatch):
-    import src.server as server
+    from src import server
 
     fake_client = RecordingRememberClient()
     monkeypatch.setattr(server, "cognee_client", fake_client)
@@ -277,7 +277,7 @@ async def test_mcp_remember_forwards_self_improvement(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_mcp_remember_background_forwards_self_improvement(monkeypatch):
-    import src.server as server
+    from src import server
 
     fake_client = RecordingRememberClient()
     monkeypatch.setattr(server, "cognee_client", fake_client)
@@ -297,7 +297,7 @@ async def test_mcp_remember_background_forwards_self_improvement(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_mcp_remember_advertises_self_improvement():
-    import src.server as server
+    from src import server
 
     tools = await server.mcp.list_tools()
     remember_tool = next(tool for tool in tools if tool.name == "remember")

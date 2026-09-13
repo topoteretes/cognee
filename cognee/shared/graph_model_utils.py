@@ -57,7 +57,7 @@ def datapoint_model_to_basemodel(
             return dict[key_type, value_type]
 
         if origin in (Union, types.UnionType):
-            return Union[tuple(_replace_datapoint_types(arg, cache) for arg in args)]
+            return Union[tuple(_replace_datapoint_types(arg, cache) for arg in args)]  # noqa: UP007 - runtime tuple
 
         return annotation
 
@@ -141,7 +141,7 @@ def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
     mod = types.ModuleType(module_name)
     sys.modules[module_name] = mod
 
-    exec(result, mod.__dict__)
+    exec(result, mod.__dict__)  # noqa: S102 - runs the generated model module source on purpose
     namespace = mod.__dict__
 
     # Extract the generated graph model class from the module's namespace

@@ -25,13 +25,14 @@ a present schema type exactly. ``target_node_set`` additionally loose-matches a
 present type of the same name.
 """
 
+from collections.abc import Iterator
 from copy import deepcopy
-from typing import Any, Dict, Iterator, List
+from typing import Any
 
 # effect ∈ {"produces", "enriches", "modifies", "removes"}
 # kind   ∈ {"pipeline", "self_improve", "lifecycle"}
 # scope  ∈ {"whole", "subset"}
-_OPERATIONS: List[Dict[str, Any]] = [
+_OPERATIONS: list[dict[str, Any]] = [
     {
         "name": "cognify",
         "label": "cognify",
@@ -106,7 +107,7 @@ _OPERATIONS: List[Dict[str, Any]] = [
 ]
 
 
-def iter_improve_operations() -> Iterator[Dict[str, Any]]:
+def iter_improve_operations() -> Iterator[dict[str, Any]]:
     """Yield one catalog row per improve stage, from the stage registry.
 
     ``name`` is the stage name (``StageResult.stage``), ``kind`` is always
@@ -126,7 +127,7 @@ def iter_improve_operations() -> Iterator[Dict[str, Any]]:
                 if effect.get("effect") == "produces" and effect.get("target_node_set")
             }
         )
-        row: Dict[str, Any] = {
+        row: dict[str, Any] = {
             "name": stage.name,
             "label": stage.label or stage.name.replace("_", " "),
             "kind": "self_improve",
@@ -141,7 +142,7 @@ def iter_improve_operations() -> Iterator[Dict[str, Any]]:
         yield row
 
 
-def get_operations_catalog() -> List[Dict[str, Any]]:
+def get_operations_catalog() -> list[dict[str, Any]]:
     """Return the operation catalog (list of operation dicts).
 
     Hand-curated rows first, then the improve rows generated from the stage

@@ -29,7 +29,7 @@ class FeedbackItem(TypedDict, total=False):
     qa_id: str
     feedback_score: int
     feedback_source: str
-    feedback_text: Optional[str]
+    feedback_text: str | None
     used_graph_element_ids: dict[str, Any]
     memify_metadata: dict[str, Any]
 

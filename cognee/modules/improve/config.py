@@ -17,7 +17,7 @@ Environment variables (prefix ``IMPROVE_``)::
 """
 
 from functools import lru_cache
-from typing import Annotated, Any, List
+from typing import Annotated, Any
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -35,14 +35,14 @@ class ImproveConfig(BaseSettings):
     debounce_seconds: float = 0.0
     # Stage names (see ``registry.DEFAULT_STAGES``) to skip with reason
     # ``disabled_by_config``. Read as a comma-separated string.
-    stages_disabled: Annotated[List[str], NoDecode] = []
+    stages_disabled: Annotated[list[str], NoDecode] = []
     feedback_alpha: float = DEFAULT_FEEDBACK_ALPHA
 
     model_config = SettingsConfigDict(env_prefix="IMPROVE_", env_file=".env", extra="ignore")
 
     @field_validator("stages_disabled", mode="before")
     @classmethod
-    def _parse_csv(cls, value: Any) -> List[str]:
+    def _parse_csv(cls, value: Any) -> list[str]:
         if value is None:
             return []
         if isinstance(value, str):

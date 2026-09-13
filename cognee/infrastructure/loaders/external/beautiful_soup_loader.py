@@ -10,10 +10,9 @@ from typing import Any
 
 from bs4 import BeautifulSoup
 
-from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
+from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface, LoaderResult
 from cognee.infrastructure.loaders.store_derived_text import store_derived_text
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -188,7 +187,7 @@ class BeautifulSoupLoader(LoaderInterface):
 
         # Normalize extraction rules
         normalized_rules: list[ExtractionRule] = []
-        for _, rule in extraction_rules.items():
+        for rule in extraction_rules.values():
             r = self._normalize_rule(rule)
             if join_all_matches:
                 r.all = True

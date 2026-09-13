@@ -1,43 +1,42 @@
+from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from fastapi import Depends
 from pydantic import Field
-from typing import List, Optional, Union, Literal
 
+from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO
+from cognee.exceptions import CogneeApiError
 from cognee.modules.improve import ImproveResult
-from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
-from cognee.shared.utils import send_telemetry
+from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
-from cognee import __version__ as cognee_version
-from cognee.exceptions import CogneeApiError
+from cognee.shared.utils import send_telemetry
 
 logger = get_logger()
 
 
 class ImprovePayloadDTO(InDTO):
-    extraction_tasks: Optional[List[str]] = Field(default=None, examples=[[]])
-    enrichment_tasks: Optional[List[str]] = Field(default=None, examples=[[]])
-    data: Optional[str] = Field(default=None)
-    dataset_name: Optional[str] = Field(default=None)
-    dataset_id: Union[UUID, Literal[""], None] = Field(default=None, examples=[""])
-    node_name: Optional[List[str]] = Field(default=None, examples=[[]])
-    run_in_background: Optional[bool] = Field(default=False)
-    build_global_context_index: Optional[bool] = Field(default=False)
-    build_truth_subspace: Optional[bool] = Field(default=False)
+    extraction_tasks: list[str] | None = Field(default=None, examples=[[]])
+    enrichment_tasks: list[str] | None = Field(default=None, examples=[[]])
+    data: str | None = Field(default=None)
+    dataset_name: str | None = Field(default=None)
+    dataset_id: UUID | Literal[""] | None = Field(default=None, examples=[""])
+    node_name: list[str] | None = Field(default=None, examples=[[]])
+    run_in_background: bool | None = Field(default=False)
+    build_global_context_index: bool | None = Field(default=False)
+    build_truth_subspace: bool | None = Field(default=False)
     # Learning rate for the feedback-weight stage. Omitted (None) means the
     # server's IMPROVE_FEEDBACK_ALPHA applies; the stage's formula is fixed,
     # only the rate is tunable.
-    feedback_alpha: Optional[float] = Field(default=None, gt=0, le=1)
+    feedback_alpha: float | None = Field(default=None, gt=0, le=1)
     # Session IDs to bridge into the permanent graph. Without them the
     # session-kind stages (feedback weights, Q&A / trace persistence,
     # distillation, preferences, truth subspace) are skipped with
     # ``no_session_ids`` and only the graph-kind stages can run.
-    session_ids: Optional[List[str]] = Field(default=None, examples=[[]])
+    session_ids: list[str] | None = Field(default=None, examples=[[]])
 
 
 def get_improve_router() -> APIRouter:
@@ -131,8 +130,8 @@ def get_improve_router() -> APIRouter:
             # Cognee errors carry their own status code and actionable message;
             # the global handler in cognee/api/client.py returns them.
             raise
-        except Exception as error:
-            logger.error("Improve endpoint error: %s", error, exc_info=True)
+        except Exception:
+            logger.exception("Improve endpoint error")
             return JSONResponse(
                 status_code=409,
                 content={"error": "An error occurred during graph improvement."},

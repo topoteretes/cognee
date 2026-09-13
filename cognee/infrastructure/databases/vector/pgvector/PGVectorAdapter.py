@@ -1,32 +1,31 @@
 import asyncio
-from typing import Any, Dict, List, Optional, get_type_hints
+from typing import Any, get_type_hints
 from uuid import UUID
+
+from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
+from sqlalchemy import JSON, Column, MetaData, Table, delete, exc, func, select, text
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError, ProgrammingError
 from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy import JSON, Column, Table, select, delete, MetaData, func, text
-from sqlalchemy import exc
-from sqlalchemy.exc import DBAPIError, ProgrammingError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
-from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
-from sqlalchemy.engine import make_url
 
-from cognee.shared.logging_utils import get_logger
+from cognee.context_global_variables import backend_access_control_enabled
+from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
+from cognee.infrastructure.databases.relational import get_relational_config, get_relational_engine
+from cognee.infrastructure.databases.vector.config import get_vectordb_config
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
-from cognee.infrastructure.databases.relational import get_relational_engine, get_relational_config
-from cognee.infrastructure.databases.vector.config import get_vectordb_config
-
-from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
-from cognee.context_global_variables import backend_access_control_enabled
 from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
+from cognee.shared.logging_utils import get_logger
 
 from ...relational.ModelBase import Base
 from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
-from ..models.ScoredResult import ScoredResult
-from ..exceptions import CollectionNotFoundError
-from ..vector_db_interface import VectorDBInterface
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
+from ..exceptions import CollectionNotFoundError
+from ..models.ScoredResult import ScoredResult
+from ..vector_db_interface import VectorDBInterface
 from .serialize_data import serialize_data
 
 logger = get_logger("PGVectorAdapter")
@@ -53,14 +52,14 @@ class IndexSchema(DataPoint):
     # Optional reference scalars carried for the search "Evidence" feature.
     # They stay None for non-chunk data points, so this schema remains
     # compatible with every indexed DataPoint type.
-    document_id: Optional[str] = None
-    document_name: Optional[str] = None
-    chunk_index: Optional[int] = None
-    source_chunk_id: Optional[str] = None
-    importance_weight: Optional[float] = 0.5
+    document_id: str | None = None
+    document_name: str | None = None
+    chunk_index: int | None = None
+    source_chunk_id: str | None = None
+    importance_weight: float | None = 0.5
 
     metadata: dict = {"index_fields": ["text"]}
-    belongs_to_set: List[str] = []
+    belongs_to_set: list[str] = []
 
 
 class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
@@ -71,7 +70,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     def __init__(
         self,
         connection_string: str,
-        api_key: Optional[str],
+        api_key: str | None,
         embedding_engine: EmbeddingEngine,
         schema: str = "",
     ):
@@ -180,7 +179,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         """
         self._metadata = MetaData()
 
-    async def get_table_names(self) -> List[str]:
+    async def get_table_names(self) -> list[str]:
         """List collection tables, scoped to this adapter's schema when pinned.
 
         In shared-database mode this adapter's engine is pinned to a single
@@ -192,7 +191,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         if not self.schema:
             return await super().get_table_names()
 
-        table_names: List[str] = []
+        table_names: list[str] = []
         async with self.engine.begin() as connection:
             metadata = MetaData()
             await connection.run_sync(metadata.reflect, schema=self.schema)
@@ -339,7 +338,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=1, max=6),
     )
-    async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
+    async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set on conflict."""
         data_point_types = get_type_hints(DataPoint)
         if not await self.has_collection(collection_name):
@@ -422,14 +421,13 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         point_dicts = [to_dict(data_point) for data_point in pgvector_data_points]
 
-        async with self._get_write_lock(collection_name):
-            async with self.get_async_session() as session:
-                for start_index in range(0, len(point_dicts), QUERY_BATCH_SIZE):
-                    point_batch = point_dicts[start_index : start_index + QUERY_BATCH_SIZE]
-                    insert_statement = insert(PGVectorDataPoint).values(point_batch)
-                    quoted_table = f'"{collection_name}"'
-                    merged_payload_expr = text(
-                        f"""
+        async with self._get_write_lock(collection_name), self.get_async_session() as session:
+            for start_index in range(0, len(point_dicts), QUERY_BATCH_SIZE):
+                point_batch = point_dicts[start_index : start_index + QUERY_BATCH_SIZE]
+                insert_statement = insert(PGVectorDataPoint).values(point_batch)
+                quoted_table = f'"{collection_name}"'
+                merged_payload_expr = text(
+                    f"""
                                     jsonb_set(
                                         EXCLUDED.payload::jsonb,
                                         '{{belongs_to_set}}',
@@ -442,13 +440,13 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                                         )
                                     )::json
                                     """
-                    )
-                    insert_statement = insert_statement.on_conflict_do_update(
-                        index_elements=["id"],
-                        set_={"payload": merged_payload_expr},
-                    )
-                    await session.execute(insert_statement)
-                await session.commit()
+                )
+                insert_statement = insert_statement.on_conflict_do_update(
+                    index_elements=["id"],
+                    set_={"payload": merged_payload_expr},
+                )
+                await session.execute(insert_statement)
+            await session.commit()
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         """Create the underlying index collection (table) for the given name/property pair."""
@@ -504,7 +502,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     supports_payload_update = True
 
     async def update_payload(
-        self, collection_name: str, payload_updates: Dict[str, Dict[str, Any]]
+        self, collection_name: str, payload_updates: dict[str, dict[str, Any]]
     ) -> None:
         """Update payload fields on existing rows WITHOUT re-embedding.
 
@@ -545,7 +543,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 )
             await session.commit()
 
-    async def retrieve(self, collection_name: str, data_point_ids: List[str]):
+    async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         """Return rows from `collection_name` matching any of `data_point_ids`."""
         # Get PGVectorDataPoint Table from database
         try:
@@ -579,14 +577,14 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     async def search(
         self,
         collection_name: str,
-        query_text: Optional[str] = None,
-        query_vector: Optional[List[float]] = None,
-        limit: Optional[int] = 15,
+        query_text: str | None = None,
+        query_vector: list[float] | None = None,
+        limit: int | None = 15,
         with_vector: bool = False,
         include_payload: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
-    ) -> List[ScoredResult]:
+    ) -> list[ScoredResult]:
         """Run a cosine-distance similarity search, optionally filtered by NodeSet tag."""
         if query_text is None and query_vector is None:
             raise MissingQueryParameterError()
@@ -624,8 +622,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 else:
                     filter_operator = "?|"
 
-                from sqlalchemy import cast, bindparam
-                from sqlalchemy.dialects.postgresql import JSONB, ARRAY, TEXT
+                from sqlalchemy import bindparam, cast
+                from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TEXT
 
                 target = bindparam("target", value=node_name, type_=ARRAY(TEXT()))
                 query = (
@@ -670,7 +668,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             return []
 
         # Return backend raw cosine distance as score (lower is better)
-        for i in range(0, len(vector_list)):
+        for i in range(len(vector_list)):
             vector_list[i]["score"] = float(vector_list[i]["_distance"])
 
         # Create and return ScoredResult objects
@@ -686,11 +684,11 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     async def batch_search(
         self,
         collection_name: str,
-        query_texts: List[str],
-        limit: int = None,
+        query_texts: list[str],
+        limit: int | None = None,
         with_vectors: bool = False,
         include_payload: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
     ):
         """Run `search` concurrently for each query text and return a list of result lists."""
         query_vectors = await self.embedding_engine.embed_text(query_texts)
@@ -738,8 +736,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
     async def remove_belongs_to_set_tags(
         self,
-        tags: List[str],
-        node_ids: Optional[List[str]] = None,
+        tags: list[str],
+        node_ids: list[str] | None = None,
     ) -> None:
         """
         Strip the given tag names from `belongs_to_set` arrays in every
@@ -756,10 +754,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         to collections by requiring an uppercase first character.
         """
         if not tags:
-            return None
+            return
 
         if node_ids is not None and not node_ids:
-            return None
+            return
 
         # `get_table_names()` returns the raw SQLAlchemy reflection keys; for
         # Postgres those may be schema-qualified (`schema.table`) when the
@@ -781,7 +779,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 candidate_tables.append(table_only)
 
         id_scope_clause = "AND id = ANY(:node_ids)" if node_ids is not None else ""
-        bind_params: Dict[str, Any] = {"tags": list(tags)}
+        bind_params: dict[str, Any] = {"tags": list(tags)}
         if node_ids is not None:
             bind_params["node_ids"] = [str(nid) for nid in node_ids]
 
@@ -838,21 +836,20 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             # no `payload::jsonb` column) must not roll back updates already
             # committed for other tables.
             try:
-                async with self._get_write_lock(table_name):
-                    async with self.get_async_session() as session:
-                        target_rows = await session.execute(select_targets_sql, bind_params)
-                        target_ids = [row[0] for row in target_rows.all()]
-                        if not target_ids:
-                            await session.commit()
-                            continue
-
-                        scoped_params: Dict[str, Any] = {
-                            "tags": list(tags),
-                            "target_ids": target_ids,
-                        }
-                        await session.execute(update_sql, scoped_params)
-                        await session.execute(delete_empties_sql, {"target_ids": target_ids})
+                async with self._get_write_lock(table_name), self.get_async_session() as session:
+                    target_rows = await session.execute(select_targets_sql, bind_params)
+                    target_ids = [row[0] for row in target_rows.all()]
+                    if not target_ids:
                         await session.commit()
+                        continue
+
+                    scoped_params: dict[str, Any] = {
+                        "tags": list(tags),
+                        "target_ids": target_ids,
+                    }
+                    await session.execute(update_sql, scoped_params)
+                    await session.execute(delete_empties_sql, {"target_ids": target_ids})
+                    await session.commit()
             except exc.SQLAlchemyError as e:
                 logger.debug(
                     "remove_belongs_to_set_tags skipped '%s': %s",
@@ -860,7 +857,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     e,
                 )
 
-        return None
+        return
 
     async def prune(self):
         """Drop all vector collection tables and reset cached reflection metadata."""
@@ -869,4 +866,4 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
     async def run_migrations(self):
         """Run PGVector adapter migrations (currently no-op)."""
-        return None
+        return

@@ -11,7 +11,7 @@ glue (plan Part 5.1).
 import asyncio
 import hashlib
 import time
-from typing import Any, List, Optional, Type, Union
+from typing import Any
 from uuid import UUID
 
 try:
@@ -60,7 +60,7 @@ class ImproveKwargs(TypedDict, total=False):
     extraction_tasks: list
     enrichment_tasks: list
     data: Any
-    node_type: Type
+    node_type: type
     user: object
     vector_db_config: dict
     graph_db_config: dict
@@ -73,11 +73,11 @@ def _hash_session_id(session_id: str) -> str:
 
 
 async def improve(
-    dataset: Union[str, UUID] = "main_dataset",
+    dataset: str | UUID = "main_dataset",
     *,
     run_in_background: bool = False,
-    node_name: Optional[List[str]] = None,
-    session_ids: Optional[List[str]] = None,
+    node_name: list[str] | None = None,
+    session_ids: list[str] | None = None,
     build_global_context_index: bool = False,
     build_truth_subspace: bool = False,
     **kwargs: Unpack[ImproveKwargs],
@@ -281,7 +281,11 @@ async def improve(
                     try:
                         await _run_stages(inputs, result)
                     except Exception as exc:
-                        logger.warning("improve: background chain aborted by fatal stage: %s", exc)
+                        logger.warning(
+                            "improve: background chain aborted by fatal stage: %s",
+                            exc,
+                            exc_info=True,
+                        )
                     finally:
                         result.finished = True
                         await release_improve_lock_many(lock_keys)
@@ -317,7 +321,9 @@ async def _run_stages(inputs: ImproveRunInputs, result: ImproveResult) -> None:
         try:
             reason = evaluate_gate(stage, inputs)
         except Exception as exc:
-            logger.warning("improve: gate for stage '%s' failed: %s", stage.name, exc)
+            logger.warning(
+                "improve: gate for stage '%s' failed: %s", stage.name, exc, exc_info=True
+            )
             reason = None
 
         if reason is not None:
@@ -337,13 +343,15 @@ async def _run_stages(inputs: ImproveRunInputs, result: ImproveResult) -> None:
                         StageResult.skipped(remaining.name, REASON_ABORTED_BY_FATAL_STAGE)
                     )
                 result.error = stage_result.error
-                logger.error("improve: fatal stage '%s' failed, chain stopped: %s", stage.name, exc)
+                logger.exception("improve: fatal stage '%s' failed, chain stopped", stage.name)
                 try:
                     exc.improve_result = result  # type: ignore[attr-defined]
                 except Exception:
-                    pass
+                    logger.debug("improve: could not attach partial result to error", exc_info=True)
                 raise
-            logger.warning("improve: stage '%s' failed (non-fatal): %s", stage.name, exc)
+            logger.warning(
+                "improve: stage '%s' failed (non-fatal): %s", stage.name, exc, exc_info=True
+            )
             continue
 
         stage_result.duration_ms = int((time.perf_counter() - started) * 1000)
@@ -372,7 +380,7 @@ async def _run_stages(inputs: ImproveRunInputs, result: ImproveResult) -> None:
             raise error
 
 
-def _coerce_remote_result(payload: Any, session_ids: List[str]) -> ImproveResult:
+def _coerce_remote_result(payload: Any, session_ids: list[str]) -> ImproveResult:
     """Turn the remote server's JSON into an ``ImproveResult``.
 
     A server running this orchestrator returns the serialized result; an older
@@ -386,5 +394,7 @@ def _coerce_remote_result(payload: Any, session_ids: List[str]) -> ImproveResult
             payload = {key: value for key, value in payload.items() if key != "status"}
             return ImproveResult.model_validate(payload)
         except Exception as error:
-            logger.debug("improve: remote result did not validate as ImproveResult: %s", error)
+            logger.debug(
+                "improve: remote result did not validate as ImproveResult: %s", error, exc_info=True
+            )
     return ImproveResult(session_ids=list(session_ids), stages=[], memify_run=payload)

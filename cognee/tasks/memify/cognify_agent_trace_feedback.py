@@ -2,21 +2,20 @@ from typing import Optional, Union
 from uuid import UUID
 
 import cognee
-
 from cognee.exceptions import CogneeSystemError, CogneeValidationError
-from cognee.modules.improve.constants import AGENT_TRACE_FEEDBACKS_NODE_SET
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.infrastructure.session.session_persist_watermark import (
     TracePersistWindow,
     save_persisted_trace_count,
 )
+from cognee.modules.improve.constants import AGENT_TRACE_FEEDBACKS_NODE_SET
 from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("cognify_agent_trace_feedback")
 
-TraceContent = Union[TracePersistWindow, str]
+TraceContent = TracePersistWindow | str
 
 
 def _coerce_trace_items(data) -> list[TraceContent]:
@@ -31,10 +30,10 @@ def _coerce_trace_items(data) -> list[TraceContent]:
 
 
 async def cognify_agent_trace_feedback(
-    data: Union[TraceContent, list[TraceContent]],
-    dataset_id: Optional[UUID | str] = None,
+    data: TraceContent | list[TraceContent],
+    dataset_id: UUID | str | None = None,
     node_set_name: str = AGENT_TRACE_FEEDBACKS_NODE_SET,
-    user: Optional[User] = None,
+    user: User | None = None,
 ) -> None:
     """
     Cognify agent trace windows into the knowledge graph and advance their watermarks.
@@ -118,7 +117,7 @@ async def cognify_agent_trace_feedback(
     except CogneeValidationError:
         raise
     except Exception as error:
-        logger.error("Error cognifying agent trace content: %s", error)
+        logger.exception("Error cognifying agent trace content")
         raise CogneeSystemError(
             message=f"Failed to cognify agent trace content: {error}",
             log=False,

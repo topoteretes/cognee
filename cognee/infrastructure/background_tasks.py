@@ -22,30 +22,29 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Optional, Set
 
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("background_tasks")
 
-_BACKGROUND_TASKS: Set["asyncio.Task"] = set()
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
 
 
-def register_background_task(task: "asyncio.Task") -> "asyncio.Task":
+def register_background_task(task: asyncio.Task) -> asyncio.Task:
     """Anchor ``task`` until it finishes and return it unchanged."""
     _BACKGROUND_TASKS.add(task)
     task.add_done_callback(_BACKGROUND_TASKS.discard)
     return task
 
 
-def _pending_on_current_loop() -> Set["asyncio.Task"]:
+def _pending_on_current_loop() -> set[asyncio.Task]:
     """Registered tasks that are still running on the calling event loop.
 
     Tasks from another loop (a previous ``asyncio.run``) cannot be awaited
     from here and are left to their own loop.
     """
     loop = asyncio.get_running_loop()
-    pending: Set["asyncio.Task"] = set()
+    pending: set[asyncio.Task] = set()
     for task in list(_BACKGROUND_TASKS):
         if task.done():
             _BACKGROUND_TASKS.discard(task)
@@ -64,7 +63,7 @@ def pending_background_tasks() -> int:
     return sum(1 for task in _BACKGROUND_TASKS if not task.done())
 
 
-async def wait_for_background_tasks(timeout: Optional[float] = None) -> bool:
+async def wait_for_background_tasks(timeout: float | None = None) -> bool:
     """Wait until every registered background task has finished.
 
     Tasks may launch further background tasks while draining (a background

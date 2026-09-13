@@ -11,6 +11,7 @@ Real add + cognify against local stores; the DLT route is LLM-free, and
 embeddings are mocked so the vector store works offline.
 """
 
+import logging
 import pathlib
 from unittest.mock import patch
 
@@ -26,6 +27,8 @@ from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.users.methods import get_default_user
+
+logger = logging.getLogger(__name__)
 
 DATASET = "gadgets_ds"
 # Separate identity for the second test: dlt keeps process-global pipeline
@@ -75,7 +78,7 @@ async def clean_env(tmp_path, monkeypatch):
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in clean_env", exc_info=True)
 
 
 def _dlt_source(rows, name="gadgets"):
@@ -117,7 +120,7 @@ async def _row_texts():
 @pytest.mark.asyncio
 async def test_changed_row_reprocesses_without_vanishing(clean_env):
     user = await get_default_user()
-    kwargs = dict(primary_key="id", write_disposition="replace", max_rows_per_table=0)
+    kwargs = {"primary_key": "id", "write_disposition": "replace", "max_rows_per_table": 0}
 
     await cognee.add(
         _dlt_source(
@@ -129,7 +132,7 @@ async def test_changed_row_reprocesses_without_vanishing(clean_env):
         dataset_name=DATASET,
         **kwargs,
     )
-    dataset, records = await _manifest_record(user)
+    _dataset, records = await _manifest_record(user)
     assert len(records) == 1
     manifest_id = records[0].id
     first_hash = records[0].content_hash
@@ -180,7 +183,7 @@ async def test_changed_row_reprocesses_without_vanishing(clean_env):
 @pytest.mark.asyncio
 async def test_unchanged_readd_keeps_the_fast_skip(clean_env):
     user = await get_default_user()
-    kwargs = dict(primary_key="id", write_disposition="replace", max_rows_per_table=0)
+    kwargs = {"primary_key": "id", "write_disposition": "replace", "max_rows_per_table": 0}
     rows = [{"id": "1", "status": "active"}]
 
     await cognee.add(_dlt_source(rows, name="gizmos"), dataset_name=DATASET_SKIP, **kwargs)

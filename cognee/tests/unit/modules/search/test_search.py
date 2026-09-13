@@ -1,7 +1,8 @@
 import types
-from uuid import uuid4, uuid5, NAMESPACE_OID
+from uuid import NAMESPACE_OID, uuid4, uuid5
 
 import pytest
+
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchType
 

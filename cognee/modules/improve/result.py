@@ -12,7 +12,7 @@ is what every surface hands back. The legacy memify return stays reachable as
 """
 
 import asyncio
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, model_validator
@@ -41,12 +41,12 @@ class StageResult(BaseModel):
 
     stage: str
     status: StageStatus
-    reason: Optional[str] = None  # required when skipped; informative otherwise
-    error: Optional[str] = None
-    counts: Dict[str, int] = Field(default_factory=dict)
+    reason: str | None = None  # required when skipped; informative otherwise
+    error: str | None = None
+    counts: dict[str, int] = Field(default_factory=dict)
     llm_calls: int = 0
     duration_ms: int = 0
-    run: Optional[PipelineRunInfo] = None  # set when the stage is a pipeline
+    run: PipelineRunInfo | None = None  # set when the stage is a pipeline
 
     # The untouched return of the wrapped pipeline call (``{dataset_id:
     # PipelineRunInfo}`` in blocking mode). Kept off the schema; the
@@ -90,7 +90,7 @@ class StageResult(BaseModel):
         """
         run_info = first_run_info(run_result)
         status: StageStatus = "completed"
-        error: Optional[str] = None
+        error: str | None = None
         if isinstance(run_info, PipelineRunErrored):
             status = "errored"
             error = run_info.error_message or _error_text(run_info.payload)
@@ -107,7 +107,7 @@ class StageResult(BaseModel):
         return result
 
 
-def first_run_info(run_result: Any) -> Optional[PipelineRunInfo]:
+def first_run_info(run_result: Any) -> PipelineRunInfo | None:
     """First ``PipelineRunInfo`` inside an executor return, if any."""
     if isinstance(run_result, PipelineRunInfo):
         return run_result
@@ -122,7 +122,7 @@ def first_run_info(run_result: Any) -> Optional[PipelineRunInfo]:
     return None
 
 
-def _error_text(error: Any) -> Optional[str]:
+def _error_text(error: Any) -> str | None:
     if error is None:
         return None
     if isinstance(error, BaseException):
@@ -145,10 +145,10 @@ class ImproveResult(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    dataset_id: Optional[UUID] = None
-    dataset_name: Optional[str] = None
-    session_ids: List[str] = Field(default_factory=list)
-    stages: List[StageResult] = Field(default_factory=list)
+    dataset_id: UUID | None = None
+    dataset_name: str | None = None
+    session_ids: list[str] = Field(default_factory=list)
+    stages: list[StageResult] = Field(default_factory=list)
     # Legacy: the raw return of the memify enrichment stage, nested for one
     # minor release (D4). ``{}`` when that stage did not run.
     memify_run: Any = None
@@ -157,7 +157,7 @@ class ImproveResult(BaseModel):
     # Set when a fatal stage aborted the chain (always raised in the
     # foreground; recorded here in background mode where a raise has nowhere
     # to go).
-    error: Optional[str] = None
+    error: str | None = None
 
     _task: Optional["asyncio.Task"] = PrivateAttr(default=None)
 
@@ -173,7 +173,7 @@ class ImproveResult(BaseModel):
         return "completed"
 
     @property
-    def ok(self) -> List[StageResult]:
+    def ok(self) -> list[StageResult]:
         """Stages that did or had already done their work."""
         return [stage for stage in self.stages if stage.ok]
 
@@ -183,7 +183,7 @@ class ImproveResult(BaseModel):
             stage.status == "skipped" and stage.reason == REASON_LOCK_HELD for stage in self.stages
         )
 
-    def stage(self, name: str) -> Optional[StageResult]:
+    def stage(self, name: str) -> StageResult | None:
         for stage in self.stages:
             if stage.stage == name:
                 return stage
@@ -206,12 +206,12 @@ class ImproveResult(BaseModel):
     @classmethod
     def all_skipped(
         cls,
-        stage_names: List[str],
+        stage_names: list[str],
         reason: str,
         *,
-        dataset_id: Optional[UUID] = None,
-        dataset_name: Optional[str] = None,
-        session_ids: Optional[List[str]] = None,
+        dataset_id: UUID | None = None,
+        dataset_name: str | None = None,
+        session_ids: list[str] | None = None,
     ) -> "ImproveResult":
         return cls(
             dataset_id=dataset_id,

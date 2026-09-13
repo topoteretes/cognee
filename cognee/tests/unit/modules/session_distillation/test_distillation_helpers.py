@@ -10,8 +10,8 @@ from uuid import uuid4
 
 import pytest
 
-from cognee.exceptions import CogneeValidationError
 import cognee.modules.session_distillation.distill as distill_module
+from cognee.exceptions import CogneeValidationError
 from cognee.modules.session_distillation.distill import render_lesson_document
 from cognee.modules.session_distillation.models import (
     BATCH_CHAR_BUDGET,

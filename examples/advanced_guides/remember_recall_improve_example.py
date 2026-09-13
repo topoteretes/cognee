@@ -1,4 +1,3 @@
-# ruff: noqa: E402
 """
 V2 Memory-Oriented API: remember, recall, improve, forget, status.
 

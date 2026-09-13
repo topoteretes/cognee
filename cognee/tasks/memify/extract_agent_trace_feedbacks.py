@@ -16,7 +16,7 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("extract_agent_trace_feedbacks")
 
 
-def _normalize_trace_content(value) -> Optional[str]:
+def _normalize_trace_content(value) -> str | None:
     """Convert raw trace content into a non-empty string suitable for memify payloads."""
     if value is None:
         return None
@@ -34,7 +34,7 @@ def _normalize_trace_content(value) -> Optional[str]:
 def resolve_trace_window_size(
     total_trace_count: int,
     persisted_trace_count: int,
-    last_n_steps: Optional[int],
+    last_n_steps: int | None,
     *,
     session_id: str = "",
 ) -> int:
@@ -58,9 +58,9 @@ def resolve_trace_window_size(
 
 async def extract_agent_trace_feedbacks(
     data,
-    session_ids: Optional[list[str]] = None,
+    session_ids: list[str] | None = None,
     raw_trace_content: bool = False,
-    last_n_steps: Optional[int] = None,
+    last_n_steps: int | None = None,
 ):
     """
     Extract not-yet-persisted agent trace steps for the current user.
@@ -199,6 +199,7 @@ async def extract_agent_trace_feedbacks(
                         content_label,
                         session_id,
                         error,
+                        exc_info=True,
                     )
                     continue
         else:
@@ -209,7 +210,7 @@ async def extract_agent_trace_feedbacks(
     except CogneeSystemError:
         raise
     except Exception as error:
-        logger.error("Error extracting agent trace feedbacks: %s", error)
+        logger.exception("Error extracting agent trace feedbacks")
         raise CogneeSystemError(
             message=f"Failed to extract agent trace feedbacks: {error}",
             log=False,

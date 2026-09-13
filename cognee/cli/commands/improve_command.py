@@ -2,10 +2,10 @@ import argparse
 import asyncio
 from typing import Any, Optional
 
-from cognee.cli.reference import SupportsCliCommand
-from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
+from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.reference import SupportsCliCommand
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 
@@ -146,7 +146,7 @@ global context index are opt-in flags. The result prints one line per stage.
             dataset = args.dataset_id if args.dataset_id else args.dataset_name
             fmt.echo(f"Improving knowledge graph for dataset '{dataset}'...")
 
-            feedback_alpha: Optional[float] = getattr(args, "feedback_alpha", None)
+            feedback_alpha: float | None = getattr(args, "feedback_alpha", None)
             build_global_context_index = bool(getattr(args, "build_global_context_index", False))
             build_truth_subspace = bool(getattr(args, "build_truth_subspace", False))
 
@@ -171,7 +171,7 @@ global context index are opt-in flags. The result prints one line per stage.
                     )
                     return result
                 except Exception as e:
-                    raise CliCommandInnerException(f"Failed to improve: {str(e)}") from e
+                    raise CliCommandInnerException(f"Failed to improve: {e!s}") from e
 
             result = asyncio.run(run_improve())
 
@@ -180,4 +180,4 @@ global context index are opt-in flags. The result prints one line per stage.
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(f"Error improving: {str(e)}", error_code=1) from e
+            raise CliCommandException(f"Error improving: {e!s}", error_code=1) from e

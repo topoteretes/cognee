@@ -7,9 +7,10 @@ context for the ``pipeline_runs`` row. It has no ``run_in_background`` field
 because the runner owns background mode and a stage never asks.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, List, Mapping, Optional, Tuple
+from typing import Any
 from uuid import UUID
 
 from .capabilities import GraphCapabilities
@@ -31,10 +32,10 @@ class ImproveRunInputs:
     user: Any
     dataset_id: UUID
     dataset: Any  # the resolved Dataset row (id, name, owner_id)
-    session_ids: Tuple[str, ...]
+    session_ids: tuple[str, ...]
     config: ImproveConfig
     capabilities: GraphCapabilities
-    node_name: Optional[List[str]] = None
+    node_name: list[str] | None = None
     feedback_alpha: float = 0.1
     build_global_context_index: bool = False
     build_truth_subspace: bool = False
@@ -53,7 +54,7 @@ class ImproveRunInputs:
         return bool(self.session_ids)
 
     @property
-    def session_id_list(self) -> List[str]:
+    def session_id_list(self) -> list[str]:
         return list(self.session_ids)
 
     @property

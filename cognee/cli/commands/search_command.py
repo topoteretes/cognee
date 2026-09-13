@@ -1,24 +1,23 @@
 import argparse
 import asyncio
 import json
-from typing import Optional
 
-from cognee.cli.reference import SupportsCliCommand
-from cognee.cli import DEFAULT_DOCS_URL
-from cognee.cli.config import (
-    COMPLETION_SEARCH_TYPES,
-    DEFAULT_SEARCH_TYPE,
-    OUTPUT_FORMAT_CHOICES,
-    SEARCH_TYPE_CHOICES,
-)
 import cognee.cli.echo as fmt
+from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.code_search import (
     add_code_arguments,
     build_code_query,
     handle_diagram_out,
     print_code_results,
 )
+from cognee.cli.config import (
+    COMPLETION_SEARCH_TYPES,
+    DEFAULT_SEARCH_TYPE,
+    OUTPUT_FORMAT_CHOICES,
+    SEARCH_TYPE_CHOICES,
+)
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.reference import SupportsCliCommand
 
 
 class SearchCommand(SupportsCliCommand):
@@ -136,7 +135,7 @@ Search Types & Use Cases:
                     )
                     return results
                 except Exception as e:
-                    raise CliCommandInnerException(f"Failed to search: {str(e)}") from e
+                    raise CliCommandInnerException(f"Failed to search: {e!s}") from e
 
             results = asyncio.run(run_search())
 
@@ -179,4 +178,4 @@ Search Types & Use Cases:
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(f"Error searching: {str(e)}", error_code=1) from e
+            raise CliCommandException(f"Error searching: {e!s}", error_code=1) from e

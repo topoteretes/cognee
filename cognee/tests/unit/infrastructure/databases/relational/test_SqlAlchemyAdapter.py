@@ -1,8 +1,8 @@
 import asyncio
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-from sqlalchemy import text, NullPool
+from sqlalchemy import NullPool, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (

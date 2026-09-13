@@ -9,6 +9,8 @@ working without churn.
 
 from __future__ import annotations
 
+import logging
+
 from ._kuzu_helpers import install_json_extension_local
 from .harness import (
     DEFAULT_DISPATCH,
@@ -28,6 +30,7 @@ from .kuzu_protocol import (
     OP_OPEN_DATABASE,
 )
 
+logger = logging.getLogger(__name__)
 
 _LOCK_HELD_MARKER = "could not set lock on file"
 
@@ -93,7 +96,7 @@ def _open_database(registry: HandleRegistry, req: Request) -> HandleResult:
                 except FileNotFoundError:
                     pass
             else:
-                from .ladybug_migrate import needs_migration, ladybug_migration
+                from .ladybug_migrate import ladybug_migration, needs_migration
 
                 should_migrate, old_version = needs_migration(db_path, ladybug.__version__)
                 if should_migrate:
@@ -112,7 +115,6 @@ def _open_database(registry: HandleRegistry, req: Request) -> HandleResult:
 def _db_init(registry: HandleRegistry, req: Request) -> None:
     db = registry.get(req.handle_id)
     db.init_database()
-    return None
 
 
 def _db_close(registry: HandleRegistry, req: Request) -> None:
@@ -121,8 +123,7 @@ def _db_close(registry: HandleRegistry, req: Request) -> None:
         try:
             db.close()
         except Exception:
-            pass
-    return None
+            logger.debug("Ignoring exception in _db_close", exc_info=True)
 
 
 def _open_connection(registry: HandleRegistry, req: Request) -> HandleResult:
@@ -140,8 +141,7 @@ def _conn_close(registry: HandleRegistry, req: Request) -> None:
         try:
             conn.close()
         except Exception:
-            pass
-    return None
+            logger.debug("Ignoring exception in _conn_close", exc_info=True)
 
 
 def _conn_execute_fetch_all(registry: HandleRegistry, req: Request):
@@ -171,7 +171,7 @@ def _conn_execute_fetch_all(registry: HandleRegistry, req: Request):
             try:
                 result.close()
             except Exception:
-                pass
+                logger.debug("Ignoring exception in _conn_execute_fetch_all", exc_info=True)
     return rows
 
 
@@ -179,7 +179,6 @@ def _install_json(registry: HandleRegistry, req: Request) -> None:
     """Run INSTALL JSON on a throwaway database so the extension is cached."""
     buffer_pool_size = req.args[0] if req.args else 64 * 1024 * 1024
     install_json_extension_local(buffer_pool_size)
-    return None
 
 
 def _load_extension(registry: HandleRegistry, req: Request) -> None:
@@ -196,7 +195,6 @@ def _load_extension(registry: HandleRegistry, req: Request) -> None:
         # retry once; if INSTALL fails here it raises with the real cause.
         conn.execute(f"INSTALL {extension_name};")
         conn.execute(f"LOAD EXTENSION {extension_name};")
-    return None
 
 
 DISPATCH = {

@@ -16,7 +16,7 @@ from uuid import uuid4
 
 import pytest
 
-import cognee.api.v1.update.update  # noqa: F401  (bind the real submodule)
+import cognee.api.v1.update.update  # bind the real submodule
 
 update_module = sys.modules["cognee.api.v1.update.update"]
 data_methods_module = sys.modules["cognee.modules.data.methods"]
@@ -140,14 +140,13 @@ async def test_multi_item_input_is_rejected_not_multiplied():
     incremental = AsyncMock()
 
     p1, p2, p3, p4, p5, p6 = _patches(data_id, incremental, {"run": "full"})
-    with p1, p2, p3, p4, p5, p6:
-        with pytest.raises(IngestionError):
-            await update_module.update(
-                data_id=data_id,
-                data=["first document", "second document"],
-                dataset_id=dataset_id,
-                user=SimpleNamespace(id=uuid4()),
-            )
+    with p1, p2, p3, p4, p5, p6, pytest.raises(IngestionError):
+        await update_module.update(
+            data_id=data_id,
+            data=["first document", "second document"],
+            dataset_id=dataset_id,
+            user=SimpleNamespace(id=uuid4()),
+        )
 
     incremental.assert_not_called()
 

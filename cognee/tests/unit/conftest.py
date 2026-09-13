@@ -15,8 +15,11 @@ Tests that never touch the relational database are unaffected.
 """
 
 import asyncio
+import logging
 
 import pytest
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -28,6 +31,7 @@ def _relational_db_for_unit_tests():
         try:
             await run_migrations()
         except Exception:
+            logger.debug("Ignoring exception in _relational_db_for_unit_tests._run", exc_info=True)
             db_engine = get_relational_engine()
             await db_engine.create_database()
             await run_migrations()

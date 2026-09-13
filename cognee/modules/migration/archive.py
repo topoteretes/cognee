@@ -10,7 +10,7 @@ receiving side.
 import shutil
 import tarfile
 from pathlib import Path
-from typing import IO, List, Union
+from typing import IO
 
 from cognee.modules.migration.cogx import MANIFEST_FILE
 
@@ -21,7 +21,7 @@ MAX_MEMBER_BYTES = 512 * 1024 * 1024  # 512 MiB per member
 MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB across all members
 
 
-def pack_archive(archive_dir: Union[str, Path], tar_path: Union[str, Path]) -> Path:
+def pack_archive(archive_dir: str | Path, tar_path: str | Path) -> Path:
     """Tar a COGX archive directory so its files sit at the tarball root."""
     archive_dir = Path(archive_dir)
     tar_path = Path(tar_path)
@@ -33,7 +33,7 @@ def pack_archive(archive_dir: Union[str, Path], tar_path: Union[str, Path]) -> P
 
 def unpack_archive(
     fileobj: IO[bytes],
-    destination: Union[str, Path],
+    destination: str | Path,
     max_members: int = MAX_ARCHIVE_MEMBERS,
     max_member_bytes: int = MAX_MEMBER_BYTES,
     max_total_bytes: int = MAX_TOTAL_BYTES,
@@ -54,7 +54,7 @@ def unpack_archive(
     member_count = 0
     declared_bytes = 0
     written_bytes = 0
-    extracted_paths: List[Path] = []
+    extracted_paths: list[Path] = []
     try:
         with tarfile.open(fileobj=fileobj, mode="r:*") as tar:
             for member in tar:
@@ -98,7 +98,7 @@ def unpack_archive(
     return find_archive_root(destination)
 
 
-def _cleanup_partial_extraction(paths: List[Path]) -> None:
+def _cleanup_partial_extraction(paths: list[Path]) -> None:
     """Remove everything an aborted ``unpack_archive`` call managed to extract."""
     for path in reversed(paths):
         try:
@@ -110,7 +110,7 @@ def _cleanup_partial_extraction(paths: List[Path]) -> None:
             pass
 
 
-def find_archive_root(directory: Union[str, Path]) -> Path:
+def find_archive_root(directory: str | Path) -> Path:
     """Locate the directory containing ``manifest.json`` (root or one level down)."""
     directory = Path(directory)
     if (directory / MANIFEST_FILE).exists():

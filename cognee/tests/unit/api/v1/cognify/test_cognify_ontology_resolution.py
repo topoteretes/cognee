@@ -48,7 +48,7 @@ async def test_cognify_normalizes_skip_config(
 async def test_cognify_raises_on_invalid_env_before_pipeline(
     mock_migrations, mock_get_resolver, mock_remote_client
 ):
-    mock_get_resolver.side_effect = EnvironmentError("Unsupported ontology resolver: bad")
+    mock_get_resolver.side_effect = OSError("Unsupported ontology resolver: bad")
 
     with pytest.raises(EnvironmentError):
         await cognify_module.cognify(config=None)

@@ -62,10 +62,11 @@ returned value as authoritative rather than concatenating deltas and stopping:
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import AsyncIterator, Literal, Optional
+from typing import Literal
 
 from cognee.shared.logging_utils import get_logger
 
@@ -90,43 +91,43 @@ class StreamEvent:
     """
 
     type: EventType
-    text: Optional[str] = None
-    stage: Optional[str] = None
-    error: Optional[str] = None
+    text: str | None = None
+    stage: str | None = None
+    error: str | None = None
     # Set on ``error`` only. The status line was already committed as 200 when
     # the first frame went out, so this is the one place a caller can still
     # learn that the failure was, say, 402 rather than a generic server error.
-    status: Optional[int] = None
+    status: int | None = None
 
 
 _SENTINEL = object()
 
 # Identifies one promoted answer call, so the sink can tell the lane that owns
 # the stream from a concurrent lane whose deltas must be dropped.
-_active_producer: ContextVar[Optional[object]] = ContextVar("active_producer", default=None)
+_active_producer: ContextVar[object | None] = ContextVar("active_producer", default=None)
 
 
 class TokenSink:
     """Fan-out channel for answer tokens. Never affects the returned value."""
 
-    def __init__(self, max_buffered_events: Optional[int] = None) -> None:
+    def __init__(self, max_buffered_events: int | None = None) -> None:
         self._queue: asyncio.Queue = asyncio.Queue()
         # Read at construction, not bound as a default, so the cap stays one
         # knob rather than a value frozen at import.
         self._max_buffered = (
             MAX_BUFFERED_EVENTS if max_buffered_events is None else max_buffered_events
         )
-        self._owner: Optional[object] = None
+        self._owner: object | None = None
         self._emitted = False
         self._detached = False
         self._closed = False
         self._dropped = False
-        self._last_stage: Optional[str] = None
-        self._iterator: Optional[AsyncIterator[StreamEvent]] = None
+        self._last_stage: str | None = None
+        self._iterator: AsyncIterator[StreamEvent] | None = None
 
     # -- producer side -------------------------------------------------
 
-    def owns(self, producer: Optional[object]) -> bool:
+    def owns(self, producer: object | None) -> bool:
         """Whether this producer is the one whose deltas reach the consumer."""
         return producer is not None and self._owner is producer
 
@@ -203,7 +204,7 @@ class TokenSink:
         """The last token has been generated; work after this is persistence."""
         self._put(StreamEvent(type="answer_done"))
 
-    def fail(self, message: str, status: Optional[int] = None) -> None:
+    def fail(self, message: str, status: int | None = None) -> None:
         """Report a failure to the consumer, then terminate the stream.
 
         Takes an already-safe message rather than an exception: provider errors
@@ -279,13 +280,13 @@ class TokenSink:
             yield item
 
 
-requested_token_sink: ContextVar[Optional[TokenSink]] = ContextVar(
+requested_token_sink: ContextVar[TokenSink | None] = ContextVar(
     "requested_token_sink", default=None
 )
-active_token_sink: ContextVar[Optional[TokenSink]] = ContextVar("active_token_sink", default=None)
+active_token_sink: ContextVar[TokenSink | None] = ContextVar("active_token_sink", default=None)
 
 
-def get_active_token_sink() -> Optional[TokenSink]:
+def get_active_token_sink() -> TokenSink | None:
     """The sink the *current task* may stream into, if any.
 
     Returns ``None`` everywhere except inside :func:`answer_scope`, which
@@ -295,9 +296,7 @@ def get_active_token_sink() -> Optional[TokenSink]:
 
 
 @asynccontextmanager
-async def answer_scope(
-    stage: Optional[str] = None, *, can_stream: bool = True
-) -> AsyncIterator[None]:
+async def answer_scope(stage: str | None = None, *, can_stream: bool = True) -> AsyncIterator[None]:
     """Mark this task as the one completion a listening client may watch.
 
     A scope, not a verb: entering it usually promotes nothing. It yields without
@@ -371,7 +370,7 @@ async def answer_scope(
         # The consumer has already been handed a 200 and part of an answer, so
         # the failure has to reach it as an event. The detail stays server-side:
         # provider errors embed the rendered prompt and connection details.
-        logger.error("Answer streaming failed: %s", error, exc_info=True)
+        logger.exception("Answer streaming failed")
         if sink.owns(producer):
             sink.fail(
                 f"{type(error).__name__} during answer generation",

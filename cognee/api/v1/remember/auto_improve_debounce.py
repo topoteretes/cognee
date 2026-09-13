@@ -58,7 +58,7 @@ class AutoImproveDecision:
     reason: str
     qa_count: int = 0
     new_entries: int = 0
-    elapsed_seconds: Optional[float] = None
+    elapsed_seconds: float | None = None
 
 
 def auto_improve_enabled() -> bool:
@@ -72,7 +72,7 @@ def debounce_active() -> bool:
     return config.debounce_entries > 1 or config.debounce_seconds > 0
 
 
-def _extract_state_row(raw_entries: list) -> Optional[dict]:
+def _extract_state_row(raw_entries: list) -> dict | None:
     for raw in raw_entries or []:
         if not isinstance(raw, dict):
             continue
@@ -83,7 +83,7 @@ def _extract_state_row(raw_entries: list) -> Optional[dict]:
     return None
 
 
-def _parse_timestamp(value) -> Optional[datetime]:
+def _parse_timestamp(value) -> datetime | None:
     if not value:
         return None
     try:
@@ -95,7 +95,7 @@ def _parse_timestamp(value) -> Optional[datetime]:
     return parsed
 
 
-async def _read_state(session_manager, user_id: str, session_id: str) -> Optional[dict]:
+async def _read_state(session_manager, user_id: str, session_id: str) -> dict | None:
     raw_entries = await session_manager.get_session_context_entries(
         user_id=user_id, session_id=session_id
     )
@@ -112,7 +112,7 @@ async def should_auto_improve(
     user_id: str,
     session_id: str,
     *,
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
 ) -> AutoImproveDecision:
     """Decide whether this ``remember()`` call should launch the improve bridge.
 
@@ -129,7 +129,7 @@ async def should_auto_improve(
         state = await _read_state(session_manager, user_id, session_id)
         qa_count = await _count_qa_entries(session_manager, user_id, session_id)
     except Exception as exc:
-        logger.debug("auto-improve debounce: state unavailable, firing (%s)", exc)
+        logger.debug("auto-improve debounce: state unavailable, firing (%s)", exc, exc_info=True)
         return AutoImproveDecision(due=True, reason=REASON_STATE_UNAVAILABLE)
 
     if state is None:
@@ -177,8 +177,8 @@ async def mark_auto_improve_fired(
     user_id: str,
     session_id: str,
     *,
-    qa_count: Optional[int] = None,
-    now: Optional[datetime] = None,
+    qa_count: int | None = None,
+    now: datetime | None = None,
 ) -> None:
     """Record that an automatic improve was launched for this session.
 
@@ -208,4 +208,4 @@ async def mark_auto_improve_fired(
                 entry_dump=payload,
             )
     except Exception as exc:
-        logger.debug("auto-improve debounce: could not save state (%s)", exc)
+        logger.debug("auto-improve debounce: could not save state (%s)", exc, exc_info=True)

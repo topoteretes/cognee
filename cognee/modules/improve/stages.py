@@ -12,7 +12,7 @@ Heavy imports stay inside ``gate``/``run`` so importing this package pulls in
 nothing but pydantic and the config modules.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from cognee.shared.logging_utils import get_logger
 
@@ -51,7 +51,7 @@ class FeedbackWeightsStage(BaseStage):
         {"effect": "modifies", "target_type": "EntityType", "property": "feedback_weight"},
     ]
 
-    def gate(self, inputs: ImproveRunInputs) -> Optional[str]:
+    def gate(self, inputs: ImproveRunInputs) -> str | None:
         from cognee.base_config import get_base_config
 
         if get_base_config().default_feedback_influence <= 0:
@@ -160,9 +160,9 @@ class ExtractAgentContextStage(BaseStage):
     after = ("persist_agent_traces",)
     label = "extract agent context"
     summary = "Turns pending tool-call traces into agent-profile lessons (session context)."
-    effects: List[Dict[str, Any]] = []
+    effects: list[dict[str, Any]] = []
 
-    def gate(self, inputs: ImproveRunInputs) -> Optional[str]:
+    def gate(self, inputs: ImproveRunInputs) -> str | None:
         from cognee.infrastructure.session.get_session_manager import get_session_manager
 
         session_manager = get_session_manager()
@@ -182,7 +182,7 @@ class ExtractAgentContextStage(BaseStage):
         user_id = str(inputs.user.id)
         touched = 0
         failed = 0
-        last_error: Optional[BaseException] = None
+        last_error: BaseException | None = None
         for session_id in inputs.session_ids:
             try:
                 ids = await extract_pending_agent_context(
@@ -199,6 +199,7 @@ class ExtractAgentContextStage(BaseStage):
                     "improve: agent-context extraction failed for '%s' (non-fatal): %s",
                     session_id,
                     e,
+                    exc_info=True,
                 )
         counts = {"lessons": touched, "sessions_failed": failed}
         if failed:
@@ -235,7 +236,7 @@ class DistillSessionsStage(BaseStage):
         distilled = 0
         completed = 0
         failed = 0
-        last_error: Optional[BaseException] = None
+        last_error: BaseException | None = None
         for session_id in inputs.session_ids:
             try:
                 result = await distill_session(
@@ -257,6 +258,7 @@ class DistillSessionsStage(BaseStage):
                     "improve: session distillation failed for '%s' (non-fatal): %s",
                     session_id,
                     e,
+                    exc_info=True,
                 )
         counts = {
             "documents": distilled,
@@ -283,7 +285,7 @@ class UpdateUserPreferencesStage(BaseStage):
         },
     ]
 
-    def gate(self, inputs: ImproveRunInputs) -> Optional[str]:
+    def gate(self, inputs: ImproveRunInputs) -> str | None:
         from cognee.base_config import get_base_config
 
         if not get_base_config().personalization_enabled:
@@ -335,7 +337,7 @@ class BuildTruthSubspaceStage(BaseStage):
         {"effect": "modifies", "target_type": "DocumentChunk", "property": "truth_alignment"},
     ]
 
-    def gate(self, inputs: ImproveRunInputs) -> Optional[str]:
+    def gate(self, inputs: ImproveRunInputs) -> str | None:
         if not inputs.build_truth_subspace:
             return REASON_OPT_IN_DISABLED
         if not inputs.capabilities.supports_truth_state:
@@ -378,7 +380,7 @@ class TripletEnrichmentStage(BaseStage):
         {"effect": "enriches", "target_type": "Entity"},
     ]
 
-    def gate(self, inputs: ImproveRunInputs) -> Optional[str]:
+    def gate(self, inputs: ImproveRunInputs) -> str | None:
         if inputs.has_custom_memify_tasks:
             return None
         from cognee.modules.cognify.config import get_cognify_config
@@ -392,15 +394,16 @@ class TripletEnrichmentStage(BaseStage):
 
         from .graph_changes import has_graph_changed_since_last_improve
 
-        if not inputs.has_custom_memify_tasks:
-            if not await has_graph_changed_since_last_improve(inputs.dataset_id):
-                result = StageResult(
-                    stage=self.name,
-                    status="already_completed",
-                    reason=REASON_NO_WRITES_SINCE_LAST_IMPROVE,
-                )
-                result._raw_run = {}
-                return result
+        if not inputs.has_custom_memify_tasks and not await has_graph_changed_since_last_improve(
+            inputs.dataset_id
+        ):
+            result = StageResult(
+                stage=self.name,
+                status="already_completed",
+                reason=REASON_NO_WRITES_SINCE_LAST_IMPROVE,
+            )
+            result._raw_run = {}
+            return result
 
         kwargs = dict(inputs.memify_kwargs)
         if kwargs.get("node_type") is None:
@@ -440,7 +443,7 @@ class GlobalContextIndexStage(BaseStage):
         {"effect": "enriches", "target_type": "TextSummary"},
     ]
 
-    def gate(self, inputs: ImproveRunInputs) -> Optional[str]:
+    def gate(self, inputs: ImproveRunInputs) -> str | None:
         if not inputs.build_global_context_index:
             return REASON_OPT_IN_DISABLED
         return None

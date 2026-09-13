@@ -1,4 +1,4 @@
-from typing import Any, List, Optional
+from typing import Any
 
 from cognee.context_global_variables import session_user
 from cognee.exceptions import CogneeSystemError, CogneeValidationError
@@ -15,7 +15,7 @@ from cognee.tasks.memify.feedback_weights_constants import (
 logger = get_logger("extract_feedback_qas")
 
 
-def _valid_rating(value: Any) -> Optional[int]:
+def _valid_rating(value: Any) -> int | None:
     if not isinstance(value, int) or isinstance(value, bool):
         return None
     return value if 1 <= value <= 5 else None
@@ -47,7 +47,7 @@ def build_implicit_rating_map(context_rows: Any) -> dict[str, tuple[int, str]]:
 def resolve_feedback(
     entry: SessionQAEntry,
     implicit_ratings: dict[str, tuple[int, str]],
-) -> Optional[tuple[int, str, Optional[str]]]:
+) -> tuple[int, str, str | None] | None:
     """Return (rating, source, feedback_text) for a QA entry, or None when it carries no rating.
 
     An explicit ``feedback_score`` always wins; the implicit rating inferred from the
@@ -73,7 +73,7 @@ def _is_already_applied(entry: SessionQAEntry) -> bool:
     )
 
 
-async def extract_feedback_qas(data, session_ids: Optional[List[str]] = None):
+async def extract_feedback_qas(data, session_ids: list[str] | None = None):
     """
     Read provided sessions and yield rated QAs not yet applied to graph weights.
 

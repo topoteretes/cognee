@@ -34,10 +34,10 @@ class GraphCapabilities(BaseModel):
     supports_feedback_weights: bool
     supports_truth_state: bool
     supports_incremental_chunk_updates: bool = False
-    adapter: Optional[str] = None
+    adapter: str | None = None
 
     @classmethod
-    def assume_supported(cls, adapter: Optional[str] = None) -> "GraphCapabilities":
+    def assume_supported(cls, adapter: str | None = None) -> "GraphCapabilities":
         """Fail-open answer used when the adapter could not be probed.
 
         A stage that runs against an unsupported backend reports ``errored`` —
@@ -66,7 +66,7 @@ def _overrides_interface(engine: Any, method_name: str) -> bool:
     return callable(getattr(engine, method_name, None))
 
 
-def _explicit_flag(engine: Any, flag_name: str) -> Optional[bool]:
+def _explicit_flag(engine: Any, flag_name: str) -> bool | None:
     value = getattr(engine, flag_name, None)
     return value if isinstance(value, bool) else None
 
@@ -92,9 +92,7 @@ def probe_graph_capabilities(engine: Any) -> GraphCapabilities:
     )
 
 
-async def resolve_graph_capabilities(
-    dataset_id: UUID, owner_id: Optional[UUID]
-) -> GraphCapabilities:
+async def resolve_graph_capabilities(dataset_id: UUID, owner_id: UUID | None) -> GraphCapabilities:
     """Probe the graph adapter that serves ``dataset_id``.
 
     Enters the dataset's database scope only for the probe and leaves it
@@ -111,5 +109,7 @@ async def resolve_graph_capabilities(
             engine = await get_graph_engine()
             return probe_graph_capabilities(engine)
     except Exception as error:
-        logger.warning("improve: graph capability probe failed, assuming support: %s", error)
+        logger.warning(
+            "improve: graph capability probe failed, assuming support: %s", error, exc_info=True
+        )
         return GraphCapabilities.assume_supported()

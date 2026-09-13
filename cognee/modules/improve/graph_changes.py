@@ -9,7 +9,8 @@ Conservative by construction: when there is no prior completed improve for the
 dataset, or the query cannot decide, the answer is "changed", so the stage runs.
 """
 
-from typing import Iterable, Optional
+from collections.abc import Iterable
+from typing import Optional
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
@@ -72,10 +73,12 @@ async def has_graph_changed_since_last_improve(
 
             return bool(writes_since)
     except Exception as error:
-        logger.debug("improve: change check could not decide, running the stage: %s", error)
+        logger.debug(
+            "improve: change check could not decide, running the stage: %s", error, exc_info=True
+        )
         return True
 
 
-def describe_change_check(changed: bool) -> Optional[str]:
+def describe_change_check(changed: bool) -> str | None:
     """Reason text for the stage result (``None`` when the stage runs)."""
     return None if changed else "no_writes_since_last_improve"

@@ -16,7 +16,7 @@ probed before the first embedding call.
 """
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 from uuid import UUID
 
 from cognee.context_global_variables import session_user, set_database_global_context_variables
@@ -66,11 +66,11 @@ def _result(
     truth_epoch: int,
     status: str = STATUS_COMPLETED,
     nodes_skipped: int = 0,
-    reason: Optional[str] = None,
-    error: Optional[str] = None,
+    reason: str | None = None,
+    error: str | None = None,
 ) -> dict:
     """The build's return shape. Integer fields double as stage counts."""
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "anchors": int(anchors),
         "nodes_scored": int(nodes_scored),
         "nodes_skipped": int(nodes_skipped),
@@ -93,13 +93,13 @@ def _node_index_text(node_data: dict) -> str:
     return str(text).strip()
 
 
-def _truth_node_sets(session_ids: Optional[List[str]]) -> List[str]:
+def _truth_node_sets(session_ids: list[str] | None) -> list[str]:
     if not session_ids:
         return TRUTH_NODE_SET
     return [truth_session_node_set(session_id) for session_id in session_ids if session_id]
 
 
-async def _fetch_learning_statements(graph_engine, session_ids: Optional[List[str]]) -> List[str]:
+async def _fetch_learning_statements(graph_engine, session_ids: list[str] | None) -> list[str]:
     """Read accepted lesson statements from the session_learnings node set.
 
     Traverses the ``session_learnings`` NodeSet to its member DocumentChunk
@@ -113,10 +113,10 @@ async def _fetch_learning_statements(graph_engine, session_ids: Optional[List[st
             node_name=_truth_node_sets(session_ids),
         )
     except Exception as error:
-        logger.warning("truth_subspace: learning lookup failed open: %s", error)
+        logger.warning("truth_subspace: learning lookup failed open: %s", error, exc_info=True)
         return []
 
-    statements: List[str] = []
+    statements: list[str] = []
     seen = set()
     for _node_id, node_data in nodes or []:
         if not isinstance(node_data, dict):
@@ -131,7 +131,7 @@ async def _fetch_learning_statements(graph_engine, session_ids: Optional[List[st
     return statements
 
 
-async def _embed_in_batches(embedding_engine, texts: List[str]) -> List[Optional[List[float]]]:
+async def _embed_in_batches(embedding_engine, texts: list[str]) -> list[list[float] | None]:
     """Embed ``texts`` in bounded batches, preserving order.
 
     A failed batch yields ``None`` for each of its texts so the caller can skip
@@ -139,7 +139,7 @@ async def _embed_in_batches(embedding_engine, texts: List[str]) -> List[Optional
     vector would project to all-zero "neutral" coordinates and be persisted as
     if it were a real score.
     """
-    vectors: List[Optional[List[float]]] = []
+    vectors: list[list[float] | None] = []
     for start in range(0, len(texts), NODE_EMBED_BATCH_SIZE):
         batch = texts[start : start + NODE_EMBED_BATCH_SIZE]
         try:
@@ -149,6 +149,7 @@ async def _embed_in_batches(embedding_engine, texts: List[str]) -> List[Optional
                 "truth_subspace: node embedding batch of %d failed, skipping those nodes: %s",
                 len(batch),
                 error,
+                exc_info=True,
             )
             vectors.extend([None for _ in batch])
             continue
@@ -165,15 +166,15 @@ async def _embed_in_batches(embedding_engine, texts: List[str]) -> List[Optional
     return vectors
 
 
-async def _resolve_dataset(dataset: Union[str, UUID], user):
+async def _resolve_dataset(dataset: str | UUID, user):
     """Resolve a writable dataset object for ``user`` (or None)."""
     datasets = await get_authorized_existing_datasets([dataset], "write", user)
     return datasets[0] if datasets else None
 
 
 async def build_truth_subspace(
-    dataset: Union[str, UUID],
-    session_ids: Optional[List[str]],
+    dataset: str | UUID,
+    session_ids: list[str] | None,
     user=None,
     k: int = DEFAULT_K,
 ) -> dict:
@@ -227,7 +228,7 @@ async def build_truth_subspace(
         try:
             existing_centroids = await load_centroids(vector_engine, str(dataset_obj.id), k)
         except Exception as error:
-            logger.debug("truth_subspace: centroid load failed open: %s", error)
+            logger.debug("truth_subspace: centroid load failed open: %s", error, exc_info=True)
             existing_centroids = []
 
         previous_epoch = max((centroid.truth_epoch for centroid in existing_centroids), default=0)
@@ -244,7 +245,7 @@ async def build_truth_subspace(
         signature = align.stable_signature(learning_ids)
 
         def live_epoch_result(
-            *, nodes_scored: int = 0, nodes_skipped: int = 0, error: Optional[str] = None
+            *, nodes_scored: int = 0, nodes_skipped: int = 0, error: str | None = None
         ) -> dict:
             """Report the state that is live: epoch N's centroids, untouched."""
             return _result(
@@ -261,7 +262,9 @@ async def build_truth_subspace(
         try:
             learning_vecs = await embedding_engine.embed_text(learning_texts)
         except Exception as error:
-            logger.warning("truth_subspace: learning embedding failed open: %s", error)
+            logger.warning(
+                "truth_subspace: learning embedding failed open: %s", error, exc_info=True
+            )
             return live_epoch_result(error=f"learning embedding failed: {error}")
 
         updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -302,14 +305,16 @@ async def build_truth_subspace(
 
         centroid_vecs = [centroid.centroid for centroid in centroids]
 
-        async def commit_centroids() -> Optional[str]:
+        async def commit_centroids() -> str | None:
             """Write the N+1 centroids; the last step of an epoch move. Returns an error."""
             if not centroids_pending_write:
                 return None
             try:
                 await upsert_centroids(vector_engine, centroids)
             except Exception as error:
-                logger.warning("truth_subspace: centroid upsert failed open: %s", error)
+                logger.warning(
+                    "truth_subspace: centroid upsert failed open: %s", error, exc_info=True
+                )
                 return f"centroid upsert failed: {error}"
             return None
 
@@ -324,12 +329,12 @@ async def build_truth_subspace(
         try:
             nodes, _edges = await graph_engine.get_graph_data()
         except Exception as error:
-            logger.warning("truth_subspace: node load failed open: %s", error)
+            logger.warning("truth_subspace: node load failed open: %s", error, exc_info=True)
             return live_epoch_result(error=f"node load failed: {error}")
 
         chunk_label = DocumentChunk.__name__
-        node_ids: List[str] = []
-        node_texts: List[str] = []
+        node_ids: list[str] = []
+        node_texts: list[str] = []
         for node_id, node_data in nodes:
             if not isinstance(node_data, dict) or node_data.get("type") != chunk_label:
                 continue
@@ -370,7 +375,9 @@ async def build_truth_subspace(
                 }
             except Exception as error:
                 # Per-node fail-open: one bad node never sinks the batch.
-                logger.debug("truth_subspace: coords failed for node %s: %s", node_id, error)
+                logger.debug(
+                    "truth_subspace: coords failed for node %s: %s", node_id, error, exc_info=True
+                )
                 nodes_skipped += 1
 
         if not scored:
@@ -389,7 +396,9 @@ async def build_truth_subspace(
         try:
             write_result = await graph_engine.set_node_truth_state(scored)
         except Exception as error:
-            logger.warning("truth_subspace: persisting alignments failed open: %s", error)
+            logger.warning(
+                "truth_subspace: persisting alignments failed open: %s", error, exc_info=True
+            )
             return live_epoch_result(
                 nodes_skipped=nodes_skipped, error=f"persisting alignments failed: {error}"
             )

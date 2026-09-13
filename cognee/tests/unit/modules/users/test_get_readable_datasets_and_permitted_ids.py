@@ -13,8 +13,8 @@ from uuid import uuid4
 
 import pytest
 
-import cognee.modules.users.permissions.methods.get_permitted_dataset_ids  # noqa: F401
-import cognee.modules.users.permissions.methods.get_readable_datasets  # noqa: F401
+import cognee.modules.users.permissions.methods.get_permitted_dataset_ids
+import cognee.modules.users.permissions.methods.get_readable_datasets
 from cognee.modules.users.exceptions import PermissionDeniedError
 
 # Both packages' __init__.py do `from .get_x import get_x`, which overwrites the

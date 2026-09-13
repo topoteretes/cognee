@@ -24,9 +24,9 @@ are factored so that's a local change.
 """
 
 import asyncio
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterable
 from contextlib import asynccontextmanager
-from typing import Any, Iterable, Optional, Tuple
+from typing import Any
 
 from cognee.shared.logging_utils import get_logger
 
@@ -169,7 +169,7 @@ async def release_improve_lock_many(keys: Iterable[str]) -> None:
         _improving_sessions.difference_update(wanted)
 
 
-def improve_lock_keys(session_ids: Optional[Iterable[str]], dataset_id: Any) -> Tuple[str, ...]:
+def improve_lock_keys(session_ids: Iterable[str] | None, dataset_id: Any) -> tuple[str, ...]:
     """The claim keys for one improve run: its session ids, else its dataset id."""
     sessions = tuple(session_id for session_id in (session_ids or ()) if session_id)
     if sessions:

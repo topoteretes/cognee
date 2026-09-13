@@ -11,7 +11,7 @@ view cannot drift. ``memify_task_registry`` is untouched: it names tasks for the
 public ``memify(tasks=[...])`` API at a finer grain than a stage.
 """
 
-from typing import Dict, Iterable, List, Sequence
+from collections.abc import Iterable, Sequence
 
 from .stage import ImproveStage
 from .stages import (
@@ -26,7 +26,7 @@ from .stages import (
     UpdateUserPreferencesStage,
 )
 
-DEFAULT_STAGES: List[ImproveStage] = [
+DEFAULT_STAGES: list[ImproveStage] = [
     FeedbackWeightsStage(),
     PersistSessionQAStage(),
     PersistAgentTracesStage(),
@@ -39,7 +39,7 @@ DEFAULT_STAGES: List[ImproveStage] = [
 ]
 
 
-def stage_names(stages: Iterable[ImproveStage] = DEFAULT_STAGES) -> List[str]:
+def stage_names(stages: Iterable[ImproveStage] = DEFAULT_STAGES) -> list[str]:
     return [stage.name for stage in stages]
 
 
@@ -49,7 +49,7 @@ def validate_stage_order(stages: Sequence[ImproveStage] = DEFAULT_STAGES) -> Non
     Also rejects duplicate names and an ``after`` that names an unknown stage,
     and requires exactly one ``fatal`` stage (decision D2).
     """
-    positions: Dict[str, int] = {}
+    positions: dict[str, int] = {}
     for index, stage in enumerate(stages):
         if not stage.name:
             raise ValueError(f"stage at position {index} has no name")

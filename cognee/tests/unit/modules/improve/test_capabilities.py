@@ -1,10 +1,11 @@
 """The per-adapter capability probe (plan Part 5.6)."""
 
-from typing import Any, Dict, List
+from typing import Any
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.modules.improve import GraphCapabilities, probe_graph_capabilities
@@ -24,16 +25,16 @@ class StubAdapter(GraphDBInterface):
 
 @_concrete
 class FeedbackOnlyAdapter(GraphDBInterface):
-    async def set_node_feedback_weights(self, node_feedback_weights: Dict[str, float]):
+    async def set_node_feedback_weights(self, node_feedback_weights: dict[str, float]):
         return {}
 
-    async def set_edge_feedback_weights(self, edge_feedback_weights: Dict[str, float]):
+    async def set_edge_feedback_weights(self, edge_feedback_weights: dict[str, float]):
         return {}
 
 
 @_concrete
 class HalfFeedbackAdapter(GraphDBInterface):
-    async def set_node_feedback_weights(self, node_feedback_weights: Dict[str, float]):
+    async def set_node_feedback_weights(self, node_feedback_weights: dict[str, float]):
         return {}
 
 
@@ -47,10 +48,10 @@ class FullAdapter(GraphDBInterface):
     async def set_edge_feedback_weights(self, edge_feedback_weights):
         return {}
 
-    async def get_node_truth_state(self, node_ids: List[str]):
+    async def get_node_truth_state(self, node_ids: list[str]):
         return {}
 
-    async def set_node_truth_state(self, node_truth_state: Dict[str, Dict[str, Any]]):
+    async def set_node_truth_state(self, node_truth_state: dict[str, dict[str, Any]]):
         return {}
 
 
@@ -135,7 +136,7 @@ def test_neo4j_adapter_reports_feedback_weights_but_no_truth_state():
 
 def test_capabilities_are_frozen():
     caps = GraphCapabilities.assume_supported()
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError, match="Instance is frozen"):
         caps.supports_truth_state = False  # type: ignore[misc]
 
 

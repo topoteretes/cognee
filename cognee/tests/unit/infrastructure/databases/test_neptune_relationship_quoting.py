@@ -9,13 +9,14 @@ Skipped automatically when the Neptune optional dependencies (langchain_aws, bot
 not installed.
 """
 
-import pytest
 from unittest.mock import AsyncMock
+
+import pytest
 
 pytest.importorskip("langchain_aws", reason="Neptune tests require langchain_aws")
 pytest.importorskip("botocore", reason="Neptune tests require botocore")
 
-from cognee.infrastructure.databases.graph.neptune_driver.adapter import (  # noqa: E402
+from cognee.infrastructure.databases.graph.neptune_driver.adapter import (
     NeptuneGraphDB,
 )
 

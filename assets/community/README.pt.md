@@ -71,6 +71,7 @@ pip install cognee
 
 ```python
 import os
+
 os.environ["LLM_API_KEY"] = "SUA_OPENAI_API_KEY"
 ```
 
@@ -88,7 +89,9 @@ import asyncio
 
 async def main():
     # Adiciona texto ao cognee
-    await cognee.add("Processamento de linguagem natural (NLP) é um subcampo interdisciplinar da ciência da computação e recuperação de informações.")
+    await cognee.add(
+        "Processamento de linguagem natural (NLP) é um subcampo interdisciplinar da ciência da computação e recuperação de informações."
+    )
 
     # Gera o grafo de conhecimento
     await cognee.cognify()
@@ -101,9 +104,8 @@ async def main():
         print(result)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
-
 ```
 Exemplo do output:
 ```

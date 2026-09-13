@@ -30,18 +30,20 @@ from cognee.infrastructure.session.session_turn import apply_served_context_rati
 @pytest.fixture
 def fs_adapter():
     """FSCacheAdapter backed by a temp directory."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with patch(
+    with (
+        tempfile.TemporaryDirectory() as tmpdir,
+        patch(
             "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
             return_value={"data_root_directory": tmpdir},
-        ):
-            from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
-                FSCacheAdapter,
-            )
+        ),
+    ):
+        from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
+            FSCacheAdapter,
+        )
 
-            inst = FSCacheAdapter()
-            yield inst
-            inst.cache.close()
+        inst = FSCacheAdapter()
+        yield inst
+        inst.cache.close()
 
 
 @pytest.fixture

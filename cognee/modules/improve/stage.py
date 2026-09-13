@@ -7,7 +7,7 @@ order is load-bearing; ``after`` names the stages that must precede this one
 and ``registry.validate_stage_order`` checks it.
 """
 
-from typing import Any, Dict, List, Literal, Optional, Protocol, Tuple, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from .inputs import ImproveRunInputs
 from .result import REASON_DISABLED_BY_CONFIG, REASON_NO_SESSION_IDS, StageResult
@@ -20,13 +20,13 @@ class ImproveStage(Protocol):
     name: str
     kind: StageKind
     fatal: bool
-    after: Tuple[str, ...]
+    after: tuple[str, ...]
     label: str
     summary: str
-    effects: List[Dict[str, Any]]
-    pipeline_name: Optional[str]
+    effects: list[dict[str, Any]]
+    pipeline_name: str | None
 
-    def gate(self, inputs: ImproveRunInputs) -> Optional[str]: ...
+    def gate(self, inputs: ImproveRunInputs) -> str | None: ...
 
     async def run(self, inputs: ImproveRunInputs) -> StageResult: ...
 
@@ -37,16 +37,16 @@ class BaseStage:
     name: str = ""
     kind: StageKind = "graph"
     fatal: bool = False
-    after: Tuple[str, ...] = ()
+    after: tuple[str, ...] = ()
     # Catalog metadata (``operations_catalog`` generates its improve rows from these).
     label: str = ""
     summary: str = ""
-    effects: List[Dict[str, Any]] = []
+    effects: list[dict[str, Any]] = []
     # The pipeline whose ``source_pipeline`` provenance stamps this stage's
     # output, when the stage is pipeline-backed.
-    pipeline_name: Optional[str] = None
+    pipeline_name: str | None = None
 
-    def gate(self, inputs: ImproveRunInputs) -> Optional[str]:
+    def gate(self, inputs: ImproveRunInputs) -> str | None:
         """Return a skip reason, or ``None`` to run. Must make zero LLM calls."""
         return None
 
@@ -57,7 +57,7 @@ class BaseStage:
         return f"<ImproveStage {self.name}>"
 
 
-def evaluate_gate(stage: ImproveStage, inputs: ImproveRunInputs) -> Optional[str]:
+def evaluate_gate(stage: ImproveStage, inputs: ImproveRunInputs) -> str | None:
     """The run-level gates every stage shares, then the stage's own.
 
     Order: ``disabled_by_config`` (operator opt-out) -> ``no_session_ids``

@@ -2,6 +2,7 @@
 
 import importlib
 import types
+from dataclasses import FrozenInstanceError
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -249,7 +250,7 @@ def test_global_context_index_skipped_unless_opted_in():
 
 def test_inputs_are_frozen():
     inputs = _inputs()
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         inputs.dataset_id = uuid4()  # type: ignore[misc]
     with pytest.raises(TypeError):
         inputs.memify_kwargs["data"] = 1  # type: ignore[index]

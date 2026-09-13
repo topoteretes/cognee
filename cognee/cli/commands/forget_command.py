@@ -2,11 +2,11 @@ import argparse
 import asyncio
 from uuid import UUID
 
-from cognee.cli.reference import SupportsCliCommand
-from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
+from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 from cognee.cli.hints import hint_remember
+from cognee.cli.reference import SupportsCliCommand
 
 
 class ForgetCommand(SupportsCliCommand):
@@ -90,7 +90,7 @@ records, so the dataset (or item) can be re-cognified later.
                         memory_only=args.memory_only,
                     )
                 except Exception as e:
-                    raise CliCommandInnerException(f"Failed to forget: {str(e)}") from e
+                    raise CliCommandInnerException(f"Failed to forget: {e!s}") from e
 
             result = asyncio.run(run_forget())
             fmt.success(f"Done: {result}")
@@ -104,4 +104,4 @@ records, so the dataset (or item) can be re-cognified later.
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(f"Error during forget: {str(e)}", error_code=1) from e
+            raise CliCommandException(f"Error during forget: {e!s}", error_code=1) from e

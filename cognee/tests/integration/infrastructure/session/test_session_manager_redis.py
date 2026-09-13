@@ -1,7 +1,8 @@
 """Integration tests for SessionManager with RedisAdapter."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from cognee.infrastructure.session.feedback_models import (
     AgentTraceFeedbackSummary,
