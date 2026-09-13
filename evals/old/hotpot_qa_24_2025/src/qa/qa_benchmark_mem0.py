@@ -3,10 +3,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from dotenv import load_dotenv
-from openai import OpenAI
 from mem0 import Memory
+from openai import OpenAI
 
-from .qa_benchmark_base import QABenchmarkRAG, QABenchmarkConfig
+from .qa_benchmark_base import QABenchmarkConfig, QABenchmarkRAG
 
 load_dotenv()
 
@@ -42,7 +42,6 @@ class QABenchmarkMem0(QABenchmarkRAG):
 
     async def cleanup_rag(self) -> None:
         """Clean up resources (no cleanup needed for Mem0)."""
-        pass
 
     async def insert_document(self, document: str, document_id: int) -> None:
         """Insert document into Mem0 as conversation messages."""

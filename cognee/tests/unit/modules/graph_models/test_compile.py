@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph_models import (
@@ -125,5 +126,5 @@ def test_identity_fields_drive_deterministic_ids():
 
 
 def test_compile_rejects_invalid_spec():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         graph_spec_to_json_schema({"entities": [{"name": "bad name!"}]})

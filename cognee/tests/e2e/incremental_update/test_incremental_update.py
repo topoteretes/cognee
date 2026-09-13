@@ -17,6 +17,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+
 from cognee.tests.e2e.incremental_update.backend_env import (
     incremental_test_backend_env,
     reset_backend_state,
@@ -33,7 +34,7 @@ def incremental_env():
 
     root = Path(tempfile.mkdtemp(prefix="cognee_incr_test_"))
 
-    import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
+    import cognee  # (cognee's import runs load_dotenv(override=True))
 
     os.environ.update(
         **incremental_test_backend_env(),
@@ -306,7 +307,7 @@ async def test_incremental_update_full_flow(incremental_env):
     from starlette.datastructures import UploadFile
 
     def _upload(content: bytes, filename: str) -> UploadFile:
-        spooled = tempfile.SpooledTemporaryFile()
+        spooled = tempfile.SpooledTemporaryFile()  # noqa: SIM115 - handed to UploadFile, which owns it
         spooled.write(content)
         spooled.seek(0)
         return UploadFile(file=spooled, filename=filename)

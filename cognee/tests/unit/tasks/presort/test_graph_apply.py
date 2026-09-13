@@ -159,12 +159,18 @@ async def test_apply_presort_graph_runs_custom_pipeline():
         "run_custom_pipeline",
         new=AsyncMock(return_value="pipeline-info"),
     ) as pipeline_mock:
-        result = await apply_presort_graph(report)
+        result = await apply_presort_graph(
+            report,
+            vector_db_config={"vector_db_provider": "pgvector"},
+            graph_db_config={"graph_database_provider": "neo4j"},
+        )
 
     pipeline_mock.assert_awaited_once()
     call_kwargs = pipeline_mock.await_args.kwargs
     assert call_kwargs["dataset"] == "downloads_presort_graph"
     assert call_kwargs["pipeline_name"] == "presort_graph_pipeline"
+    assert call_kwargs["vector_db_config"] == {"vector_db_provider": "pgvector"}
+    assert call_kwargs["graph_db_config"] == {"graph_database_provider": "neo4j"}
     assert len(call_kwargs["data"]) == 3  # all instances passed as the pipeline data
     assert result == {"dataset": "downloads_presort_graph", "nodes": 3, "result": "pipeline-info"}
 

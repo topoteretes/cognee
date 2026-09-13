@@ -45,7 +45,6 @@ pre-commit install
 - **huggingface** - HuggingFace transformers
 - **aws** - S3 storage backend
 - **redis** - Redis caching
-- **graphiti** - Graphiti-core integration
 - **baml** - BAML structured output
 - **dlt** - Data load tool (dlt) integration
 - **docling** - Docling document processing, slim profile without torch (office/HTML/email/markdown/LaTeX formats)
@@ -360,7 +359,7 @@ GRAPH_DATABASE_PASSWORD=your_password
 
 # Postgres (requires postgres extra: pip install cognee[postgres])
 # DEMO, not production-ready — see the warning below.
-# Does not support raw Cypher queries, natural language search, or Graphiti.
+# Does not support raw Cypher queries or natural language search.
 # The legacy value `postgres` still resolves to this same adapter.
 GRAPH_DATABASE_PROVIDER=postgres_demo
 GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
@@ -422,9 +421,9 @@ receives. Pass `context_format="prompt"` to get the full envelope instead:
 result = await cognee.recall(
     "why did the migration stall?",
     query_type=SearchType.GRAPH_COMPLETION,  # pin the graph lane — with a bare
-    session_id="s1",                         # session_id a session hit would
-    only_context=True,                       # short-circuit it (see recall vs search)
-    context_format="prompt",                 # default: "context"
+    session_id="s1",  # session_id a session hit would
+    only_context=True,  # short-circuit it (see recall vs search)
+    context_format="prompt",  # default: "context"
 )
 ```
 
@@ -464,7 +463,7 @@ Four flags trade memory features for speed. Know what each turns off before flip
 | `PERSONALIZATION_ENABLED=false` | Per-user preference personalization: one `UserPreference` node per user+dataset with weighted `prefers` edges, retrieval ranking multiplied by those weights, stated-preference text injected into LLM prompts, the per-turn 1-5 rating question, and the `improve()` stage that folds ratings into weights | Off by default, so nothing is lost until you opt in. When on, ranking strength comes from `PERSONALIZATION_INFLUENCE` (default 0.3, valid range [0, 1] — out-of-range values are rejected at startup); personalization also needs a user and a single resolved dataset in context, so multi-dataset searches never personalize |
 | `CACHING=true` | The entire session-memory layer: `remember(session_id=...)` raises, `recall()` loses session history and the session-cache short-circuit, `agent_memory` session options error, and `AUTO_FEEDBACK` becomes moot | You lose the fast session write path and self-improving memory — only the slower add+cognify path remains. Do not benchmark cognee with this off; that measures cognee with its memory layer removed |
 | `AUTO_FEEDBACK=true` | The automatic per-turn analysis: one structured-output LLM call after each answered query that detects implicit feedback, guides later retrievals, and feeds `improve()`'s agent-context lessons | Memory stops self-tuning from conversation signals. Session store/recall itself keeps working — this is the flag to disable for low-latency reads, since the per-turn LLM call dominates default read latency |
-| `DATASET_QUEUE_ENABLED=true` | The per-process cap on concurrent datasets (`DATASET_QUEUE_MAX_CONCURRENT`, default 6), subprocess-engine teardown on scope exit, and pinning of in-use engines against cache eviction | Saves minor per-operation overhead, but embedded engines become unbounded: file-lock leaks and mid-use engine eviction under parallel multi-dataset load. Safe only for single-dataset scripts |
+| `DATASET_QUEUE_ENABLED=true` | The per-process cap on concurrent datasets (`DATASET_QUEUE_MAX_CONCURRENT`, default 6), subprocess-engine teardown on scope exit, and pinning of in-use engines against cache eviction. Only engages when `ENABLE_BACKEND_ACCESS_CONTROL` is on (its default) — with access control off the flag is a no-op either way | Saves minor per-operation overhead, but embedded engines become unbounded: file-lock leaks and mid-use engine eviction under parallel multi-dataset load. Safe only for single-dataset scripts |
 
 `AUTO_FEEDBACK` is only consulted when `CACHING=true`. If reads feel slow on defaults, set `AUTO_FEEDBACK=false` and keep `CACHING=true` — that keeps session memory while removing the per-turn LLM call.
 
@@ -700,6 +699,7 @@ All functions are async - use `await` or `asyncio.run()`. See `examples/advanced
 
 Several security environment variables in `.env`:
 - `ACCEPT_LOCAL_FILE_PATH` - Allow local file paths (default: True)
+- `COGNEE_ALLOWED_LOCAL_FILE_ROOTS` - Optional `os.pathsep`-separated allowlist of directories local paths may be read from. Unset (default) means any local path is accepted, so a local repo or document tree can be ingested from anywhere; a path-looking string that does not exist is still ingested as text. When set, paths outside the listed roots are rejected (or ingested as text on the non-strict `add()` path); cognee's own data/system/cache/logs/repos roots are always allowed. Set it for servers reachable by untrusted callers.
 - `ALLOW_HTTP_REQUESTS` - Allow HTTP requests from Cognee (default: True)
 - `ALLOW_CYPHER_QUERY` - Allow raw Cypher queries (default: True)
 - `ENABLE_BACKEND_ACCESS_CONTROL` - Multi-tenant isolation (default: True). When `true`, API auth is required and per-user/dataset DB isolation is enabled. When `false`, single-user mode: shared DBs and auth off unless overridden.
@@ -713,10 +713,12 @@ For production deployments, review and tighten these settings.
 ```python
 from cognee.modules.pipelines.tasks.Task import Task
 
+
 async def my_custom_task(data):
     # Your logic here
     processed_data = process(data)
     return processed_data
+
 
 # Use in pipeline
 task = Task(my_custom_task)
@@ -737,9 +739,7 @@ from cognee.infrastructure.llm.get_llm_client import get_llm_client
 
 llm_client = get_llm_client()
 response = await llm_client.acreate_structured_output(
-    text_input="Your prompt",
-    system_prompt="System instructions",
-    response_model=YourPydanticModel
+    text_input="Your prompt", system_prompt="System instructions", response_model=YourPydanticModel
 )
 ```
 
@@ -783,7 +783,7 @@ Supported code files (`.py`, `.go`, `.ts`, `.java`, `.rs`, … — the extension
 - **Diagrams**: add `"diagram": "mermaid"` (or `"dot"`, or `True`) to any `code_query` and the result carries a `diagram` block with deterministic diagram source (nodes shaped by kind, one subgraph per repository, seeds/focus/path highlighted). `{"operation": "architecture"}` is the module-level overview — symbol-to-symbol edges are rolled up into counted module-to-module edges, routes/storage/services hang off their modules — and it draws itself as Mermaid by default. Renderer: `cognee/modules/retrieval/code_graph_diagram.py`; no LLM, no network. Same option over REST (`code_query` on `POST /api/v1/search` and `/api/v1/recall` with `scope=["code"]`) and the CLI: `cognee-cli search "" -t CODE --code-query '{"operation": "architecture"}' --diagram-out arch.html` (`.html` renders Mermaid in a browser, `.svg/.png/.pdf` run Graphviz on DOT, other extensions get raw source; `--diagram mermaid|dot` prints the source in a fenced block).
 - **enola version**: pinned (with per-platform SHA-256) in `cognee/tasks/code_graph/install_enola.py` and auto-installed to `~/.cognee/bin` on first use (`ENOLA_AUTO_INSTALL=false` opts out; `ENOLA_PATH` always wins). Cognee reads enola's documented snapshot contract (`facts.jsonl`, `insights.json`, `receipt.json`; `format_version` 1) and rejects a receipt with a format version it does not understand. Fact ids and resolved relation `target_id`s from the writer are used when present; explainer findings become `CodeInsight` nodes with `evidences` edges; the receipt's provenance/quality block is stamped on the `CodeRepository` node and reported by the `delta` operation. Bumping the pin means re-pinning the checksums and re-checking the known answers in `cognee/tests/test_code_graph_e2e.py`.
 - **Opt-out per add**: `preferred_loaders={"text_loader": {}}` treats a code file as a plain document (chunking + LLM extraction).
-- **Whole repositories**: `remember(content_type="code")` remains the repo-level path (cross-file edges); the CODE route is per-file.
+- **Whole repositories**: a local code-project directory or a GitHub/GitLab repository URL passed to `add()`/`remember()` (API: the `raw_data` form field) resolves to ONE `code_repo` manifest that cognify runs through the CODE_REPO route — a single enola pass with cross-file edges, plus the repo's documents as ordinary items. Remote URLs are shallow-cloned under `COGNEE_REPOS_DIR` (default `~/.cognee/repos`). `remember(content_type="code")` builds the same graph without the add step. The CODE route is per-file.
 
 ### Provenance
 Cognee has five provenance mechanisms. They answer different questions and are controlled by three unrelated flags — do not confuse them:

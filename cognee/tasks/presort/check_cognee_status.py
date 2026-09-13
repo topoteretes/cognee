@@ -10,7 +10,6 @@ other tenants' copies of a file are invisible by design.
 """
 
 from collections import defaultdict
-from typing import List
 
 from cognee.shared.logging_utils import get_logger
 
@@ -23,7 +22,7 @@ _CHUNK_SIZE = 900  # stay under SQLite's bind-parameter limit (see identify_many
 COGNIFY_PIPELINE_NAME = "cognify_pipeline"
 
 
-async def check_cognee_status(files: List[FileRecord], user=None) -> List[str]:
+async def check_cognee_status(files: list[FileRecord], user=None) -> list[str]:
     """Fill ``cognee_status`` / ``known_in_datasets`` on records; returns warnings.
 
     Statuses: ``new`` (content unknown to cognee), ``staged`` (added but not
@@ -80,10 +79,12 @@ async def check_cognee_status(files: List[FileRecord], user=None) -> List[str]:
                     ):
                         cognified_hashes.add(content_hash)
     except Exception as error:
-        logger.warning(f"Presort cognee-status check failed: {error}")
+        logger.warning(f"Presort cognee-status check failed: {error}", exc_info=True)
         return [
-            "cognee-status check failed (relational database unreachable?); "
-            "file statuses left as 'unknown'"
+            (
+                "cognee-status check failed (relational database unreachable?); "
+                "file statuses left as 'unknown'"
+            )
         ]
 
     for record in files:

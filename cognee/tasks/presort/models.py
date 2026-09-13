@@ -11,7 +11,7 @@ options — so a report can be saved, reviewed/edited, and applied later.
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -30,7 +30,7 @@ class FileRecord(_ReportBase):
     path: str
     name: str
     extension: str = ""
-    mime_type: Optional[str] = None
+    mime_type: str | None = None
     size_bytes: int = 0
     is_text: bool = False
     # Whether a registered cognee loader claims this path extension.
@@ -39,8 +39,8 @@ class FileRecord(_ReportBase):
     # Coarse deterministic bucket (documents/images/audio/video/archives/code/
     # data/other); refined by the opt-in LLM classification.
     family: str = "other"
-    content_class: Optional[str] = None  # LLM content classification, if run
-    content_hash: Optional[str] = None
+    content_class: str | None = None  # LLM content classification, if run
+    content_hash: str | None = None
     cognee_status: CogneeStatus = "unknown"
     known_in_datasets: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
@@ -77,8 +77,8 @@ class PiiFinding(_ReportBase):
     source: Literal["filename", "content", "llm"] = "content"
     # Samples are always redacted (e.g. "j***@example.com"); raw matches are
     # never stored in the report.
-    redacted_sample: Optional[str] = None
-    detail: Optional[str] = None
+    redacted_sample: str | None = None
+    detail: str | None = None
 
 
 class RelationInstance(_ReportBase):
@@ -95,8 +95,8 @@ class RelationInstance(_ReportBase):
     target: str
     target_entity: str
     origin: Literal["detector", "custom", "llm"] = "detector"
-    confidence: Optional[float] = None
-    detail: Optional[str] = None
+    confidence: float | None = None
+    detail: str | None = None
 
 
 class ProposedGroup(_ReportBase):
@@ -134,13 +134,13 @@ class PresortReport(BaseModel):
     # handing it back to remember(report).
     skip_duplicates: bool = True
     exclude_pii: bool = False
-    apply_groups: Optional[list[str]] = None
+    apply_groups: list[str] | None = None
 
-    report_path: Optional[str] = None  # where the report was persisted, if it was
+    report_path: str | None = None  # where the report was persisted, if it was
 
     # Populated only by auto_apply (remember(..., dry_run="presort", auto_apply=True)):
     # {dataset_name: RememberResult}. Live objects — excluded from serialization.
-    apply_results: Optional[dict] = Field(default=None, exclude=True)
+    apply_results: dict | None = Field(default=None, exclude=True)
 
     @staticmethod
     def _now() -> str:
@@ -172,7 +172,7 @@ class PresortReport(BaseModel):
     def to_json(self, indent: int = 2) -> str:
         return self.model_dump_json(indent=indent)
 
-    def save(self, destination: Union[str, Path]) -> str:
+    def save(self, destination: str | Path) -> str:
         destination = Path(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
         self.report_path = str(destination)
@@ -180,17 +180,16 @@ class PresortReport(BaseModel):
         return self.report_path
 
     @classmethod
-    def from_json(cls, source: Union[str, Path, dict]) -> "PresortReport":
+    def from_json(cls, source: str | Path | dict) -> "PresortReport":
         """Load a report from a dict, a JSON string, or a path to a report file."""
+        from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+
         if isinstance(source, dict):
             return cls.model_validate(source)
         text = str(source)
-        candidate = Path(text)
-        try:
-            if candidate.is_file():
-                text = candidate.read_text(encoding="utf-8")
-        except OSError:
-            pass  # not a usable path (e.g. too long) — treat as JSON text
+        if isinstance(source, Path) or not text.lstrip().startswith(("{", "[")):
+            candidate = resolve_local_path(source, must_exist=True)
+            text = candidate.read_text(encoding="utf-8")
         return cls.model_validate(json.loads(text))
 
 

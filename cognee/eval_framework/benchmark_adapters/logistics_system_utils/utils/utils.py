@@ -4,6 +4,12 @@ import json
 import re
 from pathlib import Path
 
+from cognee.eval_framework.benchmark_adapters.logistics_system_utils.entities.enums import (
+    PostOfficeType,
+    Region,
+    ShippingRange,
+    TransportMode,
+)
 from cognee.eval_framework.benchmark_adapters.logistics_system_utils.entities.package import Package
 from cognee.eval_framework.benchmark_adapters.logistics_system_utils.entities.post_office import (
     PostOffice,
@@ -15,13 +21,6 @@ from cognee.eval_framework.benchmark_adapters.logistics_system_utils.entities.tr
     Carrier,
 )
 from cognee.eval_framework.benchmark_adapters.logistics_system_utils.entities.user import User
-from cognee.eval_framework.benchmark_adapters.logistics_system_utils.entities.enums import (
-    PostOfficeType,
-    Region,
-    ShippingRange,
-    TransportMode,
-)
-
 
 DEFAULT_WORLD_PATH = Path("data").joinpath("stored_world.json")
 

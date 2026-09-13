@@ -25,12 +25,12 @@ storage) requires COGNEE_ALLOWED_LOCAL_FILE_ROOTS, e.g.::
 
 CLI equivalent::
 
-    cognee-cli remember ~/Downloads --dry-run presort --allow-root -o report.json
+    cognee-cli remember ~/Downloads --presort --allow-root -o report.json
     cognee-cli remember --from-report report.json
 
 One-shot (auto-apply the report as soon as it is produced)::
 
-    cognee-cli remember ~/Downloads --dry-run presort --apply --allow-root
+    cognee-cli remember ~/Downloads --presort --apply --allow-root
 
 SDK equivalent: ``remember(folder, dry_run="presort", auto_apply=True)`` —
 returns the report with ingest outcomes on ``report.apply_results``.

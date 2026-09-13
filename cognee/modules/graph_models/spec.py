@@ -19,7 +19,7 @@ plain identifiers and overall size is capped.
 """
 
 import re
-from typing import Annotated, Literal, Optional, Union
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -47,14 +47,14 @@ class InverseSpec(_SpecBase):
     """Reserved: accepted for frontend parity but not compiled into the schema."""
 
     enabled: bool = True
-    name: Optional[str] = None
-    cardinality: Optional[Cardinality] = None
+    name: str | None = None
+    cardinality: Cardinality | None = None
 
 
 class RelationSpec(_SpecBase):
     target_entity_name: str = Field(alias="targetEntityName")
     cardinality: Cardinality = "one"
-    inverse: Optional[InverseSpec] = None
+    inverse: InverseSpec | None = None
 
 
 class PrimitiveFieldSpec(_SpecBase):
@@ -62,7 +62,7 @@ class PrimitiveFieldSpec(_SpecBase):
     name: str
     primitive_type: PrimitiveType = Field(default="string", alias="primitiveType")
     required: bool = False
-    description: Optional[str] = None
+    description: str | None = None
 
 
 class EnumFieldSpec(_SpecBase):
@@ -70,7 +70,7 @@ class EnumFieldSpec(_SpecBase):
     name: str
     enum_values: list[str] = Field(alias="enumValues", min_length=1)
     required: bool = False
-    description: Optional[str] = None
+    description: str | None = None
 
 
 class RelationFieldSpec(_SpecBase):
@@ -78,26 +78,26 @@ class RelationFieldSpec(_SpecBase):
     name: str
     relation: RelationSpec
     required: bool = False
-    description: Optional[str] = None
+    description: str | None = None
 
 
 FieldSpec = Annotated[
-    Union[PrimitiveFieldSpec, EnumFieldSpec, RelationFieldSpec],
+    PrimitiveFieldSpec | EnumFieldSpec | RelationFieldSpec,
     Field(discriminator="kind"),
 ]
 
 
 class EntitySpec(_SpecBase):
     name: str
-    description: Optional[str] = None
-    primary_label_field: Optional[str] = Field(default=None, alias="primaryLabelField")
-    index_fields: Optional[list[str]] = Field(default=None, alias="indexFields")
+    description: str | None = None
+    primary_label_field: str | None = Field(default=None, alias="primaryLabelField")
+    index_fields: list[str] | None = Field(default=None, alias="indexFields")
     # Fields whose values determine node identity: two extracted nodes with equal
     # identity-field values merge into one graph node. Defaults to ["name"] at
     # compile time; set to [] to opt out of merging (every node gets a random id).
     # NOTE: this is a Python-side extension — the frontend compiler never emits
     # identity_fields, so frontend-built models do not merge nodes.
-    identity_fields: Optional[list[str]] = Field(default=None, alias="identityFields")
+    identity_fields: list[str] | None = Field(default=None, alias="identityFields")
     fields: list[FieldSpec] = Field(default_factory=list)
 
 
@@ -108,7 +108,7 @@ class GraphSchemaOptions(_SpecBase):
 class GraphSchemaSpec(_SpecBase):
     options: GraphSchemaOptions = GraphSchemaOptions()
     # Entity used as the top-level model; defaults to the first entity.
-    root: Optional[str] = None
+    root: str | None = None
     entities: list[EntitySpec] = Field(min_length=1, max_length=MAX_ENTITIES)
 
     def root_entity(self) -> EntitySpec:

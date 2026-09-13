@@ -15,9 +15,9 @@ fixed menu: a spec relation is only silent if nothing can compute it.
 
 import asyncio
 import inspect
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Awaitable, Callable, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -48,19 +48,19 @@ class RelationContext:
     root: Path
     spec: GraphSchemaSpec
     relation: RelationFieldSpec
-    files: List[FileRecord]
-    duplicates: List[DuplicateCluster]
-    versions: List[VersionCandidate]
-    pii: List[PiiFinding]
-    groups: List[ProposedGroup]
+    files: list[FileRecord]
+    duplicates: list[DuplicateCluster]
+    versions: list[VersionCandidate]
+    pii: list[PiiFinding]
+    groups: list[ProposedGroup]
     max_sample_bytes: int = 65536
 
 
 RelationDetector = Callable[
-    [RelationContext], Union[List[RelationInstance], Awaitable[List[RelationInstance]]]
+    [RelationContext], list[RelationInstance] | Awaitable[list[RelationInstance]]
 ]
 
-_CUSTOM_DETECTORS: Dict[str, RelationDetector] = {}
+_CUSTOM_DETECTORS: dict[str, RelationDetector] = {}
 
 
 def register_relation_detector(relation_name: str, detector: RelationDetector) -> None:
@@ -73,7 +73,7 @@ def register_relation_detector(relation_name: str, detector: RelationDetector) -
     _CUSTOM_DETECTORS[relation_name] = detector
 
 
-def _derive_duplicate_of(ctx: RelationContext) -> List[RelationInstance]:
+def _derive_duplicate_of(ctx: RelationContext) -> list[RelationInstance]:
     return [
         RelationInstance(
             source=path,
@@ -87,7 +87,7 @@ def _derive_duplicate_of(ctx: RelationContext) -> List[RelationInstance]:
     ]
 
 
-def _derive_version_of(ctx: RelationContext) -> List[RelationInstance]:
+def _derive_version_of(ctx: RelationContext) -> list[RelationInstance]:
     return [
         RelationInstance(
             source=path,
@@ -101,7 +101,7 @@ def _derive_version_of(ctx: RelationContext) -> List[RelationInstance]:
     ]
 
 
-def _derive_belongs_to_group(ctx: RelationContext) -> List[RelationInstance]:
+def _derive_belongs_to_group(ctx: RelationContext) -> list[RelationInstance]:
     return [
         RelationInstance(
             source=path,
@@ -115,7 +115,7 @@ def _derive_belongs_to_group(ctx: RelationContext) -> List[RelationInstance]:
     ]
 
 
-def _derive_contains_pii(ctx: RelationContext) -> List[RelationInstance]:
+def _derive_contains_pii(ctx: RelationContext) -> list[RelationInstance]:
     return [
         RelationInstance(
             source=finding.path,
@@ -128,7 +128,7 @@ def _derive_contains_pii(ctx: RelationContext) -> List[RelationInstance]:
     ]
 
 
-_BUILTIN_DERIVERS: Dict[str, Callable[[RelationContext], List[RelationInstance]]] = {
+_BUILTIN_DERIVERS: dict[str, Callable[[RelationContext], list[RelationInstance]]] = {
     "duplicate_of": _derive_duplicate_of,
     "version_of": _derive_version_of,
     "belongs_to_group": _derive_belongs_to_group,
@@ -143,10 +143,10 @@ class ExtractedRelationTarget(BaseModel):
 
 
 class RelationExtraction(BaseModel):
-    instances: List[ExtractedRelationTarget] = Field(default_factory=list)
+    instances: list[ExtractedRelationTarget] = Field(default_factory=list)
 
 
-async def _llm_detect(ctx: RelationContext) -> List[RelationInstance]:
+async def _llm_detect(ctx: RelationContext) -> list[RelationInstance]:
     """LLM fallback for relations with no detector: structured extraction per text file."""
     target_name = ctx.relation.relation.target_entity_name
     target_entity = next(
@@ -165,7 +165,7 @@ async def _llm_detect(ctx: RelationContext) -> List[RelationInstance]:
     candidates = [record for record in ctx.files if record.is_text and not record.is_code]
     semaphore = asyncio.Semaphore(_LLM_CONCURRENCY)
 
-    async def extract(record: FileRecord) -> List[RelationInstance]:
+    async def extract(record: FileRecord) -> list[RelationInstance]:
         async with semaphore:
             try:
                 with open(record.path, "rb") as file:
@@ -177,7 +177,9 @@ async def _llm_detect(ctx: RelationContext) -> List[RelationInstance]:
                 record.warnings.append(
                     f"LLM extraction for relation {ctx.relation.name!r} failed: {error}"
                 )
-                logger.debug(f"Presort LLM relation failed for {record.path}: {error}")
+                logger.debug(
+                    f"Presort LLM relation failed for {record.path}: {error}", exc_info=True
+                )
                 return []
             return [
                 RelationInstance(
@@ -200,22 +202,22 @@ async def _llm_detect(ctx: RelationContext) -> List[RelationInstance]:
 async def compute_relationships(
     root: Path,
     spec: GraphSchemaSpec,
-    files: List[FileRecord],
-    duplicates: List[DuplicateCluster],
-    versions: List[VersionCandidate],
-    pii: List[PiiFinding],
-    groups: List[ProposedGroup],
+    files: list[FileRecord],
+    duplicates: list[DuplicateCluster],
+    versions: list[VersionCandidate],
+    pii: list[PiiFinding],
+    groups: list[ProposedGroup],
     *,
     use_llm: bool = False,
     max_sample_bytes: int = 65536,
-) -> tuple[Dict[str, List[RelationInstance]], List[str]]:
+) -> tuple[dict[str, list[RelationInstance]], list[str]]:
     """Compute instances for every relation on the spec's root entity.
 
     Returns ``(relationships, warnings)``: one dict entry per declared
     relation, and a warning per relation nothing could compute.
     """
-    relationships: Dict[str, List[RelationInstance]] = {}
-    warnings: List[str] = []
+    relationships: dict[str, list[RelationInstance]] = {}
+    warnings: list[str] = []
 
     root_entity = spec.root_entity()
     for field in root_entity.fields:
@@ -262,5 +264,5 @@ def registered_relation_names() -> frozenset:
     return frozenset(_CUSTOM_DETECTORS)
 
 
-def unregister_relation_detector(relation_name: str) -> Optional[RelationDetector]:
+def unregister_relation_detector(relation_name: str) -> RelationDetector | None:
     return _CUSTOM_DETECTORS.pop(relation_name, None)

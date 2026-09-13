@@ -163,7 +163,7 @@ async def load_turn_context(
             ),
         )
     except Exception as error:
-        logger.warning("Concurrent turn context load failed open: %s", error)
+        logger.warning("Concurrent turn context load failed open: %s", error, exc_info=True)
         return SessionTurnContext(raw_message=raw_message)
 
 
@@ -187,7 +187,7 @@ async def analyze_turn(snapshot: SessionTurnContext) -> SessionTurnAnalysis:
             timeout=ANALYSIS_TIMEOUT_SECONDS,
         )
     except Exception as error:
-        logger.warning("Concurrent turn analysis failed open: %s", error)
+        logger.warning("Concurrent turn analysis failed open: %s", error, exc_info=True)
         return SessionTurnAnalysis()
 
 
@@ -261,4 +261,4 @@ async def commit_turn(
             used_session_context_ids=list(snapshot.active_context_ids) or None,
         )
     except Exception as error:
-        logger.warning("Concurrent turn QA write failed open: %s", error)
+        logger.warning("Concurrent turn QA write failed open: %s", error, exc_info=True)

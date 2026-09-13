@@ -16,7 +16,7 @@ grounding and the extra node/edge dedup passes in ``integrate_chunk_graphs``,
 and does not compose with ``functional_relationships``.
 """
 
-from typing import Union, cast
+from typing import cast
 
 from .spec import EntitySpec, GraphSchemaSpec
 
@@ -116,7 +116,7 @@ def _build_entity_schema(entity: EntitySpec) -> dict:
     return entity_schema
 
 
-def graph_spec_to_json_schema(spec: Union[GraphSchemaSpec, dict]) -> dict:
+def graph_spec_to_json_schema(spec: GraphSchemaSpec | dict) -> dict:
     """Compile a DSL spec (model or plain dict) into a graph-model JSON Schema."""
     validated = spec if isinstance(spec, GraphSchemaSpec) else GraphSchemaSpec.model_validate(spec)
 
@@ -132,7 +132,7 @@ def graph_spec_to_json_schema(spec: Union[GraphSchemaSpec, dict]) -> dict:
     return {"$defs": defs, **_build_entity_schema(validated.root_entity())}
 
 
-def graph_model_from_spec(spec: Union[GraphSchemaSpec, dict]) -> type:
+def graph_model_from_spec(spec: GraphSchemaSpec | dict) -> type:
     """Validate a DSL spec, compile it, and generate the DataPoint-derived model."""
     # Imported lazily: graph_model_utils imports the cognee API surface for its
     # demo block, which would otherwise create an import cycle through low_level.

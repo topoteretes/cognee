@@ -1,19 +1,17 @@
 import os
 from uuid import UUID
-from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.vector import get_vectordb_config
-from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.modules.data.methods import get_unique_dataset_id
-from cognee.modules.users.models import DatasetDatabase
-from cognee.modules.users.models import User
-from cognee.version import get_cognee_version
 from cognee.modules.migrations.migration import head_revision
 from cognee.modules.migrations.registry import MIGRATIONS
+from cognee.modules.users.models import DatasetDatabase, User
+from cognee.version import get_cognee_version
 
 
 async def _get_vector_db_info(dataset_id: UUID, owner: User) -> dict:
@@ -40,7 +38,7 @@ async def _get_graph_db_info(dataset_id: UUID, owner: User) -> dict:
 
 async def _existing_dataset_database(
     dataset_id: UUID,
-) -> Optional[DatasetDatabase]:
+) -> DatasetDatabase | None:
     """
     Check if a DatasetDatabase row already exists for the given dataset.
     Return None if it doesn't exist, return the row if it does.

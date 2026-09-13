@@ -1,7 +1,6 @@
 """Shared utilities for DLT ingestion."""
 
 import json
-from typing import Optional
 
 # A dlt source sets this attribute to opt into the "document" ingestion path:
 # each row becomes a text document that flows through normal cognify (LLM entity
@@ -12,13 +11,13 @@ from typing import Optional
 DOCUMENT_SOURCE_ATTR = "cognee_document_source"
 
 
-def document_source_tag(item) -> Optional[str]:
+def document_source_tag(item) -> str | None:
     """Return the document-source tag a dlt source opted into, else ``None``."""
     tag = getattr(item, DOCUMENT_SOURCE_ATTR, None)
     return tag if isinstance(tag, str) and tag else None
 
 
-def metadata_source(metadata) -> Optional[str]:
+def metadata_source(metadata) -> str | None:
     """Extract the ``source`` field from system metadata.
 
     Accepts a dict, a JSON string, or an object with a ``system_metadata``

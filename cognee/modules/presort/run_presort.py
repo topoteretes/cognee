@@ -13,7 +13,6 @@ semantic grouping.
 """
 
 from pathlib import Path
-from typing import Optional, Union
 
 from cognee.infrastructure.files.utils.local_path_safety import (
     ALLOWED_LOCAL_FILE_ROOTS_ENV,
@@ -30,7 +29,7 @@ DEFAULT_MAX_SAMPLE_BYTES = 65536
 REPORT_FILE_SUFFIX = ".presort.json"
 
 
-def _resolve_root(data_path: Union[str, Path, list]) -> Path:
+def _resolve_root(data_path: str | Path | list) -> Path:
     if isinstance(data_path, list):
         if len(data_path) == 1:
             data_path = data_path[0]
@@ -43,9 +42,9 @@ def _resolve_root(data_path: Union[str, Path, list]) -> Path:
         root = resolve_local_path(data_path, must_exist=True)
     except ValueError:
         raise ValueError(
-            f"Path {data_path!r} is outside the allowed local file roots. Set "
-            f"{ALLOWED_LOCAL_FILE_ROOTS_ENV}={Path(data_path).expanduser()} "
-            f"(os.pathsep-separated list) to allow it, or use the CLI's --allow-root flag."
+            "Path is outside the allowed local file roots. Add the folder to "
+            f"{ALLOWED_LOCAL_FILE_ROOTS_ENV} (os.pathsep-separated list) to allow it, "
+            "or use the CLI's --allow-root flag."
         ) from None
     except FileNotFoundError:
         raise ValueError(f"Folder {data_path!r} does not exist.") from None
@@ -55,7 +54,7 @@ def _resolve_root(data_path: Union[str, Path, list]) -> Path:
     return root
 
 
-def _report_destination(scan_id: str) -> Optional[Path]:
+def _report_destination(scan_id: str) -> Path | None:
     from cognee.base_config import get_base_config
 
     system_root = get_base_config().system_root_directory
@@ -65,13 +64,13 @@ def _report_destination(scan_id: str) -> Optional[Path]:
 
 
 async def run_presort(
-    data_path: Union[str, Path, list],
+    data_path: str | Path | list,
     *,
     include_subdirectories: bool = True,
     use_llm: bool = False,
     detect_pii: bool = True,
     check_existing: bool = True,
-    relationship_spec: Optional[Union[dict, GraphSchemaSpec]] = None,
+    relationship_spec: dict | GraphSchemaSpec | None = None,
     dataset_prefix: str = "",
     max_sample_bytes: int = DEFAULT_MAX_SAMPLE_BYTES,
     user=None,

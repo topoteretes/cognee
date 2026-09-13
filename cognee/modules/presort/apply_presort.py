@@ -12,7 +12,7 @@ The report carries the apply decisions (``skip_duplicates``, ``exclude_pii``,
 ``apply_groups``); kwargs here override them per call.
 """
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.presort.models import FileRecord, PresortReport
@@ -20,7 +20,7 @@ from cognee.tasks.presort.models import FileRecord, PresortReport
 logger = get_logger("presort")
 
 
-def resolve_report(report: Union[PresortReport, dict, str]) -> PresortReport:
+def resolve_report(report: PresortReport | dict | str) -> PresortReport:
     if isinstance(report, PresortReport):
         return report
     return PresortReport.from_json(report)
@@ -28,9 +28,9 @@ def resolve_report(report: Union[PresortReport, dict, str]) -> PresortReport:
 
 def _excluded_paths(
     report: PresortReport, *, skip_duplicates: bool, exclude_pii: bool
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Map of file path -> reason for every file apply should not ingest."""
-    excluded: Dict[str, str] = {}
+    excluded: dict[str, str] = {}
     if skip_duplicates:
         for cluster in report.duplicates:
             for path in cluster.paths[1:]:  # first path is the kept copy
@@ -64,25 +64,26 @@ def _data_item(record: FileRecord, report: PresortReport, group_name: str, reaso
 
 
 async def apply_presort(
-    report: Union[PresortReport, dict, str],
+    report: PresortReport | dict | str,
     *,
-    groups: Optional[List[str]] = None,
-    skip_duplicates: Optional[bool] = None,
-    exclude_pii: Optional[bool] = None,
-    node_set_extra: Optional[List[str]] = None,
+    groups: list[str] | None = None,
+    skip_duplicates: bool | None = None,
+    exclude_pii: bool | None = None,
+    node_set_extra: list[str] | None = None,
     apply_graph: bool = False,
-    graph_dataset: Optional[str] = None,
+    graph_dataset: str | None = None,
     user=None,
     run_in_background: bool = False,
     self_improvement: bool = True,
-) -> Dict[str, Any]:
+    **remember_kwargs,
+) -> dict[str, Any]:
     """Ingest a presort report's proposed groups; returns {dataset_name: RememberResult}.
 
     Without a configured LLM this degrades instead of failing: each group is
     staged with add() only (no cognify/improve), and apply_graph is skipped —
     both raised as warnings.
     """
-    from cognee.api.v1.remember.remember import remember
+    from cognee.api.v1.remember.remember import _ADD_ONLY, _SHARED, remember
 
     from .llm_availability import (
         LLM_MISSING_APPLY_WARNING,
@@ -110,13 +111,13 @@ async def apply_presort(
         for group in resolved.groups
         if selected is None or group.name in selected or group.dataset_name in selected
     ]
-    if not selected_groups and not apply_graph:
+    if not selected_groups and selected is not None and not (selected == [] and apply_graph):
         raise ValueError(
             "No groups to apply: the report proposes "
             f"{sorted(group.name for group in resolved.groups)!r}, requested {selected!r}."
         )
 
-    results: Dict[str, Any] = {}
+    results: dict[str, Any] = {}
     for group in selected_groups:
         items = []
         for path in group.file_paths:
@@ -132,10 +133,14 @@ async def apply_presort(
             logger.info(f"Presort apply: group {group.name!r} has no files left to ingest")
             continue
 
-        shared_kwargs: Dict[str, Any] = {
-            "node_set": ["presort", group.name, *(node_set_extra or [])],
-            "incremental_loading": True,
-        }
+        shared_kwargs: dict[str, Any] = dict(remember_kwargs)
+        shared_kwargs.setdefault("incremental_loading", True)
+        shared_kwargs["node_set"] = [
+            "presort",
+            group.name,
+            *(remember_kwargs.get("node_set") or []),
+            *(node_set_extra or []),
+        ]
         if user is not None:
             shared_kwargs["user"] = user
 
@@ -157,7 +162,9 @@ async def apply_presort(
                 dataset_name=group.dataset_name,
                 run_in_background=run_in_background,
                 skip_connection_test=True,
-                **shared_kwargs,
+                **{
+                    key: value for key, value in shared_kwargs.items() if key in _ADD_ONLY | _SHARED
+                },
             )
 
     if apply_graph:
@@ -167,7 +174,12 @@ async def apply_presort(
             from cognee.tasks.presort.graph_apply import apply_presort_graph
 
             graph_result = await apply_presort_graph(
-                resolved, dataset=graph_dataset, user=user, run_in_background=run_in_background
+                resolved,
+                dataset=graph_dataset,
+                user=user,
+                run_in_background=run_in_background,
+                vector_db_config=remember_kwargs.get("vector_db_config"),
+                graph_db_config=remember_kwargs.get("graph_db_config"),
             )
             if graph_result is not None:
                 results["presort_graph"] = graph_result

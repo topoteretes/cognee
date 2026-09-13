@@ -1,3 +1,5 @@
+import pytest
+
 from cognee.modules.graph_models import GraphSchemaSpec
 from cognee.tasks.presort.build_report import build_report
 from cognee.tasks.presort.default_spec import DEFAULT_PRESORT_SPEC
@@ -102,8 +104,41 @@ def test_report_json_round_trip(tmp_path):
 
 
 def test_scan_id_stable(tmp_path):
-    files, duplicates, pii, groups = _inputs(tmp_path)
+    files, _, _, _ = _inputs(tmp_path)
     spec = GraphSchemaSpec.model_validate(DEFAULT_PRESORT_SPEC)
     first = build_report(tmp_path, files, [], [], [], [], [], spec=spec)
     second = build_report(tmp_path, files, [], [], [], [], [], spec=spec)
     assert first.scan_id == second.scan_id
+
+
+def test_report_json_text_does_not_probe_filesystem(tmp_path, monkeypatch):
+    from cognee.infrastructure.files.utils import local_path_safety
+
+    def reject_path(*args, **kwargs):
+        pytest.fail("JSON content must not be treated as a local path")
+
+    monkeypatch.setattr(local_path_safety, "resolve_local_path", reject_path)
+    report = PresortReport(scan_id="s", root_path=str(tmp_path))
+    assert PresortReport.from_json(" \n" + report.to_json()) == report
+
+
+@pytest.mark.parametrize("path_kind", ["outside", "traversal", "symlink"])
+def test_report_loading_rejects_paths_outside_allowed_roots(tmp_path, monkeypatch, path_kind):
+    from cognee.infrastructure.files.utils import local_path_safety
+
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    source = tmp_path / "outside.presort.json"
+    PresortReport(scan_id="s", root_path=str(tmp_path)).save(source)
+    if path_kind == "traversal":
+        source = allowed / ".." / source.name
+    elif path_kind == "symlink":
+        link = allowed / "link.presort.json"
+        try:
+            link.symlink_to(source)
+        except OSError:
+            pytest.skip("Symlink creation is unavailable")
+        source = link
+    monkeypatch.setattr(local_path_safety, "get_allowed_local_file_roots", lambda: (allowed,))
+    with pytest.raises(ValueError, match="outside allowed roots"):
+        PresortReport.from_json(source)

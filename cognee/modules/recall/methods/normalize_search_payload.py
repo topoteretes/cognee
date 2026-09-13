@@ -7,7 +7,7 @@ same wire shape regardless of search type.
 """
 
 import json
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -69,7 +69,7 @@ def _text_from_dict(payload: dict) -> str:
         return str(payload)
 
 
-def _score_from(value: Any) -> Optional[float]:
+def _score_from(value: Any) -> float | None:
     if isinstance(value, dict):
         score = value.get("score")
         if isinstance(score, (int, float)):

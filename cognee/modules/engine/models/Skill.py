@@ -1,4 +1,4 @@
-from typing import Annotated, List
+from typing import Annotated
 
 from pydantic import Field
 
@@ -11,7 +11,7 @@ class Skill(DataPoint):
     name: Annotated[str, Dedup()]
     description: str = ""
     procedure: str = ""
-    declared_tools: List[str] = Field(default_factory=list)
+    declared_tools: list[str] = Field(default_factory=list)
 
     # Publisher / provenance metadata. Surfaced in the SaaS UI so users can see
     # which company or team maintains a skill. Populated from SKILL.md frontmatter
@@ -20,14 +20,14 @@ class Skill(DataPoint):
     maintainer: str = ""
     maintainer_url: str = ""
     skill_version: str = ""
-    tags: List[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
     license: str = ""
     source_repo_url: str = ""
 
     source_file: str = ""
     source_dir: str = ""
     content_hash: str = ""
-    dataset_scope: List[str] = Field(default_factory=list)
+    dataset_scope: list[str] = Field(default_factory=list)
     is_active: bool = True
 
     skill_text: str = ""

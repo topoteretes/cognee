@@ -26,29 +26,31 @@ SESSION_ID = "test_session"
 
 @pytest.fixture
 def session_manager():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with patch(
+    with (
+        tempfile.TemporaryDirectory() as tmpdir,
+        patch(
             "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
             return_value={"data_root_directory": tmpdir},
-        ):
-            from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
-                FSCacheAdapter,
-            )
-            from cognee.infrastructure.session.session_manager import SessionManager
+        ),
+    ):
+        from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
+            FSCacheAdapter,
+        )
+        from cognee.infrastructure.session.session_manager import SessionManager
 
-            adapter = FSCacheAdapter()
-            with (
-                patch(
-                    "cognee.infrastructure.session.session_manager.delete_session_qa_vector",
-                    new=AsyncMock(),
-                ),
-                patch(
-                    "cognee.infrastructure.session.session_manager.delete_session_qa_vectors",
-                    new=AsyncMock(),
-                ),
-            ):
-                yield SessionManager(adapter)
-            adapter.cache.close()
+        adapter = FSCacheAdapter()
+        with (
+            patch(
+                "cognee.infrastructure.session.session_manager.delete_session_qa_vector",
+                new=AsyncMock(),
+            ),
+            patch(
+                "cognee.infrastructure.session.session_manager.delete_session_qa_vectors",
+                new=AsyncMock(),
+            ),
+        ):
+            yield SessionManager(adapter)
+        adapter.cache.close()
 
 
 async def _seed_qa(session_manager, qa_id, used_node_ids=None, used_context_ids=None):

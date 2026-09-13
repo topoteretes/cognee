@@ -8,7 +8,6 @@ document — worth reviewing before ingesting all of them.
 import os
 import re
 from collections import defaultdict
-from typing import List
 
 from .models import FileRecord, VersionCandidate
 
@@ -37,7 +36,7 @@ def normalize_stem(stem: str) -> str:
             return normalized.lower()
 
 
-def detect_versions(files: List[FileRecord]) -> List[VersionCandidate]:
+def detect_versions(files: list[FileRecord]) -> list[VersionCandidate]:
     grouped: dict = defaultdict(list)
     for record in files:
         path = record.path

@@ -15,9 +15,8 @@ import io
 
 import pytest
 
-import cognee.modules.ingestion as ingestion
-
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.modules import ingestion
 
 # The package __init__ rebinds the name ``save_data_to_file`` to the function,
 # shadowing the module it lives in — import the module explicitly to patch it.
@@ -124,4 +123,4 @@ async def test_text_metadata_is_complete(storage_root):
 
     assert stored.metadata["extension"] == "txt"
     assert stored.metadata["mime_type"] == "text/plain"
-    assert stored.metadata["file_size"] == len("a plain note".encode("utf-8"))
+    assert stored.metadata["file_size"] == len(b"a plain note")

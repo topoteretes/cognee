@@ -134,11 +134,15 @@ jobs:
         # The suite is decoupled from the `cognee` package: --confcutdir keeps
         # pytest from loading the heavy ancestor conftests, and --no-project
         # keeps uv from syncing the whole project on the runner.
+        # The `mcp` client is pinned to match the server's own
+        # `mcp>=1.24.0,<2.0.0`: unpinned it resolves to 2.x, which dropped the
+        # `streamablehttp_client` alias and yields a 2-tuple of streams rather
+        # than 3, so the e2e client cannot talk to a 1.x server image.
         uv run --no-project \
           --with pytest \
           --with pytest-timeout \
           --with requests \
-          --with mcp \
+          --with "mcp<2" \
           python -m pytest cognee/tests/e2e/docker_compose \
             -p no:cacheprovider \
             --confcutdir=cognee/tests/e2e/docker_compose \

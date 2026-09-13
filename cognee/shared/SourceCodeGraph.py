@@ -68,7 +68,7 @@ class Expression(DataPoint):
     name: str
     description: str
     expression: str
-    members: list[Variable | Function | Operator | "Expression"]
+    members: list["Variable | Function | Operator | Expression"]
     metadata: dict = {"index_fields": ["name"]}
 
 

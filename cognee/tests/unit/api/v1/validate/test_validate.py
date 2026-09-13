@@ -7,14 +7,13 @@ the same shape test_graph_report_retriever.py's fixtures are pinned to.
 
 from __future__ import annotations
 
+import importlib
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
 from pydantic import BaseModel
-
-import importlib
 
 from cognee.api.v1.validate.validate import (
     IssueSeverity,
@@ -338,9 +337,9 @@ async def test_validate_rejects_missing_or_unauthorized_dataset_before_reads():
             "get_authorized_existing_datasets",
             return_value=[],
         ),
+        pytest.raises(DatasetNotFoundError, match="not found or not readable"),
     ):
-        with pytest.raises(DatasetNotFoundError, match="not found or not readable"):
-            await validate(dataset="private_dataset", user=object())
+        await validate(dataset="private_dataset", user=object())
 
     mock_graph_engine.get_graph_data.assert_not_awaited()
     mock_vector_engine.retrieve.assert_not_awaited()
@@ -367,9 +366,9 @@ async def test_validate_rejects_mixed_authorized_and_unauthorized_datasets():
             "get_authorized_existing_datasets",
             return_value=[_mock_dataset()],
         ),
+        pytest.raises(DatasetNotFoundError, match="not found or not readable"),
     ):
-        with pytest.raises(DatasetNotFoundError, match="not found or not readable"):
-            await validate(dataset=["visible_dataset", "private_dataset"], user=object())
+        await validate(dataset=["visible_dataset", "private_dataset"], user=object())
 
     mock_graph_engine.get_graph_data.assert_not_awaited()
     mock_vector_engine.retrieve.assert_not_awaited()

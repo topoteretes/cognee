@@ -20,7 +20,7 @@ def llm_is_configured() -> bool:
         if getattr(config, "llm_api_key", None):
             return True
         return getattr(config, "llm_provider", "") in _KEYLESS_PROVIDERS
-    except Exception:
+    except (ImportError, ValueError):
         return bool(os.environ.get("LLM_API_KEY"))
 
 

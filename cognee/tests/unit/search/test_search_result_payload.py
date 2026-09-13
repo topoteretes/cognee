@@ -1,8 +1,9 @@
 import pytest
 from pydantic import BaseModel, ValidationError
-from cognee.modules.search.types import ContextFormat
+
 from cognee.modules.search.models.EvidenceReference import EvidenceReference
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
+from cognee.modules.search.types import ContextFormat
 from cognee.modules.search.types.SearchType import SearchType
 
 

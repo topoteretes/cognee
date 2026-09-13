@@ -16,7 +16,7 @@ raw matched text never enters the report.
 
 import asyncio
 import re
-from typing import List, Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -103,7 +103,7 @@ def iban_valid(candidate: str) -> bool:
     return int(digits) % 97 == 1
 
 
-def scan_filename(record: FileRecord) -> List[PiiFinding]:
+def scan_filename(record: FileRecord) -> list[PiiFinding]:
     findings = []
     normalized = re.sub(r"[\s()-]+", "_", record.name.lower())
     for keyword, (category, severity) in FILENAME_HINTS.items():
@@ -120,7 +120,7 @@ def scan_filename(record: FileRecord) -> List[PiiFinding]:
     return findings
 
 
-def scan_content(record: FileRecord, text: str) -> List[PiiFinding]:
+def scan_content(record: FileRecord, text: str) -> list[PiiFinding]:
     findings = []
 
     def add(category: str, severity, sample: str, detail: str):
@@ -174,10 +174,10 @@ class PiiCategoryAssessment(BaseModel):
 
 class PiiAssessment(BaseModel):
     contains_personal_data: bool
-    categories: List[PiiCategoryAssessment] = Field(default_factory=list)
+    categories: list[PiiCategoryAssessment] = Field(default_factory=list)
 
 
-def _read_sample(record: FileRecord, max_sample_bytes: int) -> Optional[str]:
+def _read_sample(record: FileRecord, max_sample_bytes: int) -> str | None:
     try:
         with open(record.path, "rb") as file:
             return file.read(max_sample_bytes).decode("utf-8", errors="replace")
@@ -186,7 +186,7 @@ def _read_sample(record: FileRecord, max_sample_bytes: int) -> Optional[str]:
         return None
 
 
-async def _llm_assess(record: FileRecord, text: str) -> List[PiiFinding]:
+async def _llm_assess(record: FileRecord, text: str) -> list[PiiFinding]:
     system_prompt = render_prompt("detect_pii.txt", {"file_name": record.name})
     assessment = await LLMGateway.acreate_structured_output(text, system_prompt, PiiAssessment)
     if not assessment.contains_personal_data:
@@ -204,12 +204,12 @@ async def _llm_assess(record: FileRecord, text: str) -> List[PiiFinding]:
 
 
 async def detect_pii(
-    files: List[FileRecord],
+    files: list[FileRecord],
     *,
     use_llm: bool = False,
     max_sample_bytes: int = DEFAULT_MAX_SAMPLE_BYTES,
-) -> List[PiiFinding]:
-    findings: List[PiiFinding] = []
+) -> list[PiiFinding]:
+    findings: list[PiiFinding] = []
     flagged_text_records = []
 
     for record in files:
@@ -224,13 +224,15 @@ async def detect_pii(
     if flagged_text_records:
         semaphore = asyncio.Semaphore(_LLM_CONCURRENCY)
 
-        async def assess(record: FileRecord, text: str) -> List[PiiFinding]:
+        async def assess(record: FileRecord, text: str) -> list[PiiFinding]:
             async with semaphore:
                 try:
                     return await _llm_assess(record, text)
                 except Exception as error:  # LLM failures must not abort presort
                     record.warnings.append(f"LLM PII assessment failed: {error}")
-                    logger.debug(f"Presort LLM PII failed for {record.path}: {error}")
+                    logger.debug(
+                        f"Presort LLM PII failed for {record.path}: {error}", exc_info=True
+                    )
                     return []
 
         results = await asyncio.gather(

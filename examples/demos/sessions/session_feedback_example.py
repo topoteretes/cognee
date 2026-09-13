@@ -1,6 +1,5 @@
-# ruff: noqa: E402
-import os
 import asyncio
+import os
 
 # Set os.environ before importing Cognee: Cognee reads env-backed settings at import time, so values
 # assigned later may not override defaults or `.env`. See https://docs.cognee.ai/setup-configuration/overview#using-os-environ
@@ -19,12 +18,18 @@ async def main():
     print("Done.\n")
 
     texts = [
-        "Cognee builds knowledge graphs from text and provides session-based feedback APIs. "
-        "You can attach feedback (rating and comment) to each Q&A and later retract it.",
-        "Sessions group Q&A by conversation. Use a session_id in recall() to keep turns in one thread; "
-        "omit it to use the default_session.",
-        "Feedback helps improve answers: add_feedback stores a score and optional text, "
-        "delete_feedback clears it.",
+        (
+            "Cognee builds knowledge graphs from text and provides session-based feedback APIs. "
+            "You can attach feedback (rating and comment) to each Q&A and later retract it."
+        ),
+        (
+            "Sessions group Q&A by conversation. Use a session_id in recall() to keep turns in one thread; "
+            "omit it to use the default_session."
+        ),
+        (
+            "Feedback helps improve answers: add_feedback stores a score and optional text, "
+            "delete_feedback clears it."
+        ),
     ]
     await cognee.remember(texts, self_improvement=False)
 

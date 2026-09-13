@@ -9,7 +9,6 @@ content taxonomy (``classify_content.txt``) refines text files with a
 """
 
 import asyncio
-from typing import List
 
 from cognee.shared.logging_utils import get_logger
 
@@ -112,7 +111,7 @@ async def _llm_classify(record: FileRecord) -> None:
         record.content_class = getattr(label, "type", None)
 
 
-async def classify_files(files: List[FileRecord], *, use_llm: bool = False) -> None:
+async def classify_files(files: list[FileRecord], *, use_llm: bool = False) -> None:
     """Fill ``family`` (always) and ``content_class`` (LLM opt-in); mutates in place."""
     for record in files:
         record.family = classify_family(record)
@@ -128,7 +127,9 @@ async def classify_files(files: List[FileRecord], *, use_llm: bool = False) -> N
                 await _llm_classify(record)
             except Exception as error:  # LLM failures must not abort presort
                 record.warnings.append(f"LLM classification failed: {error}")
-                logger.debug(f"Presort LLM classify failed for {record.path}: {error}")
+                logger.debug(
+                    f"Presort LLM classify failed for {record.path}: {error}", exc_info=True
+                )
 
     await asyncio.gather(
         *(classify(record) for record in files if record.is_text and not record.is_code)

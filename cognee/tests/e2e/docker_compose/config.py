@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import List
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -64,7 +63,7 @@ class E2EConfig:
     compose_file: str = field(
         default_factory=lambda: os.getenv("COGNEE_E2E_COMPOSE_FILE", "docker-compose.yml")
     )
-    compose_profiles: List[str] = field(
+    compose_profiles: list[str] = field(
         default_factory=lambda: [
             p.strip()
             for p in os.getenv("COGNEE_E2E_COMPOSE_PROFILES", "postgres,mcp").split(",")
@@ -81,8 +80,8 @@ class E2EConfig:
         return f"{self.mcp_url.rstrip('/')}/health"
 
     @property
-    def mcp_sse_url(self) -> str:
-        return f"{self.mcp_url.rstrip('/')}/sse"
+    def mcp_http_url(self) -> str:
+        return f"{self.mcp_url.rstrip('/')}/mcp"
 
 
 CONFIG = E2EConfig()

@@ -9,7 +9,6 @@ candidate). Unhashed large files get a warning and stay out of dedup/status.
 """
 
 from collections import defaultdict
-from typing import List
 
 from cognee.infrastructure.files.utils.get_file_content_hash import get_file_content_hash
 from cognee.shared.logging_utils import get_logger
@@ -22,7 +21,7 @@ DEFAULT_SMALL_FILE_BYTES = 256 * 1024 * 1024  # 256 MiB
 
 
 async def hash_files(
-    files: List[FileRecord],
+    files: list[FileRecord],
     *,
     small_file_bytes: int = DEFAULT_SMALL_FILE_BYTES,
 ) -> None:
@@ -44,10 +43,10 @@ async def hash_files(
             record.content_hash = await get_file_content_hash(record.path)
         except Exception as error:  # hashing must never abort the scan
             record.warnings.append(f"could not hash file: {error}")
-            logger.debug(f"Presort hash failed for {record.path}: {error}")
+            logger.debug(f"Presort hash failed for {record.path}: {error}", exc_info=True)
 
 
-def detect_duplicates(files: List[FileRecord]) -> List[DuplicateCluster]:
+def detect_duplicates(files: list[FileRecord]) -> list[DuplicateCluster]:
     """Group hashed records into exact-duplicate clusters (2+ paths per hash)."""
     by_hash: dict = defaultdict(list)
     for record in files:

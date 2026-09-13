@@ -2,14 +2,13 @@ import argparse
 import asyncio
 from importlib import resources
 
-from cognee.cli.reference import SupportsCliCommand
+import cognee.cli.echo as fmt
 from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.config import CHUNKER_CHOICES
-import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 from cognee.cli.hints import hint_recall
+from cognee.cli.reference import SupportsCliCommand
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
-
 
 _SAMPLE_FIXTURE = "quickstart.txt"
 
@@ -80,22 +79,21 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
             type=int,
             help="Number of chunks to process per task batch",
         )
-        parser.add_argument(
+        modes = parser.add_mutually_exclusive_group()
+        modes.add_argument(
             "--dry-run",
-            nargs="?",
-            const=True,
-            default=False,
-            metavar="presort",
-            help=(
-                "Estimate LLM token usage and cost without ingesting data or making LLM "
-                "calls. With the value 'presort', scan a folder instead: report junk, "
-                "duplicates, version candidates, potential personal data, already-in-cognee "
-                "status, and proposed dataset groupings — then apply with --from-report."
-            ),
+            action="store_true",
+            help=("Estimate LLM token usage and cost without ingesting data or making LLM calls."),
+        )
+        modes.add_argument(
+            "--presort",
+            action="store_true",
+            help="Scan a folder for junk, duplicates, versions, personal data, and proposed "
+            "dataset groupings; use --apply to ingest the groups.",
         )
 
-        presort = parser.add_argument_group("presort (--dry-run presort / --from-report)")
-        presort.add_argument(
+        presort = parser.add_argument_group("presort (--presort / --from-report)")
+        modes.add_argument(
             "--from-report",
             metavar="REPORT_JSON",
             help="Apply a saved presort report: ingest its proposed groups as datasets",
@@ -177,7 +175,6 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
 
     def _extend_allowed_roots(self, paths) -> None:
         import os
-        import tempfile
         from pathlib import Path
 
         from cognee.infrastructure.files.utils.local_path_safety import (
@@ -185,9 +182,9 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
         )
 
         existing = os.environ.get(ALLOWED_LOCAL_FILE_ROOTS_ENV)
-        # When the env var was unset the defaults were cwd+tempdir — keep them,
-        # and always APPEND (never replace) so no previously-allowed root is lost.
-        roots = existing.split(os.pathsep) if existing else [str(Path.cwd()), tempfile.gettempdir()]
+        if not existing:
+            return  # An unset allowlist already permits all local paths.
+        roots = existing.split(os.pathsep)
         roots.extend(str(Path(path).expanduser()) for path in paths)
         os.environ[ALLOWED_LOCAL_FILE_ROOTS_ENV] = os.pathsep.join(dict.fromkeys(roots))
 
@@ -195,7 +192,7 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
         import json
 
         if not args.data or len(args.data) != 1:
-            raise CliCommandInnerException("--dry-run presort expects exactly one folder path.")
+            raise CliCommandInnerException("--presort expects exactly one folder path.")
         folder = args.data[0]
         if args.allow_root:
             self._extend_allowed_roots([folder])
@@ -284,6 +281,8 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
 
         if args.data:
             raise CliCommandInnerException("--from-report cannot be combined with data arguments.")
+        if args.allow_root:
+            self._extend_allowed_roots([args.from_report])
         report = PresortReport.from_json(args.from_report)
         if args.allow_root and report.root_path:
             self._extend_allowed_roots([report.root_path])
@@ -325,18 +324,12 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
                 self._execute_apply(args)
                 return
 
-            if args.dry_run == "presort":
+            if args.presort:
                 self._execute_presort(args)
                 return
-            if args.dry_run not in (True, False):
-                raise CliCommandInnerException(
-                    f"Unsupported --dry-run value {args.dry_run!r}; use --dry-run or "
-                    "--dry-run presort."
-                )
 
             if args.allow_root and args.data:
-                # Plain folder inputs auto-presort; the scan needs the folder
-                # inside the allowed local file roots.
+                # Opted-in folder scans need access to the local file root.
                 self._extend_allowed_roots(args.data)
 
             if args.sample_data:
@@ -389,7 +382,7 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
                     )
                     return result
                 except Exception as e:
-                    raise CliCommandInnerException(f"Failed to remember: {str(e)}") from e
+                    raise CliCommandInnerException(f"Failed to remember: {e!s}") from e
 
             result = asyncio.run(run_remember())
 
@@ -424,4 +417,4 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(f"Failed to remember: {str(e)}", error_code=1) from e
+            raise CliCommandException(f"Failed to remember: {e!s}", error_code=1) from e

@@ -21,9 +21,9 @@ cross-process mechanism (e.g. DB-backed lock) later.
 """
 
 import asyncio
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from typing import AsyncIterator
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger

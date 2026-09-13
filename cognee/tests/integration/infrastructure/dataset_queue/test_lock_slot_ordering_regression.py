@@ -113,6 +113,7 @@ async def test_improve_and_pipeline_run_on_same_dataset_complete():
         text=True,
         timeout=180,
         env=os.environ.copy(),
+        check=False,
     )
     assert result.returncode == 0, (
         f"scenario failed (rc={result.returncode})\n"

@@ -1,7 +1,8 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
-from typing import Literal, Optional
+from typing import Literal
+
 import pydantic
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class CacheConfig(BaseSettings):
@@ -48,7 +49,7 @@ class CacheConfig(BaseSettings):
     """
 
     cache_backend: Literal["redis", "fs", "tapes", "sqlite", "postgres"] = "sqlite"
-    cache_db_url: Optional[str] = None
+    cache_db_url: str | None = None
     cache_purge_interval_seconds: int = 900
     caching: bool = True
     auto_feedback: bool = True
@@ -57,14 +58,14 @@ class CacheConfig(BaseSettings):
     shared_kuzu_lock: bool = False
     cache_host: str = "localhost"
     cache_port: int = 6379
-    cache_username: Optional[str] = None
-    cache_password: Optional[str] = None
+    cache_username: str | None = None
+    cache_password: str | None = None
     cache_ssl: bool = False
-    cache_ssl_cert_reqs: Optional[str] = "required"
+    cache_ssl_cert_reqs: str | None = "required"
     agentic_lock_expire: int = 240
     agentic_lock_timeout: int = 300
-    session_ttl_seconds: Optional[int] = 604800
-    max_session_context_chars: Optional[int] = None
+    session_ttl_seconds: int | None = 604800
+    max_session_context_chars: int | None = None
     usage_logging: bool = False
     usage_logging_ttl: int = 604800
     tapes_ingest_url: str = "http://localhost:8082"

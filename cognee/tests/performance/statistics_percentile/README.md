@@ -1,7 +1,7 @@
 # Nightly performance corpora
 
 The nightly percentile benchmark (`.github/workflows/nightly_tests.yml`, dispatched by
-`.github/workflows/nightly_scheduler.yml` — dev daily, main weekly) runs each
+`.github/workflows/nightly_scheduler.yml` — main daily, dev weekly) runs each
 corpus through `statistics_percentile_report.py` on four backends. A corpus is two
 S3 objects under
 `s3://github-runner-cognee-tests/nightly_ci_artifacts/performance_test_artifacts/`:
@@ -19,7 +19,6 @@ so adding a corpus there is a separate PR.
 
 | Label | Shape | Size |
 |---|---|---|
-| `50_small_documents` | short synthetic documents | 21 KB |
 | `war_and_peace` | one very long document | 3.2 MB |
 | `war_and_peace_large` | the War and Peace corpus replayed against a 27×-inflated graph (~100k nodes) | 39 MB cassette |
 | `datasheets` | 164 medium-sized real product datasheets | 1.4 MB |
@@ -82,7 +81,13 @@ Needs `s3:PutObject` on that bucket, which lives in AWS account `463722570299`.
 Five caller jobs in `nightly_tests.yml` — `perf-<label>-llm`, `perf-<label>-mock`,
 `perf-<label>-cloud`, `perf-rust-<label>-llm`, `perf-rust-<label>` — plus, in the
 `notify` job, seven `REPORT_KEYS` entries, seven `ARMS` lines, the `needs` list and
-the status gate. Copy the `war_and_peace` block; it is the closest template.
+the status gate. Copy the `war_and_peace` block; it is the closest template — but drop its
+`if: ${{ inputs.cadence != 'daily' }}` line unless the new corpus is also
+meant to be weekly-only. Note the counts above are the pre-restructure
+shape: `50_small_documents` was removed and there is no rust arm for
+`datasheets`, so a new corpus may need fewer than five caller jobs.
+`performance_report_rust.yml` still defaults to `50_small_documents`
+with no remaining caller; that default is orphaned, not live.
 
 Nothing is needed for MotherDuck: `motherduck_nightly_etl.py` discovers labels by
 globbing the S3 report keys, so a new label appears in `ci_analytics.nightly` by

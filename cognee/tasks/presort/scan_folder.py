@@ -5,7 +5,6 @@ per-file metadata (no content hashing here — that is done lazily by
 """
 
 from pathlib import Path
-from typing import List, Tuple
 
 from cognee.infrastructure.files.utils.guess_file_type import guess_file_type
 from cognee.infrastructure.files.utils.is_text_content import is_text_content
@@ -67,13 +66,13 @@ async def scan_folder(
     root: Path,
     *,
     include_subdirectories: bool = True,
-) -> Tuple[List[FileRecord], List[JunkFile]]:
+) -> tuple[list[FileRecord], list[JunkFile]]:
     """Walk `root` and return (kept file records, junk files with reasons)."""
     from cognee.infrastructure.loaders.core.code_loader import SUPPORTED_CODE_EXTENSIONS
 
     claimable = _claimable_extensions()
-    kept: List[FileRecord] = []
-    junk: List[JunkFile] = []
+    kept: list[FileRecord] = []
+    junk: list[JunkFile] = []
 
     candidates = sorted(root.rglob("*")) if include_subdirectories else sorted(root.iterdir())
     for file_path in candidates:
@@ -118,7 +117,7 @@ async def scan_folder(
             record.is_text = is_text_content(sample) and not non_text_mime
         except Exception as error:  # sniffing must never abort the scan
             record.warnings.append(f"could not sniff file type: {error}")
-            logger.debug(f"Presort sniff failed for {file_path}: {error}")
+            logger.debug(f"Presort sniff failed for {file_path}: {error}", exc_info=True)
 
         kept.append(record)
 

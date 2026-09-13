@@ -13,7 +13,7 @@ entities and relations. Storage goes through ``run_custom_pipeline`` +
 
 import types
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union, get_args, get_origin
+from typing import Any, Union, get_args, get_origin
 
 from cognee.modules.graph_models import GraphSchemaSpec, graph_model_from_spec
 from cognee.shared.logging_utils import get_logger
@@ -25,7 +25,7 @@ logger = get_logger("presort")
 PRESORT_GRAPH_PIPELINE_NAME = "presort_graph_pipeline"
 
 
-def _unwrap_model_class(annotation) -> Optional[type]:
+def _unwrap_model_class(annotation) -> type | None:
     """Extract the DataPoint model class from Optional[X] / List[X] / X."""
     from pydantic import BaseModel
 
@@ -42,7 +42,7 @@ def _unwrap_model_class(annotation) -> Optional[type]:
     return None
 
 
-def _new_instance(model_class: type, name: str, extra_fields: Optional[dict] = None):
+def _new_instance(model_class: type, name: str, extra_fields: dict | None = None):
     """Instantiate a generated entity with its required name/is_type fields."""
     marker_class = _unwrap_model_class(model_class.model_fields["is_type"].annotation)
     payload: dict = {"name": name, "is_type": marker_class() if marker_class else {}}
@@ -52,7 +52,7 @@ def _new_instance(model_class: type, name: str, extra_fields: Optional[dict] = N
     return model_class(**payload)
 
 
-def build_graph_instances(report: PresortReport) -> List[Any]:
+def build_graph_instances(report: PresortReport) -> list[Any]:
     """Build DataPoint instances of the report's spec from its relationships."""
     spec = GraphSchemaSpec.model_validate(report.spec_used)
     root_model = graph_model_from_spec(spec)
@@ -66,13 +66,13 @@ def build_graph_instances(report: PresortReport) -> List[Any]:
     ]
 
     # One root instance per scanned file, primitives copied by matching name.
-    file_instances: Dict[str, Any] = {}
+    file_instances: dict[str, Any] = {}
     for record in report.files:
         extras = {field_name: getattr(record, field_name, None) for field_name in value_field_names}
         file_instances[record.path] = _new_instance(root_model, record.name, extras)
 
     # Targets are materialized once per (entity, name).
-    target_cache: Dict[tuple, Any] = {}
+    target_cache: dict[tuple, Any] = {}
 
     def target_instance(entity_name: str, target_name: str):
         if entity_name == root_entity.name:
@@ -122,9 +122,11 @@ def build_graph_instances(report: PresortReport) -> List[Any]:
 async def apply_presort_graph(
     report: PresortReport,
     *,
-    dataset: Optional[str] = None,
+    dataset: str | None = None,
     user=None,
     run_in_background: bool = False,
+    vector_db_config: dict | None = None,
+    graph_db_config: dict | None = None,
 ):
     """Write the report's spec-shaped graph into its own dataset."""
     from cognee.modules.pipelines import Task
@@ -147,6 +149,8 @@ async def apply_presort_graph(
         dataset=dataset,
         user=user,
         run_in_background=run_in_background,
+        vector_db_config=vector_db_config,
+        graph_db_config=graph_db_config,
         pipeline_name=PRESORT_GRAPH_PIPELINE_NAME,
     )
     logger.info(f"apply_graph: wrote {len(instances)} root node(s) into dataset {dataset!r}")

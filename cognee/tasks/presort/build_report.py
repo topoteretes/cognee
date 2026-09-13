@@ -6,7 +6,6 @@ drops the PII section.
 """
 
 from pathlib import Path
-from typing import List, Optional
 from uuid import NAMESPACE_OID, uuid5
 
 from cognee.modules.graph_models import GraphSchemaSpec
@@ -41,24 +40,24 @@ def enabled_sections(spec: GraphSchemaSpec) -> set:
     }
 
 
-def scan_id_for(root_path: str, owner_id: Optional[str] = None) -> str:
+def scan_id_for(root_path: str, owner_id: str | None = None) -> str:
     return str(uuid5(NAMESPACE_OID, f"presort:{owner_id or ''}:{root_path}"))
 
 
 def build_report(
     root: Path,
-    files: List[FileRecord],
-    junk: List[JunkFile],
-    duplicates: List[DuplicateCluster],
-    versions: List[VersionCandidate],
-    pii: List[PiiFinding],
-    groups: List[ProposedGroup],
+    files: list[FileRecord],
+    junk: list[JunkFile],
+    duplicates: list[DuplicateCluster],
+    versions: list[VersionCandidate],
+    pii: list[PiiFinding],
+    groups: list[ProposedGroup],
     *,
     spec: GraphSchemaSpec,
-    relationships: Optional[dict[str, List[RelationInstance]]] = None,
+    relationships: dict[str, list[RelationInstance]] | None = None,
     used_llm: bool = False,
-    warnings: Optional[List[str]] = None,
-    owner_id: Optional[str] = None,
+    warnings: list[str] | None = None,
+    owner_id: str | None = None,
 ) -> PresortReport:
     sections = enabled_sections(spec)
     warnings = list(warnings or [])

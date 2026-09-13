@@ -4,12 +4,12 @@ from sqlalchemy.exc import IntegrityError
 
 from cognee.infrastructure.databases.exceptions import EntityAlreadyExistsError
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.users.methods import get_user
-from cognee.modules.users.permissions.methods import get_tenant
 from cognee.modules.users.exceptions import PermissionDeniedError
+from cognee.modules.users.methods import get_user
 from cognee.modules.users.models import (
     Role,
 )
+from cognee.modules.users.permissions.methods import get_tenant
 
 
 async def create_role(

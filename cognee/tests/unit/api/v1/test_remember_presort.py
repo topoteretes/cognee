@@ -18,6 +18,11 @@ remember_module = importlib.import_module("cognee.api.v1.remember.remember")
 run_presort_module = importlib.import_module("cognee.modules.presort.run_presort")
 
 
+@pytest.fixture(autouse=True)
+def presort_disabled_by_default(monkeypatch):
+    monkeypatch.delenv("PRESORT_FOLDERS_ENABLED", raising=False)
+
+
 @pytest.fixture
 def sample_report():
     return PresortReport(scan_id="scan-1", root_path="/tmp/folder")
@@ -114,7 +119,9 @@ def test_ordinary_inputs_not_detected_as_reports(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_plain_folder_auto_presorts(tmp_path, sample_report):
+@pytest.mark.parametrize("flag", ["true", "1", "yes"])
+async def test_plain_folder_auto_presorts_when_enabled(tmp_path, sample_report, monkeypatch, flag):
+    monkeypatch.setenv("PRESORT_FOLDERS_ENABLED", flag)
     (tmp_path / "a.txt").write_text("hello")
     with (
         patch(
@@ -137,7 +144,8 @@ async def test_plain_folder_auto_presorts(tmp_path, sample_report):
         {"session_id": "s1"},
     ],
 )
-async def test_explicit_destination_skips_auto_presort(tmp_path, remember_kwargs):
+async def test_explicit_destination_skips_auto_presort(tmp_path, remember_kwargs, monkeypatch):
+    monkeypatch.setenv("PRESORT_FOLDERS_ENABLED", "true")
     (tmp_path / "a.txt").write_text("hello")
     with (
         patch(f"{PRESORT_MODULE}.run_presort", new=AsyncMock()) as run_mock,
@@ -153,20 +161,28 @@ async def test_explicit_destination_skips_auto_presort(tmp_path, remember_kwargs
 
 
 @pytest.mark.asyncio
-async def test_auto_presort_env_kill_switch(tmp_path, monkeypatch):
+@pytest.mark.parametrize("flag", [None, "false", "0", "no", "", "invalid"])
+@pytest.mark.parametrize("remember_kwargs", [{}, {"dataset_name": "main_dataset"}])
+async def test_folder_presort_requires_opt_in(tmp_path, monkeypatch, flag, remember_kwargs):
     (tmp_path / "a.txt").write_text("hello")
-    monkeypatch.setenv("PRESORT_FOLDERS_ENABLED", "false")
+    if flag is not None:
+        monkeypatch.setenv("PRESORT_FOLDERS_ENABLED", flag)
     with (
         patch(f"{PRESORT_MODULE}.run_presort", new=AsyncMock()) as run_mock,
-        patch.object(remember_module, "_remember_inner", new=AsyncMock(return_value="inner")),
+        patch.object(
+            remember_module, "_remember_inner", new=AsyncMock(return_value="inner")
+        ) as inner_mock,
     ):
-        await remember(str(tmp_path))
+        result = await remember(str(tmp_path), **remember_kwargs)
 
     run_mock.assert_not_awaited()
+    assert result == "inner"
+    assert inner_mock.await_args.args[1] == "main_dataset"
 
 
 @pytest.mark.asyncio
-async def test_code_project_folder_keeps_repo_route(tmp_path):
+async def test_code_project_folder_keeps_repo_route(tmp_path, monkeypatch):
+    monkeypatch.setenv("PRESORT_FOLDERS_ENABLED", "true")
     (tmp_path / "pyproject.toml").write_text("[project]\nname='x'")
     (tmp_path / "main.py").write_text("print('x')")
     with (
@@ -275,3 +291,163 @@ async def test_presort_end_to_end_deterministic(tmp_path):
     assert any(finding.category == "resume" for finding in report.pii)
     assert {group.name for group in report.groups} == {"docs", "documents"}
     assert report.summary()["junk"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("auto_route", [False, True])
+@pytest.mark.parametrize("filename", [None, ".DS_Store", ".hidden"])
+async def test_empty_folder_apply_returns_report(tmp_path, monkeypatch, auto_route, filename):
+    if filename:
+        (tmp_path / filename).write_text("junk")
+    if auto_route:
+        monkeypatch.setenv("PRESORT_FOLDERS_ENABLED", "true")
+    with patch.object(run_presort_module, "_report_destination", return_value=None):
+        report = await remember(
+            str(tmp_path),
+            dry_run=False if auto_route else "presort",
+            auto_apply=True,
+            check_existing=False,
+        )
+
+    assert isinstance(report, PresortReport)
+    assert report.groups == []
+    assert report.apply_results == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["report", "explicit", "automatic"])
+@pytest.mark.parametrize("llm_available", [True, False])
+async def test_presort_apply_preserves_ingestion_options(
+    tmp_path, sample_report, monkeypatch, mode, llm_available
+):
+    from cognee.tasks.presort.models import FileRecord, ProposedGroup
+
+    path = str(tmp_path / "a.txt")
+    sample_report.files = [FileRecord(path=path, name="a.txt")]
+    sample_report.groups = [ProposedGroup(name="docs", dataset_name="docs", file_paths=[path])]
+    data = sample_report if mode == "report" else str(tmp_path)
+    kwargs = {"dry_run": "presort", "auto_apply": True} if mode == "explicit" else {}
+    if mode == "automatic":
+        monkeypatch.setenv("PRESORT_FOLDERS_ENABLED", "true")
+    options = {
+        "node_set": ["custom"],
+        "node_set_extra": ["extra"],
+        "vector_db_config": {"vector_db_provider": "pgvector"},
+        "graph_db_config": {"graph_database_provider": "neo4j"},
+        "preferred_loaders": ["TextLoader"],
+        "data_per_batch": 3,
+        "data_cache": False,
+        "chunk_size": 100,
+        "custom_prompt": "Extract people",
+        "chunks_per_batch": 4,
+        "self_improvement": False,
+        "raise_on_error": False,
+    }
+    # Mock the actual ingestion boundary so this covers both remember's
+    # presort routing and apply_presort's call into the standard pipeline.
+    with (
+        patch(f"{PRESORT_MODULE}.run_presort", new=AsyncMock(return_value=sample_report)),
+        patch(
+            "cognee.modules.presort.llm_availability.llm_is_configured", return_value=llm_available
+        ),
+        patch.object(
+            remember_module, "_remember_inner", new=AsyncMock(return_value="result")
+        ) as inner,
+        patch.object(add_module, "add", new=AsyncMock(return_value="result")) as add,
+    ):
+        result = await remember(data, **kwargs, **options)
+
+    if mode == "report":
+        assert result == {"docs": "result"}
+    else:
+        assert result.apply_results == {"docs": "result"}
+    called, unused = (inner, add) if llm_available else (add, inner)
+    called.assert_awaited_once()
+    unused.assert_not_awaited()
+    actual = called.await_args.kwargs
+    dataset = called.await_args.args[1] if llm_available else actual["dataset_name"]
+    assert dataset == "docs"
+    assert actual["node_set"] == ["presort", "docs", "custom", "extra"]
+    assert actual["incremental_loading"] is True
+    for key in (
+        "vector_db_config",
+        "graph_db_config",
+        "preferred_loaders",
+        "data_per_batch",
+        "data_cache",
+    ):
+        assert actual[key] == options[key]
+    if llm_available:
+        for key in (
+            "chunk_size",
+            "custom_prompt",
+            "chunks_per_batch",
+            "self_improvement",
+            "raise_on_error",
+        ):
+            assert actual[key] == options[key]
+    else:
+        assert actual["skip_connection_test"] is True
+        assert "chunk_size" not in actual
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("apply_graph", [False, True])
+async def test_invalid_explicit_group_still_raises(sample_report, apply_graph):
+    with pytest.raises(ValueError, match="No groups to apply"):
+        await remember(sample_report, apply_groups=["missing"], apply_graph=apply_graph)
+
+
+@pytest.mark.asyncio
+async def test_graph_only_apply_preserves_database_options(sample_report):
+    with (
+        patch("cognee.modules.presort.llm_availability.llm_is_configured", return_value=True),
+        patch(
+            "cognee.tasks.presort.graph_apply.apply_presort_graph",
+            new=AsyncMock(return_value="graph"),
+        ) as graph,
+        patch.object(remember_module, "_remember_inner", new=AsyncMock()) as inner,
+    ):
+        result = await remember(
+            sample_report,
+            apply_groups=[],
+            apply_graph=True,
+            vector_db_config={"vector_db_provider": "pgvector"},
+            graph_db_config={"graph_database_provider": "neo4j"},
+        )
+    assert result == {"presort_graph": "graph"}
+    inner.assert_not_awaited()
+    assert graph.await_args.kwargs["vector_db_config"] == {"vector_db_provider": "pgvector"}
+    assert graph.await_args.kwargs["graph_db_config"] == {"graph_database_provider": "neo4j"}
+
+
+def test_report_path_must_be_allowed_before_file_probe(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from cognee.infrastructure.files.utils import local_path_safety
+
+    monkeypatch.setattr(
+        local_path_safety, "get_allowed_local_file_roots", lambda: (tmp_path / "allowed",)
+    )
+    with (
+        patch.object(Path, "is_file") as is_file,
+        pytest.raises(ValueError, match="outside allowed roots"),
+    ):
+        _maybe_presort_report(tmp_path / "outside.presort.json")
+    is_file.assert_not_called()
+
+
+def test_auto_presort_checks_allowlist_before_probing_folder(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from cognee.infrastructure.files.utils import local_path_safety
+
+    monkeypatch.setenv("PRESORT_FOLDERS_ENABLED", "true")
+    monkeypatch.setattr(
+        local_path_safety, "get_allowed_local_file_roots", lambda: (tmp_path / "allowed",)
+    )
+    with patch.object(Path, "is_dir") as is_dir:
+        assert not remember_module._should_auto_presort(
+            tmp_path / "outside", "main_dataset", None, None, {}
+        )
+    is_dir.assert_not_called()

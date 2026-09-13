@@ -1,8 +1,7 @@
-from typing import Optional
-
 from cognee import memify
 from cognee.context_global_variables import set_session_user_context_variable
 from cognee.exceptions import CogneeValidationError
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
@@ -11,18 +10,17 @@ from cognee.tasks.memify import (
     cognify_agent_trace_feedback,
     extract_agent_trace_feedbacks,
 )
-from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger("persist_agent_trace_feedbacks_in_knowledge_graph")
 
 
 async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
     user: User,
-    session_ids: Optional[list[str]] = None,
+    session_ids: list[str] | None = None,
     dataset: str = DEFAULT_DATASET_NAME,
     node_set_name: str = "agent_trace_feedbacks",
     raw_trace_content: bool = False,
-    last_n_steps: Optional[int] = None,
+    last_n_steps: int | None = None,
     run_in_background: bool = False,
 ):
     """
@@ -51,7 +49,7 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
 
     if not dataset_to_write:
         raise CogneeValidationError(
-            message=f"User (id: {str(user.id)}) does not have write access to dataset: {dataset}",
+            message=f"User (id: {user.id!s}) does not have write access to dataset: {dataset}",
             log=False,
         )
 

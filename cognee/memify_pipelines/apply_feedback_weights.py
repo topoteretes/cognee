@@ -1,22 +1,20 @@
-from typing import List
-
 from cognee import memify
 from cognee.context_global_variables import set_session_user_context_variable
 from cognee.exceptions import CogneeValidationError
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.memify.apply_feedback_weights import apply_feedback_weights
 from cognee.tasks.memify.extract_feedback_qas import extract_feedback_qas
-from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger("apply_feedback_weights_pipeline")
 
 
 async def apply_feedback_weights_pipeline(
     user: User,
-    session_ids: List[str],
+    session_ids: list[str],
     dataset: str = DEFAULT_DATASET_NAME,
     alpha: float = 0.1,
     batch_size: int = 100,
@@ -50,7 +48,7 @@ async def apply_feedback_weights_pipeline(
     )
     if not dataset_to_write:
         raise CogneeValidationError(
-            message=f"User (id: {str(user.id)}) does not have write access to dataset: {dataset}",
+            message=f"User (id: {user.id!s}) does not have write access to dataset: {dataset}",
             log=False,
         )
 

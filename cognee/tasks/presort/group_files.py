@@ -18,7 +18,6 @@ similarity — the same shape as ``consolidate_entities`` — producing
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.code_repo import detect_code_project
@@ -43,15 +42,15 @@ def _folder_group_name(root: Path, directory: Path) -> str:
 
 async def group_files(
     root: Path,
-    files: List[FileRecord],
+    files: list[FileRecord],
     *,
     use_llm: bool = False,
     dataset_prefix: str = "",
-) -> List[ProposedGroup]:
-    remaining: Dict[str, FileRecord] = {record.path: record for record in files}
-    groups: List[ProposedGroup] = []
+) -> list[ProposedGroup]:
+    remaining: dict[str, FileRecord] = {record.path: record for record in files}
+    groups: list[ProposedGroup] = []
 
-    def make_group(name: str, kind, reason: str, paths: List[str]) -> None:
+    def make_group(name: str, kind, reason: str, paths: list[str]) -> None:
         member_paths = [path for path in paths if path in remaining]
         if not member_paths:
             return
@@ -68,7 +67,7 @@ async def group_files(
         )
 
     # 1. Code projects: any directory under root carrying a project marker.
-    project_dirs: List[Path] = []
+    project_dirs: list[Path] = []
     try:
         candidate_dirs = [root] + [path for path in sorted(root.rglob("*")) if path.is_dir()]
     except OSError:
@@ -91,8 +90,8 @@ async def group_files(
         )
 
     # 2. Folder structure: first-level subdirectory of each remaining file.
-    by_folder: Dict[str, List[str]] = defaultdict(list)
-    loose: List[str] = []
+    by_folder: dict[str, list[str]] = defaultdict(list)
+    loose: list[str] = []
     for path in list(remaining):
         relative = Path(path).relative_to(root)
         if len(relative.parts) > 1:
@@ -122,7 +121,7 @@ async def group_files(
             )
 
     # 4. Remaining loose files: extension-family fallback.
-    by_family: Dict[str, List[str]] = defaultdict(list)
+    by_family: dict[str, list[str]] = defaultdict(list)
     for path, record in remaining.items():
         by_family[record.family].append(path)
     for family in sorted(by_family):
@@ -131,7 +130,7 @@ async def group_files(
     return groups
 
 
-def _semantic_label(records: List[FileRecord]) -> str:
+def _semantic_label(records: list[FileRecord]) -> str:
     classes = [record.content_class for record in records if record.content_class]
     if classes:
         most_common = max(set(classes), key=classes.count)
@@ -139,7 +138,7 @@ def _semantic_label(records: List[FileRecord]) -> str:
     return ""
 
 
-async def _semantic_groups(records: List[FileRecord]) -> List[List[FileRecord]]:
+async def _semantic_groups(records: list[FileRecord]) -> list[list[FileRecord]]:
     """Cluster text documents by embedding cosine similarity (union-find)."""
     candidates = [record for record in records if record.is_text and not record.is_code]
     if len(candidates) < _MIN_SEMANTIC_GROUP_SIZE:
@@ -173,12 +172,12 @@ async def _semantic_groups(records: List[FileRecord]) -> List[List[FileRecord]]:
                 if similarities[i, j] >= _SEMANTIC_SIMILARITY_THRESHOLD:
                     parent[find(i)] = find(j)
 
-        clusters: Dict[int, List[FileRecord]] = defaultdict(list)
+        clusters: dict[int, list[FileRecord]] = defaultdict(list)
         for index, record in enumerate(candidates):
             clusters[find(index)].append(record)
         return [
             members for members in clusters.values() if len(members) >= _MIN_SEMANTIC_GROUP_SIZE
         ]
     except Exception as error:  # embedding failures must not abort presort
-        logger.warning(f"Presort semantic grouping skipped: {error}")
+        logger.warning(f"Presort semantic grouping skipped: {error}", exc_info=True)
         return []

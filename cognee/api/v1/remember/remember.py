@@ -2,8 +2,8 @@ import asyncio
 import os
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, BinaryIO, Literal, Union
 from uuid import UUID
-from typing import Union, BinaryIO, List, Optional, Any, Literal, TYPE_CHECKING
 
 try:
     from typing import Unpack
@@ -16,30 +16,30 @@ if TYPE_CHECKING:
     from cognee.modules.cognify.estimator import DryRunEstimate
     from cognee.tasks.presort.models import PresortReport
 
-from cognee.shared.logging_utils import get_logger
-from cognee.tasks.ingestion.data_item import DataItem
 from cognee.memory import (
+    FeedbackEntry,
     MemoryEntry,
     QAEntry,
-    TraceEntry,
-    FeedbackEntry,
     SkillRunEntry,
+    TraceEntry,
 )
 from cognee.memory.entries import MEMORY_ENTRY_TYPES
 from cognee.modules.migration.sources.base import MemorySource
+from cognee.modules.observability import (
+    COGNEE_DATA_ITEM_COUNT,
+    COGNEE_DATA_SIZE_BYTES,
+    COGNEE_DATASET_NAME,
+    COGNEE_OPERATION_MODE,
+    COGNEE_SESSION_ID,
+    OtelStatusCode,
+    new_span,
+)
 from cognee.modules.operations import record_operation
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
-from cognee.modules.observability import (
-    new_span,
-    COGNEE_DATASET_NAME,
-    COGNEE_SESSION_ID,
-    COGNEE_DATA_SIZE_BYTES,
-    COGNEE_OPERATION_MODE,
-    COGNEE_DATA_ITEM_COUNT,
-    OtelStatusCode,
-)
+from cognee.shared.logging_utils import get_logger
+from cognee.tasks.ingestion.data_item import DataItem
 
 logger = get_logger("remember")
 
@@ -56,7 +56,7 @@ class RememberKwargs(TypedDict, total=False):
     """Power-user overrides for remember(). Most users never need these."""
 
     graph_model: Any
-    node_set: List[str]
+    node_set: list[str]
     preferred_loaders: list
     incremental_loading: bool
     data_cache: bool
@@ -86,10 +86,10 @@ class RememberKwargs(TypedDict, total=False):
     relationship_spec: Any
     dataset_prefix: str
     max_sample_bytes: int
-    apply_groups: List[str]
+    apply_groups: list[str]
     skip_duplicates: bool
     exclude_pii: bool
-    node_set_extra: List[str]
+    node_set_extra: list[str]
     auto_apply: bool
     apply_graph: bool
     graph_dataset: str
@@ -130,14 +130,12 @@ PRESORT_FOLDERS_ENV = "PRESORT_FOLDERS_ENABLED"
 def _should_auto_presort(data, dataset_name, dataset_id, session_id, kwargs) -> bool:
     """Whether a remember() input should be presorted automatically.
 
-    True only for a plain local directory remembered into the default dataset
-    with no session/content_type — i.e. no explicit destination or mode was
-    given, so organizing the folder is the sensible default. Code-project
-    directories keep the repo route; paths outside the allowed local file
-    roots and remote-connected sessions keep the classic behavior. Disable
-    globally with PRESORT_FOLDERS_ENABLED=false.
+    Requires an explicit opt-in through PRESORT_FOLDERS_ENABLED=true. Only
+    plain local directories targeting the default dataset without a session
+    or content_type qualify. Code projects, paths outside the allowed local
+    roots, and remote-connected sessions keep the classic behavior.
     """
-    if os.environ.get(PRESORT_FOLDERS_ENV, "true").strip().lower() in ("false", "0", "no"):
+    if os.environ.get(PRESORT_FOLDERS_ENV, "false").strip().lower() not in ("true", "1", "yes"):
         return False
     if session_id is not None or dataset_id is not None or kwargs.get("content_type"):
         return False
@@ -151,8 +149,10 @@ def _should_auto_presort(data, dataset_name, dataset_id, session_id, kwargs) -> 
     text = str(data)
     if text.startswith(("s3://", "http://", "https://", "file://")):
         return False
+    from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+
     try:
-        path = Path(text).expanduser()
+        path = resolve_local_path(text, must_exist=True)
         if not path.is_dir():
             return False
     except (OSError, ValueError):
@@ -163,22 +163,12 @@ def _should_auto_presort(data, dataset_name, dataset_id, session_id, kwargs) -> 
     if detect_code_project(path):
         return False  # repo directories keep the code-graph route
 
-    from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
-
-    try:
-        resolve_local_path(path, must_exist=True)
-    except (ValueError, FileNotFoundError):
-        return False  # outside allowed roots: keep the classic behavior
-
     from cognee.api.v1.serve.state import get_remote_client
 
-    if get_remote_client() is not None:
-        return False  # presort scans the local filesystem only
-
-    return True
+    return get_remote_client() is None  # presort scans the local filesystem only
 
 
-def _maybe_presort_report(data) -> Optional["PresortReport"]:
+def _maybe_presort_report(data) -> "PresortReport | None":
     """Detect a presort report passed as remember()'s `data` argument.
 
     Recognized shapes: a PresortReport object, a dict carrying the
@@ -192,7 +182,9 @@ def _maybe_presort_report(data) -> Optional["PresortReport"]:
     if looks_like_presort_report(data):
         return PresortReport.from_json(data) if isinstance(data, dict) else data
     if isinstance(data, (str, Path)) and str(data).endswith(REPORT_FILE_SUFFIX):
-        candidate = Path(data).expanduser()
+        from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+
+        candidate = resolve_local_path(data)
         if candidate.is_file():
             return PresortReport.from_json(candidate)
     return None
@@ -285,9 +277,9 @@ async def _remember_entry(
     entry,
     *,
     dataset_name: str,
-    session_id: Optional[str],
+    session_id: str | None,
     user,
-    skill_improvement: Optional[dict[str, Any]] = None,
+    skill_improvement: dict[str, Any] | None = None,
 ) -> "RememberResult":
     """Top-level dispatcher for typed MemoryEntry payloads.
 
@@ -336,9 +328,9 @@ async def _dispatch_session_entry(
     entry: "MemoryEntry",
     *,
     dataset_name: str,
-    session_id: Optional[str],
+    session_id: str | None,
     user,
-    skill_improvement: Optional[dict[str, Any]] = None,
+    skill_improvement: dict[str, Any] | None = None,
 ) -> "RememberResult":
     """Route a typed memory entry to the right SessionManager method.
 
@@ -434,6 +426,7 @@ async def _dispatch_session_entry(
                 resolved_dataset = ds.id
         except Exception:
             # Fall through with None — we still create the session row.
+            logger.debug("Ignoring exception in _dispatch_session_entry", exc_info=True)
             resolved_dataset = None
 
         await ensure_and_touch_session(
@@ -442,7 +435,7 @@ async def _dispatch_session_entry(
             dataset_id=resolved_dataset,
         )
     except Exception as exc:
-        logger.debug("remember: pre-upsert session_record failed (%s)", exc)
+        logger.debug("remember: pre-upsert session_record failed (%s)", exc, exc_info=True)
 
     result = RememberResult(
         status="session_stored",
@@ -549,32 +542,32 @@ class RememberResult:
         *,
         status: str,
         dataset_name: str,
-        dataset_id: Optional[str] = None,
-        session_ids: Optional[List[str]] = None,
-        pipeline_run_id: Optional[str] = None,
+        dataset_id: str | None = None,
+        session_ids: list[str] | None = None,
+        pipeline_run_id: str | None = None,
     ):
         self.status = status
         self.dataset_name = dataset_name
         self.dataset_id = dataset_id
-        self.session_ids: Optional[List[str]] = session_ids
+        self.session_ids: list[str] | None = session_ids
         self.pipeline_run_id = pipeline_run_id
-        self.error: Optional[str] = None
-        self.raw_result: Optional[dict] = None
-        self.elapsed_seconds: Optional[float] = None
-        self.content_hash: Optional[str] = None
+        self.error: str | None = None
+        self.raw_result: dict | None = None
+        self.elapsed_seconds: float | None = None
+        self.content_hash: str | None = None
         self.items_processed: int = 0
-        self.items: List[dict] = []
+        self.items: list[dict] = []
         # Populated when the call dispatched a typed MemoryEntry.
         # entry_type is one of "qa", "trace", "feedback", or
         # "skill_run"; entry_id is the qa_id / trace_id / run_id
         # returned by the storage backend.
-        self.entry_type: Optional[str] = None
-        self.entry_id: Optional[str] = None
-        self._task: Optional[asyncio.Task] = None
+        self.entry_type: str | None = None
+        self.entry_id: str | None = None
+        self._task: asyncio.Task | None = None
         self._started_at: float = time.monotonic()
 
     @property
-    def session_id(self) -> Optional[str]:
+    def session_id(self) -> str | None:
         """The session ID when exactly one session is involved, else None."""
         if self.session_ids and len(self.session_ids) == 1:
             return self.session_ids[0]
@@ -751,15 +744,15 @@ async def remember(
     ],
     dataset_name: str = "main_dataset",
     *,
-    dataset_id: Optional[UUID] = None,
-    session_id: Optional[str] = None,
-    chunk_size: Optional[int] = None,
-    chunker: Optional[Any] = None,
-    custom_prompt: Optional[str] = None,
+    dataset_id: UUID | None = None,
+    session_id: str | None = None,
+    chunk_size: int | None = None,
+    chunker: Any | None = None,
+    custom_prompt: str | None = None,
     run_in_background: bool = False,
     self_improvement: bool = True,
-    session_ids: Optional[List[str]] = None,
-    dry_run: Union[bool, Literal["presort"]] = False,
+    session_ids: list[str] | None = None,
+    dry_run: bool | Literal["presort"] = False,
     raise_on_error: bool = True,
     **kwargs: Unpack[RememberKwargs],
 ) -> Union["RememberResult", "DryRunEstimate", "PresortReport", dict]:
@@ -822,10 +815,10 @@ async def remember(
             produced (and persisted) and its groups are ingested immediately;
             the returned report carries the ingest outcomes on
             ``report.apply_results`` ({dataset_name: RememberResult}).
-            Folder inputs presort automatically: ``remember("<folder>")`` with
-            no explicit dataset/session/content_type behaves as
-            ``dry_run="presort", auto_apply=True`` (code-project directories
-            keep the repo route). Disable with ``PRESORT_FOLDERS_ENABLED=false``.
+            Folder presort is opt-in. Set ``PRESORT_FOLDERS_ENABLED=true`` to
+            automatically scan and apply plain folders targeting the default
+            dataset without a session/content_type. Code-project directories
+            keep the repo route. The environment flag defaults to false.
             Without a configured LLM, presort degrades instead of failing: the
             deterministic scan runs, ``use_llm`` is downgraded, and apply
             stages files with ``add()`` only — each raised as a warning.
@@ -864,8 +857,8 @@ async def remember(
         # Access raw pipeline result:
         result.raw_result    # {dataset_id: PipelineRunInfo}
     """
-    from cognee.shared.utils import send_telemetry
     from cognee import __version__ as cognee_version
+    from cognee.shared.utils import send_telemetry
 
     # Migration dispatch: a MemorySource streams COGX records from an external
     # memory system (Mem0, Zep/Graphiti, Letta, a COGX archive, ...). The
@@ -911,6 +904,11 @@ async def remember(
                     "cognee_version": cognee_version,
                 },
             )
+            # index_vectors=False imports the archive's graph without touching
+            # the vector/embedding stack (same kwarg the code route uses), so a
+            # bundled archive restores with no API key. Vector-independent
+            # search (CHUNKS_LEXICAL) still works over such an import.
+            graph_only = not kwargs.pop("index_vectors", True)
             return await import_memory_source(
                 data,
                 dataset_name=dataset_name,
@@ -919,6 +917,7 @@ async def remember(
                 chunker=chunker,
                 custom_prompt=custom_prompt,
                 self_improvement=self_improvement,
+                graph_only=graph_only,
                 **kwargs,
             )
 
@@ -977,15 +976,23 @@ async def remember(
                 user=kwargs.get("user"),
                 run_in_background=run_in_background,
                 self_improvement=self_improvement,
+                chunk_size=chunk_size,
+                chunker=chunker,
+                custom_prompt=custom_prompt,
+                session_ids=session_ids,
+                raise_on_error=raise_on_error,
+                **{
+                    key: value
+                    for key, value in kwargs.items()
+                    if key in (_ADD_ONLY | _COGNIFY_ONLY | _SHARED) - {"user", "run_in_background"}
+                },
             )
 
-    # Automatic presort for plain folder inputs: a local directory remembered
-    # into the default dataset is scanned, organized, and its proposed groups
-    # ingested — instead of blindly flattening the tree into one dataset.
+    # Automatic presort requires an explicit environment opt-in.
     if dry_run is False and _should_auto_presort(
         data, dataset_name, dataset_id, session_id, kwargs
     ):
-        logger.info(f"remember: folder input detected — presorting {str(data)!r} automatically")
+        logger.info("remember: presorting folder input (PRESORT_FOLDERS_ENABLED is enabled)")
         dry_run = "presort"
         kwargs.setdefault("auto_apply", True)
 
@@ -1048,6 +1055,16 @@ async def remember(
                 user=kwargs.get("user"),
                 run_in_background=run_in_background,
                 self_improvement=self_improvement,
+                chunk_size=chunk_size,
+                chunker=chunker,
+                custom_prompt=custom_prompt,
+                session_ids=session_ids,
+                raise_on_error=raise_on_error,
+                **{
+                    key: value
+                    for key, value in kwargs.items()
+                    if key in (_ADD_ONLY | _COGNIFY_ONLY | _SHARED) - {"user", "run_in_background"}
+                },
             )
             return report
 
@@ -1427,7 +1444,7 @@ async def _remember_inner(
         # _scoped_skill_id uuid5) stable across re-ingests, so re-ingesting an
         # edited SKILL.md upserts the existing Skill node instead of creating a
         # duplicate.
-        materialize_root: Optional[_Path] = None
+        materialize_root: _Path | None = None
         if normalized_uploads or skills_text:
             root = _skill_materialize_root(dataset.id)
             root.mkdir(parents=True, exist_ok=True)
@@ -1594,7 +1611,9 @@ async def _remember_inner(
                             )
                         logger.info("remember: session '%s' bridged to permanent graph", session_id)
                     except Exception as exc:
-                        logger.warning("remember: session improve failed (non-fatal): %s", exc)
+                        logger.warning(
+                            "remember: session improve failed (non-fatal): %s", exc, exc_info=True
+                        )
 
                 result._task = asyncio.create_task(_session_improve())
                 _BACKGROUND_REMEMBER_TASKS.add(result._task)
