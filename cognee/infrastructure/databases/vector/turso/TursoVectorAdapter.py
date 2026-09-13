@@ -327,6 +327,30 @@ class TursoVectorAdapter(VectorDBInterface):
                 )
         return results
 
+    async def score_by_ids(
+        self, collection_name: str, data_point_ids: list[str], query_vector: list[float]
+    ) -> list[ScoredResult]:
+        ids = list(dict.fromkeys(str(point_id) for point_id in data_point_ids))
+        if not ids:
+            return []
+        if not await self.has_collection(collection_name):
+            raise CollectionNotFoundError(f"Collection '{collection_name}' not found!")
+        scores = []
+        for start in range(0, len(ids), QUERY_BATCH_SIZE):
+            batch = ids[start : start + QUERY_BATCH_SIZE]
+            placeholders = ",".join("?" for _ in batch)
+            rows = await self._execute(
+                f"SELECT id, vector_distance_cos(vector, vector32(?)) AS distance "
+                f'FROM "{collection_name}" WHERE id IN ({placeholders})',
+                [_vector_literal(query_vector), *batch],
+                fetch=True,
+            )
+            scores.extend(
+                ScoredResult(id=parse_id(str(row[0])), score=float(row[1]), payload=None)
+                for row in rows or []
+            )
+        return scores
+
     async def search(
         self,
         collection_name: str,
