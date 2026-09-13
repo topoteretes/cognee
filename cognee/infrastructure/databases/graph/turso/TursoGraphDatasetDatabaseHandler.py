@@ -1,6 +1,5 @@
 import os
 from uuid import UUID
-from typing import Optional
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph.config import get_graph_config
@@ -8,7 +7,7 @@ from cognee.infrastructure.databases.graph.get_graph_engine import (
     create_graph_engine,
     graph_engine_cache,
 )
-from cognee.modules.users.models import User, DatasetDatabase
+from cognee.modules.users.models import DatasetDatabase, User
 
 
 class TursoGraphDatasetDatabaseHandler:
@@ -19,7 +18,7 @@ class TursoGraphDatasetDatabaseHandler:
     """
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: UUID | None, user: User | None) -> dict:
         graph_config = get_graph_config()
 
         if graph_config.graph_database_provider != "turso":
@@ -30,11 +29,21 @@ class TursoGraphDatasetDatabaseHandler:
 
         base_config = get_base_config()
         databases_dir = os.path.join(base_config.system_root_directory, "databases")
+
+        # This is delete_dataset's own os.path.isabs guard, evaluated at
+        # creation time: a non-absolute path would be silently skipped there
+        # (and by prune_system, which routes through it), leaving a file
+        # nothing can remove. Runs before makedirs so a non-local root such as
+        # an s3:// one creates no local directory on the way out.
+        if not os.path.isabs(databases_dir):
+            raise OSError(
+                "Turso per-dataset graph databases need an absolute local path; set "
+                f"SYSTEM_ROOT_DIRECTORY to one (got {base_config.system_root_directory!r})."
+            )
+
         os.makedirs(databases_dir, exist_ok=True)
 
-        db_file = os.path.join(databases_dir, f"graph_{dataset_id}.db")
-        # sqlite+aiosqlite:/// needs three slashes for absolute path
-        dataset_url = f"/{db_file}" if not db_file.startswith("/") else db_file
+        dataset_url = os.path.join(databases_dir, f"graph_{dataset_id}.db")
 
         engine = create_graph_engine(
             graph_database_provider="turso",

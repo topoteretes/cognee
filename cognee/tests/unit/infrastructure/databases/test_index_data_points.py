@@ -113,10 +113,16 @@ async def test_index_data_points_isolates_metadata_for_multiple_index_fields():
     await index_data_points([data_point], vector_engine=mock_vector_engine)
 
     assert data_point.metadata["index_fields"] == ["name", "description"]
-    assert [(field, points[0].metadata["index_fields"]) for field, points in indexed_batches] == [
+    indexed_points = [(field, points[0]) for field, points in indexed_batches]
+    assert [(field, point.metadata["index_fields"]) for field, point in indexed_points] == [
         ("name", ["name"]),
         ("description", ["description"]),
     ]
+    assert [(field, DataPoint.get_embeddable_data(point)) for field, point in indexed_points] == [
+        ("name", "name text"),
+        ("description", "description text"),
+    ]
+    assert all(point.metadata is not data_point.metadata for _, point in indexed_points)
 
 
 @pytest.mark.asyncio

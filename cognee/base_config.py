@@ -1,13 +1,14 @@
-import os
 import base64
-from pathlib import Path
-from typing import Optional
+import os
 from functools import lru_cache
-from cognee.root_dir import get_absolute_path, ensure_absolute_path
-from cognee.modules.observability.observers import Observer
-from cognee.shared.logging_utils import get_logger
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pathlib import Path
+
 import pydantic
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from cognee.modules.observability.observers import Observer
+from cognee.root_dir import ensure_absolute_path, get_absolute_path
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
@@ -24,6 +25,14 @@ class BaseConfig(BaseSettings):
     system_root_directory: str = get_absolute_path(".cognee_system")
     cache_root_directory: str = get_absolute_path(".cognee_cache")
     logs_root_directory: str = os.getenv("COGNEE_LOGS_DIR", str(Path.home() / ".cognee" / "logs"))
+    # Where remote git repositories are shallow-cloned for code-graph ingestion:
+    # remember(content_type="code") and GitHub/GitLab repository URLs passed to
+    # add(). Always a local directory, even with S3 storage -- git writes a
+    # working tree -- and one of the always-allowed local file roots
+    # (local_path_safety) so a clone's documents can be ingested by path.
+    repos_root_directory: str = os.getenv(
+        "COGNEE_REPOS_DIR", str(Path.home() / ".cognee" / "repos")
+    )
     monitoring_tool: object = Observer.NONE
     # Default blend weight for the learned feedback signal during graph search.
     # Opt-in by default to preserve existing retrieval behavior.
@@ -123,8 +132,8 @@ class BaseConfig(BaseSettings):
 
         return self
 
-    default_user_email: Optional[str] = os.getenv("DEFAULT_USER_EMAIL")
-    default_user_password: Optional[str] = os.getenv("DEFAULT_USER_PASSWORD")
+    default_user_email: str | None = os.getenv("DEFAULT_USER_EMAIL")
+    default_user_password: str | None = os.getenv("DEFAULT_USER_PASSWORD")
 
     # OpenTelemetry / tracing
     cognee_tracing_enabled: bool = os.getenv("COGNEE_TRACING_ENABLED", "false").lower() in (
@@ -133,15 +142,15 @@ class BaseConfig(BaseSettings):
         "yes",
     )
     otel_service_name: str = os.getenv("OTEL_SERVICE_NAME", "cognee")
-    otel_exporter_otlp_endpoint: Optional[str] = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-    otel_exporter_otlp_headers: Optional[str] = os.getenv("OTEL_EXPORTER_OTLP_HEADERS")
+    otel_exporter_otlp_endpoint: str | None = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+    otel_exporter_otlp_headers: str | None = os.getenv("OTEL_EXPORTER_OTLP_HEADERS")
 
     # Langfuse configuration. Read from the env by pydantic-settings at load time
     # (LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST); host falls back to
     # LANGFUSE_BASE_URL, then Langfuse cloud (see validate_paths).
-    langfuse_public_key: Optional[str] = None
-    langfuse_secret_key: Optional[str] = None
-    langfuse_host: Optional[str] = None
+    langfuse_public_key: str | None = None
+    langfuse_secret_key: str | None = None
+    langfuse_host: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -152,6 +161,7 @@ class BaseConfig(BaseSettings):
             "monitoring_tool": self.monitoring_tool,
             "cache_root_directory": self.cache_root_directory,
             "logs_root_directory": self.logs_root_directory,
+            "repos_root_directory": self.repos_root_directory,
         }
 
 

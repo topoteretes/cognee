@@ -1,76 +1,129 @@
 import asyncio
-from pydantic import BaseModel
-from typing import Collection, Union, Optional
+from collections.abc import Collection
+from typing import Literal
 from uuid import UUID
 
+from pydantic import BaseModel
+
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.llm import get_max_chunk_tokens
+from cognee.infrastructure.llm.config import LLMConfig
+from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
-from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
-from cognee.shared.logging_utils import get_logger
-from cognee.shared.data_models import KnowledgeGraph
-from cognee.infrastructure.llm import get_max_chunk_tokens
-
-from cognee.modules.pipelines import run_pipeline
-from cognee.modules.pipelines.tasks.task import Task
-from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
-from cognee.infrastructure.llm.config import LLMConfig
-from cognee.modules.chunking.TextChunker import TextChunker
+from cognee.modules.observability import (
+    COGNEE_PIPELINE_NAME,
+    COGNEE_RESULT_SUMMARY,
+    MEMORY_OPERATION,
+    MEMORY_SYSTEM,
+    increment_graph_edges,
+    increment_graph_nodes,
+    new_span,
+    record_operation_duration,
+)
+from cognee.modules.ontology.get_default_ontology_resolver import (
+    get_configured_ontology_mode,
+    get_configured_ontology_resolver,
+)
 from cognee.modules.ontology.ontology_config import Config
-from cognee.modules.ontology.get_default_ontology_resolver import get_configured_ontology_resolver
+from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
+from cognee.modules.pipelines import run_pipeline
+from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
+from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
-
+from cognee.shared.data_models import KnowledgeGraph
+from cognee.shared.logging_utils import get_logger
+from cognee.tasks.code_graph.code_files import get_code_file_tasks
+from cognee.tasks.code_graph.code_repo import get_code_repo_tasks
 from cognee.tasks.documents import (
     classify_documents,
     extract_chunks_from_documents,
 )
-from cognee.tasks.code_graph.code_files import get_code_file_tasks
-from cognee.tasks.code_graph.code_repo import get_code_repo_tasks
-from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.tasks.graph import detect_contradictions
-from cognee.tasks.provenance import record_provenance
+from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.tasks.graph.resolve_temporal_contradictions import resolve_temporal_contradictions
+from cognee.tasks.provenance import record_provenance
 from cognee.tasks.storage import add_data_points
-from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 from cognee.tasks.temporal_graph.extract_events_and_entities import extract_events_and_timestamps
 from cognee.tasks.temporal_graph.extract_knowledge_graph_from_events import (
     extract_knowledge_graph_from_events,
 )
-from cognee.modules.observability import (
-    new_span,
-    COGNEE_PIPELINE_NAME,
-    COGNEE_RESULT_SUMMARY,
-    MEMORY_SYSTEM,
-    MEMORY_OPERATION,
-    record_operation_duration,
-    increment_graph_edges,
-    increment_graph_nodes,
-)
-
 
 logger = get_logger("cognify")
 
 
+def _wrap_cognify_exception(error: BaseException, datasets) -> "Exception":
+    """Wrap a run-level pipeline exception in a typed CognifyFailedError.
+
+    CognifyFailedError instances pass through unchanged so double-wrapping
+    can't happen.
+    """
+    from cognee.modules.operations import scrub_error_message
+    from cognee.modules.pipelines.exceptions import CognifyFailedError
+
+    if isinstance(error, CognifyFailedError):
+        return error
+    return CognifyFailedError(
+        dataset_name=str(datasets) if datasets else None,
+        error_class=type(error).__name__,
+        error_message=scrub_error_message(error),
+        # On this path raise_on_error=False re-raises the original exception —
+        # there is no errored run info to hand back.
+        hint="Pass raise_on_error=False to get the original exception instead.",
+    )
+
+
+def raise_if_cognify_errored(result) -> None:
+    """Raise ``CognifyFailedError`` if any dataset's foreground run errored.
+
+    ``result`` is the blocking executor's ``{dataset_id: PipelineRunInfo}``
+    mapping (or a bare run info when no dataset id was present). The first
+    errored run wins — a day-0 user has exactly one dataset, and for batch
+    users the exception names the dataset so the rest can be retried.
+    """
+    from cognee.modules.pipelines.exceptions import CognifyFailedError
+    from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunErrored
+
+    if isinstance(result, PipelineRunErrored):
+        run_infos = [result]
+    elif isinstance(result, dict):
+        run_infos = [info for info in result.values() if isinstance(info, PipelineRunErrored)]
+    else:
+        return
+
+    for run_info in run_infos:
+        raise CognifyFailedError(
+            dataset_name=getattr(run_info, "dataset_name", None),
+            error_class=getattr(run_info, "error_class", None),
+            error_message=getattr(run_info, "error_message", None)
+            or str(getattr(run_info, "payload", "") or ""),
+        )
+
+
 async def cognify(
-    datasets: Union[str, list[str], list[UUID]] = None,
+    datasets: str | list[str] | list[UUID] | None = None,
     user: User = None,
     graph_model: BaseModel = KnowledgeGraph,
     chunker=TextChunker,
-    chunk_size: int = None,
-    chunks_per_batch: int = None,
+    chunk_size: int | None = None,
+    chunks_per_batch: int | None = None,
     config: Config = None,
-    vector_db_config: dict = None,
-    graph_db_config: dict = None,
+    vector_db_config: dict | None = None,
+    graph_db_config: dict | None = None,
     run_in_background: bool = False,
     incremental_loading: bool = True,
-    custom_prompt: Optional[str] = None,
+    custom_prompt: str | None = None,
     temporal_cognify: bool = False,
-    functional_relationships: Optional[Collection[str]] = None,
+    functional_relationships: Collection[str] | None = None,
     data_per_batch: int = 20,
-    llm_config: Optional[LLMConfig] = None,
-    embedding_config: Optional[EmbeddingConfig] = None,
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = True,
     dry_run: bool = False,
+    raise_on_error: bool = True,
+    chunk_attachment: Literal["direct", "all"] | None = None,
     **kwargs,
 ):
     """
@@ -145,6 +198,22 @@ async def cognify(
         dry_run: If True, return a stage-level estimate of LLM token usage and rough cost
                  without making LLM calls or writing graph results. The estimate covers all
                  data in the selected dataset(s); an incremental run may process fewer items.
+        chunk_attachment: How widely each chunk links into the graph extracted from it.
+                 Accepts "direct", "all", or None; omitting it is the same as "direct".
+                 - "direct": the chunk links to the extracted root, or - if that root is a
+                   transparent container - to the children that replaced it. Today's behaviour.
+                 - "all": the chunk links once to every stored node reachable from that root,
+                   so any entity is one hop from its source chunk.
+                 Requires a custom DataPoint graph_model; passing it with KnowledgeGraph
+                 raises, since that path already attaches every extracted entity to its chunk.
+                 Applies to standard-routed items only, exactly like graph_model - DLT-source
+                 manifests and code files run their own task lists and ignore both.
+                 Orthogonal to metadata["transparent"], which is a property of the model.
+                 SDK-only: not exposed over the REST API. Raises with temporal_cognify=True
+                 or while connected to a remote instance; permitted with dry_run=True.
+                 Cost of "all": index_graph_edges embeds one EdgeType per distinct edge text,
+                 and contains edge text is "<chunk label> contains <node label>." - so a model
+                 yielding N nodes per chunk means roughly N extra embedded rows per chunk.
 
     Returns:
         Union[dict, list[PipelineRunInfo], DryRunEstimate]:
@@ -221,11 +290,34 @@ async def cognify(
         - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
     """
+    if chunk_attachment is not None:
+        # cognify() forwards unknown kwargs into the LLM call, which also takes
+        # **kwargs, so an unusable value here has to raise rather than vanish.
+        if chunk_attachment not in ("direct", "all"):
+            raise ValueError(
+                f"Invalid chunk_attachment {chunk_attachment!r}; expected 'direct', 'all', or None."
+            )
+        if not (isinstance(graph_model, type) and issubclass(graph_model, DataPoint)):
+            raise ValueError(
+                "chunk_attachment requires a custom DataPoint graph_model; "
+                f"{getattr(graph_model, '__name__', graph_model)!r} is not a DataPoint subclass."
+            )
+        if temporal_cognify:
+            raise ValueError(
+                "chunk_attachment is not supported with temporal_cognify=True; the temporal "
+                "pipeline does not attach extracted graphs to chunks."
+            )
+
     # Route to remote instance if connected via serve()
     from cognee.api.v1.serve.state import get_remote_client
 
     client = get_remote_client()
     if client is not None:
+        if chunk_attachment is not None:
+            raise ValueError(
+                "chunk_attachment is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to use it locally."
+            )
         if dry_run:
             raise ValueError(
                 "dry_run is not supported while connected to a remote Cognee instance. "
@@ -255,7 +347,13 @@ async def cognify(
         await run_migrations_and_block(datasets, user)
 
         resolved_resolver = get_configured_ontology_resolver(config)
-        config = {"ontology_config": {"ontology_resolver": resolved_resolver}}
+        resolved_ontology_mode = get_configured_ontology_mode(config)
+        config = {
+            "ontology_config": {
+                "ontology_resolver": resolved_resolver,
+                "ontology_mode": resolved_ontology_mode,
+            }
+        }
 
         if dry_run:
             if temporal_cognify:
@@ -288,6 +386,7 @@ async def cognify(
                 custom_prompt=custom_prompt,
                 chunks_per_batch=chunks_per_batch,
                 functional_relationships=functional_relationships,
+                chunk_attachment=chunk_attachment,
                 **kwargs,
             )
 
@@ -318,22 +417,47 @@ async def cognify(
         def resolve_cognify_tasks(data_item):
             return tasks_by_route[cognify_route_for(data_item)]
 
-        result = await pipeline_executor_func(
-            pipeline=run_pipeline,
-            datasets=datasets,
-            tasks=resolve_cognify_tasks,
-            pipeline_name="cognify_pipeline",
-            user=user,
-            vector_db_config=vector_db_config,
-            graph_db_config=graph_db_config,
-            incremental_loading=incremental_loading,
-            use_pipeline_cache=False,
-            data_per_batch=data_per_batch,
-            rollback_handler=cognify_rollback_handler,
-            llm_config=llm_config,
-            embedding_config=embedding_config,
-            data_cache=data_cache,
-        )
+        try:
+            result = await pipeline_executor_func(
+                pipeline=run_pipeline,
+                datasets=datasets,
+                tasks=resolve_cognify_tasks,
+                pipeline_name="cognify_pipeline",
+                user=user,
+                vector_db_config=vector_db_config,
+                graph_db_config=graph_db_config,
+                incremental_loading=incremental_loading,
+                use_pipeline_cache=False,
+                data_per_batch=data_per_batch,
+                rollback_handler=cognify_rollback_handler,
+                llm_config=llm_config,
+                embedding_config=embedding_config,
+                data_cache=data_cache,
+            )
+        except Exception as error:
+            # Run-level failures (e.g. an AuthenticationError escaping a task)
+            # re-raise straight out of the pipeline generator, bypassing the
+            # errored-run-info path below. Wrap them in the same typed,
+            # classified exception so foreground callers see ONE failure
+            # surface either way; raise_on_error=False keeps the raw exception
+            # (today's behavior). Already-typed cognee errors — e.g.
+            # PermissionDeniedError / DatasetNotFoundError from dataset
+            # resolution — pass through unchanged so callers' except clauses
+            # keep matching.
+            from cognee.exceptions import CogneeApiError
+
+            if raise_on_error and not run_in_background and not isinstance(error, CogneeApiError):
+                raise _wrap_cognify_exception(error, datasets) from error
+            raise
+
+        # Loud-by-default failure: a silently "errored" run info is invisible to
+        # first-time users (57% of first SDK cognify runs errored and 0 of those
+        # accounts ever searched — the run object was never inspected). Raise a
+        # typed, classified error instead; batch/pipeline users opt out with
+        # raise_on_error=False. Background runs can't raise here — their errors
+        # land on the run record and the warm-up marker.
+        if raise_on_error and not run_in_background:
+            raise_if_cognify_errored(result)
 
         dataset_desc = str(datasets) if datasets else "all datasets"
         span.set_attribute(
@@ -352,11 +476,12 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     user: User = None,
     graph_model: BaseModel = KnowledgeGraph,
     chunker=TextChunker,
-    chunk_size: int = None,
+    chunk_size: int | None = None,
     config: Config = None,
-    custom_prompt: Optional[str] = None,
-    chunks_per_batch: int = None,
-    functional_relationships: Optional[Collection[str]] = None,
+    custom_prompt: str | None = None,
+    chunks_per_batch: int | None = None,
+    functional_relationships: Collection[str] | None = None,
+    chunk_attachment: Literal["direct", "all"] | None = None,
     **kwargs,
 ) -> list[Task]:
     cognify_config = get_cognify_config()
@@ -385,6 +510,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             graph_model=graph_model,
             config=config,
             custom_prompt=custom_prompt,
+            chunk_attachment=chunk_attachment,
             task_config={"batch_size": chunks_per_batch},
             **kwargs,
         ),
@@ -430,7 +556,9 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     return default_tasks
 
 
-async def get_dlt_tasks(chunk_size: int = None, chunks_per_batch: int = None) -> list[Task]:
+async def get_dlt_tasks(
+    chunk_size: int | None = None, chunks_per_batch: int | None = None
+) -> list[Task]:
     """Deterministic pipeline for DLT-source manifest datasets.
 
     No LLM tasks: each manifest row becomes one DocumentChunk (vector-indexed
@@ -477,7 +605,10 @@ async def get_dlt_tasks(chunk_size: int = None, chunks_per_batch: int = None) ->
 
 
 async def get_temporal_tasks(
-    user: User = None, chunker=TextChunker, chunk_size: int = None, chunks_per_batch: int = None
+    user: User = None,
+    chunker=TextChunker,
+    chunk_size: int | None = None,
+    chunks_per_batch: int | None = None,
 ) -> list[Task]:
     """
     Builds and returns a list of temporal processing tasks to be executed in sequence.

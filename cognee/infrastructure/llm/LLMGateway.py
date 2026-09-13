@@ -1,5 +1,5 @@
 from collections.abc import Coroutine
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
@@ -10,6 +10,7 @@ from cognee.infrastructure.llm.retry_config import raise_if_quota_error
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
     TranscriptionReturnType,
 )
+from cognee.shared.logging_utils import get_logger
 
 T = TypeVar("T", bound="BaseModel | str")
 
@@ -24,7 +25,7 @@ def _inject_agent_memory(text_input: str) -> str:
     return f"Additional Memory Context:\n{context.memory_context}\n\nOriginal Input:\n{text_input}"
 
 
-def _exact_usage_from_result(result: Any) -> tuple[Optional[int], Optional[int]]:
+def _exact_usage_from_result(result: Any) -> tuple[int | None, int | None]:
     """Real prompt/completion token counts from the raw provider response —
     (None, None) otherwise, so the caller falls back to its char-based
     estimate.
@@ -76,7 +77,7 @@ async def _record_session_usage_after(
             tokens_out_override=tokens_out,
         )
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _record_session_usage_after", exc_info=True)
     return result
 
 
@@ -98,6 +99,9 @@ async def _fail_fast_on_quota(coro: Coroutine) -> T:
         raise_if_budget_exhausted(error)
         raise_if_quota_error(error)
         raise
+
+
+logger = get_logger("LLMGateway")
 
 
 class LLMGateway:
@@ -153,6 +157,37 @@ class LLMGateway:
         # Wrap so usage is recorded against any active session tracker.
         # No-op when no tracker is installed.
         return _fail_fast_on_quota(_record_session_usage_after(inner, text_input=text_input))
+
+    @staticmethod
+    def supports_answer_streaming() -> bool:
+        """Whether the configured client can stream a plain-text answer.
+
+        Resolved through the same framework/provider dispatch a real call takes,
+        because that dispatch is what decides which adapter answers — a hook
+        present on one combination is absent on every other. Never raises: a
+        deployment whose client cannot even be constructed simply does not
+        stream, which is the safe direction.
+        """
+        llm_config = get_llm_config()
+        framework = llm_config.structured_output_framework.upper()
+        try:
+            if framework == "BAML":
+                # The BAML path bypasses the adapters entirely.
+                return False
+            if framework == "LITELLM_NATIVE":
+                from cognee.infrastructure.llm.structured_output_framework.litellm_native.get_native_client import (
+                    get_native_client,
+                )
+
+                return bool(getattr(get_native_client(), "supports_answer_streaming", False))
+            from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
+                get_llm_client,
+            )
+
+            return bool(getattr(get_llm_client(), "supports_answer_streaming", False))
+        except Exception:  # a capability probe must not break a request
+            logger.debug("Could not resolve answer-streaming support", exc_info=True)
+            return False
 
     @staticmethod
     def create_transcript(input, **kwargs) -> Coroutine[Any, Any, TranscriptionReturnType | None]:

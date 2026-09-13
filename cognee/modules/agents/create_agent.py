@@ -1,8 +1,9 @@
+from sqlalchemy import update
+
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.api_key.create_api_key import create_api_key
 from cognee.modules.users.methods import create_user
 from cognee.modules.users.models.User import User
-from sqlalchemy import update
 
 
 async def create_agent(name: str, parent_user: User) -> tuple[User, str]:

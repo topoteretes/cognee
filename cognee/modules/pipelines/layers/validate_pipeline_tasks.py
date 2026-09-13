@@ -1,5 +1,5 @@
-from ..tasks.task import Task
 from ..exceptions.tasks import WrongTaskTypeError
+from ..tasks.task import Task
 
 
 def validate_pipeline_tasks(tasks: list[Task]):

@@ -1,6 +1,7 @@
 """Tests for cache configuration."""
 
 import pytest
+
 from cognee.infrastructure.databases.cache.config import CacheConfig, get_cache_config
 
 

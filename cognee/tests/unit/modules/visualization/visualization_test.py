@@ -1,4 +1,5 @@
 import pytest
+
 from cognee.modules.visualization.cognee_network_visualization import (
     cognee_network_visualization,
 )

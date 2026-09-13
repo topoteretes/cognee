@@ -14,7 +14,6 @@ work, never the whole run.
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List, Optional, Union
 from uuid import UUID
 
 from cognee.context_global_variables import session_user, set_database_global_context_variables
@@ -28,8 +27,8 @@ from cognee.infrastructure.session.session_context_models import (
     SessionContextEntry,
     is_context_entry_usable,
 )
-from cognee.modules.data.models import Dataset
 from cognee.modules.data.methods import get_authorized_existing_datasets
+from cognee.modules.data.models import Dataset
 from cognee.modules.truth_subspace.constants import truth_session_node_set
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -77,7 +76,7 @@ class SessionDistillationScope:
     def dataset_id(self) -> str:
         return str(self.dataset.id)
 
-    def result(self, status: str, documents: Optional[List[str]] = None) -> DistillationResult:
+    def result(self, status: str, documents: list[str] | None = None) -> DistillationResult:
         return DistillationResult(
             session_id=self.session_id,
             dataset_id=self.dataset_id,
@@ -89,8 +88,8 @@ class SessionDistillationScope:
 async def resolve_distillation_scope(
     *,
     session_id: str,
-    dataset: Union[str, UUID],
-    user: Optional[User],
+    dataset: str | UUID,
+    user: User | None,
 ) -> SessionDistillationScope:
     resolved_user = user if user is not None else session_user.get()
     if resolved_user is None or getattr(resolved_user, "id", None) is None:
@@ -121,7 +120,7 @@ async def resolve_distillation_scope(
 
 async def load_distillable_session_inputs(
     scope: SessionDistillationScope,
-) -> tuple[List[dict], List[SessionContextEntry]]:
+) -> tuple[list[dict], list[SessionContextEntry]]:
     """Load QA turns and keep context entries worth distilling."""
     session_manager = get_session_manager()
     context_rows = await session_manager.get_session_context_entries(
@@ -148,11 +147,11 @@ async def load_distillable_session_inputs(
 
 
 def build_curator_batches(
-    qa_rows: List[dict],
-    context_entries: List[SessionContextEntry],
-) -> List[str]:
+    qa_rows: list[dict],
+    context_entries: list[SessionContextEntry],
+) -> list[str]:
     """Pack the session timeline into coarse, size-safe chronological batches."""
-    timeline: List[tuple[str, str]] = []
+    timeline: list[tuple[str, str]] = []
     for row in qa_rows:
         question = " ".join((row.get("question") or "").split())[:MAX_QA_QUESTION_CHARS]
         answer = " ".join((row.get("answer") or "").split())[:MAX_QA_ANSWER_CHARS]
@@ -175,7 +174,7 @@ def build_curator_batches(
     ]
 
 
-async def curate_batch(batch_text: str) -> List[ProposedLesson]:
+async def curate_batch(batch_text: str) -> list[ProposedLesson]:
     """One curator call over one batch slice. Fail-open -> []."""
     system_prompt = read_query_prompt(CURATOR_PROMPT_FILE)
     if not system_prompt:
@@ -189,14 +188,14 @@ async def curate_batch(batch_text: str) -> List[ProposedLesson]:
         )
         return list(result.lessons)
     except Exception as error:
-        logger.warning("Distillation curator batch failed open: %s", error)
+        logger.warning("Distillation curator batch failed open: %s", error, exc_info=True)
         return []
 
 
 async def propose_lessons(
-    qa_rows: List[dict],
-    context_entries: List[SessionContextEntry],
-) -> List[ProposedLesson]:
+    qa_rows: list[dict],
+    context_entries: list[SessionContextEntry],
+) -> list[ProposedLesson]:
     """Pack session inputs into curator batches, then flatten proposed lessons."""
     batches = build_curator_batches(qa_rows, context_entries)
     if not batches:
@@ -216,8 +215,8 @@ async def search_payload_texts(
     *,
     query_text: str | None = None,
     query_vector: list | None = None,
-    node_name: Optional[List[str]] = None,
-) -> List[str]:
+    node_name: list[str] | None = None,
+) -> list[str]:
     """Vector-search one collection and return de-duplicated payload texts; [] on failure."""
     try:
         results = await vector_engine.search(
@@ -229,10 +228,10 @@ async def search_payload_texts(
             node_name=node_name,
         )
     except Exception as error:
-        logger.debug("Distillation search on %s failed open: %s", collection, error)
+        logger.debug("Distillation search on %s failed open: %s", collection, error, exc_info=True)
         return []
 
-    texts: List[str] = []
+    texts: list[str] = []
     seen = set()
     for result in results or []:
         payload = getattr(result, "payload", None)
@@ -251,9 +250,9 @@ async def search_payload_texts(
 
 def build_writer_input(
     lesson: ProposedLesson,
-    members: List[SessionContextEntry],
-    prior_lessons: List[str],
-    glossary: List[str],
+    members: list[SessionContextEntry],
+    prior_lessons: list[str],
+    glossary: list[str],
 ) -> str:
     sections = [f"PROPOSED LESSON:\n{lesson.working_statement}"]
     if members:
@@ -271,10 +270,10 @@ def build_writer_input(
 
 async def write_or_reject(
     lesson: ProposedLesson,
-    members: List[SessionContextEntry],
-    prior_lessons: List[str],
-    glossary: List[str],
-) -> Optional[WrittenLesson]:
+    members: list[SessionContextEntry],
+    prior_lessons: list[str],
+    glossary: list[str],
+) -> WrittenLesson | None:
     """One writer/rejecter call for one proposed lesson. Fail-open -> None."""
     system_prompt = read_query_prompt(WRITER_PROMPT_FILE)
     if not system_prompt:
@@ -289,7 +288,7 @@ async def write_or_reject(
             response_model=WrittenLesson,
         )
     except Exception as error:
-        logger.warning("Distillation writer call failed open: %s", error)
+        logger.warning("Distillation writer call failed open: %s", error, exc_info=True)
         return None
 
 
@@ -297,7 +296,7 @@ async def evaluate_proposed_lesson(
     vector_engine,
     lesson: ProposedLesson,
     entries_by_id: dict,
-) -> Optional[WrittenLesson]:
+) -> WrittenLesson | None:
     members = [
         entries_by_id[entry_id] for entry_id in lesson.member_entry_ids if entry_id in entries_by_id
     ]
@@ -321,9 +320,9 @@ async def evaluate_proposed_lesson(
 
 async def accept_proposed_lessons(
     scope: SessionDistillationScope,
-    proposed: List[ProposedLesson],
-    context_entries: List[SessionContextEntry],
-) -> List[WrittenLesson]:
+    proposed: list[ProposedLesson],
+    context_entries: list[SessionContextEntry],
+) -> list[WrittenLesson]:
     entries_by_id = {entry.id: entry for entry in context_entries}
     async with set_database_global_context_variables(scope.dataset.id, scope.dataset.owner_id):
         vector_engine = await get_vector_engine_async()
@@ -365,8 +364,8 @@ def render_lesson_document(
 
 async def publish_distilled_lessons(
     scope: SessionDistillationScope,
-    accepted: List[WrittenLesson],
-) -> List[str]:
+    accepted: list[WrittenLesson],
+) -> list[str]:
     distilled_on = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     documents = [
         render_lesson_document(lesson, session_id=scope.session_id, distilled_on=distilled_on)
@@ -385,8 +384,8 @@ async def publish_distilled_lessons(
 
 async def distill_session(
     session_id: str,
-    dataset: Union[str, UUID],
-    user: Optional[User] = None,
+    dataset: str | UUID,
+    user: User | None = None,
 ) -> DistillationResult:
     """Distill one finished session's distillable learnings into its dataset's knowledge graph."""
     scope = await resolve_distillation_scope(session_id=session_id, dataset=dataset, user=user)

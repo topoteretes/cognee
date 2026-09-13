@@ -17,10 +17,10 @@ from cognee.modules.graph.utils.expand_with_nodes_and_edges import (
     construct_data_points_and_edges,
 )
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
-from cognee.modules.ontology.get_default_ontology_resolver import get_default_ontology_resolver
 from cognee.modules.ontology.construct_data_points_and_edges_with_ontology import (
     construct_data_points_and_edges_with_ontology,
 )
+from cognee.modules.ontology.get_default_ontology_resolver import get_default_ontology_resolver
 from cognee.modules.ontology.models import AttachedOntologyNode
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.shared.data_models import Edge as KGEdge

@@ -223,9 +223,11 @@ async def _cleanup_orphaned_edge_types(
                     "EdgeType_relationship_name", orphaned_edge_type_ids
                 )
             except Exception as error:
-                logger.warning("EdgeType vector cleanup failed (non-fatal): %s", error)
+                logger.warning(
+                    "EdgeType vector cleanup failed (non-fatal): %s", error, exc_info=True
+                )
     except Exception as error:
-        logger.warning("EdgeType cleanup failed (non-fatal): %s", error)
+        logger.warning("EdgeType cleanup failed (non-fatal): %s", error, exc_info=True)
 
 
 async def _cleanup_orphaned_nodeset_tags(
@@ -250,9 +252,9 @@ async def _cleanup_orphaned_nodeset_tags(
     try:
         await graph_engine.remove_belongs_to_set_tags(tags_to_remove)
     except Exception as error:
-        logger.warning("Graph NodeSet tag cleanup failed (non-fatal): %s", error)
+        logger.warning("Graph NodeSet tag cleanup failed (non-fatal): %s", error, exc_info=True)
 
     try:
         await vector_engine.remove_belongs_to_set_tags(tags_to_remove)
     except Exception as error:
-        logger.warning("Vector NodeSet tag cleanup failed (non-fatal): %s", error)
+        logger.warning("Vector NodeSet tag cleanup failed (non-fatal): %s", error, exc_info=True)

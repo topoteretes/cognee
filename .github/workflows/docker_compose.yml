@@ -20,7 +20,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@61b9e3751b92087fd0b06925ba6dd6314e06f089  # master
+      uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
@@ -134,11 +134,15 @@ jobs:
         # The suite is decoupled from the `cognee` package: --confcutdir keeps
         # pytest from loading the heavy ancestor conftests, and --no-project
         # keeps uv from syncing the whole project on the runner.
+        # The `mcp` client is pinned to match the server's own
+        # `mcp>=1.24.0,<2.0.0`: unpinned it resolves to 2.x, which dropped the
+        # `streamablehttp_client` alias and yields a 2-tuple of streams rather
+        # than 3, so the e2e client cannot talk to a 1.x server image.
         uv run --no-project \
           --with pytest \
           --with pytest-timeout \
           --with requests \
-          --with mcp \
+          --with "mcp<2" \
           python -m pytest cognee/tests/e2e/docker_compose \
             -p no:cacheprovider \
             --confcutdir=cognee/tests/e2e/docker_compose \

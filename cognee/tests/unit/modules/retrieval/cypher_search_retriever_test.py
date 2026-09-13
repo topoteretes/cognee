@@ -78,12 +78,14 @@ async def test_cypher_search_rejects_backend_without_cypher_support():
 
     retriever = CypherSearchRetriever()
 
-    with patch(
-        "cognee.modules.retrieval.cypher_search_retriever.get_graph_engine",
-        return_value=_NoCypherEngine(),
+    with (
+        patch(
+            "cognee.modules.retrieval.cypher_search_retriever.get_graph_engine",
+            return_value=_NoCypherEngine(),
+        ),
+        pytest.raises(SearchTypeNotSupported, match="_NoCypherEngine"),
     ):
-        with pytest.raises(SearchTypeNotSupported, match="_NoCypherEngine"):
-            await retriever.get_retrieved_objects("MATCH (n) RETURN count(n)")
+        await retriever.get_retrieved_objects("MATCH (n) RETURN count(n)")
 
 
 @pytest.mark.asyncio
@@ -92,12 +94,14 @@ async def test_natural_language_search_rejects_backend_without_cypher_support():
 
     retriever = NaturalLanguageRetriever()
 
-    with patch(
-        "cognee.modules.retrieval.natural_language_retriever.get_graph_engine",
-        return_value=_NoCypherEngine(),
+    with (
+        patch(
+            "cognee.modules.retrieval.natural_language_retriever.get_graph_engine",
+            return_value=_NoCypherEngine(),
+        ),
+        pytest.raises(SearchTypeNotSupported, match="_NoCypherEngine"),
     ):
-        with pytest.raises(SearchTypeNotSupported, match="_NoCypherEngine"):
-            await retriever.get_retrieved_objects("How many nodes are there?")
+        await retriever.get_retrieved_objects("How many nodes are there?")
 
 
 def test_postgres_adapters_declare_no_cypher_support():

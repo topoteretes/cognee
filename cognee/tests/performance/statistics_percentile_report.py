@@ -20,9 +20,8 @@ import subprocess
 import sys
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-
 
 BENCH_SCRIPT = (Path(__file__).parent / "statistics_percentile" / "bench_cognee.py").resolve()
 RESULTS_DIR = Path(__file__).parent / "results"
@@ -88,7 +87,7 @@ def run_single(run_num: int, total: int, extra_args: list[str]) -> dict:
     print(f"{'=' * 60}\n")
 
     t0 = time.time()
-    result = subprocess.run(cmd, text=True, cwd=str(COGNEE_DIR))
+    result = subprocess.run(cmd, text=True, cwd=str(COGNEE_DIR), check=False)
     wall = time.time() - t0
 
     # A non-zero exit with results present is a FAILED RUN (the bench exits 1
@@ -113,13 +112,20 @@ def build_report(runs: list[dict]) -> dict:
     stats = {}
     # Only report metrics the runs actually produced: cloud runs carry
     # tenant metrics, local runs don't, and vice versa for local-only ones.
-    all_metrics = [m for m in METRICS + ["wall_time_s"] if m in runs[0]]
-    for metric in all_metrics:
-        values = sorted(r[metric] for r in runs)
+    # Scan every run, not runs[0]: a run whose search phase was skipped omits
+    # its search metrics, so deriving the list from runs[0] either raised
+    # KeyError on the next run or silently dropped the metric, depending on
+    # which run happened to come first.
+    for metric in METRICS + ["wall_time_s"]:
+        values = sorted(r[metric] for r in runs if isinstance(r.get(metric), (int, float)))
+        if not values:
+            continue
         entry = {
             "min": values[0],
             "max": values[-1],
             "mean": round(sum(values) / len(values), 3),
+            "measured_runs": len(values),
+            "total_runs": len(runs),
         }
         for p in PERCENTILES:
             entry[f"p{p}"] = round(percentile(values, p), 3)
@@ -168,7 +174,7 @@ def print_report(stats: dict, num_runs: int, config: dict, runs: list[dict]):
 
 
 def generate_html(stats: dict, num_runs: int, config: dict, runs: list[dict], path: Path):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     pct_keys = ["min", "p50", "p75", "p90", "p95", "p99", "max", "mean"]
 
     # Build table rows
@@ -188,7 +194,11 @@ def generate_html(stats: dict, num_runs: int, config: dict, runs: list[dict], pa
     failed = num_runs - succeeded
     run_rows = ""
     for i, r in enumerate(runs, 1):
-        cells = "".join(f"<td>{r.get(m, 0):.3f}s</td>" for m in all_metrics)
+        # A missing metric is a skipped phase, not a 0.000s measurement.
+        cells = "".join(
+            f"<td>{r[m]:.3f}s</td>" if isinstance(r.get(m), (int, float)) else "<td>&mdash;</td>"
+            for m in all_metrics
+        )
         ok = r.get("success", True)
         status_style = "color: var(--green)" if ok else "color: var(--red)"
         status_label = "OK" if ok else "FAIL"

@@ -1,19 +1,25 @@
 name: Test Suites
 permissions:
   contents: read
-  packages: write
+  packages: read  # reusable test workflows pull the ghcr.io CI image
 
 on:
   push:
     branches: [ main, dev ]
   pull_request:
     branches: [ main, dev ]
-    types: [opened, synchronize, reopened, labeled]
+    # No `labeled`: label-core-team.yml labels every core-team PR on open, and
+    # a `labeled` trigger queued a second run that cancelled the first (both
+    # runs on the same sha, seconds apart, on every PR).
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded PR runs, but never a push-to-dev run: consecutive merges
+  # were cancelling each other's full run (15 of the last 40 push runs), so
+  # dev's real state was unknown most of the time.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   RUNTIME__LOG_LEVEL: ERROR
@@ -22,6 +28,9 @@ env:
 jobs:
   # ── Build pre-baked CI container ──────────────────────────────────────
   build-ci-env:
+    permissions:
+      contents: read
+      packages: write  # pushes the CI image
     name: Build CI Environment
     runs-on: ubuntu-latest
     if: >-
@@ -91,14 +100,11 @@ jobs:
     name: basic checks
     uses: ./.github/workflows/pre_test.yml
 
-  # Fork pull requests do not receive repository secrets. Keep secret-backed
-  # reusable workflows out of the plan for those requests; their no-secrets
-  # coverage runs in community_tests.yml instead.
   basic-tests:
     name: Basic Tests
     uses: ./.github/workflows/basic_tests.yml
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() }}
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
@@ -107,7 +113,7 @@ jobs:
     name: End-to-End Tests
     uses: ./.github/workflows/e2e_tests.yml
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() }}
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
@@ -116,7 +122,7 @@ jobs:
     name: CLI Tests
     uses: ./.github/workflows/cli_tests.yml
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() }}
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
@@ -125,7 +131,7 @@ jobs:
     name: Slow End-to-End Tests
     uses: ./.github/workflows/slow_e2e_tests.yml
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() }}
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
@@ -133,7 +139,7 @@ jobs:
   graph-db-tests:
     name: Graph Database Tests
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/graph_db_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -142,7 +148,7 @@ jobs:
   vector-db-tests:
     name: Vector DB Tests
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/vector_db_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -151,7 +157,7 @@ jobs:
   example-tests:
     name: Example Tests
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/examples_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -160,7 +166,7 @@ jobs:
   notebook-tests:
     name: Notebook Tests
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/notebooks_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -169,19 +175,26 @@ jobs:
   different-os-tests-basic:
     name: OS and Python Tests Ubuntu
     uses: ./.github/workflows/test_different_operating_systems.yml
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     with:
-      python-versions: '["3.10.x", "3.11.x", "3.12.x", "3.13.x", "3.14.x"]'
+      # The interpreter edges only. Every version-specific fix on dev since
+      # 2025-06 was 3.10 (5) or 3.14 (1); none was 3.11/3.12/3.13-only. Those
+      # three run in release_test.yml instead. The unit suite is byte-identical across the
+      # legs, so this cuts three of eight copies with no change in what a
+      # passing run proves.
+      python-versions: '["3.10.x", "3.14.x"]'
       os: '["ubuntu-22.04"]'
       # postgres so the SQL cache adapter tests run instead of skipping; omitted
       # on macos/windows (extended) where psycopg2 has no prebuilt wheels.
-      extra-dependencies: 'postgres'
+      # aws/neptune/langchain/dlt: the CI-image copy of the unit suite (deleted
+      # -- it was the slowest of eight identical copies, behind a 3-minute image
+      # pull) was the only leg with these, and four test files importorskip on
+      # them. Resolved from the existing lock on 3.10.
+      extra-dependencies: 'postgres aws neptune langchain dlt'
     secrets: inherit
 
   different-os-tests-extended:
     name: OS and Python Tests Extended
     uses: ./.github/workflows/test_different_operating_systems.yml
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     with:
       python-versions: '["3.13.x"]'
       os: '["macos-15", "windows-latest"]'
@@ -190,7 +203,7 @@ jobs:
   llm-tests:
     name: LLM Test Suite
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/test_llms.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -199,7 +212,7 @@ jobs:
   s3-file-storage-test:
     name: S3 File Storage Test
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/test_s3_file_storage.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -208,7 +221,7 @@ jobs:
   integration-tests:
     name: Run Integration Tests
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/integration_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -222,7 +235,6 @@ jobs:
   docker-compose-test:
     name: Docker Compose Test
     uses: ./.github/workflows/docker_compose.yml
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     secrets: inherit
 
   docker-ci-test:
@@ -230,10 +242,15 @@ jobs:
     uses: ./.github/workflows/backend_docker_build_test.yml
     secrets: inherit
 
+  ui-docker-ci-test:
+    name: UI Docker CI test
+    uses: ./.github/workflows/frontend_docker_build_test.yml
+    secrets: inherit
+
   temporal-graph-tests:
     name: Temporal Graph Test
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/temporal_graph_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -242,16 +259,23 @@ jobs:
   search-db-tests:
     name: Search Test on Different DBs
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/search_db_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
+      # One Python per backend combo, not four. Half of the sixteen legs ran
+      # in the CI image, which pins Python 3.11 regardless of the matrix: the
+      # job labelled "Python 3.13" logged "Python 3.11.14". So those were the
+      # same run four times. The Python dimension is the unit matrix's job;
+      # this workflow's value is the four backend combos, which all stay.
+      # The full version sweep for the two bare Neo4j jobs runs in release_test.yml.
+      python-versions: '["3.11"]'
     secrets: inherit
 
   relational-db-migration-tests:
     name: Relational DB Migration Tests
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/relational_db_migration_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -277,6 +301,7 @@ jobs:
       mcp-test,
       docker-compose-test,
       docker-ci-test,
+      ui-docker-ci-test,
       temporal-graph-tests,
       search-db-tests,
       relational-db-migration-tests,
@@ -285,52 +310,33 @@ jobs:
     if: ${{ !cancelled() }}
     steps:
       - name: Check Status
-        env:
-          # Fork PRs get no repository secrets, so the secret-dependent suites
-          # are skipped above. Accept "skipped" for fork PRs only; internal
-          # runs still require every suite to succeed.
-          IS_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
         run: |
-          results="
-          pre-test=${{ needs.pre-test.result }}
-          basic-tests=${{ needs.basic-tests.result }}
-          e2e-tests=${{ needs.e2e-tests.result }}
-          cli-tests=${{ needs.cli-tests.result }}
-          slow-e2e-tests=${{ needs.slow-e2e-tests.result }}
-          graph-db-tests=${{ needs.graph-db-tests.result }}
-          vector-db-tests=${{ needs.vector-db-tests.result }}
-          example-tests=${{ needs.example-tests.result }}
-          notebook-tests=${{ needs.notebook-tests.result }}
-          different-os-tests-basic=${{ needs.different-os-tests-basic.result }}
-          different-os-tests-extended=${{ needs.different-os-tests-extended.result }}
-          llm-tests=${{ needs.llm-tests.result }}
-          s3-file-storage-test=${{ needs.s3-file-storage-test.result }}
-          integration-tests=${{ needs.integration-tests.result }}
-          mcp-test=${{ needs.mcp-test.result }}
-          docker-compose-test=${{ needs.docker-compose-test.result }}
-          docker-ci-test=${{ needs.docker-ci-test.result }}
-          temporal-graph-tests=${{ needs.temporal-graph-tests.result }}
-          search-db-tests=${{ needs.search-db-tests.result }}
-          relational-db-migration-tests=${{ needs.relational-db-migration-tests.result }}
-          "
-          failed=0
-          for entry in $results; do
-            job="${entry%%=*}"
-            result="${entry##*=}"
-            if [[ "$result" == "success" ]]; then
-              continue
-            fi
-            if [[ "$IS_FORK_PR" == "true" && "$result" == "skipped" ]]; then
-              continue
-            fi
-            echo "::error::Test suite '${job}' finished with result '${result}'"
-            failed=1
-          done
-          if [[ "$failed" == "1" ]]; then
+          if [[ "${{ needs.pre-test.result }}" == "success" &&
+                "${{ needs.basic-tests.result }}" == "success" &&
+                "${{ needs.e2e-tests.result }}" == "success" &&
+                "${{ needs.cli-tests.result }}" == "success" &&
+                "${{ needs.slow-e2e-tests.result }}" == "success" &&
+                "${{ needs.graph-db-tests.result }}" == "success" &&
+                "${{ needs.vector-db-tests.result }}" == "success" &&
+                "${{ needs.example-tests.result }}" == "success" &&
+                "${{ needs.notebook-tests.result }}" == "success" &&
+                "${{ needs.different-os-tests-basic.result }}" == "success" &&
+                "${{ needs.different-os-tests-extended.result }}" == "success" &&
+                "${{ needs.llm-tests.result }}" == "success" &&
+                "${{ needs.s3-file-storage-test.result }}" == "success" &&
+                "${{ needs.integration-tests.result }}" == "success" &&
+                "${{ needs.mcp-test.result }}" == "success" &&
+                "${{ needs.docker-compose-test.result }}" == "success" &&
+                "${{ needs.docker-ci-test.result }}" == "success" &&
+                "${{ needs.ui-docker-ci-test.result }}" == "success" &&
+                "${{ needs.temporal-graph-tests.result }}" == "success" &&
+                "${{ needs.search-db-tests.result }}" == "success" &&
+                "${{ needs.relational-db-migration-tests.result }}" == "success" ]]; then
+            echo "All test suites completed successfully!"
+          else
             echo "One or more test suites failed."
             exit 1
           fi
-          echo "All required test suites completed successfully!"
 
   # ── Advisory Claude Code review — pulls the private skill from cognee-ci at runtime ──
   # The rubric + Slack map live in the private cognee-ci repo; this job carries no review

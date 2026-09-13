@@ -1,5 +1,6 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from cognee.infrastructure.databases.cache.models import SessionQAEntry
 from cognee.infrastructure.databases.exceptions import SessionParameterValidationError
@@ -839,9 +840,8 @@ class TestSessionManager:
 
     @pytest.mark.asyncio
     async def test_generate_completion_with_session_feedback_only_records_qa(self, sm, mock_cache):
-        """When no query_to_answer is present and the analysis carries a concrete
-        feedback artifact: return the acknowledgement and record it as a QA entry
-        (question + acknowledgement, no served context)."""
+        """When no query_to_answer is present: return the acknowledgement and record it
+        as a QA entry (question + acknowledgement, no served context)."""
         with (
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"

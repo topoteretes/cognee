@@ -1,24 +1,23 @@
-from typing import Union, Optional, List, Type, Any
+from typing import Any
 from uuid import UUID
 
-from cognee.shared.logging_utils import get_logger
-
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.pipelines import run_pipeline
+from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
-from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
-from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
 
 async def run_custom_pipeline(
-    tasks: Union[List[Task], List[str]] = None,
+    tasks: list[Task] | list[str] | None = None,
     data: Any = None,
-    dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
+    dataset: str | UUID = DEFAULT_DATASET_NAME,
     user: User = None,
-    vector_db_config: Optional[dict] = None,
-    graph_db_config: Optional[dict] = None,
+    vector_db_config: dict | None = None,
+    graph_db_config: dict | None = None,
     use_pipeline_cache: bool = False,
     incremental_loading: bool = False,
     data_per_batch: int = 20,

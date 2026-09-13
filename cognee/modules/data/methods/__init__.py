@@ -16,6 +16,15 @@ from .get_unique_data_id import get_unique_data_id
 from .get_authorized_existing_datasets import get_authorized_existing_datasets
 from .get_dataset_ids import get_dataset_ids
 
+# Update
+from .publish_updated_data import (
+    StagedContent,
+    is_data_processed,
+    mark_data_processed,
+    merged_external_metadata,
+    publish_updated_data,
+)
+
 # Delete
 from .delete_dataset import delete_dataset
 from .delete_data import delete_data

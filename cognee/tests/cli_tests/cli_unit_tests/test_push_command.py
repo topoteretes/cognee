@@ -4,8 +4,8 @@ Tests for the push CLI command with proper mocking and coroutine handling.
 
 import argparse
 import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
-from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
 
@@ -244,7 +244,7 @@ class TestPushCommand:
 
         def fail(coro):
             coro.close()  # avoid "coroutine never awaited" warnings
-            raise Exception("Push error")
+            raise RuntimeError("Push error")
 
         mock_asyncio_run.side_effect = fail
 
