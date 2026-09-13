@@ -1,6 +1,5 @@
 import os
 from uuid import UUID
-from typing import Optional
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph.config import get_graph_config
@@ -8,7 +7,7 @@ from cognee.infrastructure.databases.graph.get_graph_engine import (
     create_graph_engine,
     graph_engine_cache,
 )
-from cognee.modules.users.models import User, DatasetDatabase
+from cognee.modules.users.models import DatasetDatabase, User
 
 
 class TursoGraphDatasetDatabaseHandler:
@@ -19,7 +18,7 @@ class TursoGraphDatasetDatabaseHandler:
     """
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: UUID | None, user: User | None) -> dict:
         graph_config = get_graph_config()
 
         if graph_config.graph_database_provider != "turso":
@@ -37,7 +36,7 @@ class TursoGraphDatasetDatabaseHandler:
         # nothing can remove. Runs before makedirs so a non-local root such as
         # an s3:// one creates no local directory on the way out.
         if not os.path.isabs(databases_dir):
-            raise EnvironmentError(
+            raise OSError(
                 "Turso per-dataset graph databases need an absolute local path; set "
                 f"SYSTEM_ROOT_DIRECTORY to one (got {base_config.system_root_directory!r})."
             )

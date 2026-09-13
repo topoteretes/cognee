@@ -10,11 +10,11 @@ that equivalence.
 
 import pytest
 
-import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
 from cognee.infrastructure.loaders.store_derived_text import store_derived_text
+from cognee.modules import ingestion
 
 CONTENTS = [
     pytest.param("plain ascii text\nsecond line\n", id="ascii"),

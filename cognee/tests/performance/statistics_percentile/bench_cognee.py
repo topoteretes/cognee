@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import os
 import sys
 import time
@@ -33,10 +34,16 @@ from dotenv import dotenv_values
 # aliases keep this file's call sites and capture_mock.py's imports stable.
 from cognee.tests.utils.mock_ingestion import (
     install_mocks as _install_mocks,
+)
+from cognee.tests.utils.mock_ingestion import (
     load_memories,
-    load_mock_data as _load_mock_data,
     memory_to_text,
 )
+from cognee.tests.utils.mock_ingestion import (
+    load_mock_data as _load_mock_data,
+)
+
+logger = logging.getLogger(__name__)
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
 
@@ -191,12 +198,12 @@ async def run_benchmark(
     *,
     config: dict,
 ) -> dict:
-    import cognee
-
     # Register community adapters before any engine is created. Comma-separated
     # module names; a module-level register() is called if present (some
     # adapters register on import alone).
     import importlib
+
+    import cognee
 
     for module_name in filter(None, os.environ.get("COGNEE_REGISTER_ADAPTERS", "").split(",")):
         module = importlib.import_module(module_name)
@@ -257,6 +264,7 @@ async def run_benchmark(
         t_prune = time.time() - t_prune_start
         print(f"  Prune completed in {t_prune:.2f}s")
     except Exception as e:
+        logger.debug("Ignoring exception in run_benchmark", exc_info=True)
         t_prune = time.time() - t_prune_start
         status["prune"] = f"failed: {e}"
         print(f"  Prune FAILED: {e}")
@@ -269,6 +277,7 @@ async def run_benchmark(
         await setup()
         t_db_setup = time.time() - t_db_setup_start
     except Exception as e:
+        logger.debug("Ignoring exception in run_benchmark", exc_info=True)
         t_db_setup = time.time() - t_db_setup_start
         status["db_setup"] = f"failed: {e}"
         print(f"  DB setup FAILED: {e}")
@@ -282,6 +291,7 @@ async def run_benchmark(
         await cognee.add(text_list, dataset_name=DATASET_NAME)
         t_add = time.time() - t_add_start
     except Exception as e:
+        logger.debug("Ignoring exception in run_benchmark", exc_info=True)
         t_add = time.time() - t_add_start
         status["add"] = f"failed: {e}"
         print(f"  Add FAILED: {e}")
@@ -293,6 +303,7 @@ async def run_benchmark(
         await cognee.cognify(data_per_batch=n, chunks_per_batch=10000)
         t_cognify = time.time() - t_cognify_start
     except Exception as e:
+        logger.debug("Ignoring exception in run_benchmark", exc_info=True)
         t_cognify = time.time() - t_cognify_start
         status["cognify"] = f"failed: {e}"
         print(f"  Cognify FAILED: {e}")
@@ -317,6 +328,7 @@ async def run_benchmark(
                 )
                 t_search[metric_key] = time.time() - t_q_start
             except Exception as e:
+                logger.debug("Ignoring exception in run_benchmark", exc_info=True)
                 t_search[metric_key] = time.time() - t_q_start
                 status[f"search_{metric_key}"] = f"failed: {_err(e)}"
                 print(f"  Search {search_type} FAILED: {_err(e)}")
@@ -339,6 +351,7 @@ async def run_benchmark(
         t_dataset_delete = time.time() - t_dataset_delete_start
         print(f"  Dataset deleted in {t_dataset_delete:.2f}s")
     except Exception as e:
+        logger.debug("Ignoring exception in run_benchmark", exc_info=True)
         t_dataset_delete = time.time() - t_dataset_delete_start
         status["dataset_delete"] = f"failed: {e}"
         print(f"  Dataset delete FAILED: {e}")
@@ -483,8 +496,9 @@ async def _create_cloud_tenant(
     call PLUS the wait until the tenant reports healthy — the number that
     matters is "time until a usable tenant", not just the POST round trip.
     """
-    import aiohttp
     from urllib.parse import urlsplit
+
+    import aiohttp
 
     t0 = time.time()
     async with aiohttp.ClientSession(headers={"X-Api-Key": api_key}) as session:
@@ -607,13 +621,13 @@ async def _delete_cloud_tenant(management_url: str, api_key: str, tenant_id: str
     import aiohttp
 
     t0 = time.time()
-    async with aiohttp.ClientSession(headers={"X-Api-Key": api_key}) as session:
-        async with session.delete(
-            f"{management_url}/api/v1/tenants", params={"tenant_id": tenant_id}
-        ) as resp:
-            if resp.status >= 400:
-                body = await resp.text()
-                raise RuntimeError(f"Tenant deletion failed ({resp.status}): {body}")
+    async with (
+        aiohttp.ClientSession(headers={"X-Api-Key": api_key}) as session,
+        session.delete(f"{management_url}/api/v1/tenants", params={"tenant_id": tenant_id}) as resp,
+    ):
+        if resp.status >= 400:
+            body = await resp.text()
+            raise RuntimeError(f"Tenant deletion failed ({resp.status}): {body}")
     return time.time() - t0
 
 
@@ -733,6 +747,7 @@ async def run_benchmark_cloud(
         except Exception as e:
             # Record elapsed-until-failure like every other phase (0.0 would
             # skew failed-run percentiles low).
+            logger.debug("Ignoring exception in run_benchmark_cloud", exc_info=True)
             t_tenant_create = time.time() - t_tenant_create_start
             # TenantCreateFailed carries the id of whatever exists; without
             # this, teardown (gated on tenant_id) was unreachable on exactly
@@ -767,6 +782,7 @@ async def run_benchmark_cloud(
                 t_prune = time.time() - t_prune_start
                 print(f"  Prune completed in {t_prune:.2f}s")
             except Exception as e:
+                logger.debug("Ignoring exception in run_benchmark_cloud", exc_info=True)
                 t_prune = time.time() - t_prune_start
                 status["prune"] = f"failed: {_err(e)}"
                 print(f"  Prune FAILED: {_err(e)}")
@@ -779,6 +795,7 @@ async def run_benchmark_cloud(
             await client.add(text_list, dataset_name=dataset_name)
             t_add = time.time() - t_add_start
         except Exception as e:
+            logger.debug("Ignoring exception in run_benchmark_cloud", exc_info=True)
             t_add = time.time() - t_add_start
             status["add"] = f"failed: {_err(e)}"
             print(f"  Add FAILED: {_err(e)}")
@@ -793,6 +810,7 @@ async def run_benchmark_cloud(
             await _wait_for_cloud_cognify(client, cognify_response)
             t_cognify = time.time() - t_cognify_start
         except Exception as e:
+            logger.debug("Ignoring exception in run_benchmark_cloud", exc_info=True)
             t_cognify = time.time() - t_cognify_start
             status["cognify"] = f"failed: {_err(e)}"
             print(f"  Cognify FAILED: {_err(e)}")
@@ -816,6 +834,7 @@ async def run_benchmark_cloud(
                     )
                     t_search[metric_key] = time.time() - t_q_start
                 except Exception as e:
+                    logger.debug("Ignoring exception in run_benchmark_cloud", exc_info=True)
                     t_search[metric_key] = time.time() - t_q_start
                     status[f"search_{metric_key}"] = f"failed: {_err(e)}"
                     print(f"  Search {search_type} FAILED: {_err(e)}")
@@ -832,6 +851,7 @@ async def run_benchmark_cloud(
                 t_dataset_delete = time.time() - t_dataset_delete_start
                 print(f"  Dataset deleted in {t_dataset_delete:.2f}s")
             except Exception as e:
+                logger.debug("Ignoring exception in run_benchmark_cloud", exc_info=True)
                 t_dataset_delete = time.time() - t_dataset_delete_start
                 status["dataset_delete"] = f"failed: {_err(e)}"
                 print(f"  Dataset deletion FAILED: {_err(e)}")
@@ -850,6 +870,7 @@ async def run_benchmark_cloud(
             )
             print(f"  Tenant deleted in {t_tenant_delete:.2f}s")
         except Exception as e:
+            logger.debug("Ignoring exception in run_benchmark_cloud", exc_info=True)
             t_tenant_delete = time.time() - t_tenant_delete_start
             status["tenant_delete"] = f"failed: {_err(e)}"
             print(f"  Tenant deletion FAILED (manual cleanup needed for {tenant_id}): {e}")

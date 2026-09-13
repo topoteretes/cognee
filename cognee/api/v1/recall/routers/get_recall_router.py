@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import List, Optional, Union
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
@@ -9,8 +8,8 @@ from pydantic import Field
 
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO, OutDTO
-from cognee.api.v1.recall.recall import RecallResponse
 from cognee.api.sse import SSE_MEDIA_TYPE, sse_headers, wants_event_stream
+from cognee.api.v1.recall.recall import RecallResponse
 from cognee.api.v1.recall.recall_stream import begin_recall_stream
 from cognee.exceptions import CogneeApiError
 from cognee.modules.search.operations import get_history
@@ -27,7 +26,7 @@ class RecallPayloadDTO(InDTO):
     # As in the SDK, a null search_type with session_id and no datasets also
     # lets a session hit short-circuit the graph search; pass a value to pin a
     # strategy and disable that. See docs/recall-vs-search.md.
-    search_type: Optional[SearchType] = Field(
+    search_type: SearchType | None = Field(
         default=None,
         description=(
             "Search strategy, e.g. HYBRID_COMPLETION, GRAPH_COMPLETION, RAG_COMPLETION, CHUNKS. "
@@ -36,7 +35,7 @@ class RecallPayloadDTO(InDTO):
             "table). Pass a value to pin one."
         ),
     )
-    datasets: Optional[list[str]] = Field(
+    datasets: list[str] | None = Field(
         default=None,
         examples=[["default_dataset"]],
         description=(
@@ -44,7 +43,7 @@ class RecallPayloadDTO(InDTO):
             "you have read access to."
         ),
     )
-    dataset_ids: Optional[list[UUID]] = Field(
+    dataset_ids: list[UUID] | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -57,10 +56,10 @@ class RecallPayloadDTO(InDTO):
         examples=["What is in the document?"],
         description="The question to answer. Required; there is no default query.",
     )
-    system_prompt: Optional[str] = Field(
+    system_prompt: str | None = Field(
         default="Answer the question using the provided context. Be as brief as possible."
     )
-    node_name: Optional[list[str]] = Field(
+    node_name: list[str] | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -68,7 +67,7 @@ class RecallPayloadDTO(InDTO):
             "/v1/add or /v1/remember). Omit to search all nodes."
         ),
     )
-    top_k: Optional[int] = Field(default=15)
+    top_k: int | None = Field(default=15)
     only_context: bool = Field(default=False)
     context_format: ContextFormat = Field(
         default=ContextFormat.CONTEXT,
@@ -85,7 +84,7 @@ class RecallPayloadDTO(InDTO):
         default=False,
         description="Include source/provenance references in completion results.",
     )
-    session_id: Optional[str] = Field(
+    session_id: str | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -94,7 +93,7 @@ class RecallPayloadDTO(InDTO):
             "graph search."
         ),
     )
-    scope: Optional[Union[str, list[str]]] = Field(
+    scope: str | list[str] | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -107,7 +106,7 @@ class RecallPayloadDTO(InDTO):
             "_source='code'."
         ),
     )
-    tool_connections: Optional[list[str]] = Field(
+    tool_connections: list[str] | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -115,7 +114,7 @@ class RecallPayloadDTO(InDTO):
             "Omit to use every connection visible to the caller."
         ),
     )
-    stream: Optional[bool] = Field(
+    stream: bool | None = Field(
         default=None,
         description=(
             "Stream the answer as server-sent events. When omitted, the "
@@ -131,7 +130,7 @@ class RecallPayloadDTO(InDTO):
             "external database only when every other requested source returned nothing."
         ),
     )
-    code_query: Optional[dict] = Field(
+    code_query: dict | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -150,7 +149,7 @@ class RecallPayloadDTO(InDTO):
             "'agent' (tool/workflow). Ignored by other scopes."
         ),
     )
-    response_schema: Optional[dict] = Field(
+    response_schema: dict | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -174,7 +173,7 @@ def get_recall_router() -> APIRouter:
         user: str
         created_at: datetime
         # Null when the recall was not scoped to a single dataset.
-        dataset_id: Optional[UUID] = None
+        dataset_id: UUID | None = None
 
     @router.get("", response_model=list[RecallHistoryItem])
     async def get_recall_history(user: User = Depends(get_authenticated_user)):
@@ -188,9 +187,9 @@ def get_recall_router() -> APIRouter:
         try:
             history = await get_history(user.id, limit=0)
             return history
-        except Exception as error:
+        except Exception:
             logger = get_logger()
-            logger.error("Recall history error: %s", error, exc_info=True)
+            logger.exception("Recall history error")
             return JSONResponse(
                 status_code=500,
                 content={"error": "An error occurred while fetching recall history."},
@@ -345,9 +344,9 @@ def get_recall_router() -> APIRouter:
                     f"{sorted(_VALID_SCOPES)}."
                 },
             )
-        except Exception as error:
+        except Exception:
             logger = get_logger()
-            logger.error("Recall endpoint error: %s", error, exc_info=True)
+            logger.exception("Recall endpoint error")
             return JSONResponse(
                 status_code=409,
                 content={"error": "An error occurred during recall."},

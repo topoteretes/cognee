@@ -1,45 +1,44 @@
+from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from fastapi import Depends
 from pydantic import Field
-from typing import Dict, List, Optional, Union, Literal
 
+from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO
-from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_authenticated_user
-from cognee.shared.utils import send_telemetry
+from cognee.exceptions import CogneeApiError
 from cognee.modules.pipelines.models import PipelineRunErrored
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunInfo
+from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
-from cognee import __version__ as cognee_version
-from cognee.exceptions import CogneeApiError
+from cognee.shared.utils import send_telemetry
 
 logger = get_logger()
 
 
 class ImprovePayloadDTO(InDTO):
-    extraction_tasks: Optional[List[str]] = Field(default=None, examples=[[]])
-    enrichment_tasks: Optional[List[str]] = Field(default=None, examples=[[]])
-    data: Optional[str] = Field(default="")
-    dataset_name: Optional[str] = Field(default=None)
-    dataset_id: Union[UUID, Literal[""], None] = Field(default=None, examples=[""])
-    node_name: Optional[List[str]] = Field(default=None, examples=[[]])
-    run_in_background: Optional[bool] = Field(default=False)
-    build_global_context_index: Optional[bool] = Field(default=False)
+    extraction_tasks: list[str] | None = Field(default=None, examples=[[]])
+    enrichment_tasks: list[str] | None = Field(default=None, examples=[[]])
+    data: str | None = Field(default="")
+    dataset_name: str | None = Field(default=None)
+    dataset_id: UUID | Literal[""] | None = Field(default=None, examples=[""])
+    node_name: list[str] | None = Field(default=None, examples=[[]])
+    run_in_background: bool | None = Field(default=False)
+    build_global_context_index: bool | None = Field(default=False)
     # Session IDs to bridge into the permanent graph. When set, improve
     # runs the full session pipeline (feedback weights + QA persist +
     # trace-step persist + graph→session sync) in addition to the
     # default memify enrichment.
-    session_ids: Optional[List[str]] = Field(default=None, examples=[[]])
+    session_ids: list[str] | None = Field(default=None, examples=[[]])
 
 
 def get_improve_router() -> APIRouter:
     router = APIRouter()
 
-    @router.post("", response_model=Dict[UUID, PipelineRunInfo])
+    @router.post("", response_model=dict[UUID, PipelineRunInfo])
     @log_usage(function_name="POST /v1/improve", log_type="api_endpoint")
     async def improve(payload: ImprovePayloadDTO, user: User = Depends(get_authenticated_user)):
         """
@@ -103,8 +102,8 @@ def get_improve_router() -> APIRouter:
             # Cognee errors carry their own status code and actionable message;
             # the global handler in cognee/api/client.py returns them.
             raise
-        except Exception as error:
-            logger.error("Improve endpoint error: %s", error, exc_info=True)
+        except Exception:
+            logger.exception("Improve endpoint error")
             return JSONResponse(
                 status_code=409,
                 content={"error": "An error occurred during graph improvement."},

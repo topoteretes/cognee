@@ -14,10 +14,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from cognee.modules.preflight import config_preflight
 from cognee.modules.preflight import (
     ProviderConfigMismatchError,
     check_provider_config,
+    config_preflight,
     reset_preflight_state,
     validate_provider_config,
 )

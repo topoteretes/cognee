@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Optional
 
 from cognee.shared.logging_utils import get_logger
 
@@ -88,7 +87,7 @@ def get_language_name(language_code: str) -> str:
 def detect_language(
     text: str,
     target_language: str = "en",
-    confidence_threshold: Optional[float] = None,
+    confidence_threshold: float | None = None,
 ) -> LanguageDetectionResult:
     """
     Detect the language of the given text.
@@ -125,7 +124,7 @@ def detect_language(
             )
 
     try:
-        from langdetect import detect_langs, LangDetectException
+        from langdetect import LangDetectException, detect_langs
     except ImportError:
         raise LanguageDetectionError(
             "langdetect is required for language detection. Install it with: pip install langdetect"
@@ -160,7 +159,7 @@ def detect_language(
         logger.warning(f"Language detection failed: {e}")
         raise LanguageDetectionError(f"Language detection failed: {e}", original_error=e)
     except Exception as e:
-        logger.error(f"Unexpected error during language detection: {e}")
+        logger.exception("Unexpected error during language detection")
         raise LanguageDetectionError(
             f"Unexpected error during language detection: {e}", original_error=e
         )
@@ -169,7 +168,7 @@ def detect_language(
 async def detect_language_async(
     text: str,
     target_language: str = "en",
-    confidence_threshold: Optional[float] = None,
+    confidence_threshold: float | None = None,
 ) -> LanguageDetectionResult:
     """
     Async wrapper for language detection.

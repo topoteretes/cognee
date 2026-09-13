@@ -9,8 +9,8 @@ Requires:
   - LLM_API_KEY set for cognify
 """
 
-import os
 import asyncio
+import os
 
 
 async def main():
@@ -29,12 +29,12 @@ async def main():
     os.environ["DB_NAME"] = os.environ.get("DB_NAME", "cognee_db")
 
     # Clear all cached configs and engine factories so they re-read env vars
+    from cognee.infrastructure.databases.graph.config import get_graph_config
+    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
     from cognee.infrastructure.databases.relational.config import get_relational_config
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
     )
-    from cognee.infrastructure.databases.graph.config import get_graph_config
-    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
     from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
 
     get_relational_config.cache_clear()

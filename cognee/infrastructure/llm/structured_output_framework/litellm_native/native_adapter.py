@@ -40,10 +40,10 @@ from cognee.infrastructure.llm.exceptions import (
     is_budget_exhausted_error,
 )
 from cognee.infrastructure.llm.retry_config import llm_retry_stop_condition
-from cognee.modules.observability.get_observe import get_observe
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.llm.streaming.stream_completion import stream_text_completion
 from cognee.infrastructure.llm.streaming.token_sink import get_active_token_sink
+from cognee.modules.observability.get_observe import get_observe
+from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 
 logger = get_logger()
@@ -120,6 +120,7 @@ def _supports_native_schema(model_name: str) -> bool:
     try:
         return bool(litellm.supports_response_schema(model=model_name))
     except Exception:
+        logger.debug("Falling back to False after error in _supports_native_schema", exc_info=True)
         return False
 
 
@@ -151,7 +152,7 @@ def _enrich_llm_span(model: str, name: str) -> None:
             if stage:
                 current_span.set_attribute(COGNEE_PIPELINE_STAGE, stage)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _enrich_llm_span", exc_info=True)
 
 
 class NativeLiteLLMAdapter:

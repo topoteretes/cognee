@@ -27,8 +27,8 @@ def __getattr__(name):
 
 
 __all__ = [
-    "fetch_page_content",
-    "cron_web_scraper_task",
-    "web_scraper_task",
     "DefaultUrlCrawler",
+    "cron_web_scraper_task",
+    "fetch_page_content",
+    "web_scraper_task",
 ]

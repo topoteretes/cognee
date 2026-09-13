@@ -1,4 +1,5 @@
 import pytest
+
 from cognee.tasks.entity_completion.entity_extractors.regex_entity_extractor import (
     RegexEntityExtractor,
 )

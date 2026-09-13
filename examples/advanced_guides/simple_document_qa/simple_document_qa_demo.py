@@ -1,4 +1,3 @@
-# ruff: noqa: E402
 """
 Q&A over a full real document.
 
@@ -21,7 +20,6 @@ import os
 # Provide your OpenAI LLM API KEY, in case you did not set it in the .env file
 # Set this before importing Cognee so Cognee reads the example value instead of defaults or .env settings.
 # os.environ["LLM_API_KEY"] = ""
-
 import cognee
 
 

@@ -1,5 +1,5 @@
 import types
-from uuid import uuid4, uuid5, NAMESPACE_OID
+from uuid import NAMESPACE_OID, uuid4, uuid5
 
 import pytest
 

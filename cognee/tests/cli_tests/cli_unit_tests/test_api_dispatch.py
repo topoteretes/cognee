@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from cognee.cli.api_dispatch import can_dispatch, dispatch, SUPPORTED_COMMANDS
+from cognee.cli.api_dispatch import SUPPORTED_COMMANDS, can_dispatch, dispatch
 
 
 class TestCanDispatch:
@@ -142,18 +142,18 @@ class TestRecallDispatch:
         return mock_instance
 
     def _args(self, **overrides):
-        base = dict(
-            api_url="http://localhost:8000",
-            command="recall",
-            user_id=None,
-            query_text="Summarize the report",
-            query_type=None,
-            datasets=["docs"],
-            top_k=10,
-            system_prompt=None,
-            session_id=None,
-            output_format="pretty",
-        )
+        base = {
+            "api_url": "http://localhost:8000",
+            "command": "recall",
+            "user_id": None,
+            "query_text": "Summarize the report",
+            "query_type": None,
+            "datasets": ["docs"],
+            "top_k": 10,
+            "system_prompt": None,
+            "session_id": None,
+            "output_format": "pretty",
+        }
         base.update(overrides)
         return argparse.Namespace(**base)
 

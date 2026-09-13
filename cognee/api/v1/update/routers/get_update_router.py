@@ -1,21 +1,22 @@
-from fastapi.responses import JSONResponse
-from fastapi import File, UploadFile as UF, Depends, Form, Query, status
-from typing import Optional, Annotated, Dict, Literal, Union
-from fastapi import APIRouter
-from typing import List
+from typing import Annotated, Literal
 from uuid import UUID
+
+from fastapi import APIRouter, Depends, File, Form, Query, status
+from fastapi import UploadFile as UF
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, WithJsonSchema
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_authenticated_user
-from cognee.shared.utils import send_telemetry
+
 from cognee import __version__ as cognee_version
+from cognee.api.DTO import ErrorResponse
+from cognee.exceptions import CogneeApiError
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunErrored,
     PipelineRunInfo,
 )
-from cognee.api.DTO import ErrorResponse
-from cognee.exceptions import CogneeApiError
+from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import send_telemetry
 
 # NOTE: Needed because of: https://github.com/fastapi/fastapi/discussions/14975
 #       Once issue is resolved on Swagger side it can be removed.
@@ -39,7 +40,7 @@ def get_update_router() -> APIRouter:
 
     @router.patch(
         "",
-        response_model=Union[IncrementalUpdateResponse, Dict[UUID, PipelineRunInfo]],
+        response_model=IncrementalUpdateResponse | dict[UUID, PipelineRunInfo],
         responses={
             403: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
@@ -60,7 +61,7 @@ def get_update_router() -> APIRouter:
             description="UUID of the dataset containing the document to update.",
             examples=["a1b2c3d4-e5f6-7890-abcd-ef1234567890"],
         ),
-        data: List[UploadFile] = File(
+        data: list[UploadFile] = File(
             ...,
             description=(
                 "New version of the document that replaces the existing one. With "
@@ -68,7 +69,7 @@ def get_update_router() -> APIRouter:
                 "edit are replaced; otherwise the document is deleted and re-ingested."
             ),
         ),
-        node_set: Optional[List[str]] = Form(
+        node_set: list[str] | None = Form(
             default=[""],
             examples=[["user_memories"]],
             description="Node identifiers for graph organization and access control.",

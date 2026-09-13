@@ -1,21 +1,20 @@
-import json
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
 import pytest
 
+from cognee.context_global_variables import current_dataset_id
 from cognee.modules.retrieval.code_retriever import (
     CODE_NODE_TYPES,
     CodeRetriever,
     CodeSearchValidationError,
+    _code_graph_snapshot_cache_key,
     _CodeGraphSnapshot,
     _CodeGraphSnapshotCache,
-    _code_graph_snapshot_cache_key,
     invalidate_code_graph_snapshot_cache,
 )
-from cognee.context_global_variables import current_dataset_id
-
 
 WIDGET_ID = UUID("00000000-0000-0000-0000-000000000001")
 
@@ -251,11 +250,8 @@ async def test_query_facts_structured_filters_ignore_generic_nonempty_query_text
 @pytest.mark.asyncio
 async def test_explore_rejects_ambiguous_name_and_repo_disambiguates():
     _engine, graph_patch = _graph_patch()
-    with graph_patch:
-        with pytest.raises(CodeSearchValidationError, match="ambiguous") as error:
-            await CodeRetriever(config={"operation": "explore"}).get_retrieved_objects(
-                "shared.Helper"
-            )
+    with graph_patch, pytest.raises(CodeSearchValidationError, match="ambiguous") as error:
+        await CodeRetriever(config={"operation": "explore"}).get_retrieved_objects("shared.Helper")
     assert error.value.status_code == 422
 
     _engine, graph_patch = _graph_patch()
@@ -776,7 +772,7 @@ async def test_invalidation_during_load_discards_stale_snapshot():
 
 @pytest.mark.asyncio
 async def test_delta_operation_reports_repository_last_delta():
-    engine, graph_patch = _graph_patch()
+    _engine, graph_patch = _graph_patch()
     retriever = CodeRetriever(config={"operation": "delta"})
 
     with graph_patch:
@@ -824,7 +820,7 @@ async def test_delta_operation_repo_filter_and_stamped_payload():
 
 @pytest.mark.asyncio
 async def test_repository_nodes_stay_out_of_fact_operations():
-    engine, graph_patch = _graph_patch()
+    _engine, graph_patch = _graph_patch()
     retriever = CodeRetriever(config={"operation": "query_facts", "limit": 100})
 
     with graph_patch:
@@ -1007,11 +1003,8 @@ async def test_insights_operation_paginates_and_validates_arguments():
     assert [insight["id"] for insight in page["insights"]] == ["info"]
 
     for bad in ({"min_confidence": 2}, {"min_confidence": "high"}, {"informational": "maybe"}):
-        with pytest.raises(CodeSearchValidationError):
-            with _insight_graph_patch():
-                await CodeRetriever(config={"operation": "insights", **bad}).get_retrieved_objects(
-                    ""
-                )
+        with pytest.raises(CodeSearchValidationError), _insight_graph_patch():
+            await CodeRetriever(config={"operation": "insights", **bad}).get_retrieved_objects("")
 
 
 @pytest.mark.asyncio
@@ -1033,11 +1026,13 @@ async def test_operations_accept_enola_fact_ids_as_seeds():
     assert path["found"] is True
     assert [node["id"] for node in path["path"]] == ["api", "db"]
 
-    with pytest.raises(CodeSearchValidationError, match="could not resolve"):
-        with _insight_graph_patch():
-            await CodeRetriever(
-                config={"operation": "explore", "id": "f" * 32}
-            ).get_retrieved_objects("")
+    with (
+        pytest.raises(CodeSearchValidationError, match="could not resolve"),
+        _insight_graph_patch(),
+    ):
+        await CodeRetriever(config={"operation": "explore", "id": "f" * 32}).get_retrieved_objects(
+            ""
+        )
 
 
 @pytest.mark.asyncio

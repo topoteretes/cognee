@@ -139,7 +139,7 @@ async def extract_live_agent_context(
             candidates=candidates,
         )
     except Exception as error:
-        logger.warning("Live agent-context extraction failed open: %s", error)
+        logger.warning("Live agent-context extraction failed open: %s", error, exc_info=True)
         return []
 
 
@@ -335,7 +335,7 @@ async def extract_batch_agent_context(
             traces=traces,
         )
     except Exception as error:
-        logger.warning("Batch agent-context extraction failed open: %s", error)
+        logger.warning("Batch agent-context extraction failed open: %s", error, exc_info=True)
         return []
 
 
@@ -391,5 +391,5 @@ async def extract_pending_agent_context(
         )
         return touched
     except Exception as error:
-        logger.warning("Pending agent-context extraction failed open: %s", error)
+        logger.warning("Pending agent-context extraction failed open: %s", error, exc_info=True)
         return []

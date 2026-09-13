@@ -168,7 +168,7 @@ async def test_symlinks_are_not_followed_into_the_manifest(tmp_path):
     (repo / "real.py").write_text("x = 1")
     (repo / "creds.py").symlink_to(secret)
 
-    covered, documents, skipped = partition_repo_files(repo)
+    covered, documents, _skipped = partition_repo_files(repo)
 
     indexed = {p.name for p in covered} | {p.name for p in documents}
     assert "real.py" in indexed

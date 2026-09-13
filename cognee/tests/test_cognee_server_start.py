@@ -1,13 +1,14 @@
-import unittest
-import subprocess
-import time
+import json
 import os
 import signal
-import requests
-from pathlib import Path
+import subprocess
 import sys
+import time
+import unittest
 import uuid
-import json
+from pathlib import Path
+
+import requests
 
 
 class TestCogneeServerStart(unittest.TestCase):
@@ -25,7 +26,7 @@ class TestCogneeServerStart(unittest.TestCase):
                 "--port",
                 "8000",
             ],
-            preexec_fn=os.setsid,
+            start_new_session=True,
         )
         # Give the server some time to start
         time.sleep(120)
@@ -85,7 +86,7 @@ class TestCogneeServerStart(unittest.TestCase):
         file = {
             "data": (
                 file_path.name,
-                open(file_path, "rb"),
+                open(file_path, "rb"),  # noqa: SIM115 - requests closes the upload handle
             )
         }
 
