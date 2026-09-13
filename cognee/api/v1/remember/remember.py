@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO, Literal, Union
@@ -13,6 +14,7 @@ from typing_extensions import TypedDict
 
 if TYPE_CHECKING:
     from cognee.modules.cognify.estimator import DryRunEstimate
+    from cognee.tasks.presort.models import PresortReport
 
 from cognee.memory import (
     FeedbackEntry,
@@ -75,6 +77,22 @@ class RememberKwargs(TypedDict, total=False):
     max_rows_per_table: int
     llm_config: Any
     embedding_config: Any
+    # presort options — consumed only by dry_run="presort" (analyze) and by
+    # remember(report) (apply); rejected on normal remember paths.
+    include_subdirectories: bool
+    use_llm: bool
+    detect_pii: bool
+    check_existing: bool
+    relationship_spec: Any
+    dataset_prefix: str
+    max_sample_bytes: int
+    apply_groups: list[str]
+    skip_duplicates: bool
+    exclude_pii: bool
+    node_set_extra: list[str]
+    auto_apply: bool
+    apply_graph: bool
+    graph_dataset: str
 
 
 # Kwarg routing: which RememberKwargs go to add(), cognify(), or both.
@@ -104,6 +122,72 @@ _SHARED = frozenset(
         "embedding_config",
     }
 )
+
+
+PRESORT_FOLDERS_ENV = "PRESORT_FOLDERS_ENABLED"
+
+
+def _should_auto_presort(data, dataset_name, dataset_id, session_id, kwargs) -> bool:
+    """Whether a remember() input should be presorted automatically.
+
+    Requires an explicit opt-in through PRESORT_FOLDERS_ENABLED=true. Only
+    plain local directories targeting the default dataset without a session
+    or content_type qualify. Code projects, paths outside the allowed local
+    roots, and remote-connected sessions keep the classic behavior.
+    """
+    if os.environ.get(PRESORT_FOLDERS_ENV, "false").strip().lower() not in ("true", "1", "yes"):
+        return False
+    if session_id is not None or dataset_id is not None or kwargs.get("content_type"):
+        return False
+
+    from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+
+    if dataset_name != DEFAULT_DATASET_NAME:
+        return False
+    if not isinstance(data, (str, Path)):
+        return False
+    text = str(data)
+    if text.startswith(("s3://", "http://", "https://", "file://")):
+        return False
+    from cognee.modules.presort.local_paths import resolve_presort_path
+
+    try:
+        path = resolve_presort_path(text, must_exist=True)
+        if not path.is_dir():
+            return False
+    except (OSError, ValueError):
+        return False
+
+    from cognee.tasks.code_graph.code_repo import detect_code_project
+
+    if detect_code_project(path):
+        return False  # repo directories keep the code-graph route
+
+    from cognee.api.v1.serve.state import get_remote_client
+
+    return get_remote_client() is None  # presort scans the local filesystem only
+
+
+def _maybe_presort_report(data) -> "PresortReport | None":
+    """Detect a presort report passed as remember()'s `data` argument.
+
+    Recognized shapes: a PresortReport object, a dict carrying the
+    ``presort_report`` marker, or a path to a saved ``*.presort.json`` file.
+    Plain strings/paths without that exact suffix are never treated as reports,
+    so ordinary .json ingestion is unaffected.
+    """
+    from cognee.modules.presort import REPORT_FILE_SUFFIX
+    from cognee.tasks.presort.models import PresortReport, looks_like_presort_report
+
+    if looks_like_presort_report(data):
+        return PresortReport.from_json(data) if isinstance(data, dict) else data
+    if isinstance(data, (str, Path)) and str(data).endswith(REPORT_FILE_SUFFIX):
+        from cognee.modules.presort.local_paths import resolve_presort_path
+
+        candidate = resolve_presort_path(data)
+        if candidate.is_file():
+            return PresortReport.from_json(candidate)
+    return None
 
 
 def _estimate_data_size(data) -> int:
@@ -655,6 +739,8 @@ async def remember(
         list[DataItem],
         "MemoryEntry",
         MemorySource,
+        "PresortReport",
+        dict,
     ],
     dataset_name: str = "main_dataset",
     *,
@@ -666,10 +752,10 @@ async def remember(
     run_in_background: bool = False,
     self_improvement: bool = True,
     session_ids: list[str] | None = None,
-    dry_run: bool = False,
+    dry_run: bool | Literal["presort"] = False,
     raise_on_error: bool = True,
     **kwargs: Unpack[RememberKwargs],
-) -> Union["RememberResult", "DryRunEstimate"]:
+) -> Union["RememberResult", "DryRunEstimate", "PresortReport", dict]:
     """Store data in memory.
 
     Two modes depending on whether ``session_id`` is provided:
@@ -714,6 +800,28 @@ async def remember(
             supported for permanent add+cognify inputs in local mode. The
             estimate excludes the LLM calls ``improve()`` makes when
             ``self_improvement=True``.
+            If ``"presort"``, treat ``data`` as a folder path and return a
+            ``PresortReport`` instead of ingesting: junk filtering, duplicate
+            clusters, version candidates, potential personal data, per-file
+            already-in-cognee status, and proposed dataset groupings.
+            Deterministic by default; pass ``use_llm=True`` for LLM
+            classification, deeper PII detection, and semantic grouping.
+            Apply the report by passing it back: ``remember(report)`` (also
+            accepts the saved ``*.presort.json`` path) ingests each proposed
+            group into its dataset with ``incremental_loading=True``, honoring
+            the report's ``skip_duplicates`` / ``exclude_pii`` /
+            ``apply_groups`` settings (overridable via kwargs).
+            Pass ``auto_apply=True`` to do both in one call: the report is
+            produced (and persisted) and its groups are ingested immediately;
+            the returned report carries the ingest outcomes on
+            ``report.apply_results`` ({dataset_name: RememberResult}).
+            Folder presort is opt-in. Set ``PRESORT_FOLDERS_ENABLED=true`` to
+            automatically scan and apply plain folders targeting the default
+            dataset without a session/content_type. Code-project directories
+            keep the repo route. The environment flag defaults to false.
+            Without a configured LLM, presort degrades instead of failing: the
+            deterministic scan runs, ``use_llm`` is downgraded, and apply
+            stages files with ``add()`` only — each raised as a warning.
         content_type: Set to ``"skills"`` to explicitly ingest SKILL.md
             files as dataset-scoped Skill nodes, or ``"code"`` to index a
             code repository (local path or remote git URL, or a list of
@@ -829,6 +937,136 @@ async def remember(
             user=kwargs.get("user"),
             skill_improvement=kwargs.get("skill_improvement"),
         )
+
+    # Presort apply: a PresortReport passed as `data` (object, marker dict, or
+    # a saved *.presort.json path) ingests the report's proposed groups — the
+    # connected second phase of remember(path, dry_run="presort").
+    presort_report = _maybe_presort_report(data)
+    if presort_report is not None:
+        if dry_run:
+            raise ValueError("dry_run is not applicable when applying a presort report.")
+        if session_id is not None:
+            raise ValueError(
+                "session_id is not applicable when applying a presort report; presorted "
+                "files are ingested into the permanent graph."
+            )
+
+        from cognee.modules.presort import apply_presort
+
+        with new_span("cognee.api.remember.presort_apply") as span:
+            span.set_attribute(COGNEE_OPERATION_MODE, "presort_apply")
+            send_telemetry(
+                "cognee.remember.presort_apply",
+                kwargs.get("user", "sdk"),
+                additional_properties={
+                    "groups": len(presort_report.groups),
+                    "files": len(presort_report.files),
+                    "run_in_background": run_in_background,
+                    "cognee_version": cognee_version,
+                },
+            )
+            return await apply_presort(
+                presort_report,
+                groups=kwargs.get("apply_groups"),
+                skip_duplicates=kwargs.get("skip_duplicates"),
+                exclude_pii=kwargs.get("exclude_pii"),
+                node_set_extra=kwargs.get("node_set_extra"),
+                apply_graph=kwargs.get("apply_graph", False),
+                graph_dataset=kwargs.get("graph_dataset"),
+                user=kwargs.get("user"),
+                run_in_background=run_in_background,
+                self_improvement=self_improvement,
+                chunk_size=chunk_size,
+                chunker=chunker,
+                custom_prompt=custom_prompt,
+                session_ids=session_ids,
+                raise_on_error=raise_on_error,
+                **{
+                    key: value
+                    for key, value in kwargs.items()
+                    if key in (_ADD_ONLY | _COGNIFY_ONLY | _SHARED) - {"user", "run_in_background"}
+                },
+            )
+
+    # Automatic presort requires an explicit environment opt-in.
+    if dry_run is False and _should_auto_presort(
+        data, dataset_name, dataset_id, session_id, kwargs
+    ):
+        logger.info("remember: presorting folder input (PRESORT_FOLDERS_ENABLED is enabled)")
+        dry_run = "presort"
+        kwargs.setdefault("auto_apply", True)
+
+    # Presort analyze: scan a folder and return a PresortReport instead of
+    # ingesting — duplicates, version candidates, potential personal data,
+    # already-in-cognee status, and proposed dataset groupings.
+    if dry_run == "presort":
+        if session_id is not None:
+            raise ValueError("dry_run='presort' is not applicable to session memory.")
+        if kwargs.get("content_type"):
+            raise ValueError("dry_run='presort' is supported for folder inputs only.")
+
+        from cognee.api.v1.serve.state import get_remote_client
+
+        if get_remote_client() is not None:
+            raise ValueError(
+                "dry_run='presort' scans the local filesystem and is not supported while "
+                "connected to a remote Cognee instance. Call cognee.disconnect() first."
+            )
+
+        from cognee.modules.presort import run_presort
+
+        with new_span("cognee.api.remember.presort") as span:
+            span.set_attribute(COGNEE_OPERATION_MODE, "presort")
+            send_telemetry(
+                "cognee.remember.presort",
+                kwargs.get("user", "sdk"),
+                additional_properties={
+                    "use_llm": bool(kwargs.get("use_llm", False)),
+                    "cognee_version": cognee_version,
+                },
+            )
+            report = await run_presort(
+                data,
+                include_subdirectories=kwargs.get("include_subdirectories", True),
+                use_llm=kwargs.get("use_llm", False),
+                detect_pii=kwargs.get("detect_pii", True),
+                check_existing=kwargs.get("check_existing", True),
+                relationship_spec=kwargs.get("relationship_spec"),
+                dataset_prefix=kwargs.get("dataset_prefix", ""),
+                max_sample_bytes=kwargs.get("max_sample_bytes", 65536),
+                user=kwargs.get("user"),
+            )
+            if not kwargs.get("auto_apply", False):
+                return report
+
+            # auto_apply: ingest the proposed groups immediately, in the same
+            # call. The report was already persisted, so the analyze result is
+            # never lost; ingest outcomes ride back on report.apply_results.
+            from cognee.modules.presort import apply_presort
+
+            report.apply_results = await apply_presort(
+                report,
+                groups=kwargs.get("apply_groups"),
+                skip_duplicates=kwargs.get("skip_duplicates"),
+                exclude_pii=kwargs.get("exclude_pii"),
+                node_set_extra=kwargs.get("node_set_extra"),
+                apply_graph=kwargs.get("apply_graph", False),
+                graph_dataset=kwargs.get("graph_dataset"),
+                user=kwargs.get("user"),
+                run_in_background=run_in_background,
+                self_improvement=self_improvement,
+                chunk_size=chunk_size,
+                chunker=chunker,
+                custom_prompt=custom_prompt,
+                session_ids=session_ids,
+                raise_on_error=raise_on_error,
+                **{
+                    key: value
+                    for key, value in kwargs.items()
+                    if key in (_ADD_ONLY | _COGNIFY_ONLY | _SHARED) - {"user", "run_in_background"}
+                },
+            )
+            return report
 
     if dry_run:
         if session_id is not None:
