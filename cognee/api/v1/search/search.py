@@ -1,39 +1,39 @@
+from typing import Any
 from uuid import UUID
-from typing import Any, Union, Optional, List, Type
 
-from cognee.modules.engine.models.node_set import NodeSet
-from cognee.modules.engine.models import Skill
-from cognee.modules.users.models import User
+from cognee.base_config import get_base_config
+from cognee.context_global_variables import set_session_user_context_variable
+from cognee.exceptions import CogneeValidationError
+from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
-from cognee.modules.search.types import SearchResult, SearchType
-from cognee.modules.users.methods import get_default_user
-from cognee.base_config import get_base_config
-from cognee.modules.operations import record_operation
-from cognee.modules.search.methods import search as search_function
-from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.exceptions import DatasetNotFoundError
-from cognee.context_global_variables import set_session_user_context_variable
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
-from cognee.exceptions import CogneeValidationError
-from cognee.modules.users.exceptions.exceptions import UserNotFoundError
+from cognee.modules.data.methods import get_authorized_existing_datasets
+from cognee.modules.engine.models import Skill
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.observability import (
-    new_span,
+    COGNEE_RESULT_COUNT,
+    COGNEE_RESULT_SUMMARY,
     COGNEE_SEARCH_QUERY,
     COGNEE_SEARCH_TYPE,
-    COGNEE_RESULT_SUMMARY,
-    COGNEE_RESULT_COUNT,
-    MEMORY_SYSTEM,
     MEMORY_OPERATION,
     MEMORY_QUERY_TEXT,
     MEMORY_QUERY_TYPE,
     MEMORY_RESULT_COUNT,
-    record_operation_duration,
-    record_query_results,
+    MEMORY_SYSTEM,
     increment_items_retrieved,
     increment_vector_searches,
+    new_span,
+    record_operation_duration,
+    record_query_results,
 )
+from cognee.modules.operations import record_operation
+from cognee.modules.search.methods import search as search_function
+from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
+from cognee.modules.users.exceptions.exceptions import UserNotFoundError
+from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
@@ -41,35 +41,37 @@ logger = get_logger()
 async def search(
     query_text: str,
     query_type: SearchType = SearchType.HYBRID_COMPLETION,
-    user: Optional[User] = None,
-    datasets: Optional[Union[list[str], str]] = None,
-    dataset_ids: Optional[Union[list[UUID], UUID]] = None,
+    user: User | None = None,
+    datasets: list[str] | str | None = None,
+    dataset_ids: list[UUID] | UUID | None = None,
     system_prompt_path: str = "answer_simple_question.txt",
-    system_prompt: Optional[str] = None,
+    system_prompt: str | None = None,
     top_k: int = 15,
-    node_type: Optional[Type] = NodeSet,
-    node_name: Optional[List[str]] = None,
+    node_type: type | None = NodeSet,
+    node_name: list[str] | None = None,
     node_name_filter_operator: str = "OR",
     # only_context / verbose inspect retriever-specific shapes. Pin query_type:
     # unspecified hybrid may defer to GRAPH_COMPLETION, and this return value
     # does not include the effective type.
     only_context: bool = False,
-    session_id: Optional[str] = None,
-    wide_search_top_k: Optional[int] = None,
-    triplet_distance_penalty: Optional[float] = None,
+    context_format: ContextFormat | str = ContextFormat.CONTEXT,
+    session_id: str | None = None,
+    wide_search_top_k: int | None = None,
+    triplet_distance_penalty: float | None = None,
     feedback_influence: float = get_base_config().default_feedback_influence,
     verbose: bool = False,
-    retriever_specific_config: Optional[dict] = None,
-    neighborhood_depth: Optional[int] = None,
-    neighborhood_seed_top_k: Optional[int] = None,
-    skills: Optional[List[Union[str, Skill]]] = None,
-    tools: Optional[List[str]] = None,
-    max_iter: Optional[int] = None,
+    retriever_specific_config: dict | None = None,
+    neighborhood_depth: int | None = None,
+    neighborhood_seed_top_k: int | None = None,
+    skills: list[str | Skill] | None = None,
+    tools: list[str] | None = None,
+    max_iter: int | None = None,
     include_references: bool = False,
-    llm_config: Optional[LLMConfig] = None,
-    embedding_config: Optional[EmbeddingConfig] = None,
-    code_query: Optional[dict[str, Any]] = None,
-) -> List[SearchResult]:
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
+    code_query: dict[str, Any] | None = None,
+) -> list[SearchResult]:
+    context_format = ContextFormat.parse(context_format)
     if neighborhood_depth is not None and (
         not isinstance(neighborhood_depth, int) or neighborhood_depth < 1
     ):
@@ -190,7 +192,13 @@ async def search(
         retriever_specific_config: Optional dictionary of additional configuration parameters specific to the retriever being used.
         code_query: Structured deterministic CODE operation and arguments. Supported
                     operations are query_facts, explore, traverse, find_path,
-                    impact_analysis, and delta (what the last ingestion changed).
+                    impact_analysis, insights (enola explainer findings with their
+                    evidence facts, filterable by source/min_confidence), architecture
+                    (module-level overview with symbol edges rolled up to modules), and
+                    delta (what the last ingestion changed, plus the snapshot receipt).
+                    Add ``"diagram": "mermaid"`` (or ``"dot"``) to any operation to get
+                    the result rendered as diagram source under ``result["diagram"]``;
+                    architecture includes a Mermaid diagram unless ``"diagram": False``.
         skills: Explicit skill names or Skill objects to load into the agentic retriever.
         tools: Optional whitelist of tool names available to the agentic retriever.
         max_iter: Maximum number of agentic tool-call iterations before forcing a final answer.
@@ -263,6 +271,7 @@ async def search(
             top_k=top_k,
             node_name=node_name,
             only_context=only_context,
+            context_format=context_format,
             verbose=verbose,
             include_references=include_references,
             code_query=code_query,
@@ -282,7 +291,7 @@ async def search(
             _search_start_ns = __import__("time").monotonic_ns()
 
             # We use lists from now on for datasets
-            if isinstance(datasets, UUID) or isinstance(datasets, str):
+            if isinstance(datasets, (UUID, str)):
                 datasets = [datasets]
 
             if (
@@ -337,14 +346,19 @@ async def search(
             ):
                 operation_context.set_dataset(target_dataset_ids[0])
 
-            if query_type is SearchType.AGENTIC_COMPLETION:
+            if query_type in (SearchType.AGENTIC_COMPLETION, SearchType.SKILLS):
                 active_dataset_refs = dataset_ids if dataset_ids else datasets
                 if isinstance(active_dataset_refs, UUID):
                     active_dataset_refs = [active_dataset_refs]
                 if not active_dataset_refs or len(active_dataset_refs) != 1:
+                    if query_type is SearchType.AGENTIC_COMPLETION:
+                        raise CogneeValidationError(
+                            message="Agentic skill search requires exactly one explicit dataset.",
+                            name="InvalidAgenticDatasetScope",
+                        )
                     raise CogneeValidationError(
-                        message="Agentic skill search requires exactly one explicit dataset.",
-                        name="InvalidAgenticDatasetScope",
+                        message="SKILLS search requires exactly one explicit dataset.",
+                        name="InvalidSkillsDatasetScope",
                     )
 
             if any(v is not None for v in agentic_overrides.values()):
@@ -369,6 +383,7 @@ async def search(
                 node_name=node_name,
                 node_name_filter_operator=normalized_node_name_filter_operator,
                 only_context=only_context,
+                context_format=context_format,
                 session_id=session_id,
                 wide_search_top_k=wide_search_top_k,
                 triplet_distance_penalty=triplet_distance_penalty,

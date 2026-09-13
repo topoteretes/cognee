@@ -9,9 +9,8 @@ def filter_overlapping_entities(*entity_groups):
             else:
                 entity_count[entity.id] += 1
 
-    index = 0
     grouped_entities = []
-    for group in entity_groups:
+    for index, group in enumerate(entity_groups):
         grouped_entities.append([])
 
         for entity in group:
@@ -20,7 +19,5 @@ def filter_overlapping_entities(*entity_groups):
             else:
                 if entity not in overlapping_entities:
                     overlapping_entities.append(entity)
-
-        index += 1
 
     return overlapping_entities, *grouped_entities

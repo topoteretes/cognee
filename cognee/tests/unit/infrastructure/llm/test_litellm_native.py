@@ -147,13 +147,15 @@ async def test_auth_error_raises_immediately():
         )
     )
 
-    with patch("litellm.acompletion", mock_acompletion):
-        with pytest.raises(litellm.exceptions.AuthenticationError):
-            await adapter.acreate_structured_output(
-                text_input="Test input",
-                system_prompt="Test prompt",
-                response_model=PersonModel,
-            )
+    with (
+        patch("litellm.acompletion", mock_acompletion),
+        pytest.raises(litellm.exceptions.AuthenticationError),
+    ):
+        await adapter.acreate_structured_output(
+            text_input="Test input",
+            system_prompt="Test prompt",
+            response_model=PersonModel,
+        )
 
     assert mock_acompletion.call_count == 1
 
@@ -236,13 +238,14 @@ def test_no_instructor_import_in_litellm_native():
                         instructor_imports.append(
                             f"{py_file.name}:{node.lineno} import {alias.name}"
                         )
-            elif isinstance(node, ast.ImportFrom):
-                if node.module and (
-                    node.module == "instructor" or node.module.startswith("instructor.")
-                ):
-                    instructor_imports.append(
-                        f"{py_file.name}:{node.lineno} from {node.module} import ..."
-                    )
+            elif (
+                isinstance(node, ast.ImportFrom)
+                and node.module
+                and (node.module == "instructor" or node.module.startswith("instructor."))
+            ):
+                instructor_imports.append(
+                    f"{py_file.name}:{node.lineno} from {node.module} import ..."
+                )
 
     assert instructor_imports == [], (
         f"Found instructor imports in litellm_native: {instructor_imports}"
@@ -314,13 +317,12 @@ async def test_budget_exhausted_error_raises_payment_required_without_retry():
 
     mock_acompletion = AsyncMock(side_effect=_PaymentRequiredError("Payment required"))
 
-    with patch("litellm.acompletion", mock_acompletion):
-        with pytest.raises(LLMPaymentRequiredError):
-            await adapter.acreate_structured_output(
-                text_input="Test input",
-                system_prompt="Test prompt",
-                response_model=PersonModel,
-            )
+    with patch("litellm.acompletion", mock_acompletion), pytest.raises(LLMPaymentRequiredError):
+        await adapter.acreate_structured_output(
+            text_input="Test input",
+            system_prompt="Test prompt",
+            response_model=PersonModel,
+        )
 
     # Mapped to an actionable, non-retryable error — called exactly once.
     assert mock_acompletion.call_count == 1
@@ -470,11 +472,10 @@ async def test_cancellation_is_not_retried():
     )
 
     mock_acompletion = AsyncMock(side_effect=asyncio.CancelledError())
-    with patch("litellm.acompletion", mock_acompletion):
-        with pytest.raises(asyncio.CancelledError):
-            await adapter.acreate_structured_output(
-                text_input="t", system_prompt="s", response_model=PersonModel
-            )
+    with patch("litellm.acompletion", mock_acompletion), pytest.raises(asyncio.CancelledError):
+        await adapter.acreate_structured_output(
+            text_input="t", system_prompt="s", response_model=PersonModel
+        )
 
     assert mock_acompletion.call_count == 1
 
@@ -527,13 +528,29 @@ class TestQualifyModel:
         qualified = self._qualify("phi4", "ollama")
         assert litellm.get_llm_provider(model=qualified)[1] == "ollama"
 
+    def test_namespaced_ollama_model_gets_prefixed(self):
+        """A slash is not a provider: Ollama accepts namespaced names."""
+        assert self._qualify("library/phi4", "ollama") == "ollama/library/phi4"
+
+    def test_hugging_face_gguf_path_gets_prefixed(self):
+        """The documented way to run a GGUF under Ollama keeps its full path."""
+        model = "hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF"
+        assert self._qualify(model, "ollama") == f"ollama/{model}"
+
+    def test_namespaced_name_is_routable_by_litellm(self):
+        """Same end of the chain, for a name that contains a slash."""
+        import litellm
+
+        qualified = self._qualify("library/phi4", "ollama")
+        assert litellm.get_llm_provider(model=qualified)[1] == "ollama"
+
 
 # ── markdown-fenced JSON on the fallback path (CLO-596) ──────────────────────
 # The prompted-JSON path hands the model's reply straight to
 # model_validate_json. Models on that path routinely wrap the answer in a
 # ```json fence: the JSON inside is valid, but pydantic sees a backtick at
 # column 1 and rejects it, and the self-correction retry cannot help because a
-# model that fences once fences again. Hit while capturing the Henkel cassette.
+# model that fences once fences again. Hit while capturing the datasheets cassette.
 
 
 class TestStripJsonFence:
@@ -546,7 +563,7 @@ class TestStripJsonFence:
         return _strip_json_fence(text)
 
     def test_fenced_with_language_tag(self):
-        """The exact shape that broke the Henkel capture."""
+        """The exact shape that broke the datasheets capture."""
         assert self._strip('```json\n{"summary": "s"}\n```') == '{"summary": "s"}'
 
     def test_fenced_without_language_tag(self):

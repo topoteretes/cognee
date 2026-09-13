@@ -3,23 +3,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from cognee.modules.search.exceptions import UnsupportedSearchTypeError
-from cognee.modules.search.types import SearchType
-from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
-from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.code_retriever import CodeRetriever
+from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
+    GraphCompletionContextExtensionRetriever,
+)
+from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
 from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
     DecompositionMode,
     GraphCompletionDecompositionRetriever,
 )
-from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
-from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
-    GraphCompletionContextExtensionRetriever,
-)
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
+from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
-from cognee.modules.retrieval.code_retriever import CodeRetriever
+from cognee.modules.search.exceptions import UnsupportedSearchTypeError
+from cognee.modules.search.types import SearchType
 
 
 class _DummyCommunityRetriever:
@@ -357,6 +357,34 @@ async def test_hybrid_completion_get_retriever_output_smoke():
     from cognee.modules.retrieval.session_aware_completion import count_retrieved_objects
 
     assert count_retrieved_objects(payload.result_object) == 2
+
+
+@pytest.mark.asyncio
+async def test_skills_retriever_registered_with_dataset():
+    import types
+    from uuid import uuid4
+
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.retrieval.skills_retriever import SkillsRetriever
+
+    dataset = types.SimpleNamespace(id=uuid4())
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.SKILLS, query_text="how do I deploy", top_k=4, dataset=dataset
+    )
+
+    assert isinstance(retriever_instance, SkillsRetriever)
+    assert retriever_instance.top_k == 4
+    assert retriever_instance.dataset_id == str(dataset.id)
+
+
+@pytest.mark.asyncio
+async def test_skills_requires_dataset():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
+
+    with pytest.raises(QueryValidationError, match="exactly one explicit dataset"):
+        await mod.get_search_type_retriever_instance(SearchType.SKILLS, query_text="q")
 
 
 @pytest.mark.asyncio

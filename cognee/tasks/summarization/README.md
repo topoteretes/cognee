@@ -60,9 +60,11 @@ for summary in summaries:
 ```python
 from pydantic import BaseModel
 
+
 class CustomSummary(BaseModel):
     title: str
     key_points: list[str]
+
 
 summaries = await summarize_text(document_chunks, summarization_model=CustomSummary)
 ```
@@ -73,7 +75,7 @@ summaries = await summarize_text(document_chunks, summarization_model=CustomSumm
 from cognee.tasks.summarization import summarize_code
 
 async for item in summarize_code(code_nodes):
-    if hasattr(item, 'text'):  # CodeSummary
+    if hasattr(item, "text"):  # CodeSummary
         print(f"Code summary: {item.text[:100]}...")
 ```
 
@@ -99,4 +101,4 @@ Default summarization model is `SummarizedContent` from `cognee.modules.cognify.
 
 ## Related
 
-- [cognee docs](https://docs.cognee.ai) | [Chunking](../documents/) | [Storage](../storage/) | [Tests](../../../tests/tasks/summarization/)
+- [cognee docs](https://docs.cognee.ai) | [Chunking](../documents/) | [Tests](../../tests/tasks/summarization/)

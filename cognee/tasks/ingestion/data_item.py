@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any
 from uuid import UUID
 
 from cognee.tasks.ingestion.exceptions import (
@@ -14,15 +14,15 @@ from cognee.tasks.ingestion.exceptions import (
 @dataclass
 class DataItem:
     data: Any
-    label: Optional[str] = None
-    external_metadata: Optional[dict] = field(default=None)
+    label: str | None = None
+    external_metadata: dict | None = field(default=None)
     # System-derived metadata (e.g. DLT source stamps) persisted to
     # Data.system_metadata — never merged with user external_metadata.
-    system_metadata: Optional[dict] = field(default=None)
-    data_id: Optional[UUID] = None
+    system_metadata: dict | None = field(default=None)
+    data_id: UUID | None = None
 
 
-def parse_labels(labels: Optional[str]) -> Optional[List[Optional[str]]]:
+def parse_labels(labels: str | None) -> list[str | None] | None:
     """Parse the ``labels`` form field into per-file label entries.
 
     The canonical format is a JSON array of strings ('["finance", "people", ""]'),
@@ -52,8 +52,8 @@ def parse_labels(labels: Optional[str]) -> Optional[List[Optional[str]]]:
 
 
 def parse_external_metadata(
-    external_metadata: Optional[str],
-) -> Optional[List[Optional[dict]]]:
+    external_metadata: str | None,
+) -> list[dict | None] | None:
     """Parse the ``external_metadata`` form field: a JSON array of objects.
 
     Same wire convention as ``labels``: one JSON-encoded string, paired
@@ -88,10 +88,10 @@ def parse_external_metadata(
 
 
 def pair_labels_with_data(
-    data: Optional[list],
-    labels: Optional[List[Optional[str]]],
-    external_metadata: Optional[List[Optional[dict]]] = None,
-) -> Optional[list]:
+    data: list | None,
+    labels: list[str | None] | None,
+    external_metadata: list[dict | None] | None = None,
+) -> list | None:
     """Pair per-item labels and external metadata with data items as DataItems.
 
     Both attribute lists pair positionally: the Nth entry applies to the Nth
@@ -116,13 +116,13 @@ def pair_labels_with_data(
     item_count = len(data or [])
     if has_labels and len(normalized_labels) != item_count:
         raise LabelCountMismatchError(
-            f"Provide one label per uploaded file: got {len(normalized_labels)} labels "
-            f"for {item_count} files."
+            f"Provide one label per data item (uploads first, then raw_data entries): "
+            f"got {len(normalized_labels)} labels for {item_count} items."
         )
     if has_metadata and len(normalized_metadata) != item_count:
         raise ExternalMetadataCountMismatchError(
-            f"Provide one external_metadata entry per uploaded file: got "
-            f"{len(normalized_metadata)} entries for {item_count} files."
+            f"Provide one external_metadata entry per data item (uploads first, then "
+            f"raw_data entries): got {len(normalized_metadata)} entries for {item_count} items."
         )
 
     if not has_labels:

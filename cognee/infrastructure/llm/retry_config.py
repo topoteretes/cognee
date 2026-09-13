@@ -24,6 +24,7 @@ from tenacity import retry_if_exception, stop_after_attempt, stop_after_delay
 from cognee.infrastructure.llm.exceptions import (
     LLMPaymentRequiredError,
     LLMQuotaExceededError,
+    is_budget_exhausted_error,
 )
 
 # Minimum number of attempts before the call is allowed to give up.
@@ -77,12 +78,31 @@ def should_retry_llm_exception(error: BaseException) -> bool:
     )
     if isinstance(error, non_retryable):
         return False
+    # A configured spend cap cannot clear within a retry window, so budget
+    # exhaustion is terminal for this call even when the budget resets on a
+    # later period. Checked separately from ``_TERMINAL_QUOTA_PATTERNS`` so that
+    # ``raise_if_quota_error`` keeps mapping budget errors to the 402
+    # ``LLMPaymentRequiredError`` rather than the 422 quota error.
+    if is_budget_exhausted_error(error):
+        return False
     return not is_quota_or_billing_error(error)
 
 
 def raise_if_quota_error(error: BaseException) -> None:
-    """Re-raise quota/billing exhaustion as the actionable ``LLMQuotaExceededError``."""
+    """Re-raise quota/billing exhaustion as the actionable ``LLMQuotaExceededError``.
+
+    Returns normally when *error* is not a quota problem, leaving the caller to
+    re-raise it. Already-typed errors pass through unchanged: an
+    ``LLMQuotaExceededError`` is re-raised as-is, and so is an
+    ``LLMPaymentRequiredError`` — budget exhaustion is the more specific 402 and
+    must not be downgraded to the 422 quota error just because it also reads as
+    a spend problem.
+    """
     if isinstance(error, LLMQuotaExceededError):
+        raise error
+    # Budget exhaustion is already the more specific 402; do not downgrade it to
+    # the 422 quota error just because it also reads as a spend problem.
+    if isinstance(error, LLMPaymentRequiredError):
         raise error
     if is_quota_or_billing_error(error):
         raise LLMQuotaExceededError(str(error)) from error

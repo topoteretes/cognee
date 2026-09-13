@@ -1,10 +1,12 @@
-import os
 import asyncio
+import os
+
 from cognee.context_global_variables import (
     graph_db_config as context_graph_db_config,
+)
+from cognee.context_global_variables import (
     vector_db_config as context_vector_db_config,
 )
-
 from cognee.infrastructure.databases.relational import (
     create_db_and_tables as create_relational_db_and_tables,
 )
@@ -20,8 +22,8 @@ _first_run_lock = asyncio.Lock()
 
 
 async def setup_and_check_environment(
-    vector_db_config: dict = None,
-    graph_db_config: dict = None,
+    vector_db_config: dict | None = None,
+    graph_db_config: dict | None = None,
     skip_connection_test: bool = False,
 ):
     if vector_db_config:
@@ -57,8 +59,8 @@ async def setup_and_check_environment(
             else:
                 from cognee.infrastructure.llm.utils import (
                     determine_embedding_dimensions,
-                    test_llm_connection,
                     test_embedding_connection,
+                    test_llm_connection,
                 )
 
                 await test_llm_connection()

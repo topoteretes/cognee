@@ -46,6 +46,11 @@ on:
         description: "Cloud run: S3 object key of the HTML report."
         value: ${{ jobs.cloud.outputs.html_key }}
 
+# Least-privilege token (OSSF Scorecard: Token-Permissions). The job only
+# checks out the repo; S3/cloud access uses dedicated secrets, not GITHUB_TOKEN.
+permissions:
+  contents: read
+
 env:
   ENV: 'dev'
   COGNEE_SKIP_CONNECTION_TEST: 'true'
@@ -66,7 +71,7 @@ jobs:
       html_key: ${{ steps.upload.outputs.html_key }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -126,6 +131,32 @@ jobs:
           REPORT_RC=$?
           set -e
           echo "REPORT_RC=$REPORT_RC" >> "$GITHUB_ENV"
+
+      - name: Stamp run provenance into the report
+        env:
+          BRANCH: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          # v_perf_runs has always selected $.git_sha and $.run_id, but nothing
+          # ever wrote them, so both columns were always NULL. Now that the
+          # nightly runs at two refs the report also has to say which branch
+          # produced it — the S3 key cannot: a 4th path segment matches neither
+          # the ETL's globs nor its path regex.
+          if [ ! -s "$JSON_PATH" ]; then
+            echo "no report JSON at $JSON_PATH — leaving the upload step to fail"
+            exit 0
+          fi
+          tmp="$(mktemp)"
+          jq --arg branch "$BRANCH" --arg sha "$SHA" --arg run_id "$RUN_ID" \
+             --arg attempt "$RUN_ATTEMPT" --arg event "$EVENT" \
+             '. + {branch: $branch, git_sha: $sha, run_id: $run_id,
+                   run_attempt: $attempt, event: $event}' \
+             "$JSON_PATH" > "$tmp"
+          mv "$tmp" "$JSON_PATH"
 
       - name: Upload reports to S3
         id: upload

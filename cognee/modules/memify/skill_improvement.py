@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any, Optional
+from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from pydantic import BaseModel, Field
@@ -15,7 +15,6 @@ from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.tools.resolve_skills import find_skill_by_id, find_skill_by_name
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage.add_data_points import add_data_points
-
 
 logger = get_logger("cognee.skill_improvement")
 
@@ -35,7 +34,7 @@ def _skills_node_set() -> NodeSet:
     return NodeSet(id=generate_node_id("NodeSet:skills"), name="skills")
 
 
-def _storage_context(user, dataset, key: str) -> Optional[PipelineContext]:
+def _storage_context(user, dataset, key: str) -> PipelineContext | None:
     dataset_id = getattr(dataset, "id", None)
     if user is None or dataset is None or dataset_id is None:
         return None
@@ -59,7 +58,7 @@ async def improve_skill_from_config(
     *,
     dataset,
     user=None,
-) -> Optional[SkillImprovementProposal]:
+) -> SkillImprovementProposal | None:
     """Run the internal skill-improvement operation requested by remember()."""
     if not isinstance(config, dict):
         raise ValueError("skill_improvement must be a configuration dictionary.")
@@ -87,11 +86,11 @@ async def improve_skill(
     *,
     dataset,
     user=None,
-    proposal_id: Optional[str] = None,
+    proposal_id: str | None = None,
     apply: bool = False,
     score_threshold: float = 0.5,
     max_runs: int = 5,
-) -> Optional[SkillImprovementProposal]:
+) -> SkillImprovementProposal | None:
     """Create or apply a graph-only SkillImprovementProposal.
 
     This is intentionally internal. Callers opt in through ``cognee.remember``
@@ -138,6 +137,7 @@ async def improve_skill(
 
             model_name = get_llm_config().llm_model
         except Exception:
+            logger.debug("Ignoring exception in improve_skill", exc_info=True)
             model_name = ""
         proposal = SkillImprovementProposal(
             proposal_id=str(uuid4()),
@@ -164,7 +164,7 @@ async def get_proposal(
     *,
     dataset,
     user=None,
-) -> Optional[SkillImprovementProposal]:
+) -> SkillImprovementProposal | None:
     """Fetch a stored SkillImprovementProposal for review (read-only).
 
     Lets a caller inspect a proposal's ``old_procedure``/``proposed_procedure``/
@@ -278,7 +278,7 @@ async def _find_proposal(
     *,
     proposal_id: str,
     dataset_id: UUID,
-) -> Optional[SkillImprovementProposal]:
+) -> SkillImprovementProposal | None:
     for raw in await _load_nodes_by_type(SkillImprovementProposal):
         proposal = _coerce_model(raw, SkillImprovementProposal)
         if proposal is None:
@@ -294,11 +294,13 @@ async def _load_nodes_by_type(model):
     try:
         from cognee.infrastructure.databases.graph import get_graph_engine
     except Exception:
+        logger.debug("Optional import unavailable, continuing without it", exc_info=True)
         return []
 
     try:
         graph_engine = await get_graph_engine()
     except Exception:
+        logger.debug("Falling back to [] after error in _load_nodes_by_type", exc_info=True)
         return []
 
     get_by_type = getattr(graph_engine, "get_nodes_by_type", None)
@@ -306,7 +308,7 @@ async def _load_nodes_by_type(model):
         try:
             return await get_by_type(node_type=model)
         except Exception as exc:
-            logger.warning("Skill improvement lookup failed: %s", exc)
+            logger.warning("Skill improvement lookup failed: %s", exc, exc_info=True)
             return []
 
     get_nodeset = getattr(graph_engine, "get_nodeset_subgraph", None)
@@ -316,7 +318,7 @@ async def _load_nodes_by_type(model):
             if nodes:
                 return nodes
         except Exception as exc:
-            logger.warning("Skill improvement nodeset lookup failed: %s", exc)
+            logger.warning("Skill improvement nodeset lookup failed: %s", exc, exc_info=True)
 
     get_graph_data = getattr(graph_engine, "get_graph_data", None)
     if get_graph_data is None:
@@ -325,7 +327,7 @@ async def _load_nodes_by_type(model):
         nodes, _ = await get_graph_data()
         return nodes
     except Exception as exc:
-        logger.warning("Skill improvement full graph lookup failed: %s", exc)
+        logger.warning("Skill improvement full graph lookup failed: %s", exc, exc_info=True)
         return []
 
 
@@ -345,4 +347,5 @@ def _coerce_model(raw, model):
     try:
         return model.model_validate(data)
     except Exception:
+        logger.debug("Falling back to None after error in _coerce_model", exc_info=True)
         return None

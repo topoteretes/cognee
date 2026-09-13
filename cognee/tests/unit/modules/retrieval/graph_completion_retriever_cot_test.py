@@ -1,12 +1,51 @@
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+import logging
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.graph_completion_cot_retriever import (
     GraphCompletionCotRetriever,
     _as_answer_text,
 )
-from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
+
+logger = logging.getLogger(__name__)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_llm_calls():
+    """Keep every test in this file off the network.
+
+    The CoT round's validation and follow-up prompts go through
+    ``batch_llm_completion`` -> ``LLMGateway.acreate_structured_output``.
+    Several tests here only patch the final ``generate_completion`` and let
+    that call escape to the real provider. In the full suite an earlier test
+    happened to leave a patched gateway behind; once the suite was sharded
+    the call went out for real, hit the provider's error, and was retried
+    under the 240-second floor until pytest-timeout killed it (300s per test,
+    on macOS and Windows where the accidental polluter is skipped). Patched
+    by object, not by dotted string: the LLMGateway class shadows its module,
+    so a string target lands on the class on Python 3.10.
+    """
+
+    async def _structured(text_input, system_prompt, response_model=str, **_):
+        # Honour the requested model: str prompts get a string, pydantic
+        # models get an unvalidated instance so isinstance checks hold.
+        if response_model is str or response_model is None:
+            return "reasoning"
+        try:
+            return response_model.model_construct()
+        except Exception:
+            logger.debug(
+                "Falling back after error in _no_real_llm_calls._structured", exc_info=True
+            )
+            return "reasoning"
+
+    with patch.object(
+        LLMGateway, "acreate_structured_output", new=AsyncMock(side_effect=_structured)
+    ):
+        yield
 
 
 @pytest.fixture
@@ -181,7 +220,7 @@ async def test_run_cot_completion_with_conversation_history(mock_edge):
         ) as mock_generate,
         patch.object(retriever, "get_triplets", new_callable=AsyncMock, return_value=[[mock_edge]]),
     ):
-        completion, context_text, triplets = await retriever._run_cot_completion(
+        completion, _context_text, _triplets = await retriever._run_cot_completion(
             query_batch=["test query"],
             conversation_history="Previous conversation",
         )
@@ -214,7 +253,7 @@ async def test_run_cot_completion_with_response_model(mock_edge):
         ),
         patch.object(retriever, "get_triplets", new_callable=AsyncMock, return_value=[[mock_edge]]),
     ):
-        completion, context_text, triplets = await retriever._run_cot_completion(
+        completion, _context_text, _triplets = await retriever._run_cot_completion(
             query_batch=["test query"]
         )
 
@@ -240,7 +279,7 @@ async def test_run_cot_completion_empty_conversation_history(mock_edge):
         ) as mock_generate,
         patch.object(retriever, "get_triplets", new_callable=AsyncMock, return_value=[[mock_edge]]),
     ):
-        completion, context_text, triplets = await retriever._run_cot_completion(
+        completion, _context_text, _triplets = await retriever._run_cot_completion(
             query_batch=["test query"],
             conversation_history="",
         )
@@ -615,7 +654,6 @@ async def test_get_completion_batch_queries(mock_edge):
     assert completion[0] == "Generated answer" and completion[1] == "Generated answer"
 
 
-#
 @pytest.mark.asyncio
 async def test_get_completion_batch_queries_with_response_model(mock_edge):
     """Test get_completion of batch queries with custom response model."""

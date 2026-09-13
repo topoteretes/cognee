@@ -3,11 +3,12 @@
 Mirrors the ``supported_databases``/``use_vector_adapter`` seam already used
 by the graph and vector adapters: a plain module-level dict, populated by
 ``use_integration()`` at provider-package import time, never by this module
-importing providers itself. A provider that isn't installed (its ``pip``
-extra wasn't selected) simply never registers — callers get an unregistered
-``KeyError`` at lookup, not an import error at startup. See each provider's
-``__init__.py`` (e.g. Slack's) for the ``try/except ImportError`` guard that
-makes registration optional.
+importing providers itself. A provider package that is never imported simply
+never registers — callers get an unregistered ``KeyError`` at lookup, not an
+import error at startup. All in-tree providers (Slack, GitHub, Linear) use
+only core dependencies and register unconditionally from their
+``__init__.py``; an out-of-tree provider with optional dependencies would
+gate its own import instead.
 """
 
 from cognee.modules.integrations.base import OAuthIntegration

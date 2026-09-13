@@ -16,10 +16,11 @@ Guarantees:
   is swallowed by design.)
 """
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, AsyncIterator, Optional
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID, uuid4
 
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -60,13 +61,13 @@ class OperationContext:
     def __init__(
         self,
         operation_name: str,
-        user_id: Optional[UUID] = None,
-        tenant_id: Optional[UUID] = None,
-        dataset_id: Optional[UUID] = None,
-        usage: Optional[OperationUsage] = None,
-        session_id: Optional[str] = None,
-        background: Optional[bool] = None,
-        parent_operation_id: Optional[UUID] = None,
+        user_id: UUID | None = None,
+        tenant_id: UUID | None = None,
+        dataset_id: UUID | None = None,
+        usage: OperationUsage | None = None,
+        session_id: str | None = None,
+        background: bool | None = None,
+        parent_operation_id: UUID | None = None,
     ):
         self.operation_name = operation_name
         # Allocated up front (not at write time) so children — nested
@@ -89,11 +90,11 @@ class OperationContext:
         self.user_id = getattr(user, "id", None)
         self.tenant_id = getattr(user, "tenant_id", None)
 
-    def set_dataset(self, dataset_id: Optional[UUID]) -> None:
+    def set_dataset(self, dataset_id: UUID | None) -> None:
         """Bind the target dataset, when the operation has exactly one."""
         self.dataset_id = dataset_id
 
-    def set_session_id(self, session_id: Optional[str]) -> None:
+    def set_session_id(self, session_id: str | None) -> None:
         """Bind the active session-cache id (joins SessionModelUsage)."""
         if session_id:
             self.session_id = session_id
@@ -111,8 +112,8 @@ async def _write_operation_row(
     context: OperationContext,
     started_at: datetime,
     outcome: str,
-    error_class: Optional[str],
-    error_message: Optional[str],
+    error_class: str | None,
+    error_message: str | None,
 ) -> None:
     from cognee.modules.pipelines.models import PipelineRun
 
@@ -150,9 +151,9 @@ async def _write_operation_row(
 async def record_operation(
     operation_name: str,
     user: Optional["User"] = None,
-    dataset_id: Optional[UUID] = None,
-    session_id: Optional[str] = None,
-    background: Optional[bool] = None,
+    dataset_id: UUID | None = None,
+    session_id: str | None = None,
+    background: bool | None = None,
 ) -> AsyncIterator[OperationContext]:
     """Record one non-pipeline operation as a single ``pipeline_runs`` row."""
     from cognee.modules.pipelines.models import OperationOutcome
@@ -176,8 +177,8 @@ async def record_operation(
         context_token = _current_operation.set(context)
 
         outcome = OperationOutcome.SUCCEEDED
-        error_class: Optional[str] = None
-        error_message: Optional[str] = None
+        error_class: str | None = None
+        error_message: str | None = None
         try:
             with parent_run_scope(context.operation_id):
                 yield context
@@ -197,4 +198,5 @@ async def record_operation(
                     "record_operation: failed to persist %s record (%s)",
                     operation_name,
                     write_error,
+                    exc_info=True,
                 )

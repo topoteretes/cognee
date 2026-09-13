@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 from uuid import UUID as UUIDType
 
 from cognee.modules.agents.models import (
@@ -36,7 +36,7 @@ logger = get_logger("agents")
 RangeLiteral = Literal["24h", "7d", "30d", "all"]
 
 
-def _range_since(range_key: RangeLiteral) -> Optional[datetime]:
+def _range_since(range_key: RangeLiteral) -> datetime | None:
     now = datetime.now(timezone.utc)
     if range_key == "24h":
         return now - timedelta(hours=24)
@@ -133,9 +133,9 @@ def _attach_connected_agent_ids(
 async def list_agent_connections(
     *,
     user: User,
-    agent_id: Optional[UUIDType] = None,
+    agent_id: UUIDType | None = None,
     range_key: RangeLiteral = "30d",
-    status_filter: Optional[str] = None,
+    status_filter: str | None = None,
     include_sources: bool = True,
     active_only: bool = True,
     limit: int = 50,
@@ -187,8 +187,8 @@ async def get_agent_connection_detail(
     *,
     user: User,
     agent_id: UUIDType,
-    agent_session_name: Optional[str] = None,
-) -> Optional[AgentDetailResponse]:
+    agent_session_name: str | None = None,
+) -> AgentDetailResponse | None:
     response = await list_agent_connections(
         user=user,
         agent_id=agent_id,
@@ -231,7 +231,9 @@ async def get_agent_connection_detail(
             recent_traces = [_entry_to_dict(entry) for entry in traces[-20:]]
             recent_sessions = [{"session_id": agent.session_id, "user_id": agent.user_id}]
         except Exception as error:
-            logger.debug("Failed to hydrate agent detail from session cache: %s", error)
+            logger.debug(
+                "Failed to hydrate agent detail from session cache: %s", error, exc_info=True
+            )
 
     return AgentDetailResponse(
         agent=agent,

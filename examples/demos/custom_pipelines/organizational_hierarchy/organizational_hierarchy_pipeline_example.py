@@ -1,17 +1,16 @@
-import os
-import json
 import asyncio
-from typing import List, Any, Dict
-from uuid import uuid5, NAMESPACE_OID, UUID
+import json
+import os
+from typing import Any
+from uuid import NAMESPACE_OID, UUID, uuid5
 
 from pydantic import BaseModel
 
-from cognee import prune
-from cognee import visualize_graph
-from cognee.low_level import setup, DataPoint
+from cognee import prune, visualize_graph
+from cognee.low_level import DataPoint, setup
 from cognee.modules.data.methods import load_or_create_datasets
 from cognee.modules.users.methods import get_default_user
-from cognee.pipelines import run_tasks, Task
+from cognee.pipelines import Task, run_tasks
 from cognee.tasks.storage import add_data_points
 
 
@@ -44,8 +43,8 @@ class LightweightData(DataPoint):
     """Lightweight DataPoint model for data ingestion only."""
 
     id: UUID
-    companies: List[Dict[str, Any]]
-    people: List[Dict[str, Any]]
+    companies: list[dict[str, Any]]
+    people: list[dict[str, Any]]
 
 
 def build_lightweight_data_object(data_list):
@@ -57,10 +56,10 @@ def build_lightweight_data_object(data_list):
     ]
 
 
-def ingest_files(data: List[Any]) -> List[Company]:
+def ingest_files(data: list[Any]) -> list[Company]:
     # With identity_fields, DataPoints with the same name automatically get the same UUID.
     # No manual dict-based deduplication needed — just create instances freely.
-    all_companies: List[Company] = []
+    all_companies: list[Company] = []
 
     # Single CompanyType node shared across all data items (deterministic ID via identity_fields)
     company_type = CompanyType()
@@ -70,7 +69,7 @@ def ingest_files(data: List[Any]) -> List[Company]:
         companies = data_item.companies
 
         # Build departments with their employees
-        dept_employees: Dict[str, List[Person]] = {}
+        dept_employees: dict[str, list[Person]] = {}
         for person in people:
             dept_name = person["department"]
             if dept_name not in dept_employees:
@@ -109,9 +108,11 @@ async def main():
 
     # Prepare data for pipeline
     companies_file_path = os.path.join(os.path.dirname(__file__), "data", "companies.json")
-    companies = json.loads(open(companies_file_path, "r").read())
+    with open(companies_file_path, "r") as companies_file:
+        companies = json.load(companies_file)
     people_file_path = os.path.join(os.path.dirname(__file__), "data", "people.json")
-    people = json.loads(open(people_file_path, "r").read())
+    with open(people_file_path, "r") as people_file:
+        people = json.load(people_file)
 
     # Run tasks expects a list of data even if it is just one document
     data = [{"companies": companies, "people": people}]

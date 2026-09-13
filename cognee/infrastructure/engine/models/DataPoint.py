@@ -21,6 +21,7 @@ class MetaData(TypedDict):
     type: NotRequired[str]
     index_fields: list[str]
     identity_fields: NotRequired[list[str]]
+    transparent: NotRequired[bool]
 
 
 # Updated DataPoint model with versioning and new fields

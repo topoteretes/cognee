@@ -13,6 +13,9 @@ Route roles differ sharply in their auth model, which is the point:
 * ``GET/DELETE /{provider}/connection`` — authenticated; a user only ever
   sees or disconnects their own connection (credentials are user-scoped, not
   shared across a tenant/org).
+* ``POST /{provider}/events`` — unauthenticated webhook receiver; the
+  provider's registered ``WebhookVerifier`` (HMAC over raw bytes) is the
+  entire auth model. Providers without a verifier 404.
 
 Adding a second provider (Notion, GitHub, ...) needs none of these endpoints
 touched — only a new ``OAuthIntegration`` registered via
@@ -30,13 +33,13 @@ generic ``{provider}`` routes so ``plugins`` is never captured as a
 provider name.
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Optional
 from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi_users.exceptions import UserAlreadyExists
 from sqlalchemy.exc import IntegrityError
@@ -86,6 +89,26 @@ from cognee.modules.users.models import User
 
 logger = logging.getLogger(__name__)
 
+# Detached post-install / webhook work (initial syncs, event handling) runs
+# off the request path; strong references keep the tasks alive until done —
+# same pattern as remember()'s _BACKGROUND_REMEMBER_TASKS.
+_BACKGROUND_INTEGRATION_TASKS: set = set()
+
+
+def _spawn_background(coro, *, description: str) -> None:
+    """Run ``coro`` detached, logging (never raising) on failure."""
+
+    async def _guarded():
+        try:
+            await coro
+        except Exception:  # detached work must log, not crash the loop
+            logger.exception("%s failed", description)
+
+    task = asyncio.create_task(_guarded())
+    _BACKGROUND_INTEGRATION_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_INTEGRATION_TASKS.discard)
+
+
 # Plugin keys with a native AgentConnectionType; anything else registers as
 # a generic "sdk" connection in the agent-connection registry.
 _PLUGIN_CONNECTION_TYPES: dict[str, str] = {
@@ -102,9 +125,9 @@ class AuthorizeUrlDTO(OutDTO):
 
 class ConnectionStatusDTO(OutDTO):
     connected: bool
-    account_label: Optional[str] = None
-    provider_account_id: Optional[str] = None
-    connected_at: Optional[datetime] = None
+    account_label: str | None = None
+    provider_account_id: str | None = None
+    connected_at: datetime | None = None
 
 
 class DisconnectResultDTO(OutDTO):
@@ -121,19 +144,19 @@ class PluginProvisionDTO(OutDTO):
 class IntegrationStatusItemDTO(OutDTO):
     provider: str
     connected: bool
-    account_label: Optional[str] = None
-    provider_account_id: Optional[str] = None
-    connected_at: Optional[datetime] = None
+    account_label: str | None = None
+    provider_account_id: str | None = None
+    connected_at: datetime | None = None
 
 
 class PluginStatusItemDTO(OutDTO):
     key: str
     connected: bool
-    agent_id: Optional[UUID] = None
-    provisioned_at: Optional[datetime] = None
-    last_active_at: Optional[datetime] = None
+    agent_id: UUID | None = None
+    provisioned_at: datetime | None = None
+    last_active_at: datetime | None = None
     session_count: int = 0
-    source: Optional[str] = None
+    source: str | None = None
 
 
 class IntegrationsStatusDTO(OutDTO):
@@ -159,7 +182,7 @@ def _plugin_session_name(plugin_key: str) -> str:
     return f"plugin:{plugin_key}"
 
 
-async def _find_plugin_agent(user: User, plugin_key: str) -> Optional[User]:
+async def _find_plugin_agent(user: User, plugin_key: str) -> User | None:
     """Resolve the agent sub-user provisioned for ``(user, plugin_key)``.
 
     ``create_agent`` derives the agent's internal email deterministically
@@ -352,6 +375,9 @@ def get_integrations_router():
         returns the same agent but rotates the key (old keys are revoked —
         re-provision *is* the rotation flow). The returned key is shown once
         and never retrievable again.
+
+        ## Path Parameters
+        - **plugin_key** (str): Key of a known plugin (see GET /api/v1/integrations/status).
         """
         with new_span("cognee.integrations.plugins.provision") as span:
             span.set_attribute("cognee.integrations.plugin", plugin_key)
@@ -415,6 +441,9 @@ def get_integrations_router():
         disconnect would be surprising; full removal stays on
         ``DELETE /api/v1/agents/{agent_id}``. Re-provisioning later revives
         the same identity with a fresh key.
+
+        ## Path Parameters
+        - **plugin_key** (str): Key of a known plugin (see GET /api/v1/integrations/status).
         """
         with new_span("cognee.integrations.plugins.disconnect") as span:
             span.set_attribute("cognee.integrations.plugin", plugin_key)
@@ -438,7 +467,12 @@ def get_integrations_router():
     async def authorize(
         provider: str, user: User = Depends(get_authenticated_user)
     ) -> AuthorizeUrlDTO:
-        """Mint the provider's authorize URL for the requesting user."""
+        """Mint the provider's authorize URL for the requesting user.
+
+        ## Path Parameters
+        - **provider** (str): Key of a registered OAuth provider (see GET
+          /api/v1/integrations/status).
+        """
         with new_span("cognee.integrations.authorize") as span:
             span.set_attribute("cognee.integrations.provider", provider)
             integration = _integration_or_404(provider)
@@ -458,7 +492,9 @@ def get_integrations_router():
                 )
 
     @integrations_router.get("/{provider}/callback", include_in_schema=False)
-    async def callback(provider: str, code: str = "", state: str = "", error: str = ""):
+    async def callback(
+        provider: str, request: Request, code: str = "", state: str = "", error: str = ""
+    ):
         """OAuth redirect target — state-authenticated, browser-facing."""
         with new_span("cognee.integrations.callback") as span:
             span.set_attribute("cognee.integrations.provider", provider)
@@ -477,14 +513,22 @@ def get_integrations_router():
                 return _frontend_redirect(integration, "error_invalid_state")
 
             try:
-                credential = await complete_installation(integration, code=code, user_id=user_id)
+                credential = await complete_installation(
+                    integration,
+                    code=code,
+                    user_id=user_id,
+                    # The full query string, for providers whose redirect
+                    # carries more than a code (GitHub's installation_id).
+                    # The adapter decides what in here it trusts.
+                    callback_params=dict(request.query_params),
+                )
             except CrossUserConflictError:
                 # The account is already connected to another user; refuse
                 # rather than silently reassign it (see upsert_credential).
                 logger.warning("%s account already connected elsewhere; user %s", provider, user_id)
                 span.set_attribute("cognee.integrations.outcome", "error_already_connected")
                 return _frontend_redirect(integration, "error_already_connected")
-            except Exception:  # noqa: BLE001 - any exchange/parse failure must redirect, not 500
+            except Exception:  # any exchange/parse failure must redirect, not 500
                 # Full trace server-side; the browser only learns that it failed.
                 logger.exception("%s OAuth exchange failed for user %s", provider, user_id)
                 span.set_attribute("cognee.integrations.outcome", "error_exchange_failed")
@@ -496,14 +540,58 @@ def get_integrations_router():
                 credential.provider_account_id,
                 user_id,
             )
+            # Post-install work (e.g. GitHub's initial repo sync) runs
+            # detached — the browser gets its redirect now, not after.
+            _spawn_background(
+                integration.on_installed(credential),
+                description=f"{provider} on_installed hook",
+            )
             span.set_attribute("cognee.integrations.outcome", "connected")
             return _frontend_redirect(integration, "connected")
+
+    @integrations_router.post("/{provider}/events", include_in_schema=False)
+    async def provider_events(provider: str, request: Request):
+        """Generic webhook receiver, one URL per provider.
+
+        Unauthenticated by design — providers can't send a bearer token, so
+        the provider's own ``WebhookVerifier`` (HMAC over the raw bytes) is
+        the entire auth model, exactly like the Slack routes. A provider
+        that registers no verifier simply doesn't accept webhooks: 404, the
+        same answer an unknown provider gets, so the route leaks nothing
+        about which providers are configured.
+
+        The delivery is acked as soon as the signature checks out; the
+        actual handling (which may clone repositories or run pipelines) runs
+        detached so the provider's delivery timeout is never in play.
+        """
+        with new_span("cognee.integrations.events") as span:
+            span.set_attribute("cognee.integrations.provider", provider)
+            integration = _integration_or_404(provider)
+            verifier = integration.webhook_verifier()
+            if verifier is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"{provider} does not accept webhook deliveries.",
+                )
+
+            raw_body = await verifier.verify(request)
+            headers = {key.lower(): value for key, value in request.headers.items()}
+            _spawn_background(
+                integration.handle_webhook(raw_body, headers),
+                description=f"{provider} webhook handling",
+            )
+            return {"ok": True}
 
     @integrations_router.get("/{provider}/connection", response_model_exclude_none=True)
     async def connection_status(
         provider: str, user: User = Depends(get_authenticated_user)
     ) -> ConnectionStatusDTO:
-        """Connection state for the Integrations page."""
+        """Connection state for the Integrations page.
+
+        ## Path Parameters
+        - **provider** (str): Key of a registered OAuth provider (see GET
+          /api/v1/integrations/status).
+        """
         integration = _integration_or_404(provider)
         credential = await get_active_credential_for_user(user.id, integration.provider)
         if credential is None:
@@ -529,6 +617,10 @@ def get_integrations_router():
         of each adapter's own best-effort handling — a third-party
         integration that doesn't honor the "never raise" contract on
         ``revoke_remote`` still must not block the local disconnect.
+
+        ## Path Parameters
+        - **provider** (str): Key of a registered OAuth provider (see GET
+          /api/v1/integrations/status).
         """
         with new_span("cognee.integrations.disconnect") as span:
             span.set_attribute("cognee.integrations.provider", provider)
@@ -539,7 +631,7 @@ def get_integrations_router():
 
             try:
                 await integration.revoke_remote(credential)
-            except Exception:  # noqa: BLE001 - a remote-revoke failure must never block disconnect
+            except Exception:  # a remote-revoke failure must never block disconnect
                 logger.exception(
                     "%s revoke_remote raised for account %s",
                     provider,

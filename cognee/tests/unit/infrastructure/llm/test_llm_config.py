@@ -208,7 +208,24 @@ def test_instructor_mode_table_and_adapter_wiring():
 
 
 def _clear_sampling_env(monkeypatch):
-    for var in ("LLM_TEMPERATURE", "LLM_SEED", "LLM_ARGS", "LLM_PROVIDER", "LLM_MODEL"):
+    # LLM_ENDPOINT and LLM_API_KEY belong here even though no test reads them:
+    # cognee loads .env into os.environ at import, and pydantic-settings fills
+    # any field not passed as a kwarg from the environment - so an ambient
+    # LLM_ENDPOINT/LLM_API_KEY reaches LLMConfig.ensure_env_vars_for_ollama the
+    # same as a kwarg would. Leaving either one set makes an ollama config
+    # raise "some but not all of the required environment variables" no
+    # matter what the test passes as kwargs. _env_file=None does not help: it
+    # disables pydantic's dotenv reading, not the environment already
+    # populated at import time.
+    for var in (
+        "LLM_TEMPERATURE",
+        "LLM_SEED",
+        "LLM_ARGS",
+        "LLM_PROVIDER",
+        "LLM_MODEL",
+        "LLM_ENDPOINT",
+        "LLM_API_KEY",
+    ):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -261,6 +278,72 @@ def test_seed_folds_into_llm_args_and_preserves_existing_keys(monkeypatch):
     assert config.llm_args == {"seed": 42, "max_tokens": 1024}
 
 
+def _build_local(monkeypatch, **kwargs):
+    """Build a config for a local inference server with sampling env cleared."""
+    _clear_sampling_env(monkeypatch)
+    defaults = {
+        "llm_api_key": "test-key",
+        "llm_endpoint": "http://localhost:11434/v1",
+        "_env_file": None,
+    }
+    defaults.update(kwargs)
+    return LLMConfig(**defaults)
+
+
+@pytest.mark.parametrize(
+    ("provider", "model"),
+    [
+        ("ollama", "gemma4:e2b-it-qat"),
+        ("llama_cpp", "some-model"),
+        ("custom", "lm_studio/qwen2.5-7b"),
+    ],
+)
+def test_local_provider_folds_unset_temperature(monkeypatch, provider, model):
+    """
+    On a local inference server an unset llm_temperature must still reach the
+    provider. The gpt-5 restriction that gates the fold does not apply there,
+    and without this the model's own default applies (1.0 for several Ollama
+    models) even though docs/ollama_models.md documents 0.0 for extraction.
+    """
+    config = _build_local(monkeypatch, llm_provider=provider, llm_model=model)
+    assert config.llm_args == {"temperature": 0.0}
+
+
+@pytest.mark.parametrize(
+    ("provider", "model"),
+    [
+        ("openai", "openai/gpt-5-mini"),
+        ("custom", "hosted_vllm/meta-llama/Llama-3-70B"),
+        ("custom", "vllm/some-model"),
+    ],
+)
+def test_non_local_provider_still_omits_unset_temperature(monkeypatch, provider, model):
+    """The gpt-5 guard is untouched for hosted providers, vLLM included."""
+    config = _build_local(monkeypatch, llm_provider=provider, llm_model=model)
+    assert config.llm_args is None
+
+
+def test_explicit_temperature_wins_on_local_provider(monkeypatch):
+    config = _build_local(
+        monkeypatch,
+        llm_provider="ollama",
+        llm_model="gemma4:e2b-it-qat",
+        llm_temperature=0.7,
+    )
+    assert config.llm_args == {"temperature": 0.7}
+
+
+def test_llm_args_temperature_wins_over_local_default(monkeypatch):
+    """LLM_ARGS keeps precedence over the folded local default."""
+    config = _build_local(
+        monkeypatch,
+        llm_provider="ollama",
+        llm_model="gemma4:e2b-it-qat",
+        llm_args={"temperature": 0.7, "max_tokens": 1024},
+    )
+    assert config.llm_args == {"temperature": 0.7, "max_tokens": 1024}
+
+
 def test_known_providers_match_enum():
     """
     KNOWN_LLM_PROVIDERS must stay aligned with the LLMProvider dispatch enum so
@@ -272,3 +355,118 @@ def test_known_providers_match_enum():
     )
 
     assert KNOWN_LLM_PROVIDERS == {provider.value for provider in LLMProvider}
+
+
+class TestEnsureEnvVarsForOllama:
+    """The ollama all-or-nothing guard must judge the resolved config, not os.environ.
+
+    COG-6293: this validator used to check os.environ directly, so a config
+    built entirely from kwargs (as every case below does) was invisible to
+    it, and a caller's unrelated ambient .env could trip or silence it by
+    accident. It now reads self.llm_model / self.llm_endpoint / self.llm_api_key
+    after pydantic-settings has already merged env and kwargs into them.
+    """
+
+    def test_all_three_provided_as_kwargs_is_fine(self, monkeypatch):
+        for var in ("LLM_PROVIDER", "LLM_MODEL", "LLM_ENDPOINT", "LLM_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+
+        config = LLMConfig(
+            _env_file=None,
+            llm_provider="ollama",
+            llm_model="gemma4:e2b-it-qat",
+            llm_endpoint="http://localhost:11434/v1",
+            llm_api_key="test-key",
+        )
+
+        assert config.llm_model == "gemma4:e2b-it-qat"
+
+    def test_none_provided_is_fine(self, monkeypatch):
+        """Only llm_provider set: no partial state to complain about."""
+        for var in ("LLM_MODEL", "LLM_ENDPOINT", "LLM_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+
+        LLMConfig(_env_file=None, llm_provider="ollama")
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"llm_endpoint": "http://localhost:11434/v1"},
+            {"llm_api_key": "test-key"},
+            {"llm_model": "gemma4:e2b-it-qat"},
+        ],
+    )
+    def test_exactly_one_provided_raises(self, monkeypatch, kwargs):
+        for var in ("LLM_MODEL", "LLM_ENDPOINT", "LLM_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+
+        with pytest.raises(ValueError, match="some but not all"):
+            LLMConfig(_env_file=None, llm_provider="ollama", **kwargs)
+
+    def test_ambient_env_unrelated_to_the_kwargs_still_raises(self, monkeypatch):
+        """An LLM_API_KEY left over from the caller's own .env must still count.
+
+        Guards against overcorrecting into ignoring env entirely: the fields
+        are resolved from env-or-kwarg by pydantic-settings before this
+        validator runs, so an ambient LLM_API_KEY combined with a kwarg-only
+        llm_model is exactly the "some but not all" case, and must still raise.
+        """
+        monkeypatch.delenv("LLM_MODEL", raising=False)
+        monkeypatch.delenv("LLM_ENDPOINT", raising=False)
+        monkeypatch.setenv("LLM_API_KEY", "from-ambient-env")
+
+        with pytest.raises(ValueError, match="some but not all"):
+            LLMConfig(_env_file=None, llm_provider="ollama", llm_model="gemma4:e2b-it-qat")
+
+    def test_non_ollama_provider_is_never_checked(self, monkeypatch):
+        for var in ("LLM_MODEL", "LLM_ENDPOINT", "LLM_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+
+        LLMConfig(_env_file=None, llm_provider="openai", llm_api_key="test-key")
+
+    def test_llm_model_explicitly_set_to_the_default_value_still_counts_as_set(self, monkeypatch):
+        """A kwarg/env value that happens to match the field default is still 'set'.
+
+        llm_model's default ("openai/gpt-5-mini") is a real, non-blank model
+        id, so a plain non-blank check can't tell "explicitly configured,
+        coincidentally matches the default" apart from "left unset". This
+        must key off model_fields_set instead, the same way
+        infer_provider_from_model already does for llm_provider.
+        """
+        for var in ("LLM_PROVIDER", "LLM_MODEL", "LLM_ENDPOINT", "LLM_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+
+        default_model = LLMConfig.model_fields["llm_model"].default
+        config = LLMConfig(
+            _env_file=None,
+            llm_provider="ollama",
+            llm_model=default_model,
+            llm_endpoint="http://localhost:11434/v1",
+            llm_api_key="test-key",
+        )
+
+        assert config.llm_model == default_model
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"llm_endpoint": "   "},
+            {"llm_api_key": "   "},
+            {"llm_model": "   "},
+        ],
+    )
+    def test_whitespace_only_value_counts_as_unset(self, monkeypatch, kwargs):
+        """A whitespace-only value carries no real configuration, so it must not
+        satisfy the "this field is set" side of the all-or-nothing check."""
+        for var in ("LLM_MODEL", "LLM_ENDPOINT", "LLM_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+
+        config_kwargs = {
+            "llm_endpoint": "http://localhost:11434/v1",
+            "llm_api_key": "test-key",
+            "llm_model": "gemma4:e2b-it-qat",
+        }
+        config_kwargs.update(kwargs)
+
+        with pytest.raises(ValueError, match="some but not all"):
+            LLMConfig(_env_file=None, llm_provider="ollama", **config_kwargs)

@@ -1,6 +1,6 @@
-from cognee.modules.retrieval.lexical_retriever import LexicalRetriever, tokenize_words
 from collections import Counter
-from typing import Optional
+
+from cognee.modules.retrieval.lexical_retriever import LexicalRetriever, tokenize_words
 
 
 class JaccardChunksRetriever(LexicalRetriever):
@@ -12,7 +12,7 @@ class JaccardChunksRetriever(LexicalRetriever):
         self,
         top_k: int = 15,
         with_scores: bool = False,
-        stop_words: Optional[list[str]] = None,
+        stop_words: list[str] | None = None,
         multiset_jaccard: bool = False,
     ):
         """

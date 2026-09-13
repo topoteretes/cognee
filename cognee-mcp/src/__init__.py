@@ -13,8 +13,16 @@ def _load_server_main():
     """
     try:
         from .server import main as server_main
-    except ImportError:
-        from server import main as server_main
+    except ImportError as relative_import_error:
+        # The fallback exists for source checkouts where `src` isn't a package.
+        # But it also used to swallow a missing third-party dependency: with
+        # fastmcp absent, the real "No module named 'fastmcp'" was replaced by
+        # a baffling "No module named 'server'". Re-raise the original when the
+        # fallback fails too, so the actual cause is what the user sees.
+        try:
+            from server import main as server_main
+        except ImportError:
+            raise relative_import_error from None
     return server_main
 
 

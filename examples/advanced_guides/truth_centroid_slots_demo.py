@@ -46,7 +46,6 @@ from cognee.modules.truth_subspace.build import build_truth_subspace
 from cognee.modules.truth_subspace.centroids import load_centroids
 from cognee.modules.users.methods import get_default_user
 
-
 DATASET = "truth_centroid_slots_demo"
 CORPUS_NODE_SET = ["truth_demo_corpus"]
 LEARNINGS_NODE_SET = ["session_learnings"]

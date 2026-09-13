@@ -40,6 +40,8 @@ from cognee.infrastructure.llm.exceptions import (
     is_budget_exhausted_error,
 )
 from cognee.infrastructure.llm.retry_config import llm_retry_stop_condition
+from cognee.infrastructure.llm.streaming.stream_completion import stream_text_completion
+from cognee.infrastructure.llm.streaming.token_sink import get_active_token_sink
 from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
@@ -118,6 +120,7 @@ def _supports_native_schema(model_name: str) -> bool:
     try:
         return bool(litellm.supports_response_schema(model=model_name))
     except Exception:
+        logger.debug("Falling back to False after error in _supports_native_schema", exc_info=True)
         return False
 
 
@@ -149,7 +152,7 @@ def _enrich_llm_span(model: str, name: str) -> None:
             if stage:
                 current_span.set_attribute(COGNEE_PIPELINE_STAGE, stage)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _enrich_llm_span", exc_info=True)
 
 
 class NativeLiteLLMAdapter:
@@ -164,6 +167,10 @@ class NativeLiteLLMAdapter:
         - model, api_key, endpoint, api_version, max_completion_tokens,
           fallback_model, fallback_api_key, fallback_endpoint, llm_args, name
     """
+
+    # The default framework's answer path, so this is the one that decides
+    # whether an out-of-the-box install can stream at all.
+    supports_answer_streaming = True
 
     def __init__(
         self,
@@ -200,7 +207,26 @@ class NativeLiteLLMAdapter:
         api_version: str | None,
         **merged_kwargs: Any,
     ) -> str:
-        """Plain-text completion without any schema (mirrors GenericAPIAdapter)."""
+        """Plain-text completion without any schema (mirrors GenericAPIAdapter).
+
+        This is the default framework's answer path, so it is the one that has to
+        stream for streaming to reach anybody: STRUCTURED_OUTPUT_FRAMEWORK
+        defaults to litellm_native, which routes here regardless of provider.
+        """
+        sink = get_active_token_sink()
+        if sink is not None:
+            return await stream_text_completion(
+                sink=sink,
+                model=model,
+                system_prompt=system_prompt,
+                text_input=text_input,
+                api_key=api_key,
+                endpoint=endpoint,
+                api_version=api_version,
+                adapter_name="litellm_native",
+                **merged_kwargs,
+            )
+
         async with llm_rate_limiter_context_manager():
             response = await litellm.acompletion(
                 model=model,
@@ -213,6 +239,8 @@ class NativeLiteLLMAdapter:
                 api_version=api_version,
                 **merged_kwargs,
             )
+        if not response.choices:
+            raise ValueError("litellm_native returned no choices for a plain-text completion")
         return response.choices[0].message.content or ""
 
     async def _acreate_schema_native(

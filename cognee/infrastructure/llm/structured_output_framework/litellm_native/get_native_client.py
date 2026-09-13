@@ -14,6 +14,9 @@ from cognee.infrastructure.llm.exceptions import LLMAPIKeyNotSetError
 from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
     NativeLiteLLMAdapter,
 )
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 # Providers that do not require ``llm_api_key`` (mirrors get_llm_client): Bedrock
 # authenticates with AWS credentials and llama.cpp runs locally.
@@ -47,8 +50,12 @@ def _qualify_model(model: str, provider: str) -> str:
     bare name litellm can already resolve on its own are returned untouched, so
     this cannot re-route a configuration that works today. It only rescues the
     case that currently raises BadRequestError before a request is even sent.
+
+    A slash does not by itself mean the name carries a provider. Ollama accepts
+    namespaced names ("library/phi4") and Hugging Face GGUF paths
+    ("hf.co/user/repo"), so litellm decides instead.
     """
-    if not model or "/" in model:
+    if not model:
         return model
 
     import litellm
@@ -57,6 +64,7 @@ def _qualify_model(model: str, provider: str) -> str:
         litellm.get_llm_provider(model=model)
         return model
     except Exception:
+        logger.debug("Falling back after error in _qualify_model", exc_info=True)
         prefix = _LITELLM_PROVIDER_PREFIX.get((provider or "").lower())
         return f"{prefix}/{model}" if prefix else model
 

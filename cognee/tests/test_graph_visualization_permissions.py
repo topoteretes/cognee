@@ -58,7 +58,7 @@ async def setup_environment():
 
     def extract_dataset_id_from_cognify(cognify_result):
         """Extract dataset_id from cognify output dictionary"""
-        for dataset_id, pipeline_result in cognify_result.items():
+        for dataset_id in cognify_result:
             return dataset_id
         return None
 
