@@ -2,7 +2,6 @@ import asyncio
 import re
 from uuid import UUID
 
-from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 from cognee.base_config import get_base_config
