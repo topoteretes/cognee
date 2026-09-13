@@ -69,6 +69,7 @@ async def add(
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = True,
+    skip_connection_test: bool = False,
     **kwargs,
 ):
     """
@@ -338,6 +339,7 @@ async def add(
         llm_config=llm_config,
         embedding_config=embedding_config,
         data_cache=data_cache,
+        skip_connection_test=skip_connection_test,
     )
 
     # Foreground runs: the fresh rows are committed by pipeline_executor_func

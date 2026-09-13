@@ -253,7 +253,7 @@ docker run \
 
 **Note:** When running in API mode:
 - Database migrations are automatically skipped (API server handles its own DB)
-- Some features are limited (see [API Mode Limitations](#-api-mode))
+- Some features are limited (see [API Mode Limitations](#api-mode))
 
 
 ## 🔗 MCP Client Configuration
