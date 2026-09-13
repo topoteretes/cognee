@@ -327,30 +327,10 @@ def set_pdeathsig() -> bool:
 
 
 def get_original_parent_pid() -> Optional[int]:
-    """The PID of the process that actually launched this worker, or ``None``.
+    """Return the launching process's PID, or ``None`` outside an mp child.
 
-    Read from ``multiprocessing.parent_process()``, NOT from ``os.getppid()``.
-    The two are not interchangeable, and the difference is the whole point:
-
-    * ``os.getppid()`` is rewritten by the kernel to the reaper's PID the
-      moment the real parent dies — i.e. it is destroyed by exactly the event
-      we want to detect, so it cannot serve as its own baseline.
-    * Under the ``forkserver`` start method the two differ **by design even
-      while the parent is perfectly healthy** — ``getppid()`` reports the
-      fork-server process, not the launching process. Measured on this
-      project's own target (WSL Ubuntu / CPython 3.14.4), parent alive
-      throughout::
-
-          spawn        parent_process().pid=199682  getppid()=199682
-          fork         parent_process().pid=199682  getppid()=199682
-          forkserver   parent_process().pid=199682  getppid()=199706   <-- differ
-
-      CPython 3.14 makes ``forkserver`` the default start method on Linux, so
-      this is the common case, not an exotic one.
-
-    ``None`` when this process is not a ``multiprocessing`` child at all (e.g.
-    ``run_worker_loop`` invoked directly in a test or an embedding host), which
-    callers must treat as "no baseline available", never as "parent is gone".
+    Under forkserver, ``os.getppid()`` identifies the fork server instead.
+    After reparenting it identifies the reaper, so it cannot supply a baseline.
     """
     try:
         import multiprocessing
@@ -364,42 +344,48 @@ def get_original_parent_pid() -> Optional[int]:
     return pid if isinstance(pid, int) and pid > 0 else None
 
 
+def _parent_pid_exited(pid: Optional[int]) -> bool:
+    """Independently confirm that the launching PID has exited.
+
+    A missing process or a Linux zombie confirms death. A live or reused PID,
+    permission failure, or unreadable procfs leaves the answer uncertain.
+    """
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+
+    # kill(pid, 0) also succeeds for zombies. The launching process may have
+    # exited without its own parent having reaped it yet.
+    if sys.platform == "linux":
+        try:
+            with open(f"/proc/{pid}/stat", "rb") as stat_file:
+                stat = stat_file.read()
+            # comm (field 2) may itself contain spaces and parentheses.
+            state = stat[stat.rindex(b")") + 1 :].split()[0]
+            if state in (b"Z", b"X", b"x"):
+                return True
+        except (OSError, ValueError, IndexError):
+            pass
+
+    # Probe after procfs: the process may have been reaped during the read,
+    # while a missing procfs mount alone cannot establish parent death.
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        pass
+    return False
+
+
 def _parent_sentinel_alive() -> Optional[bool]:
-    """Tri-state liveness of the real parent, via the multiprocessing sentinel.
+    """Return True for a live parent, False for confirmed death, else None.
 
-    ``True`` = parent confirmed alive, ``False`` = parent confirmed exited,
-    ``None`` = could not tell. An error must never be reported as "dead",
-    because the only caller acts on "dead" by killing the worker.
-
-    CORRECTED 2026-07-28: an earlier version claimed "**every** error path
-    returns ``None``". That was FALSE, and it was a safety claim guarding an
-    ``os._exit(0)``. ``is_alive()`` does NOT raise on a closed or otherwise
-    invalid sentinel fd: ``selectors`` accepts any non-negative int with no
-    ``EBADF`` check, ``poll()`` reports ``POLLNVAL``, and the selector treats
-    that as ready -- so ``is_alive()`` returns **False**, i.e. "confirmed
-    dead", for a perfectly healthy parent. Anything closing that fd number in
-    the child would then kill the worker.
-
-    A "dead" answer is therefore CORROBORATED before being returned: on POSIX
-    the fd must still be valid. An invalid fd degrades to ``None``, never
-    to ``False``.
-
-    ``multiprocessing.parent_process().is_alive()`` polls the parent-sentinel
-    pipe file descriptor (POSIX) / process HANDLE (Windows) that the
-    multiprocessing bootstrap hands every child. The launching process holds
-    the far end open for the child's entire life, so the **kernel** releases it
-    on ANY parent exit — clean shutdown, ``SIGKILL``, OOM killer, ``kill -9``.
-    That makes this signal:
-
-    * start-method agnostic (works identically under spawn / fork /
-      forkserver — for forkserver the sentinel is a dup of the data pipe whose
-      write end is kept open by the *launching* process, not by the fork
-      server, so it still tracks the real parent);
-    * immune to PID reuse (it is an open-fd relationship, not a PID number);
-    * not dependent on ``os.getppid()``, which the parent's death corrupts.
-
-    Verified on WSL Ubuntu / CPython 3.14.4: after the launching process
-    ``SIGKILL``s itself, this flips to ``False`` in all three start methods.
+    The multiprocessing sentinel tracks the launching process even under
+    forkserver. Its descriptor can, however, be closed and reused: polling a
+    replacement file or EOF pipe then reports death while fstat still succeeds.
+    Before trusting a dead result on POSIX, independently check the parent's
+    PID. If it is alive or cannot be checked, leave the worker running. PID
+    reuse can therefore prevent confirmation, but cannot kill a healthy worker.
     """
     try:
         import multiprocessing
@@ -407,99 +393,35 @@ def _parent_sentinel_alive() -> Optional[bool]:
         parent = multiprocessing.parent_process()
         if parent is None:
             return None
-        # No sentinel to consult (shouldn't happen for a real mp child, but a
-        # missing one must degrade to "unknown", not to "dead").
         sentinel = getattr(parent, "_sentinel", None)
         if sentinel is None:
             return None
         if parent.is_alive():
             return True
 
-        # is_alive() said "dead". Do NOT act on that alone -- an invalid fd is
-        # reported as ready (POLLNVAL) and is indistinguishable from a real EOF
-        # at this layer. Corroborate the fd is still valid before confirming.
-        # POSIX only: on Windows _sentinel is a process HANDLE, not an fd.
+        # On Windows the sentinel is a process HANDLE rather than an fd;
+        # parent_already_exited leaves Windows handling unchanged.
         if sys.platform != "win32":
-            try:
-                os.fstat(sentinel)
-            except OSError:
-                return None  # cannot tell -- must never be read as "dead"
+            os.fstat(sentinel)
+            if not _parent_pid_exited(parent.pid):
+                return None
         return False
     except Exception:
         return None
 
 
 def parent_already_exited(original_ppid: Optional[int]) -> bool:
-    """Did the parent die BEFORE ``set_pdeathsig`` could arm? (POSIX only.)
+    """Check for parent death before protection was armed (POSIX only).
 
-    ``PR_SET_PDEATHSIG`` is not retroactive: it only fires for a parent death
-    that happens *after* the ``prctl`` call. Workers here are ``spawn``-started,
-    so there is a real window — re-exec python, import chain, unpickle — between
-    ``Process.start()`` in the parent and ``set_pdeathsig()`` inside the child.
-    A parent that dies in that window (OOM kill being the realistic trigger)
-    delivers no signal, ever. Worse, ``set_pdeathsig()`` still returns ``True``
-    (the syscall itself succeeded), which *suppresses* the polling-watchdog
-    fallback at its call site. Net result: an orphaned worker holding an
-    exclusive Kuzu/LanceDB lock forever, exactly the failure the Windows branch
-    of this module was written to fix — just via a different door.
-
-    Returns ``True`` ONLY on a confirmed-dead parent. Every ambiguous or
-    error case returns ``False``, because the caller's response to ``True``
-    is ``os._exit(0)`` and a false positive there is an outage: it would kill
-    every worker at startup.
-
-    Ordering, and why:
-
-    1. ``sys.platform == "win32"`` → ``False``. This fix is deliberately
-       POSIX-scoped: the race it closes is specific to ``PR_SET_PDEATHSIG``
-       not being retroactive. Windows parent-death handling is unchanged.
-    2. The sentinel (see ``_parent_sentinel_alive``) — kernel-guaranteed,
-       start-method agnostic, PID-reuse immune. This is the primary signal.
-    3. No fallback. If step 2 cannot answer, this returns ``False`` (unknown,
-       do not kill).
-
-       There WAS a ``getppid() != original_ppid`` fallback here. It was removed
-       2026-07-28 because it was both dead and dangerous -- see the comment at
-       the return site. The short version: ``get_start_method()`` reports the
-       process-wide DEFAULT context, not the context that created this child, so
-       the gate meant to keep that comparison away from ``forkserver`` could be
-       passed by a process that merely *defaults* to spawn while launching via
-       forkserver -- where the two pids differ BY DESIGN, making every worker
-       exit at startup. That is the same failure the naive "just compare
-       getppid()" fix would have caused, reintroduced one level down in the very
-       guard written to prevent it. ``forkserver`` is CPython 3.14's default on
-       Linux, so this was not theoretical.
+    PR_SET_PDEATHSIG is not retroactive. Call this AFTER arming it (or starting
+    the fallback watchdog) to cover death during spawn's import/bootstrap work.
+    An unavailable or ambiguous sentinel never authorizes killing the worker.
+    Do not compare getppid() with the launching PID: they differ by design under
+    forkserver, even when the launching process is healthy.
     """
-    if sys.platform == "win32":
+    if sys.platform == "win32" or original_ppid is None:
         return False
-
-    alive = _parent_sentinel_alive()
-    if alive is True:
-        return False
-    if alive is False:
-        return True
-
-    # alive is None: no usable sentinel. Fall back only where it is safe to.
-    if original_ppid is None:
-        return False
-    # NO getppid() FALLBACK. Removed 2026-07-28 -- it was both DEAD and DANGEROUS.
-    #
-    # DEAD: it was gated on `get_start_method(allow_none=True)` being spawn/fork.
-    # In cognee's shipped configuration that call returns None, so the branch
-    # never executed in production. The comment describing it as "the intended
-    # last resort under spawn" described a state the code never reached.
-    #
-    # DANGEROUS: `get_start_method()` reports the PROCESS-WIDE DEFAULT context,
-    # not the context that actually created THIS child. An app that calls
-    # `set_start_method("spawn")` at import while a component launches via
-    # `get_context("forkserver")` would read "spawn", pass the gate, and then
-    # evaluate `getppid() != original_ppid` -- which under forkserver differs
-    # BY DESIGN. That is the same shape as the outage this whole function was
-    # written to prevent: keying a kill decision on a fact that does not mean
-    # what it appears to mean.
-    #
-    # Without a usable sentinel we simply cannot tell. Say so, and never kill.
-    return False
+    return _parent_sentinel_alive() is False
 
 
 def start_parent_liveness_watchdog(poll_interval: float = 1.0) -> None:

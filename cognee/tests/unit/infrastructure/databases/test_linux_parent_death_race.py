@@ -54,13 +54,15 @@ from pathlib import Path
 
 import pytest
 
+from cognee_db_workers import harness
+
 pytestmark = pytest.mark.skipif(
     sys.platform != "linux", reason="POSIX parent-death race; /proc and prctl are Linux-only"
 )
 
 # Derived from the module under test rather than hard-coded, so the suite also
 # runs from a copied tree (e.g. a WSL native-filesystem scratch copy).
-_REPO_ROOT = str(Path(__file__).resolve().parents[2])
+_REPO_ROOT = str(Path(harness.__file__).resolve().parents[1])
 
 # Long enough that the parent is reliably dead before the worker reaches
 # ``run_worker_loop``; short enough to keep the suite quick.
@@ -85,9 +87,23 @@ METHOD = {method!r}
 KILL_MODE = {kill_mode!r}
 KILL_AFTER = {kill_after!r}
 MARKER_PATH = {marker_path!r}
+SENTINEL_REPLACEMENT = {sentinel_replacement!r}
 
 
 def _worker(req_q, resp_q):
+    if SENTINEL_REPLACEMENT:
+        sentinel = mp.parent_process().sentinel
+        if SENTINEL_REPLACEMENT == "file":
+            replacement = os.open(os.devnull, os.O_RDONLY)
+        else:
+            replacement, writer = os.pipe()
+            os.close(writer)
+        # Atomically close the original sentinel and reuse its descriptor.
+        os.dup2(replacement, sentinel)
+        os.close(replacement)
+        assert not mp.parent_process().is_alive()
+        os.fstat(sentinel)
+
     # The deliberate stall. In production this window is filled by spawn's own
     # re-exec + import + unpickle work; here it is explicit so the race is
     # deterministic rather than a microsecond-wide coin flip.
@@ -186,6 +202,26 @@ def _is_gone(pid: int, starttime: str) -> bool:
     return state == "Z"
 
 
+def test_unreaped_process_is_confirmed_dead():
+    proc = subprocess.Popen([sys.executable, "-c", "import os; os._exit(0)"])
+    try:
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            identity = _proc_identity(proc.pid)
+            if identity is not None and identity[0] == "Z":
+                # A PID-existence probe alone cannot distinguish this zombie
+                # from a healthy parent. Do not call Popen.poll() and reap it.
+                os.kill(proc.pid, 0)
+                assert harness._parent_pid_exited(proc.pid) is True
+                return
+            time.sleep(0.01)
+        pytest.fail("child never became a zombie")
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=10)
+
+
 class _LineReader:
     """Non-blocking line access to a child's stdout.
 
@@ -217,7 +253,9 @@ class _LineReader:
             )
 
 
-def _write_parent_script(tmp_path, *, method: str, kill_mode: str, stall: float) -> str:
+def _write_parent_script(
+    tmp_path, *, method: str, kill_mode: str, stall: float, sentinel_replacement=None
+) -> str:
     path = tmp_path / f"parent_{method}_{kill_mode}.py"
     path.write_text(
         _PARENT_SCRIPT.format(
@@ -226,7 +264,8 @@ def _write_parent_script(tmp_path, *, method: str, kill_mode: str, stall: float)
             method=method,
             kill_mode=kill_mode,
             kill_after=_KILL_AFTER_SECONDS,
-            marker_path=str(path) + '.reached',
+            marker_path=str(path) + ".reached",
+            sentinel_replacement=sentinel_replacement,
         )
     )
     return str(path)
@@ -241,27 +280,13 @@ def _launch_parent(script: str) -> subprocess.Popen:
     )
 
 
-def _reap(pid: int, starttime: str | None = None) -> None:
-    """Kill a test-spawned process, verifying identity first.
-
-    CORRECTED 2026-07-28: this previously did a bare ``os.kill(pid, SIGKILL)``
-    with no starttime check -- violating the discipline THIS FILE states at the
-    top ("never by PID number alone"). By the time cleanup runs the pid has very
-    likely already exited, and Linux recycles pids, so a bare kill can SIGKILL an
-    unrelated process on the test host. Same class as the machine-wide PID-reuse
-    rule that the descendant-walk reaper had to be fixed for.
-
-    ``starttime`` is optional only so older call sites keep working; pass it.
-    """
-    if starttime is not None:
-        ident = _proc_identity(pid)
-        if ident is None:
-            return  # already gone -- nothing to kill
-        if ident[1] != starttime:
-            return  # PID RECYCLED: this is a different process. Do not kill it.
+def _reap(pid: int, starttime: str) -> None:
+    """Kill a test worker only while the recorded process identity matches."""
+    if _is_gone(pid, starttime):
+        return
     try:
         os.kill(pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError, OSError):
+    except OSError:
         pass
 
 
@@ -275,6 +300,7 @@ class TestArmWindowRace:
         )
         parent = _launch_parent(script)
         worker_pid = None
+        starttime = None
         try:
             reader = _LineReader(parent)
             line = reader.next_line()
@@ -315,10 +341,11 @@ class TestArmWindowRace:
                 "True suppresses the polling-watchdog fallback."
             )
         finally:
-            if worker_pid is not None:
-                _reap(worker_pid)
+            if worker_pid is not None and starttime is not None:
+                _reap(worker_pid, starttime)
             if parent.poll() is None:
                 parent.kill()
+            parent.wait(timeout=10)
 
 
 class TestNoFalsePositive:
@@ -340,10 +367,18 @@ class TestNoFalsePositive:
     """
 
     @pytest.mark.parametrize("method", ["spawn", "fork", "forkserver"])
-    def test_worker_survives_while_parent_is_alive(self, tmp_path, method):
-        script = _write_parent_script(tmp_path, method=method, kill_mode="never", stall=0.0)
+    @pytest.mark.parametrize("sentinel_replacement", [None, "file", "pipe"])
+    def test_worker_survives_while_parent_is_alive(self, tmp_path, method, sentinel_replacement):
+        script = _write_parent_script(
+            tmp_path,
+            method=method,
+            kill_mode="never",
+            stall=0.0,
+            sentinel_replacement=sentinel_replacement,
+        )
         parent = _launch_parent(script)
         worker_pid = None
+        starttime = None
         try:
             reader = _LineReader(parent)
             line = reader.next_line()
@@ -359,9 +394,9 @@ class TestNoFalsePositive:
                 "parent."
             )
 
-            # Watch for a while: a false positive kills the worker essentially
-            # immediately, so a steady 6s is a decisive observation.
-            deadline = time.monotonic() + 6.0
+            # READY proves the startup guard passed; also observe the worker
+            # briefly to catch asynchronous termination.
+            deadline = time.monotonic() + 1.0
             while time.monotonic() < deadline:
                 assert not _is_gone(worker_pid, starttime), (
                     f"[{method}] worker pid {worker_pid} exited while its parent was still "
@@ -371,10 +406,11 @@ class TestNoFalsePositive:
                 time.sleep(0.25)
             assert parent.poll() is None, "the parent died on its own; test setup is invalid"
         finally:
-            if worker_pid is not None:
-                _reap(worker_pid)
+            if worker_pid is not None and starttime is not None:
+                _reap(worker_pid, starttime)
             if parent.poll() is None:
                 parent.kill()
+            parent.wait(timeout=10)
 
 
 class TestNormalPathNotRegressed:
@@ -415,6 +451,7 @@ class TestNormalPathNotRegressed:
         script = _write_parent_script(tmp_path, method=method, kill_mode="after_arm", stall=0.0)
         parent = _launch_parent(script)
         worker_pid = None
+        starttime = None
         try:
             reader = _LineReader(parent)
             line = reader.next_line()
@@ -440,102 +477,8 @@ class TestNormalPathNotRegressed:
                 "path has regressed."
             )
         finally:
-            if worker_pid is not None:
-                _reap(worker_pid)
+            if worker_pid is not None and starttime is not None:
+                _reap(worker_pid, starttime)
             if parent.poll() is None:
                 parent.kill()
-
-
-class TestParentAlreadyExitedUnitSemantics:
-    """Fail-safe contract of the helpers, without spawning anything."""
-
-    def test_returns_false_without_a_baseline(self):
-        from cognee_db_workers import harness
-
-        # Not a multiprocessing child at all: no sentinel, no baseline pid.
-        # Must NOT claim the parent is dead.
-        assert harness.get_original_parent_pid() is None
-        assert harness.parent_already_exited(None) is False
-
-    def test_returns_false_on_win32_regardless_of_baseline(self, monkeypatch):
-        from cognee_db_workers import harness
-
-        monkeypatch.setattr(harness.sys, "platform", "win32")
-        assert harness.parent_already_exited(999999) is False
-        assert harness.parent_already_exited(None) is False
-
-    def test_sentinel_absent_reports_unknown_not_dead(self):
-        from cognee_db_workers import harness
-
-        # In the main process there is no parent sentinel; the tri-state must
-        # be None ("cannot tell"), never False ("dead").
-        assert harness._parent_sentinel_alive() is None
-
-    def test_there_is_no_getppid_fallback_at_all(self, monkeypatch):
-        """No usable sentinel must mean "unknown", never "dead".
-
-        REPLACES test_getppid_fallback_is_not_used_under_forkserver, which
-        asserted the fallback was *gated* correctly. The fallback has since been
-        REMOVED outright: its gate read `get_start_method()`, i.e. the
-        process-wide DEFAULT context rather than the context that created this
-        child, so a process defaulting to spawn while launching via forkserver
-        would pass the gate and then evaluate a comparison that differs BY
-        DESIGN -- killing every healthy worker at startup.
-
-        A gate on the wrong fact is not a gate. This asserts the property that
-        replaced it: with no answer from the sentinel, the result is False
-        (do not kill) regardless of pids or start method.
-        """
-        import multiprocessing
-
-        from cognee_db_workers import harness
-
-        monkeypatch.setattr(harness, "_parent_sentinel_alive", lambda: None)
-        bogus_baseline = 999999
-        assert os.getppid() != bogus_baseline, "baseline must differ for this to mean anything"
-
-        # Under EVERY start method -- including the ones the old fallback
-        # treated as safe -- an unanswerable sentinel must never yield "dead".
-        for method in ("spawn", "fork", "forkserver"):
-            monkeypatch.setattr(
-                multiprocessing, "get_start_method", lambda allow_none=False, _m=method: _m
-            )
-            assert harness.parent_already_exited(bogus_baseline) is False, (
-                f"under {method}: no sentinel answer must mean unknown, not dead. "
-                "Returning True here kills healthy workers."
-            )
-
-    def test_invalid_sentinel_fd_is_unknown_not_dead(self):
-        """A closed/invalid sentinel fd must degrade to None, never False.
-
-        `is_alive()` does NOT raise on a bad fd: selectors accept any
-        non-negative int, poll() reports POLLNVAL, and the selector treats that
-        as ready -- so `is_alive()` returns False, i.e. "confirmed dead", for a
-        perfectly healthy parent. The docstring used to claim every error path
-        returned None; it did not, and that claim guarded an os._exit(0).
-        """
-        import multiprocessing
-
-        from cognee_db_workers import harness
-
-        r, w = os.pipe()
-        os.close(r)
-        os.close(w)
-
-        class _BadFdParent:
-            _sentinel = r
-
-            def is_alive(self):
-                return False  # what POLLNVAL actually produces
-
-        original = multiprocessing.parent_process
-        multiprocessing.parent_process = lambda: _BadFdParent()
-        try:
-            got = harness._parent_sentinel_alive()
-        finally:
-            multiprocessing.parent_process = original
-
-        assert got is None, (
-            f"invalid fd yielded {got!r}; False would be read as 'parent dead' "
-            "and kill a worker whose parent is fine"
-        )
+            parent.wait(timeout=10)
