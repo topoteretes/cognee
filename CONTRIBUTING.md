@@ -66,8 +66,7 @@ Looking for a place to start? Try filtering for [good first issues](https://gith
 ### Required tools
 * [Python](https://www.python.org/downloads/)
 * [uv](https://docs.astral.sh/uv/getting-started/installation/)
-* pre-commit: `uv run pip install pre-commit && pre-commit install`
-
+* pre-commit: `uv add --dev pre-commit && uv run pre-commit install` (installing via `uv add --dev` avoids "program not found" errors that `pip install` + a bare `pre-commit install` can hit, especially on Windows)
 ### Fork and Clone
 
 1. Fork the [**cognee**](https://github.com/topoteretes/cognee) repository
@@ -83,6 +82,17 @@ In case you are working on Vector and Graph Adapters
 git clone https://github.com/<your-github-username>/cognee-community.git
 cd cognee-community
 ```
+### Sync the `dev` Branch
+
+Forking only copies the `main` branch by default, so `dev` won't exist on your fork yet. Add the original repo as a second remote and pull `dev` in before creating your feature branch:
+
+```shell
+git remote add upstream https://github.com/topoteretes/cognee.git
+git fetch upstream dev
+git checkout -b dev upstream/dev
+```
+
+PRs should be opened against `dev`, not `main` — create your feature branch from here.
 
 ### Create a Branch
 
