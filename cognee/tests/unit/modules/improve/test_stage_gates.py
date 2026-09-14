@@ -18,7 +18,6 @@ from cognee.modules.improve import (
     evaluate_gate,
 )
 from cognee.modules.improve.stages import (
-    REASON_FEEDBACK_INFLUENCE_ZERO,
     REASON_OPT_IN_DISABLED,
     REASON_PERSONALIZATION_DISABLED,
     REASON_TRIPLET_EMBEDDING_DISABLED,
@@ -64,20 +63,17 @@ def _patch_cognify_config(monkeypatch, triplet_embedding):
 # --- stage 1 ---------------------------------------------------------------
 
 
-def test_feedback_weights_skipped_at_zero_influence(monkeypatch):
+def test_feedback_weights_runs_at_zero_global_influence(monkeypatch):
+    """feedback_influence is a per-call read-time knob; the write must not gate on
+    the global default (0 is the only value base_config doesn't warn against)."""
     _patch_base_config(monkeypatch, default_feedback_influence=0.0)
-    assert FeedbackWeightsStage().gate(_inputs()) == REASON_FEEDBACK_INFLUENCE_ZERO
+    assert FeedbackWeightsStage().gate(_inputs()) is None
 
 
 def test_feedback_weights_skipped_on_unsupported_backend(monkeypatch):
     _patch_base_config(monkeypatch, default_feedback_influence=0.5)
     caps = GraphCapabilities(supports_feedback_weights=False, supports_truth_state=False)
     assert FeedbackWeightsStage().gate(_inputs(capabilities=caps)) == REASON_BACKEND_UNSUPPORTED
-
-
-def test_feedback_weights_runs_when_influence_and_backend_allow(monkeypatch):
-    _patch_base_config(monkeypatch, default_feedback_influence=0.5)
-    assert FeedbackWeightsStage().gate(_inputs()) is None
 
 
 def test_session_stage_without_sessions_is_skipped_before_its_own_gate(monkeypatch):

@@ -22,7 +22,6 @@ from .stage import BaseStage
 logger = get_logger("improve")
 
 # Stage-specific gate reasons.
-REASON_FEEDBACK_INFLUENCE_ZERO = "feedback_influence_zero"
 REASON_SESSION_MANAGER_UNAVAILABLE = "session_manager_unavailable"
 REASON_AUTO_FEEDBACK_DISABLED = "auto_feedback_disabled"
 REASON_PERSONALIZATION_DISABLED = "personalization_disabled"
@@ -38,10 +37,9 @@ class FeedbackWeightsStage(BaseStage):
     needs_sessions = True
 
     def gate(self, inputs: ImproveRunInputs) -> str | None:
-        from cognee.base_config import get_base_config
-
-        if get_base_config().default_feedback_influence <= 0:
-            return REASON_FEEDBACK_INFLUENCE_ZERO
+        # No influence gate: feedback_influence is a read-time ranking knob that
+        # recall()/search() take per call, so weights must be written even when
+        # the global default is 0 (the only value base_config doesn't warn about).
         if not inputs.capabilities.supports_feedback_weights:
             return REASON_BACKEND_UNSUPPORTED
         return None

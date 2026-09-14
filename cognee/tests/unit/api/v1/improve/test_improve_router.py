@@ -48,7 +48,7 @@ def improve_stub(monkeypatch):
         dataset_name="docs",
         session_ids=["s1"],
         stages=[
-            StageResult.skipped("feedback_weights", "feedback_influence_zero"),
+            StageResult.skipped("feedback_weights", "backend_unsupported"),
             StageResult.completed("persist_session_qa", entries=3),
             enrichment,
         ],
@@ -82,7 +82,7 @@ def test_response_is_the_improve_result_with_one_entry_per_stage(client, improve
     assert body["stages"][0] == {
         "stage": "feedback_weights",
         "status": "skipped",
-        "reason": "feedback_influence_zero",
+        "reason": "backend_unsupported",
         "error": None,
         "counts": {},
         "duration_ms": 0,
