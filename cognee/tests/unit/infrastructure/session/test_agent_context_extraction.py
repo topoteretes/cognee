@@ -267,15 +267,18 @@ async def test_batch_noop_without_traces(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_batch_fail_open_on_llm_error(monkeypatch):
+async def test_batch_llm_error_propagates(monkeypatch):
+    """An LLM outage is not "no lessons found": it must reach the caller so the
+    watermark never advances over traces that were never extracted, and so the
+    improve stage's errored branch is reachable."""
     sm = FakeSessionManager(traces=[_trace("run_tests", status="error", error_message="exit 1")])
 
     async def boom(text_input, system_prompt, response_model):
         raise RuntimeError("llm down")
 
     monkeypatch.setattr(agent_context_extraction.LLMGateway, "acreate_structured_output", boom)
-    touched = await extract_batch_agent_context(session_manager=sm, user_id="u", session_id="s")
-    assert touched == []
+    with pytest.raises(RuntimeError, match="llm down"):
+        await extract_batch_agent_context(session_manager=sm, user_id="u", session_id="s")
     assert sm.store == []
 
 
@@ -425,11 +428,11 @@ async def test_pending_extraction_does_not_advance_watermark_on_llm_error(monkey
 
     monkeypatch.setattr(agent_context_extraction.LLMGateway, "acreate_structured_output", boom)
 
-    touched = await extract_pending_agent_context(
-        session_manager=sm, user_id="u", session_id="s", min_new_traces=3, overlap=1
-    )
+    with pytest.raises(RuntimeError, match="llm down"):
+        await extract_pending_agent_context(
+            session_manager=sm, user_id="u", session_id="s", min_new_traces=3, overlap=1
+        )
 
-    assert touched == []
     assert not any(row.get("kind") == TRACE_EXTRACTION_STATE_KIND for row in sm.store)
 
 

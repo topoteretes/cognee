@@ -293,9 +293,13 @@ async def extract_batch_agent_context(
             session_id=session_id,
             traces=traces,
         )
-    except Exception as error:
-        logger.warning("Batch agent-context extraction failed open: %s", error, exc_info=True)
-        return []
+    except Exception:
+        # No blanket catch-to-[] here: an LLM outage must propagate so the
+        # caller's watermark never advances over traces that were never
+        # extracted (the same failed-vs-empty rule the distillation watermark
+        # follows). Callers own the fail-open policy.
+        logger.warning("Batch agent-context extraction failed", exc_info=True)
+        raise
 
 
 async def extract_pending_agent_context(
@@ -315,40 +319,41 @@ async def extract_pending_agent_context(
 
     The LLM receives only the latest ``pending + overlap`` trace steps, capped by ``max_window``.
     The watermark advances only after the extraction attempt completes without raising.
-    Fail-open -> [].
+
+    Failures PROPAGATE — the callers own the fail-open policy: the trace-write
+    path wraps this in its own try (a failed extraction must never lose the
+    already-stored trace row), and the improve stage catches per session and
+    reports ``errored``. A blanket catch-to-[] here made that stage's errored
+    branch unreachable and hid every outage as "nothing pending".
     """
     if min_new_traces <= 0:
         return []
-    try:
-        plan = await _plan_pending_extraction(
-            session_manager=session_manager,
-            user_id=user_id,
-            session_id=session_id,
-            min_new_traces=min_new_traces,
-            overlap=overlap,
-            max_window=max_window,
-        )
-        if plan is None:
-            return []
-
-        traces = await session_manager.get_agent_trace_session(
-            user_id=user_id,
-            session_id=session_id,
-            last_n=plan.window_size,
-        )
-        touched = await _extract_batch_from_traces(
-            session_manager=session_manager,
-            user_id=user_id,
-            session_id=session_id,
-            traces=traces,
-        )
-        await TRACE_EXTRACTION_WATERMARK.write_count(
-            session_manager,
-            user_id,
-            session_id,
-            count=plan.total_trace_count,
-        )
-        return touched
-    except Exception as error:
-        logger.warning("Pending agent-context extraction failed open: %s", error, exc_info=True)
+    plan = await _plan_pending_extraction(
+        session_manager=session_manager,
+        user_id=user_id,
+        session_id=session_id,
+        min_new_traces=min_new_traces,
+        overlap=overlap,
+        max_window=max_window,
+    )
+    if plan is None:
         return []
+
+    traces = await session_manager.get_agent_trace_session(
+        user_id=user_id,
+        session_id=session_id,
+        last_n=plan.window_size,
+    )
+    touched = await _extract_batch_from_traces(
+        session_manager=session_manager,
+        user_id=user_id,
+        session_id=session_id,
+        traces=traces,
+    )
+    await TRACE_EXTRACTION_WATERMARK.write_count(
+        session_manager,
+        user_id,
+        session_id,
+        count=plan.total_trace_count,
+    )
+    return touched
