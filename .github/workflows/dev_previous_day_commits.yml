@@ -36,6 +36,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
+          # Pinned: this workflow analyses dev merges, so every job must run
+          # dev's tools/, not the default branch's. Without a ref a scheduled
+          # run checks out main (RES-41).
+          ref: dev
           fetch-depth: 0
 
       - name: Fetch latest dev branch
@@ -82,6 +86,7 @@ jobs:
       - name: Check out core repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
+          ref: dev
           fetch-depth: 0
 
       - name: Set up Python
@@ -426,6 +431,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        with:
+          ref: dev
 
       - name: Send failure email
         env:
