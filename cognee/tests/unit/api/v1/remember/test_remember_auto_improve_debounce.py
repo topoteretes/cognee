@@ -294,3 +294,32 @@ async def test_state_read_failure_fails_open(monkeypatch):
     decision = await debounce_module.should_auto_improve(BrokenSessionManager(), "u", "s")
     assert decision.due
     assert decision.reason == debounce_module.REASON_STATE_UNAVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_lock_held_bridge_refunds_the_debounce_window(monkeypatch, fake_sm):
+    """A bridge that lost its improve-lock claim persisted nothing, so its spent
+    debounce window is refunded: the NEXT remember() retries instead of waiting
+    out a full window behind a bridge that never ran."""
+    from cognee.modules.improve.result import REASON_LOCK_HELD
+
+    _config(monkeypatch, debounce_entries=3)
+    user = SimpleNamespace(id=uuid4())
+    calls = []
+    lock_held_first = ImproveResult.all_skipped(["a", "b"], REASON_LOCK_HELD)
+
+    async def fake_improve(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return lock_held_first
+        return ImproveResult(stages=[], memify_run={})
+
+    monkeypatch.setattr(improve_pkg, "improve", fake_improve)
+
+    results = await _remember_n(2, user)
+
+    # First call fired and lost the lock; the refund makes the second fire too.
+    assert len(calls) == 2
+    assert results[0].improve is lock_held_first
+    assert results[0].improve_error is None  # lock_held is a skip, not an error
+    assert results[1]._task is not None

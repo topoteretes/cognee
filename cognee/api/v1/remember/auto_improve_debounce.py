@@ -189,12 +189,11 @@ async def mark_auto_improve_fired(
     """Record that an automatic improve was launched for this session.
 
     Written before the improve runs, so back-to-back ``remember()`` calls see
-    the advanced watermark — including when the launched improve then loses
-    its lock claim to a concurrent run: the budget is spent either way, and
-    the skipped bridge's entries wait for the next fire (the persist stages'
-    own watermarks are independent of this row, so nothing is lost). Never
-    raises: losing the row only means the next call fires one improve earlier
-    than the thresholds ask for.
+    the advanced watermark. A launched bridge that then loses its lock claim
+    gets the window refunded (``rearm_auto_improve_debounce``), so its entries
+    never wait out a window behind a bridge that did nothing. Never raises:
+    losing the row only means the next call fires one improve earlier than
+    the thresholds ask for.
     """
     try:
         if qa_count is None:
@@ -210,3 +209,18 @@ async def mark_auto_improve_fired(
         )
     except Exception as exc:
         logger.debug("auto-improve debounce: could not save state (%s)", exc, exc_info=True)
+
+
+async def rearm_auto_improve_debounce(session_manager, user_id: str, session_id: str) -> None:
+    """Refund the debounce budget after a bridge that did no work.
+
+    A launched bridge that lost its improve-lock claim persisted nothing, but
+    ``mark_auto_improve_fired`` already spent the window — without a refund the
+    session's entries wait out a full extra debounce window behind a bridge
+    that never ran. Clearing the state value makes the NEXT ``remember()`` fire
+    unconditionally (a non-dict state is the first-run path). Never raises.
+    """
+    try:
+        await AUTO_IMPROVE_WATERMARK.write_value(session_manager, user_id, session_id, None)
+    except Exception as exc:
+        logger.debug("auto-improve debounce: could not re-arm (%s)", exc, exc_info=True)
