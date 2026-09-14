@@ -3,7 +3,7 @@
 from enum import Enum, auto
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from cognee.infrastructure.llm.config import (
     get_llm_config,
@@ -278,6 +278,35 @@ class SummarizedContent(BaseModel):
         ),
     )
     description: str = Field("", description="Unused; kept for backwards compatibility.")
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _coerce_description(cls, value: Any) -> Any:
+        """Accept whatever a model puts in this field.
+
+        ``description`` is unused and kept only for backwards compatibility,
+        but it is still part of the schema handed to the LLM, so a model is
+        free to fill it. Smaller local models routinely answer with a list of
+        bullets instead of a string, and strict validation then fails the whole
+        structured-output call -- instructor retries, exhausts, and an entire
+        cognify run dies on a field nothing reads. Observed nightly on the
+        llama-cpp suite:
+
+            ValidationError: 1 validation error for SummarizedContent
+            description
+              Input should be a valid string [type=string_type,
+              input_value=['Natural Language Proces...'], input_type=list]
+
+        Coerce instead of rejecting. ``summary`` -- the field that is actually
+        consumed -- keeps strict validation.
+        """
+        if value is None:
+            return ""
+        if isinstance(value, (list, tuple)):
+            return "\n".join(str(item) for item in value)
+        if not isinstance(value, str):
+            return str(value)
+        return value
 
 
 class SummarizedFunction(BaseModel):

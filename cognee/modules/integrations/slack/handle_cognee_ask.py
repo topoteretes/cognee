@@ -22,12 +22,13 @@ messages visible).
 
 import asyncio
 import logging
-from typing import Any, List, Optional, Tuple
+from typing import Any
 from urllib.parse import parse_qs
 from uuid import UUID, uuid4
 
 from cognee.api.v1.search.search import search as cognee_search
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
+from cognee.modules.integrations.slack.handle_slack_link import NOT_LINKED_MESSAGE
 from cognee.modules.integrations.slack.persistence import (
     get_by_team,
     is_active,
@@ -53,7 +54,7 @@ _pending_searches: set = set()
 # text itself — Slack button values cap at 2000 chars, easily blown by a
 # real question+answer). Popped on Share or Discard; an id missing here
 # (server restart, double-click) means "no longer available", not a crash.
-_pending_answers: dict[str, Tuple[str, str, List[dict[str, Any]]]] = {}
+_pending_answers: dict[str, tuple[str, str, list[dict[str, Any]]]] = {}
 
 # Keep the placeholder/confirm text readable even if someone pastes an essay.
 _QUERY_PREVIEW_MAX_CHARS = 200
@@ -63,7 +64,7 @@ def _ephemeral(
     text: str,
     *,
     replace_original: bool = False,
-    blocks: Optional[List[dict[str, Any]]] = None,
+    blocks: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a reply visible only to the person who ran the command.
 
@@ -77,7 +78,7 @@ def _in_channel(
     text: str,
     *,
     replace_original: bool = False,
-    blocks: Optional[List[dict[str, Any]]] = None,
+    blocks: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a reply visible to everyone in the channel/DM the command ran in.
 
@@ -92,7 +93,7 @@ def _reply(
     text: str,
     *,
     replace_original: bool,
-    blocks: Optional[List[dict[str, Any]]],
+    blocks: list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
     # `text` is always set, even when `blocks` is present — Slack renders it
     # in notifications, screen readers, and any client that doesn't support
@@ -128,13 +129,13 @@ async def handle_cognee_ask(raw_body: bytes) -> dict[str, Any]:
 
     owner_user_id = await resolve_owner_user_id(credential, team_id, invoking_slack_user_id)
     if owner_user_id is None:
-        return _ephemeral(
-            "Link your own Cognee account first: `/cognee-link <api_key>` "
-            "(create a key from your Cognee account's API Keys settings)."
-        )
+        return _ephemeral(NOT_LINKED_MESSAGE)
 
     if not text:
-        return _ephemeral("Usage: `/cognee-ask <your question>`")
+        return _ephemeral(
+            "Ask me something and I'll check what you know — "
+            "e.g. `/cognee-ask why did we choose Neon for v2?`"
+        )
 
     task = asyncio.create_task(_search_and_respond(response_url, team_id, owner_user_id, text))
     _pending_searches.add(task)
@@ -144,7 +145,7 @@ async def handle_cognee_ask(raw_body: bytes) -> dict[str, Any]:
     # on the answer that follows, so this ack (and the "<@user> used
     # /cognee-ask ..." invocation line an in_channel response would trigger)
     # must not leak the question either.
-    return _ephemeral(f'Searching your memory for: "{_preview(text)}"…')
+    return _ephemeral(f"🔎 Recalling: _{_preview(text)}_")
 
 
 def _preview(text: str) -> str:
@@ -182,7 +183,7 @@ async def _search_and_respond(response_url: str, team_id: str, user_id: UUID, te
             user=owner,
             datasets=None,  # search across every dataset the owner can read
         )
-    except Exception:  # noqa: BLE001 - any search failure must degrade to a chat message, not a crash
+    except Exception:  # any search failure must degrade to a chat message, not a crash
         logger.exception("Search failed for Slack team %s", team_id)
         await post_to_response_url(
             response_url, _ephemeral("Search failed. Please try again.", replace_original=True)
@@ -250,7 +251,7 @@ async def handle_cognee_ask_discard(answer_id: str) -> dict[str, Any]:
     return _ephemeral("Discarded.", replace_original=True)
 
 
-def _extract_fact(result: Any) -> Optional[str]:
+def _extract_fact(result: Any) -> str | None:
     """Pull the answer text out of one ``cognee.search()`` result.
 
     Despite the ``List[SearchResult]`` type hint, the public ``search()``
@@ -294,7 +295,7 @@ def _is_refusal(fact: str) -> bool:
     return any(marker in lowered for marker in _REFUSAL_MARKERS)
 
 
-def _format_answer(results: List[Any]) -> Tuple[str, List[dict[str, Any]]]:
+def _format_answer(results: list[Any]) -> tuple[str, list[dict[str, Any]]]:
     """Build a ``/cognee-ask`` answer as ``(fallback_text, blocks)``.
 
     ``fallback_text`` is a plain-text summary for notifications/screen
@@ -312,7 +313,7 @@ def _format_answer(results: List[Any]) -> Tuple[str, List[dict[str, Any]]]:
     if not facts:
         return "No relevant information found.", []
 
-    blocks: List[dict[str, Any]] = [
+    blocks: list[dict[str, Any]] = [
         {"type": "header", "text": {"type": "plain_text", "text": "Answer", "emoji": True}},
     ]
     for fact in facts:

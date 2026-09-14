@@ -10,20 +10,22 @@ setup_tracing() / setup_metrics().
 
 import logging
 import os
-from typing import Optional
 
 try:
     from opentelemetry._logs import set_logger_provider
     from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
-    from opentelemetry.sdk._logs.export import SimpleLogRecordProcessor
+    from opentelemetry.sdk._logs.export import (
+        BatchLogRecordProcessor,
+        SimpleLogRecordProcessor,
+    )
     from opentelemetry.sdk.resources import Resource
 
     _OTEL_LOGS_AVAILABLE = True
 except ImportError:
     _OTEL_LOGS_AVAILABLE = False
 
-_log_provider: Optional[object] = None
-_handler: Optional[object] = None
+_log_provider: object | None = None
+_handler: object | None = None
 
 # Loggers that receive the OTel handler (covers all cognee namespaces)
 _COGNEE_LOGGER_NAMES = [
@@ -35,7 +37,7 @@ _COGNEE_LOGGER_NAMES = [
 ]
 
 
-def setup_log_bridge(console_output: bool = False) -> Optional[object]:
+def setup_log_bridge(console_output: bool = False) -> object | None:
     """Attach an OTel logging handler to all cognee loggers.
 
     Reads the OTLP endpoint from BaseConfig (same as tracing). Returns the
@@ -47,8 +49,8 @@ def setup_log_bridge(console_output: bool = False) -> Optional[object]:
         return None
 
     from cognee.base_config import get_base_config
-    from cognee.version import get_cognee_version
     from cognee.modules.observability.tracing import _parse_otlp_headers
+    from cognee.version import get_cognee_version
 
     config = get_base_config()
     version = get_cognee_version()
@@ -71,9 +73,7 @@ def setup_log_bridge(console_output: bool = False) -> Optional[object]:
     if console_output:
         from opentelemetry.sdk._logs.export import ConsoleLogExporter
 
-        _log_provider.add_log_record_processor(
-            SimpleLogRecordProcessor(ConsoleLogExporter())
-        )
+        _log_provider.add_log_record_processor(SimpleLogRecordProcessor(ConsoleLogExporter()))
 
     set_logger_provider(_log_provider)
 
@@ -105,8 +105,12 @@ def _try_add_otlp_log_exporter(provider, endpoint: str, headers) -> None:
     try:
         from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
 
+        # BatchLogRecordProcessor exports on a background thread. A Simple
+        # processor here means one synchronous network round trip PER LOG
+        # RECORD on the emitting thread — cognify emits log lines by the
+        # hundred thousand, so that silently collapses pipeline throughput.
         provider.add_log_record_processor(
-            SimpleLogRecordProcessor(OTLPLogExporter(endpoint=logs_endpoint, headers=headers))
+            BatchLogRecordProcessor(OTLPLogExporter(endpoint=logs_endpoint, headers=headers))
         )
         _log.info("OTel: OTLP gRPC log exporter registered → %s", logs_endpoint)
     except ImportError:
@@ -119,8 +123,9 @@ def _add_http_log_exporter(provider, endpoint: str, headers) -> None:
             OTLPLogExporter as OTLPHttpLogExporter,
         )
 
+        # Batch, not Simple — see the gRPC path above for why.
         provider.add_log_record_processor(
-            SimpleLogRecordProcessor(OTLPHttpLogExporter(endpoint=endpoint, headers=headers))
+            BatchLogRecordProcessor(OTLPHttpLogExporter(endpoint=endpoint, headers=headers))
         )
     except ImportError:
         import warnings

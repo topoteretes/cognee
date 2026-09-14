@@ -1,5 +1,6 @@
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 from cognee.modules.retrieval.utils.used_graph_elements import (
     extract_from_edges,

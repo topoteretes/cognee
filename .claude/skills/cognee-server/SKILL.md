@@ -43,8 +43,15 @@ auth off you must set `ENABLE_BACKEND_ACCESS_CONTROL=false`.
 
   In Python: `await cognee.serve(url="http://localhost:8000")`.
 
-- **HTTP**: main routes live under `/api/v1/` — `add`, `cognify`, `search`,
-  `memify`, `datasets`, `users`, `visualize` (see `cognee/api/v1/`).
+- **HTTP**: main routes live under `/api/v1/` — the memory API is `remember`
+  (plus `remember/entry`), `recall`, `improve`, `forget`; `sessions` covers
+  session memory; `datasets`, `users`, `visualize` handle the rest. The legacy
+  `add`, `cognify`, `search`, `memify`, and `delete` routes still exist and are
+  what the memory routes call underneath (see `cognee/api/client.py` for the
+  registered routers, or `GET /openapi.json` on a running server).
+
+  Note there is **no `/api/v1/feedback` route** — `feedback` exists as a CLI
+  command and in the SDK, but is not exposed over HTTP.
 
 ## Graph visualization without the full UI
 
@@ -60,5 +67,5 @@ shutdown = visualization_server(port=8080)  # synchronous; returns a shutdown ca
   `"8080:8000"`).
 - 401/403 on every call → you're in multi-tenant mode; either authenticate or
   set `ENABLE_BACKEND_ACCESS_CONTROL=false` and restart.
-- Search returns `[]` instead of erroring → permission-filtered result;
-  check dataset access rights for the calling user.
+- `recall`/`search` returns `[]` instead of erroring → permission-filtered
+  result; check dataset access rights for the calling user.

@@ -15,29 +15,34 @@ echo "Debug port: $DEBUG_PORT"
 echo "HTTP port: $HTTP_PORT"
 echo "Bind address: $BIND_ADDRESS"
 
-# Run Alembic migrations with proper error handling.
+# Run migrations through cognee's own migration system rather than raw
+# alembic: it knows a fresh database from an existing one (fresh -> create
+# directories + build the schema from the models + `alembic stamp head`;
+# existing -> apply Alembic deltas + the graph/vector data chain), honors
+# ENABLE_AUTO_MIGRATIONS, and needs no working directory. Raw
+# `alembic upgrade head` had none of that: on a fresh volume it died on the
+# missing databases directory and the silent create_all fallback left the
+# schema unstamped.
+#
+# A relational migration failure aborts the boot (set -e). Per-dataset
+# data-chain failures do not: the server comes up, cognee blocks writes to
+# just those datasets and retries on the next start — the same semantics as
+# the in-app startup path.
 echo "Running database migrations..."
+python <<'PYTHON'
+import asyncio
 
-# Move to the cognee directory to run alembic migrations from there
-set +e # Disable exit on error to handle specific migration errors
-MIGRATION_OUTPUT=$(cd cognee && alembic upgrade head)
-MIGRATION_EXIT_CODE=$?
-set -e
+from cognee.modules.migrations.startup import run_migrations
 
-if [[ $MIGRATION_EXIT_CODE -ne 0 ]]; then
-    echo "Migration failed with unexpected error. Trying to run Cognee without migrations."
-
-    echo "Initializing database tables..."
-    python /app/cognee/modules/engine/operations/setup.py
-    INIT_EXIT_CODE=$?
-
-    if [[ $INIT_EXIT_CODE -ne 0 ]]; then
-        echo "Database initialization failed!"
-        exit 1
-    fi
-else
-    echo "Database migrations done."
-fi
+failed = asyncio.run(run_migrations())
+if failed:
+    print(
+        "Data migrations failed for: " + ", ".join(failed)
+        + ". Writes to those datasets are blocked until they migrate; "
+        "retried on the next start."
+    )
+PYTHON
+echo "Database migrations done."
 
 echo "Starting server..."
 

@@ -165,6 +165,7 @@ from pydantic import SkipValidation
 from cognee.infrastructure.engine import DataPoint
 from cognee.tasks.storage import add_data_points
 
+
 class ScientificPaper(DataPoint):
     title: str
     authors: list[str]
@@ -172,6 +173,7 @@ class ScientificPaper(DataPoint):
     findings: list[str]
     cites: SkipValidation[Any] = None
     metadata: dict = {"index_fields": ["title", "findings"]}
+
 
 paper = ScientificPaper(
     title="Graph Memory for Agents",
@@ -190,8 +192,10 @@ Use `run_custom_pipeline(...)` when the user needs explicit sequential task cont
 ```python
 from cognee.modules.pipelines.tasks.task import Task
 
+
 async def my_task(data):
     return data
+
 
 await cognee.run_custom_pipeline(
     tasks=[Task(my_task)],
@@ -252,7 +256,7 @@ await cognee.add(
     [
         "Alice prefers terse answers and email follow-ups.",
         "Alice escalates billing issues to finance first.",
-        "Bob prefers detailed technical explanations."
+        "Bob prefers detailed technical explanations.",
     ],
     dataset_name="agent_memory",
     node_set=["crm", "user_profiles"],
@@ -580,7 +584,7 @@ await cognee.start_ui()
 ```
 
 Caps: `neighborhood_depth=2`, `neighborhood_seed_top_k=10`, `max_nodes=500`.
-See `examples/python/subgraph_visualization_demo.py`.
+See `examples/guides/graph_visualization.py`.
 
 ## Pruning and reset operations
 

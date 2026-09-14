@@ -1,22 +1,22 @@
-from typing import Optional
 from uuid import UUID
-from sqlalchemy.exc import IntegrityError
+
 from sqlalchemy import insert
+from sqlalchemy.exc import IntegrityError
 
 from cognee.infrastructure.databases.exceptions import EntityAlreadyExistsError
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.users.models.UserTenant import UserTenant
-from cognee.modules.users.methods import get_user
-from cognee.modules.users.permissions.methods import get_tenant
 from cognee.modules.users.exceptions import (
-    UserNotFoundError,
-    TenantNotFoundError,
     PermissionDeniedError,
+    TenantNotFoundError,
+    UserNotFoundError,
 )
+from cognee.modules.users.methods import get_user
+from cognee.modules.users.models.UserTenant import UserTenant
+from cognee.modules.users.permissions.methods import get_tenant
 
 
 async def add_user_to_tenant(
-    user_id: UUID, tenant_id: UUID, owner_id: UUID, set_as_active_tenant: Optional[bool] = False
+    user_id: UUID, tenant_id: UUID, owner_id: UUID, set_as_active_tenant: bool | None = False
 ):
     """
         Add a user with the given id to the tenant with the given id.
@@ -34,20 +34,24 @@ async def add_user_to_tenant(
 
     """
     db_engine = get_relational_engine()
+
+    # Resolve user + tenant (each opens its own session) BEFORE opening ours, so
+    # this request never holds two pooled connections at once — that overlap
+    # deadlocks the pool under concurrency (issue #4197 class).
+    user = await get_user(user_id)
+    tenant = await get_tenant(tenant_id)
+
+    if not user:
+        raise UserNotFoundError
+    elif not tenant:
+        raise TenantNotFoundError
+
+    if tenant.owner_id != owner_id:
+        raise PermissionDeniedError(
+            message="Only tenant owner can add other users to organization."
+        )
+
     async with db_engine.get_async_session() as session:
-        user = await get_user(user_id)
-        tenant = await get_tenant(tenant_id)
-
-        if not user:
-            raise UserNotFoundError
-        elif not tenant:
-            raise TenantNotFoundError
-
-        if tenant.owner_id != owner_id:
-            raise PermissionDeniedError(
-                message="Only tenant owner can add other users to organization."
-            )
-
         if set_as_active_tenant:
             user.tenant_id = tenant_id
             await session.merge(user)

@@ -23,8 +23,8 @@ def datapoint_model_to_basemodel(
     """
     Convert a DataPoint-derived model into a plain BaseModel-derived model at runtime.
 
-    The converted model keeps only fields declared directly on each DataPoint subclass
-    (excluding inherited DataPoint infrastructure fields).
+    Keeps domain fields from the model and its custom DataPoint parents. Drops fields
+    defined on DataPoint itself (id, version, metadata, and other infrastructure).
     """
 
     def _replace_datapoint_types(
@@ -57,7 +57,7 @@ def datapoint_model_to_basemodel(
             return dict[key_type, value_type]
 
         if origin in (Union, types.UnionType):
-            return Union[tuple(_replace_datapoint_types(arg, cache) for arg in args)]
+            return Union[tuple(_replace_datapoint_types(arg, cache) for arg in args)]  # noqa: UP007 - runtime tuple
 
         return annotation
 
@@ -73,11 +73,10 @@ def datapoint_model_to_basemodel(
             model_config = ConfigDict(arbitrary_types_allowed=True)
 
         model_fields = model_type.model_fields
-        own_annotations = getattr(model_type, "__annotations__", {})
 
-        # For DataPoint subclasses, keep only fields explicitly declared on the subclass.
+        # Keep merged domain fields; drop DataPoint infrastructure (including metadata).
         if issubclass(model_type, DataPoint):
-            field_names = [name for name in own_annotations if name in model_fields]
+            field_names = [name for name in model_fields if name not in DataPoint.model_fields]
         else:
             field_names = list(model_fields.keys())
 
@@ -142,7 +141,7 @@ def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
     mod = types.ModuleType(module_name)
     sys.modules[module_name] = mod
 
-    exec(result, mod.__dict__)
+    exec(result, mod.__dict__)  # noqa: S102 - runs the generated model module source on purpose
     namespace = mod.__dict__
 
     # Extract the generated graph model class from the module's namespace

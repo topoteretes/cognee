@@ -132,7 +132,7 @@ def test_callback_surfaces_missing_frontend_url_as_503_not_a_raw_crash(client):
 def test_callback_success_redirects_connected(client):
     from cognee.modules.integrations.oauth_flow import make_state
 
-    state = make_state(user_id=USER_ID, signing_secret="fake-secret")
+    state = make_state(USER_ID, signing_secret="fake-secret")
     with patch.object(
         _router_module,
         "complete_installation",
@@ -147,7 +147,7 @@ def test_callback_success_redirects_connected(client):
 def test_callback_cross_user_conflict_redirects_already_connected(client):
     from cognee.modules.integrations.oauth_flow import make_state
 
-    state = make_state(user_id=USER_ID, signing_secret="fake-secret")
+    state = make_state(USER_ID, signing_secret="fake-secret")
     with patch.object(
         _router_module,
         "complete_installation",
@@ -162,7 +162,7 @@ def test_callback_cross_user_conflict_redirects_already_connected(client):
 def test_callback_unexpected_error_redirects_exchange_failed(client):
     from cognee.modules.integrations.oauth_flow import make_state
 
-    state = make_state(user_id=USER_ID, signing_secret="fake-secret")
+    state = make_state(USER_ID, signing_secret="fake-secret")
     with patch.object(
         _router_module,
         "complete_installation",

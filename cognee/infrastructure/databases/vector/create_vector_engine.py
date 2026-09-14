@@ -1,13 +1,15 @@
-import os
 import inspect
+import os
 from numbers import Number
 
-from .supported_databases import supported_databases
-from .embeddings import get_embedding_engine
 from cognee.infrastructure.databases.dataset_queue.pinning import dataset_queue_pin_predicate
 from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
-from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
+from cognee.infrastructure.databases.utils.engine_cache_ops import EngineCacheOps
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
+
+from .embeddings import get_embedding_engine
+from .supported_databases import supported_databases
 
 logger = get_logger("VectorEngine")
 
@@ -60,6 +62,7 @@ def create_vector_engine(
     vector_db_password: str = "",
     vector_db_host: str = "",
     vector_db_subprocess_enabled: bool = True,
+    vector_db_schema: str = "",
 ):
     """
     Wrapper function to call create vector engine with caching.
@@ -77,6 +80,7 @@ def create_vector_engine(
     # reassign so callers passing ``None`` see the function-default applied
     # instead of having ``None`` flow into the cache key + factory.
     vector_db_subprocess_enabled = normalized_optional_params["vector_db_subprocess_enabled"]
+    vector_db_schema = normalized_optional_params["vector_db_schema"]
 
     # Check USE_UNIFIED_PROVIDER outside the cache so it's always re-read
     # unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
@@ -110,17 +114,17 @@ def create_vector_engine(
         vector_db_password,
         vector_db_host,
         vector_db_subprocess_enabled,
+        vector_db_schema,
     )
 
 
-def evict_vector_engine(**kwargs) -> bool:
-    """Evict a cached vector engine entry created via ``create_vector_engine``.
-
-    Mirrors ``create_vector_engine``'s normalization so the cache key
-    matches. Returns True if the entry existed.
-    """
+def _vector_engine_key_args(kwargs) -> tuple:
+    """Positional cache-key args for a ``create_vector_engine`` config dict,
+    normalized the way ``create_vector_engine`` normalizes them so the key
+    matches. The single place this knowledge lives — every cache operation
+    on ``vector_engine_cache`` routes through it."""
     normalized = _normalize_optional_create_vector_engine_params(kwargs)
-    return _create_vector_engine.cache_evict(
+    return (
         kwargs.get("vector_db_provider", ""),
         kwargs.get("vector_db_url", ""),
         kwargs.get("vector_db_name", ""),
@@ -131,60 +135,7 @@ def evict_vector_engine(**kwargs) -> bool:
         normalized["vector_db_password"],
         normalized["vector_db_host"],
         normalized["vector_db_subprocess_enabled"],
-    )
-
-
-def evict_vector_engines_for_database(vector_db_name: str) -> int:
-    """Evict every cached vector engine bound to *vector_db_name*.
-
-    The same per-dataset database can be cached under multiple keys: the
-    dataset-handler paths and the pipeline's context-config path build their
-    engines with different kwargs (e.g. ``vector_dataset_database_handler``),
-    so key-exact ``evict_vector_engine`` misses entries and leaves an engine
-    with a dead connection pool and stale collection metadata. Per-dataset
-    database names are dataset UUIDs, so matching the name against key fields
-    cannot collide with other entries.
-
-    Returns the number of evicted entries.
-    """
-    if not vector_db_name:
-        raise ValueError("vector_db_name must be a non-empty database name")
-    return _create_vector_engine.cache_evict_matching(vector_db_name=vector_db_name)
-
-
-async def aevict_vector_engines_for_database(vector_db_name: str) -> int:
-    """Evict every cached vector engine bound to *vector_db_name* and wait
-    until their IN-FLIGHT closes have completed. Use before removing the
-    database's files so a teardown that is already running cannot race the
-    removal.
-
-    A close still deferred behind a live caller proxy (an idle engine handle)
-    is NOT waited on — see the ``closing_lru_cache`` module docstring. In that
-    case files are removed under an engine that closes later; on POSIX the
-    unlinked files stay valid for the holder and the eventual close writes to
-    nowhere, which is acceptable for a dataset being deleted.
-
-    Returns the number of evicted entries.
-    """
-    evicted = evict_vector_engines_for_database(vector_db_name)
-    await _create_vector_engine.cache_await_closed(vector_db_name=vector_db_name)
-    return evicted
-
-
-def is_vector_engine_cached(**kwargs) -> bool:
-    """Check whether a vector engine entry exists in the cache without creating."""
-    normalized = _normalize_optional_create_vector_engine_params(kwargs)
-    return _create_vector_engine.cache_contains(
-        kwargs.get("vector_db_provider", ""),
-        kwargs.get("vector_db_url", ""),
-        kwargs.get("vector_db_name", ""),
-        normalized["vector_db_port"],
-        normalized["vector_db_key"],
-        normalized["vector_dataset_database_handler"],
-        normalized["vector_db_username"],
-        normalized["vector_db_password"],
-        normalized["vector_db_host"],
-        normalized["vector_db_subprocess_enabled"],
+        normalized["vector_db_schema"],
     )
 
 
@@ -203,6 +154,7 @@ def _create_vector_engine(
     vector_db_password: str,
     vector_db_host: str,
     vector_db_subprocess_enabled: bool,
+    vector_db_schema: str = "",
 ):
     """
     Create a vector database engine based on the specified provider.
@@ -238,11 +190,19 @@ def _create_vector_engine(
     if vector_db_provider in supported_databases:
         adapter = supported_databases[vector_db_provider]
 
+        # Forward the connection details the wrapper already accepts so registered
+        # community adapters can reach a store on a non-default host/port or one that
+        # needs credentials. Adapters that don't need them accept **kwargs and ignore
+        # the extras, so this stays backwards-compatible.
         return adapter(
             url=vector_db_url,
             api_key=vector_db_key,
             embedding_engine=embedding_engine,
             database_name=vector_db_name,
+            vector_db_host=vector_db_host,
+            vector_db_port=vector_db_port,
+            vector_db_username=vector_db_username,
+            vector_db_password=vector_db_password,
         )
 
     if vector_db_provider.lower() == "pgvector":
@@ -252,7 +212,7 @@ def _create_vector_engine(
             if not (
                 vector_db_host and vector_db_port and vector_db_username and vector_db_password
             ):
-                raise EnvironmentError("Missing required pgvector credentials.")
+                raise OSError("Missing required pgvector credentials.")
 
             connection_string: str = (
                 f"postgresql+asyncpg://{vector_db_username}:{vector_db_password}"
@@ -289,7 +249,7 @@ def _create_vector_engine(
                 db_name = relational_config.db_name
 
                 if not (db_host and db_port and db_name and db_username and db_password):
-                    raise EnvironmentError("Missing required pgvector credentials!")
+                    raise OSError("Missing required pgvector credentials!")
 
                 connection_string: str = (
                     f"postgresql+asyncpg://{db_username}:{db_password}"
@@ -307,6 +267,7 @@ def _create_vector_engine(
             connection_string,
             vector_db_key,
             embedding_engine,
+            schema=vector_db_schema,
         )
 
     elif vector_db_provider.lower() == "neptune_analytics":
@@ -318,11 +279,11 @@ def _create_vector_engine(
             )
 
         if not vector_db_url:
-            raise EnvironmentError("Missing Neptune endpoint.")
+            raise OSError("Missing Neptune endpoint.")
 
         from cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter import (
-            NeptuneAnalyticsAdapter,
             NEPTUNE_ANALYTICS_ENDPOINT_URL,
+            NeptuneAnalyticsAdapter,
         )
 
         if not vector_db_url.startswith(NEPTUNE_ANALYTICS_ENDPOINT_URL):
@@ -357,7 +318,7 @@ def _create_vector_engine(
         try:
             # Probe the driver itself: the adapter module imports it lazily, so
             # importing the module alone would not catch a missing turso extra.
-            import libsql_experimental  # noqa: F401
+            import libsql_experimental
         except ImportError:
             raise ImportError(
                 "Turso/libSQL dependencies are not installed. Please install with "
@@ -374,7 +335,23 @@ def _create_vector_engine(
         )
 
     else:
-        raise EnvironmentError(
+        raise OSError(
             f"Unsupported vector database provider: {vector_db_provider}. "
             f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['LanceDB', 'PGVector', 'neptune_analytics', 'Turso'])}"
         )
+
+
+# Public cache-management API for vector engines: ``vector_engine_cache.evict``
+# / ``.touch`` / ``.is_cached`` / ``.evict_for_database`` /
+# ``.aevict_for_database``.
+#
+# Dependency injection: EngineCacheOps holds the shared procedure (which cache
+# method implements which operation), and this call supplies the three
+# vector-specific dependencies — which cache to operate on (the decorated
+# factory), how a config dict becomes that cache's exact key (the key
+# builder), and which key field holds the per-dataset database name (for the
+# by-database evictions). The graph module builds its own instance from the
+# same class, so the procedure exists once and cannot drift between engines.
+vector_engine_cache = EngineCacheOps(
+    _create_vector_engine, _vector_engine_key_args, "vector_db_name"
+)

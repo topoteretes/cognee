@@ -1,4 +1,5 @@
 import os
+
 from fastapi_users.authentication import CookieTransport
 
 # Get cookie domain from environment variable

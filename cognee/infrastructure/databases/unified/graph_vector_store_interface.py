@@ -10,9 +10,12 @@ class GraphVectorStoreInterface:
     contract.
     """
 
-    async def delete_by_source_ref(self, source_ref_key: str) -> None:
+    async def delete_by_source_ref(self, source_ref_key: str):
         """
         Delete artifacts owned only by the given source ref.
+
+        Returns a ``SourceRefRemovalResult`` carrying the hard-deleted node/edge
+        identities so callers can invalidate derived caches.
 
         Parameters:
         -----------

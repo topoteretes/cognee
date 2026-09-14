@@ -6,25 +6,32 @@ Call sites that know the active session_id wrap their work in
 opts in) calls ``record_llm_call`` after each LLM completion. The
 tracker accumulates into the ``SessionRecord`` row.
 
-Token counts are approximate — we don't currently extract
-``response.usage`` from the litellm/instructor client (requires
-changes deeper in the stack). A ~chars/4 heuristic is close enough
-for the dashboard's "are we spending?" question without plumbing
-upstream.
+Token counts are exact for the instructor and litellm_native
+structured-output paths — ``LLMGateway`` reads real
+``prompt_tokens``/``completion_tokens`` off the raw provider response
+(instructor attaches it internally; the litellm_native adapter attaches
+it explicitly, see ``_attach_raw_response``) and passes them as
+``tokens_in_override``/``tokens_out_override`` below (see
+``LLMGateway._exact_usage_from_result``). BAML and the plain-string path
+that skips structured output don't expose that raw response, so calls
+through those still fall back to the ~chars/4 heuristic here — close
+enough for the dashboard's "are we spending?" question on those paths.
 """
 
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from typing import Optional
 from uuid import UUID as UUIDType
 
+# Submodule import on purpose: avoids the cognee.modules.operations
+# package-init chain from this low-level module.
+from cognee.modules.operations.usage_accumulator import get_active_operation_usage
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("session_usage")
 
 
 # (session_id, user_id) when active, else None.
-_active_session: ContextVar[Optional[tuple[str, UUIDType]]] = ContextVar(
+_active_session: ContextVar[tuple[str, UUIDType] | None] = ContextVar(
     "cognee_session_usage_target", default=None
 )
 
@@ -108,7 +115,7 @@ _PRICING_PER_M_TOKENS = {
 _PRICING_SORTED = sorted(_PRICING_PER_M_TOKENS.items(), key=lambda kv: -len(kv[0]))
 
 
-def _estimate_cost_usd(model: Optional[str], tokens_in: int, tokens_out: int) -> float:
+def _estimate_cost_usd(model: str | None, tokens_in: int, tokens_out: int) -> float:
     if not model:
         return 0.0
     # Normalize: strip provider prefix ("openai/gpt-4o" → "gpt-4o"), drop date suffix.
@@ -119,7 +126,7 @@ def _estimate_cost_usd(model: Optional[str], tokens_in: int, tokens_out: int) ->
     return 0.0
 
 
-def estimate_cost_usd(model: Optional[str], tokens_in: int, tokens_out: int) -> float:
+def estimate_cost_usd(model: str | None, tokens_in: int, tokens_out: int) -> float:
     """Estimate USD cost for a model using Cognee's rough pricing table.
 
     Unrecognized models cost $0 — callers that surface the number should say so.
@@ -131,9 +138,9 @@ async def record_llm_call(
     *,
     input_text: str,
     output_text: str,
-    model: Optional[str] = None,
-    tokens_in_override: Optional[int] = None,
-    tokens_out_override: Optional[int] = None,
+    model: str | None = None,
+    tokens_in_override: int | None = None,
+    tokens_out_override: int | None = None,
 ) -> None:
     """If there's an active session, accumulate this call's usage into it.
 
@@ -141,17 +148,25 @@ async def record_llm_call(
     caller has exact counts from ``response.usage``; otherwise the
     char-based estimate is used.
     """
-    target = _active_session.get()
-    if target is None:
-        return
-    session_id, user_id = target
-
     tokens_in = (
         tokens_in_override if tokens_in_override is not None else _estimate_tokens(input_text)
     )
     tokens_out = (
         tokens_out_override if tokens_out_override is not None else _estimate_tokens(output_text)
     )
+
+    # Operation-level accumulation is session-independent: an active
+    # record_operation / run_tasks scope captures tokens even when no
+    # session-usage target is set (SDK-399).
+    op_usage = get_active_operation_usage()
+    if op_usage is not None:
+        op_usage.add(tokens_in, tokens_out)
+
+    target = _active_session.get()
+    if target is None:
+        return
+    session_id, user_id = target
+
     cost = _estimate_cost_usd(model, tokens_in, tokens_out)
 
     try:
@@ -166,4 +181,4 @@ async def record_llm_call(
             model=model,
         )
     except Exception as exc:
-        logger.debug("record_llm_call: accumulate failed (%s)", exc)
+        logger.debug("record_llm_call: accumulate failed (%s)", exc, exc_info=True)

@@ -1,6 +1,7 @@
 """Prepare edges for graph storage by ensuring each has default edge properties."""
 
-from typing import Any, Dict, Iterable, List, Tuple
+from collections.abc import Iterable
+from typing import Any
 
 from cognee.modules.engine.utils import generate_edge_object_id
 from cognee.shared.logging_utils import get_logger
@@ -98,9 +99,9 @@ def _build_fallback_edge_text(
 
 
 def ensure_default_edge_properties(
-    edges: List[Tuple[str, str, str, Dict[str, Any]]],
+    edges: list[tuple[str, str, str, dict[str, Any]]],
     nodes: Iterable[Any] | None = None,
-) -> List[Tuple[str, str, str, Dict[str, Any]]]:
+) -> list[tuple[str, str, str, dict[str, Any]]]:
     """
     Ensure each edge has all default properties and retrieval text.
     Returns a new list of edges; does not mutate the input.

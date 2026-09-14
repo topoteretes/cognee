@@ -17,6 +17,7 @@ from cognee.modules.integrations.credentials import (
     STATUS_ACTIVE,
     STATUS_REVOKED,
     CrossUserConflictError,
+    get_active_credential_for_workspace,
     upsert_credential,
 )
 
@@ -24,6 +25,8 @@ PROVIDER = "slack"
 ACCOUNT_ID = "T123"
 USER_A = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 USER_B = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+WORKSPACE_A = UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")
+WORKSPACE_B = UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
 
 
 @pytest.fixture(autouse=True)
@@ -32,9 +35,12 @@ def _credentials_key(monkeypatch):
     monkeypatch.setenv("INTEGRATION_CREDENTIALS_KEY", base64.b64encode(b"0" * 32).decode())
 
 
-def make_existing(user_id: UUID, status: str = STATUS_ACTIVE) -> MagicMock:
+def make_existing(
+    user_id: UUID, status: str = STATUS_ACTIVE, workspace_id: UUID | None = None
+) -> MagicMock:
     credential = MagicMock()
     credential.user_id = user_id
+    credential.workspace_id = workspace_id
     credential.status = status
     return credential
 
@@ -61,7 +67,7 @@ def make_engine(session: MagicMock) -> MagicMock:
     return engine
 
 
-async def _upsert(user_id: UUID, session: MagicMock):
+async def _upsert(user_id: UUID, session: MagicMock, workspace_id: UUID | None = None):
     with patch(
         "cognee.modules.integrations.credentials.get_relational_engine",
         return_value=make_engine(session),
@@ -71,6 +77,7 @@ async def _upsert(user_id: UUID, session: MagicMock):
             user_id=user_id,
             provider_account_id=ACCOUNT_ID,
             token_payload={"access_token": "xoxb-secret"},
+            workspace_id=workspace_id,
         )
 
 
@@ -105,6 +112,59 @@ async def test_first_connection_inserts():
     await _upsert(USER_A, session)
     session.add.assert_called_once()
     session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_workspace_scoped_different_workspace_active_is_refused():
+    # Owned by WORKSPACE_A; a different workspace reconnecting must be
+    # refused even though the connecting user differs too — workspace_id is
+    # the conflict key here, not user_id.
+    existing = make_existing(USER_A, STATUS_ACTIVE, workspace_id=WORKSPACE_A)
+    session = make_session(existing)
+    with pytest.raises(CrossUserConflictError):
+        await _upsert(USER_B, session, workspace_id=WORKSPACE_B)
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_workspace_scoped_same_workspace_different_user_reconnect_is_allowed():
+    # Same workspace, a different member of it reconnecting (e.g. someone
+    # else on the team clicks "Connect" again) takes the row over — the
+    # workspace owns it, not whichever user happened to connect it first.
+    existing = make_existing(USER_A, STATUS_ACTIVE, workspace_id=WORKSPACE_A)
+    session = make_session(existing)
+    await _upsert(USER_B, session, workspace_id=WORKSPACE_A)
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_omitting_workspace_id_falls_back_to_user_id_even_if_row_has_one():
+    # A caller that doesn't pass workspace_id keeps the original single-user
+    # contract literally: it compares against user_id, not workspace_id, even
+    # if the existing row happens to carry a workspace_id from a previous
+    # workspace-scoped connect.
+    existing = make_existing(USER_A, STATUS_ACTIVE, workspace_id=WORKSPACE_A)
+    session = make_session(existing)
+    with pytest.raises(CrossUserConflictError):
+        await _upsert(USER_B, session)
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_active_credential_for_workspace_filters_by_workspace_and_status():
+    existing = make_existing(USER_A, STATUS_ACTIVE, workspace_id=WORKSPACE_A)
+    execute_result = MagicMock()
+    execute_result.scalars.return_value.first.return_value = existing
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=execute_result)
+
+    with patch(
+        "cognee.modules.integrations.credentials.get_relational_engine",
+        return_value=make_engine(session),
+    ):
+        result = await get_active_credential_for_workspace(WORKSPACE_A, PROVIDER)
+
+    assert result is existing
 
 
 @pytest.mark.asyncio

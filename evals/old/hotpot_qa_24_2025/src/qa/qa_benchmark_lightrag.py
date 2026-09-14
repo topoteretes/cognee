@@ -4,12 +4,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from dotenv import load_dotenv
-
 from lightrag import LightRAG, QueryParam
-from lightrag.llm.openai import gpt_4o_mini_complete, gpt_4o_complete, openai_embed
 from lightrag.kg.shared_storage import initialize_pipeline_status
+from lightrag.llm.openai import gpt_4o_complete, gpt_4o_mini_complete, openai_embed
 from lightrag.utils import setup_logger
-from .qa_benchmark_base import QABenchmarkRAG, QABenchmarkConfig
+
+from .qa_benchmark_base import QABenchmarkConfig, QABenchmarkRAG
 
 load_dotenv()
 setup_logger("lightrag", level="INFO")

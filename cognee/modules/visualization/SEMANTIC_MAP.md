@@ -69,7 +69,7 @@ In the tab:
 - **Recall overlay** lights up the nodes a past recall query retrieved.
 
 A runnable end-to-end example lives at
-`examples/python/semantic_memory_map.py`.
+`examples/guides/semantic_memory_map.py`.
 
 ## Design notes
 

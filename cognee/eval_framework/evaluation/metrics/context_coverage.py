@@ -1,7 +1,7 @@
 from deepeval.metrics import SummarizationMetric
-from deepeval.test_case import LLMTestCase
-from deepeval.metrics.summarization.schema import ScoreType
 from deepeval.metrics.indicator import metric_progress_indicator
+from deepeval.metrics.summarization.schema import ScoreType
+from deepeval.test_case import LLMTestCase
 from deepeval.utils import get_or_create_event_loop
 
 

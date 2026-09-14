@@ -1,0 +1,19 @@
+Cognee is an open-source AI memory platform. It transforms raw text,
+files, and URLs into a persistent knowledge graph that agents can query.
+
+The core workflow has three verbs: remember (ingest data), recall (query
+the graph), and forget (evict data). Behind the scenes, remember runs an
+extract-cognify-load pipeline: it chunks the input, extracts entities and
+relationships with an LLM, embeds the chunks, and stores the results in
+a graph database plus a vector store.
+
+For example, Alice works at Anthropic in San Francisco. She contributes
+to the Cognee project. The Cognee project depends on litellm for LLM
+routing and on Ladybug as its default graph backend. Ladybug is a
+lightweight, in-process graph store designed for local development.
+
+Recall queries can traverse this graph: "who works at Anthropic" returns
+Alice, "what does Cognee depend on" returns litellm and Ladybug, and
+"where does Alice live" returns San Francisco. Recall combines a vector
+similarity step with graph traversal so the answers stay grounded in the
+original chunks rather than being invented by the language model.

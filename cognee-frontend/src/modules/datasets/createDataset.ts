@@ -1,3 +1,4 @@
+import { notifySurveyTrigger } from "@/services/survey/surveyTriggerBridge";
 import { CogneeInstance } from "../instances/types";
 
 export default async function createDataset(
@@ -14,8 +15,11 @@ export default async function createDataset(
   });
   const created = await response.json();
 
-  // Grant tenant-level read+write so all tenant members can see this dataset
-  if (tenantId && created.id) {
+  // Grant tenant-level read+write so all tenant members can see this dataset.
+  // Skip in local (self-hosted) mode, where tenantId is the "local" sentinel
+  // rather than a real UUID — there's no multi-tenant sharing to set up there.
+  const isRealTenantId = !!tenantId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tenantId);
+  if (isRealTenantId && created.id) {
     const body = JSON.stringify([created.id]);
     try {
       await Promise.all([
@@ -36,6 +40,8 @@ export default async function createDataset(
       // Non-fatal — dataset was created, just not shared yet
     }
   }
+
+  notifySurveyTrigger("datasource_added");
 
   return created;
 }

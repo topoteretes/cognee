@@ -1,3 +1,4 @@
+import logging
 import pathlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -14,6 +15,8 @@ from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
     QueryDecomposition,
 )
 from cognee.tasks.storage import add_data_points
+
+logger = logging.getLogger(__name__)
 
 ORIGINAL_QUERY = "Who works at Figma and who works at Canva?"
 SUBQUERIES = ["Who works at Figma?", "Who works at Canva?"]
@@ -107,7 +110,7 @@ async def setup_test_environment_simple():
         await cognee.prune.prune_system(metadata=True)
         _clear_engine_caches()
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_test_environment_simple", exc_info=True)
 
 
 @pytest_asyncio.fixture
@@ -140,7 +143,7 @@ async def setup_test_environment_empty():
         await cognee.prune.prune_system(metadata=True)
         _clear_engine_caches()
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_test_environment_empty", exc_info=True)
 
 
 @pytest.fixture

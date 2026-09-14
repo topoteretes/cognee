@@ -1,63 +1,79 @@
 """FastAPI server for the Cognee API."""
 
 import os
+from contextlib import asynccontextmanager
+from traceback import format_exc
 
 import uvicorn
-from traceback import format_exc
-from contextlib import asynccontextmanager
-from fastapi import Request
-from fastapi import FastAPI, status
+from fastapi import FastAPI, Request, status
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
+from fastapi.responses import JSONResponse
 
-from cognee.exceptions import CogneeApiError
-from cognee.shared.logging_utils import get_logger, setup_logging
-from cognee.api.v1.cloud.routers import get_checks_router
-from cognee.api.v1.permissions.routers import get_permissions_router
-from cognee.api.v1.settings.routers import get_settings_router
-from cognee.api.v1.datasets.routers import get_datasets_router
-from cognee.api.v1.cognify.routers import get_cognify_router
-from cognee.api.v1.search.routers import get_search_router
-from cognee.api.v1.ontologies.routers.get_ontology_router import get_ontology_router
-from cognee.api.v1.memify.routers import get_memify_router
+# Registers the GitHub and Linear integrations with the integrations registry
+# as import side effects. Slack registers via its router imports above; GitHub
+# and Linear mount no routers of their own (webhooks arrive on the generic
+# /api/v1/integrations/{provider}/events routes), so the registration imports
+# are explicit here.
+import cognee.modules.integrations.github
+import cognee.modules.integrations.linear
+from cognee.api.v1.activity.routers import get_activity_router
 from cognee.api.v1.add.routers import get_add_router
+from cognee.api.v1.agents.routers import get_agents_router
+from cognee.api.v1.api_keys.routers import get_api_key_management_router
+from cognee.api.v1.cloud.routers import get_checks_router
+from cognee.api.v1.cognify.routers import get_cognify_router
+from cognee.api.v1.datasets.routers import get_datasets_router
 from cognee.api.v1.delete.routers import get_delete_router
-from cognee.api.v1.remember.routers import get_remember_router
-from cognee.api.v1.recall.routers import get_recall_router
-from cognee.api.v1.improve.routers import get_improve_router
 from cognee.api.v1.forget.routers import get_forget_router
-from cognee.api.v1.responses.routers import get_responses_router
-from cognee.api.v1.llm.routers import get_llm_router
-from cognee.api.v1.sync.routers import get_sync_router
 from cognee.api.v1.health.routers import get_health_router
+from cognee.api.v1.improve.routers import get_improve_router
+from cognee.api.v1.integrations.routers import get_integrations_router
+from cognee.api.v1.llm.routers import get_llm_router
+from cognee.api.v1.memify.routers import get_memify_router
+from cognee.api.v1.ontologies.routers.get_ontology_router import get_ontology_router
+from cognee.api.v1.permissions.routers import get_permissions_router
+from cognee.api.v1.proposals.routers import get_proposals_router
+from cognee.api.v1.recall.routers import get_recall_router
+from cognee.api.v1.remember.routers import get_remember_router
+from cognee.api.v1.responses.routers import get_responses_router
+from cognee.api.v1.search.routers import get_search_router
+from cognee.api.v1.sessions import get_sessions_router
+from cognee.api.v1.settings.routers import get_settings_router
+from cognee.api.v1.skills.routers import get_skills_router
+from cognee.api.v1.slack.routers import get_slack_channels_router, get_slack_router
+from cognee.api.v1.sync.routers import get_sync_router
 from cognee.api.v1.update.routers import get_update_router
 from cognee.api.v1.users.routers import (
     get_auth_router,
+    get_configuration_router,
     get_register_router,
     get_reset_password_router,
-    get_verify_router,
-    get_users_router,
-    get_visualize_router,
-    get_configuration_router,
     get_user_id_by_email_router,
+    get_users_router,
+    get_verify_router,
+    get_visualize_router,
 )
-from cognee.api.v1.api_keys.routers import get_api_key_management_router
-from cognee.api.v1.agents.routers import get_agents_router
+from cognee.api.v1.validate.routers import get_validate_router
 from cognee.api.v1.visualize.routers import get_schema_router
-from cognee.api.v1.skills.routers import get_skills_router
-from cognee.api.v1.proposals.routers import get_proposals_router
-from cognee.api.v1.activity.routers import get_activity_router
-from cognee.api.v1.sessions import get_sessions_router
-from cognee.api.v1.slack.routers import get_slack_channels_router, get_slack_router
-from cognee.api.v1.integrations.routers import get_integrations_router
+from cognee.exceptions import CogneeApiError
+from cognee.modules.users.authentication.redact_websocket_query_secrets import (
+    install_websocket_query_param_redaction,
+)
 from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
+from cognee.shared.logging_utils import get_logger, setup_logging
 
 # Ensure application logging is configured for container stdout/stderr
 setup_logging()
 logger = get_logger()
+
+# Keeps the WebSocket ?token= auth fallback out of uvicorn's own access/error
+# logs, regardless of how uvicorn was launched (this module is imported
+# either way). See redact_websocket_query_secrets.py for why this can't be
+# left to proxy-side redaction alone.
+install_websocket_query_param_redaction()
 
 app_environment = os.getenv("ENV", "prod")
 
@@ -74,6 +90,7 @@ async def lifespan(app: FastAPI):
     try:
         await run_migrations()
     except Exception:
+        logger.debug("Ignoring exception in lifespan", exc_info=True)
         db_engine = get_relational_engine()
         await db_engine.create_database()
 
@@ -104,8 +121,24 @@ async def lifespan(app: FastAPI):
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
 
+    # Flush in-flight telemetry and close its shared aiohttp session on the
+    # loop that owns them, instead of leaving it to the atexit fallback.
+    from cognee.shared.utils import close_telemetry_session
+
+    await close_telemetry_session()
+
 
 app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def _stamp_operation_origin(request, call_next):
+    # Operations executed for this request record origin="api" in
+    # pipeline_runs. ContextVars set here propagate into the handler task.
+    from cognee.modules.operations import ORIGIN_API, set_operation_origin
+
+    set_operation_origin(ORIGIN_API)
+    return await call_next(request)
 
 
 # Read allowed origins from environment variable (comma-separated)
@@ -195,7 +228,7 @@ async def exception_handler(_: Request, exc: CogneeApiError) -> JSONResponse:
         logger.error("Improperly defined exception: %s", exc)
         # Provide a default error response
         detail["message"] = "An unexpected error occurred."
-        status_code = status.HTTP_418_IM_A_TEAPOT
+        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
 
     # log the stack trace for easier serverside debugging
     logger.error(format_exc())
@@ -258,6 +291,8 @@ app.include_router(
 )
 
 app.include_router(get_delete_router(), prefix="/api/v1/delete", tags=["delete"])
+
+app.include_router(get_validate_router(), prefix="/api/v1/validate", tags=["validate"])
 
 app.include_router(get_update_router(), prefix="/api/v1/update", tags=["update"])
 
@@ -347,10 +382,10 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
 
         config = uvicorn.Config(app, host=host, port=port)
         uvicorn.Server(config).run(sockets=[sock])
-    except Exception as e:
-        logger.exception(f"Failed to start server: {e}")
+    except Exception:
+        logger.exception("Failed to start server")
         # Here you could add any cleanup code or error recovery code.
-        raise e
+        raise
 
 
 if __name__ == "__main__":

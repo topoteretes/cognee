@@ -2,11 +2,23 @@ import argparse
 import asyncio
 import json
 
-from cognee.cli.reference import SupportsCliCommand
-from cognee.cli import DEFAULT_DOCS_URL
-from cognee.cli.config import SEARCH_TYPE_CHOICES, OUTPUT_FORMAT_CHOICES
 import cognee.cli.echo as fmt
+from cognee.cli import DEFAULT_DOCS_URL
+from cognee.cli.code_search import (
+    add_code_arguments,
+    build_code_query,
+    handle_diagram_out,
+    print_code_results,
+)
+from cognee.cli.config import (
+    COMPLETION_SEARCH_TYPES,
+    DEFAULT_SEARCH_TYPE,
+    OUTPUT_FORMAT_CHOICES,
+    SEARCH_TYPE_CHOICES,
+)
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.hints import hint_recall_empty
+from cognee.cli.reference import SupportsCliCommand
 
 
 class RecallCommand(SupportsCliCommand):
@@ -19,6 +31,9 @@ Recall information from the knowledge graph or session memory.
 When --session-id is provided without --datasets or --query-type,
 searches the session cache directly by keyword matching.
 Otherwise, this is a memory-oriented alias for `cognee search`.
+
+With --query-type CODE, --code-query selects the code-graph operation and
+--diagram / --diagram-out draw the result (Mermaid or Graphviz).
     """
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
@@ -27,8 +42,8 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
             "--query-type",
             "-t",
             choices=SEARCH_TYPE_CHOICES,
-            default="GRAPH_COMPLETION",
-            help="Search mode (default: GRAPH_COMPLETION)",
+            default=None,
+            help="Search mode (default: HYBRID_COMPLETION)",
         )
         parser.add_argument(
             "--datasets",
@@ -64,18 +79,20 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
             default="pretty",
             help="Output format (default: pretty)",
         )
+        add_code_arguments(parser)
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
             import cognee
             from cognee.modules.search.types import SearchType
 
+            code_query = build_code_query(args, args.query_type)
+
             # Session-only mode: -s without -d and without explicit -t
             session_only = (
-                args.session_id is not None
-                and not args.datasets
-                and args.query_type == "GRAPH_COMPLETION"  # i.e., the user didn't pass -t
+                args.session_id is not None and not args.datasets and args.query_type is None
             )
+            effective_query_type = args.query_type or DEFAULT_SEARCH_TYPE
 
             if session_only:
                 fmt.echo(f"Searching session '{args.session_id}': '{args.query_text}'")
@@ -83,7 +100,9 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                 datasets_msg = (
                     f" in datasets {args.datasets}" if args.datasets else " across all datasets"
                 )
-                fmt.echo(f"Recalling: '{args.query_text}' (type: {args.query_type}){datasets_msg}")
+                fmt.echo(
+                    f"Recalling: '{args.query_text}' (type: {effective_query_type}){datasets_msg}"
+                )
 
             async def run_recall():
                 try:
@@ -99,7 +118,7 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                             **session_kwargs,
                         )
                     else:
-                        query_type = SearchType[args.query_type]
+                        query_type = SearchType[effective_query_type]
                         recall_kwargs = {
                             "query_text": args.query_text,
                             "query_type": query_type,
@@ -110,10 +129,15 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                             ),
                             **session_kwargs,
                         }
+                        if code_query is not None:
+                            # recall() runs code_query in its dedicated "code"
+                            # lane, which the auto scope never implies.
+                            recall_kwargs["code_query"] = code_query
+                            recall_kwargs["scope"] = ["code"]
                         results = await cognee.recall(**recall_kwargs)
                     return results
                 except Exception as e:
-                    raise CliCommandInnerException(f"Failed to recall: {str(e)}") from e
+                    raise CliCommandInnerException(f"Failed to recall: {e!s}") from e
 
             results = asyncio.run(run_recall())
 
@@ -125,6 +149,12 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
             else:
                 if not results:
                     fmt.warning("No results found for your query.")
+                    # Hint scoped to the pretty output path: json/simple are
+                    # for scripting so an extra line would corrupt the sink.
+                    hint_dataset = (
+                        args.datasets[0] if getattr(args, "datasets", None) else "<dataset-name>"
+                    )
+                    hint_recall_empty(hint_dataset)
                     return
 
                 # Detect session results by _source tag
@@ -145,10 +175,10 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                         if i < len(results):
                             fmt.echo("-" * 40)
                 else:
-                    fmt.echo(f"\nFound {len(results)} result(s) using {args.query_type}:")
+                    fmt.echo(f"\nFound {len(results)} result(s) using {effective_query_type}:")
                     fmt.echo("=" * 60)
 
-                    if args.query_type in ["GRAPH_COMPLETION", "RAG_COMPLETION"]:
+                    if effective_query_type in COMPLETION_SEARCH_TYPES:
                         for i, result in enumerate(results, 1):
                             fmt.echo(f"{fmt.bold('Response:')} {result}")
                             if i < len(results):
@@ -157,12 +187,16 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                         for i, result in enumerate(results, 1):
                             fmt.echo(f"{fmt.bold(f'Chunk {i}:')} {result}")
                             fmt.echo()
+                    elif effective_query_type == "CODE" and print_code_results(results):
+                        pass
                     else:
                         for i, result in enumerate(results, 1):
                             fmt.echo(f"{fmt.bold(f'Result {i}:')} {result}")
                             fmt.echo()
 
+            handle_diagram_out(results, args)
+
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(f"Error recalling: {str(e)}", error_code=1) from e
+            raise CliCommandException(f"Error recalling: {e!s}", error_code=1) from e

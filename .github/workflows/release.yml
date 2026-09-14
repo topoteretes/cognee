@@ -2,6 +2,11 @@ name: release.yml
 on:
   workflow_dispatch:
 
+# Minimal default permissions for all jobs (OSSF Scorecard: Token-Permissions).
+# Jobs that need more (release creation, OIDC, attestations) opt in explicitly.
+permissions:
+  contents: read
+
 jobs:
   release-github:
     name: Create GitHub Release from ${{ github.ref_name }}
@@ -14,7 +19,7 @@ jobs:
 
     steps:
       - name: Check out ${{ github.ref_name }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           ref: ${{ github.ref_name }}
           fetch-depth: 0  # Fetch all history for comparison
@@ -28,7 +33,7 @@ jobs:
         run: git fetch origin dev:dev
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
 
       - name: Install Python
         run: uv python install
@@ -44,11 +49,24 @@ jobs:
 
           echo "Tag to create: ${TAG}"
 
+          # Resolve the previous release tag BEFORE creating the new one, so the
+          # release notes describe prev-release..this-release instead of comparing
+          # the new tag against itself (issue #4661). Stable releases (main) are
+          # compared against the previous stable tag — dev canaries version-sort
+          # above their stable release, so they must be filtered out here.
+          if [ "${GITHUB_REF_NAME}" = "main" ]; then
+            PREV_TAG="$(git tag --sort=-version:refname --list 'v*' | grep -vE '\.(dev|rc|a|b|alpha|beta)[0-9]*$' | grep -vx "${TAG}" | head -n 1 || true)"
+          else
+            PREV_TAG="$(git tag --sort=-version:refname --list 'v*' | grep -vx "${TAG}" | head -n 1 || true)"
+          fi
+          echo "Previous release tag: ${PREV_TAG:-<none>}"
+
           git config user.name "Cognee Team"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "prev_tag=${PREV_TAG}" >> "$GITHUB_OUTPUT"
 
           git tag "${TAG}"
           git push origin "${TAG}"
@@ -63,14 +81,17 @@ jobs:
           # Set PYTHONPATH to include project root
           export PYTHONPATH="${GITHUB_WORKSPACE}:${PYTHONPATH}"
 
-          # Generate release notes
-          # Compares current branch against the latest release tag automatically
+          # Generate release notes comparing the previous release tag to the new
+          # one. --base may be empty on a first-ever release; the script then
+          # auto-detects a base (excluding the tag being released).
           uv run python tools/generate_release_notes.py \
             --version "${{ steps.create_tag.outputs.version }}" \
+            --base "${{ steps.create_tag.outputs.prev_tag }}" \
+            --target "${{ steps.create_tag.outputs.tag }}" \
             --github-output
 
       - name: Create GitHub Release with AI-generated notes
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
         with:
           tag_name: ${{ steps.create_tag.outputs.tag }}
           name: ${{ steps.generate_notes.outputs.RELEASE_TITLE }}
@@ -82,18 +103,24 @@ jobs:
   release-pypi-package:
     needs: release-github
     name: Release PyPI Package from ${{ github.ref_name }}
+    # Publishing happens through PyPI Trusted Publishing (OIDC) so the uploaded
+    # distributions carry verifiable PEP 740 provenance attestations, and the
+    # built artifacts also get a SLSA build-provenance attestation hosted by
+    # GitHub. See docs/supply_chain_provenance.md for the one-time PyPI setup.
     permissions:
-      contents: read
+      contents: write       # Attach the distributions and provenance to the release
+      id-token: write       # OIDC: Trusted Publishing + signing attestations
+      attestations: write   # Persist the SLSA build provenance attestation
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out ${{ github.ref_name }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           ref: ${{ github.ref_name }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
 
       - name: Install Python
         run: uv python install
@@ -104,10 +131,42 @@ jobs:
       - name: Build distributions
         run: uv build
 
+      - name: Attest build provenance for distributions
+        id: attest
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be  # v2.4.0
+        with:
+          subject-path: "dist/*"
+
       - name: Publish ${{ github.ref_name }} release to PyPI
+        # Trusted Publishing (OIDC) — no API token. The action generates and
+        # uploads PEP 740 digital attestations by default (attestations: true).
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2 (twine 7.0.0: accepts Metadata-Version 2.5)
+        with:
+          packages-dir: dist/
+
+      - name: Attach distributions and provenance to the GitHub release
+        # The release page carried no assets, so the provenance that PyPI and
+        # the GitHub attestation store already hold was invisible there (OSSF
+        # Scorecard: Signed-Releases). Upload the wheel and sdist together with
+        # the SLSA build-provenance attestation in two shapes: the Sigstore
+        # bundle (certificate + signature + statement; verify with
+        # `gh attestation verify <dist> --bundle <file> --owner topoteretes`)
+        # and the bare DSSE envelope it wraps, in the .intoto.jsonl form the
+        # SLSA ecosystem expects. Runs after publish so a PyPI failure leaves
+        # the release page without artifacts that never shipped.
         env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
-        run: uv publish
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-github.outputs.tag }}
+          VERSION: ${{ needs.release-github.outputs.version }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          cp "${BUNDLE}" "dist/cognee-${VERSION}.sigstore.json"
+          jq -c '.dsseEnvelope' "${BUNDLE}" > "dist/cognee-${VERSION}.intoto.jsonl"
+          gh release upload "${TAG}" \
+            dist/*.whl dist/*.tar.gz \
+            "dist/cognee-${VERSION}.sigstore.json" \
+            "dist/cognee-${VERSION}.intoto.jsonl" \
+            --repo "${GITHUB_REPOSITORY}" --clobber
 
   release-docker-image:
     needs: release-github
@@ -118,26 +177,29 @@ jobs:
 
     steps:
       - name: Check out ${{ github.ref_name }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           ref: ${{ github.ref_name }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3.7.0
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Build and push Dev Docker Image
         if: ${{ github.ref_name == 'dev' }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          # Attach SLSA build provenance + SBOM in-toto attestations to the image.
+          provenance: mode=max
+          sbom: true
           tags: cognee/cognee:${{ needs.release-github.outputs.version }}
           labels: |
             version=${{ needs.release-github.outputs.version }}
@@ -147,11 +209,13 @@ jobs:
 
       - name: Build and push Main Docker Image
         if: ${{ github.ref_name == 'main' }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          provenance: mode=max
+          sbom: true
           tags: |
             cognee/cognee:${{ needs.release-github.outputs.version }}
             cognee/cognee:latest
@@ -161,14 +225,203 @@ jobs:
           cache-from: type=registry,ref=cognee/cognee:buildcache
           cache-to: type=registry,ref=cognee/cognee:buildcache,mode=max
 
+      - name: Build and push Dev UI Docker Image
+        if: ${{ github.ref_name == 'dev' }}
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
+        with:
+          context: ./cognee-frontend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: cognee/cognee-ui:${{ needs.release-github.outputs.version }}
+          labels: |
+            version=${{ needs.release-github.outputs.version }}
+            flavour=${{ github.ref_name }}
+          cache-from: type=registry,ref=cognee/cognee-ui:buildcache
+          cache-to: type=registry,ref=cognee/cognee-ui:buildcache,mode=max
+
+      - name: Build and push Main UI Docker Image
+        if: ${{ github.ref_name == 'main' }}
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
+        with:
+          context: ./cognee-frontend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: |
+            cognee/cognee-ui:${{ needs.release-github.outputs.version }}
+            cognee/cognee-ui:latest
+          labels: |
+            version=${{ needs.release-github.outputs.version }}
+            flavour=${{ github.ref_name }}
+          cache-from: type=registry,ref=cognee/cognee-ui:buildcache
+          cache-to: type=registry,ref=cognee/cognee-ui:buildcache,mode=max
+
+  bump-mcp-lock:
+    needs: [release-github, release-pypi-package]
+    name: Sync cognee-mcp lock to the released version
+    # The MCP image installs cognee from PyPI via cognee-mcp/uv.lock, which can
+    # only be re-locked after the new version is published (the lock embeds the
+    # published artifacts' hashes). Doing that by hand was missed for 1.4.1 and
+    # 1.5.0, shipping images whose tag did not match the cognee library inside
+    # (issue #4360), and stalled 1.5.2 on a failed guard — so the release now
+    # bumps the lock itself. Dev canaries are exempt: their .devN versions are
+    # never in the lock.
+    if: ${{ github.ref_name == 'main' }}
+    permissions:
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.push.outputs.sha }}
+    steps:
+      - name: Check out ${{ github.ref_name }}
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          ref: ${{ github.ref_name }}
+          # Prefer GH_RELEASE_TOKEN (it already creates the GitHub release):
+          # PRs opened with the default workflow token do not trigger other
+          # workflows, so the sync PR's required checks would never run and
+          # auto-merge would never fire.
+          token: ${{ secrets.GH_RELEASE_TOKEN || github.token }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
+
+      - name: Wait for cognee ${{ needs.release-github.outputs.version }} on PyPI
+        env:
+          VERSION: ${{ needs.release-github.outputs.version }}
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl -sf "https://pypi.org/pypi/cognee/${VERSION}/json" > /dev/null; then
+              echo "cognee ${VERSION} is live on PyPI."
+              exit 0
+            fi
+            echo "Attempt ${attempt}/60: cognee ${VERSION} not on PyPI yet; retrying in 15s..."
+            sleep 15
+          done
+          echo "::error::cognee ${VERSION} did not appear on PyPI within 15 minutes."
+          exit 1
+
+      - name: Re-lock cognee-mcp to the released version
+        env:
+          VERSION: ${{ needs.release-github.outputs.version }}
+        working-directory: cognee-mcp
+        run: |
+          uv lock --upgrade-package "cognee==${VERSION}"
+          LOCKED_VERSION="$(python3 - <<'PY'
+          import tomllib
+
+          with open("uv.lock", "rb") as lock_file:
+              lock = tomllib.load(lock_file)
+
+          print(next(p["version"] for p in lock["package"] if p["name"] == "cognee"))
+          PY
+          )"
+          echo "cognee-mcp/uv.lock now pins cognee: ${LOCKED_VERSION}"
+          if [ "${LOCKED_VERSION}" != "${VERSION}" ]; then
+            echo "::error::Re-lock did not land on ${VERSION} (got ${LOCKED_VERSION})."
+            exit 1
+          fi
+
+      - name: Commit the lock bump and open a sync PR
+        id: push
+        env:
+          VERSION: ${{ needs.release-github.outputs.version }}
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN || github.token }}
+        run: |
+          git config user.name "Cognee Team"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet cognee-mcp/uv.lock; then
+            echo "Lock already pinned cognee ${VERSION}; nothing to push."
+          else
+            git add cognee-mcp/uv.lock
+            git commit -m "chore: Sync cognee-mcp lock to cognee ${VERSION} [release]"
+            # main is protected (changes must go through a pull request), so a
+            # direct `git push origin HEAD:main` is rejected with GH006 — the
+            # v1.5.3 release stalled on exactly that. Push a release branch and
+            # open an auto-merging sync PR instead. --force keeps re-runs of
+            # this job idempotent.
+            BRANCH="release/mcp-lock-v${VERSION}"
+            git push --force origin "HEAD:${BRANCH}"
+            if [ -z "$(gh pr list --head "${BRANCH}" --base main --state open --json number --jq '.[].number')" ]; then
+              gh pr create --base main --head "${BRANCH}" \
+                --title "chore: sync cognee-mcp lock to cognee ${VERSION} [release]" \
+                --body "Automated by release.yml: pins cognee-mcp/uv.lock to the just-released cognee ${VERSION} so the MCP image matches its tag (issue #4360)."
+            fi
+            # Best effort: merges once required checks pass. If auto-merge is
+            # disabled on the repo, the PR stays open for a manual merge — the
+            # MCP image build below does not wait for the merge, it builds from
+            # this commit's SHA directly.
+            gh pr merge "${BRANCH}" --auto --squash || gh pr merge "${BRANCH}" --auto --merge || true
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  release-mcp-docker-image:
+    # On main this waits for the lock bump and builds from the bumped commit;
+    # on dev, bump-mcp-lock is skipped and this builds from the branch head
+    # exactly as before. `!failure() && !cancelled()` lets the job run after a
+    # skipped dependency but never after a failed bump — that would rebuild
+    # exactly the tag/library skew this pipeline exists to prevent.
+    needs: [release-github, bump-mcp-lock]
+    if: ${{ !failure() && !cancelled() }}
+    name: Release MCP Docker Image from ${{ github.ref_name }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out ${{ needs.bump-mcp-lock.outputs.sha || github.ref_name }}
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          ref: ${{ needs.bump-mcp-lock.outputs.sha || github.ref_name }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3.7.0
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Check MCP lockfile ships the released cognee version
+        # Safety net behind bump-mcp-lock: catches push races and manual
+        # re-runs against a stale ref instead of pushing a silently skewed
+        # cognee-mcp image (issue #4360). Dev canaries are exempt: their .devN
+        # versions cannot be in the lock before they are published.
+        if: ${{ github.ref_name == 'main' }}
+        env:
+          RELEASE_VERSION: ${{ needs.release-github.outputs.version }}
+        run: |
+          LOCKED_VERSION="$(python3 - <<'PY'
+          import tomllib
+
+          with open("cognee-mcp/uv.lock", "rb") as lock_file:
+              lock = tomllib.load(lock_file)
+
+          print(next(p["version"] for p in lock["package"] if p["name"] == "cognee"))
+          PY
+          )"
+          echo "Release version: ${RELEASE_VERSION}"
+          echo "cognee-mcp/uv.lock pins cognee: ${LOCKED_VERSION}"
+          if [ "${LOCKED_VERSION}" != "${RELEASE_VERSION}" ]; then
+            echo "::error file=cognee-mcp/uv.lock::cognee-mcp/uv.lock pins cognee ${LOCKED_VERSION}, but this release is ${RELEASE_VERSION} — the cognee-mcp:${RELEASE_VERSION} image would ship the wrong library (issue #4360). The bump-mcp-lock job should have synced this; re-run the workflow, or run 'uv lock --upgrade-package cognee==${RELEASE_VERSION}' in cognee-mcp/, merge the bump, then re-run this job."
+            exit 1
+          fi
+
       - name: Build and push Dev MCP Docker Image
         if: ${{ github.ref_name == 'dev' }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
         with:
           context: .
           file: cognee-mcp/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
+          provenance: mode=max
+          sbom: true
           tags: cognee/cognee-mcp:${{ needs.release-github.outputs.version }}
           labels: |
             version=${{ needs.release-github.outputs.version }}
@@ -178,12 +431,14 @@ jobs:
 
       - name: Build and push Main MCP Docker Image
         if: ${{ github.ref_name == 'main' }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
         with:
           context: .
           file: cognee-mcp/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
+          provenance: mode=max
+          sbom: true
           tags: |
             cognee/cognee-mcp:${{ needs.release-github.outputs.version }}
             cognee/cognee-mcp:latest
@@ -192,6 +447,26 @@ jobs:
             flavour=${{ github.ref_name }}
           cache-from: type=registry,ref=cognee/cognee-mcp:buildcache
           cache-to: type=registry,ref=cognee/cognee-mcp:buildcache,mode=max
+
+  sync-docs-spec:
+    needs: release-github
+    name: Sync the OpenAPI spec and changelog to cognee-docs
+    # sync_mintlify_docs.yml also listens for `release: published`, but that
+    # event never arrives for a release this workflow published itself:
+    # GitHub does not fire workflow triggers for events created with the
+    # default Actions token. The result was silent — no failing run to
+    # notice — and cognee-docs' cognee_openapi_spec.json went unmaintained
+    # from 2026-05-03 until someone updated it by hand (RES-37). Calling the
+    # sync makes it independent of which token published the release.
+    #
+    # Only stable releases: dev releases are prereleases, and the docs site
+    # documents the released line.
+    if: ${{ github.ref_name == 'main' }}
+    uses: ./.github/workflows/sync_mintlify_docs.yml
+    with:
+      tag: ${{ needs.release-github.outputs.tag }}
+    # The sync needs REPO_DISPATCH_PAT_TOKEN to write to cognee-docs.
+    secrets: inherit
 
   trigger-docs-test-suite:
     needs: release-pypi-package

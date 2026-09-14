@@ -8,19 +8,20 @@ import os
 import re
 import threading
 from collections import defaultdict
-from typing import Optional, Sequence
+from collections.abc import Sequence
+from typing import Optional
 
 try:
     from opentelemetry import trace
-    from opentelemetry.sdk.trace import TracerProvider, ReadableSpan
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
     from opentelemetry.sdk.trace.export import (
-        SpanExporter,
-        SpanExportResult,
-        SimpleSpanProcessor,
         BatchSpanProcessor,
         ConsoleSpanExporter,
+        SimpleSpanProcessor,
+        SpanExporter,
+        SpanExportResult,
     )
-    from opentelemetry.sdk.resources import Resource
     from opentelemetry.trace import StatusCode
 
     _OTEL_AVAILABLE = True
@@ -161,7 +162,7 @@ class CogneeSpanExporter(_ExporterBase):
 
     # -- Public helpers for reading collected traces --
 
-    def get_last_trace_spans(self) -> Optional[list[dict]]:
+    def get_last_trace_spans(self) -> list[dict] | None:
         with self._lock:
             if not self._trace_order:
                 return None
@@ -261,7 +262,7 @@ def _is_auto_instrumented() -> bool:
     return current is not None and type(current).__name__ != "ProxyTracerProvider"
 
 
-def _parse_otlp_headers(raw: Optional[str]) -> Optional[dict]:
+def _parse_otlp_headers(raw: str | None) -> dict | None:
     """Parse an ``OTEL_EXPORTER_OTLP_HEADERS``-style ``key=value,key2=value2``
     string into a dict. Splitting on the first ``=`` preserves base64 padding in
     values (e.g. ``Authorization=Basic abc==``). Returns None when empty."""
@@ -284,13 +285,13 @@ def _requires_http_exporter(endpoint: str) -> bool:
     closed) which causes traces to disappear without any visible error.
     """
     http_only_patterns = (
-        "/api/public/otel",        # Langfuse
-        "live.dynatrace.com",      # Dynatrace SaaS
-        "dynatrace.com",           # Dynatrace (any subdomain)
-        "/api/v2/otlp",            # Dynatrace OTLP path
-        "otel.live.dynatrace.com", # Dynatrace dedicated ingest
-        ":4318",                   # standard OTLP HTTP port
-        ":443/",                   # standard HTTPS — almost certainly HTTP OTLP
+        "/api/public/otel",  # Langfuse
+        "live.dynatrace.com",  # Dynatrace SaaS
+        "dynatrace.com",  # Dynatrace (any subdomain)
+        "/api/v2/otlp",  # Dynatrace OTLP path
+        "otel.live.dynatrace.com",  # Dynatrace dedicated ingest
+        ":4318",  # standard OTLP HTTP port
+        ":443/",  # standard HTTPS — almost certainly HTTP OTLP
     )
     return any(pat in endpoint for pat in http_only_patterns)
 
@@ -408,6 +409,7 @@ def setup_tracing(console_output: bool = False) -> "trace.Tracer":
         )
 
         import logging as _logging
+
         _log = _logging.getLogger("cognee.observability")
 
         _provider = TracerProvider(resource=resource)
@@ -424,7 +426,9 @@ def setup_tracing(console_output: bool = False) -> "trace.Tracer":
         endpoint = config.otel_exporter_otlp_endpoint
         _log.info(
             "OTel tracing initialised — service=%s version=%s endpoint=%s",
-            config.otel_service_name, version, endpoint or "none (in-memory only)",
+            config.otel_service_name,
+            version,
+            endpoint or "none (in-memory only)",
         )
 
     _tracer = _provider.get_tracer("cognee", version)

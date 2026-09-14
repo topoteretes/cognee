@@ -1,12 +1,50 @@
-from types import SimpleNamespace
-import pytest
+import logging
 import os
-from unittest.mock import AsyncMock, patch, MagicMock
 from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
 from cognee.tasks.temporal_graph.models import QueryInterval, Timestamp
-from cognee.infrastructure.llm import LLMGateway
+
+logger = logging.getLogger(__name__)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_llm_calls():
+    """Keep every test in this file off the network.
+
+    ``extract_time_from_query`` asks the gateway for a ``QueryInterval``.
+    Several tests here only patch the final ``generate_completion`` and let
+    that call escape to the real provider. In the full suite an earlier test
+    happened to leave a patched gateway behind; once the suite was sharded
+    the call went out for real, hit the provider's error, and was retried
+    under the 240-second floor until pytest-timeout killed it (300s per test,
+    on macOS and Windows where the accidental polluter is skipped). Patched
+    by object, not by dotted string: the LLMGateway class shadows its module,
+    so a string target lands on the class on Python 3.10.
+    """
+
+    async def _structured(text_input, system_prompt, response_model=str, **_):
+        # Honour the requested model: str prompts get a string, pydantic
+        # models get an unvalidated instance so isinstance checks hold.
+        if response_model is str or response_model is None:
+            return QueryInterval()
+        try:
+            return response_model.model_construct()
+        except Exception:
+            logger.debug(
+                "Falling back after error in _no_real_llm_calls._structured", exc_info=True
+            )
+            return QueryInterval()
+
+    with patch.object(
+        LLMGateway, "acreate_structured_output", new=AsyncMock(side_effect=_structured)
+    ):
+        yield
 
 
 # Test TemporalRetriever initialization defaults and overrides
@@ -101,6 +139,50 @@ async def test_filter_top_k_events_includes_unknown_as_infinite_but_not_in_top_k
     top = await tr.filter_top_k_events(relevant_events, scored_results)
     assert [e["id"] for e in top] == ["known2", "known1"]
     assert all(e["score"] != float("inf") for e in top)
+
+
+# Regression test: in production, ScoredResult.id is a UUID while event["id"] arrives from
+# the graph as a string. filter_top_k_events must normalize both sides to str; otherwise the
+# score lookup misses on every event, all scores become inf, and the vector-similarity
+# ranking is silently discarded (events come back in graph order instead of by relevance).
+# The other tests use string ids on both sides, so they never catch this.
+@pytest.mark.asyncio
+async def test_filter_top_k_events_matches_uuid_scored_results_against_str_event_ids():
+    from uuid import uuid4
+
+    from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
+
+    tr = TemporalRetriever(top_k=2)
+
+    id_first = uuid4()  # best match (lowest distance)
+    id_second = uuid4()
+    id_third = uuid4()  # not present in the vector results
+
+    # Event ids come from the graph as strings (str() of the node UUID).
+    relevant_events = [
+        {
+            "events": [
+                {"id": str(id_third), "description": "Third - not scored"},
+                {"id": str(id_second), "description": "Second"},
+                {"id": str(id_first), "description": "First"},
+            ]
+        }
+    ]
+
+    # Real ScoredResult objects: .id is a UUID (not a str).
+    scored_results = [
+        ScoredResult(id=id_first, score=0.10, payload={}),
+        ScoredResult(id=id_second, score=0.50, payload={}),
+    ]
+
+    top = await tr.filter_top_k_events(relevant_events, scored_results)
+
+    # Before the fix (UUID keys vs str lookup) every score is inf and the stable sort keeps
+    # graph order -> [third, second]. After the fix the lookup matches, so the two scored
+    # events are returned ordered by ascending distance.
+    assert [e["id"] for e in top] == [str(id_first), str(id_second)]
+    assert top[0]["score"] == 0.10
+    assert top[1]["score"] == 0.50
 
 
 # Test descriptions_to_string with unicode and newlines
@@ -399,11 +481,24 @@ async def test_get_completion_without_context(mock_graph_engine, mock_vector_eng
 
 
 @pytest.mark.asyncio
-async def test_get_completion_with_provided_context():
+async def test_get_completion_with_provided_context(mock_graph_engine, mock_vector_engine):
     """Test get_completion uses provided context."""
     retriever = TemporalRetriever()
+    # The retrieval calls before get_completion_from_context are incidental
+    # to this test; without these two patches they ran a real vector search
+    # (a real embedding call) once nothing earlier in the process had
+    # patched the engine for them.
+    mock_vector_engine.search.return_value = []
+    unified_mock = _make_unified_mock(mock_graph_engine, mock_vector_engine)
 
     with (
+        patch.object(
+            retriever, "extract_time_from_query", return_value=("2024-01-01", "2024-12-31")
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_unified_engine",
+            return_value=unified_mock,
+        ),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.generate_completion",
             new_callable=AsyncMock,

@@ -29,7 +29,7 @@
 
 **Relational sibling** — `cognee/modules/session_lifecycle/models.py` (`session_records`, `session_model_usage`): alembic-managed lifecycle/metrics rows, already Postgres-compatible, untouched by this plan. No FK between cache rows and `session_records` (cache rows TTL-expire; lifecycle rows persist — by design).
 
-**Template** — `cognee/infrastructure/databases/graph/postgres/adapter.py` + `tables.py`: own `create_async_engine(uri, json_serializer=lambda obj: json.dumps(obj, cls=JSONEncoder), **pool_args)` (verified, lines 40–58), `async_sessionmaker(expire_on_commit=False)`, private `MetaData()` with `create_all(checkfirst=True)` in `initialize()` — not alembic.
+**Template** — `cognee/infrastructure/databases/graph/postgres_demo/adapter.py` + `tables.py`: own `create_async_engine(uri, json_serializer=lambda obj: json.dumps(obj, cls=JSONEncoder), **pool_args)` (verified, lines 40–58), `async_sessionmaker(expire_on_commit=False)`, private `MetaData()` with `create_all(checkfirst=True)` in `initialize()` — not alembic.
 
 ---
 
@@ -77,11 +77,11 @@ cognee/infrastructure/databases/cache/postgres/
 class PostgresCacheAdapter(CacheDBInterface):
     def __init__(
         self,
-        connection_string: str,                  # any SQLAlchemy async URL (asyncpg in prod, aiosqlite in tests)
+        connection_string: str,  # any SQLAlchemy async URL (asyncpg in prod, aiosqlite in tests)
         lock_key: str = "default_lock",
         log_key: str = "usage_logs",
         session_ttl_seconds: int | None = 604800,
-        agentic_lock_expire: int = 240,          # stored now, used by Phase 6 advisory locks
+        agentic_lock_expire: int = 240,  # stored now, used by Phase 6 advisory locks
         agentic_lock_timeout: int = 300,
         purge_interval_seconds: int = 900,
     ):
