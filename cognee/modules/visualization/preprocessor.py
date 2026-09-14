@@ -837,7 +837,9 @@ def build_operation_layer(
         links_for_op = []
         for effect in op.get("effects", []):
             for type_name in resolve_targets(effect):
-                key = (effect["effect"], type_name)
+                # Include the property: two effects of the same kind on the same
+                # type are distinct rows when they touch different properties.
+                key = (effect["effect"], type_name, effect.get("property"))
                 if key in seen:
                     continue
                 seen.add(key)
