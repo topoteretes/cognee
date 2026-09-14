@@ -36,48 +36,50 @@ MARKER = re.compile(r"ENT[A-Z0-9]+")
 
 @pytest.fixture(scope="module")
 def scoped_env():
-    import os
-
     root = Path(tempfile.mkdtemp(prefix="cognee_scoped_data_test_"))
 
-    import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
+    import cognee  # (cognee's import runs load_dotenv(override=True))
 
-    os.environ.update(
-        DB_PROVIDER="sqlite",
-        VECTOR_DB_PROVIDER="lancedb",
-        GRAPH_DATABASE_PROVIDER="kuzu",
-        CACHE_BACKEND="sqlite",
-        MOCK_EMBEDDING="true",
-        TELEMETRY_DISABLED="1",
-        DATA_ROOT_DIRECTORY=str(root / "data"),
-        SYSTEM_ROOT_DIRECTORY=str(root / "system"),
-        ENABLE_BACKEND_ACCESS_CONTROL="false",
-    )
+    def clear_config_caches():
+        import importlib
 
-    import importlib
+        for module_name, factory_name in [
+            ("cognee.base_config", "get_base_config"),
+            ("cognee.infrastructure.databases.relational.config", "get_relational_config"),
+            (
+                "cognee.infrastructure.databases.relational.get_relational_engine",
+                "get_relational_engine",
+            ),
+            ("cognee.infrastructure.databases.graph.config", "get_graph_config"),
+            ("cognee.infrastructure.databases.vector.config", "get_vectordb_config"),
+            ("cognee.infrastructure.databases.cache.config", "get_cache_config"),
+            ("cognee.infrastructure.databases.cache.get_cache_engine", "create_cache_engine"),
+            ("cognee.infrastructure.databases.vector.embeddings.config", "get_embedding_config"),
+            (
+                "cognee.infrastructure.databases.vector.embeddings.get_embedding_engine",
+                "create_embedding_engine",
+            ),
+            ("cognee.infrastructure.llm.config", "get_llm_config"),
+        ]:
+            try:
+                getattr(importlib.import_module(module_name), factory_name).cache_clear()
+            except (ImportError, AttributeError):
+                pass
 
-    for module_name, factory_name in [
-        ("cognee.base_config", "get_base_config"),
-        ("cognee.infrastructure.databases.relational.config", "get_relational_config"),
-        (
-            "cognee.infrastructure.databases.relational.get_relational_engine",
-            "get_relational_engine",
-        ),
-        ("cognee.infrastructure.databases.graph.config", "get_graph_config"),
-        ("cognee.infrastructure.databases.vector.config", "get_vectordb_config"),
-        ("cognee.infrastructure.databases.cache.config", "get_cache_config"),
-        ("cognee.infrastructure.databases.cache.get_cache_engine", "create_cache_engine"),
-        ("cognee.infrastructure.databases.vector.embeddings.config", "get_embedding_config"),
-        (
-            "cognee.infrastructure.databases.vector.embeddings.get_embedding_engine",
-            "create_embedding_engine",
-        ),
-        ("cognee.infrastructure.llm.config", "get_llm_config"),
-    ]:
-        try:
-            getattr(importlib.import_module(module_name), factory_name).cache_clear()
-        except (ImportError, AttributeError):
-            pass
+    mp = pytest.MonkeyPatch()
+    for key, value in {
+        "DB_PROVIDER": "sqlite",
+        "VECTOR_DB_PROVIDER": "lancedb",
+        "GRAPH_DATABASE_PROVIDER": "kuzu",
+        "CACHE_BACKEND": "sqlite",
+        "MOCK_EMBEDDING": "true",
+        "TELEMETRY_DISABLED": "1",
+        "DATA_ROOT_DIRECTORY": str(root / "data"),
+        "SYSTEM_ROOT_DIRECTORY": str(root / "system"),
+        "ENABLE_BACKEND_ACCESS_CONTROL": "false",
+    }.items():
+        mp.setenv(key, value)
+    clear_config_caches()
 
     from cognee.infrastructure.llm.LLMGateway import LLMGateway
     from cognee.shared.data_models import KnowledgeGraph, Node, SummarizedContent
@@ -101,6 +103,8 @@ def scoped_env():
     yield root
 
     LLMGateway.acreate_structured_output = original
+    mp.undo()
+    clear_config_caches()
     shutil.rmtree(root, ignore_errors=True)
 
 
@@ -218,7 +222,9 @@ async def _scenario():
     # --- 5. every id ever issued keeps resolving --------------------------- #
     # Simulate a backfill-split fork: beta's row records a pre-fork original.
     from uuid import uuid4 as _mint
+
     from sqlalchemy import update as sql_update
+
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.data.exceptions import AmbiguousDataIdError
     from cognee.modules.data.methods import get_data, resolve_data_id
@@ -329,11 +335,12 @@ async def _scenario():
     # The same dlt row loaded into two datasets must be two id families (a
     # shared id would trip ingestion's foreign-pin guard); rows ingested
     # before ids were dataset-namespaced are adopted in their own dataset only.
+    from sqlalchemy import insert as sql_insert
+
     from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id
     from cognee.modules.data.models import Data
     from cognee.tasks.ingestion.dlt_row_data import DltRowData
     from cognee.tasks.ingestion.resolve_dlt_sources import _dlt_row_identifier, _stable_row_ids
-    from sqlalchemy import insert as sql_insert
 
     dlt_row = DltRowData(
         table_name="users",

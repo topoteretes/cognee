@@ -1,7 +1,7 @@
 from .discover_directory_datasets import discover_directory_datasets
 
 
-def get_matched_datasets(data_path: str, dataset_name_to_match: str = None):
+def get_matched_datasets(data_path: str, dataset_name_to_match: str | None = None):
     datasets = discover_directory_datasets(data_path)
 
     matched_datasets = []

@@ -1,5 +1,6 @@
-from .create_user import create_user
 from cognee.base_config import get_base_config
+
+from .create_user import create_user
 
 
 async def create_default_user():

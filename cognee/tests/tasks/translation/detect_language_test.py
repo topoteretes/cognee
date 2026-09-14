@@ -3,9 +3,10 @@ Unit tests for language detection functionality
 """
 
 import pytest
+
 from cognee.tasks.translation.detect_language import (
-    detect_language_async,
     LanguageDetectionResult,
+    detect_language_async,
 )
 from cognee.tasks.translation.exceptions import LanguageDetectionError
 

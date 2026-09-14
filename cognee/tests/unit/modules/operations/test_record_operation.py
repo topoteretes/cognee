@@ -29,6 +29,12 @@ record_operation_mod = importlib.import_module("cognee.modules.operations.record
 get_pipeline_status_mod = importlib.import_module(
     "cognee.modules.pipelines.operations.get_pipeline_status"
 )
+# get_pipeline_status delegates its query to this module now, so the real
+# DB call this test needs to intercept happens here, not in either module
+# above.
+get_pipeline_run_by_dataset_mod = importlib.import_module(
+    "cognee.modules.pipelines.methods.get_pipeline_run_by_dataset"
+)
 
 record_operation = record_operation_mod.record_operation
 get_current_operation = record_operation_mod.get_current_operation
@@ -50,7 +56,7 @@ async def ops_engine(tmp_path, monkeypatch):
     async with engine.engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all, tables=[PipelineRun.__table__])
 
-    for module in (record_operation_mod, get_pipeline_status_mod):
+    for module in (record_operation_mod, get_pipeline_run_by_dataset_mod):
         monkeypatch.setattr(module, "get_relational_engine", lambda: engine)
 
     yield engine

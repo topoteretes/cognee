@@ -1,9 +1,10 @@
-from typing import Any, Optional, List, Union
-from cognee.shared.logging_utils import get_logger
+from typing import Any
+
 from cognee.infrastructure.databases.unified import get_unified_engine
+from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("ChunksRetriever")
 
@@ -22,8 +23,8 @@ class ChunksRetriever(BaseRetriever):
 
     def __init__(
         self,
-        top_k: Optional[int] = 5,
-        node_name: Optional[List[str]] = None,
+        top_k: int | None = 5,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
     ):
         """
@@ -46,7 +47,7 @@ class ChunksRetriever(BaseRetriever):
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
-    ) -> Union[List[str], List[dict]]:
+    ) -> list[str] | list[dict]:
         """
         Generates a completion using document chunks context.
         In case of the Chunks Retriever, we do not generate a completion, we just return
@@ -62,11 +63,16 @@ class ChunksRetriever(BaseRetriever):
         Returns:
         --------
 
-            - List[dict]: A list of payloads of found chunks.
+            - List[dict]: A list of payloads of found chunks. Each payload carries the
+              vector search ``score`` of the chunk: the raw backend distance (cosine
+              distance for built-in adapters), where a lower value is a better match.
         """
         # TODO: Do we want to generate a completion using LLM here?
         if retrieved_objects:
-            chunk_payloads = [found_chunk.payload for found_chunk in retrieved_objects]
+            chunk_payloads = [
+                {**(found_chunk.payload or {}), "score": found_chunk.score}
+                for found_chunk in retrieved_objects
+            ]
             return chunk_payloads
         else:
             return []

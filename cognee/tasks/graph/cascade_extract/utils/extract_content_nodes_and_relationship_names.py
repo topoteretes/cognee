@@ -1,24 +1,23 @@
-from typing import List, Tuple
 from pydantic import BaseModel
 
-from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.root_dir import get_absolute_path
 
 
 class PotentialNodesAndRelationshipNames(BaseModel):
     """Response model containing lists of potential node names and relationship names."""
 
-    nodes: List[str]
-    relationship_names: List[str]
+    nodes: list[str]
+    relationship_names: list[str]
 
 
 async def extract_content_nodes_and_relationship_names(
-    content: str, existing_nodes: List[str], n_rounds: int = 2
-) -> Tuple[List[str], List[str]]:
+    content: str, existing_nodes: list[str], n_rounds: int = 2
+) -> tuple[list[str], list[str]]:
     """Extracts node names and relationship_names from content through multiple rounds of analysis."""
-    all_nodes: List[str] = existing_nodes.copy()
-    all_relationship_names: List[str] = []
+    all_nodes: list[str] = existing_nodes.copy()
+    all_relationship_names: list[str] = []
     existing_node_set = {node.lower() for node in all_nodes}
     existing_relationship_names = set()
 

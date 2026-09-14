@@ -5,11 +5,12 @@ Covers:
 - Validation error when memory_only=True without dataset
 """
 
-import uuid
 import importlib
-import pytest
+import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+
+import pytest
 from fastapi.testclient import TestClient
 
 from cognee.api.client import app

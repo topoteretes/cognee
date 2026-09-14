@@ -2,12 +2,12 @@
 
 import os
 from functools import lru_cache
-from pydantic_settings import BaseSettings, SettingsConfigDict
+
 import pydantic
 from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 from cognee.base_config import get_base_config
-from cognee.root_dir import ensure_absolute_path
-from cognee.shared.data_models import KnowledgeGraph
 
 # Single source of truth for Kuzu defaults lives next to the adapter.
 # Imported here so config-side env Fields and the adapter agree.
@@ -15,6 +15,8 @@ from cognee.infrastructure.databases.graph.kuzu.adapter import (
     DEFAULT_KUZU_BUFFER_POOL_SIZE,
     DEFAULT_KUZU_MAX_DB_SIZE,
 )
+from cognee.root_dir import ensure_absolute_path
+from cognee.shared.data_models import KnowledgeGraph
 
 
 class GraphConfig(BaseSettings):
@@ -76,7 +78,11 @@ class GraphConfig(BaseSettings):
         self.graph_dataset_database_handler = graph_dataset_database_handler
         if provider == "kuzu" and graph_dataset_database_handler == "ladybug":
             self.graph_dataset_database_handler = "kuzu"
-        if provider == "postgres" and graph_dataset_database_handler in ("ladybug", "postgres"):
+        if provider in ("postgres", "postgres_demo") and graph_dataset_database_handler in (
+            "ladybug",
+            "postgres",
+            "postgres_demo",
+        ):
             self.graph_dataset_database_handler = "postgres_graph"
         if provider == "neo4j" and graph_dataset_database_handler in ("ladybug", "neo4j"):
             self.graph_dataset_database_handler = "neo4j"

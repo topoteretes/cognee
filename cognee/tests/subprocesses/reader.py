@@ -1,7 +1,8 @@
 import asyncio
 
-from cognee.infrastructure.databases.graph.ladybug.adapter import LadybugAdapter
 from common import get_kuzu_db_path
+
+from cognee.infrastructure.databases.graph.ladybug.adapter import LadybugAdapter
 
 
 async def main():

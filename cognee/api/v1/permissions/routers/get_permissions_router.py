@@ -1,15 +1,17 @@
-from typing import List, Union
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, Query
 from fastapi.responses import JSONResponse
 
 from cognee import __version__ as cognee_version
+from cognee.api.DTO import InDTO
+from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.models import User
+from cognee.modules.users.permissions.methods import (
+    authorized_get_principal_datasets as method_authorized_get_principal_datasets,
+)
 from cognee.modules.users.tenants.methods.get_tenant_roles import (
     get_tenant_roles as method_get_tenant_roles,
-)
-from cognee.modules.users.tenants.methods.get_users_in_role import (
-    get_users_in_role as method_get_users_in_roles,
 )
 from cognee.modules.users.tenants.methods.get_user_roles import (
     get_user_roles as method_get_user_roles,
@@ -17,16 +19,13 @@ from cognee.modules.users.tenants.methods.get_user_roles import (
 from cognee.modules.users.tenants.methods.get_user_tenants import (
     get_user_tenants as method_get_user_tenants,
 )
+from cognee.modules.users.tenants.methods.get_users_in_role import (
+    get_users_in_role as method_get_users_in_roles,
+)
 from cognee.modules.users.tenants.methods.get_users_in_tenant import (
     get_users_in_tenant as method_get_users_in_tenant,
 )
-from cognee.modules.users.models import User
-from cognee.api.DTO import InDTO
-from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
-from cognee.modules.users.permissions.methods import (
-    authorized_get_principal_datasets as method_authorized_get_principal_datasets,
-)
 
 
 class SelectTenantDTO(InDTO):
@@ -44,7 +43,7 @@ def get_permissions_router() -> APIRouter:
             examples=["read"],
             description="Permission to grant. One of 'read', 'write', 'delete', 'share'.",
         ),
-        dataset_ids: List[UUID] = Body(
+        dataset_ids: list[UUID] = Body(
             ...,
             examples=[["a1b2c3d4-5717-4562-b3fc-2c963f66afa6"]],
             description=(
@@ -80,7 +79,7 @@ def get_permissions_router() -> APIRouter:
             "Permissions API Endpoint Invoked",
             user,
             additional_properties={
-                "endpoint": f"POST /v1/permissions/datasets/{str(principal_id)}",
+                "endpoint": f"POST /v1/permissions/datasets/{principal_id!s}",
                 "dataset_ids": str(dataset_ids),
                 "principal_id": str(principal_id),
                 "cognee_version": cognee_version,
@@ -103,7 +102,7 @@ def get_permissions_router() -> APIRouter:
     @permissions_router.delete("/datasets/{principal_id}")
     async def revoke_datasets_permission_from_principal(
         permission_name: str,
-        dataset_ids: List[UUID],
+        dataset_ids: list[UUID],
         principal_id: UUID,
         user: User = Depends(get_authenticated_user),
     ):
@@ -121,7 +120,7 @@ def get_permissions_router() -> APIRouter:
             "Permissions API Endpoint Invoked",
             user,
             additional_properties={
-                "endpoint": f"DELETE /v1/permissions/datasets/{str(principal_id)}",
+                "endpoint": f"DELETE /v1/permissions/datasets/{principal_id!s}",
                 "dataset_ids": str(dataset_ids),
                 "principal_id": str(principal_id),
                 "cognee_version": cognee_version,
@@ -179,7 +178,7 @@ def get_permissions_router() -> APIRouter:
             "Permissions API Endpoint Invoked",
             user.id,
             additional_properties={
-                "endpoint": f"GET /v1/permissions/principals/{str(principal_id)}/datasets",
+                "endpoint": f"GET /v1/permissions/principals/{principal_id!s}/datasets",
                 "principal_id": str(principal_id),
                 "permission_name": permission_name,
                 "cognee_version": cognee_version,
@@ -261,7 +260,7 @@ def get_permissions_router() -> APIRouter:
             "Permissions API Endpoint Invoked",
             user,
             additional_properties={
-                "endpoint": f"DELETE /v1/permissions/roles/{str(role_id)}",
+                "endpoint": f"DELETE /v1/permissions/roles/{role_id!s}",
                 "role_id": str(role_id),
                 "cognee_version": cognee_version,
             },
@@ -312,7 +311,7 @@ def get_permissions_router() -> APIRouter:
             "Permissions API Endpoint Invoked",
             user,
             additional_properties={
-                "endpoint": f"POST /v1/permissions/users/{str(user_id)}/roles",
+                "endpoint": f"POST /v1/permissions/users/{user_id!s}/roles",
                 "user_id": str(user_id),
                 "role_id": str(role_id),
                 "cognee_version": cognee_version,
@@ -344,7 +343,7 @@ def get_permissions_router() -> APIRouter:
             "Permissions API Endpoint Invoked",
             user,
             additional_properties={
-                "endpoint": f"DELETE /v1/permissions/users/{str(user_id)}/roles",
+                "endpoint": f"DELETE /v1/permissions/users/{user_id!s}/roles",
                 "user_id": str(user_id),
                 "role_id": str(role_id),
                 "cognee_version": cognee_version,
@@ -389,7 +388,7 @@ def get_permissions_router() -> APIRouter:
             "Permissions API Endpoint Invoked",
             user,
             additional_properties={
-                "endpoint": f"POST /v1/permissions/users/{str(user_id)}/tenants",
+                "endpoint": f"POST /v1/permissions/users/{user_id!s}/tenants",
                 "user_id": str(user_id),
                 "tenant_id": str(tenant_id),
                 "cognee_version": cognee_version,
@@ -434,7 +433,7 @@ def get_permissions_router() -> APIRouter:
             "Permissions API Endpoint Invoked",
             user,
             additional_properties={
-                "endpoint": f"DELETE /v1/permissions/tenants/{str(tenant_id)}/users/{str(user_id)}",
+                "endpoint": f"DELETE /v1/permissions/tenants/{tenant_id!s}/users/{user_id!s}",
                 "tenant_id": str(tenant_id),
                 "user_id": str(user_id),
                 "cognee_version": cognee_version,
@@ -505,7 +504,7 @@ def get_permissions_router() -> APIRouter:
             "Permissions API Endpoint Invoked",
             user,
             additional_properties={
-                "endpoint": f"POST /v1/permissions/tenants/{str(payload.tenant_id)}",
+                "endpoint": f"POST /v1/permissions/tenants/{payload.tenant_id!s}",
                 "tenant_id": str(payload.tenant_id),
             },
         )

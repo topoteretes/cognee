@@ -4,6 +4,9 @@
  * environment variables set in step 1.
  */
 
+import { writeSkillFile } from "@/utils/osCommands";
+import type { PreferredOs } from "@/ui/layout/OsPreferenceContext";
+
 export const CLAUDE_PROMPT = `You are connected to Cognee Cloud, a persistent knowledge graph memory system. Use it to store and retrieve knowledge across conversations.
 
 ## First — is memory already automatic here?
@@ -456,10 +459,6 @@ export const CODEX_HOOKS_ENABLE = "codex features enable hooks";
 export const CODEX_MARKETPLACE_ADD = "codex plugin marketplace add topoteretes/cognee-integrations --ref main";
 export const CODEX_PLUGIN_INSTALL = "codex plugin add cognee@cognee";
 
-// OpenCode's native Cognee plugin installs and configures itself through its
-// package setup command. Credentials are supplied in the preceding dashboard step.
-export const OPENCODE_PLUGIN_SETUP = "npx @cognee/cognee-opencode setup";
-
 // Onboarding: a ready-to-paste prompt telling the connected agent to push the
 // user's existing context into Cognee as long-term memory.
 //
@@ -481,14 +480,17 @@ export const UPLOAD_SAMPLE_PROMPT =
 export const RECALL_SAMPLE_PROMPT = "Where is Cognee's founder and CEO Vasilije from, and what is special about that town?";
 
 // Ready-to-paste shell commands — copied to clipboard and run by the user locally
-export const CLAUDE_CODE_SKILL_INSTALL =
-  `mkdir -p ~/.claude/skills/cognee && cat > ~/.claude/skills/cognee/SKILL.md << 'COGNEE_EOF'\n${SKILLS_CONTENT}\nCOGNEE_EOF`;
+export function claudeCodeSkillInstall(os: PreferredOs): string {
+  return writeSkillFile(os, "/.claude/skills/cognee", "SKILL.md", SKILLS_CONTENT);
+}
 
-export const CODEX_SKILL_INSTALL =
-  `mkdir -p ~/.codex/skills/cognee && cat > ~/.codex/skills/cognee/SKILL.md << 'COGNEE_EOF'\n${CODEX_SKILLS_CONTENT}\nCOGNEE_EOF`;
+export function codexSkillInstall(os: PreferredOs): string {
+  return writeSkillFile(os, "/.codex/skills/cognee", "SKILL.md", CODEX_SKILLS_CONTENT);
+}
 
-export const OPENCLAW_SKILL_INSTALL =
-  `mkdir -p ~/.openclaw/skills/cognee && cat > ~/.openclaw/skills/cognee/SKILL.md << 'COGNEE_EOF'\n${OPENCLAW_SKILLS_CONTENT}\nCOGNEE_EOF`;
+export function openclawSkillInstall(os: PreferredOs): string {
+  return writeSkillFile(os, "/.openclaw/skills/cognee", "SKILL.md", OPENCLAW_SKILLS_CONTENT);
+}
 
 // Agent-agnostic variant of the Claude Code skill, used by the API / MCP
 // card: same operations and behavior rules, but without Claude-specific
@@ -515,8 +517,12 @@ export const GENERIC_SKILL_CONTENT = SKILLS_CONTENT
     'a unix-timestamp-based id unique to this conversation, e.g. "1719320000"',
   );
 
-export const GENERIC_SKILL_INSTALL =
-  `mkdir -p skills/cognee && cat > skills/cognee/SKILL.md << 'COGNEE_EOF'\n${GENERIC_SKILL_CONTENT}\nCOGNEE_EOF`;
+export function genericSkillInstall(os: PreferredOs): string {
+  if (os === "windows") {
+    return `New-Item -ItemType Directory -Force -Path "skills\\cognee" | Out-Null\nSet-Content -Path "skills\\cognee\\SKILL.md" -Value @'\n${GENERIC_SKILL_CONTENT}\n'@`;
+  }
+  return `mkdir -p skills/cognee && cat > skills/cognee/SKILL.md << 'COGNEE_EOF'\n${GENERIC_SKILL_CONTENT}\nCOGNEE_EOF`;
+}
 
 // Standard stdio MCP config. Launched via `uvx cognee-mcp`, which fetches and
 // runs the package on demand — no separate `pip install` step, and it avoids
@@ -544,6 +550,23 @@ export const HERMES_MCP_CONFIG = `mcp_servers:
     env:
       COGNEE_BASE_URL: "{{BASE_URL}}"
       COGNEE_API_KEY: "{{API_KEY}}"`;
+
+// Claude Desktop's config file already exists (it holds "preferences" and other
+// keys), so users MERGE this "mcpServers" key into it — hence no outer file
+// braces here, unlike MCP_STDIO_CONFIG's whole-file shape. Pasting a full
+// { "mcpServers": … } object would nest braces inside the existing root and
+// break the JSON. Uses --api-url/--api-token flags (not env vars) to match
+// the args Claude Desktop's own docs show for third-party servers.
+export const CLAUDE_DESKTOP_MCP_ENTRY = `"mcpServers": {
+  "cognee": {
+    "command": "uvx",
+    "args": [
+      "cognee-mcp@latest",
+      "--api-url", "{{BASE_URL}}",
+      "--api-token", "{{API_KEY}}"
+    ]
+  }
+}`;
 
 export function fillTemplate(template: string, baseUrl: string, apiKey: string): string {
   return template

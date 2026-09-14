@@ -80,6 +80,7 @@ pip install cognee
 
 ```python
 import os
+
 os.environ["LLM_API_KEY"] = "ВАШ_OPENAI_API_KEY"
 ```
 
@@ -97,7 +98,9 @@ import asyncio
 
 async def main():
     # Добавляем текст в cognee
-    await cognee.add("Обработка естественного языка (NLP) - это междисциплинарная область компьютерных наук и информационного поиска.")
+    await cognee.add(
+        "Обработка естественного языка (NLP) - это междисциплинарная область компьютерных наук и информационного поиска."
+    )
 
     # Генерируем граф знаний
     await cognee.cognify()
@@ -110,9 +113,8 @@ async def main():
         print(result)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
-
 ```
 Пример вывода:
 ```

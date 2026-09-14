@@ -18,6 +18,7 @@ either is absent. Local run:
 
 import collections
 import io
+import logging
 import shutil
 import socket
 import subprocess
@@ -27,6 +28,8 @@ import time
 from pathlib import Path
 
 import pytest
+
+logger = logging.getLogger(__name__)
 
 moto = pytest.importorskip("moto", reason="requires moto[server] (pip install 'moto[server]')")
 s3fs = pytest.importorskip("s3fs", reason="requires s3fs (pip install 'cognee[aws]')")
@@ -49,8 +52,6 @@ def _free_port():
 
 @pytest.fixture(scope="module")
 def s3_env():
-    import os
-
     import boto3
 
     port = _free_port()
@@ -72,6 +73,7 @@ def s3_env():
             client.list_buckets()
             break
         except Exception:
+            logger.debug("Ignoring exception in s3_env", exc_info=True)
             time.sleep(0.25)
     else:
         moto_proc.terminate()
@@ -80,45 +82,49 @@ def s3_env():
 
     root = Path(tempfile.mkdtemp(prefix="cognee_s3_counts_"))
 
-    import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
+    import cognee  # (cognee's import runs load_dotenv(override=True))
 
-    os.environ.update(
-        DB_PROVIDER="sqlite",
-        CACHE_BACKEND="sqlite",
-        MOCK_EMBEDDING="true",
-        TELEMETRY_DISABLED="1",
-        STORAGE_BACKEND="s3",
-        STORAGE_BUCKET_NAME="bench",
-        AWS_REGION="us-east-1",
-        AWS_ACCESS_KEY_ID="testing",
-        AWS_SECRET_ACCESS_KEY="testing",
-        AWS_ENDPOINT_URL=endpoint,
-        DATA_ROOT_DIRECTORY="s3://bench/tenant-x/data",
+    def clear_config_caches():
+        import importlib
+
+        for module_name, factory_name in [
+            ("cognee.base_config", "get_base_config"),
+            ("cognee.infrastructure.files.storage.s3_config", "get_s3_config"),
+            ("cognee.infrastructure.databases.relational.config", "get_relational_config"),
+            (
+                "cognee.infrastructure.databases.relational.get_relational_engine",
+                "get_relational_engine",
+            ),
+            ("cognee.infrastructure.databases.cache.config", "get_cache_config"),
+            ("cognee.infrastructure.databases.cache.get_cache_engine", "create_cache_engine"),
+            ("cognee.infrastructure.llm.config", "get_llm_config"),
+        ]:
+            try:
+                getattr(importlib.import_module(module_name), factory_name).cache_clear()
+            except (ImportError, AttributeError):
+                pass
+
+    mp = pytest.MonkeyPatch()
+    for key, value in {
+        "DB_PROVIDER": "sqlite",
+        "CACHE_BACKEND": "sqlite",
+        "MOCK_EMBEDDING": "true",
+        "TELEMETRY_DISABLED": "1",
+        "STORAGE_BACKEND": "s3",
+        "STORAGE_BUCKET_NAME": "bench",
+        "AWS_REGION": "us-east-1",
+        "AWS_ACCESS_KEY_ID": "testing",
+        "AWS_SECRET_ACCESS_KEY": "testing",
+        "AWS_ENDPOINT_URL": endpoint,
+        "DATA_ROOT_DIRECTORY": "s3://bench/tenant-x/data",
         # System (sqlite, cache) stays local: this test budgets the DATA path.
-        SYSTEM_ROOT_DIRECTORY=str(root / "system"),
-        CACHE_ROOT_DIRECTORY=str(root / "cache"),
-        ENABLE_BACKEND_ACCESS_CONTROL="false",
-        COGNEE_SKIP_CONNECTION_TEST="true",
-    )
-
-    import importlib
-
-    for module_name, factory_name in [
-        ("cognee.base_config", "get_base_config"),
-        ("cognee.infrastructure.files.storage.s3_config", "get_s3_config"),
-        ("cognee.infrastructure.databases.relational.config", "get_relational_config"),
-        (
-            "cognee.infrastructure.databases.relational.get_relational_engine",
-            "get_relational_engine",
-        ),
-        ("cognee.infrastructure.databases.cache.config", "get_cache_config"),
-        ("cognee.infrastructure.databases.cache.get_cache_engine", "create_cache_engine"),
-        ("cognee.infrastructure.llm.config", "get_llm_config"),
-    ]:
-        try:
-            getattr(importlib.import_module(module_name), factory_name).cache_clear()
-        except (ImportError, AttributeError):
-            pass
+        "SYSTEM_ROOT_DIRECTORY": str(root / "system"),
+        "CACHE_ROOT_DIRECTORY": str(root / "cache"),
+        "ENABLE_BACKEND_ACCESS_CONTROL": "false",
+        "COGNEE_SKIP_CONNECTION_TEST": "true",
+    }.items():
+        mp.setenv(key, value)
+    clear_config_caches()
 
     # Count every S3 API call, through both the async client and the sync bridge.
     counts = collections.Counter()
@@ -140,6 +146,8 @@ def s3_env():
 
     s3fs.S3FileSystem._call_s3 = original_async
     s3fs.S3FileSystem.call_s3 = original_sync
+    mp.undo()
+    clear_config_caches()
     moto_proc.terminate()
     shutil.rmtree(root, ignore_errors=True)
 

@@ -147,7 +147,7 @@ class TestRecordProvenanceTask:
 
     @pytest.mark.asyncio
     async def test_no_ctx_degrades_to_entries_without_source_ref(self, manager):
-        _, chunk, _, _, data_points = _pipeline_data()
+        _, _chunk, _, _, data_points = _pipeline_data()
         result = await record_provenance(data_points, ctx=None)
         assert result is data_points
 
@@ -190,7 +190,7 @@ class TestRecordProvenanceTask:
     async def test_dataset_scoping_isolates_tenants(self, manager):
         # Same (deterministic) entity ids ingested under two datasets must not
         # share a version chain.
-        document, chunk, entity, _, _ = _pipeline_data()
+        _document, chunk, entity, _, _ = _pipeline_data()
         data_points_a = [FakeSummary(chunk)]
         ctx_a, ctx_b = _ctx(), _ctx()
 
@@ -229,6 +229,41 @@ class TestRecordProvenanceTask:
         relationships = [entry for entry in entries.values() if entry.entity_type == "relationship"]
         assert len(relationships) == 1
         assert relationships[0].used_entities == [str(root.id), str(leaf.id)]
+        assert (await manager.verify_chain())["valid"] is True
+
+    @pytest.mark.asyncio
+    async def test_generic_walk_without_the_input_attributes_to_nothing(self, manager):
+        # get_graph_from_model may return a node set that does not include the item
+        # it was given. Attributing those entries to the absent item would forge a
+        # provenance chain pointing at something that was never written.
+        class CustomTail(DataPoint):
+            name: str
+
+        class CustomLeaf(DataPoint):
+            name: str
+            points_to: CustomTail
+
+        class CustomContainer(DataPoint):
+            name: str
+            holds: CustomLeaf
+            metadata: dict = {"index_fields": [], "transparent": True}
+
+        tail = CustomTail(name="tail")
+        leaf = CustomLeaf(name="leaf", points_to=tail)
+        container = CustomContainer(name="container", holds=leaf)
+
+        result = await record_provenance([container], ctx=None)
+
+        assert result == [container]
+        entries = await storage.retrieve_all()
+        entity_ids = {entry.entity_id for entry in entries}
+        assert str(container.id) not in entity_ids
+        # The leaf, the tail, and the one relationship between them.
+        assert {str(leaf.id), str(tail.id)} <= entity_ids
+        assert any(entry.entity_type == "relationship" for entry in entries)
+        # Nothing may be attributed to an entity that was never written.
+        assert all(entry.source_document == "" for entry in entries)
+        assert all(entry.parent_entity_id is None for entry in entries)
         assert (await manager.verify_chain())["valid"] is True
 
     @pytest.mark.asyncio

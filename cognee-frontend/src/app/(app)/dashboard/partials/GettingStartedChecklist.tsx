@@ -61,15 +61,15 @@ export function GettingStartedChecklist({ items }: { items: ChecklistItem[] }) {
   const progressPct = Math.round((doneCount / items.length) * 100);
 
   return (
-    <div style={{ background: "rgba(188,155,255,0.06)", border: "1px solid rgba(188,155,255,0.25)", borderRadius: 12, padding: "18px 20px" }}>
+    <div style={{ background: "rgba(188,155,255,0.06)", border: "1px solid rgba(188,155,255,0.25)", borderRadius: 0, padding: "18px 20px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         <span style={{ fontSize: 15, fontWeight: 700, color: "#EDECEA" }}>Set up your workspace</span>
         <span style={{ fontSize: 12, fontWeight: 600, color: "#BC9BFF", fontVariantNumeric: "tabular-nums" }}>
           {doneCount} / {items.length}
         </span>
       </div>
-      <div style={{ height: 5, borderRadius: 3, background: "rgba(255,255,255,0.08)", overflow: "hidden", marginBottom: 14 }}>
-        <div style={{ height: "100%", width: `${progressPct}%`, background: "#BC9BFF", borderRadius: 3, transition: "width 300ms ease" }} />
+      <div style={{ height: 5, borderRadius: 0, background: "rgba(255,255,255,0.08)", overflow: "hidden", marginBottom: 14 }}>
+        <div style={{ height: "100%", width: `${progressPct}%`, background: "#BC9BFF", borderRadius: 0, transition: "width 300ms ease" }} />
       </div>
       <div>
         {items.map((item, i) => (

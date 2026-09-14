@@ -1,5 +1,5 @@
+from typing import Any
 from uuid import UUID
-from typing import Union, Optional, List, Type, Any
 
 try:
     from typing import Unpack
@@ -8,17 +8,17 @@ except ImportError:
 
 from typing_extensions import TypedDict
 
-from cognee.shared.logging_utils import get_logger
+from cognee.modules.observability import (
+    COGNEE_DATASET_NAME,
+    COGNEE_IMPROVE_STAGES,
+    COGNEE_SESSION_ID,
+    new_span,
+)
 from cognee.modules.operations import record_operation
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
-from cognee.modules.observability import (
-    new_span,
-    COGNEE_DATASET_NAME,
-    COGNEE_SESSION_ID,
-    COGNEE_IMPROVE_STAGES,
-)
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("improve")
 
@@ -29,7 +29,7 @@ class ImproveKwargs(TypedDict, total=False):
     extraction_tasks: list
     enrichment_tasks: list
     data: Any
-    node_type: Type
+    node_type: type
     user: object
     vector_db_config: dict
     graph_db_config: dict
@@ -37,11 +37,11 @@ class ImproveKwargs(TypedDict, total=False):
 
 
 async def improve(
-    dataset: Union[str, UUID] = "main_dataset",
+    dataset: str | UUID = "main_dataset",
     *,
     run_in_background: bool = False,
-    node_name: Optional[List[str]] = None,
-    session_ids: Optional[List[str]] = None,
+    node_name: list[str] | None = None,
+    session_ids: list[str] | None = None,
     build_global_context_index: bool = False,
     build_truth_subspace: bool = False,
     **kwargs: Unpack[ImproveKwargs],
@@ -103,8 +103,8 @@ async def improve(
         # Enrich graph only (no session bridging)
         await cognee.improve(dataset="docs")
     """
-    from cognee.shared.utils import send_telemetry
     from cognee import __version__ as cognee_version
+    from cognee.shared.utils import send_telemetry
 
     stages_run = []
 
@@ -170,7 +170,7 @@ async def improve(
             # lock so auto-improve + idle-watcher + SessionEnd don't
             # duplicate work. Multi-session improves skip the lock — the
             # pattern is rare and locking N sessions at once is messy.
-            acquired_lock_for: Optional[str] = None
+            acquired_lock_for: str | None = None
             if session_ids and len(session_ids) == 1:
                 from cognee.infrastructure.locks import (
                     release_improve_lock,
@@ -229,6 +229,18 @@ async def improve(
                     if distilled:
                         stages_run.append("distill_sessions")
 
+                    # Stage 2c2: fold rated turns and stated preferences into the
+                    # calling user's preference subgraph (weighted `prefers` edges
+                    # plus the preference node's text). One call for all sessions —
+                    # preferences aggregate across a user's sessions.
+                    preference_result = await _update_user_preferences(
+                        dataset=write_dataset_ref,
+                        session_ids=session_ids,
+                        user=user,
+                    )
+                    if preference_result is not None and preference_result.status == "completed":
+                        stages_run.append("user_preferences")
+
                     # Stage 2d: build the truth subspace from distilled session
                     # learnings (opt-in, default OFF). Runs after distillation so
                     # freshly accepted lessons are available as anchors, and before
@@ -248,7 +260,9 @@ async def improve(
                             stages_run.append("build_truth_subspace")
                         except Exception as e:
                             logger.warning(
-                                "improve: truth subspace build failed (non-fatal): %s", e
+                                "improve: truth subspace build failed (non-fatal): %s",
+                                e,
+                                exc_info=True,
                             )
 
                 # Stage 3: default enrichment (triplet embeddings)
@@ -303,7 +317,7 @@ async def improve(
 
 
 async def _build_global_context_index(
-    dataset: Union[str, UUID],
+    dataset: str | UUID,
     user,
 ) -> bool:
     from cognee.memify_pipelines.global_context_index import global_context_index_pipeline
@@ -319,13 +333,15 @@ async def _build_global_context_index(
         logger.info("improve: global context index updated")
         return True
     except Exception as e:
-        logger.warning("improve: global context index update failed (non-fatal): %s", e)
+        logger.warning(
+            "improve: global context index update failed (non-fatal): %s", e, exc_info=True
+        )
         return False
 
 
 async def _bridge_sessions(
-    dataset: Union[str, UUID],
-    session_ids: List[str],
+    dataset: str | UUID,
+    session_ids: list[str],
     user,
     feedback_alpha: float,
     run_in_background: bool,
@@ -356,7 +372,7 @@ async def _bridge_sessions(
         )
         logger.info("improve: feedback weights applied from %d session(s)", len(session_ids))
     except Exception as e:
-        logger.warning("improve: feedback weights failed (non-fatal): %s", e)
+        logger.warning("improve: feedback weights failed (non-fatal): %s", e, exc_info=True)
 
     # Stage 2: persist session Q&A into permanent graph
     from cognee.memify_pipelines.persist_sessions_in_knowledge_graph import (
@@ -373,7 +389,7 @@ async def _bridge_sessions(
 
 
 async def _extract_agent_context(
-    session_ids: List[str],
+    session_ids: list[str],
     user,
 ) -> int:
     """Flush pending trace windows into agent-profile lessons before distillation.
@@ -409,13 +425,14 @@ async def _extract_agent_context(
                 "improve: agent-context extraction failed for '%s' (non-fatal): %s",
                 session_id,
                 e,
+                exc_info=True,
             )
     return touched
 
 
 async def _distill_sessions(
-    dataset: Union[str, UUID],
-    session_ids: List[str],
+    dataset: str | UUID,
+    session_ids: list[str],
     user,
 ) -> int:
     """Distill each session's gated learnings into curated lessons in the graph.
@@ -451,13 +468,58 @@ async def _distill_sessions(
                 "improve: session distillation failed for '%s' (non-fatal): %s",
                 session_id,
                 e,
+                exc_info=True,
             )
     return distilled
 
 
+async def _update_user_preferences(
+    dataset: str | UUID,
+    session_ids: list[str],
+    user,
+):
+    """Update the caller's per-dataset preference node and ``prefers`` weights.
+
+    Delegates to ``user_preferences.update_user_preferences`` once for all
+    sessions: rated turns move that user's ``prefers`` edge weights (exactly
+    once per turn), idle edges decay against the per-turn clock and are pruned
+    at neutral, and gated ``preferences`` session-context entries are folded
+    into the preference node's text behind a watermark.
+
+    Best-effort and fail-open like its neighbours: an error here never blocks
+    the rest of ``improve()``. Returns the ``PreferenceUpdateResult`` (or None
+    on error) so the caller can decide whether the stage actually changed
+    anything.
+    """
+    try:
+        from cognee.modules.user_preferences.update import update_user_preferences
+
+        result = await update_user_preferences(
+            session_ids=session_ids,
+            dataset=dataset,
+            user=user,
+        )
+        if result.status == "personalization_disabled":
+            logger.debug("improve: user preference stage skipped (PERSONALIZATION_ENABLED is off)")
+            return result
+        logger.info(
+            "improve: user preferences updated -> status=%s turns=%d edges=%d "
+            "pruned=%d text_lines=%d",
+            result.status,
+            result.turns_applied,
+            result.edges_written,
+            result.edges_pruned,
+            result.text_lines_added,
+        )
+        return result
+    except Exception as e:
+        logger.warning("improve: user preference update failed (non-fatal): %s", e, exc_info=True)
+        return None
+
+
 async def _persist_session_traces(
-    dataset: Union[str, UUID],
-    session_ids: List[str],
+    dataset: str | UUID,
+    session_ids: list[str],
     user,
     run_in_background: bool,
 ):
@@ -491,4 +553,4 @@ async def _persist_session_traces(
             len(session_ids),
         )
     except Exception as e:
-        logger.warning("improve: trace persistence failed (non-fatal): %s", e)
+        logger.warning("improve: trace persistence failed (non-fatal): %s", e, exc_info=True)

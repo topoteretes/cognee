@@ -107,7 +107,9 @@ Three env flags trade memory features for speed; know what each disables before 
   lower-cost reads; session store/recall itself keeps working.
 - `DATASET_QUEUE_ENABLED` (default `true`) — per-process cap on concurrent datasets
   (`DATASET_QUEUE_MAX_CONCURRENT`, default 6); also tears down subprocess DB engines on
-  scope exit and pins in-use engines against cache eviction. Disable only for
+  scope exit and pins in-use engines against cache eviction. Only engages when
+  `ENABLE_BACKEND_ACCESS_CONTROL` is on (its default) — with access control off the
+  flag is a no-op, so flipping it cannot affect performance there. Disable only for
   single-dataset scripts — under parallel multi-dataset load, turning it off risks
   file-lock leaks and unbounded embedded engines.
 

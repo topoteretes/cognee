@@ -3,21 +3,23 @@
 import asyncio
 import json
 from collections import Counter
-from typing import List, Optional, Any, Dict, Tuple
+from typing import Any
 from uuid import UUID
 
-from cognee.modules.graph.models.EdgeType import EdgeType
-from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
-from cognee.infrastructure.databases.exceptions import MutuallyExclusiveQueryParametersError
+from cognee.infrastructure.databases.exceptions import (
+    MissingQueryParameterError,
+    MutuallyExclusiveQueryParametersError,
+)
 from cognee.infrastructure.databases.graph.neptune_driver.adapter import NeptuneGraphDB
-from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
-from cognee.infrastructure.engine import DataPoint
-from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
-from cognee.modules.storage.utils import JSONEncoder
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.vector.models.PayloadSchema import PayloadSchema
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
+from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
+from cognee.infrastructure.engine import DataPoint
+from cognee.modules.graph.models.EdgeType import EdgeType
+from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
+from cognee.modules.storage.utils import JSONEncoder
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("NeptuneAnalyticsAdapter")
 
@@ -39,12 +41,12 @@ class IndexSchema(DataPoint):
     # Optional reference scalars carried for the search "Evidence" feature.
     # They stay None for non-chunk data points, so this schema remains
     # compatible with every indexed DataPoint type.
-    document_id: Optional[str] = None
-    document_name: Optional[str] = None
-    chunk_index: Optional[int] = None
-    source_chunk_id: Optional[str] = None
-    importance_weight: Optional[float] = 0.5
-    belongs_to_set: List[str] = []
+    document_id: str | None = None
+    document_name: str | None = None
+    chunk_index: int | None = None
+    source_chunk_id: str | None = None
+    importance_weight: float | None = 0.5
+    belongs_to_set: list[str] = []
     metadata: dict = {"index_fields": ["text"]}
 
 
@@ -68,11 +70,11 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
     def __init__(
         self,
         graph_id: str,
-        embedding_engine: Optional[EmbeddingEngine] = None,
-        region: Optional[str] = None,
-        aws_access_key_id: Optional[str] = None,
-        aws_secret_access_key: Optional[str] = None,
-        aws_session_token: Optional[str] = None,
+        embedding_engine: EmbeddingEngine | None = None,
+        region: str | None = None,
+        aws_access_key_id: str | None = None,
+        aws_secret_access_key: str | None = None,
+        aws_session_token: str | None = None,
     ):
         """
         Initialize the Neptune Analytics hybrid adapter.
@@ -107,7 +109,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         No operation is performed and None will be returned here,
         because the concept of connection is not applicable in this context.
         """
-        return None
+        return
 
     async def embed_data(self, data: list[str]) -> list[list[float]]:
         """
@@ -143,7 +145,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
     async def create_collection(
         self,
         collection_name: str,
-        payload_schema: Optional[PayloadSchema] = None,
+        payload_schema: PayloadSchema | None = None,
     ):
         """
         Neptune Analytics stores vector on a node level, so create_collection() implements interface for compliance but performs no operations when called.
@@ -155,16 +157,15 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             - payload_schema (Optional[PayloadSchema]): An optional schema for the payloads
               within this collection. (default None)
         """
-        pass
 
     async def get_collection(self, collection_name: str):
         """
         This method is part of the default implementation but not defined in the interface.
         No operation is performed here because the concept of collection is not applicable in NeptuneAnalytics vector store.
         """
-        return None
+        return
 
-    async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
+    async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """
         Insert new data points into the specified collection, by first inserting the node itself on the graph,
         then execute neptune.algo.vectors.upsert() to insert the corresponded embedding.
@@ -189,12 +190,12 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             # Fetch properties
             properties = self._serialize_properties(data_point.model_dump())
             properties[self._COLLECTION_PREFIX] = collection_name
-            params = dict(
-                node_id=str(node_id),
-                properties=properties,
-                embedding=data_vector,
-                collection_name=collection_name,
-            )
+            params = {
+                "node_id": str(node_id),
+                "properties": properties,
+                "embedding": data_vector,
+                "collection_name": collection_name,
+            }
 
             # Compose the query and send
             query_string = (
@@ -212,8 +213,11 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             try:
                 self._client.query(query_string, params)
             except Exception as e:
+                logger.debug(
+                    "Ignoring exception in NeptuneAnalyticsAdapter.create_data_points",
+                    exc_info=True,
+                )
                 self._na_exception_handler(e, query_string)
-        pass
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         """
@@ -226,7 +230,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             - data_point_ids (list[str]): A list of IDs of the data points to retrieve.
         """
         # Do the fetch for each node
-        params = dict(node_ids=data_point_ids, collection_name=collection_name)
+        params = {"node_ids": data_point_ids, "collection_name": collection_name}
         query_string = (
             f"MATCH( n :{self._VECTOR_NODE_LABEL}) "
             f"WHERE id(n) in $node_ids AND "
@@ -245,17 +249,18 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
                 for item in result
             ]
         except Exception as e:
+            logger.debug("Ignoring exception in NeptuneAnalyticsAdapter.retrieve", exc_info=True)
             self._na_exception_handler(e, query_string)
 
     async def search(
         self,
         collection_name: str,
-        query_text: Optional[str] = None,
-        query_vector: Optional[List[float]] = None,
-        limit: Optional[int] = None,
+        query_text: str | None = None,
+        query_vector: list[float] | None = None,
+        limit: int | None = None,
         with_vector: bool = False,
         include_payload: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
     ):
         """
@@ -313,7 +318,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             embedding = data_vectors[0]
 
         # Compose the parameters map
-        params = dict(embedding=embedding, param_topk=limit)
+        params = {"embedding": embedding, "param_topk": limit}
         # Compose the query
         query_string = f"""
         CALL neptune.algo.vectors.topKByEmbeddingWithFiltering({{
@@ -368,16 +373,17 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
                 )
             return results
         except Exception as e:
+            logger.debug("Ignoring exception in NeptuneAnalyticsAdapter.search", exc_info=True)
             self._na_exception_handler(e, query_string)
 
     async def batch_search(
         self,
         collection_name: str,
-        query_texts: List[str],
+        query_texts: list[str],
         limit: int,
         with_vectors: bool = False,
         include_payload: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
     ):
         """
@@ -426,7 +432,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
               points.
             - data_point_ids (list[str]): A list of IDs of the data points to delete.
         """
-        params = dict(node_ids=data_point_ids, collection_name=collection_name)
+        params = {"node_ids": data_point_ids, "collection_name": collection_name}
         query_string = (
             f"MATCH (n :{self._VECTOR_NODE_LABEL}) "
             f"WHERE id(n) IN $node_ids "
@@ -436,8 +442,10 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         try:
             self._client.query(query_string, params)
         except Exception as e:
+            logger.debug(
+                "Ignoring exception in NeptuneAnalyticsAdapter.delete_data_points", exc_info=True
+            )
             self._na_exception_handler(e, query_string)
-        pass
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         """
@@ -490,7 +498,6 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         """
         # Run actual truncate
         self._client.query(f"MATCH (n :{self._VECTOR_NODE_LABEL}) DETACH DELETE n")
-        pass
 
     async def is_empty(self) -> bool:
         query = """
@@ -518,7 +525,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
                 "Neptune Analytics requires an embedder defined to make vector operations"
             )
 
-    async def add_nodes_with_vectors(self, data_points: List[DataPoint]) -> None:
+    async def add_nodes_with_vectors(self, data_points: list[DataPoint]) -> None:
         """Add nodes to the graph and index their embeddable fields as vector data points.
 
         This is the hybrid write path for Neptune Analytics: graph nodes are inserted
@@ -536,7 +543,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         await self.add_nodes(data_points)
 
         # Group by (type_name, field_name) to build one collection per field.
-        groups: Dict[Tuple[str, str], List[DataPoint]] = {}
+        groups: dict[tuple[str, str], list[DataPoint]] = {}
         for dp in data_points:
             if not hasattr(dp, "metadata") or not dp.metadata:
                 continue
@@ -565,7 +572,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             await self.create_data_points(f"{type_name}_{field_name}", index_schemas)
 
     async def add_edges_with_vectors(
-        self, edges: List[Tuple[str, str, str, Dict[str, Any]]]
+        self, edges: list[tuple[str, str, str, dict[str, Any]]]
     ) -> None:
         """Add edges to the graph and index unique relationship types as vector data points.
 
@@ -609,4 +616,4 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
 
     async def run_migrations(self):
         """Run Neptune Analytics adapter migrations (currently no-op)."""
-        return None
+        return

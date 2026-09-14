@@ -6,17 +6,16 @@ Create Date: 2025-11-25 17:56:28.938931
 
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "46a6ce2bd2b2"
-down_revision: Union[str, None] = "76625596c5c3"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "76625596c5c3"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 graph_constraint_name = "dataset_database_graph_database_name_key"
 vector_constraint_name = "dataset_database_vector_database_name_key"

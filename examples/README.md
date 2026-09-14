@@ -1,6 +1,6 @@
 # Cognee Examples
 
-Runnable example scripts demonstrating cognee end-to-end — 69 scripts across three folders.
+Runnable example scripts demonstrating cognee end-to-end — 64 scripts across three folders.
 They double as the smoke-test corpus the team uses to verify behaviour across the SDK.
 
 > **New here?** Start with [`guides/simple_cognee_example.py`](guides/simple_cognee_example.py)
@@ -14,13 +14,13 @@ They double as the smoke-test corpus the team uses to verify behaviour across th
 | [`advanced_guides/remember_recall_improve_example.py`](advanced_guides/remember_recall_improve_example.py) | The v1.0 memory API (`remember`, `recall`, `improve`, `forget`) |
 | [`guides/agent_memory_quickstart.py`](guides/agent_memory_quickstart.py) | Wrap an LLM agent with cognee memory |
 | [`guides/graph_visualization.py`](guides/graph_visualization.py) | Render the resulting knowledge graph |
-| [`guides/start_local_ui_frontend_example.py`](guides/start_local_ui_frontend_example.py) | Launch the cognee UI alongside the API server |
+| [`guides/sessions.py`](guides/sessions.py) | Session-scoped memory via `session_id` |
 
 ## 📁 Top-level layout
 
 | Folder | What lives there | Count |
 |---|---|---|
-| [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 36 |
+| [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 31 |
 | [`advanced_guides/`](advanced_guides/) | Deeper takes on topics a guide already covers | 8 |
 | [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 25 |
 
@@ -71,7 +71,6 @@ features.** See [Contributing](#-contributing-a-new-example) for the precise cat
 |---|---|
 | [`web_url_content_ingestion_example.py`](guides/web_url_content_ingestion_example.py) | Ingesting a URL with `preferred_loaders` (needs network) |
 | [`multimedia_audio_image_processing_example.py`](guides/multimedia_audio_image_processing_example.py) | Audio + image ingestion (bundled assets) |
-| [`video_processing_example.py`](guides/video_processing_example.py) | Video ingestion (supply your own file) |
 | [`image_ocr_extraction.py`](guides/image_ocr_extraction.py) | Vision transcription + OCR text for an image |
 | [`code_graph_example.py`](guides/code_graph_example.py) | Code-graph pipeline + `SearchType.CODE` |
 
@@ -86,13 +85,9 @@ features.** See [Contributing](#-contributing-a-new-example) for the precise cat
 ### Backends & deployment
 | Script | Prerequisite |
 |---|---|
-| [`ladybug_example.py`](guides/ladybug_example.py) | None — embedded default backend |
-| [`neo4j_example.py`](guides/neo4j_example.py) | Neo4j server + `cognee[neo4j]` |
-| [`pgvector_example.py`](guides/pgvector_example.py) | Postgres + `cognee[postgres]` |
 | [`neptune_analytics_example.py`](guides/neptune_analytics_example.py) | AWS account + provisioned Neptune Analytics graph |
 | [`local_ollama_example.py`](guides/local_ollama_example.py) | `ollama serve` + two pulled models — fully local |
 | [`s3_storage.py`](guides/s3_storage.py) | Your S3 bucket + AWS credentials |
-| [`start_local_ui_frontend_example.py`](guides/start_local_ui_frontend_example.py) | Built frontend; blocks until Ctrl-C |
 
 ## 🎓 `advanced_guides/` — the same topic, deeper
 
@@ -146,6 +141,7 @@ Every demo lives in a topic folder.
 | [`simple_relational_database_migration_example/`](demos/ingestion_and_migration/simple_relational_database_migration_example/) | SQL → knowledge graph (small schema) |
 | [`complex_relational_database_migration_example/`](demos/ingestion_and_migration/complex_relational_database_migration_example/) | SQL → knowledge graph (richer schema, optional ontology) |
 | [`migrate_from_mem0/`](demos/ingestion_and_migration/migrate_from_mem0/) | Importing mem0 memories into cognee |
+| [`migrate_from_letta_and_zep/`](demos/ingestion_and_migration/migrate_from_letta_and_zep/) | Importing Letta (MemGPT) agent files and Zep / Graphiti exports into cognee |
 
 ### [`custom_pipelines/`](demos/custom_pipelines/) — pipeline composition
 | Script | Demonstrates |

@@ -16,6 +16,7 @@ from uuid import UUID
 
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
+from cognee.infrastructure.engine import is_internal_node
 
 # Relationship name and direction of the Entity -> EntityType edge (verified).
 ENTITY_TYPE_RELATION = "is_a"
@@ -127,6 +128,15 @@ async def _build_inventory(samples_per_type: int, sort: str) -> list[dict[str, A
     """Fetch graph data and assemble the per-type inventory."""
     graph_engine = await get_graph_engine()
     nodes, edges = await graph_engine.get_graph_data()
+
+    # Internal nodes (``is_internal`` marker, e.g. per-user preference state)
+    # must never be surfaced; drop them and every edge touching them.
+    internal_ids = {node_id for node_id, props in nodes if is_internal_node(props)}
+    if internal_ids:
+        nodes = [(node_id, props) for node_id, props in nodes if node_id not in internal_ids]
+        edges = [
+            edge for edge in edges if edge[0] not in internal_ids and edge[1] not in internal_ids
+        ]
 
     node_type = _resolve_node_types(nodes, edges)
     node_name = {node_id: props.get("name") for node_id, props in nodes}

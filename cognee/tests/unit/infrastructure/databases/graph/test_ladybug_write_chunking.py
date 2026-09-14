@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from cognee.infrastructure.databases.graph.ladybug.adapter import (
-    LadybugAdapter,
     _WRITE_CHUNK_SIZE,
+    LadybugAdapter,
 )
 
 

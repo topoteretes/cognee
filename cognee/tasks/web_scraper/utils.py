@@ -6,23 +6,24 @@ BeautifulSoup for custom extraction rules and Tavily or Keenable for API-based s
 
 import asyncio
 import os
-from typing import List, Optional, Union
 
 import httpx
+
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.web_scraper.types import UrlsToHtmls
-from .default_url_crawler import DefaultUrlCrawler
+
 from .config import DefaultCrawlerConfig, KeenableConfig, TavilyConfig
+from .default_url_crawler import DefaultUrlCrawler
 
 logger = get_logger(__name__)
 
 
 async def fetch_page_content(
-    urls: Union[str, List[str]],
-    preferred_tool: Optional[str] = None,
-    tavily_config: Optional[TavilyConfig] = None,
-    keenable_config: Optional[KeenableConfig] = None,
-    soup_crawler_config: Optional[DefaultCrawlerConfig] = None,
+    urls: str | list[str],
+    preferred_tool: str | None = None,
+    tavily_config: TavilyConfig | None = None,
+    keenable_config: KeenableConfig | None = None,
+    soup_crawler_config: DefaultCrawlerConfig | None = None,
 ) -> UrlsToHtmls:
     """Fetch content from one or more URLs using the specified tool.
 
@@ -98,7 +99,7 @@ async def fetch_page_content(
             logger.info(f"Successfully fetched content from {len(results)} URL(s)")
             return results
         except Exception as e:
-            logger.error(f"Error fetching page content: {str(e)}")
+            logger.error(f"Error fetching page content: {e!s}")
             raise
         finally:
             logger.info("Closing BeautifulSoup crawler")
@@ -111,7 +112,7 @@ async def fetch_page_content(
 
 
 async def fetch_with_tavily(
-    urls: Union[str, List[str]], tavily_config: Optional[TavilyConfig] = None
+    urls: str | list[str], tavily_config: TavilyConfig | None = None
 ) -> UrlsToHtmls:
     """Fetch content from URLs using the Tavily API.
 
@@ -171,7 +172,7 @@ async def fetch_with_tavily(
 
 
 async def fetch_with_keenable(
-    urls: Union[str, List[str]], keenable_config: Optional[KeenableConfig] = None
+    urls: str | list[str], keenable_config: KeenableConfig | None = None
 ) -> UrlsToHtmls:
     """Fetch content from URLs using the Keenable API.
 
@@ -228,12 +229,21 @@ async def fetch_with_keenable(
 
     return_results = {}
     errors = []
-    for url, result in zip(url_list, responses):
+    # URLs and error details can embed credentials — log only positions and
+    # exception class names.
+    for position, (url, result) in enumerate(zip(url_list, responses), start=1):
         if isinstance(result, BaseException):
-            logger.warning(f"Keenable API failed to fetch {url}: {result}")
+            logger.warning(
+                "Keenable API failed to fetch URL %d of %d (%s)",
+                position,
+                len(url_list),
+                type(result).__name__,
+            )
             errors.append(result)
         elif result is None:
-            logger.warning(f"Keenable API returned no content for {url}")
+            logger.warning(
+                "Keenable API returned no content for URL %d of %d", position, len(url_list)
+            )
         else:
             return_results[url] = result
 

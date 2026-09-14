@@ -10,6 +10,7 @@ import base64
 import json
 
 import pytest
+from cryptography.exceptions import InvalidTag
 
 from cognee.modules.integrations.crypto import (
     CURRENT_ENCRYPTION_VERSION,
@@ -74,7 +75,7 @@ def test_tampered_ciphertext_raises():
     # GCM authenticates the ciphertext — a flipped byte must fail, not decode garbage.
     ciphertext, nonce, version, key_id = encrypt_credentials({"access_token": "x"})
     tampered = bytes([ciphertext[0] ^ 0xFF]) + ciphertext[1:]
-    with pytest.raises(Exception):
+    with pytest.raises(InvalidTag):
         decrypt_credentials(tampered, nonce, version, key_id)
 
 
