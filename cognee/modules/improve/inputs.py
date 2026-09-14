@@ -8,7 +8,7 @@ because ``improve()`` owns background mode and a stage never asks.
 """
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any
 from uuid import UUID
@@ -52,6 +52,16 @@ class ImproveRunInputs:
             object.__setattr__(self, "memify_kwargs", MappingProxyType(dict(self.memify_kwargs)))
         if not isinstance(self.session_ids, tuple):
             object.__setattr__(self, "session_ids", tuple(self.session_ids or ()))
+
+    def with_capabilities(self, capabilities: GraphCapabilities) -> "ImproveRunInputs":
+        """A copy carrying the probed adapter capabilities.
+
+        The probe leases the graph engine (and, with backend access control
+        on, a dataset-queue slot), so the orchestrator resolves it only AFTER
+        winning the lock claim — a lock loser must not pay for a probe that
+        only stages 1 and 7 read.
+        """
+        return replace(self, capabilities=capabilities)
 
     @property
     def dataset_name(self) -> str | None:

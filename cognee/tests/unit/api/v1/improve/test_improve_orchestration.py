@@ -600,3 +600,25 @@ def test_memify_passthrough_keys_are_declared_on_improve_kwargs():
     from cognee.modules.improve import MEMIFY_PASSTHROUGH_KEYS
 
     assert set(MEMIFY_PASSTHROUGH_KEYS) <= set(ImproveKwargs.__annotations__)
+
+
+@pytest.mark.asyncio
+async def test_lock_loser_never_probes_the_graph_engine(harness):
+    """The capability probe leases the graph engine (and a dataset-queue slot);
+    a run that loses its lock claim runs nothing, so it must not pay for it."""
+    harness.use_stages([FakeStage("a")])
+    resolve_mock = harness.improve_mod.resolve_graph_capabilities  # AsyncMock in conftest
+    resolve_mock.reset_mock()
+    key = f"dataset:{harness.dataset.id}"
+    assert await session_lock.try_acquire_improve_lock_many([key])
+    try:
+        blocked = await harness.improve()
+    finally:
+        await session_lock.release_improve_lock_many([key])
+
+    assert _lock_held(blocked)
+    resolve_mock.assert_not_awaited()
+
+    winner = await harness.improve()
+    assert not _lock_held(winner)
+    resolve_mock.assert_awaited_once()

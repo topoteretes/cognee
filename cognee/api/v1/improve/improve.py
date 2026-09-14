@@ -37,6 +37,7 @@ from cognee.modules.improve import (
     REASON_ABORTED_BY_FATAL_STAGE,
     REASON_LOCK_HELD,
     BaseStage,
+    GraphCapabilities,
     ImproveResult,
     ImproveRunInputs,
     StageResult,
@@ -231,6 +232,15 @@ async def improve(
             if not await try_acquire_improve_lock_many(lock_keys):
                 return report(_skip_lock_held_run(operation, inputs, lock_keys))
 
+            # Probed only after the claim was won: the probe leases the graph
+            # engine, which every lock loser would otherwise pay for although
+            # only stages 1 and 7 read the answer.
+            inputs = inputs.with_capabilities(
+                await resolve_graph_capabilities(
+                    inputs.dataset_id, getattr(inputs.dataset, "owner_id", None)
+                )
+            )
+
             # Created before the stages run: background mode hands this result
             # to the caller while the detached task is still filling it.
             result = ImproveResult(
@@ -345,9 +355,10 @@ async def _resolve_inputs(
         improve_operation_id=operation.operation_id,
         session_ids=tuple(session_ids),
         config=config,
-        capabilities=await resolve_graph_capabilities(
-            resolved_dataset.id, getattr(resolved_dataset, "owner_id", None)
-        ),
+        # Placeholder until the lock claim is won: the real probe leases the
+        # graph engine (and a dataset-queue slot), which a lock loser must not
+        # pay for. improve() swaps in the probed answer via with_capabilities.
+        capabilities=GraphCapabilities.assume_supported(),
         node_name=node_name,
         feedback_alpha=feedback_alpha,
         build_global_context_index=build_global_context_index,
