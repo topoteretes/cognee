@@ -92,7 +92,7 @@ class TestTurnAnalysisRatingQuestionIgnoresPersonalizationFlag:
         llm_mock = AsyncMock(return_value=SessionTurnAnalysis())
         cache_config = SimpleNamespace(caching=True, auto_feedback=auto_feedback)
         with (
-            patch.object(feedback_detection_module, "get_cache_config", lambda: cache_config),
+            patch.object(feedback_detection_module, "CacheConfig", lambda: cache_config),
             patch.object(
                 feedback_detection_module.LLMGateway,
                 "acreate_structured_output",

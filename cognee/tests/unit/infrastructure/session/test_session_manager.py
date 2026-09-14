@@ -12,6 +12,20 @@ from cognee.infrastructure.session.session_manager import SessionManager
 from cognee.infrastructure.session.session_turn import compose_session_prompt
 
 
+@pytest.fixture(autouse=True)
+def _deterministic_cache_env(monkeypatch):
+    """Pin the cache flags to their defaults for every test in this module.
+
+    The gates deliberately read the LIVE env now (fresh CacheConfig, not the
+    import-time lru cache), so CACHING/AUTO_FEEDBACK leakage from earlier tests
+    in a full-suite run would flip behavior these tests pin. Tests that need
+    other values patch CacheConfig or set the env themselves — both override
+    this pin.
+    """
+    monkeypatch.setenv("CACHING", "true")
+    monkeypatch.setenv("AUTO_FEEDBACK", "true")
+
+
 class TestComposeSessionPrompt:
     """Characterization tests pinning the exact prompt assembly extracted from the
     inner completion method. These must stay byte-identical to the pre-extraction
