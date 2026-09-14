@@ -448,6 +448,26 @@ jobs:
           cache-from: type=registry,ref=cognee/cognee-mcp:buildcache
           cache-to: type=registry,ref=cognee/cognee-mcp:buildcache,mode=max
 
+  sync-docs-spec:
+    needs: release-github
+    name: Sync the OpenAPI spec and changelog to cognee-docs
+    # sync_mintlify_docs.yml also listens for `release: published`, but that
+    # event never arrives for a release this workflow published itself:
+    # GitHub does not fire workflow triggers for events created with the
+    # default Actions token. The result was silent — no failing run to
+    # notice — and cognee-docs' cognee_openapi_spec.json went unmaintained
+    # from 2026-05-03 until someone updated it by hand (RES-37). Calling the
+    # sync makes it independent of which token published the release.
+    #
+    # Only stable releases: dev releases are prereleases, and the docs site
+    # documents the released line.
+    if: ${{ github.ref_name == 'main' }}
+    uses: ./.github/workflows/sync_mintlify_docs.yml
+    with:
+      tag: ${{ needs.release-github.outputs.tag }}
+    # The sync needs REPO_DISPATCH_PAT_TOKEN to write to cognee-docs.
+    secrets: inherit
+
   trigger-docs-test-suite:
     needs: release-pypi-package
     if: ${{ github.ref_name == 'main' }}
