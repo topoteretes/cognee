@@ -362,10 +362,13 @@ def _is_label(name: str) -> bool:
 
 def _same_identity(a: str, b: str) -> bool:
     """Two keys written for the same item by different readings ("Matchday 5, Rojas 12'"
-    and "Matchday 5: Rojas, 12th minute"): the same digits, and one's words within the
-    other's or most of them shared."""
+    and "Matchday 5: Rojas, 12th minute"): no digit on one side that the other side
+    contradicts, and one's words within the other's or most of them shared."""
     a, b = a.lower(), b.lower()
-    if sorted(re.findall(r"\d+", a)) != sorted(re.findall(r"\d+", b)):
+    da, db = set(re.findall(r"\d+", a)), set(re.findall(r"\d+", b))
+    # One reading may leave a part out ("Matchday 12, Kessler" for "Matchday 12,
+    # Kessler 78'"): the digits of one key must sit inside the other's, never differ.
+    if not (da <= db or db <= da):
         return False
     wa, wb = set(re.findall(r"[a-z]+", a)), set(re.findall(r"[a-z]+", b))
     if not wa or not wb:

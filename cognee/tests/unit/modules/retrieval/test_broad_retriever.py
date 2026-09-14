@@ -1614,6 +1614,7 @@ def test_same_identity_needs_the_same_digits():
     assert not _same_identity("Matchday 5, Rojas 12'", "Matchday 5, Rojas 70'")
     assert not _same_identity("PR 42", "issue 43")
     assert _same_identity("PR 42", "pr-42")
+    assert _same_identity("Matchday 12, Kessler", "Matchday 12, Kessler 78'")  # a part left out
 
 
 @pytest.mark.asyncio
