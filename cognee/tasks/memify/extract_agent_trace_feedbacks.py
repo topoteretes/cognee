@@ -28,21 +28,22 @@ def _normalize_trace_content(value) -> str | None:
     return normalized or None
 
 
-def resolve_trace_window_size(
+def resolve_trace_window(
     total_trace_count: int,
     persisted_trace_count: int,
     last_n_steps: int | None,
     *,
     session_id: str = "",
-) -> int:
-    """How many of the most recent trace steps are not yet persisted.
+) -> tuple[int, int]:
+    """The pending trace window as ``(start index, size)``.
 
     The pending window is every step above the watermark. A stale watermark
     (above the current step count: the trace session was cleared and rebuilt)
     restarts from the beginning. An explicit ``last_n_steps`` caps the window
-    at the most recent N pending steps — the caller asked for a bounded
-    persist — and the watermark still advances to the total, so steps below
-    that cap are deliberately left behind, exactly as ``last_n`` did before.
+    at the OLDEST N pending steps and the watermark advances only past them,
+    so a backlog drains across bounded triggers instead of being sealed —
+    capping at the newest N would leave the older pending steps below an
+    advanced watermark forever, unreachable even for ``improve()``.
     """
     effective = TRACE_PERSIST_WATERMARK.resolve_effective(
         persisted_trace_count, total_trace_count, session_id=session_id
@@ -50,7 +51,7 @@ def resolve_trace_window_size(
     pending = max(0, total_trace_count - effective)
     if last_n_steps is not None:
         pending = min(pending, max(0, int(last_n_steps)))
-    return pending
+    return effective, pending
 
 
 async def extract_agent_trace_feedbacks(
@@ -131,12 +132,12 @@ async def extract_agent_trace_feedbacks(
                         session_manager, user_id, session_id
                     )
                     if (
-                        resolve_trace_window_size(
+                        resolve_trace_window(
                             total_trace_count,
                             persisted_count,
                             last_n_steps,
                             session_id=session_id,
-                        )
+                        )[1]
                         <= 0
                     ):
                         logger.info(
@@ -166,7 +167,7 @@ async def extract_agent_trace_feedbacks(
                         trace_values = [entry.method_return_value for entry in trace_session]
 
                     total_trace_count = len(trace_values)
-                    window_size = resolve_trace_window_size(
+                    window_start, window_size = resolve_trace_window(
                         total_trace_count,
                         persisted_count,
                         last_n_steps,
@@ -174,7 +175,8 @@ async def extract_agent_trace_feedbacks(
                     )
                     if window_size <= 0:
                         continue
-                    pending_trace_values = trace_values[total_trace_count - window_size :]
+                    window_end = window_start + window_size
+                    pending_trace_values = trace_values[window_start:window_end]
 
                     normalized_trace_values = [
                         normalized
@@ -186,7 +188,7 @@ async def extract_agent_trace_feedbacks(
                         # feedback text). Mark it done so it is not re-read forever;
                         # there is no cognify whose success the advance could wait on.
                         await TRACE_PERSIST_WATERMARK.write_count(
-                            session_manager, user_id, session_id, total_trace_count
+                            session_manager, user_id, session_id, window_end
                         )
                         logger.info(
                             "Session %s: %d pending trace steps carry no %s; watermark "
@@ -194,7 +196,7 @@ async def extract_agent_trace_feedbacks(
                             session_id,
                             window_size,
                             content_label,
-                            total_trace_count,
+                            window_end,
                         )
                         continue
 
@@ -211,7 +213,7 @@ async def extract_agent_trace_feedbacks(
                         user_id=user_id,
                         session_id=session_id,
                         text=f"Session ID: {session_id}\n\n" + "\n".join(normalized_trace_values),
-                        persisted_trace_count=total_trace_count,
+                        persisted_trace_count=window_end,
                     )
                 except Exception as error:
                     logger.warning(

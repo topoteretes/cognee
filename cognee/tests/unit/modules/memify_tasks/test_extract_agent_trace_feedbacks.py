@@ -21,7 +21,7 @@ from cognee.infrastructure.session.session_persist_watermark import (
 from cognee.modules.users.models import User
 from cognee.tasks.memify.extract_agent_trace_feedbacks import (
     extract_agent_trace_feedbacks,
-    resolve_trace_window_size,
+    resolve_trace_window,
 )
 
 extract_agent_trace_feedbacks_module = sys.modules[
@@ -124,18 +124,18 @@ async def _extract(session_ids, **kwargs) -> list[TracePersistWindow]:
 @pytest.mark.parametrize(
     ("total", "persisted", "last_n_steps", "expected"),
     [
-        (3, 0, None, 3),  # fresh session: everything
-        (5, 3, None, 2),  # above the watermark only
-        (5, 5, None, 0),  # fully persisted
-        (0, 0, None, 0),  # nothing stored
-        (2, 10, None, 2),  # stale watermark (session rebuilt): start over
-        (5, 1, 2, 2),  # explicit cap bounds the pending window
-        (5, 4, 2, 1),  # cap larger than pending: pending wins
-        (5, 0, 0, 0),  # zero cap: nothing
+        (3, 0, None, (0, 3)),  # fresh session: everything
+        (5, 3, None, (3, 2)),  # above the watermark only
+        (5, 5, None, (5, 0)),  # fully persisted
+        (0, 0, None, (0, 0)),  # nothing stored
+        (2, 10, None, (0, 2)),  # stale watermark (session rebuilt): start over
+        (5, 1, 2, (1, 2)),  # explicit cap bounds the window to the OLDEST pending
+        (5, 4, 2, (4, 1)),  # cap larger than pending: pending wins
+        (5, 0, 0, (0, 0)),  # zero cap: nothing
     ],
 )
-def test_resolve_trace_window_size(total, persisted, last_n_steps, expected):
-    assert resolve_trace_window_size(total, persisted, last_n_steps) == expected
+def test_resolve_trace_window(total, persisted, last_n_steps, expected):
+    assert resolve_trace_window(total, persisted, last_n_steps) == expected
 
 
 # ------------------------------------------------------------------ extraction contract
@@ -209,7 +209,11 @@ async def test_stale_watermark_restarts_from_the_beginning(manager):
 
 
 @pytest.mark.asyncio
-async def test_last_n_steps_caps_the_pending_window(manager):
+async def test_last_n_steps_caps_the_pending_window_at_the_oldest(manager):
+    """A bounded persist drains the backlog oldest-first and advances the
+    watermark only past what it read — capping at the newest N would seal the
+    older pending steps below an advanced watermark, unreachable even for
+    improve()."""
     for index in range(5):
         manager.add_step("s", feedback=f"step {index}")
     await TRACE_PERSIST_WATERMARK.write_count(manager, USER_ID, "s", 1)
@@ -217,10 +221,27 @@ async def test_last_n_steps_caps_the_pending_window(manager):
     windows = await _extract(["s"], last_n_steps=2)
 
     assert manager.feedback_last_n_calls == [None]
-    assert windows[0].text == "Session ID: s\n\nstep 3\nstep 4"
-    # The watermark still advances to the total once cognified: steps under the
-    # explicit cap are deliberately left behind, as last_n always did.
-    assert windows[0].persisted_trace_count == 5
+    assert windows[0].text == "Session ID: s\n\nstep 1\nstep 2"
+    assert windows[0].persisted_trace_count == 3
+
+
+@pytest.mark.asyncio
+async def test_bounded_persists_drain_a_backlog_across_triggers(manager):
+    for index in range(5):
+        manager.add_step("s", feedback=f"step {index}")
+
+    first = await _extract(["s"], last_n_steps=2)
+    await TRACE_PERSIST_WATERMARK.write_count(manager, USER_ID, "s", first[0].persisted_trace_count)
+    second = await _extract(["s"], last_n_steps=2)
+    await TRACE_PERSIST_WATERMARK.write_count(
+        manager, USER_ID, "s", second[0].persisted_trace_count
+    )
+    third = await _extract(["s"], last_n_steps=2)
+
+    assert first[0].text.endswith("step 0\nstep 1")
+    assert second[0].text.endswith("step 2\nstep 3")
+    assert third[0].text.endswith("step 4")
+    assert third[0].persisted_trace_count == 5
 
 
 class LiveWriterSessionManager(FakeSessionManager):
@@ -343,8 +364,10 @@ async def test_raw_return_values_respect_last_n_steps_cap(manager):
 
     windows = await _extract(["trace_session"], raw_trace_content=True, last_n_steps=2)
 
+    # Oldest pending first: bounded persists drain the backlog instead of
+    # sealing the older steps below an advanced watermark.
     assert [window.text for window in windows] == [
-        "Session ID: trace_session\n\nsecond return\nthird return"
+        "Session ID: trace_session\n\nfirst return\nsecond return"
     ]
     assert manager.session_last_n_calls == [None]
 
