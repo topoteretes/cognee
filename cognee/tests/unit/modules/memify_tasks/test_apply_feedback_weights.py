@@ -499,3 +499,61 @@ class TestFeedbackAlpha:
     async def test_apply_feedback_weights_uses_the_shared_check(self):
         with pytest.raises(CogneeValidationError):
             await apply_feedback_weights([], alpha=0.0)
+
+
+@pytest.mark.asyncio
+async def test_raised_graph_call_persists_bookkeeping_and_spares_the_batch():
+    """An edge read raising after the node write succeeded must not lose the
+    applied ids or the attempt count (the same nodes would move again on every
+    run and the cap would never trip), and must not abort the rest of the batch."""
+
+    class EdgeReadRaises(InMemoryGraphWithWeights):
+        async def get_edge_feedback_weights(self, edge_object_ids):
+            raise RuntimeError("edge read failed")
+
+    graph = EdgeReadRaises()
+    graph.node_weights["n2"] = 0.5
+    session_manager = RecordingSessionManager()
+    second_item = _feedback_item(
+        qa_id="q2", used_graph_element_ids={"node_ids": ["n2"], "edge_ids": []}
+    )
+    # q2 has no edge ids, so the raising edge read is never called for it.
+
+    result = await _run(graph, session_manager, [_feedback_item(), second_item])
+
+    # q1: nodes applied and persisted despite the raise; attempt counted; not done.
+    stored = session_manager.metadata["q1"]
+    assert stored[APPLIED] is False
+    assert stored[NODE_IDS] == ["n1"]
+    assert stored[ATTEMPTS] == 1
+    assert graph.node_weights["n1"] == pytest.approx(0.55)
+    # q2 still processed: the batch survived q1's failure.
+    assert session_manager.metadata["q2"][APPLIED] is True
+    assert result["skipped"] == 1
+
+    # A retry of q1 does not re-move n1 (exactly-once across retries).
+    await _run(graph, session_manager, [_feedback_item(memify_metadata=stored)])
+    assert graph.node_weights["n1"] == pytest.approx(0.55)
+    assert [write for write in graph.node_write_log if "n1" in write] == [
+        {"n1": pytest.approx(0.55)}
+    ]
+    assert session_manager.metadata["q1"][ATTEMPTS] == 2
+
+
+@pytest.mark.asyncio
+async def test_repeated_raises_trip_the_attempt_cap():
+    class EdgeReadRaises(InMemoryGraphWithWeights):
+        async def get_edge_feedback_weights(self, edge_object_ids):
+            raise RuntimeError("edge read failed")
+
+    graph = EdgeReadRaises()
+    session_manager = RecordingSessionManager()
+
+    def item(stored):
+        return _feedback_item(memify_metadata=stored)
+
+    await _run_from_store(graph, session_manager, item, times=FEEDBACK_WEIGHTS_MAX_ATTEMPTS + 1)
+
+    stored = session_manager.metadata["q1"]
+    assert stored[APPLIED] is True  # sealed by the cap, not by success
+    assert stored[ATTEMPTS] == FEEDBACK_WEIGHTS_MAX_ATTEMPTS

@@ -244,25 +244,51 @@ async def _process_feedback_item(
     effective_alpha = _effective_alpha(item, alpha)
     attempts += 1
 
-    node_outcome = await _update_element_weights(
-        ids=pending_nodes,
-        normalized_rating=normalized_rating,
-        alpha=effective_alpha,
-        get_weights=graph_engine.get_node_feedback_weights,
-        set_weights=graph_engine.set_node_feedback_weights,
-    )
-    edge_outcome = await _update_element_weights(
-        ids=pending_edges,
-        normalized_rating=normalized_rating,
-        alpha=effective_alpha,
-        get_weights=graph_engine.get_edge_feedback_weights,
-        set_weights=graph_engine.set_edge_feedback_weights,
-    )
+    # A raised graph call must not lose the bookkeeping of the calls that
+    # already succeeded: without persisting applied ids and the attempt count
+    # below, the same elements would move again on every retry and the attempt
+    # cap would never trip. The error is re-raised after the metadata write.
+    node_outcome: ElementUpdateOutcome = {"applied": [], "pruned": [], "failed": []}
+    edge_outcome: ElementUpdateOutcome = {"applied": [], "pruned": [], "failed": []}
+    graph_error: Exception | None = None
+    try:
+        node_outcome = await _update_element_weights(
+            ids=pending_nodes,
+            normalized_rating=normalized_rating,
+            alpha=effective_alpha,
+            get_weights=graph_engine.get_node_feedback_weights,
+            set_weights=graph_engine.set_node_feedback_weights,
+        )
+        edge_outcome = await _update_element_weights(
+            ids=pending_edges,
+            normalized_rating=normalized_rating,
+            alpha=effective_alpha,
+            get_weights=graph_engine.get_edge_feedback_weights,
+            set_weights=graph_engine.set_edge_feedback_weights,
+        )
+    except Exception as error:
+        logger.warning(
+            "Feedback QA %s (session %s): graph call failed mid-row; persisting the "
+            "bookkeeping before re-raising: %s",
+            qa_id,
+            session_id,
+            error,
+            exc_info=True,
+        )
+        graph_error = error
 
     applied_nodes.update(node_outcome["applied"])
     applied_edges.update(edge_outcome["applied"])
     pruned = node_outcome["pruned"] + edge_outcome["pruned"]
     failed = node_outcome["failed"] + edge_outcome["failed"]
+    if graph_error is not None:
+        # Pending ids the raise left unattempted count as failed for this run.
+        touched = set(applied_nodes) | set(applied_edges) | set(pruned) | set(failed)
+        failed += [
+            element_id
+            for element_id in (*pending_nodes, *pending_edges)
+            if element_id not in touched
+        ]
 
     if pruned:
         logger.warning(
@@ -322,6 +348,9 @@ async def _process_feedback_item(
         len(item.get("feedback_text") or ""),
     )
 
+    if graph_error is not None:
+        raise graph_error
+
     return {"processed": 1, "applied": 1 if qa_success else 0, "skipped": 0}
 
 
@@ -344,13 +373,27 @@ async def apply_feedback_weights(
 
     user_id = str(user.id)
     for item in _iter_feedback_items(data):
-        outcome = await _process_feedback_item(
-            item=item,
-            alpha=alpha,
-            user_id=user_id,
-            session_manager=session_manager,
-            graph_engine=graph_engine,
-        )
+        try:
+            outcome = await _process_feedback_item(
+                item=item,
+                alpha=alpha,
+                user_id=user_id,
+                session_manager=session_manager,
+                graph_engine=graph_engine,
+            )
+        except Exception as error:
+            # One row's failure must not abort the rest of the batch; the row's
+            # own bookkeeping (applied ids, attempt count) was persisted before
+            # the re-raise, so its retry never re-moves what already moved.
+            logger.warning(
+                "Feedback QA %s (session %s) failed and will be retried: %s",
+                item.get("qa_id"),
+                item.get("session_id"),
+                error,
+                exc_info=True,
+            )
+            skipped += 1
+            continue
         processed += outcome["processed"]
         applied += outcome["applied"]
         skipped += outcome["skipped"]
