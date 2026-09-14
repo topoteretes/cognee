@@ -1777,11 +1777,25 @@ async def _remember_inner(
 
         # IMPROVE_AUTO_ENABLED=false is the kill switch for automatic improves
         # on both paths; an explicit self_improvement=True does not override it.
+        # Fail-open on a bad IMPROVE_* value: this reads ImproveConfig, whose
+        # validation raises on e.g. IMPROVE_FEEDBACK_ALPHA=0 — an improve-only
+        # knob must never block ingestion, so remember() logs loudly and skips
+        # the auto-improve instead of raising before the data is stored.
+        # Explicit improve() calls stay fail-loud on the same error.
         from cognee.api.v1.remember.auto_improve_debounce import auto_improve_enabled
 
-        auto_improve = bool(self_improvement) and auto_improve_enabled()
+        try:
+            auto_improve = bool(self_improvement) and auto_improve_enabled()
+        except Exception as config_error:
+            logger.warning(
+                "remember: invalid IMPROVE_* configuration, skipping automatic improve "
+                "(ingestion continues): %s",
+                config_error,
+                exc_info=True,
+            )
+            auto_improve = False
         if self_improvement and not auto_improve:
-            logger.debug("remember: automatic improve disabled by IMPROVE_AUTO_ENABLED=false")
+            logger.debug("remember: automatic improve disabled or unavailable")
 
         # Session memory: store in session cache, then optionally bridge to graph
         if session_id:

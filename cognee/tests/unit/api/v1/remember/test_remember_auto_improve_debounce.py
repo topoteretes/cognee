@@ -323,3 +323,37 @@ async def test_lock_held_bridge_refunds_the_debounce_window(monkeypatch, fake_sm
     assert results[0].improve is lock_held_first
     assert results[0].improve_error is None  # lock_held is a skip, not an error
     assert results[1]._task is not None
+
+
+@pytest.mark.asyncio
+async def test_invalid_improve_config_never_blocks_ingestion(monkeypatch, fake_sm, improve_calls):
+    """An improve-only knob (IMPROVE_FEEDBACK_ALPHA=0, an IMPROVE_STAGES_DISABLED
+    typo) must not make remember() raise before the data is stored: the
+    auto-improve is skipped with a warning and ingestion continues."""
+
+    def broken_config():
+        raise ValueError("feedback_alpha must be in range (0, 1]")
+
+    monkeypatch.setattr(debounce_module, "get_improve_config", broken_config)
+    user = SimpleNamespace(id=uuid4())
+
+    result = await remember_module.remember(
+        "turn", dataset_id=uuid4(), session_id="s-broken-config", user=user
+    )
+    await result
+
+    assert result.status == "session_stored"
+    assert fake_sm.qa[(str(user.id), "s-broken-config")] == ["turn"]
+    assert improve_calls == []
+
+
+def test_env_typo_in_stages_disabled_fails_the_first_config_read(monkeypatch):
+    from cognee.modules.improve.config import get_improve_config
+
+    monkeypatch.setenv("IMPROVE_STAGES_DISABLED", "triplet_enrichmnt")
+    get_improve_config.cache_clear()
+    try:
+        with pytest.raises(ValueError, match="triplet_enrichmnt"):
+            get_improve_config()
+    finally:
+        get_improve_config.cache_clear()
