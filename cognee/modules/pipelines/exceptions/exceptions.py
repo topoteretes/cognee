@@ -35,7 +35,11 @@ class AbandonedPipelineRunError(CogneeSystemError):
         name: str = "AbandonedPipelineRunError",
         status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
     ):
-        super().__init__(message, name, status_code)
+        # This one is only ever constructed, never raised: it is a label for a
+        # stored row. The base logs at ERROR on construction, which would emit
+        # one "raised" line per abandoned dataset on every boot for something
+        # that did not raise. Recovery logs the real event itself.
+        super().__init__(message, name, status_code, log=False)
 
 
 class CognifyFailedError(CogneeSystemError):

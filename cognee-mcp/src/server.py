@@ -1827,6 +1827,34 @@ async def main():
     elif not is_remote:
         logger.info("Skipping DB migrations")
 
+    if not is_remote:
+        # A run this server was executing when it died leaves a STARTED row
+        # that nothing else will ever close: the API server sweeps only its
+        # own rows, for the same reason this one does. Without this, a dataset
+        # whose cognify died with an MCP container reports "processing"
+        # forever (SDK-591).
+        #
+        # Placed here deliberately. It rolls back graph data, so it must not
+        # run before the schema is migrated, and it must not run at all when
+        # --api-url or --serve-url says this process does not own the database.
+        # Guarded like the origin stamp above, since cognee comes from PyPI and
+        # may predate either piece.
+        try:
+            from cognee.modules.cognify.recovery import recover_stale_cognify_runs_on_startup
+            from cognee.modules.operations import ORIGIN_MCP
+
+            await recover_stale_cognify_runs_on_startup(owned_origins=frozenset({ORIGIN_MCP}))
+        except ImportError:
+            logger.warning(
+                "Installed cognee has no startup recovery that accepts owned "
+                "origins — a cognify run interrupted by restarting this server "
+                "will stay reported as processing. Remove this guard once "
+                "cognee-mcp requires a cognee release that ships it (SDK-591)."
+            )
+        except Exception:
+            # Never let recovery stop the server from serving.
+            logger.exception("MCP startup recovery failed; continuing to boot.")
+
     try:
         match args.transport.lower():
             case "sse":
