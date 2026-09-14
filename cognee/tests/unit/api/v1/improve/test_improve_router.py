@@ -215,3 +215,36 @@ def test_docstring_no_longer_promises_a_graph_to_session_sync():
     assert "sync" not in doc
     assert "build_truth_subspace" in doc
     assert "feedback_alpha" in doc
+
+
+def test_fatal_stage_failure_returns_409_with_the_partial_result(client, monkeypatch):
+    """The documented 409: _abort_run raises a CogneeSystemError carrying the
+    partial ImproveResult, which used to reach clients as a bare 500 with no
+    body — the router must serialize what ran before the abort."""
+    import importlib
+
+    from cognee.exceptions import CogneeSystemError
+
+    improve_pkg = importlib.import_module("cognee.api.v1.improve")
+    partial = ImproveResult(
+        dataset_id=DATASET_ID,
+        dataset_name="docs",
+        session_ids=["s1"],
+        stages=[
+            StageResult.completed("feedback_weights"),
+            StageResult.errored("persist_session_qa", RuntimeError("persist failed")),
+            StageResult.skipped("persist_agent_traces", "aborted_by_fatal_stage"),
+        ],
+        memify_run={},
+    )
+    error = CogneeSystemError(message="improve aborted: persist_session_qa failed")
+    error.improve_result = partial
+    monkeypatch.setattr(improve_pkg, "improve", AsyncMock(side_effect=error))
+
+    resp = client.post("/improve", json={"datasetName": "docs", "sessionIds": ["s1"]})
+
+    assert resp.status_code == 409
+    body = resp.json()
+    assert "persist_session_qa" in body["error"]
+    stages = body["improve_result"]["stages"]
+    assert [stage["status"] for stage in stages] == ["completed", "errored", "skipped"]

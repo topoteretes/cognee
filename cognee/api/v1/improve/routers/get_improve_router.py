@@ -86,8 +86,11 @@ def get_improve_router() -> APIRouter:
 
         ## Error Codes
         - **400 Bad Request**: Neither dataset_id nor dataset_name provided
-        - **409 Conflict**: The fatal `persist_session_qa` stage failed, or another
-          error aborted the run
+        - **409 Conflict**: The fatal `persist_session_qa` stage failed — the body
+          carries the abort reason and the partial `improve_result` (what ran
+          before the abort) — or a non-Cognee error aborted the run (body
+          carries the reason). Other Cognee errors return their own status
+          codes.
         """
         send_telemetry(
             "Improve API Endpoint Invoked",
@@ -126,11 +129,28 @@ def get_improve_router() -> APIRouter:
             )
 
             return improve_run
-        except CogneeApiError:
-            # Cognee errors carry their own status code and actionable message;
-            # the global handler in cognee/api/client.py returns them.
+        except CogneeApiError as error:
+            partial = getattr(error, "improve_result", None)
+            if partial is not None:
+                # The fatal-stage abort (_abort_run attaches the partial result):
+                # the documented 409, with what ran before the abort in the body
+                # — the exception alone would reach clients as a bare 500.
+                logger.exception("Improve run aborted by its fatal stage")
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "error": str(getattr(error, "message", None) or error),
+                        "improve_result": partial.model_dump(mode="json"),
+                    },
+                )
+            # Other Cognee errors carry their own status code and actionable
+            # message; the global handler in cognee/api/client.py returns them.
             raise
         except Exception:
+            # Generic body on purpose: an unexpected exception's text can leak
+            # internals; the details go to the server log. Config mistakes
+            # (e.g. an IMPROVE_STAGES_DISABLED typo) fail loudly at startup
+            # instead of reaching this handler per call.
             logger.exception("Improve endpoint error")
             return JSONResponse(
                 status_code=409,
