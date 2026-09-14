@@ -8,6 +8,7 @@ from cognee.infrastructure.session.get_session_manager import get_session_manage
 from cognee.modules.improve.constants import DEFAULT_FEEDBACK_ALPHA
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.memify.feedback_weights_constants import (
+    FEEDBACK_SOURCE_EXPLICIT,
     FEEDBACK_SOURCE_IMPLICIT,
     FEEDBACK_WEIGHTS_MAX_ATTEMPTS,
     IMPLICIT_FEEDBACK_ALPHA_FACTOR,
@@ -15,6 +16,7 @@ from cognee.tasks.memify.feedback_weights_constants import (
     MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY,
     MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_NODE_IDS_KEY,
     MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_SCORE_KEY,
+    MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_SOURCE_KEY,
     MEMIFY_METADATA_FEEDBACK_WEIGHTS_ATTEMPTS_KEY,
     MEMIFY_METADATA_FEEDBACK_WEIGHTS_PRUNED_IDS_KEY,
 )
@@ -223,10 +225,17 @@ async def _process_feedback_item(
         )
         return {"processed": 0, "applied": 0, "skipped": 1}
 
-    # A re-rated row (different score than the one already applied) starts over;
-    # otherwise only ids not yet applied move, so a retry never compounds a weight.
+    # A re-rated row (different score OR source than the one already applied)
+    # starts over; otherwise only ids not yet applied move, so a retry never
+    # compounds a weight. Source matters: an implicit rating applied at half
+    # alpha, so an explicit re-rating of the same score still owes the rest.
+    feedback_source = item.get("feedback_source") or FEEDBACK_SOURCE_EXPLICIT
     applied_score = memify_metadata.get(MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_SCORE_KEY)
-    if applied_score is None or applied_score == feedback_score:
+    applied_source = memify_metadata.get(MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_SOURCE_KEY)
+    same_rating = applied_score == feedback_score and (
+        applied_source is None or applied_source == feedback_source
+    )
+    if applied_score is None or same_rating:
         applied_nodes = _id_list(
             memify_metadata.get(MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_NODE_IDS_KEY)
         )
@@ -324,6 +333,7 @@ async def _process_feedback_item(
             MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_NODE_IDS_KEY: sorted(applied_nodes),
             MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_EDGE_IDS_KEY: sorted(applied_edges),
             MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_SCORE_KEY: feedback_score,
+            MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_SOURCE_KEY: feedback_source,
             MEMIFY_METADATA_FEEDBACK_WEIGHTS_ATTEMPTS_KEY: attempts,
             MEMIFY_METADATA_FEEDBACK_WEIGHTS_PRUNED_IDS_KEY: sorted(pruned),
         },

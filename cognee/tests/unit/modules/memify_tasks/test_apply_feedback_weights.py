@@ -557,3 +557,39 @@ async def test_repeated_raises_trip_the_attempt_cap():
     stored = session_manager.metadata["q1"]
     assert stored[APPLIED] is True  # sealed by the cap, not by success
     assert stored[ATTEMPTS] == FEEDBACK_WEIGHTS_MAX_ATTEMPTS
+
+
+@pytest.mark.asyncio
+async def test_explicit_rerating_of_an_implicit_score_reapplies_at_full_alpha():
+    """An implicit rating moved the weights at half alpha; an explicit rating of
+    the SAME score is new information and must re-apply — comparing only the
+    score would leave the half-alpha update standing."""
+    from cognee.tasks.memify.feedback_weights_constants import (
+        FEEDBACK_SOURCE_EXPLICIT,
+        MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_SOURCE_KEY,
+    )
+
+    graph = InMemoryGraphWithWeights()
+    session_manager = RecordingSessionManager()
+
+    first = await _run(
+        graph, session_manager, [_feedback_item(feedback_source=FEEDBACK_SOURCE_IMPLICIT)]
+    )
+    assert first["applied"] == 1
+    assert graph.node_weights["n1"] == pytest.approx(0.525)  # half alpha
+    stored = session_manager.metadata["q1"]
+    assert stored[MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_SOURCE_KEY] == "implicit"
+
+    # add_feedback resets the done flag; same score, now explicit.
+    stored = {**stored, APPLIED: False}
+    second = await _run(
+        graph,
+        session_manager,
+        [_feedback_item(memify_metadata=stored, feedback_source=FEEDBACK_SOURCE_EXPLICIT)],
+    )
+    assert second["applied"] == 1
+    assert graph.node_weights["n1"] == pytest.approx(0.5725)  # full alpha from 0.525
+    assert (
+        session_manager.metadata["q1"][MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_SOURCE_KEY]
+        == "explicit"
+    )

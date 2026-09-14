@@ -12,9 +12,12 @@ MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY = "feedback_weights_applied"
 MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_NODE_IDS_KEY = "feedback_weights_applied_node_ids"
 MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_EDGE_IDS_KEY = "feedback_weights_applied_edge_ids"
 
-# The 1-5 rating those ids were moved with. A different rating on the same row (re-rated
-# feedback) starts the row over; the same rating is a no-op.
+# The 1-5 rating those ids were moved with, and the source (explicit/implicit) it
+# came from. A different rating OR source on the same row starts the row over —
+# source matters because an implicit rating moves weights at half alpha, so an
+# explicit re-rating of the same score still owes the other half.
 MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_SCORE_KEY = "feedback_weights_applied_score"
+MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_SOURCE_KEY = "feedback_weights_applied_source"
 
 # Number of runs that tried to write this row's weights (int).
 MEMIFY_METADATA_FEEDBACK_WEIGHTS_ATTEMPTS_KEY = "feedback_weights_attempts"
