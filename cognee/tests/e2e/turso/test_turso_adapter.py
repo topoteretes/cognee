@@ -279,6 +279,81 @@ async def test_get_nodeset_subgraph_empty_names(adapter):
 
 
 @pytest.mark.asyncio
+async def test_get_nodeset_subgraph_and_ignores_missing_names(adapter):
+    await adapter.add_nodes(
+        [
+            ("primary-a", {"name": "Alpha", "type": "Entity"}),
+            ("primary-b", {"name": "Beta", "type": "Entity"}),
+            ("shared", {"name": "Shared", "type": "Other"}),
+            ("one-side", {"name": "One", "type": "Other"}),
+        ]
+    )
+
+    await adapter.add_edges(
+        [
+            ("primary-a", "shared", "R", {}),
+            ("primary-b", "shared", "R", {}),
+            ("primary-a", "one-side", "R", {}),
+        ]
+    )
+
+    class Entity:
+        pass
+
+    nodes, _ = await adapter.get_nodeset_subgraph(
+        Entity, ["Alpha", "Missing"], node_name_filter_operator="AND"
+    )
+
+    assert {node_id for node_id, _ in nodes} == {
+        "primary-a",
+        "shared",
+        "one-side",
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_nodeset_subgraph_and_ignores_duplicate_names(adapter):
+    await adapter.add_nodes(
+        [
+            ("primary-a", {"name": "Alpha", "type": "Entity"}),
+            ("primary-b", {"name": "Beta", "type": "Entity"}),
+            ("shared", {"name": "Shared", "type": "Other"}),
+            ("one-side", {"name": "One", "type": "Other"}),
+        ]
+    )
+
+    await adapter.add_edges(
+        [
+            ("primary-a", "shared", "R", {}),
+            ("primary-b", "shared", "R", {}),
+            ("primary-a", "one-side", "R", {}),
+        ]
+    )
+
+    class Entity:
+        pass
+
+    nodes, _ = await adapter.get_nodeset_subgraph(
+        Entity, ["Alpha", "Alpha"], node_name_filter_operator="AND"
+    )
+
+    assert {node_id for node_id, _ in nodes} == {
+        "primary-a",
+        "shared",
+        "one-side",
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_nodeset_subgraph_rejects_invalid_operator(adapter):
+    class Entity:
+        pass
+
+    with pytest.raises(ValueError, match="node_name_filter_operator must be 'OR' or 'AND'"):
+        await adapter.get_nodeset_subgraph(Entity, ["Alpha"], node_name_filter_operator="INVALID")
+
+
+@pytest.mark.asyncio
 async def test_bulk_add_delete_large_id_set(adapter):
     """Bulk add/get/delete over a large id set must not raise "too many SQL
     variables" — id lists are bound as a single JSON array via json_each."""
