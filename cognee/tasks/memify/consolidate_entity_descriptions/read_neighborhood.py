@@ -56,10 +56,19 @@ def format_edges_with_endpoints(
     endpoint. Unlike get_edges() (which never carries edge properties on any
     backend), the edge dict here includes edge_text when the edge has one.
 
-    An entity can have more than one EntityType neighbor - e.g. classified
-    differently across separate ingestions of the same (name-deduped) entity -
-    so entity_types is a list, not a single value that would silently drop all
-    but the last one found.
+    A membership is an outgoing is_a edge from this node to an EntityType, at
+    most once per type id. Node type alone is not enough: any other edge that
+    happens to land on an EntityType node (or an is_a edge pointing the other
+    way) is not a typing statement, and treating it as one makes this pipeline
+    write back an is_a edge cognify never asserted.
+
+    An entity can have more than one such type - e.g. classified differently
+    across separate ingestions of the same (name-deduped) entity - so
+    entity_types is a list, not a single value that would silently drop all
+    but the last one found. It is deduped by type id: two distinct edges to
+    the same type are one membership, not two, or the entity is counted twice
+    in that type's member list and inflates the total member count the type
+    summary is required to state.
 
     Two distinct edges can also connect this node to the SAME neighbor (e.g.
     "works_at" and "visited" both linking the same pair) - edges maps each
@@ -76,23 +85,32 @@ def format_edges_with_endpoints(
     edges: dict[str, list[dict[str, str | None]]] = {}
     filtered_neighbors: list[dict[str, Any]] = []
     seen_neighbor_ids: set[str] = set()
+    seen_entity_type_ids: set[str] = set()
 
     for triple in edges_with_endpoints:
         if not isinstance(triple, (list, tuple)) or len(triple) != 3:
             continue
 
         source, edge_info, target = triple
-        neighbor = target if str(source.get("id")) == str(node_id) else source
+        is_outgoing = str(source.get("id")) == str(node_id)
+        neighbor = target if is_outgoing else source
         neighbor_id = str(neighbor.get("id", ""))
+        relationship_name = str(edge_info.get("relationship_name") or "related to")
 
         edges.setdefault(neighbor_id, []).append(
             {
-                "relationship_name": str(edge_info.get("relationship_name") or "related to"),
+                "relationship_name": relationship_name,
                 "edge_text": str(edge_info["edge_text"]) if edge_info.get("edge_text") else None,
             }
         )
 
-        if neighbor.get("type") == "EntityType":
+        if (
+            neighbor.get("type") == "EntityType"
+            and relationship_name == "is_a"
+            and is_outgoing
+            and neighbor_id not in seen_entity_type_ids
+        ):
+            seen_entity_type_ids.add(neighbor_id)
             entity_types.append(neighbor)
 
         if neighbor_id not in seen_neighbor_ids:

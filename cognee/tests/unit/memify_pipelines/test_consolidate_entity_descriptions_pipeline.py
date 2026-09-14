@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
+from uuid import NAMESPACE_OID, uuid4, uuid5
 
 import pytest
 
@@ -59,9 +59,9 @@ def test_format_edges_with_endpoints_extracts_edge_text_and_entity_type():
             {"id": neighbor_id, "name": "Milano", "description": "A city", "type": "Entity"},
         ),
         (
-            {"id": type_id, "name": "Person", "type": "EntityType"},
-            {"relationship_name": "is_a"},
             {"id": node_id, "name": "Marco", "type": "Entity"},
+            {"relationship_name": "is_a"},
+            {"id": type_id, "name": "Person", "type": "EntityType"},
         ),
     ]
 
@@ -82,12 +82,50 @@ def test_format_edges_with_endpoints_collects_every_entity_type_not_just_the_las
 
     edges_with_endpoints = [
         (
-            {"id": "type-person", "name": "Person", "type": "EntityType"},
-            {"relationship_name": "is_a"},
             {"id": node_id, "name": "Marco", "type": "Entity"},
+            {"relationship_name": "is_a"},
+            {"id": "type-person", "name": "Person", "type": "EntityType"},
         ),
         (
+            {"id": node_id, "name": "Marco", "type": "Entity"},
+            {"relationship_name": "is_a"},
             {"id": "type-author", "name": "Author", "type": "EntityType"},
+        ),
+    ]
+
+    entity_types, _, _ = format_edges_with_endpoints(node_id, edges_with_endpoints)
+
+    assert {entity_type["id"] for entity_type in entity_types} == {"type-person", "type-author"}
+
+
+def test_format_edges_with_endpoints_ignores_non_is_a_entity_type_neighbor():
+    # An edge that merely lands on an EntityType node is not a typing statement.
+    # Treating it as one made this pipeline write back an is_a edge cognify
+    # never asserted.
+    node_id = "entity-1"
+
+    edges_with_endpoints = [
+        (
+            {"id": node_id, "name": "Marco", "type": "Entity"},
+            {"relationship_name": "mentions"},
+            {"id": "type-person", "name": "Person", "type": "EntityType"},
+        ),
+    ]
+
+    entity_types, _, _ = format_edges_with_endpoints(node_id, edges_with_endpoints)
+
+    assert entity_types == []
+
+
+def test_format_edges_with_endpoints_ignores_incoming_is_a_edge():
+    # cognify writes Entity --is_a--> EntityType (get_graph_from_model emits
+    # (data_point.id, target.id, ...)), so an is_a edge pointing at this node
+    # types something else, not this entity.
+    node_id = "entity-1"
+
+    edges_with_endpoints = [
+        (
+            {"id": "type-person", "name": "Person", "type": "EntityType"},
             {"relationship_name": "is_a"},
             {"id": node_id, "name": "Marco", "type": "Entity"},
         ),
@@ -95,7 +133,48 @@ def test_format_edges_with_endpoints_collects_every_entity_type_not_just_the_las
 
     entity_types, _, _ = format_edges_with_endpoints(node_id, edges_with_endpoints)
 
-    assert {entity_type["id"] for entity_type in entity_types} == {"type-person", "type-author"}
+    assert entity_types == []
+
+
+def test_format_edges_with_endpoints_dedupes_repeated_type_edges():
+    # Two distinct edges to the same type are one membership. Without the
+    # dedupe the entity lands twice in that type's member list and inflates
+    # total_member_count, which the type summary is required to state and
+    # which decides whether members get named individually.
+    node_id = str(uuid5(NAMESPACE_OID, "marco"))
+    type_id = str(uuid5(NAMESPACE_OID, "person"))
+    type_node = {
+        "id": type_id,
+        "name": "Person",
+        "type": "EntityType",
+        "description": "Person",
+    }
+
+    edges_with_endpoints = [
+        (
+            {"id": node_id, "name": "Marco", "type": "Entity"},
+            {"relationship_name": "is_a"},
+            type_node,
+        ),
+        (
+            {"id": node_id, "name": "Marco", "type": "Entity"},
+            {"relationship_name": "described_as"},
+            type_node,
+        ),
+    ]
+
+    entity_types, _, _ = format_edges_with_endpoints(node_id, edges_with_endpoints)
+
+    assert [entity_type["id"] for entity_type in entity_types] == [type_id]
+
+    # The consequence the dedupe exists to prevent: one member, counted once.
+    entity = rewrite_entities.build_entity(
+        {"id": node_id, "name": "Marco", "description": "old"},
+        [rewrite_entities.build_entity_type(entity_type) for entity_type in entity_types],
+        "new description",
+    )
+    groups = apply_type_description_module.group_entities_by_type([entity])
+    assert [len(group["members"]) for group in groups.values()] == [1]
 
 
 def test_format_edges_with_endpoints_omits_edge_text_when_absent():
