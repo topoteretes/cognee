@@ -28,11 +28,17 @@ Two policies apply to every count watermark:
    content-hash dedup absorbs the repeat.
 
 Scope — a deliberate asymmetry. The two *count* watermarks are per
-(user, session) with no dataset in the key: session content bridges into ONE
-dataset, the one its ``remember(session_id=...)`` calls target. An explicit
+(user, session) with no dataset in the key. For Q&A the premise holds:
+session content bridges into ONE dataset, the one its
+``remember(session_id=...)`` calls target. An explicit
 ``improve(dataset=other, session_ids=[...])`` after a session was already
 bridged finds the watermark at the total and bridges nothing new into
-``other``. That is a known limitation, not an oversight: a per-dataset count
+``other``. For TRACES the premise is weaker: ``@agent_memory`` writes them,
+and periodic persistence targets the decorator's own ``dataset_name`` (default
+``main_dataset``), unrelated to any ``remember()`` — once it has advanced the
+row, ``improve(dataset=other, session_ids=[...])`` persists only newer steps
+into ``other``, with no hint in the stage result that the earlier steps went
+elsewhere. Both are known limitations, not oversights: a per-dataset count
 watermark also needs session invalidation (``invalidate_sessions`` clamps the
 Q&A watermark when entries are deleted, with no dataset in scope) to find and
 clamp every dataset's row, and a migration story for existing session-scoped

@@ -115,7 +115,13 @@ async def improve(
             ``status == "running"``; ``await result.wait()`` blocks on it.
         node_name: Filter graph to specific named entities (enrichment stage).
         session_ids: Session IDs whose feedback and content should be
-            bridged into the permanent graph.
+            bridged into the permanent graph. The Q&A and trace persist
+            watermarks are per (user, session), NOT per dataset: content a
+            session already bridged elsewhere — for traces, periodic
+            ``@agent_memory`` persistence targets the decorator's own
+            ``dataset_name`` — is not re-bridged into this call's dataset;
+            those stages then report nothing new. (Distillation is
+            per-dataset and unaffected.)
         build_global_context_index: Opt in to ``global_context_index``.
         build_truth_subspace: Opt in to ``build_truth_subspace``.
         **kwargs: Additional options — see ``ImproveKwargs``.
