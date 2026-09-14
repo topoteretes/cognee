@@ -19,6 +19,7 @@ from cognee.tasks.memify.consolidate_entity_descriptions import (
     constants,
     describe_types,
     rewrite_entities,
+    type_links,
 )
 from cognee.tasks.memify.consolidate_entity_descriptions import (
     generate_type_description as generate_type_description_module,
@@ -393,7 +394,49 @@ def test_group_entities_by_type_groups_separate_instances_by_id():
     assert groups[str(city.id)]["members"] == [milano]
 
 
-def test_all_entity_types_reads_from_relations_when_is_a_is_none():
+def test_type_link_roundtrip_write_read_update():
+    # One test pins the whole convention, instead of three modules each
+    # asserting their own half of it.
+    person = EntityType(id=uuid4(), name="Person", description="A person")
+    author = EntityType(id=uuid4(), name="Author", description="An author")
+    marco = Entity(id=uuid4(), name="Marco", description="d", is_a=None)
+
+    type_links.set_type_links(marco, [person, author])
+    assert [entity_type.id for entity_type in type_links.iter_type_links(marco)] == [
+        person.id,
+        author.id,
+    ]
+
+    updated_author = author.model_copy(update={"description": "rewritten"})
+    assert type_links.update_type_link(marco, updated_author, "Marco is a Author: ...") is True
+
+    # Only the author slot moved; the person slot is untouched, and a later
+    # call for Person still finds it.
+    assert marco.is_a is person
+    edge, target = marco.relations[0]
+    assert target.description == "rewritten"
+    assert edge.relationship_type == "is_a"
+    assert edge.edge_text == "Marco is a Author: ..."
+
+    # A type this entity has no link to is reported, not silently ignored.
+    assert (
+        type_links.update_type_link(
+            marco, EntityType(id=uuid4(), name="City", description="c"), "x"
+        )
+        is False
+    )
+
+
+def test_set_type_links_clears_both_slots_when_there_are_no_types():
+    marco = Entity(id=uuid4(), name="Marco", description="d", is_a=None)
+    type_links.set_type_links(marco, [EntityType(id=uuid4(), name="Person", description="p")])
+    type_links.set_type_links(marco, [])
+
+    assert marco.is_a is None
+    assert marco.relations == []
+
+
+def test_iter_type_links_reads_from_relations_when_is_a_is_none():
     person = EntityType(name="Person", description="Person")
     author = EntityType(name="Author", description="Author")
     marco = Entity(
@@ -406,15 +449,15 @@ def test_all_entity_types_reads_from_relations_when_is_a_is_none():
         description="d1",
     )
 
-    types = apply_type_description_module.all_entity_types(marco)
+    types = list(type_links.iter_type_links(marco))
 
     assert {entity_type.id for entity_type in types} == {person.id, author.id}
 
 
-def test_all_entity_types_combines_is_a_and_relations_when_both_are_set():
+def test_iter_type_links_combines_is_a_and_relations_when_both_are_set():
     # Regression test: build_entity() now always puts the first type on is_a
     # (never leaves it empty), with any extra types on relations. If
-    # all_entity_types() stopped at is_a instead of also checking relations,
+    # the reader stopped at is_a instead of also checking relations,
     # every extra type would silently disappear from Phase 2 processing.
     person = EntityType(name="Person", description="Person")
     author = EntityType(name="Author", description="Author")
@@ -425,7 +468,7 @@ def test_all_entity_types_combines_is_a_and_relations_when_both_are_set():
         description="d1",
     )
 
-    types = apply_type_description_module.all_entity_types(marco)
+    types = list(type_links.iter_type_links(marco))
 
     assert {entity_type.id for entity_type in types} == {person.id, author.id}
 

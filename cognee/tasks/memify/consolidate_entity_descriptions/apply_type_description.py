@@ -1,67 +1,26 @@
 from typing import Any
 
-from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.modules.engine.models import EntityType
 from cognee.modules.engine.models.Entity import Entity
 from cognee.shared.logging_utils import get_logger
 
-from .constants import MAX_TYPE_TEXT_CHARS
+from .constants import MAX_TYPE_TEXT_CHARS, truncate
 from .models import MemberIsAText
+from .type_links import iter_type_links, update_type_link
 
 logger = get_logger("consolidate_entity_descriptions")
-
-
-def _truncate(text: str, max_chars: int) -> str:
-    if len(text) <= max_chars:
-        return text
-    return text[:max_chars] + "..."
-
-
-def _entity_type_of(is_a: EntityType | tuple | None) -> EntityType | None:
-    """Unwrap is_a to its EntityType, whether it's bare or (Edge, EntityType)."""
-    if isinstance(is_a, tuple):
-        return is_a[1]
-    return is_a
-
-
-def _is_a_relation_type(relation: Any) -> EntityType | None:
-    """Return the EntityType of an is_a-tagged (Edge, EntityType) tuple in relations, else None."""
-    if (
-        isinstance(relation, tuple)
-        and len(relation) == 2
-        and isinstance(relation[0], Edge)
-        and relation[0].relationship_type == "is_a"
-        and isinstance(relation[1], EntityType)
-    ):
-        return relation[1]
-    return None
-
-
-def all_entity_types(entity: Entity) -> list[EntityType]:
-    """Every type this entity belongs to - the one on is_a plus any extras on
-    relations (see build_entity). Must combine both, not treat them as
-    alternatives: is_a is now always populated when the entity has a type, so
-    stopping as soon as it's found would silently drop every extra type for a
-    multi-type entity - the exact bug this pipeline exists to fix."""
-    primary = _entity_type_of(entity.is_a)
-    from_relations = [
-        entity_type
-        for relation in entity.relations
-        if (entity_type := _is_a_relation_type(relation)) is not None
-    ]
-    return ([primary] if primary is not None else []) + from_relations
 
 
 def group_entities_by_type(entities: list[Entity]) -> dict[str, dict[str, Any]]:
     """Group rewritten entities by their EntityType id.
 
     An entity with multiple types is registered as a member of every one of
-    its type groups, not just one - see all_entity_types(). Entities with no
-    type at all are left out of the result.
+    its type groups, not just one - see type_links.iter_type_links(). Entities
+    with no type at all are left out of the result.
     """
     groups: dict[str, dict[str, Any]] = {}
     for entity in entities:
-        for entity_type in all_entity_types(entity):
+        for entity_type in iter_type_links(entity):
             type_id = str(entity_type.id)
             group = groups.setdefault(type_id, {"entity_type": entity_type, "members": []})
             group["members"].append(entity)
@@ -97,10 +56,9 @@ def apply_type_description(
 
     A member with more than one type appears here once per type it belongs to
     (once per call to this function, across different groups - see
-    group_entities_by_type). Each call must only touch THIS type's slot -
-    is_a if this is the member's sole type, or the matching tuple inside
-    relations otherwise - and leave the member's other types exactly as they
-    were, since a later call for another of its types still needs them intact.
+    group_entities_by_type). type_links.update_type_link() is what keeps each
+    call to this type's own slot, leaving the member's other types intact for
+    the later call that handles them.
     """
     updated_entity_type = entity_type.model_copy(update={"description": new_description})
     is_a_text_by_name = {item.member_name: item.is_a_text for item in (is_a_texts or [])}
@@ -112,34 +70,11 @@ def apply_type_description(
             # Bounds what actually gets persisted, independent of the output
             # token budget on the LLM call that produced it - that budget caps
             # generation, this caps what's written to the graph afterward.
-            is_a_text = _truncate(is_a_text, max_type_text_chars)
+            is_a_text = truncate(is_a_text, max_type_text_chars)
         else:
             missed_count += 1
 
-        primary_type = _entity_type_of(member.is_a)
-        if primary_type is not None and primary_type.id == entity_type.id:
-            # is_a is a scalar field: get_graph_from_model derives the "is_a"
-            # relationship name from the field name itself when there's no
-            # Edge wrapper, so a bare EntityType here still persists correctly.
-            member.is_a = (
-                (Edge(relationship_type="is_a", edge_text=is_a_text), updated_entity_type)
-                if is_a_text
-                else updated_entity_type
-            )
-            continue
-
-        for index, relation in enumerate(member.relations):
-            if _is_a_relation_type(relation) is not None and relation[1].id == entity_type.id:
-                # relations is a list field: without an explicit Edge wrapper,
-                # get_graph_from_model would label this edge "relations"
-                # instead of "is_a" (it falls back to the field name). Always
-                # wrap here, even with edge_text=None, to keep the "is_a"
-                # label - unlike the is_a slot above, there is no bare form.
-                member.relations[index] = (
-                    Edge(relationship_type="is_a", edge_text=is_a_text),
-                    updated_entity_type,
-                )
-                break
+        update_type_link(member, updated_entity_type, is_a_text)
 
     if missed_count > 0:
         logger.warning(

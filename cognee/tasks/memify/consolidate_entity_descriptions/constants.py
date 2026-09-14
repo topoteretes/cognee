@@ -1,3 +1,10 @@
+def truncate(text: str, max_chars: int) -> str:
+    """Cap a string for a prompt line or a persisted edge property."""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "..."
+
+
 type_prompt_name = "consolidate_entity_type_details.txt"
 type_merge_prompt_name = "consolidate_entity_type_merge.txt"
 is_a_only_prompt_name = "consolidate_entity_is_a_only.txt"

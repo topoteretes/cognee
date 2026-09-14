@@ -11,14 +11,9 @@ from .constants import (
     PARAGRAPH_MAX_COMPLETION_TOKENS,
     REASONING_HEADROOM_TOKENS,
     TOKENS_PER_IS_A_LINE,
+    truncate,
 )
 from .models import EntityIsATexts, EntityTypeDescription, NodeDescription
-
-
-def _truncate(text: str, max_chars: int) -> str:
-    if len(text) <= max_chars:
-        return text
-    return text[:max_chars] + "..."
 
 
 def build_naming_instruction(total_member_count: int, max_named_members: int) -> str:
@@ -51,7 +46,7 @@ def build_entity_type_prompt(
         f"Member cards shown below ({len(members)} of {total_member_count}):",
     ]
     for member in members:
-        lines.append(f"- {member.name}: {_truncate(member.description, max_type_text_chars)}")
+        lines.append(f"- {member.name}: {truncate(member.description, max_type_text_chars)}")
     return "\n".join(lines)
 
 
@@ -88,7 +83,7 @@ def build_type_merge_prompt(
         "Partial summaries:",
     ]
     for index, partial in enumerate(partial_descriptions, start=1):
-        lines.append(f"{index}. {_truncate(partial, max_type_text_chars)}")
+        lines.append(f"{index}. {truncate(partial, max_type_text_chars)}")
     return "\n".join(lines)
 
 
@@ -117,7 +112,7 @@ def build_is_a_only_prompt(
         f"Member cards shown below ({len(members)} of {total_member_count}):",
     ]
     for member in members:
-        lines.append(f"- {member.name}: {_truncate(member.description, max_type_text_chars)}")
+        lines.append(f"- {member.name}: {truncate(member.description, max_type_text_chars)}")
     return "\n".join(lines)
 
 
