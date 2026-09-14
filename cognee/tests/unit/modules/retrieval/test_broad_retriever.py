@@ -1587,6 +1587,14 @@ def test_vote_keeps_what_a_majority_of_readings_listed():
     ]
     assert voted.aliases == [["Rojas", "the Lighthouse"]]
 
+    # A kept entry carries the group spelling most of its readings used.
+    readings = [
+        ShardItems(items=[keyed(0, "Matchday 2, 55'", group="the Wall")]),
+        ShardItems(items=[keyed(0, "Matchday 2, 55'", group="Leon Fischer")]),
+        ShardItems(items=[keyed(0, "Matchday 2, 55'", group="Leon Fischer")]),
+    ]
+    assert [item.group for item in _vote(readings).items] == ["Leon Fischer"]
+
     def unkeyed(unit, quote):
         return ExtractedItem(unit=unit, evidence=quote)
 

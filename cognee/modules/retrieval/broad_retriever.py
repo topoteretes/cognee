@@ -383,26 +383,35 @@ def _vote(readings: list[ShardItems]) -> ShardItems:
     if len(readings) == 1:
         return readings[0]
     majority = len(readings) // 2 + 1
-    # clusters[unit] = list of (representative item, readings that listed it)
-    clusters: dict[int, list[tuple[ExtractedItem, set[int]]]] = {}
+    # clusters[unit] = list of (the readings that listed one item, keyed by reading)
+    clusters: dict[int, list[dict[int, ExtractedItem]]] = {}
     unkeyed: dict[int, list[list[ExtractedItem]]] = {}
     for n, reading in enumerate(readings):
         for item in reading.items:
             if not item.key:
                 unkeyed.setdefault(item.unit, [[] for _ in readings])[n].append(item)
                 continue
-            for representative, listed_by in clusters.setdefault(item.unit, []):
-                if n not in listed_by and _same_identity(representative.key, item.key):
-                    listed_by.add(n)
+            for members in clusters.setdefault(item.unit, []):
+                first = next(iter(members.values()))
+                if n not in members and _same_identity(first.key, item.key):
+                    members[n] = item
                     break
             else:
-                clusters[item.unit].append((item, {n}))
-    items = [
-        representative
-        for unit_clusters in clusters.values()
-        for representative, listed_by in unit_clusters
-        if len(listed_by) >= majority
-    ]
+                clusters[item.unit].append({n: item})
+    items = []
+    for unit_clusters in clusters.values():
+        for members in unit_clusters:
+            if len(members) < majority:
+                continue
+            # The kept entry is the first reading's, under the group spelling most of
+            # its readings used: one reading's "the Wall" must not stand for an item
+            # the others filed under "Leon Fischer", or the name match splits them.
+            kept = next(iter(members.values()))
+            groups = Counter(m.group for m in members.values() if m.group)
+            if groups:
+                items.append(kept.model_copy(update={"group": groups.most_common(1)[0][0]}))
+            else:
+                items.append(kept)
     for lists in unkeyed.values():
         items += sorted(lists, key=len)[len(lists) // 2]
     return ShardItems(items=items, aliases=[a for r in readings for a in r.aliases])
