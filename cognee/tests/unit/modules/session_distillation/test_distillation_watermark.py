@@ -120,7 +120,7 @@ async def test_watermark_is_scoped_to_the_target_dataset(monkeypatch, datasets):
 
     async def fake_propose(qa_rows, context_entries):
         proposed.append([entry.id for entry in context_entries])
-        return []
+        return [], 0
 
     monkeypatch.setattr(distill_module, "propose_lessons", fake_propose)
 
@@ -157,7 +157,7 @@ async def test_new_gated_entry_after_the_watermark_triggers_a_run(monkeypatch, d
 
     async def fake_propose(qa_rows, context_entries):
         seen.append(sorted(entry.id for entry in context_entries))
-        return []
+        return [], 0
 
     monkeypatch.setattr(distill_module, "propose_lessons", fake_propose)
 
@@ -184,7 +184,7 @@ async def test_no_proposed_lessons_advances_watermark_so_next_run_is_free(monkey
     async def fake_propose(qa_rows, context_entries):
         nonlocal calls
         calls += 1
-        return []
+        return [], 0
 
     monkeypatch.setattr(distill_module, "propose_lessons", fake_propose)
 
@@ -203,10 +203,10 @@ async def test_no_accepted_lessons_advances_watermark(monkeypatch, datasets):
     _install_manager(monkeypatch, manager)
 
     async def fake_propose(qa_rows, context_entries):
-        return [ProposedLesson(working_statement="Something.")]
+        return [ProposedLesson(working_statement="Something.")], 0
 
     async def fake_accept(scope, proposed, context_entries):
-        return []
+        return [], 0
 
     monkeypatch.setattr(distill_module, "propose_lessons", fake_propose)
     monkeypatch.setattr(distill_module, "accept_proposed_lessons", fake_accept)
@@ -227,10 +227,10 @@ async def test_completed_run_advances_watermark_after_publish(monkeypatch, datas
     order = []
 
     async def fake_propose(qa_rows, context_entries):
-        return [ProposedLesson(working_statement="Something.")]
+        return [ProposedLesson(working_statement="Something.")], 0
 
     async def fake_accept(scope, proposed, context_entries):
-        return [WrittenLesson(accept=True, statement="Keep reports concise.")]
+        return [WrittenLesson(accept=True, statement="Keep reports concise.")], 0
 
     async def fake_publish(scope, accepted):
         order.append(("publish", len(manager.store)))
@@ -258,10 +258,10 @@ async def test_failed_publish_leaves_watermark_untouched(monkeypatch, datasets):
     _install_manager(monkeypatch, manager)
 
     async def fake_propose(qa_rows, context_entries):
-        return [ProposedLesson(working_statement="Something.")]
+        return [ProposedLesson(working_statement="Something.")], 0
 
     async def fake_accept(scope, proposed, context_entries):
-        return [WrittenLesson(accept=True, statement="Keep reports concise.")]
+        return [WrittenLesson(accept=True, statement="Keep reports concise.")], 0
 
     async def failing_publish(scope, accepted):
         raise RuntimeError("cognify exploded")
@@ -300,3 +300,88 @@ def test_lesson_documents_carry_no_run_date():
     assert re.search(r"\d{4}-\d{2}-\d{2}", document) is None
     # Identical lessons render byte-identically, so add()'s content hash dedups them.
     assert document == distill_module.render_lesson_document(lesson, session_id="s-1")
+
+
+@pytest.mark.asyncio
+async def test_failed_curator_calls_leave_the_watermark_untouched(monkeypatch, datasets):
+    """An LLM outage is not "nothing durable": sealing the entries would mark a
+    finished session's learnings distilled forever without a single call running."""
+    rows = [_context_row("Lesson one.")]
+    manager = FakeSessionManager(rows)
+    _install_manager(monkeypatch, manager)
+
+    async def fake_propose(qa_rows, context_entries):
+        return [], 2  # every curator batch failed
+
+    monkeypatch.setattr(distill_module, "propose_lessons", fake_propose)
+
+    with pytest.raises(distill_module.DistillationCallsFailedError):
+        await distill_module.distill_session("s-1", dataset=DATASET_A.name, user=USER)
+
+    assert await get_distilled_entry_ids(manager, str(USER.id), "s-1", str(DATASET_A.id)) == set()
+
+
+@pytest.mark.asyncio
+async def test_partial_failure_publishes_survivors_but_keeps_the_window(monkeypatch, datasets):
+    rows = [_context_row("Lesson one.")]
+    manager = FakeSessionManager(rows)
+    _install_manager(monkeypatch, manager)
+    published = []
+
+    async def fake_propose(qa_rows, context_entries):
+        return [ProposedLesson(working_statement="Something.")], 1  # one batch lost
+
+    async def fake_accept(scope, proposed, context_entries):
+        return [WrittenLesson(accept=True, statement="Keep reports concise.")], 0
+
+    async def fake_publish(scope, accepted):
+        published.append(len(accepted))
+        return ["doc"]
+
+    monkeypatch.setattr(distill_module, "propose_lessons", fake_propose)
+    monkeypatch.setattr(distill_module, "accept_proposed_lessons", fake_accept)
+    monkeypatch.setattr(distill_module, "publish_distilled_lessons", fake_publish)
+
+    with pytest.raises(distill_module.DistillationCallsFailedError):
+        await distill_module.distill_session("s-1", dataset=DATASET_A.name, user=USER)
+
+    # Surviving lessons were published (date-free documents dedup on the retry),
+    # but the lost batch's entries stay pending for the next run.
+    assert published == [1]
+    assert await get_distilled_entry_ids(manager, str(USER.id), "s-1", str(DATASET_A.id)) == set()
+
+
+@pytest.mark.asyncio
+async def test_failed_writer_calls_leave_the_watermark_untouched(monkeypatch, datasets):
+    rows = [_context_row("Lesson one.")]
+    manager = FakeSessionManager(rows)
+    _install_manager(monkeypatch, manager)
+
+    async def fake_propose(qa_rows, context_entries):
+        return [ProposedLesson(working_statement="Something.")], 0
+
+    async def fake_accept(scope, proposed, context_entries):
+        return [], 1  # the writer call failed, nothing was rejected
+
+    monkeypatch.setattr(distill_module, "propose_lessons", fake_propose)
+    monkeypatch.setattr(distill_module, "accept_proposed_lessons", fake_accept)
+
+    with pytest.raises(distill_module.DistillationCallsFailedError):
+        await distill_module.distill_session("s-1", dataset=DATASET_A.name, user=USER)
+
+    assert await get_distilled_entry_ids(manager, str(USER.id), "s-1", str(DATASET_A.id)) == set()
+
+
+@pytest.mark.asyncio
+async def test_curate_batch_reports_failure_as_none(monkeypatch):
+    async def boom(**kwargs):
+        raise RuntimeError("llm down")
+
+    monkeypatch.setattr(distill_module.LLMGateway, "acreate_structured_output", boom)
+    monkeypatch.setattr(distill_module, "read_query_prompt", lambda name: "PROMPT")
+
+    assert await distill_module.curate_batch("batch text") is None
+
+    proposed, failed = await distill_module.propose_lessons([{"question": "q", "answer": "a"}], [])
+    assert proposed == []
+    assert failed >= 1

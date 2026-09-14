@@ -7,8 +7,10 @@ Flow (curator calls parallel by batch; accept/write calls parallel by lesson):
 3. ACCEPT  per proposed lesson: search prior lessons/entities, then writer/rejecter LLM.
 4. PERSIST render accepted lessons as documents; add + cognify them in one pass.
 
-Everything is fail-open per unit: a failed curator batch or writer call drops only its own
-work, never the whole run.
+A failed curator batch or writer call drops only its own work mid-run, but the run then
+finishes by RAISING (after publishing what survived) instead of advancing the watermark:
+sealing entries behind calls that never ran would mark them distilled forever — one LLM
+outage on a finished session would silently lose its lessons.
 """
 
 import asyncio
@@ -59,6 +61,11 @@ from .models import (
 )
 
 logger = get_logger("session_distillation")
+
+
+class DistillationCallsFailedError(RuntimeError):
+    """Some curator/writer LLM calls failed, so the run's watermark was left untouched."""
+
 
 CURATOR_PROMPT_FILE = "session_distillation_curator_system.txt"
 WRITER_PROMPT_FILE = "session_distillation_writer_system.txt"
@@ -195,12 +202,17 @@ def build_curator_batches(
     ]
 
 
-async def curate_batch(batch_text: str) -> list[ProposedLesson]:
-    """One curator call over one batch slice. Fail-open -> []."""
+async def curate_batch(batch_text: str) -> list[ProposedLesson] | None:
+    """One curator call over one batch slice.
+
+    ``None`` means the call FAILED (missing prompt, LLM error) — distinct from
+    ``[]``, the curator deciding nothing in the batch is durable. The caller
+    must not seal entries behind a failed call as if they were curated.
+    """
     system_prompt = read_query_prompt(CURATOR_PROMPT_FILE)
     if not system_prompt:
         logger.warning("Distillation curator prompt not found: %s", CURATOR_PROMPT_FILE)
-        return []
+        return None
     try:
         result = await LLMGateway.acreate_structured_output(
             text_input=batch_text,
@@ -209,24 +221,35 @@ async def curate_batch(batch_text: str) -> list[ProposedLesson]:
         )
         return list(result.lessons)
     except Exception as error:
-        logger.warning("Distillation curator batch failed open: %s", error, exc_info=True)
-        return []
+        logger.warning("Distillation curator batch failed: %s", error, exc_info=True)
+        return None
 
 
 async def propose_lessons(
     qa_rows: list[dict],
     context_entries: list[SessionContextEntry],
-) -> list[ProposedLesson]:
-    """Pack session inputs into curator batches, then flatten proposed lessons."""
+) -> tuple[list[ProposedLesson], int]:
+    """Pack session inputs into curator batches, then flatten proposed lessons.
+
+    Returns ``(lessons, failed_batches)``: a failed curator call is not
+    "nothing durable found", so the caller keeps the watermark put when the
+    second element is non-zero.
+    """
     batches = build_curator_batches(qa_rows, context_entries)
     if not batches:
-        return []
+        return [], 0
 
     curator_calls = [lambda batch=batch: curate_batch(batch) for batch in batches]
     per_batch = await gather_with_concurrency_limit(curator_calls, CURATOR_CONCURRENCY)
 
-    proposed = [lesson for batch_lessons in per_batch for lesson in batch_lessons]
-    return proposed
+    proposed = [
+        lesson
+        for batch_lessons in per_batch
+        if batch_lessons is not None
+        for lesson in batch_lessons
+    ]
+    failed_batches = sum(1 for batch_lessons in per_batch if batch_lessons is None)
+    return proposed, failed_batches
 
 
 async def search_payload_texts(
@@ -295,7 +318,12 @@ async def write_or_reject(
     prior_lessons: list[str],
     glossary: list[str],
 ) -> WrittenLesson | None:
-    """One writer/rejecter call for one proposed lesson. Fail-open -> None."""
+    """One writer/rejecter call for one proposed lesson.
+
+    ``None`` means the call FAILED (missing prompt, LLM error); a rejection is
+    a ``WrittenLesson`` with ``accept=False``. The caller counts failures so a
+    writer outage is never mistaken for "every lesson rejected".
+    """
     system_prompt = read_query_prompt(WRITER_PROMPT_FILE)
     if not system_prompt:
         logger.warning("Distillation writer prompt not found: %s", WRITER_PROMPT_FILE)
@@ -309,7 +337,7 @@ async def write_or_reject(
             response_model=WrittenLesson,
         )
     except Exception as error:
-        logger.warning("Distillation writer call failed open: %s", error, exc_info=True)
+        logger.warning("Distillation writer call failed: %s", error, exc_info=True)
         return None
 
 
@@ -343,7 +371,8 @@ async def accept_proposed_lessons(
     scope: SessionDistillationScope,
     proposed: list[ProposedLesson],
     context_entries: list[SessionContextEntry],
-) -> list[WrittenLesson]:
+) -> tuple[list[WrittenLesson], int]:
+    """Returns ``(accepted lessons, failed writer calls)`` — see write_or_reject."""
     entries_by_id = {entry.id: entry for entry in context_entries}
     async with set_database_global_context_variables(scope.dataset.id, scope.dataset.owner_id):
         vector_engine = await get_vector_engine_async()
@@ -363,7 +392,8 @@ async def accept_proposed_lessons(
         for lesson in decisions
         if lesson is not None and lesson.accept and lesson.statement.strip()
     ]
-    return accepted
+    failed_calls = sum(1 for lesson in decisions if lesson is None)
+    return accepted, failed_calls
 
 
 def render_lesson_document(
@@ -457,16 +487,36 @@ async def distill_session(
         )
         return scope.result("no_new_entries")
 
-    proposed = await propose_lessons(qa_rows, context_entries)
-    if not proposed:
+    proposed, curator_failures = await propose_lessons(qa_rows, context_entries)
+    if not proposed and not curator_failures:
         await advance_distillation_watermark(scope, context_entries)
         return scope.result("no_proposed_lessons")
 
-    accepted = await accept_proposed_lessons(scope, proposed, context_entries)
+    accepted: list[WrittenLesson] = []
+    writer_failures = 0
+    if proposed:
+        accepted, writer_failures = await accept_proposed_lessons(scope, proposed, context_entries)
+
+    documents: list[str] = []
+    if accepted:
+        # Publish what survived before reporting the failure: the lesson
+        # documents are date-free, so a re-run re-accepting the same lesson
+        # dedups in add() instead of duplicating.
+        documents = await publish_distilled_lessons(scope, accepted)
+
+    if curator_failures or writer_failures:
+        # An LLM outage is not "nothing durable to keep". Leave the watermark
+        # untouched — sealing the entries here would mark them distilled
+        # forever on the strength of calls that never ran.
+        raise DistillationCallsFailedError(
+            f"session {scope.session_id}: {curator_failures} curator batch(es) and "
+            f"{writer_failures} writer call(s) failed; watermark left untouched "
+            f"({len(documents)} lesson document(s) from surviving calls were published)"
+        )
+
     if not accepted:
         await advance_distillation_watermark(scope, context_entries)
         return scope.result("no_accepted_lessons")
 
-    documents = await publish_distilled_lessons(scope, accepted)
     await advance_distillation_watermark(scope, context_entries)
     return scope.result("completed", documents=documents)
