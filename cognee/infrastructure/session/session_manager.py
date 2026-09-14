@@ -219,8 +219,10 @@ class SessionManager:
         ``generate_feedback_with_llm`` asks for a one-line LLM summary of the step's
         return value as its ``session_feedback``. That call is made only when automatic
         feedback analysis is enabled (``CACHING`` and ``AUTO_FEEDBACK`` both on); with it
-        off, the step gets the deterministic success/failure line instead. The batch
-        pass in ``improve()`` reads the stored return value directly, so nothing is lost.
+        off, the step gets the deterministic success/failure line instead. Nothing is
+        lost either way: improve()'s agent-context extraction reads the stored return
+        value directly, and its trace persistence substitutes the return value for
+        steps whose feedback is only the fallback line.
 
         Returns trace_id, or None if cache unavailable.
         """

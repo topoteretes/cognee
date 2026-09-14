@@ -159,7 +159,7 @@ async def test_fresh_session_yields_all_feedback_above_watermark(manager):
     assert window.persisted_trace_count == 3
     # One full snapshot: the pending slice and the watermark target come from
     # the same read, so a step written mid-run can never fall below the advance.
-    assert manager.feedback_last_n_calls == [None]
+    assert manager.session_last_n_calls == [None]
     # The extractor never advances the watermark itself for a non-empty window.
     assert await TRACE_PERSIST_WATERMARK.read_count(manager, USER_ID, "trace_session") == 0
 
@@ -173,7 +173,7 @@ async def test_watermark_skips_already_persisted_steps(manager):
     windows = await _extract(["s"])
 
     assert len(windows) == 1
-    assert manager.feedback_last_n_calls == [None]
+    assert manager.session_last_n_calls == [None]
     assert "step 2" not in windows[0].text
     assert "step 3" in windows[0].text and "step 4" in windows[0].text
     assert windows[0].persisted_trace_count == 5
@@ -204,7 +204,7 @@ async def test_stale_watermark_restarts_from_the_beginning(manager):
 
     assert len(windows) == 1
     assert "rebuilt step" in windows[0].text
-    assert manager.feedback_last_n_calls == [None]
+    assert manager.session_last_n_calls == [None]
     assert windows[0].persisted_trace_count == 1
 
 
@@ -220,7 +220,7 @@ async def test_last_n_steps_caps_the_pending_window_at_the_oldest(manager):
 
     windows = await _extract(["s"], last_n_steps=2)
 
-    assert manager.feedback_last_n_calls == [None]
+    assert manager.session_last_n_calls == [None]
     assert windows[0].text == "Session ID: s\n\nstep 1\nstep 2"
     assert windows[0].persisted_trace_count == 3
 
@@ -288,7 +288,7 @@ async def test_multiple_sessions_yield_one_window_each(manager):
     windows = await _extract(["session1", "session2"])
 
     assert [window.session_id for window in windows] == ["session1", "session2"]
-    assert manager.session_last_n_calls == []
+    assert manager.session_last_n_calls == [None, None]  # one full snapshot per session
 
 
 @pytest.mark.asyncio
@@ -378,3 +378,21 @@ async def test_rejects_non_boolean_raw_trace_content(manager):
 
     with pytest.raises(CogneeSystemError, match="raw_trace_content must be a boolean"):
         await _extract(["trace_session"], raw_trace_content="yes")
+
+
+@pytest.mark.asyncio
+async def test_fallback_only_steps_carry_their_return_values(manager):
+    """With trace summaries off (the default), every stored feedback is the
+    deterministic "<fn> succeeded." line — cognifying those alone would strip
+    the agent_trace_feedbacks node set of all content. Fallback-equal steps get
+    their return value appended; real summaries pass through untouched."""
+    manager.add_step("s", feedback="traced_agent succeeded.", return_value={"answer": 42})
+    manager.add_step("s", feedback="Looked up the Q3 revenue figures.", return_value="ignored")
+    manager.add_step("s", feedback="traced_agent succeeded.", return_value=None)
+
+    windows = await _extract(["s"])
+
+    lines = windows[0].text.split("\n")
+    assert 'traced_agent succeeded. Output: {"answer": 42}' in lines
+    assert "Looked up the Q3 revenue figures." in lines  # real summary untouched
+    assert "traced_agent succeeded." in lines  # no return value: fallback stands

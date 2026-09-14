@@ -56,11 +56,12 @@ def agent_memory(
 
     ``session_trace_summary`` controls the per-call LLM summary stored as each trace step's
     ``session_feedback``. It defaults to ``False`` (earlier releases defaulted to ``True``): the
-    summary is one extra LLM call per wrapped invocation, and the batch agent-context
-    extraction run by ``improve()`` reads the stored return value directly, so the per-call
-    summary is not needed for learning. When set to ``True`` the summary is still generated
-    only while automatic feedback analysis is enabled (``CACHING`` and ``AUTO_FEEDBACK``
-    both on); otherwise the step records a deterministic success/failure line.
+    summary is one extra LLM call per wrapped invocation, and both ``improve()`` readers cover
+    for its absence — agent-context extraction (stage 4) reads the stored return value
+    directly, and trace persistence (stage 3) substitutes the return value for any step whose
+    feedback is only the deterministic fallback line. When set to ``True`` the summary is
+    still generated only while automatic feedback analysis is enabled (``CACHING`` and
+    ``AUTO_FEEDBACK`` both on); otherwise the step records the fallback line.
     """
     config = validate_agent_memory_config(
         with_memory=with_memory,

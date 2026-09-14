@@ -13,6 +13,32 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("extract_agent_trace_feedbacks")
 
 
+def _effective_feedback(entry) -> str | None:
+    """The step's summary, or its raw return value when only the fallback exists.
+
+    With trace summaries off (the ``session_trace_summary=False`` default, or
+    ``AUTO_FEEDBACK`` off) every stored ``session_feedback`` is the
+    deterministic line ``"<fn> succeeded."`` — cognifying those would build an
+    ``agent_trace_feedbacks`` node set with none of the content the summaries
+    used to carry. A step whose feedback equals its own fallback line gets its
+    return value appended instead; real summaries pass through untouched.
+    """
+    from cognee.infrastructure.session.session_agent_trace import fallback_agent_trace_feedback
+
+    feedback = entry.session_feedback
+    fallback = fallback_agent_trace_feedback(
+        origin_function=entry.origin_function or "",
+        status=entry.status or "",
+        error_message=entry.error_message or "",
+    )
+    if (feedback or "").strip() != fallback.strip():
+        return feedback
+    return_text = _normalize_trace_content(entry.method_return_value)
+    if return_text is None:
+        return feedback
+    return f"{fallback} Output: {return_text}"
+
+
 def _normalize_trace_content(value) -> str | None:
     """Convert raw trace content into a non-empty string suitable for memify payloads."""
     if value is None:
@@ -172,16 +198,13 @@ async def extract_agent_trace_feedbacks(
                     # pending steps, and the watermark then sealed them below it
                     # forever. The count above is only a cheap early exit; every index
                     # from here on comes from this one fetch.
+                    trace_session = await session_manager.get_agent_trace_session(
+                        user_id=user_id,
+                        session_id=session_id,
+                    )
                     if not raw_trace_content:
-                        trace_values = await session_manager.get_agent_trace_feedback(
-                            user_id=user_id,
-                            session_id=session_id,
-                        )
+                        trace_values = [_effective_feedback(entry) for entry in trace_session]
                     else:
-                        trace_session = await session_manager.get_agent_trace_session(
-                            user_id=user_id,
-                            session_id=session_id,
-                        )
                         trace_values = [entry.method_return_value for entry in trace_session]
 
                     total_trace_count = len(trace_values)
