@@ -372,8 +372,13 @@ def _dispatch_improve(client: CogneeApiClient, args: argparse.Namespace) -> None
         feedback_alpha=getattr(args, "feedback_alpha", None),
     )
     if isinstance(result, dict) and "stages" in result:
-        # The server returned an ImproveResult: same per-stage lines as in-process.
-        print_improve_result(result, background=getattr(args, "background", False))
+        # The server returned an ImproveResult: same per-stage lines as
+        # in-process. "started in background" only when the run is actually
+        # running — a lost lock claim comes back finished with every stage
+        # skipped, and must print as skipped, not started (the local path
+        # makes the same status check).
+        still_running = getattr(args, "background", False) and result.get("status") == "running"
+        print_improve_result(result, background=still_running)
         return
     if getattr(args, "background", False):
         fmt.success("Improvement started in background!")
