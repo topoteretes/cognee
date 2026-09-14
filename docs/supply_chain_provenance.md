@@ -13,8 +13,9 @@ This covers three layers of evidence:
 | PyPI sdist + wheel | **SLSA build provenance** (`actions/attest-build-provenance`) | GitHub repo → *Attestations* tab |
 | Docker images | **in-toto provenance + SBOM** (buildx `provenance`/`sbom`) | Pushed alongside the image manifest |
 
-The relevant workflows are `.github/workflows/release.yml` (tagged releases)
-and `.github/workflows/dev_canary_release.yml` (weekly dev canaries).
+The relevant workflows are `.github/workflows/release.yml` (tagged library releases),
+`.github/workflows/dev_canary_release.yml` (weekly dev canaries), and
+`.github/workflows/release_mcp.yml` (manual MCP releases).
 
 ---
 
@@ -26,39 +27,21 @@ workflows have already been switched to OIDC (`id-token: write`, no
 `UV_PUBLISH_TOKEN`), but a project owner must register the trusted publishers
 on PyPI **once**:
 
-1. Go to <https://pypi.org/manage/project/cognee/settings/publishing/>.
-2. Under **Add a new pending publisher** → **GitHub**, add **two** publishers
-   (one per release workflow file):
+PyPI scopes trusted publishers per project. Register **three** publishers, one
+per workflow: two on `cognee` and one on the separate `cognee-mcp` project.
 
-   | Field | Release publisher | Canary publisher |
-   | --- | --- | --- |
-   | Owner | `topoteretes` | `topoteretes` |
-   | Repository | `cognee` | `cognee` |
-   | Workflow name | `release.yml` | `dev_canary_release.yml` |
-   | Environment | *(leave blank)* | *(leave blank)* |
+1. Open the publishing settings for [cognee](https://pypi.org/manage/project/cognee/settings/publishing/)
+   and [cognee-mcp](https://pypi.org/manage/project/cognee-mcp/settings/publishing/).
+2. Under **Add a new publisher** → **GitHub**, add each publisher to the
+   PyPI project listed below:
 
-3. Save both.
-
-`cognee-mcp` is a **separate PyPI project** with its own release workflow
-(`.github/workflows/release_mcp.yml`), and PyPI scopes trusted publishers per
-project — the two entries above do not cover it. Register a third publisher
-for it, once:
-
-4. Go to <https://pypi.org/manage/project/cognee-mcp/settings/publishing/>.
-5. Under **Add a new pending publisher** → **GitHub**, add:
-
-   | Field | MCP release publisher |
-   | --- | --- |
-   | Owner | `topoteretes` |
-   | Repository | `cognee` |
-   | Workflow name | `release_mcp.yml` |
-   | Environment | *(leave blank)* |
-
-6. Save. Then release by running `release_mcp.yml` from `main` in the Actions
-   tab: it reads the version from `cognee-mcp/pyproject.toml`, refuses to run
-   if that version is already on PyPI, publishes over OIDC, and tags the commit
-   `cognee-mcp-v<version>` (its own namespace, since cognee-mcp versions
-   independently of the library).
+   | Field | Release publisher | Canary publisher | MCP release publisher |
+   | --- | --- | --- | --- |
+   | PyPI project | `cognee` | `cognee` | `cognee-mcp` |
+   | Owner | `topoteretes` | `topoteretes` | `topoteretes` |
+   | Repository | `cognee` | `cognee` | `cognee` |
+   | Workflow name | `release.yml` | `dev_canary_release.yml` | `release_mcp.yml` |
+   | Environment | *(leave blank)* | *(leave blank)* | *(leave blank)* |
 
 > The **Environment** value must match the `environment:` declared on the
 > publishing job. The workflows do not set one, so leave this blank — if you
@@ -71,6 +54,14 @@ for it, once:
 > `environment: <name>` to the publishing job and set the matching name on the
 > PyPI publisher above. Note that required reviewers on the canary workflow
 > would block its weekly cron.
+
+3. Save all three publishers.
+
+Release MCP by running `release_mcp.yml` from the `main` branch in the Actions
+tab. Other refs fail explicitly. The workflow reads the version from
+`cognee-mcp/pyproject.toml`, refuses to run if that version is already on PyPI,
+publishes over OIDC, and tags the commit `cognee-mcp-v<version>` (its own
+namespace, since cognee-mcp versions independently of the library).
 
 After the publishers are registered, the next release uploads with provenance
 automatically. The legacy `PYPI_TOKEN` secret can be removed once a release has

@@ -24,14 +24,13 @@ permissions:
 jobs:
   release-mcp-pypi:
     name: Release cognee-mcp to PyPI from ${{ github.ref_name }}
-    # Both side effects of this job — the PyPI upload and the tag — are
-    # permanent, so it only runs from main.
-    if: ${{ github.ref_name == 'main' }}
     permissions:
       contents: write       # push the cognee-mcp-v* tag
       id-token: write       # OIDC: Trusted Publishing + signing attestations
       attestations: write   # Persist the SLSA build provenance attestation
     runs-on: ubuntu-latest
+    env:
+      UV_PYTHON: "3.12"
     defaults:
       run:
         working-directory: cognee-mcp
@@ -41,15 +40,13 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           ref: ${{ github.ref_name }}
-          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
 
       - name: Install Python
-        # Pinned below 3.14 on purpose: cognee[docs] -> unstructured -> spacy
-        # has no cp314 wheel, and cognee-mcp declares requires-python <3.14.
-        # 3.12 matches the runtime in cognee-mcp/Dockerfile.
+        # UV_PYTHON selects 3.12 for all uv commands: it satisfies
+        # requires-python <3.14 and matches cognee-mcp/Dockerfile.
         run: uv python install 3.12
 
       - name: Resolve version and tag
@@ -66,6 +63,10 @@ jobs:
           VERSION: ${{ steps.meta.outputs.version }}
           TAG: ${{ steps.meta.outputs.tag }}
         run: |
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::release_mcp.yml publishes and tags permanently; run it from main (got ${GITHUB_REF})."
+            exit 1
+          fi
           # PyPI versions are immutable: a second upload of the same version is
           # rejected, and a yanked version can never be reused. Fail here, with
           # a message that says what to do, rather than at the upload step.
@@ -84,12 +85,48 @@ jobs:
         # pin someone meant to ship is not the one that would be resolved.
         run: uv lock --check
 
+      - name: Validate locked cognee version matches declared range
+        run: |
+          uv run --no-project --with packaging==25.0 python - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          from packaging.requirements import Requirement
+          from packaging.version import Version
+
+          project = tomllib.loads(Path("pyproject.toml").read_text())
+          lock = tomllib.loads(Path("uv.lock").read_text())
+          requirement = next(
+              req for dep in project["project"]["dependencies"]
+              if (req := Requirement(dep)).name == "cognee"
+          )
+          locked = [pkg["version"] for pkg in lock["package"] if pkg["name"] == "cognee"]
+          if not locked:
+              raise SystemExit("::error::uv.lock has no cognee package. Run 'uv lock' to sync.")
+          for version in locked:
+              if Version(version) not in requirement.specifier:
+                  raise SystemExit(
+                      f"::error::uv.lock pins cognee {version}, but pyproject.toml requires "
+                      f"{requirement}. Run 'uv lock' to sync."
+                  )
+              print(f"Locked cognee {version} satisfies {requirement}.")
+          PY
+
       - name: Build distributions
         run: uv build
 
-      - name: Validate distribution metadata
-        # twine >= 7 is required to accept Metadata-Version 2.5, which uv emits.
-        run: uvx --from "twine>=7" twine check dist/*
+      - name: Verify distributions were built
+        run: |
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          sdists=(dist/*.tar.gz)
+          if [ "${#wheels[@]}" -ne 1 ] || [ "${#sdists[@]}" -ne 1 ] || \
+             [ ! -s "${wheels[0]}" ] || [ ! -s "${sdists[0]}" ]; then
+            echo "::error::Build must produce exactly one nonempty wheel and sdist."
+            ls -lh dist/ || true
+            exit 1
+          fi
+          ls -lh "${wheels[@]}" "${sdists[@]}"
 
       # `with:` paths on actions are workspace-relative — the job-level
       # working-directory only applies to `run:` steps.
