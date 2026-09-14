@@ -95,11 +95,7 @@ async def recover_stale_cognify_runs_on_startup() -> None:
                 )
                 # Clear the lingering STARTED status so a re-run is not blocked by
                 # check_pipeline_run_qualification ("already being processed").
-                await reset_pipeline_run_status(
-                    user_id=dataset.owner_id,
-                    dataset_id=dataset.id,
-                    pipeline_name="cognify_pipeline",
-                )
+                await reset_pipeline_run_status(pipeline_run, user_id=dataset.owner_id)
             logger.info(
                 "Startup recovery completed for cognify run %s (dataset=%s).",
                 pipeline_run.pipeline_run_id,

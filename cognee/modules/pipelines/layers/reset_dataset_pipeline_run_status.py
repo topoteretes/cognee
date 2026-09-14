@@ -24,4 +24,4 @@ async def reset_dataset_pipeline_run_status(
         if pipeline_names is not None and pipeline_run.pipeline_name not in pipeline_names:
             continue
 
-        await reset_pipeline_run_status(user.id, dataset_id, pipeline_run.pipeline_name)
+        await reset_pipeline_run_status(pipeline_run, user_id=user.id)
