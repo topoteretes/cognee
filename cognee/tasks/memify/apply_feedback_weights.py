@@ -299,7 +299,7 @@ async def _process_feedback_item(
 
     logger.info(
         "Processed feedback QA %s from session %s (source=%s, alpha=%s, nodes=%d, edges=%d, "
-        "moved=%d, pruned=%d, failed=%d, attempt=%d, applied=%s, feedback_text=%r)",
+        "moved=%d, pruned=%d, failed=%d, attempt=%d, applied=%s, feedback_text_len=%d)",
         qa_id,
         session_id,
         item.get("feedback_source") or "explicit",
@@ -311,7 +311,9 @@ async def _process_feedback_item(
         len(failed),
         attempts,
         qa_success,
-        item.get("feedback_text"),
+        # Length only: feedback_text is the user's own words (explicit feedback,
+        # or the verbatim follow-up message on the implicit path) — never log it.
+        len(item.get("feedback_text") or ""),
     )
 
     return {"processed": 1, "applied": 1 if qa_success else 0, "skipped": 0}
