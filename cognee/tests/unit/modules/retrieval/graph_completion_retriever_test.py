@@ -524,16 +524,74 @@ async def test_empty_context_skip_respects_opt_out():
 
 
 def test_empty_context_skip_flag_contract():
-    """The graph-completion family skips on empty context; agentic opts out."""
+    """Every completion search type skips on empty context — search is not an
+    LLM gateway. The agentic retriever opts out: its tools answer without
+    memory context."""
     from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
+    from cognee.modules.retrieval.completion_retriever import CompletionRetriever
     from cognee.modules.retrieval.graph_completion_cot_retriever import (
         GraphCompletionCotRetriever,
     )
     from cognee.modules.retrieval.graph_summary_completion_retriever import (
         GraphSummaryCompletionRetriever,
     )
+    from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
+    from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 
     assert GraphCompletionRetriever.skip_completion_on_empty_context is True
     assert GraphCompletionCotRetriever.skip_completion_on_empty_context is True
     assert GraphSummaryCompletionRetriever.skip_completion_on_empty_context is True
+    assert CompletionRetriever.skip_completion_on_empty_context is True
+    assert HybridRetriever.skip_completion_on_empty_context is True
+    assert TripletRetriever.skip_completion_on_empty_context is True
     assert AgenticRetriever.skip_completion_on_empty_context is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "retriever_module, retriever_name",
+    [
+        ("completion_retriever", "CompletionRetriever"),
+        ("hybrid_retriever", "HybridRetriever"),
+        ("triplet_retriever", "TripletRetriever"),
+    ],
+)
+async def test_empty_context_skips_llm_across_completion_retrievers(
+    retriever_module, retriever_name
+):
+    """RAG, hybrid, and triplet completions skip the LLM on empty context too."""
+    import importlib
+
+    module = importlib.import_module(f"cognee.modules.retrieval.{retriever_module}")
+    retriever = getattr(module, retriever_name)()
+
+    with patch.object(module, "generate_completion", new_callable=AsyncMock) as mock_generate:
+        completion = await retriever.get_completion_from_context(
+            query="test query", retrieved_objects=None, context=""
+        )
+
+    assert completion == []
+    mock_generate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_empty_graph_raises_no_data_error():
+    """An empty graph is a loud state error (NoDataError -> 404 over the API),
+    not a quiet miss: symmetric with the RAG retriever's missing-collection
+    behavior (SDK-270 / gh #3728)."""
+    from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+
+    mock_graph_engine = AsyncMock()
+    mock_graph_engine.is_empty = AsyncMock(return_value=True)
+
+    retriever = GraphCompletionRetriever()
+
+    with (
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+            return_value=_make_unified_mock(mock_graph_engine),
+        ),
+        pytest.raises(NoDataError, match="knowledge graph is empty"),
+    ):
+        await retriever.get_retrieved_objects(query="test query")

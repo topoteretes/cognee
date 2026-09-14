@@ -43,6 +43,10 @@ DEFAULT_HYBRID_LANE_TOP_K = 10
 class HybridRetriever(BaseRetriever):
     """Completion retriever using chunk, entity, and optional global-context channels."""
 
+    # Search is not an LLM gateway: when every channel comes back empty there
+    # is no answer to give (SDK-270 / gh #3728).
+    skip_completion_on_empty_context = True
+
     def __init__(
         self,
         chunks_top_k: int | None = 5,
@@ -234,6 +238,15 @@ class HybridRetriever(BaseRetriever):
         effective_query: str | None = None,
         turn_preparation=None,
     ) -> list[Any]:
+        if self.skip_completion_on_empty_context and not query_batch and not context:
+            # Empty context must not reach the LLM: search is not an LLM
+            # gateway, and the only possible output is a phantom "no context
+            # provided" deflection (SDK-270 / gh #3728). A global-context
+            # prelude counts as real grounding, so this only fires when every
+            # section came back empty.
+            logger.warning("Empty context: skipping LLM completion, returning no results")
+            return []
+
         prompts = {
             "user_prompt_path": self.user_prompt_path,
             "system_prompt_path": self.system_prompt_path,
