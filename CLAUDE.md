@@ -260,8 +260,8 @@ Available search types (from `cognee/modules/search/types/SearchType.py`), passe
 - **CHUNKS** - Vector similarity search over chunks
 - **CHUNKS_LEXICAL** - Lexical (keyword) search over chunks
 - **SUMMARIES** - Search pre-computed document summaries
-- **CYPHER** - Direct Cypher query execution (requires `ALLOW_CYPHER_QUERY=True`)
-- **NATURAL_LANGUAGE** - Natural language to structured query
+- **CYPHER** - Direct Cypher query execution (requires `ALLOW_CYPHER_QUERY=True` and write permission on every targeted dataset)
+- **NATURAL_LANGUAGE** - Natural language to Cypher query, executed against the graph (same gate and write requirement as CYPHER)
 - **TEMPORAL** - Time-aware graph search
 - **FEELING_LUCKY** - Automatic search type selection
 - **CODING_RULES** - Code-specific search rules
@@ -702,7 +702,7 @@ Several security environment variables in `.env`:
 - `ACCEPT_LOCAL_FILE_PATH` - Allow local file paths (default: True)
 - `COGNEE_ALLOWED_LOCAL_FILE_ROOTS` - Optional `os.pathsep`-separated allowlist of directories local paths may be read from. Unset (default) means any local path is accepted, so a local repo or document tree can be ingested from anywhere; a path-looking string that does not exist is still ingested as text. When set, paths outside the listed roots are rejected (or ingested as text on the non-strict `add()` path); cognee's own data/system/cache/logs/repos roots are always allowed. Set it for servers reachable by untrusted callers.
 - `ALLOW_HTTP_REQUESTS` - Allow HTTP requests from Cognee (default: True)
-- `ALLOW_CYPHER_QUERY` - Allow raw Cypher queries (default: True)
+- `ALLOW_CYPHER_QUERY` - Allow raw Cypher queries (default: True). CYPHER and NATURAL_LANGUAGE search also require write permission on every dataset they target (`SearchType.required_permissions`), and FEELING_LUCKY never routes to them. Set to False on multi-tenant deployments with untrusted users: raw Cypher on Neo4j and Ladybug can reach files, other databases, and the network.
 - `ENABLE_BACKEND_ACCESS_CONTROL` - Multi-tenant isolation (default: True). When `true`, API auth is required and per-user/dataset DB isolation is enabled. When `false`, single-user mode: shared DBs and auth off unless overridden.
 - `REQUIRE_AUTHENTICATION` - Explicit auth override. Unset (default): follows `ENABLE_BACKEND_ACCESS_CONTROL`. `false` is ignored when `ENABLE_BACKEND_ACCESS_CONTROL=true`. For a single-user deployment with auth off, set `ENABLE_BACKEND_ACCESS_CONTROL=false` (and optionally `REQUIRE_AUTHENTICATION=false`).
 
