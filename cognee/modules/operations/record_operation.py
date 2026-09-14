@@ -92,6 +92,9 @@ class OperationContext:
         # stage as failed). A raised exception still wins over it.
         self.outcome = None
         self.close_deferred = False
+        # Optional JSON payload for the row's run_info column (improve stamps
+        # its enrichment watermark here — see improve/graph_changes.py).
+        self.run_info = None
 
     def set_user(self, user) -> None:
         """Bind the triggering user (tolerates None and partial objects)."""
@@ -123,6 +126,10 @@ class OperationContext:
         """Override the outcome recorded for a body that exits cleanly."""
         self.outcome = outcome
 
+    def set_run_info(self, run_info: dict | None) -> None:
+        """Attach a JSON payload to the row's ``run_info`` column."""
+        self.run_info = run_info
+
     def defer_close(self) -> None:
         """Hand the row write to background work — see ``finish_operation``.
 
@@ -147,7 +154,7 @@ async def _write_operation_row(
         pipeline_name=None,
         pipeline_id=None,
         dataset_id=context.dataset_id,
-        run_info=None,
+        run_info=context.run_info,
         user_id=context.user_id,
         tenant_id=context.tenant_id,
         operation_name=context.operation_name,
