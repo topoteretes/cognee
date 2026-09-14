@@ -7,6 +7,10 @@ with patch("dotenv.load_dotenv"):
     os.environ["REQUIRE_AUTHENTICATION"] = "true"
     os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "false"
     os.environ["HASH_API_KEY"] = "false"
+    # The default superuser is only loginable when DEFAULT_USER_PASSWORD is
+    # set; unset, it gets an unrecorded random password. This test logs in as
+    # it, so it pins the value before the account is lazily created.
+    os.environ["DEFAULT_USER_PASSWORD"] = "default_password"
 
     from fastapi.testclient import TestClient
 
