@@ -192,6 +192,9 @@ cognee/cache/
 .cognee_system/
 .data_storage/
 .cognee_cache/
+
+# Storage for the company-brain demo (examples/demos/company_brain/)
+.cognee-readme-demo/
 .artifacts/
 .anon_id
 
