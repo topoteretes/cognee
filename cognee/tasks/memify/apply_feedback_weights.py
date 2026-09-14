@@ -16,6 +16,7 @@ from cognee.tasks.memify.feedback_weights_constants import (
     MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_NODE_IDS_KEY,
     MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_SCORE_KEY,
     MEMIFY_METADATA_FEEDBACK_WEIGHTS_ATTEMPTS_KEY,
+    MEMIFY_METADATA_FEEDBACK_WEIGHTS_PRUNED_IDS_KEY,
 )
 
 logger = get_logger("apply_feedback_weights")
@@ -133,10 +134,10 @@ async def _update_element_weights(
             # "Pruned" conflates two cases: the element was deleted, or it
             # lives outside this run's dataset-scoped graph (a QA row's
             # used_graph_element_ids come from recall(), which spans every
-            # accessible dataset). Both are dropped for good once the row is
-            # marked done — the deliberate trade against dev's endless
-            # re-scan. Recording pruned ids separately would let an improve
-            # on the other dataset consume them, if that ever matters.
+            # accessible dataset). Pruned ids keep the row pending until the
+            # attempt cap, so an improve on the dataset that HAS them can
+            # consume the row — the cap bounds the rescans a genuinely
+            # deleted id can cost.
             outcome["pruned"].append(element_id)
             continue
         updates[element_id] = stream_update_weight(previous_weight, normalized_rating, alpha)
@@ -265,22 +266,26 @@ async def _process_feedback_item(
 
     if pruned:
         logger.warning(
-            "Feedback QA %s (session %s): %d graph element(s) no longer exist and were dropped: %s",
+            "Feedback QA %s (session %s): %d graph element(s) not found in this dataset's "
+            "graph (deleted, or owned by another dataset); the row stays pending until the "
+            "attempt cap so another dataset's improve can consume them: %s",
             qa_id,
             session_id,
             len(pruned),
             pruned,
         )
 
-    qa_success = not failed
+    qa_success = not failed and not pruned
     done = qa_success or attempts >= FEEDBACK_WEIGHTS_MAX_ATTEMPTS
-    if failed and done:
+    if not qa_success and done:
         logger.warning(
-            "Feedback QA %s (session %s): giving up after %d attempts; unapplied ids: %s",
+            "Feedback QA %s (session %s): giving up after %d attempts; failed ids: %s, "
+            "never-found ids: %s",
             qa_id,
             session_id,
             attempts,
             failed,
+            pruned,
         )
 
     await _mark_feedback_processed(
@@ -294,6 +299,7 @@ async def _process_feedback_item(
             MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_EDGE_IDS_KEY: sorted(applied_edges),
             MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_SCORE_KEY: feedback_score,
             MEMIFY_METADATA_FEEDBACK_WEIGHTS_ATTEMPTS_KEY: attempts,
+            MEMIFY_METADATA_FEEDBACK_WEIGHTS_PRUNED_IDS_KEY: sorted(pruned),
         },
     )
 

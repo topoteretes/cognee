@@ -19,7 +19,14 @@ MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_SCORE_KEY = "feedback_weights_applied_s
 # Number of runs that tried to write this row's weights (int).
 MEMIFY_METADATA_FEEDBACK_WEIGHTS_ATTEMPTS_KEY = "feedback_weights_attempts"
 
-# After this many attempts a row is marked done even if some writes never succeeded.
+# Ids the last run could not find in its graph (list of str, observability only —
+# retries recompute pending from the applied sets). "Not found" conflates deleted
+# with living in another dataset's graph, so these ids keep the row pending until
+# the attempt cap: an improve on the dataset that HAS them can consume the row.
+MEMIFY_METADATA_FEEDBACK_WEIGHTS_PRUNED_IDS_KEY = "feedback_weights_pruned_ids"
+
+# After this many attempts a row is marked done even if some writes never succeeded
+# or some ids were never found.
 FEEDBACK_WEIGHTS_MAX_ATTEMPTS = 3
 
 # An implicit rating (inferred from the user's next turn) moves weights at half the

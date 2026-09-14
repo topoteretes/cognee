@@ -19,6 +19,7 @@ from cognee.tasks.memify.feedback_weights_constants import (
     MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_NODE_IDS_KEY,
     MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_SCORE_KEY,
     MEMIFY_METADATA_FEEDBACK_WEIGHTS_ATTEMPTS_KEY,
+    MEMIFY_METADATA_FEEDBACK_WEIGHTS_PRUNED_IDS_KEY,
 )
 
 apply_feedback_weights_module = sys.modules["cognee.tasks.memify.apply_feedback_weights"]
@@ -28,6 +29,7 @@ NODE_IDS = MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_NODE_IDS_KEY
 EDGE_IDS = MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_EDGE_IDS_KEY
 SCORE = MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_SCORE_KEY
 ATTEMPTS = MEMIFY_METADATA_FEEDBACK_WEIGHTS_ATTEMPTS_KEY
+PRUNED_IDS = MEMIFY_METADATA_FEEDBACK_WEIGHTS_PRUNED_IDS_KEY
 
 
 class InMemoryGraphWithWeights:
@@ -269,25 +271,57 @@ async def test_apply_feedback_weights_no_ids_marks_row_done_and_touches_no_weigh
 
 
 @pytest.mark.asyncio
-async def test_apply_feedback_weights_deleted_ids_are_pruned_and_row_is_done():
+async def test_missing_ids_keep_the_row_pending_until_the_attempt_cap():
+    """ "Not found" conflates deleted with owned-by-another-dataset, so a pruned id
+    must not seal the row: it stays pending (bounded by the attempt cap) so an
+    improve on the dataset that HAS the id can consume it."""
     graph = InMemoryGraphWithWeights(missing_edge=True)
     session_manager = RecordingSessionManager()
 
     result = await _run(graph, session_manager, [_feedback_item()])
 
     assert result["processed"] == 1
-    assert result["applied"] == 1
+    assert result["applied"] == 0  # e1 was never found: not fully applied
     assert graph.node_weights["n1"] == pytest.approx(0.55)
     written = session_manager.metadata["q1"]
-    assert written[APPLIED] is True
+    assert written[APPLIED] is False
     assert written[NODE_IDS] == ["n1"]
-    assert written[EDGE_IDS] == []  # e1 is gone: dropped, not retried
+    assert written[PRUNED_IDS] == ["e1"]
 
 
 @pytest.mark.asyncio
-async def test_deleted_node_three_runs_moves_each_surviving_element_exactly_once():
-    """Acceptance: a QA whose ids include one deleted node, run three times, moves each
-    surviving element exactly once."""
+async def test_pruned_ids_are_consumed_by_the_dataset_that_has_them():
+    """A row rated during a recall over dataset B, first processed by dataset A's
+    improve: A applies its own ids and cannot find B's. B's improve then finds
+    and applies them — before, A's run sealed the row and B's weights never moved."""
+    graph_a = InMemoryGraphWithWeights(missing_edge=True)  # dataset A has no e1
+    graph_b = InMemoryGraphWithWeights()  # dataset B has e1
+    graph_b.node_weights = {}  # ...and no n1
+    session_manager = RecordingSessionManager()
+
+    def item(stored):
+        return _feedback_item(memify_metadata=stored)
+
+    first = (await _run_from_store(graph_a, session_manager, item, times=1))[0]
+    assert first["applied"] == 0
+    assert session_manager.metadata["q1"][APPLIED] is False
+
+    second = (await _run_from_store(graph_b, session_manager, item, times=1))[0]
+    assert second["applied"] == 1
+    stored = session_manager.metadata["q1"]
+    assert stored[APPLIED] is True
+    assert stored[EDGE_IDS] == ["e1"]
+    assert graph_b.edge_weights["e1"] == pytest.approx(0.55)
+    # n1 moved exactly once, in dataset A; B never re-applied it.
+    assert graph_a.node_weights["n1"] == pytest.approx(0.55)
+    assert graph_b.node_write_log == []
+
+
+@pytest.mark.asyncio
+async def test_deleted_node_runs_move_each_surviving_element_exactly_once():
+    """Acceptance: a QA whose ids include one deleted node moves each surviving
+    element exactly once; the never-found id keeps the row pending until the
+    attempt cap, then the row seals."""
     graph = InMemoryGraphWithWeights()
     session_manager = RecordingSessionManager()
 
@@ -297,18 +331,21 @@ async def test_deleted_node_three_runs_moves_each_surviving_element_exactly_once
             used_graph_element_ids={"node_ids": ["n1", "n_deleted"], "edge_ids": ["e1"]},
         )
 
-    results = await _run_from_store(graph, session_manager, item, times=3)
+    results = await _run_from_store(
+        graph, session_manager, item, times=FEEDBACK_WEIGHTS_MAX_ATTEMPTS + 1
+    )
 
     assert graph.node_weights["n1"] == pytest.approx(0.55)
     assert graph.edge_weights["e1"] == pytest.approx(0.55)
     assert graph.node_write_log == [{"n1": pytest.approx(0.55)}]
     assert graph.edge_write_log == [{"e1": pytest.approx(0.55)}]
-    assert [r["processed"] for r in results] == [1, 0, 0]
-    assert [r["skipped"] for r in results] == [0, 1, 1]
+    assert [r["processed"] for r in results] == [1] * FEEDBACK_WEIGHTS_MAX_ATTEMPTS + [0]
+    assert [r["skipped"] for r in results] == [0] * FEEDBACK_WEIGHTS_MAX_ATTEMPTS + [1]
     stored = session_manager.metadata["q1"]
     assert stored[APPLIED] is True
     assert stored[NODE_IDS] == ["n1"]
-    assert stored[ATTEMPTS] == 1
+    assert stored[PRUNED_IDS] == ["n_deleted"]
+    assert stored[ATTEMPTS] == FEEDBACK_WEIGHTS_MAX_ATTEMPTS
 
 
 @pytest.mark.asyncio
