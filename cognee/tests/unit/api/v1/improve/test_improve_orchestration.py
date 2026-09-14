@@ -29,6 +29,12 @@ from .conftest import FakeStage
 session_lock = importlib.import_module("cognee.infrastructure.locks.session_lock")
 
 
+def _lock_held(result: ImproveResult) -> bool:
+    return bool(result.stages) and all(
+        stage.status == "skipped" and stage.reason == REASON_LOCK_HELD for stage in result.stages
+    )
+
+
 def _run_info(cls, dataset_id, **extra):
     return cls(pipeline_run_id=uuid4(), dataset_id=dataset_id, dataset_name="docs", **extra)
 
@@ -64,7 +70,7 @@ async def test_gate_reasons(harness):
     harness.set_config(stages_disabled=["disabled_one"])
     stages = harness.use_stages(
         [
-            FakeStage("needs_sessions", kind="session", calls=calls),
+            FakeStage("needs_sessions", needs_sessions=True, calls=calls),
             FakeStage("disabled_one", calls=calls),
             FakeStage("own_gate", gate_reason="opt_in_disabled", calls=calls),
             FakeStage("runs", calls=calls),
@@ -89,9 +95,30 @@ async def test_gate_reasons(harness):
 
 
 @pytest.mark.asyncio
+async def test_unknown_disabled_stage_name_fails_loudly(harness):
+    harness.use_stages([FakeStage("real_stage")])
+    harness.set_config(stages_disabled=["real_stag"])  # one typo
+
+    with pytest.raises(ValueError, match="real_stag"):
+        await harness.improve()
+
+
+@pytest.mark.asyncio
+async def test_fatal_stage_cannot_be_disabled_by_config(harness):
+    calls = []
+    harness.use_stages([FakeStage("fatal_one", fatal=True, calls=calls)])
+    harness.set_config(stages_disabled=["fatal_one"])
+
+    with pytest.raises(ValueError, match="fatal"):
+        await harness.improve()
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
 async def test_session_stage_runs_when_session_ids_given(harness):
     calls = []
-    harness.use_stages([FakeStage("needs_sessions", kind="session", calls=calls)])
+    harness.use_stages([FakeStage("needs_sessions", needs_sessions=True, calls=calls)])
 
     result = await harness.improve(session_ids=["chat_1", "chat_2"])
 
@@ -112,43 +139,50 @@ async def test_lock_held_returns_every_stage_skipped_never_empty_dict(harness):
         await session_lock.release_improve_lock_many([key])
 
     assert isinstance(result, ImproveResult)
-    assert result.lock_held is True
+    assert _lock_held(result)
     assert result.status == "skipped"
     assert [(s.stage, s.status, s.reason) for s in result.stages] == [
         ("a", "skipped", REASON_LOCK_HELD),
         ("b", "skipped", REASON_LOCK_HELD),
     ]
     assert calls == []
-    assert result.to_legacy_dict() == {}
+    assert result.memify_run == {}
     assert harness.span.attributes[COGNEE_IMPROVE_STAGES] == "a=skipped,b=skipped"
 
 
 @pytest.mark.asyncio
-async def test_lock_is_keyed_to_session_ids_when_given(harness):
+async def test_lock_is_keyed_to_session_ids_and_the_dataset(harness):
     calls = []
     harness.use_stages([FakeStage("a", calls=calls)])
-    # Another run holding one of our sessions blocks us; the dataset key does not.
+    # Another run holding one of our sessions blocks us.
     assert await session_lock.try_acquire_improve_lock_many(["chat_2"])
     try:
         blocked = await harness.improve(session_ids=["chat_1", "chat_2"])
     finally:
         await session_lock.release_improve_lock_many(["chat_2"])
-    assert blocked.lock_held
+    assert _lock_held(blocked)
 
-    assert await session_lock.try_acquire_improve_lock_many([f"dataset:{harness.dataset.id}"])
+    # So does a dataset-keyed run over the same dataset: a session-keyed
+    # bridge and a plain improve(dataset=...) must never write concurrently.
+    dataset_key = f"dataset:{harness.dataset.id}"
+    assert await session_lock.try_acquire_improve_lock_many([dataset_key])
     try:
-        allowed = await harness.improve(session_ids=["chat_1", "chat_2"])
+        blocked = await harness.improve(session_ids=["chat_1", "chat_2"])
     finally:
-        await session_lock.release_improve_lock_many([f"dataset:{harness.dataset.id}"])
-    assert not allowed.lock_held
+        await session_lock.release_improve_lock_many([dataset_key])
+    assert _lock_held(blocked)
+
+    allowed = await harness.improve(session_ids=["chat_1", "chat_2"])
+    assert not _lock_held(allowed)
     assert calls == ["a"]
-    # And the claim is released afterwards.
-    assert await session_lock.try_acquire_improve_lock_many(["chat_1", "chat_2"])
-    await session_lock.release_improve_lock_many(["chat_1", "chat_2"])
+    # And every claim — sessions and dataset — is released afterwards.
+    all_keys = ["chat_1", "chat_2", dataset_key]
+    assert await session_lock.try_acquire_improve_lock_many(all_keys)
+    await session_lock.release_improve_lock_many(all_keys)
 
 
 @pytest.mark.asyncio
-async def test_fatal_stage_stops_chain_and_raises_with_partial_result(harness):
+async def test_fatal_stage_stops_run_and_raises_with_partial_result(harness):
     calls = []
     boom = RuntimeError("persist failed")
     harness.use_stages(
@@ -185,7 +219,7 @@ async def test_fatal_stage_stops_chain_and_raises_with_partial_result(harness):
 
 
 @pytest.mark.asyncio
-async def test_fatal_stage_reporting_errored_run_info_also_stops_chain(harness):
+async def test_fatal_stage_reporting_errored_run_info_also_stops_run(harness):
     calls = []
     errored = _run_info(
         PipelineRunErrored, harness.dataset.id, error_class="X", error_message="lost"
@@ -229,7 +263,6 @@ async def test_errored_non_fatal_stage_records_and_continues(harness):
     assert result.stages[0].error == "ValueError: nope"
     assert result.stages[1].status == "completed"
     assert result.status == "errored"
-    assert [s.stage for s in result.ok] == ["next"]
 
 
 @pytest.mark.asyncio
@@ -257,12 +290,11 @@ async def test_stage_status_is_derived_from_pipeline_run_info(harness):
     assert result.stages[2].error == "bad"
     # Legacy return shape stays reachable, nested (D4).
     assert result.memify_run is memify_return
-    assert result.to_legacy_dict() is memify_return
     assert result.stages[0].duration_ms >= 0
 
 
 @pytest.mark.asyncio
-async def test_background_mode_runs_whole_chain_under_one_lock(harness):
+async def test_background_mode_runs_all_stages_under_one_lock(harness):
     calls = []
     release = asyncio.Event()
 
@@ -284,7 +316,7 @@ async def test_background_mode_runs_whole_chain_under_one_lock(harness):
     assert result.background is True
     assert result.stages == []
     assert harness.span.attributes[COGNEE_IMPROVE_STAGES] == "background"
-    # The whole chain, not one stage, is what holds the claim.
+    # The whole run, not one stage, is what holds the claim.
     await asyncio.sleep(0)
     assert not await session_lock.try_acquire_improve_lock_many([key])
     assert calls == ["slow"]
@@ -326,6 +358,144 @@ async def test_background_fatal_error_is_recorded_not_raised(harness):
 
 
 @pytest.mark.asyncio
+async def test_clean_foreground_run_leaves_the_operation_close_to_the_recorder(harness):
+    harness.use_stages([FakeStage("a")])
+
+    await harness.improve()
+
+    operation = harness.operations[-1]
+    assert operation.close_deferred is False
+    assert operation.outcome is None  # record_operation writes "succeeded" on clean exit
+    assert harness.finish_calls == []
+
+
+@pytest.mark.asyncio
+async def test_errored_non_fatal_run_marks_the_operation_failed(harness):
+    from cognee.modules.pipelines.models import OperationOutcome
+
+    harness.use_stages(
+        [
+            FakeStage("flaky", run=lambda _i: ValueError("nope")),
+            FakeStage("next"),
+        ]
+    )
+
+    result = await harness.improve()
+
+    assert result.status == "errored"
+    # The stage-8 watermark trusts the operation row, so a run with an errored
+    # stage must not be recorded as a succeeded improve.
+    assert harness.operations[-1].outcome == OperationOutcome.FAILED
+
+
+@pytest.mark.asyncio
+async def test_lock_held_run_records_a_noop_operation_row(harness):
+    """A lost claim runs zero stages, so its row must never serve as a watermark.
+
+    The dataset is bound to the record before the claim, so a "succeeded" row
+    here would mark a dataset current that this call never improved — including
+    one whose claim was lost on a shared *session* key.
+    """
+    from cognee.modules.pipelines.models import OperationOutcome
+
+    harness.use_stages([FakeStage("a")])
+    key = f"dataset:{harness.dataset.id}"
+    assert await session_lock.try_acquire_improve_lock_many([key])
+    try:
+        result = await harness.improve()
+    finally:
+        await session_lock.release_improve_lock_many([key])
+
+    assert _lock_held(result)
+    assert harness.operations[-1].outcome == OperationOutcome.NOOP
+
+
+@pytest.mark.asyncio
+async def test_all_skipped_run_records_a_noop_operation_row(harness):
+    """Nothing ran (e.g. sessionless with triplet_embedding off): not a watermark.
+
+    Otherwise enabling triplet_embedding later finds "no writes since the last
+    succeeded improve" and never enriches the data ingested before the flip.
+    """
+    from cognee.modules.pipelines.models import OperationOutcome
+
+    harness.use_stages(
+        [FakeStage("a", gate_reason="nope"), FakeStage("b", gate_reason="nope")],
+    )
+
+    result = await harness.improve()
+
+    assert result.status == "skipped"
+    assert harness.operations[-1].outcome == OperationOutcome.NOOP
+
+
+@pytest.mark.asyncio
+async def test_background_run_defers_the_operation_close_until_the_run_ends(harness):
+    release = asyncio.Event()
+
+    async def slow_stage(_inputs):
+        await release.wait()
+        return StageResult.completed("slow")
+
+    harness.use_stages([FakeStage("slow", run=slow_stage)])
+
+    result = await harness.improve(run_in_background=True)
+
+    operation = harness.operations[-1]
+    assert operation.close_deferred is True
+    await asyncio.sleep(0)
+    assert harness.finish_calls == []  # no row at launch: the run has not ended
+
+    release.set()
+    await result.wait()
+
+    assert [call["context"] for call in harness.finish_calls] == [operation]
+    assert harness.finish_calls[0]["error"] is None
+    # The stage the run's own operation id was handed to (via inputs) matches.
+    stage = harness.improve_mod.DEFAULT_STAGES[0]
+    assert stage.seen_inputs[0].improve_operation_id == operation.operation_id
+
+
+@pytest.mark.asyncio
+async def test_background_fatal_closes_the_operation_with_the_error(harness):
+    harness.use_stages(
+        [FakeStage("fatal_one", fatal=True, run=lambda _i: RuntimeError("boom"))],
+    )
+
+    result = await harness.improve(run_in_background=True)
+    await result.wait()
+
+    assert len(harness.finish_calls) == 1
+    assert isinstance(harness.finish_calls[0]["error"], RuntimeError)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_background_run_still_closes_the_operation(harness):
+    """CancelledError is not an Exception: it must propagate, yet the deferred
+    row write still has to happen or the run leaves no trace in pipeline_runs."""
+    running = asyncio.Event()
+
+    async def blocked_stage(_inputs):
+        running.set()
+        await asyncio.Event().wait()  # blocks until cancelled
+
+    harness.use_stages([FakeStage("slow", run=blocked_stage)])
+
+    result = await harness.improve(run_in_background=True)
+    await running.wait()
+    result._task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await result._task
+
+    assert [call["context"] for call in harness.finish_calls] == [harness.operations[-1]]
+    assert isinstance(harness.finish_calls[0]["error"], asyncio.CancelledError)
+    # execute_stages' own finally still released the lock during cancellation.
+    key = f"dataset:{harness.dataset.id}"
+    assert await session_lock.try_acquire_improve_lock_many([key])
+    await session_lock.release_improve_lock_many([key])
+
+
+@pytest.mark.asyncio
 async def test_telemetry_hashes_session_ids(harness):
     harness.use_stages([FakeStage("a")])
 
@@ -343,8 +513,7 @@ async def test_remote_client_passthrough_forwards_every_option(harness, monkeypa
 
     client = type("Client", (), {})()
     client.improve = AsyncMock(return_value={"legacy": "run"})
-    state_mod = importlib.import_module("cognee.api.v1.serve.state")
-    monkeypatch.setattr(state_mod, "get_remote_client", lambda: client)
+    monkeypatch.setattr(harness.improve_mod, "get_remote_client", lambda: client)
 
     result = await harness.improve_mod.improve(
         "docs",
@@ -369,6 +538,26 @@ async def test_remote_client_passthrough_forwards_every_option(harness, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_remote_result_stamps_the_span(harness, monkeypatch):
+    """The remote path exits through report() like every local path, so the
+    span carries the server's stage summary instead of staying unset."""
+    from unittest.mock import AsyncMock
+
+    payload = ImproveResult(
+        stages=[StageResult.completed("a"), StageResult.skipped("b", "opt_in_disabled")],
+        memify_run={},
+    ).model_dump(mode="json")
+    client = type("Client", (), {})()
+    client.improve = AsyncMock(return_value=payload)
+    monkeypatch.setattr(harness.improve_mod, "get_remote_client", lambda: client)
+
+    result = await harness.improve_mod.improve("docs")
+
+    assert result.stage("a").status == "completed"
+    assert harness.span.attributes[COGNEE_IMPROVE_STAGES] == "a=completed,b=skipped"
+
+
+@pytest.mark.asyncio
 async def test_feedback_alpha_kwarg_overrides_config(harness):
     stage = FakeStage("a")
     harness.use_stages([stage])
@@ -379,3 +568,14 @@ async def test_feedback_alpha_kwarg_overrides_config(harness):
 
     await harness.improve(feedback_alpha=0.7)
     assert stage.seen_inputs[1].feedback_alpha == 0.7
+
+
+def test_memify_passthrough_keys_are_declared_on_improve_kwargs():
+    """The forwarded memify surface is spelled twice — MEMIFY_PASSTHROUGH_KEYS
+    (what _resolve_inputs forwards) and ImproveKwargs (what type checkers let a
+    caller pass). A key added to one and not the other is silently either
+    rejected by type checkers or never forwarded; this pins the two together."""
+    from cognee.api.v1.improve.improve import ImproveKwargs
+    from cognee.modules.improve import MEMIFY_PASSTHROUGH_KEYS
+
+    assert set(MEMIFY_PASSTHROUGH_KEYS) <= set(ImproveKwargs.__annotations__)

@@ -26,10 +26,8 @@ from cognee.infrastructure.session.session_persist_watermark import (
     distill_watermark,
     get_distilled_entry_ids,
     get_persisted_qa_count,
-    get_persisted_trace_count,
     save_distilled_entry_ids,
     save_persisted_qa_count,
-    save_persisted_trace_count,
 )
 
 USER = "u"
@@ -180,10 +178,10 @@ async def test_qa_persist_reads_rows_written_before_the_shared_helper():
 async def test_trace_persist_watermark_has_its_own_row():
     manager = FakeSessionManager()
     await save_persisted_qa_count(manager, USER, SESSION, 2)
-    await save_persisted_trace_count(manager, USER, SESSION, 9)
+    await TRACE_PERSIST_WATERMARK.write_count(manager, USER, SESSION, 9)
 
     assert await get_persisted_qa_count(manager, USER, SESSION) == 2
-    assert await get_persisted_trace_count(manager, USER, SESSION) == 9
+    assert await TRACE_PERSIST_WATERMARK.read_count(manager, USER, SESSION) == 9
     ids = {row["id"] for row in manager.store}
     assert ids == {SESSION_PERSIST_STATE_ID, TRACE_PERSIST_STATE_ID}
     assert TRACE_PERSIST_STATE_KIND != SESSION_PERSIST_STATE_KIND

@@ -12,7 +12,7 @@ is what every surface hands back. The legacy memify return stays reachable as
 """
 
 import asyncio
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, model_validator
@@ -23,8 +23,15 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunErrored,
     PipelineRunInfo,
 )
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("improve")
 
 StageStatus = Literal["completed", "already_completed", "skipped", "errored"]
+
+# The one stage whose raw pipeline return is nested on
+# ``ImproveResult.memify_run`` for one minor release (decision D4).
+LEGACY_MEMIFY_STAGE_NAME = "triplet_enrichment"
 
 # Gate reasons the orchestrator itself produces (stages add their own).
 REASON_LOCK_HELD = "lock_held"
@@ -44,7 +51,6 @@ class StageResult(BaseModel):
     reason: str | None = None  # required when skipped; informative otherwise
     error: str | None = None
     counts: dict[str, int] = Field(default_factory=dict)
-    llm_calls: int = 0
     duration_ms: int = 0
     run: PipelineRunInfo | None = None  # set when the stage is a pipeline
 
@@ -52,6 +58,11 @@ class StageResult(BaseModel):
     # PipelineRunInfo}`` in blocking mode). Kept off the schema; the
     # orchestrator lifts stage 8's copy onto ``ImproveResult.memify_run``.
     _raw_run: Any = PrivateAttr(default=None)
+
+    # The exception a stage raised, when it did. A stage whose wrapped pipeline
+    # reported PipelineRunErrored instead of raising carries none, so the
+    # orchestrator can tell the two apart and re-raise the original.
+    _exception: BaseException | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def _skipped_needs_reason(self) -> "StageResult":
@@ -64,8 +75,8 @@ class StageResult(BaseModel):
         return self._raw_run
 
     @property
-    def ok(self) -> bool:
-        return self.status in ("completed", "already_completed")
+    def exception(self) -> BaseException | None:
+        return self._exception
 
     @classmethod
     def skipped(cls, stage: str, reason: str) -> "StageResult":
@@ -73,11 +84,14 @@ class StageResult(BaseModel):
 
     @classmethod
     def errored(cls, stage: str, error: Any, **counts: int) -> "StageResult":
-        return cls(stage=stage, status="errored", error=_error_text(error), counts=dict(counts))
+        result = cls(stage=stage, status="errored", error=_error_text(error), counts=dict(counts))
+        if isinstance(error, BaseException):
+            result._exception = error
+        return result
 
     @classmethod
-    def completed(cls, stage: str, llm_calls: int = 0, **counts: int) -> "StageResult":
-        return cls(stage=stage, status="completed", counts=dict(counts), llm_calls=llm_calls)
+    def completed(cls, stage: str, **counts: int) -> "StageResult":
+        return cls(stage=stage, status="completed", counts=dict(counts))
 
     @classmethod
     def from_pipeline_run(cls, stage: str, run_result: Any, **counts: int) -> "StageResult":
@@ -108,15 +122,15 @@ class StageResult(BaseModel):
 
 
 def first_run_info(run_result: Any) -> PipelineRunInfo | None:
-    """First ``PipelineRunInfo`` inside an executor return, if any."""
+    """First ``PipelineRunInfo`` inside an executor return, if any.
+
+    Executors hand back a ``{dataset_id: PipelineRunInfo}`` mapping or a bare
+    ``PipelineRunInfo``; anything else carries no run info.
+    """
     if isinstance(run_result, PipelineRunInfo):
         return run_result
     if isinstance(run_result, dict):
         for value in run_result.values():
-            if isinstance(value, PipelineRunInfo):
-                return value
-    if isinstance(run_result, (list, tuple)):
-        for value in run_result:
             if isinstance(value, PipelineRunInfo):
                 return value
     return None
@@ -136,11 +150,11 @@ ImproveStatus = Literal["completed", "errored", "skipped", "running"]
 class ImproveResult(BaseModel):
     """One entry per stage, in registry order, for one ``improve()`` run.
 
-    ``status`` summarises the stages: ``running`` while a background chain is
+    ``status`` summarises the stages: ``running`` while a background run is
     still going, ``errored`` when any stage errored, ``skipped`` when every
     stage was skipped (a lost lock claim, an unchanged graph with nothing
     opted in), ``completed`` otherwise. ``await result.wait()`` blocks on a
-    background chain and returns the same, now finished, object.
+    background run and returns the same, now finished, object.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -154,12 +168,12 @@ class ImproveResult(BaseModel):
     memify_run: Any = None
     background: bool = False
     finished: bool = True
-    # Set when a fatal stage aborted the chain (always raised in the
+    # Set when a fatal stage aborted the run (always raised in the
     # foreground; recorded here in background mode where a raise has nowhere
     # to go).
     error: str | None = None
 
-    _task: Optional["asyncio.Task"] = PrivateAttr(default=None)
+    _task: asyncio.Task | None = PrivateAttr(default=None)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -172,16 +186,11 @@ class ImproveResult(BaseModel):
             return "skipped"
         return "completed"
 
-    @property
-    def ok(self) -> list[StageResult]:
-        """Stages that did or had already done their work."""
-        return [stage for stage in self.stages if stage.ok]
-
-    @property
-    def lock_held(self) -> bool:
-        return bool(self.stages) and all(
-            stage.status == "skipped" and stage.reason == REASON_LOCK_HELD for stage in self.stages
-        )
+    def record(self, stage_result: StageResult) -> None:
+        """Append one stage's outcome, nesting the legacy memify return (D4)."""
+        self.stages.append(stage_result)
+        if stage_result.stage == LEGACY_MEMIFY_STAGE_NAME:
+            self.memify_run = stage_result.raw_run if stage_result.raw_run is not None else {}
 
     def stage(self, name: str) -> StageResult | None:
         for stage in self.stages:
@@ -193,15 +202,40 @@ class ImproveResult(BaseModel):
         """``name=status`` pairs, comma-joined — the tracing attribute value."""
         return ",".join(f"{stage.stage}={stage.status}" for stage in self.stages)
 
-    def to_legacy_dict(self) -> Any:
-        """The pre-1.x return shape: the memify enrichment run info (or ``{}``)."""
-        return self.memify_run if self.memify_run is not None else {}
+    def attach_background_task(self, task: asyncio.Task) -> "ImproveResult":
+        """Bind the detached task that is filling this result, for ``wait()``.
+
+        The task pointer is a ``PrivateAttr`` to stay off the schema; this is
+        the one way to set it from outside the class.
+        """
+        self._task = task
+        return self
 
     async def wait(self) -> "ImproveResult":
-        """Await the background chain (no-op for foreground runs)."""
+        """Await the background run (no-op for foreground runs)."""
         if self._task is not None and not self._task.done():
             await asyncio.shield(self._task)
         return self
+
+    @classmethod
+    def from_remote_payload(cls, payload: Any, session_ids: list[str]) -> "ImproveResult":
+        """Rebuild a result handed back by a remote cognee server.
+
+        A server running the same stages returns the serialized result; an older one
+        returns the legacy memify run mapping, which is nested as
+        ``memify_run`` with no stage detail.
+        """
+        if isinstance(payload, dict) and "stages" in payload:
+            try:
+                return cls.model_validate(payload)
+            except Exception as error:
+                logger.debug(
+                    "improve: remote result did not validate as ImproveResult: %s",
+                    error,
+                    exc_info=True,
+                )
+
+        return cls(session_ids=list(session_ids), stages=[], memify_run=payload)
 
     @classmethod
     def all_skipped(

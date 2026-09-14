@@ -1,57 +1,67 @@
-"""``improve()``: the orchestrator of the self-improvement loop.
+"""``improve()``: the public entry point and orchestrator of the self-improvement loop.
 
-It resolves the dataset once, claims one lock keyed to the run, assembles a
-frozen ``ImproveRunInputs``, and walks ``DEFAULT_STAGES`` in registry order:
-gate, then run, timing each stage and mapping its outcome onto a
-``StageResult``. The stage bodies live in ``cognee/modules/improve/stages.py``
-and the code they wrap stays where it always was; this module owns only the
-glue (plan Part 5.1).
+``execute_stages``, defined first inside ``improve()``, is what a run does: one
+gated stage after another, in registry order. The body below it decides when
+and whether — forward to a remote server, resolve the request, claim the
+improve lock, then run in the foreground or detach as one background task.
+
+Two contracts shape everything here. The ``record_operation`` row is the
+stage-8 watermark, so it must describe the *finished* run: an errored stage
+records ``failed``, a run in which nothing executed records ``noop``, and a
+background run defers the row close to the detached task. And the run fails
+open: every stage failure is recorded and the next stage still runs — except
+the one ``fatal`` stage, ``persist_session_qa``, where losing session Q&A
+would be data loss: it stops the run and raises, carrying the partial
+``ImproveResult`` on the exception (decision D2).
 """
 
 import asyncio
 import hashlib
-import time
+from collections.abc import Callable, Coroutine, Iterator, Sequence
+from contextlib import contextmanager
 from typing import Any
 from uuid import UUID
 
-try:
-    from typing import Unpack
-except ImportError:
-    from typing_extensions import Unpack
+from typing_extensions import TypedDict, Unpack
 
-from typing_extensions import TypedDict
-
+from cognee.api.v1.serve.state import get_remote_client
+from cognee.infrastructure.background_tasks import register_background_task
+from cognee.infrastructure.locks.session_lock import (
+    improve_lock_keys,
+    release_improve_lock_many,
+    try_acquire_improve_lock_many,
+)
 from cognee.modules.improve import (
     DEFAULT_STAGES,
     MEMIFY_PASSTHROUGH_KEYS,
     REASON_ABORTED_BY_FATAL_STAGE,
     REASON_LOCK_HELD,
+    BaseStage,
     ImproveResult,
     ImproveRunInputs,
     StageResult,
-    evaluate_gate,
+    execute_stage,
     get_improve_config,
     resolve_graph_capabilities,
     stage_names,
+    validate_stages_disabled,
 )
+from cognee.modules.migrations.startup import run_migrations_and_block
 from cognee.modules.observability import (
     COGNEE_DATASET_NAME,
     COGNEE_IMPROVE_STAGES,
     COGNEE_SESSION_ID,
     new_span,
 )
-from cognee.modules.operations import record_operation
+from cognee.modules.operations import finish_operation, record_operation
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
+from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import send_telemetry
 
 logger = get_logger("improve")
-
-# Strong refs for background improve chains. The event loop only keeps weak
-# references to tasks, so without anchoring here gc can collect an in-flight
-# chain mid-run (same pattern as remember.py's _BACKGROUND_REMEMBER_TASKS).
-_BACKGROUND_IMPROVE_TASKS: set = set()
 
 
 class ImproveKwargs(TypedDict, total=False):
@@ -67,11 +77,6 @@ class ImproveKwargs(TypedDict, total=False):
     feedback_alpha: float
 
 
-def _hash_session_id(session_id: str) -> str:
-    """Short, stable, non-reversible token for telemetry — never the raw id."""
-    return hashlib.sha256(str(session_id).encode("utf-8")).hexdigest()[:16]
-
-
 async def improve(
     dataset: str | UUID = "main_dataset",
     *,
@@ -82,52 +87,36 @@ async def improve(
     build_truth_subspace: bool = False,
     **kwargs: Unpack[ImproveKwargs],
 ) -> ImproveResult:
-    """Run the self-improvement loop over a dataset and return what each stage did.
+    """Run the self-improvement loop over a dataset and report what each stage did.
 
-    The nine stages run in a fixed order (``cognee.modules.improve.DEFAULT_STAGES``).
-    Each one first *gates* — declines work it cannot do under the current
-    settings, with zero LLM calls — and only then runs:
+    The stages are ``cognee.modules.improve.DEFAULT_STAGES``, in order:
+    ``feedback_weights``, ``persist_session_qa``, ``persist_agent_traces``,
+    ``extract_agent_context``, ``distill_sessions``, ``update_user_preferences``,
+    ``build_truth_subspace``, ``triplet_enrichment``, ``global_context_index``.
+    Each stage first *gates* — declines work it cannot do under the current
+    settings, with zero LLM calls — and only then runs. That registry is the
+    authoritative description of what runs.
 
-    1. ``feedback_weights`` — scored session answers move ``feedback_weight`` on
-       the graph elements they used. Skipped at ``DEFAULT_FEEDBACK_INFLUENCE=0``
-       (``feedback_influence_zero``) or on backends without the method
-       (``backend_unsupported``).
-    2. ``persist_session_qa`` — session Q&A is cognified into the graph
-       (``user_sessions_from_cache``). The one fatal stage: an error stops the
-       chain and is raised, because silently losing Q&A would be data loss.
-    3. ``persist_agent_traces`` — tool-call trace feedback is cognified
-       (``agent_trace_feedbacks``).
-    4. ``extract_agent_context`` — pending traces become agent-profile lessons.
-       Skipped when the session cache or ``AUTO_FEEDBACK`` is off.
-    5. ``distill_sessions`` — gated guidance becomes entity-anchored lessons
-       (``session_learnings``).
-    6. ``update_user_preferences`` — ratings fold into ``prefers`` weights.
-       Skipped unless ``PERSONALIZATION_ENABLED``.
-    7. ``build_truth_subspace`` — opt-in (``build_truth_subspace=True``); also
-       needs a backend with truth state.
-    8. ``triplet_enrichment`` — default memify enrichment. Skipped when
-       ``triplet_embedding`` is off (``triplet_embedding_disabled``);
-       ``already_completed`` when no write pipeline finished for this dataset
-       since its last improve.
-    9. ``global_context_index`` — opt-in (``build_global_context_index=True``).
-
-    Session-kind stages (1-7) are skipped with ``no_session_ids`` when no
-    ``session_ids`` were given. Stages named in ``IMPROVE_STAGES_DISABLED`` are
-    skipped with ``disabled_by_config``. A run that loses the improve lock
-    (another run is already touching the same sessions or dataset) returns a
-    result whose every stage is ``skipped: lock_held``.
+    Every stage but the last two is session-fed and is skipped with
+    ``no_session_ids`` when no ``session_ids`` were given. Stages named in
+    ``IMPROVE_STAGES_DISABLED`` are skipped with ``disabled_by_config``. A run
+    that loses the improve lock — another run is already touching the same
+    sessions or dataset — returns a result whose every stage is
+    ``skipped: lock_held``. A failure in ``persist_session_qa`` stops the run
+    and raises, because silently losing session Q&A would be data loss; every
+    other failure is recorded and the remaining stages still run.
 
     Args:
         dataset: Dataset name or UUID to process. Resolved once; every stage
             receives the resolved id.
-        run_in_background: Run the whole chain as one background task that
-            holds the improve lock for its lifetime. The returned result has
+        run_in_background: Run all stages as one background task that holds
+            the improve lock for its lifetime. The returned result has
             ``status == "running"``; ``await result.wait()`` blocks on it.
         node_name: Filter graph to specific named entities (enrichment stage).
         session_ids: Session IDs whose feedback and content should be
             bridged into the permanent graph.
-        build_global_context_index: Opt in to stage 9.
-        build_truth_subspace: Opt in to stage 7.
+        build_global_context_index: Opt in to ``global_context_index``.
+        build_truth_subspace: Opt in to ``build_truth_subspace``.
         **kwargs: Additional options — see ``ImproveKwargs``.
 
     Returns:
@@ -140,18 +129,341 @@ async def improve(
         for stage in result.stages:
             print(stage.stage, stage.status, stage.reason or "")
     """
-    from cognee import __version__ as cognee_version
-    from cognee.shared.utils import send_telemetry
 
-    session_ids = [sid for sid in (session_ids or []) if sid]
+    async def execute_stages(
+        inputs: ImproveRunInputs,
+        result: ImproveResult,
+        lock_keys: tuple[str, ...],
+        operation: Any,
+    ) -> None:
+        """One ``StageResult`` per registry stage, in order; then free the lock."""
+        stages = list(DEFAULT_STAGES)
+        try:
+            for index, stage in enumerate(stages):
+                stage_result = await execute_stage(stage, inputs)
+                result.record(stage_result)
+                if stage.fatal and stage_result.status == "errored":
+                    raise _abort_run(result, stages[index + 1 :], stage, stage_result)
+        finally:
+            result.finished = True
+            from cognee.modules.pipelines.models import OperationOutcome
+
+            if result.status == "errored":
+                # A non-fatal errored stage exits this block cleanly; without
+                # this the row would say "succeeded" and gate off the retry.
+                operation.set_outcome(OperationOutcome.FAILED)
+            elif result.status == "skipped":
+                # Every stage skipped means nothing ran, so there is nothing
+                # to watermark: a "succeeded" row would gate enrichment off
+                # until the dataset's next write pipeline.
+                operation.set_outcome(OperationOutcome.NOOP)
+            await release_improve_lock_many(lock_keys)
+
+    session_ids = [session_id for session_id in (session_ids or []) if session_id]
+    _send_improve_telemetry(
+        dataset,
+        session_ids,
+        user=kwargs.get("user", "sdk"),
+        run_in_background=run_in_background,
+        build_global_context_index=build_global_context_index,
+        build_truth_subspace=build_truth_subspace,
+    )
+
+    with _improve_span(dataset, session_ids) as report:
+        remote_client = get_remote_client()
+        if remote_client is not None:
+            remote_result = await _improve_remotely(
+                remote_client,
+                dataset,
+                node_name=node_name,
+                session_ids=session_ids,
+                build_global_context_index=build_global_context_index,
+                build_truth_subspace=build_truth_subspace,
+                run_in_background=run_in_background,
+                overrides=kwargs,
+            )
+            return report(remote_result)
+
+        # Opened across the stage execution, not just the prep: this row is
+        # the stage-8 watermark and must describe the finished run, never the
+        # launch (outcome contract in the module docstring).
+        async with record_operation("improve") as operation:
+            inputs = await _resolve_inputs(
+                operation,
+                dataset=dataset,
+                session_ids=session_ids,
+                run_in_background=run_in_background,
+                node_name=node_name,
+                build_global_context_index=build_global_context_index,
+                build_truth_subspace=build_truth_subspace,
+                overrides=kwargs,
+            )
+            # One claim per session id plus one for the dataset, so bridge
+            # runs and dataset runs exclude each other; held until the last
+            # stage finishes, background included.
+            lock_keys = improve_lock_keys(inputs.session_ids, inputs.dataset_id)
+            if not await try_acquire_improve_lock_many(lock_keys):
+                return report(_skip_lock_held_run(operation, inputs, lock_keys))
+
+            # Created before the stages run: background mode hands this result
+            # to the caller while the detached task is still filling it.
+            result = ImproveResult(
+                dataset_id=inputs.dataset_id,
+                dataset_name=inputs.dataset_name,
+                session_ids=inputs.session_id_list,
+                memify_run={},
+                background=run_in_background,
+                finished=False,
+            )
+
+            if run_in_background:
+                operation.defer_close()
+                # ``operation`` is passed twice on purpose: the coroutine's own
+                # finally sets the outcome from the finished stages, while
+                # _run_detached closes the deferred row even on cancellation.
+                run = _run_detached(execute_stages(inputs, result, lock_keys, operation), operation)
+                task = register_background_task(asyncio.create_task(run))
+                result.attach_background_task(task)
+                return report(result)
+
+            await execute_stages(inputs, result, lock_keys, operation)
+            return report(result)
+
+
+@contextmanager
+def _improve_span(
+    dataset: str | UUID, session_ids: list[str]
+) -> Iterator[Callable[[ImproveResult], ImproveResult]]:
+    """The tracing span around one improve call.
+
+    Yields ``report``: call it with the result on the way out to stamp the
+    stage summary onto the span — ``"background"`` for a detached run, whose
+    stages land only after the span is gone. A fatal stage raises instead of
+    returning; the partial result on the exception stamps how far it got.
+    """
+    with new_span("cognee.api.improve") as span:
+        span.set_attribute(COGNEE_DATASET_NAME, str(dataset))
+        if session_ids:
+            span.set_attribute(COGNEE_SESSION_ID, ",".join(session_ids))
+
+        def report(result: ImproveResult) -> ImproveResult:
+            span.set_attribute(
+                COGNEE_IMPROVE_STAGES,
+                "background" if result.status == "running" else result.stage_summary(),
+            )
+            return result
+
+        try:
+            yield report
+        except Exception as error:
+            partial_result = getattr(error, "improve_result", None)
+            if partial_result is not None:
+                span.set_attribute(COGNEE_IMPROVE_STAGES, partial_result.stage_summary())
+            raise
+
+
+async def _resolve_inputs(
+    operation: Any,
+    *,
+    dataset: str | UUID,
+    session_ids: list[str],
+    run_in_background: bool,
+    node_name: list[str] | None,
+    build_global_context_index: bool,
+    build_truth_subspace: bool,
+    overrides: dict,
+) -> ImproveRunInputs:
+    """Resolve everything a stage may read into the frozen ``ImproveRunInputs``.
+
+    ``operation`` is the open ``record_operation`` context; each fact is bound
+    to it as soon as it is known, so a run that fails to resolve its dataset is
+    still recorded as a failed improve. The options arrive one by one on
+    purpose: a bundle type would be a third copy of ``improve()``'s signature
+    to keep in sync. ``overrides`` is the caller's ``**kwargs``, never mutated.
+    """
+    user = overrides.get("user")
+    if user is None:
+        user = await get_default_user()
+    operation.set_user(user)
+    operation.set_background(run_in_background)
+    if len(session_ids) == 1:
+        operation.set_session_id(session_ids[0])
+
+    # The run-log writers INSERT the operation-record columns, so the database
+    # must be at the current Alembic head before the first write — same gate
+    # as cognify().
+    await run_migrations_and_block(dataset, user)
+
+    # The same write-level resolver remember/memify use: names resolve or are
+    # created for the caller; a missing or unauthorized UUID raises instead of
+    # being silently retargeted. Downstream gets the resolved UUID, never a
+    # name — names are owner-scoped, so a name collapsed from a *shared*
+    # dataset's UUID would re-resolve to the caller's own same-named dataset.
+    user, authorized_datasets = await resolve_authorized_user_datasets(dataset, user)
+    resolved_dataset = authorized_datasets[0]
+    operation.set_dataset(resolved_dataset.id)
+
+    config = get_improve_config()
+    # Fail loudly rather than skip silently in the loop: a typo in
+    # IMPROVE_STAGES_DISABLED would disable nothing, and the fatal stage must
+    # not be bypassable by config.
+    validate_stages_disabled(config.stages_disabled, DEFAULT_STAGES)
+    feedback_alpha = overrides.get("feedback_alpha")
+    if feedback_alpha is None:
+        feedback_alpha = config.feedback_alpha
+
+    return ImproveRunInputs(
+        user=user,
+        dataset_id=resolved_dataset.id,
+        dataset=resolved_dataset,
+        improve_operation_id=operation.operation_id,
+        session_ids=tuple(session_ids),
+        config=config,
+        capabilities=await resolve_graph_capabilities(
+            resolved_dataset.id, getattr(resolved_dataset, "owner_id", None)
+        ),
+        node_name=node_name,
+        feedback_alpha=feedback_alpha,
+        build_global_context_index=build_global_context_index,
+        build_truth_subspace=build_truth_subspace,
+        memify_kwargs={key: overrides[key] for key in MEMIFY_PASSTHROUGH_KEYS if key in overrides},
+    )
+
+
+def _skip_lock_held_run(
+    operation: Any, inputs: ImproveRunInputs, lock_keys: tuple[str, ...]
+) -> ImproveResult:
+    """React to a lost lock claim: log it, record a no-op run, skip every stage.
+
+    Not "succeeded": zero stages ran, and the dataset is already bound to the
+    record, so a succeeded row would stand in as the stage-8 watermark for a
+    dataset this claim may never have improved (a clash on a shared session
+    key). The caller still gets one entry per stage, never ``{}``.
+    """
+    from cognee.modules.pipelines.models import OperationOutcome
+
+    logger.info(
+        "improve: another run holds the improve lock for %s, skipping",
+        ", ".join(lock_keys),
+    )
+    operation.set_outcome(OperationOutcome.NOOP)
+    return ImproveResult.all_skipped(
+        stage_names(DEFAULT_STAGES),
+        REASON_LOCK_HELD,
+        dataset_id=inputs.dataset_id,
+        dataset_name=inputs.dataset_name,
+        session_ids=inputs.session_id_list,
+    )
+
+
+def _abort_run(
+    result: ImproveResult,
+    remaining_stages: Sequence[BaseStage],
+    stage: BaseStage,
+    stage_result: StageResult,
+) -> BaseException:
+    """Mark the rest of the run aborted and build the exception the loop raises.
+
+    The exception is the stage's own when it raised — its type is what the HTTP
+    layer maps onto a status code — and a synthetic one when the wrapped
+    pipeline only reported ``PipelineRunErrored`` without raising. Either way it
+    carries the partial ``ImproveResult`` as ``improve_result``.
+    """
+    for remaining_stage in remaining_stages:
+        result.record(StageResult.skipped(remaining_stage.name, REASON_ABORTED_BY_FATAL_STAGE))
+    result.error = stage_result.error
+    logger.error(
+        "improve: fatal stage '%s' failed, run stopped: %s", stage.name, stage_result.error
+    )
+
+    # Lazy: cognee.exceptions pulls in fastapi, and this path runs only when a
+    # fatal stage has already failed.
+    from cognee.exceptions import CogneeSystemError
+
+    error = stage_result.exception
+    if error is None:
+        error = CogneeSystemError(
+            message=f"improve: fatal stage '{stage.name}' errored: {stage_result.error}",
+            name="ImproveFatalStageError",
+            log=False,
+        )
+
+    try:
+        error.improve_result = result  # type: ignore[attr-defined]
+    except (AttributeError, TypeError):
+        # Exceptions that reject attribute assignment (__slots__, some C-level
+        # types) simply carry no partial result.
+        logger.debug("improve: could not attach partial result to %s", type(error).__name__)
+
+    return error
+
+
+async def _run_detached(execute: Coroutine[Any, Any, None], operation: Any) -> None:
+    """Await the stage execution where a fatal stage has nowhere to raise.
+
+    The failure is logged and already on ``result.error`` for whoever awaits
+    ``result.wait()``. The deferred row close in ``finally`` is unconditional:
+    even a cancelled run records ``failed: CancelledError`` — with the close
+    deferred, skipping it would leave the run with no row at all.
+    """
+    error: BaseException | None = None
+    try:
+        await execute
+    except Exception as caught:
+        error = caught
+        logger.warning("improve: background run aborted by fatal stage: %s", caught, exc_info=True)
+    except BaseException as caught:
+        error = caught
+        raise
+    finally:
+        await finish_operation(operation, error=error)
+
+
+async def _improve_remotely(
+    remote_client: Any,
+    dataset: str | UUID,
+    *,
+    node_name: list[str] | None,
+    session_ids: list[str],
+    build_global_context_index: bool,
+    build_truth_subspace: bool,
+    run_in_background: bool,
+    overrides: dict,
+) -> ImproveResult:
+    """Forward every option to the configured server, which runs the same
+    stages and hands back its ``ImproveResult``."""
+    payload = await remote_client.improve(
+        dataset,
+        node_name=node_name,
+        session_ids=session_ids or None,
+        build_global_context_index=build_global_context_index,
+        build_truth_subspace=build_truth_subspace,
+        run_in_background=run_in_background,
+        **overrides,
+    )
+    return ImproveResult.from_remote_payload(payload, session_ids)
+
+
+def _send_improve_telemetry(
+    dataset: str | UUID,
+    session_ids: list[str],
+    *,
+    user: Any,
+    run_in_background: bool,
+    build_global_context_index: bool,
+    build_truth_subspace: bool,
+) -> None:
+    # cognee/__init__.py imports this module, so the version has to be read at
+    # call time; its own NOTE explains why __version__ sits at the top there.
+    from cognee import __version__ as cognee_version
 
     send_telemetry(
         "cognee.improve",
-        kwargs.get("user", "sdk"),
+        user,
         additional_properties={
             "dataset": str(dataset),
             "session_count": len(session_ids),
-            # Hashed, never raw: session ids are user-chosen strings (A6).
+            # Hashed, never raw: session ids are user-chosen strings.
             "session_ids": ",".join(_hash_session_id(sid) for sid in session_ids),
             "run_in_background": run_in_background,
             "build_global_context_index": build_global_context_index,
@@ -160,241 +472,7 @@ async def improve(
         },
     )
 
-    with new_span("cognee.api.improve") as span:
-        span.set_attribute(COGNEE_DATASET_NAME, str(dataset))
-        if session_ids:
-            span.set_attribute(COGNEE_SESSION_ID, ",".join(session_ids))
 
-        from cognee.api.v1.serve.state import get_remote_client
-
-        client = get_remote_client()
-        if client is not None:
-            # Remote mode forwards every option (PR #3824 revived): the server
-            # runs the same orchestrator and hands back its ImproveResult.
-            payload = await client.improve(
-                dataset,
-                node_name=node_name,
-                session_ids=session_ids or None,
-                build_global_context_index=build_global_context_index,
-                build_truth_subspace=build_truth_subspace,
-                run_in_background=run_in_background,
-                **kwargs,
-            )
-            return _coerce_remote_result(payload, session_ids)
-
-        from cognee.modules.users.methods import get_default_user
-
-        async with record_operation("improve") as operation_context:
-            user = kwargs.pop("user", None)
-            if user is None:
-                user = await get_default_user()
-            operation_context.set_user(user)
-
-            # The pipeline-run log writers INSERT the operation-record columns
-            # (user_id, outcome, tokens, ...), so an existing database must be
-            # at the current Alembic head before the first write — same gate
-            # as cognify().
-            from cognee.modules.migrations.startup import run_migrations_and_block
-
-            await run_migrations_and_block(dataset, user)
-
-            # One write-level resolution, shared by every stage — the same
-            # resolver remember/memify use: names resolve or are created for
-            # the caller; a missing or unauthorized UUID raises
-            # DatasetNotFoundError instead of being silently retargeted.
-            # Downstream always receives the resolved UUID, never a name:
-            # names are owner-scoped, so a name collapsed from a *shared*
-            # dataset's UUID would re-resolve to the caller's own same-named
-            # dataset inside the pipelines.
-            user, authorized_datasets = await resolve_authorized_user_datasets(dataset, user)
-            resolved_dataset = authorized_datasets[0]
-            dataset_id: UUID = resolved_dataset.id
-            dataset_name = getattr(resolved_dataset, "name", None)
-            operation_context.set_dataset(dataset_id)
-            if len(session_ids) == 1:
-                operation_context.set_session_id(session_ids[0])
-            operation_context.set_background(run_in_background)
-
-            config = get_improve_config()
-            feedback_alpha = kwargs.pop("feedback_alpha", None)
-            if feedback_alpha is None:
-                feedback_alpha = config.feedback_alpha
-
-            capabilities = await resolve_graph_capabilities(
-                dataset_id, getattr(resolved_dataset, "owner_id", None)
-            )
-
-            inputs = ImproveRunInputs(
-                user=user,
-                dataset_id=dataset_id,
-                dataset=resolved_dataset,
-                session_ids=tuple(session_ids),
-                config=config,
-                capabilities=capabilities,
-                node_name=node_name,
-                feedback_alpha=feedback_alpha,
-                build_global_context_index=build_global_context_index,
-                build_truth_subspace=build_truth_subspace,
-                memify_kwargs={
-                    key: kwargs[key] for key in MEMIFY_PASSTHROUGH_KEYS if key in kwargs
-                },
-            )
-
-            # One claim per run, keyed by what the run touches: every session
-            # id given, or the dataset id when none. Held across the whole
-            # chain, background included, so no stage reads while another run
-            # is still writing (plan Part 5.8).
-            from cognee.infrastructure.locks.session_lock import (
-                improve_lock_keys,
-                release_improve_lock_many,
-                try_acquire_improve_lock_many,
-            )
-
-            lock_keys = improve_lock_keys(session_ids, dataset_id)
-            if not await try_acquire_improve_lock_many(lock_keys):
-                logger.info(
-                    "improve: another run holds the improve lock for %s, skipping",
-                    ", ".join(lock_keys),
-                )
-                result = ImproveResult.all_skipped(
-                    stage_names(DEFAULT_STAGES),
-                    REASON_LOCK_HELD,
-                    dataset_id=dataset_id,
-                    dataset_name=dataset_name,
-                    session_ids=session_ids,
-                )
-                span.set_attribute(COGNEE_IMPROVE_STAGES, result.stage_summary())
-                return result
-
-            result = ImproveResult(
-                dataset_id=dataset_id,
-                dataset_name=dataset_name,
-                session_ids=list(session_ids),
-                memify_run={},
-                background=run_in_background,
-                finished=False,
-            )
-
-            if run_in_background:
-
-                async def _run_chain_in_background():
-                    try:
-                        await _run_stages(inputs, result)
-                    except Exception as exc:
-                        logger.warning(
-                            "improve: background chain aborted by fatal stage: %s",
-                            exc,
-                            exc_info=True,
-                        )
-                    finally:
-                        result.finished = True
-                        await release_improve_lock_many(lock_keys)
-
-                task = asyncio.create_task(_run_chain_in_background())
-                _BACKGROUND_IMPROVE_TASKS.add(task)
-                task.add_done_callback(_BACKGROUND_IMPROVE_TASKS.discard)
-                result._task = task
-                span.set_attribute(COGNEE_IMPROVE_STAGES, "background")
-                return result
-
-            try:
-                await _run_stages(inputs, result)
-            finally:
-                result.finished = True
-                await release_improve_lock_many(lock_keys)
-                span.set_attribute(COGNEE_IMPROVE_STAGES, result.stage_summary())
-
-            return result
-
-
-async def _run_stages(inputs: ImproveRunInputs, result: ImproveResult) -> None:
-    """Walk the registry: gate, run, time, map. Fills ``result.stages`` in order.
-
-    Every stage's error is recorded as ``errored`` and the chain continues,
-    except a ``fatal`` stage (decision D2): the remaining stages are marked
-    ``skipped: aborted_by_fatal_stage``, the partial result is attached to
-    the exception as ``improve_result`` and the exception is re-raised.
-    """
-    stages = list(DEFAULT_STAGES)
-    for index, stage in enumerate(stages):
-        started = time.perf_counter()
-        try:
-            reason = evaluate_gate(stage, inputs)
-        except Exception as exc:
-            logger.warning(
-                "improve: gate for stage '%s' failed: %s", stage.name, exc, exc_info=True
-            )
-            reason = None
-
-        if reason is not None:
-            result.stages.append(StageResult.skipped(stage.name, reason))
-            logger.debug("improve: stage '%s' skipped (%s)", stage.name, reason)
-            continue
-
-        try:
-            stage_result = await stage.run(inputs)
-        except Exception as exc:
-            stage_result = StageResult.errored(stage.name, exc)
-            stage_result.duration_ms = int((time.perf_counter() - started) * 1000)
-            result.stages.append(stage_result)
-            if stage.fatal:
-                for remaining in stages[index + 1 :]:
-                    result.stages.append(
-                        StageResult.skipped(remaining.name, REASON_ABORTED_BY_FATAL_STAGE)
-                    )
-                result.error = stage_result.error
-                logger.exception("improve: fatal stage '%s' failed, chain stopped", stage.name)
-                try:
-                    exc.improve_result = result  # type: ignore[attr-defined]
-                except Exception:
-                    logger.debug("improve: could not attach partial result to error", exc_info=True)
-                raise
-            logger.warning(
-                "improve: stage '%s' failed (non-fatal): %s", stage.name, exc, exc_info=True
-            )
-            continue
-
-        stage_result.duration_ms = int((time.perf_counter() - started) * 1000)
-        result.stages.append(stage_result)
-        if stage.name == "triplet_enrichment":
-            result.memify_run = stage_result.raw_run if stage_result.raw_run is not None else {}
-
-        if stage.fatal and stage_result.status == "errored":
-            # The wrapped pipeline reported PipelineRunErrored instead of
-            # raising. Fail closed all the same (D2): stop the chain and raise
-            # so the caller sees it — later stages must not report success
-            # over lost Q&A.
-            from cognee.exceptions import CogneeSystemError
-
-            for remaining in stages[index + 1 :]:
-                result.stages.append(
-                    StageResult.skipped(remaining.name, REASON_ABORTED_BY_FATAL_STAGE)
-                )
-            result.error = stage_result.error
-            error = CogneeSystemError(
-                message=f"improve: fatal stage '{stage.name}' errored: {stage_result.error}",
-                name="ImproveFatalStageError",
-                log=False,
-            )
-            error.improve_result = result  # type: ignore[attr-defined]
-            raise error
-
-
-def _coerce_remote_result(payload: Any, session_ids: list[str]) -> ImproveResult:
-    """Turn the remote server's JSON into an ``ImproveResult``.
-
-    A server running this orchestrator returns the serialized result; an older
-    server returns the legacy memify run mapping, which is nested as
-    ``memify_run`` with no stage detail.
-    """
-    if isinstance(payload, ImproveResult):
-        return payload
-    if isinstance(payload, dict) and "stages" in payload:
-        try:
-            payload = {key: value for key, value in payload.items() if key != "status"}
-            return ImproveResult.model_validate(payload)
-        except Exception as error:
-            logger.debug(
-                "improve: remote result did not validate as ImproveResult: %s", error, exc_info=True
-            )
-    return ImproveResult(session_ids=list(session_ids), stages=[], memify_run=payload)
+def _hash_session_id(session_id: str) -> str:
+    """Short, stable, non-reversible token for telemetry — never the raw id."""
+    return hashlib.sha256(str(session_id).encode("utf-8")).hexdigest()[:16]

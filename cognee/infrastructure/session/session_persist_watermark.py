@@ -27,14 +27,28 @@ Two policies apply to every count watermark:
    untouched so the same window is retried next time, and add-level
    content-hash dedup absorbs the repeat.
 
+Scope — a deliberate asymmetry. The two *count* watermarks are per
+(user, session) with no dataset in the key: session content bridges into ONE
+dataset, the one its ``remember(session_id=...)`` calls target. An explicit
+``improve(dataset=other, session_ids=[...])`` after a session was already
+bridged finds the watermark at the total and bridges nothing new into
+``other``. That is a known limitation, not an oversight: a per-dataset count
+watermark also needs session invalidation (``invalidate_sessions`` clamps the
+Q&A watermark when entries are deleted, with no dataset in scope) to find and
+clamp every dataset's row, and a migration story for existing session-scoped
+rows — follow-up work, not a suffix on the id. The distill watermark differs
+deliberately: it is id-set-based, so per-dataset rows cost nothing there.
+
 The legacy ``get_persisted_qa_count`` / ``save_persisted_qa_count`` functions
-are kept as thin wrappers over ``SESSION_PERSIST_WATERMARK``.
+are kept as thin wrappers over ``SESSION_PERSIST_WATERMARK`` because their
+call sites predate this module; the trace watermark's call sites are all new
+and use ``TRACE_PERSIST_WATERMARK.read_count`` / ``.write_count`` directly.
 """
 
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Optional, Union
+from typing import Any
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
@@ -124,12 +138,6 @@ class StateRowWatermark:
 
     # -- storage -----------------------------------------------------------
 
-    async def read_row(self, session_manager, user_id: str, session_id: str) -> dict | None:
-        raw_entries = await session_manager.get_session_context_entries(
-            user_id=user_id, session_id=session_id
-        )
-        return self.find_row(raw_entries)
-
     async def read_count(self, session_manager, user_id: str, session_id: str) -> int:
         """Read the count watermark. Missing or malformed state means nothing done yet."""
         raw_entries = await session_manager.get_session_context_entries(
@@ -172,6 +180,8 @@ class StateRowWatermark:
 
 # -- Stage 2: persisted session Q&A ------------------------------------------
 
+# Per (user, session), NOT per dataset — see "Scope" in the module docstring:
+# a session's Q&A bridges into the one dataset its remember() calls target.
 SESSION_PERSIST_WATERMARK = StateRowWatermark(
     state_id=SESSION_PERSIST_STATE_ID,
     state_kind=SESSION_PERSIST_STATE_KIND,
@@ -211,6 +221,8 @@ async def save_persisted_qa_count(
 
 # -- Stage 3: persisted agent trace steps ------------------------------------
 
+# Per (user, session), NOT per dataset — same single-target-dataset model as
+# the Q&A watermark above; see "Scope" in the module docstring.
 TRACE_PERSIST_WATERMARK = StateRowWatermark(
     state_id=TRACE_PERSIST_STATE_ID,
     state_kind=TRACE_PERSIST_STATE_KIND,
@@ -231,20 +243,6 @@ class TracePersistWindow:
     session_id: str
     text: str
     persisted_trace_count: int
-
-
-async def get_persisted_trace_count(session_manager, user_id: str, session_id: str) -> int:
-    """Read the trace persist watermark. Missing or malformed state means nothing persisted yet."""
-    return await TRACE_PERSIST_WATERMARK.read_count(session_manager, user_id, session_id)
-
-
-async def save_persisted_trace_count(
-    session_manager, user_id: str, session_id: str, persisted_trace_count: int
-) -> None:
-    """Persist the trace watermark as an internal non-rendered session-context row."""
-    await TRACE_PERSIST_WATERMARK.write_count(
-        session_manager, user_id, session_id, persisted_trace_count
-    )
 
 
 # -- Stage 5: distilled context entries, per (session, dataset) --------------

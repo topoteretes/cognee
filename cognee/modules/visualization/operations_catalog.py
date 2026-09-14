@@ -16,8 +16,10 @@ Curated from the implementation:
 The self-improvement rows (feedback weighting, session/trace persistence,
 distillation, preferences, truth subspace, triplet enrichment, global context
 index) are **generated** from ``cognee.modules.improve.DEFAULT_STAGES`` — the
-only description of the improve chain — so this view cannot drift from what
-``improve()`` actually runs (plan Part 5.5).
+only description of the improve stages — with their view copy kept here in
+``_IMPROVE_STAGE_DESCRIPTORS``, keyed by stage name; a test asserts the key
+sets match, so the view cannot drift from what ``improve()`` actually runs
+(plan Part 5.5) and the orchestration classes carry no presentation fields.
 
 Effects use raw type names. ``"Entity"`` is expanded by the preprocessor to the
 semantic entity types actually present (Person/Broker/Tool/…); other names match
@@ -28,6 +30,13 @@ present type of the same name.
 from collections.abc import Iterator
 from copy import deepcopy
 from typing import Any
+
+from cognee.modules.improve.constants import (
+    AGENT_TRACE_FEEDBACKS_NODE_SET,
+    SESSION_LEARNINGS_NODE_SET,
+    USER_PREFERENCES_NODE_SET,
+    USER_SESSIONS_NODE_SET,
+)
 
 # effect ∈ {"produces", "enriches", "modifies", "removes"}
 # kind   ∈ {"pipeline", "self_improve", "lifecycle"}
@@ -107,8 +116,107 @@ _OPERATIONS: list[dict[str, Any]] = [
 ]
 
 
+# View copy for the improve rows, keyed by stage name. The registry stays the
+# only description of WHAT runs (names, order, gates); how a stage is shown —
+# label, summary, effects, and the pipeline whose ``source_pipeline``
+# provenance corroborates the row — is presentation and lives with this view.
+# ``test_operations_catalog`` asserts this key set equals the registry's.
+_IMPROVE_STAGE_DESCRIPTORS: dict[str, dict[str, Any]] = {
+    "feedback_weights": {
+        "label": "feedback weighting",
+        "summary": "Re-weights used nodes/edges from session feedback (feedback_weight).",
+        "pipeline_name": "memify_pipeline",
+        "effects": [
+            {"effect": "modifies", "target_type": "Entity", "property": "feedback_weight"},
+            {"effect": "modifies", "target_type": "EntityType", "property": "feedback_weight"},
+        ],
+    },
+    "persist_session_qa": {
+        "label": "persist sessions",
+        "summary": "Cognifies cached user Q&A sessions into the graph.",
+        "pipeline_name": "memify_pipeline",
+        "effects": [
+            {
+                "effect": "produces",
+                "target_type": "Session",
+                "target_node_set": USER_SESSIONS_NODE_SET,
+            },
+            {
+                "effect": "produces",
+                "target_type": "Entity",
+                "target_node_set": USER_SESSIONS_NODE_SET,
+            },
+        ],
+    },
+    "persist_agent_traces": {
+        "label": "persist agent traces",
+        "summary": "Cognifies agent trace feedback into the graph.",
+        "pipeline_name": "memify_pipeline",
+        "effects": [
+            {
+                "effect": "produces",
+                "target_type": "Entity",
+                "target_node_set": AGENT_TRACE_FEEDBACKS_NODE_SET,
+            },
+        ],
+    },
+    "extract_agent_context": {
+        "label": "extract agent context",
+        "summary": "Turns pending tool-call traces into agent-profile lessons (session context).",
+        "effects": [],
+    },
+    "distill_sessions": {
+        "label": "distill sessions",
+        "summary": "Curates gated session guidance into entity-anchored lessons.",
+        "pipeline_name": "cognify_pipeline",
+        "effects": [
+            {
+                "effect": "produces",
+                "target_type": "Entity",
+                "target_node_set": SESSION_LEARNINGS_NODE_SET,
+            },
+        ],
+    },
+    "update_user_preferences": {
+        "label": "user preferences",
+        "summary": "Folds ratings and stated preferences into per-user prefers weights.",
+        "effects": [
+            {
+                "effect": "produces",
+                "target_type": "UserPreference",
+                "target_node_set": USER_PREFERENCES_NODE_SET,
+            },
+        ],
+    },
+    "build_truth_subspace": {
+        "label": "truth subspace",
+        "summary": "Scores chunks against accepted lessons (truth_alignment coordinates).",
+        "effects": [
+            {"effect": "modifies", "target_type": "DocumentChunk", "property": "truth_alignment"},
+        ],
+    },
+    "triplet_enrichment": {
+        "label": "memify (triplets)",
+        "summary": "Default enrichment: builds triplet embeddings over the graph.",
+        "pipeline_name": "memify_pipeline",
+        "effects": [
+            {"effect": "enriches", "target_type": "Entity"},
+        ],
+    },
+    "global_context_index": {
+        "label": "global context index",
+        "summary": "Builds hierarchical context summaries for retrieval.",
+        "pipeline_name": "memify_pipeline",
+        "effects": [
+            {"effect": "produces", "target_type": "GlobalContextSummary"},
+            {"effect": "enriches", "target_type": "TextSummary"},
+        ],
+    },
+}
+
+
 def iter_improve_operations() -> Iterator[dict[str, Any]]:
-    """Yield one catalog row per improve stage, from the stage registry.
+    """Yield one catalog row per improve stage, in registry order.
 
     ``name`` is the stage name (``StageResult.stage``), ``kind`` is always
     ``"self_improve"``, ``scope`` is ``"subset"`` for session-fed stages and
@@ -119,7 +227,8 @@ def iter_improve_operations() -> Iterator[dict[str, Any]]:
     from cognee.modules.improve.registry import DEFAULT_STAGES
 
     for stage in DEFAULT_STAGES:
-        effects = deepcopy(list(getattr(stage, "effects", []) or []))
+        descriptor = _IMPROVE_STAGE_DESCRIPTORS[stage.name]
+        effects = deepcopy(descriptor["effects"])
         node_sets = sorted(
             {
                 effect["target_node_set"]
@@ -129,16 +238,15 @@ def iter_improve_operations() -> Iterator[dict[str, Any]]:
         )
         row: dict[str, Any] = {
             "name": stage.name,
-            "label": stage.label or stage.name.replace("_", " "),
+            "label": descriptor["label"],
             "kind": "self_improve",
-            "scope": "whole" if stage.kind == "graph" else "subset",
-            "summary": stage.summary,
+            "scope": "subset" if stage.needs_sessions else "whole",
+            "summary": descriptor["summary"],
             "effects": effects,
             "node_sets": node_sets,
         }
-        pipeline_name = getattr(stage, "pipeline_name", None)
-        if pipeline_name:
-            row["pipeline_name"] = pipeline_name
+        if descriptor.get("pipeline_name"):
+            row["pipeline_name"] = descriptor["pipeline_name"]
         yield row
 
 

@@ -122,7 +122,6 @@ async def test_improve_global_context_index_opt_in(monkeypatch, build_global_con
 
     assert isinstance(result, ImproveResult)
     assert result.memify_run == {"status": "memify-ok"}
-    assert result.to_legacy_dict() == {"status": "memify-ok"}
     memify_mock.assert_awaited_once()
     stage = result.stage("global_context_index")
     if build_global_context_index:

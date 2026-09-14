@@ -141,8 +141,8 @@ async def try_acquire_improve_lock_many(keys: Iterable[str]) -> bool:
     """Atomically claim the improve-lock for every key in ``keys``, or none.
 
     One claim per ``improve()`` run, keyed by what the run touches: every
-    session id it was given, or ``f"dataset:{dataset_id}"`` when it was given
-    none. Same held-set, same registry lock as the single-key claim; the
+    session id it was given plus ``f"dataset:{dataset_id}"`` (see
+    ``improve_lock_keys``). Same held-set, same registry lock as the single-key claim; the
     all-or-nothing check-and-add happens inside one critical section, so two
     overlapping runs that share any key cannot both win. Returns ``True`` iff
     every key was claimed — the caller MUST then call
@@ -170,8 +170,12 @@ async def release_improve_lock_many(keys: Iterable[str]) -> None:
 
 
 def improve_lock_keys(session_ids: Iterable[str] | None, dataset_id: Any) -> tuple[str, ...]:
-    """The claim keys for one improve run: its session ids, else its dataset id."""
+    """The claim keys for one improve run: its session ids plus its dataset id.
+
+    Every run claims the dataset key, session-fed or not, so a session-keyed
+    bridge run and a dataset-keyed run over the same dataset exclude each
+    other — improves for one dataset serialize; an overlapping claim loses and
+    returns ``lock_held``.
+    """
     sessions = tuple(session_id for session_id in (session_ids or ()) if session_id)
-    if sessions:
-        return sessions
-    return (f"dataset:{dataset_id}",)
+    return (*sessions, f"dataset:{dataset_id}")

@@ -95,6 +95,50 @@ async def test_triplet_embedding_off_skips_enrichment_without_calling_memify(mon
 
 
 @pytest.mark.asyncio
+async def test_node_name_scoped_run_bypasses_the_change_check(monkeypatch, harness):
+    """The watermark's unit is the dataset; a node_name run is narrower work."""
+    cognify_config_mod = importlib.import_module("cognee.modules.cognify.config")
+    monkeypatch.setattr(
+        cognify_config_mod,
+        "get_cognify_config",
+        lambda: types.SimpleNamespace(triplet_embedding=True),
+    )
+    changes_mod = importlib.import_module("cognee.modules.improve.graph_changes")
+    changes_mock = AsyncMock(return_value=False)  # "nothing changed"
+    monkeypatch.setattr(changes_mod, "has_graph_changed_since_last_improve", changes_mock)
+    memify_mod = importlib.import_module("cognee.modules.memify")
+    memify_mock = AsyncMock(return_value={})
+    monkeypatch.setattr(memify_mod, "memify", memify_mock)
+
+    result = await harness.improve(node_name=["Bob"])
+
+    changes_mock.assert_not_awaited()
+    memify_mock.assert_awaited_once()
+    assert memify_mock.await_args.kwargs["node_name"] == ["Bob"]
+    assert result.stage("triplet_enrichment").status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_change_check_excludes_the_runs_own_operation_row(monkeypatch, harness):
+    cognify_config_mod = importlib.import_module("cognee.modules.cognify.config")
+    monkeypatch.setattr(
+        cognify_config_mod,
+        "get_cognify_config",
+        lambda: types.SimpleNamespace(triplet_embedding=True),
+    )
+    changes_mod = importlib.import_module("cognee.modules.improve.graph_changes")
+    changes_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr(changes_mod, "has_graph_changed_since_last_improve", changes_mock)
+    memify_mod = importlib.import_module("cognee.modules.memify")
+    monkeypatch.setattr(memify_mod, "memify", AsyncMock(return_value={}))
+
+    await harness.improve()
+
+    kwargs = changes_mock.await_args.kwargs
+    assert kwargs["exclude_operation_id"] == harness.operations[-1].operation_id
+
+
+@pytest.mark.asyncio
 async def test_unchanged_graph_reports_already_completed(monkeypatch, harness):
     cognify_config_mod = importlib.import_module("cognee.modules.cognify.config")
     monkeypatch.setattr(

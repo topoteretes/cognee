@@ -1,8 +1,8 @@
 """Shared harness for the improve() orchestrator tests.
 
-Everything below the orchestrator is stubbed: dataset resolution, the
-migrations gate, the operation record, the remote client, telemetry, tracing
-and the graph capability probe. Tests then either swap ``DEFAULT_STAGES`` for
+Everything around the stages is stubbed: dataset resolution, the migrations
+gate, the operation record, the remote client, telemetry, tracing and the graph
+capability probe. Tests then either swap ``improve()``'s ``DEFAULT_STAGES`` for
 fake stages (orchestration tests) or patch the module a real stage calls into
 (stage tests).
 """
@@ -42,20 +42,15 @@ class FakeStage(BaseStage):
         self,
         name: str,
         *,
-        kind: str = "graph",
+        needs_sessions: bool = False,
         fatal: bool = False,
-        after=(),
         gate_reason: str | None = None,
         run=None,
         calls: list[Any] | None = None,
     ):
         self.name = name
-        self.kind = kind
+        self.needs_sessions = needs_sessions
         self.fatal = fatal
-        self.after = tuple(after)
-        self.label = name
-        self.summary = name
-        self.effects = []
         self._gate_reason = gate_reason
         self._run = run
         self.calls = calls if calls is not None else []
@@ -88,6 +83,8 @@ class ImproveHarness:
         self.span = DummySpan()
         self.telemetry: list[dict] = []
         self.resolve_calls: list[Any] = []
+        self.operations: list[Any] = []  # every OperationContext record_operation yielded
+        self.finish_calls: list[dict] = []  # finish_operation(context, error) invocations
         self.config = ImproveConfig()
         self.capabilities = GraphCapabilities.assume_supported("FakeAdapter")
         self._install()
@@ -113,24 +110,26 @@ class ImproveHarness:
         async def fake_record_operation(_name):
             from cognee.modules.operations.record_operation import OperationContext
 
-            yield OperationContext(_name)
+            context = OperationContext(_name)
+            self.operations.append(context)
+            yield context
 
         mp.setattr(improve_mod, "record_operation", fake_record_operation)
 
-        state_mod = importlib.import_module("cognee.api.v1.serve.state")
-        mp.setattr(state_mod, "get_remote_client", lambda: None)
+        async def fake_finish_operation(context, error=None):
+            self.finish_calls.append({"context": context, "error": error})
 
-        utils_mod = importlib.import_module("cognee.shared.utils")
+        mp.setattr(improve_mod, "finish_operation", fake_finish_operation)
+
+        mp.setattr(improve_mod, "get_remote_client", lambda: None)
 
         def fake_send_telemetry(event, user=None, additional_properties=None, **_kwargs):
             self.telemetry.append(
                 {"event": event, "user": user, "properties": dict(additional_properties or {})}
             )
 
-        mp.setattr(utils_mod, "send_telemetry", fake_send_telemetry)
-
-        startup_mod = importlib.import_module("cognee.modules.migrations.startup")
-        mp.setattr(startup_mod, "run_migrations_and_block", AsyncMock(return_value=None))
+        mp.setattr(improve_mod, "send_telemetry", fake_send_telemetry)
+        mp.setattr(improve_mod, "run_migrations_and_block", AsyncMock(return_value=None))
 
     def use_stages(self, stages):
         self.monkeypatch.setattr(self.improve_mod, "DEFAULT_STAGES", list(stages))

@@ -30,7 +30,10 @@ class ImproveConfig(BaseSettings):
 
     auto_enabled: bool = True
     # Debounce for automatic improves (plan item B6). The defaults mean "no
-    # debounce": every trigger runs, exactly as today.
+    # debounce": every trigger runs, exactly as today. With debounce_seconds
+    # set and debounce_entries left at this default 1 — which fires on every
+    # call — the entry trigger steps aside, so a seconds-only configuration
+    # is time-only rather than a silent no-op (set entries >= 2 to combine).
     debounce_entries: int = 1
     debounce_seconds: float = 0.0
     # Stage names (see ``registry.DEFAULT_STAGES``) to skip with reason
@@ -69,15 +72,6 @@ class ImproveConfig(BaseSettings):
         if value < 0:
             raise ValueError("debounce_seconds must be >= 0")
         return value
-
-    def to_dict(self) -> dict:
-        return {
-            "auto_enabled": self.auto_enabled,
-            "debounce_entries": self.debounce_entries,
-            "debounce_seconds": self.debounce_seconds,
-            "stages_disabled": list(self.stages_disabled),
-            "feedback_alpha": self.feedback_alpha,
-        }
 
 
 @lru_cache

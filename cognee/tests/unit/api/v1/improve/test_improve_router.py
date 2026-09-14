@@ -85,7 +85,6 @@ def test_response_is_the_improve_result_with_one_entry_per_stage(client, improve
         "reason": "feedback_influence_zero",
         "error": None,
         "counts": {},
-        "llm_calls": 0,
         "duration_ms": 0,
         "run": None,
     }

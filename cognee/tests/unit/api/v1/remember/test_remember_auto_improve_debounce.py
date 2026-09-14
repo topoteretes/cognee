@@ -179,6 +179,62 @@ async def test_time_trigger_fires_after_debounce_seconds(monkeypatch, fake_sm):
 
 
 @pytest.mark.asyncio
+async def test_seconds_only_config_debounces_despite_the_entries_default(monkeypatch, fake_sm):
+    """IMPROVE_DEBOUNCE_SECONDS alone must debounce. The entries default of 1
+    fires on every call, so left as-is it would silently defeat the time knob;
+    a seconds-only configuration is therefore time-only."""
+    _config(monkeypatch, debounce_entries=1, debounce_seconds=60)
+    user_id, session_id = str(uuid4()), "s-seconds-only"
+    now = datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)
+
+    fake_sm.qa[(user_id, session_id)] = ["a"]
+    first = await debounce_module.should_auto_improve(fake_sm, user_id, session_id, now=now)
+    assert first.due and first.reason == debounce_module.REASON_FIRST_RUN
+    await debounce_module.mark_auto_improve_fired(
+        fake_sm, user_id, session_id, qa_count=first.qa_count, now=now
+    )
+
+    fake_sm.qa[(user_id, session_id)].append("b")
+    soon = await debounce_module.should_auto_improve(
+        fake_sm, user_id, session_id, now=now + timedelta(seconds=30)
+    )
+    assert not soon.due
+    assert soon.reason == debounce_module.REASON_DEBOUNCED
+
+    later = await debounce_module.should_auto_improve(
+        fake_sm, user_id, session_id, now=now + timedelta(seconds=61)
+    )
+    assert later.due and later.reason == debounce_module.REASON_ELAPSED
+
+
+@pytest.mark.asyncio
+async def test_explicitly_raised_entries_combine_with_seconds(monkeypatch, fake_sm):
+    """entries >= 2 alongside seconds keeps both triggers: whichever fires first."""
+    _config(monkeypatch, debounce_entries=2, debounce_seconds=3600)
+    user_id, session_id = str(uuid4()), "s-both"
+    now = datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)
+
+    fake_sm.qa[(user_id, session_id)] = ["a"]
+    first = await debounce_module.should_auto_improve(fake_sm, user_id, session_id, now=now)
+    assert first.due
+    await debounce_module.mark_auto_improve_fired(
+        fake_sm, user_id, session_id, qa_count=first.qa_count, now=now
+    )
+
+    fake_sm.qa[(user_id, session_id)].append("b")
+    one_new = await debounce_module.should_auto_improve(
+        fake_sm, user_id, session_id, now=now + timedelta(seconds=1)
+    )
+    assert not one_new.due
+
+    fake_sm.qa[(user_id, session_id)].append("c")
+    two_new = await debounce_module.should_auto_improve(
+        fake_sm, user_id, session_id, now=now + timedelta(seconds=2)
+    )
+    assert two_new.due and two_new.reason == debounce_module.REASON_ENTRIES
+
+
+@pytest.mark.asyncio
 async def test_state_row_uses_internal_context_row_pattern(fake_sm, monkeypatch):
     _config(monkeypatch, debounce_entries=2)
     user_id, session_id = str(uuid4()), "s-row"
@@ -190,14 +246,14 @@ async def test_state_row_uses_internal_context_row_pattern(fake_sm, monkeypatch)
     row = rows[0]
     assert row["id"] == debounce_module.AUTO_IMPROVE_STATE_ID
     assert row["kind"] == debounce_module.AUTO_IMPROVE_STATE_KIND
-    assert row["qa_count"] == 2
-    assert datetime.fromisoformat(row["last_improve_at"]).tzinfo is not None
+    assert row["state"]["qa_count"] == 2
+    assert datetime.fromisoformat(row["state"]["last_improve_at"]).tzinfo is not None
 
     # A second fire merges into the same row instead of appending another.
     fake_sm.qa[(user_id, session_id)].append("c")
     await debounce_module.mark_auto_improve_fired(fake_sm, user_id, session_id)
     assert len(fake_sm.context[(user_id, session_id)]) == 1
-    assert fake_sm.context[(user_id, session_id)][0]["qa_count"] == 3
+    assert fake_sm.context[(user_id, session_id)][0]["state"]["qa_count"] == 3
 
 
 @pytest.mark.asyncio
@@ -208,8 +264,10 @@ async def test_cleared_session_counts_all_entries_as_new(fake_sm, monkeypatch):
         {
             "id": debounce_module.AUTO_IMPROVE_STATE_ID,
             "kind": debounce_module.AUTO_IMPROVE_STATE_KIND,
-            "qa_count": 10,
-            "last_improve_at": datetime.now(timezone.utc).isoformat(),
+            "state": {
+                "qa_count": 10,
+                "last_improve_at": datetime.now(timezone.utc).isoformat(),
+            },
         }
     ]
     fake_sm.qa[(user_id, session_id)] = ["x", "y", "z"]

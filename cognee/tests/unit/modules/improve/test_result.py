@@ -71,7 +71,6 @@ def test_improve_result_status_summary():
         ]
     )
     assert mixed.status == "errored"
-    assert [s.stage for s in mixed.ok] == ["a"]
     assert mixed.stage("b").reason == "x"
     assert mixed.stage("zzz") is None
     assert mixed.stage_summary() == "a=completed,b=skipped,c=errored"
@@ -81,9 +80,9 @@ def test_improve_result_status_summary():
 
     all_skipped = ImproveResult.all_skipped(["a", "b"], REASON_LOCK_HELD, session_ids=["s"])
     assert all_skipped.status == "skipped"
-    assert all_skipped.lock_held is True
+    assert all(stage.reason == REASON_LOCK_HELD for stage in all_skipped.stages)
     assert all_skipped.session_ids == ["s"]
-    assert all_skipped.to_legacy_dict() == {}
+    assert all_skipped.memify_run == {}
 
 
 def test_model_dump_includes_status_and_serializes_run_info():

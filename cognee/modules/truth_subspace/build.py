@@ -294,6 +294,16 @@ async def build_truth_subspace(
 
         # Step 2: decide the epoch. New centroids are held in memory until the
         # chunks have been scored against them; nothing is written yet.
+        #
+        # Known limit: chunk validity at read time is the integer epoch alone
+        # (ranking.py compares truth_epoch), not the learning basis. A run
+        # that stamped chunks at N+1 and crashed before the commit, followed
+        # by a run over DIFFERENT learnings that also computes N+1 but skips
+        # some chunks (failed embedding batches are skipped, not cleared),
+        # leaves those chunks passing the epoch guard with abandoned-basis
+        # coordinates. Two independent failures, damage bounded by the
+        # [0.75, 1.25] factor; stamping ``signature`` per chunk would close
+        # it if it ever matters.
         if centroids_changed(existing_centroids, rebuilt_centroids):
             current_epoch = previous_epoch + 1
             centroids = build_for_epoch(current_epoch)

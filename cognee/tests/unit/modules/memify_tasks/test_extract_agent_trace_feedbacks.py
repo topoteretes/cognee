@@ -15,9 +15,8 @@ from cognee.infrastructure.databases.cache.models import SessionAgentTraceEntry
 from cognee.infrastructure.session.session_persist_watermark import (
     TRACE_PERSIST_STATE_ID,
     TRACE_PERSIST_STATE_KIND,
+    TRACE_PERSIST_WATERMARK,
     TracePersistWindow,
-    get_persisted_trace_count,
-    save_persisted_trace_count,
 )
 from cognee.modules.users.models import User
 from cognee.tasks.memify.extract_agent_trace_feedbacks import (
@@ -158,22 +157,23 @@ async def test_fresh_session_yields_all_feedback_above_watermark(manager):
     assert window.user_id == USER_ID
     assert window.session_id == "trace_session"
     assert window.persisted_trace_count == 3
-    # Only the pending steps are read: every step above the (empty) watermark.
-    assert manager.feedback_last_n_calls == [3]
+    # One full snapshot: the pending slice and the watermark target come from
+    # the same read, so a step written mid-run can never fall below the advance.
+    assert manager.feedback_last_n_calls == [None]
     # The extractor never advances the watermark itself for a non-empty window.
-    assert await get_persisted_trace_count(manager, USER_ID, "trace_session") == 0
+    assert await TRACE_PERSIST_WATERMARK.read_count(manager, USER_ID, "trace_session") == 0
 
 
 @pytest.mark.asyncio
 async def test_watermark_skips_already_persisted_steps(manager):
     for index in range(5):
         manager.add_step("s", feedback=f"step {index}")
-    await save_persisted_trace_count(manager, USER_ID, "s", 3)
+    await TRACE_PERSIST_WATERMARK.write_count(manager, USER_ID, "s", 3)
 
     windows = await _extract(["s"])
 
     assert len(windows) == 1
-    assert manager.feedback_last_n_calls == [2]
+    assert manager.feedback_last_n_calls == [None]
     assert "step 2" not in windows[0].text
     assert "step 3" in windows[0].text and "step 4" in windows[0].text
     assert windows[0].persisted_trace_count == 5
@@ -182,7 +182,7 @@ async def test_watermark_skips_already_persisted_steps(manager):
 @pytest.mark.asyncio
 async def test_fully_persisted_session_yields_nothing_and_reads_no_steps(manager):
     manager.add_step("s", feedback="done")
-    await save_persisted_trace_count(manager, USER_ID, "s", 1)
+    await TRACE_PERSIST_WATERMARK.write_count(manager, USER_ID, "s", 1)
 
     assert await _extract(["s"]) == []
     assert manager.feedback_last_n_calls == []
@@ -198,13 +198,13 @@ async def test_session_without_steps_yields_nothing(manager):
 @pytest.mark.asyncio
 async def test_stale_watermark_restarts_from_the_beginning(manager):
     manager.add_step("s", feedback="rebuilt step")
-    await save_persisted_trace_count(manager, USER_ID, "s", 10)
+    await TRACE_PERSIST_WATERMARK.write_count(manager, USER_ID, "s", 10)
 
     windows = await _extract(["s"])
 
     assert len(windows) == 1
     assert "rebuilt step" in windows[0].text
-    assert manager.feedback_last_n_calls == [1]
+    assert manager.feedback_last_n_calls == [None]
     assert windows[0].persisted_trace_count == 1
 
 
@@ -212,15 +212,51 @@ async def test_stale_watermark_restarts_from_the_beginning(manager):
 async def test_last_n_steps_caps_the_pending_window(manager):
     for index in range(5):
         manager.add_step("s", feedback=f"step {index}")
-    await save_persisted_trace_count(manager, USER_ID, "s", 1)
+    await TRACE_PERSIST_WATERMARK.write_count(manager, USER_ID, "s", 1)
 
     windows = await _extract(["s"], last_n_steps=2)
 
-    assert manager.feedback_last_n_calls == [2]
+    assert manager.feedback_last_n_calls == [None]
     assert windows[0].text == "Session ID: s\n\nstep 3\nstep 4"
     # The watermark still advances to the total once cognified: steps under the
     # explicit cap are deliberately left behind, as last_n always did.
     assert windows[0].persisted_trace_count == 5
+
+
+class LiveWriterSessionManager(FakeSessionManager):
+    """Writes one step between the count read and the trace fetch — a live agent."""
+
+    async def get_agent_trace_count(self, *, user_id, session_id=None):
+        count = await super().get_agent_trace_count(user_id=user_id, session_id=session_id)
+        if count:
+            self.add_step(session_id, feedback=f"raced step {count}")
+        return count
+
+
+@pytest.mark.asyncio
+async def test_live_writer_between_count_and_fetch_loses_no_steps(mock_user, monkeypatch):
+    """The regression behind the one-snapshot shape: when the count and the fetch
+    were two reads, a step written between them shifted the newest-first window
+    past the oldest pending step, and the watermark then sealed that step below
+    itself forever. With one snapshot, the raced step is either in the window or
+    above the advanced watermark — never lost."""
+    racing = LiveWriterSessionManager()
+    session_user = MagicMock()
+    session_user.get.return_value = mock_user
+    monkeypatch.setattr(extract_agent_trace_feedbacks_module, "session_user", session_user)
+    monkeypatch.setattr(extract_agent_trace_feedbacks_module, "get_session_manager", lambda: racing)
+    racing.add_step("s", feedback="step 0")
+    racing.add_step("s", feedback="step 1")
+
+    windows = await _extract(["s"])
+
+    assert len(windows) == 1
+    window = windows[0]
+    # Every step below the count the cognify will advance the watermark to is in
+    # the window — the oldest pending step included, which the two-read shape lost.
+    assert "step 0" in window.text and "step 1" in window.text
+    assert "raced step 2" in window.text
+    assert window.persisted_trace_count == 3
 
 
 @pytest.mark.asyncio
@@ -242,7 +278,7 @@ async def test_window_without_persistable_content_advances_watermark_without_yie
     assert await _extract(["empty_session"]) == []
     # Nothing to cognify, so there is no success to wait on: mark the window done
     # instead of re-reading it on every run.
-    assert await get_persisted_trace_count(manager, USER_ID, "empty_session") == 2
+    assert await TRACE_PERSIST_WATERMARK.read_count(manager, USER_ID, "empty_session") == 2
     state = manager.context["empty_session"][0]
     assert state["id"] == TRACE_PERSIST_STATE_ID
     assert state["kind"] == TRACE_PERSIST_STATE_KIND
@@ -288,7 +324,7 @@ async def test_raw_return_values_are_extracted_above_the_watermark(manager):
     manager.add_step("trace_session", return_value={"summary": "done", "steps": 2})
     manager.add_step("trace_session", return_value="   ")
     manager.add_step("trace_session", return_value=None)
-    await save_persisted_trace_count(manager, USER_ID, "trace_session", 1)
+    await TRACE_PERSIST_WATERMARK.write_count(manager, USER_ID, "trace_session", 1)
 
     windows = await _extract(["trace_session"], raw_trace_content=True)
 
@@ -296,7 +332,7 @@ async def test_raw_return_values_are_extracted_above_the_watermark(manager):
         'Session ID: trace_session\n\ndraft ready\n{"steps": 2, "summary": "done"}'
     ]
     assert windows[0].persisted_trace_count == 5
-    assert manager.session_last_n_calls == [4]
+    assert manager.session_last_n_calls == [None]
     assert manager.feedback_last_n_calls == []
 
 
@@ -310,7 +346,7 @@ async def test_raw_return_values_respect_last_n_steps_cap(manager):
     assert [window.text for window in windows] == [
         "Session ID: trace_session\n\nsecond return\nthird return"
     ]
-    assert manager.session_last_n_calls == [2]
+    assert manager.session_last_n_calls == [None]
 
 
 @pytest.mark.asyncio

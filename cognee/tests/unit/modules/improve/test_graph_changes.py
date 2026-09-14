@@ -72,12 +72,39 @@ async def test_query_failure_is_conservative(monkeypatch):
     assert await graph_changes.has_graph_changed_since_last_improve(uuid4()) is True
 
 
+@pytest.mark.asyncio
+async def test_own_operation_row_is_excluded_from_the_watermark(monkeypatch):
+    """The calling run's own record must never serve as its own watermark."""
+    session = _install_engine(monkeypatch, [None])
+    own_id = uuid4()
+
+    assert (
+        await graph_changes.has_graph_changed_since_last_improve(
+            uuid4(), exclude_operation_id=own_id
+        )
+        is True
+    )
+
+    watermark_sql = str(session.statements[0])
+    assert "pipeline_run_id !=" in watermark_sql
+
+    session = _install_engine(monkeypatch, [None])
+    await graph_changes.has_graph_changed_since_last_improve(uuid4())
+    assert "pipeline_run_id" not in str(session.statements[0])
+
+
+@pytest.mark.asyncio
+async def test_watermark_counts_only_succeeded_improve_rows(monkeypatch):
+    """ "failed" and "noop" rows (lost lock claim, all-skipped run) are not watermarks."""
+    session = _install_engine(monkeypatch, [None])
+
+    await graph_changes.has_graph_changed_since_last_improve(uuid4())
+
+    watermark_sql = str(session.statements[0])
+    assert "outcome =" in watermark_sql
+
+
 def test_write_pipelines_cover_cognify_code_graph_and_memify_but_not_add():
     names = set(graph_changes.WRITE_PIPELINE_NAMES)
     assert {"cognify_pipeline", "code_graph_pipeline", "memify_pipeline"} <= names
     assert "add_pipeline" not in names
-
-
-def test_describe_change_check():
-    assert graph_changes.describe_change_check(True) is None
-    assert graph_changes.describe_change_check(False) == "no_writes_since_last_improve"

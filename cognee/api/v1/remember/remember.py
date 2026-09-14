@@ -3,7 +3,7 @@ import hashlib
 import os
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, BinaryIO, Literal, Optional, Union
+from typing import TYPE_CHECKING, Any, BinaryIO, Literal, Union
 from uuid import UUID
 
 try:
@@ -1857,12 +1857,15 @@ async def _remember_inner(
                     # The data is stored and cognified; a failed improve is
                     # reported on the result, never as a failed remember (A5).
                     result.improve_error = str(exc)
-                    logger.warning("remember: self-improvement failed (non-fatal)", exc_info=True)
-                if result.improve_error:
                     logger.warning(
-                        "remember: self-improvement reported errors (non-fatal): %s",
-                        result.improve_error,
+                        "remember: self-improvement raised (non-fatal): %s", exc, exc_info=True
                     )
+                else:
+                    if result.improve_error:
+                        logger.warning(
+                            "remember: self-improvement reported errors (non-fatal): %s",
+                            result.improve_error,
+                        )
 
         if session_ids:
             operation_context.set_session_id(session_ids[0] if len(session_ids) == 1 else None)

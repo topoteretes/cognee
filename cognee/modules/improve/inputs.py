@@ -4,7 +4,7 @@ Assembled once by the orchestrator after the dataset is resolved and the
 adapter probed. Nothing mutates it during a run. It is an argument bundle,
 not a context: ``OperationContext`` (``record_operation``) stays the mutable
 context for the ``pipeline_runs`` row. It has no ``run_in_background`` field
-because the runner owns background mode and a stage never asks.
+because ``improve()`` owns background mode and a stage never asks.
 """
 
 from collections.abc import Mapping
@@ -15,6 +15,7 @@ from uuid import UUID
 
 from .capabilities import GraphCapabilities
 from .config import ImproveConfig
+from .constants import DEFAULT_FEEDBACK_ALPHA
 
 # memify() knobs that improve() forwards untouched to the enrichment stage.
 MEMIFY_PASSTHROUGH_KEYS = (
@@ -36,7 +37,10 @@ class ImproveRunInputs:
     config: ImproveConfig
     capabilities: GraphCapabilities
     node_name: list[str] | None = None
-    feedback_alpha: float = 0.1
+    # The run's own operation-record id (``pipeline_runs.pipeline_run_id``),
+    # which stage 8's change check must never read as its own watermark.
+    improve_operation_id: UUID | None = None
+    feedback_alpha: float = DEFAULT_FEEDBACK_ALPHA
     build_global_context_index: bool = False
     build_truth_subspace: bool = False
     # Caller-supplied memify overrides (extraction_tasks, enrichment_tasks,
@@ -48,6 +52,11 @@ class ImproveRunInputs:
             object.__setattr__(self, "memify_kwargs", MappingProxyType(dict(self.memify_kwargs)))
         if not isinstance(self.session_ids, tuple):
             object.__setattr__(self, "session_ids", tuple(self.session_ids or ()))
+
+    @property
+    def dataset_name(self) -> str | None:
+        """The resolved dataset's name — for reporting only, never for resolution."""
+        return getattr(self.dataset, "name", None)
 
     @property
     def has_sessions(self) -> bool:

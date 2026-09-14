@@ -12,16 +12,9 @@ Heavy imports stay inside ``gate``/``run`` so importing this package pulls in
 nothing but pydantic and the config modules.
 """
 
-from typing import Any
-
 from cognee.shared.logging_utils import get_logger
 
-from .constants import (
-    AGENT_TRACE_FEEDBACKS_NODE_SET,
-    SESSION_LEARNINGS_NODE_SET,
-    USER_PREFERENCES_NODE_SET,
-    USER_SESSIONS_NODE_SET,
-)
+from .constants import AGENT_TRACE_FEEDBACKS_NODE_SET
 from .inputs import ImproveRunInputs
 from .result import REASON_BACKEND_UNSUPPORTED, StageResult
 from .stage import BaseStage
@@ -42,14 +35,7 @@ class FeedbackWeightsStage(BaseStage):
     """Stage 1: move ``feedback_weight`` on the graph elements scored answers used."""
 
     name = "feedback_weights"
-    kind = "session"
-    pipeline_name = "memify_pipeline"
-    label = "feedback weighting"
-    summary = "Re-weights used nodes/edges from session feedback (feedback_weight)."
-    effects = [
-        {"effect": "modifies", "target_type": "Entity", "property": "feedback_weight"},
-        {"effect": "modifies", "target_type": "EntityType", "property": "feedback_weight"},
-    ]
+    needs_sessions = True
 
     def gate(self, inputs: ImproveRunInputs) -> str | None:
         from cognee.base_config import get_base_config
@@ -80,19 +66,12 @@ class PersistSessionQAStage(BaseStage):
     """Stage 2: cognify session Q&A into the graph (``user_sessions_from_cache``).
 
     The single fail-closed stage (decision D2): losing Q&A would be data loss,
-    so an error here stops the chain instead of being swallowed.
+    so an error here stops the run instead of being swallowed.
     """
 
     name = "persist_session_qa"
-    kind = "session"
+    needs_sessions = True
     fatal = True
-    pipeline_name = "memify_pipeline"
-    label = "persist sessions"
-    summary = "Cognifies cached user Q&A sessions into the graph."
-    effects = [
-        {"effect": "produces", "target_type": "Session", "target_node_set": USER_SESSIONS_NODE_SET},
-        {"effect": "produces", "target_type": "Entity", "target_node_set": USER_SESSIONS_NODE_SET},
-    ]
 
     async def run(self, inputs: ImproveRunInputs) -> StageResult:
         from cognee.memify_pipelines.persist_sessions_in_knowledge_graph import (
@@ -113,17 +92,7 @@ class PersistAgentTracesStage(BaseStage):
     """Stage 3: cognify per-step agent trace feedback (``agent_trace_feedbacks``)."""
 
     name = "persist_agent_traces"
-    kind = "session"
-    pipeline_name = "memify_pipeline"
-    label = "persist agent traces"
-    summary = "Cognifies agent trace feedback into the graph."
-    effects = [
-        {
-            "effect": "produces",
-            "target_type": "Entity",
-            "target_node_set": AGENT_TRACE_FEEDBACKS_NODE_SET,
-        },
-    ]
+    needs_sessions = True
 
     async def run(self, inputs: ImproveRunInputs) -> StageResult:
         from cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph import (
@@ -156,11 +125,7 @@ class ExtractAgentContextStage(BaseStage):
     """
 
     name = "extract_agent_context"
-    kind = "session"
-    after = ("persist_agent_traces",)
-    label = "extract agent context"
-    summary = "Turns pending tool-call traces into agent-profile lessons (session context)."
-    effects: list[dict[str, Any]] = []
+    needs_sessions = True
 
     def gate(self, inputs: ImproveRunInputs) -> str | None:
         from cognee.infrastructure.session.get_session_manager import get_session_manager
@@ -217,18 +182,7 @@ class DistillSessionsStage(BaseStage):
     """
 
     name = "distill_sessions"
-    kind = "session"
-    after = ("extract_agent_context",)
-    pipeline_name = "cognify_pipeline"
-    label = "distill sessions"
-    summary = "Curates gated session guidance into entity-anchored lessons."
-    effects = [
-        {
-            "effect": "produces",
-            "target_type": "Entity",
-            "target_node_set": SESSION_LEARNINGS_NODE_SET,
-        },
-    ]
+    needs_sessions = True
 
     async def run(self, inputs: ImproveRunInputs) -> StageResult:
         from cognee.modules.session_distillation import distill_session
@@ -274,16 +228,7 @@ class UpdateUserPreferencesStage(BaseStage):
     """Stage 6: fold rated turns and stated preferences into the user's ``prefers`` subgraph."""
 
     name = "update_user_preferences"
-    kind = "session"
-    label = "user preferences"
-    summary = "Folds ratings and stated preferences into per-user prefers weights."
-    effects = [
-        {
-            "effect": "produces",
-            "target_type": "UserPreference",
-            "target_node_set": USER_PREFERENCES_NODE_SET,
-        },
-    ]
+    needs_sessions = True
 
     def gate(self, inputs: ImproveRunInputs) -> str | None:
         from cognee.base_config import get_base_config
@@ -329,13 +274,7 @@ class BuildTruthSubspaceStage(BaseStage):
     """Stage 7: build the truth subspace from distilled learnings (opt-in)."""
 
     name = "build_truth_subspace"
-    kind = "session"
-    after = ("distill_sessions",)
-    label = "truth subspace"
-    summary = "Scores chunks against accepted lessons (truth_alignment coordinates)."
-    effects = [
-        {"effect": "modifies", "target_type": "DocumentChunk", "property": "truth_alignment"},
-    ]
+    needs_sessions = True
 
     def gate(self, inputs: ImproveRunInputs) -> str | None:
         if not inputs.build_truth_subspace:
@@ -358,6 +297,23 @@ class BuildTruthSubspaceStage(BaseStage):
             for key, value in (result_ts or {}).items()
             if isinstance(value, (int, float)) and not isinstance(value, bool)
         }
+        # The build fails open — a failed centroid commit or chunk write comes
+        # back as {"status": "errored", "error": ...} instead of a raise — so
+        # translate that status: reporting it completed would hide the failure
+        # from the ImproveResult AND from the improve operation row (the
+        # "errored stage records a failed run" rule keys off the stage status).
+        status = (result_ts or {}).get("status")
+        if status == "errored":
+            return StageResult.errored(
+                self.name,
+                (result_ts or {}).get("error") or "truth subspace build errored",
+                **counts,
+            )
+        if status == "skipped":
+            # Normally unreachable: this stage's gate checks the same
+            # capability first. Reachable by a mid-run capability change; the
+            # mapping should not lie about it.
+            return StageResult.skipped(self.name, (result_ts or {}).get("reason") or "skipped")
         return StageResult.completed(self.name, **counts)
 
 
@@ -367,18 +323,13 @@ class TripletEnrichmentStage(BaseStage):
     Skipped when ``triplet_embedding`` is off and the caller supplied no tasks
     of their own (the default task list would be empty). ``already_completed``
     when no write pipeline has completed for this dataset since its last
-    improve, read from ``pipeline_runs``.
+    improve, read from ``pipeline_runs`` — unless the caller scoped the run
+    with ``node_name`` or supplied custom tasks: the watermark's unit is the
+    dataset, and "nothing changed" does not imply that narrower or different
+    work was already done.
     """
 
     name = "triplet_enrichment"
-    kind = "graph"
-    after = ("build_truth_subspace",)
-    pipeline_name = "memify_pipeline"
-    label = "memify (triplets)"
-    summary = "Default enrichment: builds triplet embeddings over the graph."
-    effects = [
-        {"effect": "enriches", "target_type": "Entity"},
-    ]
 
     def gate(self, inputs: ImproveRunInputs) -> str | None:
         if inputs.has_custom_memify_tasks:
@@ -394,8 +345,12 @@ class TripletEnrichmentStage(BaseStage):
 
         from .graph_changes import has_graph_changed_since_last_improve
 
-        if not inputs.has_custom_memify_tasks and not await has_graph_changed_since_last_improve(
-            inputs.dataset_id
+        if (
+            not inputs.has_custom_memify_tasks
+            and not inputs.node_name
+            and not await has_graph_changed_since_last_improve(
+                inputs.dataset_id, exclude_operation_id=inputs.improve_operation_id
+            )
         ):
             result = StageResult(
                 stage=self.name,
@@ -433,15 +388,6 @@ class GlobalContextIndexStage(BaseStage):
     """Stage 9: build retrieval-ready bucket and root summaries (opt-in)."""
 
     name = "global_context_index"
-    kind = "graph"
-    after = ("triplet_enrichment",)
-    pipeline_name = "memify_pipeline"
-    label = "global context index"
-    summary = "Builds hierarchical context summaries for retrieval."
-    effects = [
-        {"effect": "produces", "target_type": "GlobalContextSummary"},
-        {"effect": "enriches", "target_type": "TextSummary"},
-    ]
 
     def gate(self, inputs: ImproveRunInputs) -> str | None:
         if not inputs.build_global_context_index:

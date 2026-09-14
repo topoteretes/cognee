@@ -1,12 +1,11 @@
-from typing import Optional, Union
 from uuid import UUID
 
 import cognee
 from cognee.exceptions import CogneeSystemError, CogneeValidationError
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.infrastructure.session.session_persist_watermark import (
+    TRACE_PERSIST_WATERMARK,
     TracePersistWindow,
-    save_persisted_trace_count,
 )
 from cognee.modules.improve.constants import AGENT_TRACE_FEEDBACKS_NODE_SET
 from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
@@ -102,11 +101,11 @@ async def cognify_agent_trace_feedback(
 
             if window is None:
                 continue
-            await save_persisted_trace_count(
+            await TRACE_PERSIST_WATERMARK.write_count(
                 get_session_manager(),
                 user_id=window.user_id,
                 session_id=window.session_id,
-                persisted_trace_count=window.persisted_trace_count,
+                count=window.persisted_trace_count,
             )
             logger.info(
                 "Session %s trace persist watermark advanced to %d",

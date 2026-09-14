@@ -136,7 +136,12 @@ global context index are opt-in flags. The result prints one line per stage.
             "--background",
             "-b",
             action="store_true",
-            help="Run processing in background",
+            help=(
+                "Run all stages as one background task. The CLI waits for it to "
+                "finish before exiting (a short-lived process cannot outlive its "
+                "own background work); with a remote server the server owns the "
+                "task and the CLI returns immediately"
+            ),
         )
 
     def execute(self, args: argparse.Namespace) -> None:
@@ -169,13 +174,21 @@ global context index are opt-in flags. The result prints one line per stage.
                         run_in_background=args.background,
                         **improve_kwargs,
                     )
+                    if args.background:
+                        # A short-lived CLI process cannot outlive its own
+                        # background work: asyncio.run closes the loop on
+                        # return, so wait for the detached run here. A remote
+                        # server owns its task; its still-running result has
+                        # nothing to wait on and passes through untouched.
+                        result = await result.wait()
                     return result
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to improve: {e!s}") from e
 
             result = asyncio.run(run_improve())
 
-            print_improve_result(result, background=bool(args.background))
+            still_running = bool(args.background) and _field(result, "status") == "running"
+            print_improve_result(result, background=still_running)
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):

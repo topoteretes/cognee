@@ -10,7 +10,6 @@ dataset, or the query cannot decide, the answer is "changed", so the stage runs.
 """
 
 from collections.abc import Iterable
-from typing import Optional
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
@@ -36,24 +35,42 @@ IMPROVE_OPERATION_NAME = "improve"
 async def has_graph_changed_since_last_improve(
     dataset_id: UUID,
     write_pipeline_names: Iterable[str] = WRITE_PIPELINE_NAMES,
+    exclude_operation_id: UUID | None = None,
 ) -> bool:
-    """True unless a completed improve exists and no write pipeline completed after it."""
+    """True unless a completed improve exists and no write pipeline completed after it.
+
+    ``exclude_operation_id`` is the calling run's own operation-record id: its
+    row must never serve as its own watermark. The orchestrator closes that
+    record only after the run finishes, so the row normally does not exist yet
+    when this runs — the exclusion is insurance against the close moving
+    earlier again.
+    """
     try:
         from sqlalchemy import func, select
 
         from cognee.infrastructure.databases.relational import get_relational_engine
         from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
 
+        last_improve_conditions = [
+            PipelineRun.dataset_id == dataset_id,
+            PipelineRun.operation_name == IMPROVE_OPERATION_NAME,
+            # "succeeded" excludes failed runs (their work may not have
+            # happened) and "noop" rows (a lost lock claim, an all-skipped
+            # run — nothing ran, so nothing to watermark). Accepted gap: a
+            # session run whose enrichment stage was skipped by config still
+            # records "succeeded", so after enabling triplet_embedding the
+            # backlog stays gated until the dataset's next write pipeline.
+            PipelineRun.outcome == "succeeded",
+            PipelineRun.status.is_(None),
+        ]
+        if exclude_operation_id is not None:
+            last_improve_conditions.append(PipelineRun.pipeline_run_id != exclude_operation_id)
+
         engine = get_relational_engine()
         async with engine.get_async_session() as session:
             last_improve_ended_at = (
                 await session.execute(
-                    select(func.max(PipelineRun.ended_at)).where(
-                        PipelineRun.dataset_id == dataset_id,
-                        PipelineRun.operation_name == IMPROVE_OPERATION_NAME,
-                        PipelineRun.outcome == "succeeded",
-                        PipelineRun.status.is_(None),
-                    )
+                    select(func.max(PipelineRun.ended_at)).where(*last_improve_conditions)
                 )
             ).scalar_one_or_none()
 
@@ -77,8 +94,3 @@ async def has_graph_changed_since_last_improve(
             "improve: change check could not decide, running the stage: %s", error, exc_info=True
         )
         return True
-
-
-def describe_change_check(changed: bool) -> str | None:
-    """Reason text for the stage result (``None`` when the stage runs)."""
-    return None if changed else "no_writes_since_last_improve"

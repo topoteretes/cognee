@@ -122,7 +122,33 @@ class TestExecute:
         stage_lines = [line for line in echoed if line.startswith("  ")]
         assert len(stage_lines) == 3
 
-    def test_background_prints_only_the_headline(self):
+    def test_local_background_waits_for_the_run_and_prints_it(self):
+        """A short-lived CLI process must not report work it never executed."""
+
+        class _WaitedResult(ImproveResult):
+            waited: bool = False
+
+            async def wait(self):
+                self.waited = True
+                self.finished = True
+                return self
+
+        result = _WaitedResult(
+            dataset_name="docs",
+            background=True,
+            finished=False,
+            stages=[StageResult.completed("triplet_enrichment")],
+            memify_run={},
+        )
+        _, echoed = self._execute(_parse("-b"), result)
+
+        assert result.waited is True
+        assert "Improvement started in background!" not in echoed
+        assert any("triplet_enrichment" in line for line in echoed)
+
+    def test_remote_background_prints_only_the_headline(self):
+        # A remote server owns the task: the result has nothing to wait on and
+        # comes back still running.
         result = ImproveResult(dataset_name="docs", background=True)
         result.finished = False
         _, echoed = self._execute(_parse("-b"), result)

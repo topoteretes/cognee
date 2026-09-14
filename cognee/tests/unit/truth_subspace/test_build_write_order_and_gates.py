@@ -9,6 +9,7 @@ Three guarantees, each pinned here:
   last, so a failure anywhere before that final write leaves epoch N live.
 """
 
+from contextlib import ExitStack
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -22,6 +23,10 @@ from cognee.modules.truth_subspace.build import (
     STATUS_ERRORED,
     STATUS_SKIPPED,
     build_truth_subspace,
+)
+from cognee.modules.truth_subspace.centroids import (
+    build_centroids_from_learning_vectors,
+    learning_id,
 )
 
 LEARNINGS = [
@@ -69,6 +74,7 @@ async def _run_build(
     embedding_engine,
     vector_engine=None,
     session_ids=None,
+    existing_centroids=None,
 ):
     dataset = SimpleNamespace(id=uuid4(), owner_id=uuid4())
     user = SimpleNamespace(id=uuid4())
@@ -78,20 +84,47 @@ async def _run_build(
         vector_engine.upsert_raw_vectors = AsyncMock()
     monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "false")
 
-    with (
-        patch.object(
-            build_module,
-            "get_authorized_existing_datasets",
-            new=AsyncMock(return_value=[dataset]),
-        ),
-        patch.object(
-            build_module, "get_vector_engine_async", new=AsyncMock(return_value=vector_engine)
-        ),
-        patch.object(build_module, "get_graph_engine", new=AsyncMock(return_value=graph_engine)),
-        patch.object(build_module, "get_embedding_engine", return_value=embedding_engine),
-    ):
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch.object(
+                build_module,
+                "get_authorized_existing_datasets",
+                new=AsyncMock(return_value=[dataset]),
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                build_module, "get_vector_engine_async", new=AsyncMock(return_value=vector_engine)
+            )
+        )
+        stack.enter_context(
+            patch.object(build_module, "get_graph_engine", new=AsyncMock(return_value=graph_engine))
+        )
+        stack.enter_context(
+            patch.object(build_module, "get_embedding_engine", return_value=embedding_engine)
+        )
+        if existing_centroids is not None:
+            stack.enter_context(
+                patch.object(
+                    build_module,
+                    "load_centroids",
+                    new=AsyncMock(return_value=list(existing_centroids)),
+                )
+            )
         result = await build_truth_subspace(dataset.id, session_ids=session_ids, user=user)
     return result, vector_engine
+
+
+def _committed_centroids(truth_epoch: int, texts=("alpha", "beta")):
+    """Centroids exactly as a previous successful build over ``texts`` committed them.
+
+    Same sort-by-learning-id order and the same constructor the build uses, so
+    ``centroids_changed`` compares real like against real like.
+    """
+    learning_vectors = sorted((learning_id(text), VECTORS[text]) for text in texts)
+    return build_centroids_from_learning_vectors(
+        "prior-dataset", learning_vectors, truth_epoch=truth_epoch
+    )
 
 
 @pytest.mark.asyncio
@@ -291,3 +324,49 @@ async def test_failed_centroid_commit_reports_the_previous_epoch(monkeypatch):
     assert result["truth_epoch"] == 0
     assert result["anchors"] == 0
     assert result["nodes_scored"] == 1
+
+
+@pytest.mark.asyncio
+async def test_unchanged_learnings_keep_the_existing_epoch_and_write_no_centroids(monkeypatch):
+    """``centroids_changed=False``: epoch N > 0 stays live, chunks are re-scored at N,
+    and the centroid commit is a no-op. A fresh-store test cannot pin this — with no
+    prior centroids, epoch 0 satisfies "previous epoch reported" by accident."""
+    graph_engine = _graph_engine(
+        [("chunk-1", {"type": "DocumentChunk", "text": "alpha corpus"})],
+    )
+
+    result, vector_engine = await _run_build(
+        monkeypatch,
+        graph_engine=graph_engine,
+        embedding_engine=RecordingEmbeddingEngine(),
+        existing_centroids=_committed_centroids(truth_epoch=1),
+    )
+
+    assert result["status"] == STATUS_COMPLETED
+    assert result["truth_epoch"] == 1
+    assert result["nodes_scored"] == 1
+    vector_engine.upsert_raw_vectors.assert_not_awaited()
+    scored = graph_engine.set_node_truth_state.await_args.args[0]
+    assert {state["truth_epoch"] for state in scored.values()} == {1}
+
+
+@pytest.mark.asyncio
+async def test_failed_chunk_write_keeps_a_nonzero_previous_epoch_live(monkeypatch):
+    """A failure during the 1 -> 2 move reports epoch 1 — not 0, not 2."""
+    graph_engine = _graph_engine(
+        [("chunk-1", {"type": "DocumentChunk", "text": "alpha corpus"})],
+    )
+    graph_engine.set_node_truth_state = AsyncMock(side_effect=RuntimeError("graph write failed"))
+
+    result, vector_engine = await _run_build(
+        monkeypatch,
+        graph_engine=graph_engine,
+        embedding_engine=RecordingEmbeddingEngine(),
+        # A different learning basis, so the build computes changed centroids at 2.
+        existing_centroids=_committed_centroids(truth_epoch=1, texts=("alpha",)),
+    )
+
+    assert result["status"] == STATUS_ERRORED
+    assert "graph write failed" in result["error"]
+    assert result["truth_epoch"] == 1
+    vector_engine.upsert_raw_vectors.assert_not_awaited()

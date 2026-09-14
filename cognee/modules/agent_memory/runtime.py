@@ -4,7 +4,7 @@ import contextvars
 import inspect
 import json
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from cognee.exceptions import CogneeValidationError

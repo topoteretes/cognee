@@ -193,6 +193,55 @@ async def test_truth_subspace_passes_resolved_id(monkeypatch):
     assert result.counts == {"anchors": 2, "nodes_scored": 10, "truth_epoch": 3}
 
 
+@pytest.mark.asyncio
+async def test_truth_subspace_maps_an_errored_build_onto_the_stage(monkeypatch):
+    """The build fails open — a failed write is a status dict, not a raise — so the
+    stage must translate it: a completed report would hide the failure from the
+    ImproveResult and keep the improve operation row at "succeeded"."""
+    build_mod = importlib.import_module("cognee.modules.truth_subspace.build")
+    fake = AsyncMock(
+        return_value={
+            "anchors": 2,
+            "nodes_scored": 0,
+            "nodes_skipped": 5,
+            "signature": "x",
+            "truth_epoch": 3,
+            "status": "errored",
+            "error": "centroid commit failed: boom",
+        }
+    )
+    monkeypatch.setattr(build_mod, "build_truth_subspace", fake)
+
+    result = await BuildTruthSubspaceStage().run(_inputs(build_truth_subspace=True))
+
+    assert result.status == "errored"
+    assert "centroid commit failed" in result.error
+    assert result.counts["nodes_skipped"] == 5
+
+
+@pytest.mark.asyncio
+async def test_truth_subspace_maps_a_skipped_build_onto_the_stage(monkeypatch):
+    """Normally unreachable past the stage gate, but the mapping must not lie."""
+    build_mod = importlib.import_module("cognee.modules.truth_subspace.build")
+    fake = AsyncMock(
+        return_value={
+            "anchors": 0,
+            "nodes_scored": 0,
+            "nodes_skipped": 0,
+            "signature": "",
+            "truth_epoch": 0,
+            "status": "skipped",
+            "reason": "backend_unsupported",
+        }
+    )
+    monkeypatch.setattr(build_mod, "build_truth_subspace", fake)
+
+    result = await BuildTruthSubspaceStage().run(_inputs(build_truth_subspace=True))
+
+    assert result.status == "skipped"
+    assert result.reason == "backend_unsupported"
+
+
 # --- stage 8 ---------------------------------------------------------------
 
 

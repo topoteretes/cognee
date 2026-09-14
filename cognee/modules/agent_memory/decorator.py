@@ -4,7 +4,7 @@ import functools
 import inspect
 import uuid
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.agent_memory.runtime import (

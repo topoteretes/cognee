@@ -40,8 +40,6 @@ class HalfFeedbackAdapter(GraphDBInterface):
 
 @_concrete
 class FullAdapter(GraphDBInterface):
-    supports_incremental_chunk_updates = True
-
     async def set_node_feedback_weights(self, node_feedback_weights):
         return {}
 
@@ -72,7 +70,6 @@ def test_interface_stubs_do_not_count_as_support():
     caps = probe_graph_capabilities(StubAdapter())
     assert caps.supports_feedback_weights is False
     assert caps.supports_truth_state is False
-    assert caps.supports_incremental_chunk_updates is False
     assert caps.adapter == "StubAdapter"
 
 
@@ -91,7 +88,6 @@ def test_full_adapter_supports_everything():
     assert caps == GraphCapabilities(
         supports_feedback_weights=True,
         supports_truth_state=True,
-        supports_incremental_chunk_updates=True,
         adapter="FullAdapter",
     )
 
@@ -122,7 +118,6 @@ def test_ladybug_adapter_reports_feedback_weights_and_truth_state():
     caps = probe_graph_capabilities(engine)
     assert caps.supports_feedback_weights is True
     assert caps.supports_truth_state is True
-    assert caps.supports_incremental_chunk_updates is True
 
 
 def test_neo4j_adapter_reports_feedback_weights_but_no_truth_state():
@@ -136,7 +131,7 @@ def test_neo4j_adapter_reports_feedback_weights_but_no_truth_state():
 
 def test_capabilities_are_frozen():
     caps = GraphCapabilities.assume_supported()
-    with pytest.raises(ValidationError, match="Instance is frozen"):
+    with pytest.raises(ValidationError):
         caps.supports_truth_state = False  # type: ignore[misc]
 
 
@@ -188,4 +183,3 @@ async def test_resolve_fails_open_when_the_engine_cannot_be_created(monkeypatch)
 
     assert caps.supports_feedback_weights is True
     assert caps.supports_truth_state is True
-    assert caps.supports_incremental_chunk_updates is False

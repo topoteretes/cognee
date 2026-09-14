@@ -8,12 +8,10 @@ hands the answer to every stage on ``ImproveRunInputs.capabilities``.
 
 An adapter supports a method when its class overrides the interface's stub
 (compared by function identity), or when it declares an explicit boolean class
-attribute of the same ``supports_*`` name. ``supports_incremental_chunk_updates``
-(PR #4874) is read the same way, so this is the adapters' only capability
-surface.
+attribute of the same ``supports_*`` name.
 """
 
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
@@ -33,7 +31,6 @@ class GraphCapabilities(BaseModel):
 
     supports_feedback_weights: bool
     supports_truth_state: bool
-    supports_incremental_chunk_updates: bool = False
     adapter: str | None = None
 
     @classmethod
@@ -47,7 +44,6 @@ class GraphCapabilities(BaseModel):
         return cls(
             supports_feedback_weights=True,
             supports_truth_state=True,
-            supports_incremental_chunk_updates=False,
             adapter=adapter,
         )
 
@@ -85,9 +81,6 @@ def probe_graph_capabilities(engine: Any) -> GraphCapabilities:
             engine, "supports_feedback_weights", _FEEDBACK_WEIGHT_METHODS
         ),
         supports_truth_state=_supports(engine, "supports_truth_state", _TRUTH_STATE_METHODS),
-        supports_incremental_chunk_updates=bool(
-            getattr(engine, "supports_incremental_chunk_updates", False)
-        ),
         adapter=type(engine).__name__,
     )
 

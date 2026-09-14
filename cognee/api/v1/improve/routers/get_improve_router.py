@@ -62,7 +62,7 @@ def get_improve_router() -> APIRouter:
         - **dataset_name** (Optional[str]): Dataset name.
         - **dataset_id** (Optional[UUID]): Dataset UUID.
         - **node_name** (Optional[List[str]]): Filter to specific named entities.
-        - **run_in_background** (Optional[bool]): Run the whole chain as one background
+        - **run_in_background** (Optional[bool]): Run all stages as one background
           task and return immediately with `status == "running"` (default: False).
         - **build_global_context_index** (Optional[bool]): Build the global context index
           after enrichment (default: False).

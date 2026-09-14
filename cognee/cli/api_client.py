@@ -15,7 +15,7 @@ from __future__ import annotations
 import io
 import mimetypes
 import os
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urljoin
 
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME

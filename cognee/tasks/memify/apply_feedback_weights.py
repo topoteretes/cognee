@@ -130,6 +130,13 @@ async def _update_element_weights(
     for element_id in ids:
         previous_weight = existing_weights.get(element_id)
         if previous_weight is None:
+            # "Pruned" conflates two cases: the element was deleted, or it
+            # lives outside this run's dataset-scoped graph (a QA row's
+            # used_graph_element_ids come from recall(), which spans every
+            # accessible dataset). Both are dropped for good once the row is
+            # marked done — the deliberate trade against dev's endless
+            # re-scan. Recording pruned ids separately would let an improve
+            # on the other dataset consume them, if that ever matters.
             outcome["pruned"].append(element_id)
             continue
         updates[element_id] = stream_update_weight(previous_weight, normalized_rating, alpha)

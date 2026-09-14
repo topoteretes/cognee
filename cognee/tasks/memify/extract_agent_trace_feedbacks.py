@@ -1,5 +1,4 @@
 import json
-from typing import Optional
 
 from cognee.context_global_variables import session_user
 from cognee.exceptions import CogneeSystemError
@@ -7,8 +6,6 @@ from cognee.infrastructure.session.get_session_manager import get_session_manage
 from cognee.infrastructure.session.session_persist_watermark import (
     TRACE_PERSIST_WATERMARK,
     TracePersistWindow,
-    get_persisted_trace_count,
-    save_persisted_trace_count,
 )
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -74,6 +71,11 @@ async def extract_agent_trace_feedbacks(
     The watermark itself is advanced by ``cognify_agent_trace_feedback`` only
     after the window is successfully cognified.
 
+    The pending slice and the count the watermark advances to come from ONE
+    snapshot of the trace (the same shape as the Q&A path), so a step a live
+    agent writes mid-run is always at or above the advanced watermark — next
+    run's work, never sealed below it.
+
     Args:
         data: Data passed from memify. If empty dict ({}), no external data is provided.
         session_ids: Optional list of specific session IDs to extract.
@@ -125,16 +127,18 @@ async def extract_agent_trace_feedbacks(
                     if not total_trace_count:
                         continue
 
-                    persisted_count = await get_persisted_trace_count(
+                    persisted_count = await TRACE_PERSIST_WATERMARK.read_count(
                         session_manager, user_id, session_id
                     )
-                    window_size = resolve_trace_window_size(
-                        total_trace_count,
-                        persisted_count,
-                        last_n_steps,
-                        session_id=session_id,
-                    )
-                    if window_size <= 0:
+                    if (
+                        resolve_trace_window_size(
+                            total_trace_count,
+                            persisted_count,
+                            last_n_steps,
+                            session_id=session_id,
+                        )
+                        <= 0
+                    ):
                         logger.info(
                             "Session %s trace steps already persisted up to %d, nothing new",
                             session_id,
@@ -142,30 +146,46 @@ async def extract_agent_trace_feedbacks(
                         )
                         continue
 
+                    # One snapshot: the same read provides the pending slice AND the
+                    # total the watermark advances to. Counting first and fetching the
+                    # `last_n` newest second raced a live agent — steps written between
+                    # the two reads shifted the newest-first window past the oldest
+                    # pending steps, and the watermark then sealed them below it
+                    # forever. The count above is only a cheap early exit; every index
+                    # from here on comes from this one fetch.
                     if not raw_trace_content:
                         trace_values = await session_manager.get_agent_trace_feedback(
                             user_id=user_id,
                             session_id=session_id,
-                            last_n=window_size,
                         )
                     else:
                         trace_session = await session_manager.get_agent_trace_session(
                             user_id=user_id,
                             session_id=session_id,
-                            last_n=window_size,
                         )
                         trace_values = [entry.method_return_value for entry in trace_session]
 
+                    total_trace_count = len(trace_values)
+                    window_size = resolve_trace_window_size(
+                        total_trace_count,
+                        persisted_count,
+                        last_n_steps,
+                        session_id=session_id,
+                    )
+                    if window_size <= 0:
+                        continue
+                    pending_trace_values = trace_values[total_trace_count - window_size :]
+
                     normalized_trace_values = [
                         normalized
-                        for value in trace_values
+                        for value in pending_trace_values
                         if (normalized := _normalize_trace_content(value)) is not None
                     ]
                     if not normalized_trace_values:
                         # Nothing worth cognifying in this window (steps without
                         # feedback text). Mark it done so it is not re-read forever;
                         # there is no cognify whose success the advance could wait on.
-                        await save_persisted_trace_count(
+                        await TRACE_PERSIST_WATERMARK.write_count(
                             session_manager, user_id, session_id, total_trace_count
                         )
                         logger.info(

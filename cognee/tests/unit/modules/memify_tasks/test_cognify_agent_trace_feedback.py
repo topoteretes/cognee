@@ -5,8 +5,8 @@ import pytest
 
 from cognee.exceptions import CogneeSystemError, CogneeValidationError
 from cognee.infrastructure.session.session_persist_watermark import (
+    TRACE_PERSIST_WATERMARK,
     TracePersistWindow,
-    get_persisted_trace_count,
 )
 from cognee.tasks.memify.cognify_agent_trace_feedback import cognify_agent_trace_feedback
 
@@ -187,7 +187,7 @@ async def test_window_advances_watermark_after_successful_cognify():
     mock_add.assert_called_once_with(
         window.text, dataset_id="123", node_set=["agent_trace_feedbacks"], user="user"
     )
-    assert await get_persisted_trace_count(manager, "u", "s") == 5
+    assert await TRACE_PERSIST_WATERMARK.read_count(manager, "u", "s") == 5
 
 
 @pytest.mark.asyncio
@@ -209,8 +209,8 @@ async def test_batched_windows_each_advance_their_own_session():
 
     assert mock_add.await_count == 2
     assert mock_cognify.await_count == 2
-    assert await get_persisted_trace_count(manager, "u", "s1") == 2
-    assert await get_persisted_trace_count(manager, "u", "s2") == 7
+    assert await TRACE_PERSIST_WATERMARK.read_count(manager, "u", "s1") == 2
+    assert await TRACE_PERSIST_WATERMARK.read_count(manager, "u", "s2") == 7
 
 
 @pytest.mark.asyncio
@@ -238,7 +238,7 @@ async def test_errored_run_info_keeps_watermark_put():
         mock_cognify.return_value = {"ds": errored}
         await cognify_agent_trace_feedback(_window(persisted_trace_count=5), dataset_id="123")
 
-    assert await get_persisted_trace_count(manager, "u", "s") == 0
+    assert await TRACE_PERSIST_WATERMARK.read_count(manager, "u", "s") == 0
     assert manager.store == []
 
 
@@ -257,7 +257,7 @@ async def test_cognify_exception_keeps_watermark_put():
         with pytest.raises(CogneeSystemError, match="Failed to cognify agent trace content"):
             await cognify_agent_trace_feedback(_window(persisted_trace_count=5), dataset_id="123")
 
-    assert await get_persisted_trace_count(manager, "u", "s") == 0
+    assert await TRACE_PERSIST_WATERMARK.read_count(manager, "u", "s") == 0
 
 
 @pytest.mark.asyncio
