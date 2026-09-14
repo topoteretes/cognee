@@ -1,6 +1,6 @@
-from cognee.tests.tasks.descriptive_metrics.metrics_test_utils import get_metrics
-
 import asyncio
+
+from cognee.tests.tasks.descriptive_metrics.metrics_test_utils import get_metrics
 
 
 async def check_graph_metrics_consistency_across_adapters(include_optional=False):

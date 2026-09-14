@@ -1,13 +1,13 @@
 import os
 from functools import lru_cache
-from fastapi_users import models
 
+from fastapi_users import models
 from fastapi_users.authentication import (
-    JWTStrategy,
     AuthenticationBackend,
+    JWTStrategy,
 )
 
-from .api_bearer import api_bearer_transport, APIJWTStrategy
+from .api_bearer import APIJWTStrategy, api_bearer_transport
 
 
 @lru_cache

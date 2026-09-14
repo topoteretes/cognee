@@ -1,5 +1,6 @@
-from cognee.exceptions import CogneeConfigurationError, CogneeValidationError
 from fastapi import status
+
+from cognee.exceptions import CogneeConfigurationError, CogneeValidationError
 
 
 class InvalidConfigAttributeError(CogneeConfigurationError):

@@ -1,25 +1,19 @@
-from typing import Optional, List
-
 from cognee import memify
-from cognee.context_global_variables import (
-    set_database_global_context_variables,
-    set_session_user_context_variable,
-)
+from cognee.context_global_variables import set_session_user_context_variable
 from cognee.exceptions import CogneeValidationError
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.data.methods import get_authorized_existing_datasets
-from cognee.shared.logging_utils import get_logger
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
-from cognee.tasks.memify import extract_user_sessions, cognify_session
-from cognee.modules.data.constants import DEFAULT_DATASET_NAME
-
+from cognee.shared.logging_utils import get_logger
+from cognee.tasks.memify import cognify_session, extract_user_sessions
 
 logger = get_logger("persist_sessions_in_knowledge_graph")
 
 
 async def persist_sessions_in_knowledge_graph_pipeline(
     user: User,
-    session_ids: Optional[List[str]] = None,
+    session_ids: list[str] | None = None,
     dataset: str = DEFAULT_DATASET_NAME,
     run_in_background: bool = False,
 ):
@@ -43,27 +37,28 @@ async def persist_sessions_in_knowledge_graph_pipeline(
 
     if not dataset_to_write:
         raise CogneeValidationError(
-            message=f"User (id: {str(user.id)}) does not have write access to dataset: {dataset}",
+            message=f"User (id: {user.id!s}) does not have write access to dataset: {dataset}",
             log=False,
         )
 
-    async with set_database_global_context_variables(
-        dataset_to_write[0].id, dataset_to_write[0].owner_id
-    ):
-        extraction_tasks = [Task(extract_user_sessions, session_ids=session_ids)]
+    extraction_tasks = [Task(extract_user_sessions, session_ids=session_ids)]
 
-        enrichment_tasks = [
-            Task(cognify_session, dataset_id=dataset_to_write[0].id, user=user),
-        ]
+    enrichment_tasks = [
+        Task(cognify_session, dataset_id=dataset_to_write[0].id, user=user),
+    ]
 
-        result = await memify(
-            extraction_tasks=extraction_tasks,
-            enrichment_tasks=enrichment_tasks,
-            dataset=dataset_to_write[0].id,
-            user=user,
-            data=[{}],
-            run_in_background=run_in_background,
-        )
+    # No set_database_global_context_variables scope around memify: the pipeline
+    # enters it itself under the dataset lock. Holding the scope's queue slot
+    # while memify waits on that lock inverts the canonical order
+    # (dataset lock -> queue slot) and can deadlock the process (SDK-483).
+    result = await memify(
+        extraction_tasks=extraction_tasks,
+        enrichment_tasks=enrichment_tasks,
+        dataset=dataset_to_write[0].id,
+        user=user,
+        data=[{}],
+        run_in_background=run_in_background,
+    )
 
     logger.info("Session persistence pipeline completed")
     return result

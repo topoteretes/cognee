@@ -5,8 +5,9 @@ Each engine module exposes one public instance of this class
 decorated factory.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from cognee.infrastructure.databases.utils.engine_cache_ops import EngineCacheOps
 

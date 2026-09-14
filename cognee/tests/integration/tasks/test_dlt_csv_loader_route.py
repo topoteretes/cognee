@@ -9,6 +9,7 @@ mocked embeddings (the DLT route makes no LLM calls).
 """
 
 import json
+import logging
 import pathlib
 from unittest.mock import patch
 
@@ -25,6 +26,8 @@ from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.users.methods import get_default_user
 from cognee.tasks.ingestion.dlt_utils import is_dlt_source_manifest
+
+logger = logging.getLogger(__name__)
 
 DATASET = "csv_loader_ds"
 CSV_CONTENT = "id,name,section\n1,anemometer,weather\n2,barometer,weather\n3,seismograph,geology\n"
@@ -75,7 +78,7 @@ async def clean_env(tmp_path, monkeypatch):
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in clean_env", exc_info=True)
 
 
 @pytest.mark.asyncio

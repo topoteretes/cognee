@@ -4,17 +4,25 @@ on:
   pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review, edited]
 
+# pull_request_target runs in the context of the base branch with a token that
+# can write to the repository, so nothing from the pull request may be checked
+# out or executed here. The core-team list is read from the base ref through the
+# API, and the PR author reaches the shell through an environment variable
+# rather than expression interpolation (OSSF Scorecard: Dangerous-Workflow).
 permissions:
   contents: read
-  issues: write
 
 jobs:
   label-core-team:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write         # PR labels are issue labels
+      pull-requests: write
     steps:
       - name: Check out base repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.event.pull_request.base.ref }}
@@ -22,31 +30,30 @@ jobs:
       - name: Determine if PR author is a core team member
         id: check_core
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BASE_REF: ${{ github.base_ref }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
-          AUTHOR="${{ github.event.pull_request.user.login }}"
-          LIST_FILE=".github/core-team.txt"
+          # Read .github/core-team.txt from the base branch without a checkout.
+          LIST="$(gh api -H "Accept: application/vnd.github.raw+json" \
+            "repos/${REPO}/contents/.github/core-team.txt?ref=${BASE_REF}" 2>/dev/null)" || LIST=""
 
-          if [ ! -f "$LIST_FILE" ]; then
+          if [ -z "$LIST" ]; then
             echo "core=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          # Normalize author to lowercase and strip leading '@'
-          AUTHOR_NORM="$(echo "$AUTHOR" | tr '[:upper:]' '[:lower:]' | sed 's/^@//')"
+          # Normalize author to lowercase and strip a leading '@'.
+          AUTHOR_NORM="$(printf '%s' "$AUTHOR" | tr '[:upper:]' '[:lower:]' | sed 's/^@//')"
 
-          # Compare against normalized list values (ignore comments/blank lines)
-          if awk -v author="$AUTHOR_NORM" '
-            BEGIN { found=0 }
-            {
-              line=$0
-              sub(/^[ \t]+|[ \t]+$/, "", line)
-              if (line ~ /^#/ || line == "") next
-              sub(/^@/, "", line)
-              line=tolower(line)
-              if (line == author) { found=1; exit }
-            }
-            END { exit(found ? 0 : 1) }
-          ' "$LIST_FILE"; then
+          # Compare against normalized list entries; comments and blank lines are ignored.
+          if printf '%s\n' "$LIST" \
+               | grep -vE '^[[:space:]]*(#|$)' \
+               | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^@//' \
+               | tr '[:upper:]' '[:lower:]' \
+               | grep -qxF "$AUTHOR_NORM"; then
             echo "core=true" >> "$GITHUB_OUTPUT"
           else
             echo "core=false" >> "$GITHUB_OUTPUT"
@@ -54,7 +61,7 @@ jobs:
 
       - name: Add core-team label
         if: steps.check_core.outputs.core == 'true'
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd  # v8.0.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |

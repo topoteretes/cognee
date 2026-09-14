@@ -8,15 +8,15 @@ documents in the knowledge graph. The flow:
 Curator calls run in parallel by batch; judge/write calls run in parallel by lesson.
 """
 
-from typing import List, Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 # -- Tunables ----------------------------------------------------------------
 
-# Gate: a context entry is distillable only when it was never rated harmful and its
-# confidence clears this threshold. Deterministic, no search/LLM.
-MIN_GATE_CONFIDENCE = 0.75
+# Gate: a context entry is distillable only when it passes the shared usability
+# check (never rated harmful, confidence clears MIN_GATE_CONFIDENCE). The
+# threshold lives next to the session-context models; re-exported above.
 
 # Batching: pack capped timeline blocks into coarse batches. Six worst-case QA
 # blocks plus separators stays below the budget, so the batching logic can stay simple.
@@ -44,7 +44,7 @@ class ProposedLesson(BaseModel):
     working_statement: str = Field(
         description="One standalone sentence capturing the durable learning."
     )
-    member_entry_ids: List[str] = Field(
+    member_entry_ids: list[str] = Field(
         default_factory=list,
         description="Ids of the candidate memories this lesson draws from (may be empty).",
     )
@@ -53,7 +53,7 @@ class ProposedLesson(BaseModel):
 class CuratorBatchOutput(BaseModel):
     """Proposed lessons from one curator batch call."""
 
-    lessons: List[ProposedLesson] = Field(default_factory=list)
+    lessons: list[ProposedLesson] = Field(default_factory=list)
 
 
 # -- Writer/rejecter output (one call per proposed lesson) -------------------
@@ -63,7 +63,7 @@ class WrittenLesson(BaseModel):
     """A per-lesson decision: accept (and write it) or reject (with a reason)."""
 
     accept: bool = Field(description="True to persist this lesson, False to drop it.")
-    reason: Optional[Literal["already_known", "not_durable", "unsupported"]] = Field(
+    reason: Literal["already_known", "not_durable", "unsupported"] | None = Field(
         default=None,
         description="Why the lesson was rejected, when accept is False.",
     )
@@ -71,7 +71,7 @@ class WrittenLesson(BaseModel):
         default="",
         description="Standalone, entity-anchored prose for the lesson, when accepted.",
     )
-    entities: List[str] = Field(
+    entities: list[str] = Field(
         default_factory=list,
         description="Glossary entity names used in the statement.",
     )
@@ -88,11 +88,11 @@ class DistillationResult(BaseModel):
     """Outcome of one distill_session call."""
 
     session_id: str
-    dataset_id: Optional[str] = None
+    dataset_id: str | None = None
     status: Literal[
         "completed",
         "no_gated_entries",
         "no_proposed_lessons",
         "no_accepted_lessons",
     ]
-    documents: List[str] = Field(default_factory=list)
+    documents: list[str] = Field(default_factory=list)

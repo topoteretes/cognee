@@ -53,8 +53,7 @@ async def main():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
-    await cognee.add(TEXT)
-    await cognee.cognify()
+    await cognee.remember(TEXT, self_improvement=False)
 
     await visualize_graph(destination_file_path=DEST)
 

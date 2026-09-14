@@ -1,8 +1,9 @@
 from uuid import UUID
-from cognee.modules.pipelines.utils.generate_pipeline_id import generate_pipeline_id
+
 from cognee.modules.pipelines.operations.log_pipeline_run_initiated import (
     log_pipeline_run_initiated,
 )
+from cognee.modules.pipelines.utils.generate_pipeline_id import generate_pipeline_id
 
 
 async def reset_pipeline_run_status(user_id: UUID, dataset_id: UUID, pipeline_name: str):
@@ -13,4 +14,5 @@ async def reset_pipeline_run_status(user_id: UUID, dataset_id: UUID, pipeline_na
         pipeline_id=pipeline_id,
         pipeline_name=pipeline_name,
         dataset_id=dataset_id,
+        user_id=user_id,
     )

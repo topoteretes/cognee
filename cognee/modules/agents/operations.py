@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 from uuid import UUID as UUIDType
 
-from sqlalchemy import select
-
-from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.agents.models import (
     AgentConnection,
     AgentDatasetRef,
@@ -21,10 +18,16 @@ from cognee.modules.agents.registry import (
     list_registered_agent_connections,
     register_agent_connection,
 )
-from cognee.modules.users.exceptions import PermissionDeniedError
+
+# Import from the defining modules, not the package __init__: these packages
+# are mid-initialization on some import orders (their __init__ transitively
+# reaches back into agents.operations), and a from-import against a partially
+# initialized package silently binds the same-named SUBMODULE instead of the
+# function ("'module' object is not callable" at call time).
+from cognee.modules.users.methods.get_visible_user_ids import get_visible_user_ids
 from cognee.modules.users.models import User
-from cognee.modules.users.permissions.methods.get_specific_user_permission_datasets import (
-    get_specific_user_permission_datasets,
+from cognee.modules.users.permissions.methods.get_readable_datasets import (
+    get_readable_datasets,
 )
 from cognee.shared.logging_utils import get_logger
 
@@ -33,7 +36,7 @@ logger = get_logger("agents")
 RangeLiteral = Literal["24h", "7d", "30d", "all"]
 
 
-def _range_since(range_key: RangeLiteral) -> Optional[datetime]:
+def _range_since(range_key: RangeLiteral) -> datetime | None:
     now = datetime.now(timezone.utc)
     if range_key == "24h":
         return now - timedelta(hours=24)
@@ -52,39 +55,6 @@ def _entry_to_dict(entry: Any) -> dict[str, Any]:
     if hasattr(entry, "dict"):
         return entry.dict()
     return {"value": str(entry)}
-
-
-async def _readable_datasets_for(user: User) -> list[Any]:
-    try:
-        return await get_specific_user_permission_datasets(user.id, "read", None)
-    except PermissionDeniedError:
-        return []
-    except Exception as error:
-        logger.warning("Failed to resolve readable datasets for agents API: %s", error)
-        return []
-
-
-async def _child_agent_user_ids(user_id: UUIDType) -> list[UUIDType]:
-    try:
-        engine = get_relational_engine()
-        async with engine.get_async_session() as session:
-            from cognee.modules.users.models import User as UserModel
-
-            rows = (
-                await session.execute(
-                    select(UserModel.id).where(UserModel.parent_user_id == user_id)
-                )
-            ).all()
-            return [row.id for row in rows]
-    except Exception as error:
-        logger.debug("Failed to resolve child agent users for agents API: %s", error)
-        return []
-
-
-async def _visible_user_ids(user: User) -> list[UUIDType]:
-    ids = [user.id]
-    ids.extend(await _child_agent_user_ids(user.id))
-    return ids
 
 
 def _memory_sources_from_datasets(datasets: list[Any]) -> list[MemorySourceConnection]:
@@ -163,17 +133,17 @@ def _attach_connected_agent_ids(
 async def list_agent_connections(
     *,
     user: User,
-    agent_id: Optional[UUIDType] = None,
+    agent_id: UUIDType | None = None,
     range_key: RangeLiteral = "30d",
-    status_filter: Optional[str] = None,
+    status_filter: str | None = None,
     include_sources: bool = True,
     active_only: bool = True,
     limit: int = 50,
     offset: int = 0,
 ) -> AgentsListResponse:
-    readable_datasets = await _readable_datasets_for(user)
+    readable_datasets = await get_readable_datasets(user.id)
     memory_sources = _memory_sources_from_datasets(readable_datasets)
-    visible_user_ids = await _visible_user_ids(user)
+    visible_user_ids = await get_visible_user_ids(user.id)
     visible_user_id_set = set(visible_user_ids)
     permitted_dataset_id_strings = {source.id for source in memory_sources}
 
@@ -217,8 +187,8 @@ async def get_agent_connection_detail(
     *,
     user: User,
     agent_id: UUIDType,
-    agent_session_name: Optional[str] = None,
-) -> Optional[AgentDetailResponse]:
+    agent_session_name: str | None = None,
+) -> AgentDetailResponse | None:
     response = await list_agent_connections(
         user=user,
         agent_id=agent_id,
@@ -261,7 +231,9 @@ async def get_agent_connection_detail(
             recent_traces = [_entry_to_dict(entry) for entry in traces[-20:]]
             recent_sessions = [{"session_id": agent.session_id, "user_id": agent.user_id}]
         except Exception as error:
-            logger.debug("Failed to hydrate agent detail from session cache: %s", error)
+            logger.debug(
+                "Failed to hydrate agent detail from session cache: %s", error, exc_info=True
+            )
 
     return AgentDetailResponse(
         agent=agent,

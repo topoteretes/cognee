@@ -1,5 +1,6 @@
-from cognee.eval_framework.benchmark_adapters.hotpot_qa_adapter import HotpotQAAdapter
 import json
+
+from cognee.eval_framework.benchmark_adapters.hotpot_qa_adapter import HotpotQAAdapter
 
 INSTANCE_FILTER = [
     "5a8e341c5542995085b373d6",
@@ -32,8 +33,10 @@ INSTANCE_FILTER = [
 def main():
     hotpot_qa_adapter = HotpotQAAdapter()
     corpus_list, qa_pairs = hotpot_qa_adapter.load_corpus(instance_filter=INSTANCE_FILTER)
-    json.dump(corpus_list, open("hotpot_qa_24_corpus.json", "w"), indent=2)
-    json.dump(qa_pairs, open("hotpot_qa_24_qa_pairs.json", "w"), indent=2)
+    with open("hotpot_qa_24_corpus.json", "w") as corpus_file:
+        json.dump(corpus_list, corpus_file, indent=2)
+    with open("hotpot_qa_24_qa_pairs.json", "w") as qa_file:
+        json.dump(qa_pairs, qa_file, indent=2)
 
 
 if __name__ == "__main__":

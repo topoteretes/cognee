@@ -1,7 +1,8 @@
 import asyncio
+
 import cognee
-from cognee.shared.logging_utils import setup_logging, ERROR
 from cognee.api.v1.search import SearchType
+from cognee.shared.logging_utils import ERROR, setup_logging
 
 
 async def main():

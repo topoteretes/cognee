@@ -38,12 +38,12 @@ def __getattr__(name):
 
 
 __all__ = [
-    # Legacy (backward compatible, lazy-loaded)
-    "Task",
-    "task",
-    "run_tasks",
-    "run_tasks_parallel",
-    "run_pipeline",
     # Type annotations
     "Drop",
+    # Legacy (backward compatible, lazy-loaded)
+    "Task",
+    "run_pipeline",
+    "run_tasks",
+    "run_tasks_parallel",
+    "task",
 ]

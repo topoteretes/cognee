@@ -1,16 +1,17 @@
 import os
-from urllib.parse import urlparse
-from typing import Any, List, Tuple
-from pathlib import Path
 import tempfile
-
-from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
-from cognee.modules.ingestion.exceptions import IngestionError
-from cognee.infrastructure.loaders import get_loader_engine
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.loaders import get_loader_engine
+from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
+from cognee.infrastructure.utils.run_async import run_async
+from cognee.modules.ingestion.exceptions import IngestionError
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -24,20 +25,31 @@ class SaveDataSettings(BaseSettings):
 settings = SaveDataSettings()
 
 
+# Bytes copied per iteration when pulling a stored object down to a temp file.
+# The previous 8 KiB read meant one Python-level round trip through the storage
+# stack per 8 KiB of payload — ~12k iterations for a 100 MB object.
+DOWNLOAD_CHUNK_SIZE = 4 * 1024 * 1024
+
+
+def _copy_stream(source_file, destination_file) -> None:
+    """Copy a stream in chunks. Blocking: callers run this off the event loop."""
+    while chunk := source_file.read(DOWNLOAD_CHUNK_SIZE):
+        destination_file.write(chunk)
+
+
 async def pull_from_s3(file_path, destination_file) -> None:
     async with open_data_file(file_path) as file:
-        while True:
-            chunk = file.read(8192)
-            if not chunk:
-                break
-            destination_file.write(chunk)
+        # Both sides of this copy block: the reads wait on the network and the
+        # writes wait on the disk. Inline, it parked the event loop for the whole
+        # download, so the pipeline's per-item concurrency could not overlap.
+        await run_async(_copy_stream, file, destination_file)
 
 
 async def data_item_to_text_file(
     data_item_path: str,
-    preferred_loaders: dict[str, dict[str, Any]] = None,
+    preferred_loaders: dict[str, dict[str, Any]] | None = None,
     **loader_kwargs: Any,
-) -> Tuple[str, LoaderInterface]:
+) -> tuple[str, LoaderInterface]:
     """Run the loader engine on a data item's file.
 
     ``loader_kwargs`` (ingestion context: dataset_name, dataset_id, user,
@@ -58,7 +70,7 @@ async def data_item_to_text_file(
             # create it with delete=False, close our handle first, and clean it up
             # ourselves. (Mirrors the delete=False pattern used by the SQLAlchemy and
             # ladybug S3 temp-file paths.)
-            temp_file = tempfile.NamedTemporaryFile(
+            temp_file = tempfile.NamedTemporaryFile(  # noqa: SIM115 - closed below after the write; delete=False keeps the path
                 mode="wb", suffix=path_info.suffix, delete=False
             )
             try:

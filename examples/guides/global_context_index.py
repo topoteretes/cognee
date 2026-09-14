@@ -1,77 +1,67 @@
-"""Global context index: a dataset-level summary prepended to retrieval context.
-
-``improve(..., build_global_context_index=True)`` builds a compact summary of the whole
-dataset — a world summary plus the areas it covers. When
-``include_global_context_index`` is on, the retriever **prepends that summary to the
-context it hands the LLM**, so answers can draw on the shape of the whole dataset
-instead of only the chunks nearest the query.
-
-Note where the summary lands: it is retriever *input*, not output. A normal
-``recall()`` returns an answer that was informed by the summary, not one containing
-it. This guide passes ``only_context=True`` to skip generation and print the assembled
-context instead, so you can diff the two directly — the extra block at the top of the
-second output is the prelude.
-
-For a longer run with a multi-day conversation and several queries, see
-``examples/advanced_guides/global_context_index_smoke_demo.py``.
-"""
-
 import asyncio
 
 import cognee
-from cognee import SearchType
+from cognee.infrastructure.databases.graph import get_graph_engine
 
-DATASET = "global_context_index_guide"
+DATASET = "global_context_index_demo"
 
-CONVERSATION = [
-    "[2026-04-02 09:14] User: Could you suggest three dates for our team syncs this month?",
-    "[2026-04-02 09:18] Assistant: April 5, 12, and 19 look clear — 10:00 for the first two.",
-    "[2026-04-02 09:20] User: That works. Please put all three on the calendar.",
-    "[2026-04-07 11:09] User: Cancel Meeting 3, and move Meeting 2 from April 12 to April 9.",
-    "[2026-04-07 11:10] Assistant: Done. Meeting 3 is cancelled; Meeting 2 is now April 9 at 10:00.",
+INITIAL_FACTS = [
+    "Alice hikes in the Alps every summer.",
+    "Bob sails along the Adriatic coast every summer.",
+    "Alice says hiking helps her disconnect from work.",
+    "Bob says sailing is the best way to unwind after a busy winter.",
+    "Last year Alice hiked a new trail near Lake Como.",
+    "Last year Bob sailed to a small island he had never visited.",
 ]
 
-QUERY = "When is the second meeting?"
+ADDITIONAL_FACT = (
+    "This year, Bob decided to join Alice's hiking trip to the Alps instead of sailing."
+)
 
 
-async def main() -> None:
-    # Prune data and system metadata before running, only if we want "fresh" state.
-    await cognee.forget(everything=True)
+async def print_index_structure(label):
+    graph_engine = await get_graph_engine()
+    nodes_data, _edges_data = await graph_engine.get_graph_data()
 
-    await cognee.remember(CONVERSATION, dataset_name=DATASET, self_improvement=False)
+    root = None
+    buckets = []
+    text_summary_count = 0
 
-    # The index is built during improve(); it is off by default.
+    for node_id, properties in nodes_data:
+        node_type = properties.get("type")
+        if node_type == "TextSummary":
+            text_summary_count += 1
+        elif node_type == "GlobalContextSummary":
+            if properties.get("is_root"):
+                root = (node_id, properties.get("text", ""))
+            else:
+                buckets.append((node_id, properties.get("text", "")))
+
+    print(f"\n{label}")
+    print(f"Source summaries: {text_summary_count} TextSummary nodes")
+    print(f"Buckets: {len(buckets)}")
+    for bucket_id, text in buckets:
+        print(f"  - [{bucket_id}] {text[:60]}...")
+    if root:
+        print(f"Root [{root[0]}]: {root[1][:100]}...")
+
+
+async def main():
+    await cognee.remember(
+        INITIAL_FACTS,
+        dataset_name=DATASET,
+        self_improvement=False,
+    )
     await cognee.improve(dataset=DATASET, build_global_context_index=True)
+    await print_index_structure("Index structure after the initial build:")
 
-    print(f"Query: {QUERY}")
-
-    # only_context=True skips generation and returns the assembled context instead,
-    # so `text` holds what the retriever would have handed the LLM.
-    print("\nCONTEXT WITHOUT the global context index")
-    without_index = await cognee.recall(
-        query_text=QUERY,
-        query_type=SearchType.GRAPH_COMPLETION,
-        datasets=[DATASET],
-        only_context=True,
-        retriever_specific_config={
-            "include_global_context_index": False,
-            "global_context_index_top_k": 3,
-        },
+    await cognee.remember(
+        ADDITIONAL_FACT,
+        dataset_name=DATASET,
+        self_improvement=False,
     )
-    print(without_index[0].text)
-
-    print("\nCONTEXT WITH the global context index")
-    with_index = await cognee.recall(
-        query_text=QUERY,
-        query_type=SearchType.GRAPH_COMPLETION,
-        datasets=[DATASET],
-        only_context=True,
-        retriever_specific_config={
-            "include_global_context_index": True,
-            "global_context_index_top_k": 3,
-        },
-    )
-    print(with_index[0].text)
+    await cognee.improve(dataset=DATASET, build_global_context_index=True)
+    await print_index_structure("Index structure after adding one more fact:")
 
 
 if __name__ == "__main__":

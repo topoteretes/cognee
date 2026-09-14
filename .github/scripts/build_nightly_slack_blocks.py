@@ -13,7 +13,8 @@ Input (env):
                `metrics` output; empty/unparseable is treated as `{}`, which is
                what a failed job produces. A `tenant_create` key adds the
                cloud-only tenant row.
-  STATUS_*     header fields (emoji, summary, ran_at, ollama, llamacpp).
+  STATUS_*     header fields (emoji, summary, ran_at, branch, cadence,
+               sha — the last three fall back if unset).
   RUN_URL      link target for the footer.
 
 Output: `blocks=<compact JSON>` appended to $GITHUB_OUTPUT (stdout if unset).
@@ -29,16 +30,36 @@ import sys
 # `p50`, preserved verbatim from the hand-written YAML this replaced: the
 # columns do not line up (add/cognify/tenant end at 9, search/total at 11), and
 # reproducing that exactly is what lets the migration be diffed to zero.
-ROWS = [("add", 6), ("cognify", 2), ("search", 5), ("total", 6)]
+ROWS_BEFORE_SEARCH = [("add", 6), ("cognify", 2)]
+ROWS_AFTER_SEARCH = [("total", 6)]
 TENANT_ROW = ("tenant", 3)
-# Metric rows read `<key>.p50` etc. from the arm's metrics object; the tenant
-# row is the one whose label differs from its JSON key.
-METRIC_KEY = {"tenant": "tenant_create"}
+# Search rows, in render order. The Python and cloud arms time each search type
+# separately (`search_graph` / `search_hybrid`); the Rust SDK arm still reports
+# a single `search`. search_rows() picks whichever the arm actually carries.
+SEARCH_ROWS = [("search", 5), ("search graph", 3), ("search hybrid", 2)]
+# Metric rows read `<key>.p50` etc. from the arm's metrics object; these are the
+# rows whose label differs from its JSON key.
+METRIC_KEY = {
+    "tenant": "tenant_create",
+    "search graph": "search_graph",
+    "search hybrid": "search_hybrid",
+}
 PERCENTILES = ("p50", "p90", "p99")
 
 
 def section(text):
     return {"type": "section", "text": {"type": "mrkdwn", "text": text}}
+
+
+def search_rows(metrics):
+    """The search rows this arm reports.
+
+    A failed job produces `{}`, which matches none of them — fall back to the
+    single legacy row so the arm still renders a search line with blank
+    numbers rather than silently losing it.
+    """
+    rows = [row for row in SEARCH_ROWS if METRIC_KEY.get(row[0], row[0]) in metrics]
+    return rows or [SEARCH_ROWS[0]]
 
 
 def metric_row(metrics, label, pad):
@@ -57,7 +78,7 @@ def arm_block(emoji, title, result, metrics_json, url):
         metrics = {}
 
     rows = [TENANT_ROW] if "tenant_create" in metrics else []
-    rows += ROWS
+    rows += ROWS_BEFORE_SEARCH + search_rows(metrics) + ROWS_AFTER_SEARCH
 
     lines = [f"*{emoji} {title}* (`{result}`)  •  runs `{metrics.get('success', '')}`"]
     lines += [metric_row(metrics, label, pad) for label, pad in rows]
@@ -67,14 +88,20 @@ def arm_block(emoji, title, result, metrics_json, url):
 
 def main():
     env = os.environ
+    # Fall back rather than raise: a hand-dispatch or an older caller may not
+    # set these, and a missing label must not cost the whole message.
+    branch = env.get("STATUS_BRANCH") or "?"
+    cadence = env.get("STATUS_CADENCE") or "manual"
+    sha = (env.get("STATUS_SHA") or "")[:7]
     header = section(
-        f"{env.get('STATUS_EMOJI', '')} *Nightly Tests* — {env.get('STATUS_SUMMARY', '')}\n"
-        f"*Ran at:* `{env.get('STATUS_RAN_AT', '')}`\n"
-        f"*Ollama:* `{env.get('STATUS_OLLAMA', '')}`  •  "
-        f"*Llama-cpp:* `{env.get('STATUS_LLAMACPP', '')}`\n"
+        f"{env.get('STATUS_EMOJI', '')} *Nightly Tests* — `{branch}` — "
+        f"{env.get('STATUS_SUMMARY', '')}\n"
+        f"*Ran at:* `{env.get('STATUS_RAN_AT', '')}`  •  "
+        f"*Branch:* `{branch}` (`{cadence}`)  •  *Commit:* `{sha}`"
     )
 
     blocks = [header]
+    skipped = 0
     for line in env.get("ARMS", "").splitlines():
         if not line.strip():
             continue
@@ -83,8 +110,23 @@ def main():
             raise SystemExit(
                 f"ARMS line must have 5 pipe-separated fields, got {len(fields)}: {line!r}"
             )
-        blocks.append(arm_block(*(f.strip() for f in fields)))
+        emoji, title, result, metrics_json, url = (f.strip() for f in fields)
+        # A cadence-gated arm reports `skipped` and carries no numbers, no
+        # report and no link, so rendering it costs dead lines in a report
+        # that is meant to stay scannable. A FAILED arm still renders: a
+        # missing failure reads as "this suite does not exist", which is worse.
+        if result == "skipped":
+            skipped += 1
+            continue
+        blocks.append(arm_block(emoji, title, result, metrics_json, url))
 
+    # Deliberately worded "not run this cadence", not "weekly arms": a future
+    # `needs:` could skip an arm for a different reason and this line must not
+    # then lie about why.
+    blocks[0] = section(
+        blocks[0]["text"]["text"]
+        + (f"  •  `{skipped}` arms not run this cadence\n" if skipped else "\n")
+    )
     blocks.append(section(f"<{env.get('RUN_URL', '')}|View run>\n"))
 
     payload = f"blocks={json.dumps(blocks, ensure_ascii=False, separators=(',', ':'))}"

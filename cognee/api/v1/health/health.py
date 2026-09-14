@@ -1,16 +1,16 @@
 """Health check system for cognee API."""
 
-from io import BytesIO
-import time
 import asyncio
-from sqlalchemy import text
+import time
 from datetime import datetime, timezone
-from typing import Dict
 from enum import Enum
-from pydantic import BaseModel
+from io import BytesIO
 
-from cognee.version import get_cognee_version
+from pydantic import BaseModel
+from sqlalchemy import text
+
 from cognee.shared.logging_utils import get_logger
+from cognee.version import get_cognee_version
 
 logger = get_logger()
 
@@ -33,7 +33,7 @@ class HealthResponse(BaseModel):
     timestamp: str
     version: str
     uptime: int
-    components: Dict[str, ComponentHealth]
+    components: dict[str, ComponentHealth]
 
 
 class HealthChecker:
@@ -44,10 +44,10 @@ class HealthChecker:
         """Check relational database health."""
         start_time = time.time()
         try:
+            from cognee.infrastructure.databases.relational.config import get_relational_config
             from cognee.infrastructure.databases.relational.get_relational_engine import (
                 get_relational_engine,
             )
-            from cognee.infrastructure.databases.relational.config import get_relational_config
 
             config = get_relational_config()
             engine = get_relational_engine()
@@ -68,22 +68,22 @@ class HealthChecker:
             )
         except Exception as e:
             response_time = int((time.time() - start_time) * 1000)
-            logger.error(f"Relational DB health check failed: {str(e)}", exc_info=True)
+            logger.exception("Relational DB health check failed")
             return ComponentHealth(
                 status=HealthStatus.UNHEALTHY,
                 provider="unknown",
                 response_time_ms=response_time,
-                details=f"Connection failed: {str(e)}",
+                details=f"Connection failed: {e!s}",
             )
 
     async def check_vector_db(self) -> ComponentHealth:
         """Check vector database health."""
         start_time = time.time()
         try:
+            from cognee.infrastructure.databases.vector.config import get_vectordb_config
             from cognee.infrastructure.databases.vector.get_vector_engine import (
                 get_vector_engine_async,
             )
-            from cognee.infrastructure.databases.vector.config import get_vectordb_config
 
             config = get_vectordb_config()
             engine = await get_vector_engine_async()
@@ -104,20 +104,20 @@ class HealthChecker:
             )
         except Exception as e:
             response_time = int((time.time() - start_time) * 1000)
-            logger.error(f"Vector DB health check failed: {str(e)}", exc_info=True)
+            logger.exception("Vector DB health check failed")
             return ComponentHealth(
                 status=HealthStatus.UNHEALTHY,
                 provider="unknown",
                 response_time_ms=response_time,
-                details=f"Connection failed: {str(e)}",
+                details=f"Connection failed: {e!s}",
             )
 
     async def check_graph_db(self) -> ComponentHealth:
         """Check graph database health."""
         start_time = time.time()
         try:
-            from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
             from cognee.infrastructure.databases.graph.config import get_graph_config
+            from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 
             config = get_graph_config()
             engine = await get_graph_engine()
@@ -136,12 +136,12 @@ class HealthChecker:
             )
         except Exception as e:
             response_time = int((time.time() - start_time) * 1000)
-            logger.error(f"Graph DB health check failed: {str(e)}", exc_info=True)
+            logger.exception("Graph DB health check failed")
             return ComponentHealth(
                 status=HealthStatus.UNHEALTHY,
                 provider="unknown",
                 response_time_ms=response_time,
-                details=f"Connection failed: {str(e)}",
+                details=f"Connection failed: {e!s}",
             )
 
     async def check_file_storage(self) -> ComponentHealth:
@@ -149,8 +149,9 @@ class HealthChecker:
         start_time = time.time()
         try:
             import os
-            from cognee.infrastructure.files.storage.get_file_storage import get_file_storage
+
             from cognee.base_config import get_base_config
+            from cognee.infrastructure.files.storage.get_file_storage import get_file_storage
 
             base_config = get_base_config()
             storage = get_file_storage(base_config.data_root_directory)
@@ -158,17 +159,22 @@ class HealthChecker:
             # Determine provider
             provider = "s3" if base_config.data_root_directory.startswith("s3://") else "local"
 
+            import uuid
+
+            test_id = str(uuid.uuid4())
             # Test storage accessibility - for local storage, just check directory exists
             if provider == "local":
                 os.makedirs(base_config.data_root_directory, exist_ok=True)
                 # Simple write/read test
-                test_file = os.path.join(base_config.data_root_directory, "health_check_test")
+                test_file = os.path.join(
+                    base_config.data_root_directory, f"health_check_test_{test_id}"
+                )
                 with open(test_file, "w") as f:
                     f.write("test")
                 os.remove(test_file)
             else:
                 # For S3, test basic operations
-                test_path = "health_check_test"
+                test_path = f"health_check_test_{test_id}"
                 await storage.store(test_path, BytesIO(b"test"))
                 await storage.remove(test_path)
 
@@ -180,12 +186,15 @@ class HealthChecker:
                 details="Storage accessible",
             )
         except Exception as e:
+            logger.debug(
+                "Falling back after error in HealthChecker.check_file_storage", exc_info=True
+            )
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(
                 status=HealthStatus.UNHEALTHY,
                 provider="unknown",
                 response_time_ms=response_time,
-                details=f"Storage test failed: {str(e)}",
+                details=f"Storage test failed: {e!s}",
             )
 
     async def check_llm_provider(self) -> ComponentHealth:
@@ -209,12 +218,12 @@ class HealthChecker:
             )
         except Exception as e:
             response_time = int((time.time() - start_time) * 1000)
-            logger.error(f"LLM provider health check failed: {str(e)}", exc_info=True)
+            logger.exception("LLM provider health check failed")
             return ComponentHealth(
                 status=HealthStatus.DEGRADED,
                 provider="unknown",
                 response_time_ms=response_time,
-                details=f"API check failed: {str(e)}",
+                details=f"API check failed: {e!s}",
             )
 
     async def check_embedding_service(self) -> ComponentHealth:
@@ -233,12 +242,15 @@ class HealthChecker:
                 details="Embedding generation working",
             )
         except Exception as e:
+            logger.debug(
+                "Falling back after error in HealthChecker.check_embedding_service", exc_info=True
+            )
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(
                 status=HealthStatus.DEGRADED,
                 provider="unknown",
                 response_time_ms=response_time,
-                details=f"Embedding test failed: {str(e)}",
+                details=f"Embedding test failed: {e!s}",
             )
 
     async def get_health_status(self, detailed: bool = False) -> HealthResponse:
@@ -263,7 +275,7 @@ class HealthChecker:
                     status=HealthStatus.UNHEALTHY,
                     provider="unknown",
                     response_time_ms=0,
-                    details=f"Health check failed: {str(result)}",
+                    details=f"Health check failed: {result!s}",
                 )
             else:
                 components[name] = result
@@ -286,7 +298,7 @@ class HealthChecker:
                         status=HealthStatus.DEGRADED,
                         provider="unknown",
                         response_time_ms=0,
-                        details=f"Health check failed: {str(result)}",
+                        details=f"Health check failed: {result!s}",
                     )
                 else:
                     components[name] = result
