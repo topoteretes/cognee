@@ -47,6 +47,11 @@ class GraphCompletionRetriever(BaseRetriever):
     LLM completions using the retrieved graph data (get_completion_from_context function).
     """
 
+    # An empty graph must yield an empty result, not a phantom LLM deflection
+    # (SDK-270 / gh #3728). Applies to the whole graph-completion family via
+    # inheritance; AgenticRetriever opts back out.
+    skip_completion_on_empty_context = True
+
     def __init__(
         self,
         user_prompt_path: str = "graph_context_for_question.txt",
@@ -390,6 +395,14 @@ class GraphCompletionRetriever(BaseRetriever):
         Note: To avoid duplicate retrievals, ensure that retrieved_objects and context
               are provided from previous method calls.
         """
+        if self.skip_completion_on_empty_context and not query_batch and not context:
+            # Empty context must not reach the LLM: the only possible output is
+            # a phantom "no context provided" deflection that callers cannot
+            # distinguish from a real answer (SDK-270 / gh #3728). An empty
+            # result also lets recall()'s on_empty fallback actually fire.
+            logger.warning("Empty context: skipping LLM completion, returning no results")
+            return []
+
         use_session = self._use_session_cache() and not query_batch
         if use_session:
             sm = get_session_manager()
