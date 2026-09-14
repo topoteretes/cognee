@@ -28,7 +28,10 @@ from cognee.infrastructure.session.session_concurrent_turn import (
     complete_turn,
     load_turn_context,
 )
-from cognee.infrastructure.session.session_turn import decide_turn_answer
+from cognee.infrastructure.session.session_turn import (
+    acknowledgement_for_turn,
+    should_answer_turn,
+)
 from cognee.modules.observability import (
     COGNEE_RESULT_COUNT,
     COGNEE_RESULT_SUMMARY,
@@ -330,13 +333,12 @@ async def run_concurrent_session_turn(
             analysis = SessionTurnAnalysis()
             answer_lane_result = await answer_lane
         retrieved_objects, context, generated_answer = answer_lane_result
-
-        decision = decide_turn_answer(
-            analysis,
-            raw_query=snapshot.raw_message,
-            has_previous_qa=bool(snapshot.previous_qa_id),
+        should_answer = should_answer_turn(analysis, has_previous_qa=bool(snapshot.previous_qa_id))
+        stored_answer = (
+            generated_answer
+            if should_answer
+            else acknowledgement_for_turn(analysis.response_to_user)
         )
-        stored_answer = generated_answer if decision.should_answer else decision.response_to_user
 
         await commit_turn(
             session_manager,
@@ -348,8 +350,8 @@ async def run_concurrent_session_turn(
             used_graph_element_ids=retriever.extract_context_object_ids(retrieved_objects),
         )
 
-    if not decision.should_answer:
-        return retrieved_objects, context, [decision.response_to_user]
+    if not should_answer:
+        return retrieved_objects, context, [stored_answer]
     completions = await retriever.append_references([generated_answer], retrieved_objects)
     return retrieved_objects, context, completions
 
@@ -396,7 +398,7 @@ async def run_sequential_session_turn(
     if not only_context and getattr(retriever, "supports_session_turn_preparation", True):
         turn_preparation = await retriever.prepare_session_turn_for_retrieval(raw_query)
         if not turn_preparation.should_answer:
-            acknowledgement = turn_preparation.response_to_user or "Got it."
+            acknowledgement = acknowledgement_for_turn(turn_preparation.response_to_user)
             await _record_no_answer_turn(retriever, raw_query=raw_query, answer=acknowledgement)
             return None, None, [acknowledgement]
         effective_query = turn_preparation.effective_query or raw_query
