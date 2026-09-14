@@ -76,4 +76,17 @@ class ImproveConfig(BaseSettings):
 
 @lru_cache
 def get_improve_config() -> ImproveConfig:
-    return ImproveConfig()
+    """The env-built config, validated against the real stage registry.
+
+    Stage names are checked HERE, not in ``ImproveConfig`` itself: the model
+    must stay constructible with arbitrary names for non-default stage sets
+    (tests, custom registries), but an env typo must fail at the first read
+    with the valid names in the message — the API server touches this at
+    startup so a bad ``IMPROVE_STAGES_DISABLED`` fails the boot, not every
+    later request.
+    """
+    config = ImproveConfig()
+    from .registry import DEFAULT_STAGES, validate_stages_disabled
+
+    validate_stages_disabled(config.stages_disabled, DEFAULT_STAGES)
+    return config
