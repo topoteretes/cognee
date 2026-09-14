@@ -1019,6 +1019,36 @@ class LanceDBAdapter(VectorDBInterface):
             for result in results_list
         ]
 
+    SCORE_ID_BATCH_SIZE = 1000
+
+    async def score_by_ids(
+        self, collection_name: str, data_point_ids: list[str], query_vector: list[float]
+    ) -> list[ScoredResult]:
+        ids = list(dict.fromkeys(str(point_id) for point_id in data_point_ids))
+        if not ids:
+            return []
+        collection = await self.get_collection(collection_name)
+        scores = []
+        for start in range(0, len(ids), self.SCORE_ID_BATCH_SIZE):
+            batch = ids[start : start + self.SCORE_ID_BATCH_SIZE]
+            literals = ", ".join("'" + point_id.replace("'", "''") + "'" for point_id in batch)
+            # where() prefilters by default. Bypass ANN so even an indexed table
+            # scores every requested row, including neighbors far from the query.
+            rows = await (
+                collection.vector_search(query_vector)
+                .distance_type("cosine")
+                .where(f"id IN ({literals})")
+                .bypass_vector_index()
+                .select(["id", "_distance"])
+                .limit(len(batch))
+                .to_list()
+            )
+            scores.extend(
+                ScoredResult(id=parse_id(row["id"]), score=float(row["_distance"]), payload=None)
+                for row in rows
+            )
+        return scores
+
     async def search(
         self,
         collection_name: str,

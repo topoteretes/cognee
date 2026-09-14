@@ -11,7 +11,6 @@ async def get_dataset_ids(datasets: list[str] | list[UUID], user):
     If a user wants to write to a dataset he is not the owner of it must be provided through UUID.
     Args:
         datasets:
-        pipeline_name:
         user:
 
     Returns: a list of write access dataset_ids if they exist
@@ -33,7 +32,7 @@ async def get_dataset_ids(datasets: list[str] | list[UUID], user):
             ]
         else:
             raise DatasetTypeError(
-                f"One or more of the provided dataset types is not handled: f{datasets}"
+                f"One or more of the provided dataset types is not handled: {datasets}"
             )
 
     return dataset_ids
