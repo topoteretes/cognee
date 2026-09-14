@@ -120,7 +120,9 @@ _OPERATIONS: list[dict[str, Any]] = [
         "effects": [
             {"effect": "modifies", "target_type": "Entity", "property": "description"},
             {"effect": "modifies", "target_type": "EntityType", "property": "description"},
-            {"effect": "modifies", "target_type": "EntityType", "property": "is_a.edge_text"},
+            # The field is Entity.is_a and the artifact is the entity->type edge,
+            # so this effect belongs to Entity, not to the type node.
+            {"effect": "modifies", "target_type": "Entity", "property": "is_a.edge_text"},
         ],
     },
     {
