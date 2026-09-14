@@ -431,7 +431,13 @@ async def _improve_remotely(
     overrides: dict,
 ) -> ImproveResult:
     """Forward every option to the configured server, which runs the same
-    stages and hands back its ``ImproveResult``."""
+    stages and hands back its ``ImproveResult``.
+
+    ``run_in_background=True`` over serve() is fire-and-forget: the server
+    returns the running result and finishes on its own, but no local task is
+    attached, so ``result.status`` stays ``"running"`` and ``await
+    result.wait()`` returns immediately. There is no polling endpoint yet.
+    """
     payload = await remote_client.improve(
         dataset,
         node_name=node_name,

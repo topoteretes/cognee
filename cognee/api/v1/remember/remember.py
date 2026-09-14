@@ -1346,6 +1346,14 @@ async def _remember_inner(
                 "extractor is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose the extractor locally."
             )
+        if session_ids:
+            # Same discipline as extractor: POST /remember carries no
+            # session_ids field, so forwarding would silently drop them.
+            raise ValueError(
+                "session_ids is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect(), or call improve() with the "
+                "session ids after the remote remember finishes."
+            )
         span.set_attribute(COGNEE_OPERATION_MODE, "cloud")
         return await client.remember(
             data,
@@ -1355,6 +1363,7 @@ async def _remember_inner(
             chunk_size=chunk_size,
             custom_prompt=custom_prompt,
             run_in_background=run_in_background,
+            self_improvement=self_improvement,
             **kwargs,
         )
 

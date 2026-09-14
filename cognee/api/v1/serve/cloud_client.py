@@ -105,6 +105,8 @@ class CloudClient:
             form.add_field("session_id", kwargs["session_id"])
         if kwargs.get("run_in_background"):
             form.add_field("run_in_background", "true")
+        if kwargs.get("self_improvement") is not None:
+            form.add_field("self_improvement", "true" if kwargs["self_improvement"] else "false")
         if kwargs.get("custom_prompt"):
             form.add_field("custom_prompt", kwargs["custom_prompt"])
         if kwargs.get("chunk_size") is not None:
@@ -284,6 +286,14 @@ class CloudClient:
             payload["run_in_background"] = True
         if kwargs.get("node_name"):
             payload["node_name"] = kwargs["node_name"]
+        if kwargs.get("session_ids"):
+            payload["session_ids"] = list(kwargs["session_ids"])
+        if kwargs.get("build_global_context_index"):
+            payload["build_global_context_index"] = True
+        if kwargs.get("build_truth_subspace"):
+            payload["build_truth_subspace"] = True
+        if kwargs.get("feedback_alpha") is not None:
+            payload["feedback_alpha"] = kwargs["feedback_alpha"]
 
         async with session.post(
             f"{self.service_url}/api/v1/improve",
