@@ -24,7 +24,7 @@ from cognee.tasks.memify.consolidate_entity_descriptions.models import (
     NodeDescription,
 )
 from cognee.tasks.memify.consolidate_entity_descriptions.read_neighborhood import (
-    format_connections,
+    format_edges_with_endpoints,
 )
 from cognee.tasks.memify.consolidate_entity_descriptions.rewrite_entities import (
     generate_consolidated_entities,
@@ -44,12 +44,12 @@ def _node(entity_id, name, description, edges, neighbors, entity_types):
     }
 
 
-def test_format_connections_extracts_edge_text_and_entity_type():
+def test_format_edges_with_endpoints_extracts_edge_text_and_entity_type():
     node_id = "entity-1"
     type_id = "type-1"
     neighbor_id = "entity-2"
 
-    connections = [
+    edges_with_endpoints = [
         (
             {"id": node_id, "name": "Marco", "type": "Entity"},
             {"relationship_name": "works_at", "edge_text": "Marco works in Milan"},
@@ -62,7 +62,7 @@ def test_format_connections_extracts_edge_text_and_entity_type():
         ),
     ]
 
-    entity_types, edges, neighbors = format_connections(node_id, connections)
+    entity_types, edges, neighbors = format_edges_with_endpoints(node_id, edges_with_endpoints)
 
     assert [entity_type["id"] for entity_type in entity_types] == [type_id]
     assert edges[neighbor_id] == [
@@ -74,10 +74,10 @@ def test_format_connections_extracts_edge_text_and_entity_type():
     assert any(neighbor["id"] == neighbor_id for neighbor in neighbors)
 
 
-def test_format_connections_collects_every_entity_type_not_just_the_last():
+def test_format_edges_with_endpoints_collects_every_entity_type_not_just_the_last():
     node_id = "entity-1"
 
-    connections = [
+    edges_with_endpoints = [
         (
             {"id": "type-person", "name": "Person", "type": "EntityType"},
             {"relationship_name": "is_a"},
@@ -90,16 +90,16 @@ def test_format_connections_collects_every_entity_type_not_just_the_last():
         ),
     ]
 
-    entity_types, _, _ = format_connections(node_id, connections)
+    entity_types, _, _ = format_edges_with_endpoints(node_id, edges_with_endpoints)
 
     assert {entity_type["id"] for entity_type in entity_types} == {"type-person", "type-author"}
 
 
-def test_format_connections_omits_edge_text_when_absent():
+def test_format_edges_with_endpoints_omits_edge_text_when_absent():
     node_id = "entity-1"
     neighbor_id = "entity-2"
 
-    connections = [
+    edges_with_endpoints = [
         (
             {"id": node_id, "name": "Marco", "type": "Entity"},
             {"relationship_name": "is_a"},
@@ -107,13 +107,13 @@ def test_format_connections_omits_edge_text_when_absent():
         ),
     ]
 
-    _, edges, _ = format_connections(node_id, connections)
+    _, edges, _ = format_edges_with_endpoints(node_id, edges_with_endpoints)
 
     assert edges[neighbor_id][0]["relationship_name"] == "is_a"
     assert edges[neighbor_id][0]["edge_text"] is None
 
 
-def test_format_connections_keeps_every_edge_between_the_same_pair():
+def test_format_edges_with_endpoints_keeps_every_edge_between_the_same_pair():
     # Regression test: two distinct relationships connecting the same pair of
     # nodes used to collapse into one - the second overwrote the first in the
     # edges dict, and the neighbor was listed twice in filtered_neighbors
@@ -121,7 +121,7 @@ def test_format_connections_keeps_every_edge_between_the_same_pair():
     node_id = "marco-id"
     neighbor_id = "milano-id"
 
-    connections = [
+    edges_with_endpoints = [
         (
             {"id": node_id, "name": "Marco", "type": "Entity"},
             {"relationship_name": "works_at", "edge_text": "Marco works in Milan."},
@@ -134,7 +134,7 @@ def test_format_connections_keeps_every_edge_between_the_same_pair():
         ),
     ]
 
-    entity_types, edges, neighbors = format_connections(node_id, connections)
+    entity_types, edges, neighbors = format_edges_with_endpoints(node_id, edges_with_endpoints)
 
     assert edges[neighbor_id] == [
         {"relationship_name": "works_at", "edge_text": "Marco works in Milan."},

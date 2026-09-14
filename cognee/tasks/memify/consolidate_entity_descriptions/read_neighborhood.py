@@ -21,9 +21,11 @@ async def get_entity_neighborhood(
     feedback_weight, importance_weight, belongs_to_set, and every other field
     this pipeline has no opinion about.
     """
-    connections = await graph_engine.get_connections(node_id)
+    edges_with_endpoints = await get_edges_with_endpoints(graph_engine, node_id)
 
-    entity_types, edges, filtered_neighbors = format_connections(node_id, connections)
+    entity_types, edges, filtered_neighbors = format_edges_with_endpoints(
+        node_id, edges_with_endpoints
+    )
     entity_props = dict(props)
     if "id" not in entity_props:
         entity_props["id"] = str(node_id)
@@ -35,16 +37,23 @@ async def get_entity_neighborhood(
     }
 
 
-def format_connections(
+async def get_edges_with_endpoints(graph_engine, node_id):
+    """Incident edges as (source, edge, target), including edge properties.
+
+    Wraps graph_engine.get_connections(); get_edges() never returns edge_text.
+    """
+    return await graph_engine.get_connections(node_id)
+
+
+def format_edges_with_endpoints(
     node_id: str,
-    connections: List[Any],
+    edges_with_endpoints: List[Any],
     node_fields: Optional[Set[str]] = None,
 ) -> tuple[List[Dict[str, Any]], Dict[str, List[Dict[str, Optional[str]]]], List[Dict[str, Any]]]:
-    """Split get_connections() triples into EntityType neighbors, edge info, and other neighbors.
+    """Split (source, edge, target) triples into EntityType neighbors, edges, and other neighbors.
 
-    get_connections(node_id) returns (source, edge, target) triples where node_id
-    can be on either side of the edge, so the neighbor is whichever side does not
-    match node_id. Unlike get_edges() (which never carries edge properties on any
+    node_id can be on either side of the edge, so the neighbor is the other
+    endpoint. Unlike get_edges() (which never carries edge properties on any
     backend), the edge dict here includes edge_text when the edge has one.
 
     An entity can have more than one EntityType neighbor - e.g. classified
@@ -68,11 +77,11 @@ def format_connections(
     filtered_neighbors: List[Dict[str, Any]] = []
     seen_neighbor_ids: Set[str] = set()
 
-    for connection in connections:
-        if not isinstance(connection, (list, tuple)) or len(connection) != 3:
+    for triple in edges_with_endpoints:
+        if not isinstance(triple, (list, tuple)) or len(triple) != 3:
             continue
 
-        source, edge_info, target = connection
+        source, edge_info, target = triple
         neighbor = target if str(source.get("id")) == str(node_id) else source
         neighbor_id = str(neighbor.get("id", ""))
 
