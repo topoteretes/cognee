@@ -143,32 +143,40 @@ def is_entry_distillable(entry: SessionContextEntry) -> bool:
     return clamped_net_helpfulness(entry) >= 0 and entry.confidence >= MIN_GATE_CONFIDENCE
 
 
-async def load_distillable_session_inputs(
+async def load_distillable_context_entries(
     scope: SessionDistillationScope,
-) -> tuple[list[dict], list[SessionContextEntry]]:
-    """Load QA turns and keep context entries worth distilling."""
+) -> list[SessionContextEntry]:
+    """Load the session's context entries and keep the distillable ones.
+
+    Split from the QA load on purpose: this read decides the two cheap exits
+    (``no_gated_entries``, ``no_new_entries``), and the default debounce runs
+    distillation after every ``remember(session_id=...)`` — the full QA history
+    must not be loaded and dumped just to conclude there is nothing to do.
+    """
     session_manager = get_session_manager()
     context_rows = await session_manager.get_session_context_entries(
         user_id=scope.user_id,
         session_id=scope.session_id,
     )
+    return [
+        entry
+        for entry in coerce_active_context_entries(context_rows)
+        if is_entry_distillable(entry)
+    ]
 
+
+async def load_session_qa_rows(scope: SessionDistillationScope) -> list[dict]:
+    """Load the session's QA turns for curator batching — only after the exits."""
+    session_manager = get_session_manager()
     raw_qa = await session_manager.get_session(
         user_id=scope.user_id,
         session_id=scope.session_id,
         formatted=False,
     )
-    qa_rows = [
+    return [
         entry.model_dump() if hasattr(entry, "model_dump") else dict(entry)
         for entry in (raw_qa if isinstance(raw_qa, list) else [])
     ]
-
-    context_entries = [
-        entry
-        for entry in coerce_active_context_entries(context_rows)
-        if is_entry_distillable(entry)
-    ]
-    return qa_rows, context_entries
 
 
 def build_curator_batches(
@@ -473,7 +481,7 @@ async def distill_session(
     """
     scope = await resolve_distillation_scope(session_id=session_id, dataset=dataset, user=user)
 
-    qa_rows, context_entries = await load_distillable_session_inputs(scope)
+    context_entries = await load_distillable_context_entries(scope)
     if not context_entries:
         return scope.result("no_gated_entries")
 
@@ -487,6 +495,7 @@ async def distill_session(
         )
         return scope.result("no_new_entries")
 
+    qa_rows = await load_session_qa_rows(scope)
     proposed, curator_failures = await propose_lessons(qa_rows, context_entries)
     if not proposed and not curator_failures:
         await advance_distillation_watermark(scope, context_entries)

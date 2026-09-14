@@ -77,13 +77,18 @@ class TestLoadDistillableSessionInputs:
         )
         monkeypatch.setattr(distill_module, "get_session_manager", lambda: session_manager)
 
-        qa_rows, context_entries = await distill_module.load_distillable_session_inputs(
+        context_entries = await distill_module.load_distillable_context_entries(
+            SimpleNamespace(user_id="u-1", session_id="s-1")
+        )
+        qa_rows = await distill_module.load_session_qa_rows(
             SimpleNamespace(user_id="u-1", session_id="s-1")
         )
 
         assert len(qa_rows) == 1
         assert qa_rows[0]["question"] == "What changed?"
         assert len(context_entries) == 4
+        # The context load never touches the QA history: the cheap exits in
+        # distill_session run before any QA read.
         session_manager.get_session_context_entries.assert_awaited_once_with(
             user_id="u-1",
             session_id="s-1",
@@ -110,7 +115,7 @@ class TestLoadDistillableSessionInputs:
         )
         monkeypatch.setattr(distill_module, "get_session_manager", lambda: session_manager)
 
-        _qa_rows, context_entries = await distill_module.load_distillable_session_inputs(
+        context_entries = await distill_module.load_distillable_context_entries(
             SimpleNamespace(user_id="u-1", session_id="s-1")
         )
 
@@ -161,7 +166,7 @@ class TestIsEntryDistillable:
         )
         monkeypatch.setattr(distill_module, "get_session_manager", lambda: session_manager)
 
-        _qa_rows, context_entries = await distill_module.load_distillable_session_inputs(
+        context_entries = await distill_module.load_distillable_context_entries(
             SimpleNamespace(user_id="u-1", session_id="s-1")
         )
 
@@ -317,7 +322,7 @@ class TestProfileSymmetry:
 
         # (3) Distillation sees both profiles.
         monkeypatch.setattr(distill_module, "get_session_manager", lambda: sm)
-        _qa_rows, entries = await distill_module.load_distillable_session_inputs(
+        entries = await distill_module.load_distillable_context_entries(
             SimpleNamespace(user_id="u", session_id="s")
         )
         assert {entry.context_profile for entry in entries} == {"qa", "agent"}

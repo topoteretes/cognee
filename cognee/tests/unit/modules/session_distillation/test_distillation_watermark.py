@@ -385,3 +385,27 @@ async def test_curate_batch_reports_failure_as_none(monkeypatch):
     proposed, failed = await distill_module.propose_lessons([{"question": "q", "answer": "a"}], [])
     assert proposed == []
     assert failed >= 1
+
+
+@pytest.mark.asyncio
+async def test_idle_run_never_reads_the_qa_history(monkeypatch, datasets):
+    """The default debounce runs distillation after every remember(session_id=...),
+    so the no_new_entries exit must stay cheap: no QA-history load, no dump."""
+    rows = [_context_row("Lesson one.")]
+
+    class CountingManager(FakeSessionManager):
+        qa_reads = 0
+
+        async def get_session(self, **kwargs):
+            type(self).qa_reads += 1
+            return []
+
+    manager = CountingManager(rows)
+    _install_manager(monkeypatch, manager)
+    await save_distilled_entry_ids(manager, str(USER.id), "s-1", str(DATASET_A.id), [rows[0]["id"]])
+    _forbid_llm(monkeypatch)
+
+    result = await distill_module.distill_session("s-1", dataset=DATASET_A.name, user=USER)
+
+    assert result.status == "no_new_entries"
+    assert CountingManager.qa_reads == 0
