@@ -827,13 +827,17 @@ def build_operation_layer(
     def resolve_targets(effect):
         names = set()
         target_type = effect.get("target_type")
-        if target_type == "Entity":
+        node_set = effect.get("target_node_set")
+        # A node set on the effect SCOPES it: the operation touches only that
+        # set's subgraph, so expanding "Entity" to every semantic entity type
+        # would mark e.g. distill_sessions as the observed producer of any
+        # cognify-built graph's types (both publish through cognify_pipeline).
+        if target_type == "Entity" and not node_set:
             names |= semantic_entity_types & present
             if "Entity" in present:
                 names.add("Entity")
-        elif target_type and target_type in present:
+        elif target_type and target_type != "Entity" and target_type in present:
             names.add(target_type)
-        node_set = effect.get("target_node_set")
         if node_set and node_set in present:
             names.add(node_set)
         return names
