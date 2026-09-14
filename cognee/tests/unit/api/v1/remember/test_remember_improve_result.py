@@ -251,15 +251,19 @@ async def test_telemetry_never_carries_raw_session_ids(monkeypatch, permanent_pi
     remember_events = [props for name, props in events if name == "cognee.remember"]
     assert len(remember_events) == 2
     session_props, permanent_props = remember_events
-    expected = remember_module._hash_session_id("alice-private-chat")
-    assert session_props["session_id"] == expected
-    assert len(expected) == 16
+    # Hashing happens centrally inside send_telemetry
+    # (TELEMETRY_SANITIZED_PROPERTIES), so the call site must put session ids
+    # ONLY under the key names that rule covers.
+    from cognee.shared.utils import TELEMETRY_SANITIZED_PROPERTIES, _sanitize_nested_properties
+
+    assert "session_id" in TELEMETRY_SANITIZED_PROPERTIES
+    assert "session_ids" in TELEMETRY_SANITIZED_PROPERTIES
+    assert session_props["session_id"] == "alice-private-chat"
     assert permanent_props["session_id"] == ""
-    assert permanent_props["session_ids"] == ",".join(
-        remember_module._hash_session_id(sid) for sid in ["alice-private-chat", "bob-chat"]
-    )
+    assert permanent_props["session_ids"] == "alice-private-chat,bob-chat"
     for props in remember_events:
-        blob = " ".join(str(value) for value in props.values())
+        sanitized = _sanitize_nested_properties(props, TELEMETRY_SANITIZED_PROPERTIES)
+        blob = " ".join(str(value) for value in sanitized.values())
         assert "alice-private-chat" not in blob
         assert "bob-chat" not in blob
 

@@ -16,7 +16,6 @@ would be data loss: it stops the run and raises, carrying the partial
 """
 
 import asyncio
-import hashlib
 from collections.abc import Callable, Coroutine, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -496,16 +495,12 @@ def _send_improve_telemetry(
         additional_properties={
             "dataset": str(dataset),
             "session_count": len(session_ids),
-            # Hashed, never raw: session ids are user-chosen strings.
-            "session_ids": ",".join(_hash_session_id(sid) for sid in session_ids),
+            # Session ids are user-chosen strings; send_telemetry hashes this
+            # key centrally (TELEMETRY_SANITIZED_PROPERTIES), never sent raw.
+            "session_ids": ",".join(session_ids),
             "run_in_background": run_in_background,
             "build_global_context_index": build_global_context_index,
             "build_truth_subspace": build_truth_subspace,
             "cognee_version": cognee_version,
         },
     )
-
-
-def _hash_session_id(session_id: str) -> str:
-    """Short, stable, non-reversible token for telemetry — never the raw id."""
-    return hashlib.sha256(str(session_id).encode("utf-8")).hexdigest()[:16]

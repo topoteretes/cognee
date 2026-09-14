@@ -511,15 +511,21 @@ async def test_cancelled_background_run_still_closes_the_operation(harness):
 
 
 @pytest.mark.asyncio
-async def test_telemetry_hashes_session_ids(harness):
+async def test_telemetry_puts_session_ids_under_the_sanitized_key(harness):
+    """send_telemetry hashes session ids centrally (TELEMETRY_SANITIZED_PROPERTIES);
+    the call site's job is to put them ONLY under a key that rule covers."""
+    from cognee.shared.utils import TELEMETRY_SANITIZED_PROPERTIES, _sanitize_nested_properties
+
     harness.use_stages([FakeStage("a")])
 
     await harness.improve(session_ids=["very-secret-session"])
 
     props = harness.telemetry[0]["properties"]
     assert props["session_count"] == 1
-    assert "very-secret-session" not in props["session_ids"]
-    assert len(props["session_ids"]) == 16
+    assert props["session_ids"] == "very-secret-session"
+    assert "session_ids" in TELEMETRY_SANITIZED_PROPERTIES
+    sanitized = _sanitize_nested_properties(props, TELEMETRY_SANITIZED_PROPERTIES)
+    assert "very-secret-session" not in " ".join(str(value) for value in sanitized.values())
 
 
 @pytest.mark.asyncio

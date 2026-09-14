@@ -67,11 +67,6 @@ def _anchor_background_task(task: asyncio.Task) -> asyncio.Task:
     return register_background_task(task)
 
 
-def _hash_session_id(session_id: str) -> str:
-    """Stable, non-reversible fingerprint of a session id for telemetry payloads."""
-    return hashlib.sha256(str(session_id).encode("utf-8")).hexdigest()[:16]
-
-
 def _improve_error_text(improve_result: "ImproveResult") -> str | None:
     """Summarise what went wrong inside a finished ``ImproveResult``, if anything.
 
@@ -1287,9 +1282,11 @@ async def remember(
                 "data_size_bytes": data_size,
                 "item_count": item_count,
                 # Session ids are caller-chosen and can carry user data; only a
-                # fingerprint leaves the process (A6, same as improve()).
-                "session_id": _hash_session_id(session_id) if session_id else "",
-                "session_ids": ",".join(_hash_session_id(sid) for sid in (session_ids or [])),
+                # fingerprint leaves the process (A6) — hashed centrally by
+                # send_telemetry (TELEMETRY_SANITIZED_PROPERTIES), the same
+                # rule every other event's session_id goes through.
+                "session_id": session_id or "",
+                "session_ids": ",".join(session_ids or []),
                 "self_improvement": self_improvement,
                 "run_in_background": run_in_background,
                 "cognee_version": cognee_version,
@@ -1322,7 +1319,6 @@ def _skill_materialize_root(dataset_id: UUID) -> Path:
     call and duplicate the Skill node in the graph. The system temp dir is always
     an allowed skill source root (see ``_configured_skill_source_roots``).
     """
-    import hashlib
     import tempfile
     from pathlib import Path as _Path
 
