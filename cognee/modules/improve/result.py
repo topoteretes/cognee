@@ -144,6 +144,33 @@ def _error_text(error: Any) -> str | None:
     return str(error)
 
 
+def stage_detail_text(stage: Any) -> str:
+    """The human-readable detail every surface shows for one stage.
+
+    Reason when skipped, counts as ``key=value``, and the error when errored,
+    "; "-joined. Accepts a ``StageResult`` or its serialized dict, so the CLI's
+    remote path and MCP format the same content the in-process path does —
+    the layout (columns, dashes) stays with each surface.
+    """
+
+    def field(key: str, default: Any = None) -> Any:
+        if isinstance(stage, dict):
+            return stage.get(key, default)
+        return getattr(stage, key, default)
+
+    details = []
+    reason = field("reason")
+    if reason:
+        details.append(str(reason))
+    counts = field("counts") or {}
+    if isinstance(counts, dict) and counts:
+        details.append(", ".join(f"{key}={value}" for key, value in counts.items()))
+    error = field("error")
+    if error and field("status") == "errored":
+        details.append(str(error))
+    return "; ".join(details)
+
+
 ImproveStatus = Literal["completed", "errored", "skipped", "running"]
 
 

@@ -672,6 +672,10 @@ def format_improve_result(result, dataset_name: str) -> str:
     """Summarize an ImproveResult payload (dict from the API or model_dump) per stage."""
     if not isinstance(result, dict):
         return f"Improve completed for dataset '{dataset_name}'."
+    # Deliberately NOT cognee.modules.improve.result.stage_detail_text: this
+    # package depends on RELEASED cognee (see pyproject), which may predate
+    # that helper — the same reason this formatter tolerates legacy payloads.
+    # Keep the detail rule (reason; counts; error) in sync with it by hand.
     status = result.get("status", "completed")
     stages = result.get("stages") or []
     lines = [f"Improve {status} for dataset '{dataset_name}'."]

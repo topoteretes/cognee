@@ -17,22 +17,18 @@ def _field(obj: Any, key: str, default: Any = None) -> Any:
 
 
 def format_stage_line(stage: Any) -> str:
-    """One CLI line for one stage: name, status, then the reason / counts / error.
+    """One CLI line for one stage: name, status, then the shared detail text.
 
     Accepts a ``StageResult`` (in-process) or its serialized dict (``--api-url``).
     """
+    from cognee.modules.improve.result import stage_detail_text
+
     name = str(_field(stage, "stage", "?"))
     status = str(_field(stage, "status", "?"))
     details = []
-    reason = _field(stage, "reason")
-    if reason:
-        details.append(str(reason))
-    counts = _field(stage, "counts") or {}
-    if isinstance(counts, dict) and counts:
-        details.append(", ".join(f"{key}={value}" for key, value in counts.items()))
-    error = _field(stage, "error")
-    if error and status == "errored":
-        details.append(str(error))
+    detail = stage_detail_text(stage)
+    if detail:
+        details.append(detail)
     duration_ms = _field(stage, "duration_ms") or 0
     if duration_ms:
         details.append(f"{int(duration_ms)} ms")

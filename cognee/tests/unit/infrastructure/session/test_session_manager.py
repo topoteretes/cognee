@@ -1414,9 +1414,10 @@ class TestAutoFeedbackPredicate:
         [(True, True, True), (True, False, False), (False, True, False), (False, False, False)],
     )
     def test_reads_a_fresh_cache_config(self, caching, auto_feedback, expected):
+        # The manager delegates to feedback_detection's single implementation.
         sm = SessionManager(cache_engine=MagicMock())
         with patch(
-            "cognee.infrastructure.session.session_manager.CacheConfig",
+            "cognee.infrastructure.session.feedback_detection.CacheConfig",
             return_value=MagicMock(caching=caching, auto_feedback=auto_feedback),
         ) as config_cls:
             assert sm.is_auto_feedback_enabled() is expected

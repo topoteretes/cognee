@@ -11,8 +11,8 @@ Three primitives:
   that serializes whole session turns for one cache identity, so two
   quick turns cannot read the same state and overwrite each other.
 
-* ``try_acquire_improve_lock(session_id)`` / ``try_acquire_improve_lock_many(keys)`` /
-  ``release_improve_lock(session_id)`` — non-blocking claim for
+* ``try_acquire_improve_lock_many(keys)`` /
+  ``release_improve_lock_many(keys)`` — non-blocking claim for
   long-running ``improve()`` calls. The claim is atomic: a
   registry-wide ``asyncio.Lock`` protects a set of held keys, and
   the check-and-add happens inside that critical section so two
@@ -109,32 +109,6 @@ async def session_turn_lock(user_id: Any, session_id: Any) -> AsyncGenerator[Non
 
 _improving_sessions: set[str] = set()
 _improve_registry_lock = asyncio.Lock()
-
-
-async def try_acquire_improve_lock(session_id: str) -> bool:
-    """Atomically claim the improve-lock for ``session_id``.
-
-    Returns ``True`` iff we got it. The caller MUST call
-    ``release_improve_lock`` when done (use try/finally). Returns
-    ``False`` immediately when another task already holds the lock —
-    callers should no-op rather than wait.
-    """
-    if not session_id:
-        return True  # no-op sessions don't need exclusion
-
-    async with _improve_registry_lock:
-        if session_id in _improving_sessions:
-            return False
-        _improving_sessions.add(session_id)
-        return True
-
-
-async def release_improve_lock(session_id: str) -> None:
-    """Release the improve-lock for ``session_id``. Idempotent."""
-    if not session_id:
-        return
-    async with _improve_registry_lock:
-        _improving_sessions.discard(session_id)
 
 
 async def try_acquire_improve_lock_many(keys: Iterable[str]) -> bool:

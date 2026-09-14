@@ -324,12 +324,13 @@ class SessionManager:
     def is_auto_feedback_enabled(self) -> bool:
         """Return True if caching and automatic turn-feedback analysis are both enabled.
 
-        The one predicate for the session layer's auto-feedback gate: retrievers,
-        turn handling and the improve stages all ask here rather than re-reading
-        the cache config themselves.
+        The session layer's auto-feedback gate: retrievers, turn handling and
+        the improve stages all ask here. Delegates to the one implementation in
+        ``feedback_detection`` so the two entry points can never drift.
         """
-        cache_config = CacheConfig()  # fresh read — see is_session_available_for_completion
-        return bool(cache_config.caching and cache_config.auto_feedback)
+        from cognee.infrastructure.session.feedback_detection import is_auto_feedback_enabled
+
+        return is_auto_feedback_enabled()
 
     async def prepare_session_turn(
         self,
