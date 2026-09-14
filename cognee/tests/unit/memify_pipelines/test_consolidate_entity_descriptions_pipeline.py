@@ -12,6 +12,7 @@ from cognee.memify_pipelines.consolidate_entity_descriptions import (
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.engine.models import EntityType
 from cognee.modules.engine.models.Entity import Entity
+from cognee.modules.graph.utils.get_graph_from_model import get_graph_from_model
 from cognee.tasks.memify.consolidate_entity_descriptions import (
     apply_type_description as apply_type_description_module,
 )
@@ -752,7 +753,8 @@ def test_apply_type_description_builds_is_a_edge_tuple_when_text_matches(caplog)
 def test_apply_type_description_truncates_long_is_a_text_before_persisting():
     entity_type = EntityType(name="Person", description="Person")
     marco = Entity(name="Marco", is_a=entity_type, description="d1")
-    long_is_a_text = "x" * (constants.MAX_PERSISTED_IS_A_CHARS + 100)
+    prefix = "Marco is a Person: "
+    long_is_a_text = prefix + "x" * constants.MAX_PERSISTED_IS_A_CHARS
     is_a_texts = [MemberIsAText(member_name="Marco", is_a_text=long_is_a_text)]
 
     apply_type_description_module.apply_type_description(
@@ -760,7 +762,40 @@ def test_apply_type_description_truncates_long_is_a_text_before_persisting():
     )
 
     marco_edge, _ = marco.is_a
-    assert marco_edge.edge_text == "x" * constants.MAX_PERSISTED_IS_A_CHARS + "..."
+    assert marco_edge.edge_text == long_is_a_text[: constants.MAX_PERSISTED_IS_A_CHARS] + "..."
+
+
+def test_apply_type_description_repairs_an_off_pattern_is_a_line():
+    # The ticket's done state is a specific prefix on the persisted edge. A
+    # well-formed but off-pattern line used to land as-is and look like a
+    # success in the graph.
+    entity_type = EntityType(name="Person", description="Person")
+    marco = Entity(name="Marco", is_a=entity_type, description="d1")
+
+    apply_type_description_module.apply_type_description(
+        entity_type,
+        [marco],
+        "New aggregate description",
+        [MemberIsAText(member_name="Marco", is_a_text="Works in Milan.")],
+    )
+
+    marco_edge, _ = marco.is_a
+    assert marco_edge.edge_text == "Marco is a Person: Works in Milan."
+
+
+def test_apply_type_description_keeps_the_an_article_a_model_would_write():
+    entity_type = EntityType(name="Author", description="Author")
+    marco = Entity(name="Marco", is_a=entity_type, description="d1")
+
+    apply_type_description_module.apply_type_description(
+        entity_type,
+        [marco],
+        "New aggregate description",
+        [MemberIsAText(member_name="Marco", is_a_text="Marco is an Author: wrote two books.")],
+    )
+
+    marco_edge, _ = marco.is_a
+    assert marco_edge.edge_text == "Marco is an Author: wrote two books."
 
 
 def test_apply_type_description_logs_nothing_when_every_member_matches(caplog):
@@ -1218,3 +1253,52 @@ async def test_pipeline_forwards_tuning_parameter_overrides_to_tasks():
         "max_completion_tokens": 9,
         "tokens_per_is_a_line": 10,
     }
+
+
+@pytest.mark.asyncio
+async def test_is_a_edge_text_survives_get_graph_from_model():
+    # The ticket's done state is a PERSISTED edge. Every other test here
+    # asserts the in-memory (Edge, EntityType) shape; this one is the only
+    # thing covering the mechanism that turns it into a graph edge.
+    entity_type = EntityType(id=uuid4(), name="Person", description="Aggregate description")
+    marco = Entity(
+        id=uuid4(),
+        name="Marco",
+        description="d",
+        is_a=(
+            Edge(relationship_type="is_a", edge_text="Marco is a Person: works in Milan."),
+            entity_type,
+        ),
+    )
+
+    _nodes, edges = await get_graph_from_model(marco)
+
+    is_a_edges = [edge for edge in edges if edge[2] == "is_a"]
+    assert len(is_a_edges) == 1
+    assert is_a_edges[0][0] == marco.id
+    assert is_a_edges[0][1] == entity_type.id
+    assert is_a_edges[0][3]["edge_text"] == "Marco is a Person: works in Milan."
+
+
+@pytest.mark.asyncio
+async def test_multi_type_entity_persists_one_is_a_edge_per_type():
+    # The extra types live on `relations`, a list field - without the explicit
+    # Edge wrapper get_graph_from_model would label them "relations".
+    person = EntityType(id=uuid4(), name="Person", description="P")
+    author = EntityType(id=uuid4(), name="Author", description="A")
+    marco = Entity(
+        id=uuid4(),
+        name="Marco",
+        description="d",
+        is_a=(Edge(relationship_type="is_a", edge_text="Marco is a Person: x."), person),
+        relations=[(Edge(relationship_type="is_a", edge_text="Marco is an Author: y."), author)],
+    )
+
+    _nodes, edges = await get_graph_from_model(marco)
+
+    is_a_by_target = {edge[1]: edge[3]["edge_text"] for edge in edges if edge[2] == "is_a"}
+    assert is_a_by_target == {
+        person.id: "Marco is a Person: x.",
+        author.id: "Marco is an Author: y.",
+    }
+    assert not [edge for edge in edges if edge[2] == "relations"]

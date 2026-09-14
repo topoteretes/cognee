@@ -6,10 +6,7 @@ its member Entities and writes is_a edge text.
 """
 
 import asyncio
-import sys
 from os import path
-
-sys.path.insert(0, path.abspath(path.join(path.dirname(__file__), "..", "..")))
 
 import cognee
 from cognee import visualize_graph
