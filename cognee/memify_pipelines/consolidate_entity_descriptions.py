@@ -30,8 +30,8 @@ from cognee.tasks.memify.consolidate_entity_descriptions.constants import (
 )
 from cognee.tasks.memify.consolidate_entity_descriptions.rewrite_entities import (
     MAX_CONCURRENT_ENTITY_LLM_CALLS,
+    MAX_NEIGHBOR_LINES_IN_PROMPT,
     MAX_NEIGHBOR_TEXT_CHARS,
-    MAX_NEIGHBORS_IN_PROMPT,
 )
 from cognee.tasks.memify.consolidate_entity_descriptions.rewrite_entities import (
     PARAGRAPH_MAX_COMPLETION_TOKENS as ENTITY_PARAGRAPH_MAX_COMPLETION_TOKENS,
@@ -46,7 +46,7 @@ async def consolidate_entity_descriptions_pipeline(
     dataset: str = DEFAULT_DATASET_NAME,
     run_in_background: bool = False,
     entity_max_concurrent_calls: int = MAX_CONCURRENT_ENTITY_LLM_CALLS,
-    entity_max_neighbors: int = MAX_NEIGHBORS_IN_PROMPT,
+    entity_max_neighbor_lines: int = MAX_NEIGHBOR_LINES_IN_PROMPT,
     entity_max_neighbor_text_chars: int = MAX_NEIGHBOR_TEXT_CHARS,
     entity_description_max_completion_tokens: int = ENTITY_PARAGRAPH_MAX_COMPLETION_TOKENS,
     type_max_concurrent_calls: int = MAX_CONCURRENT_TYPE_LLM_CALLS,
@@ -74,8 +74,9 @@ async def consolidate_entity_descriptions_pipeline(
         run_in_background: Forwarded to ``memify``.
         entity_max_concurrent_calls: Max concurrent LLM calls while rewriting
             Entity descriptions (Phase 1).
-        entity_max_neighbors: Max neighbors shown in one Entity's rewrite
-            prompt.
+        entity_max_neighbor_lines: Max neighborhood lines in one Entity's
+            rewrite prompt. Counted in lines, not neighbors: a neighbor linked
+            by several distinct edges contributes one line per edge.
         entity_max_neighbor_text_chars: Max characters of text per neighbor
             shown in that prompt.
         entity_description_max_completion_tokens: Output token budget for the
@@ -105,7 +106,7 @@ async def consolidate_entity_descriptions_pipeline(
         Task(
             generate_consolidated_entities,
             max_concurrent_calls=entity_max_concurrent_calls,
-            max_neighbors=entity_max_neighbors,
+            max_neighbor_lines=entity_max_neighbor_lines,
             max_neighbor_text_chars=entity_max_neighbor_text_chars,
             max_completion_tokens=entity_description_max_completion_tokens,
         ),

@@ -930,8 +930,26 @@ async def test_generate_consolidated_entity_preserves_properties_it_does_not_own
     assert entity.ontology_uri == "http://x/Person"
 
 
+def test_build_node_neighborhood_prompt_caps_total_lines_not_neighbors():
+    # Regression: the cap used to count neighbors while the body emitted one
+    # line per edge, so a neighbor cap of 20 let an over-connected entity send
+    # 120 lines and log zero drops.
+    neighbors = [{"id": f"n{i}", "name": f"Neighbor{i}", "description": f"d{i}"} for i in range(25)]
+    edges = {
+        f"n{i}": [{"relationship_name": f"rel{j}", "edge_text": None} for j in range(6)]
+        for i in range(25)
+    }
+    node = _node(
+        "entity-1", "Marco", "old description", edges=edges, neighbors=neighbors, entity_types=[]
+    )
+
+    prompt = rewrite_entities.build_node_neighborhood_prompt(node)
+
+    assert prompt.count("\n- ") == rewrite_entities.MAX_NEIGHBOR_LINES_IN_PROMPT
+
+
 def test_build_node_neighborhood_prompt_caps_neighbor_count():
-    total_neighbors = rewrite_entities.MAX_NEIGHBORS_IN_PROMPT + 15
+    total_neighbors = rewrite_entities.MAX_NEIGHBOR_LINES_IN_PROMPT + 15
     neighbors = [
         {"id": f"n{i}", "name": f"Neighbor{i}", "description": f"d{i}"}
         for i in range(total_neighbors)
@@ -942,8 +960,8 @@ def test_build_node_neighborhood_prompt_caps_neighbor_count():
 
     prompt = rewrite_entities.build_node_neighborhood_prompt(node)
 
-    assert prompt.count("\n- ") == rewrite_entities.MAX_NEIGHBORS_IN_PROMPT
-    for neighbor in neighbors[rewrite_entities.MAX_NEIGHBORS_IN_PROMPT :]:
+    assert prompt.count("\n- ") == rewrite_entities.MAX_NEIGHBOR_LINES_IN_PROMPT
+    for neighbor in neighbors[rewrite_entities.MAX_NEIGHBOR_LINES_IN_PROMPT :]:
         assert neighbor["name"] not in prompt
 
 
@@ -1052,7 +1070,7 @@ async def test_pipeline_forwards_tuning_parameter_overrides_to_tasks():
     with patch(f"{module}.memify", new=AsyncMock(return_value={"status": "ok"})) as memify_mock:
         await consolidate_entity_descriptions_pipeline(
             entity_max_concurrent_calls=1,
-            entity_max_neighbors=2,
+            entity_max_neighbor_lines=2,
             entity_max_neighbor_text_chars=3,
             entity_description_max_completion_tokens=4,
             type_max_concurrent_calls=5,
@@ -1067,7 +1085,7 @@ async def test_pipeline_forwards_tuning_parameter_overrides_to_tasks():
     entity_kwargs = entity_task.default_params["kwargs"]
     assert entity_kwargs == {
         "max_concurrent_calls": 1,
-        "max_neighbors": 2,
+        "max_neighbor_lines": 2,
         "max_neighbor_text_chars": 3,
         "max_completion_tokens": 4,
     }
