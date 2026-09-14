@@ -1,20 +1,16 @@
 """Memify pipeline that rewrites Entity descriptions and EntityType summaries.
 
 Mirrors the structure of the sibling graph-mutating enrichment pipelines (e.g.
-``consolidate_entities``): it resolves the target dataset, enters that
-dataset's database context, and runs the extraction + enrichment tasks. The
-actual work lives in ``cognee.tasks.memify.consolidate_entity_descriptions``.
+``consolidate_entities``): a thin wrapper that builds the extraction +
+enrichment tasks and hands them to ``memify``. Dataset auth and the
+per-dataset database context stay inside ``memify`` / ``run_pipeline`` — do
+not wrap this call in ``set_database_global_context_variables`` (SDK-483).
+The actual work lives in ``cognee.tasks.memify.consolidate_entity_descriptions``.
 """
 
-from typing import Optional
-
 from cognee import memify
-from cognee.context_global_variables import set_database_global_context_variables
-from cognee.exceptions import CogneeValidationError
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
-from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.pipelines.tasks.task import Task
-from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.memify.consolidate_entity_descriptions import (
@@ -42,7 +38,7 @@ logger = get_logger("consolidate_entity_descriptions_pipeline")
 
 
 async def consolidate_entity_descriptions_pipeline(
-    user: Optional[User] = None,
+    user: User | None = None,
     dataset: str = DEFAULT_DATASET_NAME,
     run_in_background: bool = False,
     entity_max_concurrent_calls: int = MAX_CONCURRENT_ENTITY_LLM_CALLS,
@@ -68,8 +64,9 @@ async def consolidate_entity_descriptions_pipeline(
     than editing the module constants.
 
     Args:
-        user: Acting user; the default user is used when omitted.
-        dataset: Dataset name (or id) whose graph to consolidate.
+        user: Acting user; forwarded to ``memify`` (default user when omitted).
+        dataset: Dataset name (or id) whose graph to consolidate. Forwarded to
+            ``memify``, which resolves write access and the dataset DB context.
         run_in_background: Forwarded to ``memify``.
         entity_max_concurrent_calls: Max concurrent LLM calls while rewriting
             Entity descriptions (Phase 1).
@@ -98,48 +95,36 @@ async def consolidate_entity_descriptions_pipeline(
     Returns:
         The ``memify`` pipeline result.
     """
-    if user is None:
-        user = await get_default_user()
+    extraction_tasks = [Task(get_entities_with_neighborhood)]
 
-    datasets = await get_authorized_existing_datasets([dataset], "write", user)
-    if not datasets:
-        raise CogneeValidationError(
-            message=f"User (id: {user.id}) has no write access to dataset: {dataset}",
-            log=False,
-        )
-    target = datasets[0]
+    enrichment_tasks = [
+        Task(
+            generate_consolidated_entities,
+            max_concurrent_calls=entity_max_concurrent_calls,
+            max_neighbors=entity_max_neighbors,
+            max_neighbor_text_chars=entity_max_neighbor_text_chars,
+            max_completion_tokens=entity_description_max_completion_tokens,
+        ),
+        Task(
+            generate_type_descriptions,
+            max_concurrent_calls=type_max_concurrent_calls,
+            max_members_per_batch=type_max_members_per_batch,
+            max_named_members=type_max_named_members,
+            max_type_text_chars=type_max_text_chars,
+            max_completion_tokens=type_description_max_completion_tokens,
+            tokens_per_is_a_line=type_tokens_per_is_a_line,
+        ),
+        Task(add_data_points),
+    ]
 
-    async with set_database_global_context_variables(target.id, target.owner_id):
-        extraction_tasks = [Task(get_entities_with_neighborhood)]
+    result = await memify(
+        extraction_tasks=extraction_tasks,
+        enrichment_tasks=enrichment_tasks,
+        data=[{}],  # A placeholder to prevent fetching the entire graph
+        dataset=dataset,
+        user=user,
+        run_in_background=run_in_background,
+    )
 
-        enrichment_tasks = [
-            Task(
-                generate_consolidated_entities,
-                max_concurrent_calls=entity_max_concurrent_calls,
-                max_neighbors=entity_max_neighbors,
-                max_neighbor_text_chars=entity_max_neighbor_text_chars,
-                max_completion_tokens=entity_description_max_completion_tokens,
-            ),
-            Task(
-                generate_type_descriptions,
-                max_concurrent_calls=type_max_concurrent_calls,
-                max_members_per_batch=type_max_members_per_batch,
-                max_named_members=type_max_named_members,
-                max_type_text_chars=type_max_text_chars,
-                max_completion_tokens=type_description_max_completion_tokens,
-                tokens_per_is_a_line=type_tokens_per_is_a_line,
-            ),
-            Task(add_data_points),
-        ]
-
-        result = await memify(
-            extraction_tasks=extraction_tasks,
-            enrichment_tasks=enrichment_tasks,
-            data=[{}],  # A placeholder to prevent fetching the entire graph
-            dataset=target.id,
-            user=user,
-            run_in_background=run_in_background,
-        )
-
-    logger.info("consolidate_entity_descriptions pipeline finished (dataset=%s).", target.id)
+    logger.info("consolidate_entity_descriptions pipeline finished (dataset=%s).", dataset)
     return result

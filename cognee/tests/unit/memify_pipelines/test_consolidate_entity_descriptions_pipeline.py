@@ -1,15 +1,14 @@
 import asyncio
 import logging
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
-from cognee.exceptions import CogneeValidationError
 from cognee.memify_pipelines.consolidate_entity_descriptions import (
     consolidate_entity_descriptions_pipeline,
 )
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.tasks.memify.consolidate_entity_descriptions import describe_types, rewrite_entities
 from cognee.tasks.memify.consolidate_entity_descriptions import (
     apply_type_description as apply_type_description_module,
@@ -936,49 +935,15 @@ def test_build_node_neighborhood_prompt_emits_one_line_per_edge_to_the_same_neig
 # --------------------------------------------------------------------------- #
 # pipeline wiring
 # --------------------------------------------------------------------------- #
-def _make_async_ctx_mock():
-    """A MagicMock that behaves as an async-context-manager factory."""
-    inner = MagicMock()
-    inner.__aenter__ = AsyncMock(return_value=inner)
-    inner.__aexit__ = AsyncMock(return_value=None)
-    return MagicMock(return_value=inner)
-
-
-@pytest.mark.asyncio
-async def test_pipeline_raises_when_user_has_no_write_access():
-    module = "cognee.memify_pipelines.consolidate_entity_descriptions"
-    user = MagicMock()
-    user.id = "u1"
-
-    with (
-        patch(f"{module}.get_default_user", new=AsyncMock(return_value=user)),
-        patch(f"{module}.get_authorized_existing_datasets", new=AsyncMock(return_value=[])),
-    ):
-        with pytest.raises(CogneeValidationError):
-            await consolidate_entity_descriptions_pipeline()
-
-
 @pytest.mark.asyncio
 async def test_pipeline_wires_memify_tasks_dataset_and_user():
     user = MagicMock()
-    user.id = "u1"
-    dataset = SimpleNamespace(id="ds-1", owner_id="owner-1", name="main_dataset")
-
     module = "cognee.memify_pipelines.consolidate_entity_descriptions"
-    with (
-        patch(f"{module}.get_default_user", new=AsyncMock(return_value=user)),
-        patch(
-            f"{module}.get_authorized_existing_datasets",
-            new=AsyncMock(return_value=[dataset]),
-        ),
-        patch(f"{module}.set_database_global_context_variables", new=_make_async_ctx_mock()) as ctx,
-        patch(f"{module}.memify", new=AsyncMock(return_value={"status": "ok"})) as memify_mock,
-    ):
-        result = await consolidate_entity_descriptions_pipeline()
+
+    with patch(f"{module}.memify", new=AsyncMock(return_value={"status": "ok"})) as memify_mock:
+        result = await consolidate_entity_descriptions_pipeline(user=user, dataset="ds-1")
 
     assert result == {"status": "ok"}
-    ctx.assert_called_once_with("ds-1", "owner-1")
-
     kwargs = memify_mock.call_args.kwargs
     assert kwargs["data"] == [{}]
     assert kwargs["dataset"] == "ds-1"
@@ -988,21 +953,21 @@ async def test_pipeline_wires_memify_tasks_dataset_and_user():
 
 
 @pytest.mark.asyncio
-async def test_pipeline_forwards_tuning_parameter_overrides_to_tasks():
-    user = MagicMock()
-    user.id = "u1"
-    dataset = SimpleNamespace(id="ds-1", owner_id="owner-1", name="main_dataset")
-
+async def test_pipeline_forwards_defaults_to_memify():
     module = "cognee.memify_pipelines.consolidate_entity_descriptions"
-    with (
-        patch(f"{module}.get_default_user", new=AsyncMock(return_value=user)),
-        patch(
-            f"{module}.get_authorized_existing_datasets",
-            new=AsyncMock(return_value=[dataset]),
-        ),
-        patch(f"{module}.set_database_global_context_variables", new=_make_async_ctx_mock()),
-        patch(f"{module}.memify", new=AsyncMock(return_value={"status": "ok"})) as memify_mock,
-    ):
+
+    with patch(f"{module}.memify", new=AsyncMock(return_value={"status": "ok"})) as memify_mock:
+        await consolidate_entity_descriptions_pipeline()
+
+    kwargs = memify_mock.call_args.kwargs
+    assert kwargs["dataset"] == DEFAULT_DATASET_NAME
+    assert kwargs["user"] is None
+
+
+@pytest.mark.asyncio
+async def test_pipeline_forwards_tuning_parameter_overrides_to_tasks():
+    module = "cognee.memify_pipelines.consolidate_entity_descriptions"
+    with patch(f"{module}.memify", new=AsyncMock(return_value={"status": "ok"})) as memify_mock:
         await consolidate_entity_descriptions_pipeline(
             entity_max_concurrent_calls=1,
             entity_max_neighbors=2,
