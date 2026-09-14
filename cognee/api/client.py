@@ -77,9 +77,14 @@ install_websocket_query_param_redaction()
 
 app_environment = os.getenv("ENV", "prod")
 
-# How long the shutdown hook waits for background tasks (B6). Overridable so
-# operators with short SIGTERM grace periods can trim it.
-BACKGROUND_DRAIN_TIMEOUT_SECONDS = float(os.getenv("BACKGROUND_DRAIN_TIMEOUT_SECONDS", "30"))
+# How long the shutdown hook waits for background tasks (B6). The default must
+# fit inside the smallest shipped kill window WITH room left for the engine
+# close below it: Docker stops containers after 10s (compose ships no
+# stop_grace_period), so a longer drain gets the worker SIGKILLed mid-WAL-
+# checkpoint — the exact failure the close exists to prevent. Operators with
+# longer grace periods (K8s/gunicorn default 30s) can raise it together with
+# their stop timeout.
+BACKGROUND_DRAIN_TIMEOUT_SECONDS = float(os.getenv("BACKGROUND_DRAIN_TIMEOUT_SECONDS", "8"))
 
 
 @asynccontextmanager
