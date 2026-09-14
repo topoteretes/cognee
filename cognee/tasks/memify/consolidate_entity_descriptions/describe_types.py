@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Dict, List
+from typing import Any
 
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.modules.engine.models.Entity import Entity
@@ -20,14 +20,14 @@ from .generate_type_description import generate_type_description
 
 
 async def generate_type_descriptions(
-    entities: List[Entity],
+    entities: list[Entity],
     max_concurrent_calls: int = MAX_CONCURRENT_TYPE_LLM_CALLS,
     max_members_per_batch: int = MAX_MEMBERS_PER_TYPE_PROMPT,
     max_named_members: int = MAX_NAMED_MEMBERS,
     max_type_text_chars: int = MAX_TYPE_TEXT_CHARS,
     max_completion_tokens: int = PARAGRAPH_MAX_COMPLETION_TOKENS,
     tokens_per_is_a_line: int = TOKENS_PER_IS_A_LINE,
-) -> List[Entity]:
+) -> list[Entity]:
     """Group rewritten entities by type, generate one type description per group,
     and point every member's is_a at the shared updated EntityType.
 
@@ -40,7 +40,7 @@ async def generate_type_descriptions(
     is_a_system_prompt = render_prompt(is_a_only_prompt_name, {})
     semaphore = asyncio.Semaphore(max_concurrent_calls)
 
-    async def process_group(group: Dict[str, Any]) -> None:
+    async def process_group(group: dict[str, Any]) -> None:
         entity_type = group["entity_type"]
         members = group["members"]
         result = await generate_type_description(

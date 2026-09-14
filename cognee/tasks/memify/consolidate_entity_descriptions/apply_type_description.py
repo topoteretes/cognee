@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.modules.engine.models import EntityType
@@ -17,14 +17,14 @@ def _truncate(text: str, max_chars: int) -> str:
     return text[:max_chars] + "..."
 
 
-def _entity_type_of(is_a: Optional[Union[EntityType, tuple]]) -> Optional[EntityType]:
+def _entity_type_of(is_a: EntityType | tuple | None) -> EntityType | None:
     """Unwrap is_a to its EntityType, whether it's bare or (Edge, EntityType)."""
     if isinstance(is_a, tuple):
         return is_a[1]
     return is_a
 
 
-def _is_a_relation_type(relation: Any) -> Optional[EntityType]:
+def _is_a_relation_type(relation: Any) -> EntityType | None:
     """Return the EntityType of an is_a-tagged (Edge, EntityType) tuple in relations, else None."""
     if (
         isinstance(relation, tuple)
@@ -37,7 +37,7 @@ def _is_a_relation_type(relation: Any) -> Optional[EntityType]:
     return None
 
 
-def all_entity_types(entity: Entity) -> List[EntityType]:
+def all_entity_types(entity: Entity) -> list[EntityType]:
     """Every type this entity belongs to - the one on is_a plus any extras on
     relations (see build_entity). Must combine both, not treat them as
     alternatives: is_a is now always populated when the entity has a type, so
@@ -52,14 +52,14 @@ def all_entity_types(entity: Entity) -> List[EntityType]:
     return ([primary] if primary is not None else []) + from_relations
 
 
-def group_entities_by_type(entities: List[Entity]) -> Dict[str, Dict[str, Any]]:
+def group_entities_by_type(entities: list[Entity]) -> dict[str, dict[str, Any]]:
     """Group rewritten entities by their EntityType id.
 
     An entity with multiple types is registered as a member of every one of
     its type groups, not just one - see all_entity_types(). Entities with no
     type at all are left out of the result.
     """
-    groups: Dict[str, Dict[str, Any]] = {}
+    groups: dict[str, dict[str, Any]] = {}
     for entity in entities:
         for entity_type in all_entity_types(entity):
             type_id = str(entity_type.id)
@@ -70,9 +70,9 @@ def group_entities_by_type(entities: List[Entity]) -> Dict[str, Dict[str, Any]]:
 
 def apply_type_description(
     entity_type: EntityType,
-    members: List[Entity],
+    members: list[Entity],
     new_description: str,
-    is_a_texts: Optional[List[MemberIsAText]] = None,
+    is_a_texts: list[MemberIsAText] | None = None,
     max_type_text_chars: int = MAX_TYPE_TEXT_CHARS,
 ) -> EntityType:
     """Build one updated EntityType (same id, all other fields preserved) and

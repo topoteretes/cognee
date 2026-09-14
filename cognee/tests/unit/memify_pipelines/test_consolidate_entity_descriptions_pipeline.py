@@ -5,15 +5,21 @@ from uuid import uuid4
 
 import pytest
 
+from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.memify_pipelines.consolidate_entity_descriptions import (
     consolidate_entity_descriptions_pipeline,
 )
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
-from cognee.tasks.memify.consolidate_entity_descriptions import describe_types, rewrite_entities
+from cognee.modules.engine.models import EntityType
+from cognee.modules.engine.models.Entity import Entity
 from cognee.tasks.memify.consolidate_entity_descriptions import (
     apply_type_description as apply_type_description_module,
 )
-from cognee.tasks.memify.consolidate_entity_descriptions import constants
+from cognee.tasks.memify.consolidate_entity_descriptions import (
+    constants,
+    describe_types,
+    rewrite_entities,
+)
 from cognee.tasks.memify.consolidate_entity_descriptions import (
     generate_type_description as generate_type_description_module,
 )
@@ -30,9 +36,6 @@ from cognee.tasks.memify.consolidate_entity_descriptions.rewrite_entities import
     generate_consolidated_entities,
     generate_consolidated_entity,
 )
-from cognee.infrastructure.engine.models.Edge import Edge
-from cognee.modules.engine.models import EntityType
-from cognee.modules.engine.models.Entity import Entity
 
 
 def _node(entity_id, name, description, edges, neighbors, entity_types):
@@ -134,7 +137,7 @@ def test_format_edges_with_endpoints_keeps_every_edge_between_the_same_pair():
         ),
     ]
 
-    entity_types, edges, neighbors = format_edges_with_endpoints(node_id, edges_with_endpoints)
+    _entity_types, edges, neighbors = format_edges_with_endpoints(node_id, edges_with_endpoints)
 
     assert edges[neighbor_id] == [
         {"relationship_name": "works_at", "edge_text": "Marco works in Milan."},

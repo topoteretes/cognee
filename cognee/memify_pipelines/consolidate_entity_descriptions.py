@@ -23,13 +23,17 @@ from cognee.tasks.memify.consolidate_entity_descriptions.constants import (
     MAX_MEMBERS_PER_TYPE_PROMPT,
     MAX_NAMED_MEMBERS,
     MAX_TYPE_TEXT_CHARS,
-    PARAGRAPH_MAX_COMPLETION_TOKENS as TYPE_PARAGRAPH_MAX_COMPLETION_TOKENS,
     TOKENS_PER_IS_A_LINE,
+)
+from cognee.tasks.memify.consolidate_entity_descriptions.constants import (
+    PARAGRAPH_MAX_COMPLETION_TOKENS as TYPE_PARAGRAPH_MAX_COMPLETION_TOKENS,
 )
 from cognee.tasks.memify.consolidate_entity_descriptions.rewrite_entities import (
     MAX_CONCURRENT_ENTITY_LLM_CALLS,
     MAX_NEIGHBOR_TEXT_CHARS,
     MAX_NEIGHBORS_IN_PROMPT,
+)
+from cognee.tasks.memify.consolidate_entity_descriptions.rewrite_entities import (
     PARAGRAPH_MAX_COMPLETION_TOKENS as ENTITY_PARAGRAPH_MAX_COMPLETION_TOKENS,
 )
 from cognee.tasks.storage import add_data_points

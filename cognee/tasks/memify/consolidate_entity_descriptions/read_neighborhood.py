@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 
@@ -12,8 +12,8 @@ async def get_all_entity_nodes(graph_engine):
 
 
 async def get_entity_neighborhood(
-    node_id: str, props: Dict[str, Any], graph_engine
-) -> Dict[str, Any]:
+    node_id: str, props: dict[str, Any], graph_engine
+) -> dict[str, Any]:
     """Fetch and format data for a single entity node.
 
     Keeps the node's full stored properties (not a hand-picked subset) -
@@ -47,9 +47,9 @@ async def get_edges_with_endpoints(graph_engine, node_id):
 
 def format_edges_with_endpoints(
     node_id: str,
-    edges_with_endpoints: List[Any],
-    node_fields: Optional[Set[str]] = None,
-) -> tuple[List[Dict[str, Any]], Dict[str, List[Dict[str, Optional[str]]]], List[Dict[str, Any]]]:
+    edges_with_endpoints: list[Any],
+    node_fields: set[str] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, str | None]]], list[dict[str, Any]]]:
     """Split (source, edge, target) triples into EntityType neighbors, edges, and other neighbors.
 
     node_id can be on either side of the edge, so the neighbor is the other
@@ -72,10 +72,10 @@ def format_edges_with_endpoints(
     if node_fields is None:
         node_fields = {"id", "name", "description", "text", "type"}
 
-    entity_types: List[Dict[str, Any]] = []
-    edges: Dict[str, List[Dict[str, Optional[str]]]] = {}
-    filtered_neighbors: List[Dict[str, Any]] = []
-    seen_neighbor_ids: Set[str] = set()
+    entity_types: list[dict[str, Any]] = []
+    edges: dict[str, list[dict[str, str | None]]] = {}
+    filtered_neighbors: list[dict[str, Any]] = []
+    seen_neighbor_ids: set[str] = set()
 
     for triple in edges_with_endpoints:
         if not isinstance(triple, (list, tuple)) or len(triple) != 3:
@@ -107,7 +107,7 @@ def format_edges_with_endpoints(
 # endregion
 
 
-async def get_entities_with_neighborhood(args) -> List[Dict[str, Any]]:
+async def get_entities_with_neighborhood(args) -> list[dict[str, Any]]:
     """Iterate through all Entity nodes and fetch their edges and neighbor nodes."""
     graph_engine = await get_graph_engine()
     entity_nodes = await get_all_entity_nodes(graph_engine)

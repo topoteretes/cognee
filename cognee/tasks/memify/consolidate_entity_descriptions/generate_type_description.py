@@ -1,5 +1,4 @@
 import asyncio
-from typing import List
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.modules.engine.models import EntityType
@@ -39,7 +38,7 @@ def build_naming_instruction(total_member_count: int, max_named_members: int) ->
 def build_entity_type_prompt(
     entity_type_name: str,
     current_description: str,
-    members: List[Entity],
+    members: list[Entity],
     total_member_count: int,
     max_named_members: int = MAX_NAMED_MEMBERS,
     max_type_text_chars: int = MAX_TYPE_TEXT_CHARS,
@@ -67,14 +66,14 @@ async def query_type_LLM(
     )
 
 
-def batch_members(members: List[Entity], batch_size: int) -> List[List[Entity]]:
+def batch_members(members: list[Entity], batch_size: int) -> list[list[Entity]]:
     return [members[i : i + batch_size] for i in range(0, len(members), batch_size)]
 
 
 def build_type_merge_prompt(
     entity_type_name: str,
     total_member_count: int,
-    partial_descriptions: List[str],
+    partial_descriptions: list[str],
     max_named_members: int = MAX_NAMED_MEMBERS,
     max_type_text_chars: int = MAX_TYPE_TEXT_CHARS,
 ) -> str:
@@ -82,8 +81,10 @@ def build_type_merge_prompt(
         f"Entity type: {entity_type_name}",
         f"Total member count: {total_member_count}",
         build_naming_instruction(total_member_count, max_named_members),
-        "You are given partial summaries, each covering a different subset of the members. "
-        "Synthesize them into a single final summary following the same rules.",
+        (
+            "You are given partial summaries, each covering a different subset of the "
+            "members. Synthesize them into a single final summary following the same rules."
+        ),
         "Partial summaries:",
     ]
     for index, partial in enumerate(partial_descriptions, start=1):
@@ -105,7 +106,7 @@ async def query_type_merge_LLM(
 def build_is_a_only_prompt(
     entity_type_name: str,
     final_type_description: str,
-    members: List[Entity],
+    members: list[Entity],
     total_member_count: int,
     max_type_text_chars: int = MAX_TYPE_TEXT_CHARS,
 ) -> str:
@@ -136,7 +137,7 @@ async def query_is_a_only_LLM(
 
 async def generate_type_description(
     entity_type: EntityType,
-    members: List[Entity],
+    members: list[Entity],
     system_prompt: str,
     merge_system_prompt: str,
     is_a_system_prompt: str,
@@ -172,7 +173,7 @@ async def generate_type_description(
     total_member_count = len(members)
     batches = batch_members(members, max_members_per_batch)
 
-    async def limited_type_call(batch: List[Entity]):
+    async def limited_type_call(batch: list[Entity]):
         async with semaphore:
             return await query_type_LLM(
                 build_entity_type_prompt(
@@ -218,7 +219,7 @@ async def generate_type_description(
             )
         final_description = merged.description
 
-    async def limited_is_a_call(batch: List[Entity]):
+    async def limited_is_a_call(batch: list[Entity]):
         async with semaphore:
             return await query_is_a_only_LLM(
                 build_is_a_only_prompt(

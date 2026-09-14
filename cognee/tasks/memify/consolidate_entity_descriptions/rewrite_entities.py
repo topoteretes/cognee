@@ -1,8 +1,7 @@
 import asyncio
 import json
-from typing import Any, Dict, List
+from typing import Any, cast
 from uuid import UUID
-from typing import cast
 
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.infrastructure.engine.models.Edge import Edge
@@ -32,7 +31,7 @@ MAX_NEIGHBOR_TEXT_CHARS = 500
 PARAGRAPH_MAX_COMPLETION_TOKENS = REASONING_HEADROOM_TOKENS + 250
 
 
-def load_metadata_to_dict(value: Any) -> Dict[str, Any]:
+def load_metadata_to_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, str):
         try:
             return json.loads(value)
@@ -136,7 +135,7 @@ def build_entity_type(entity_type_node):
     return entity_type
 
 
-def build_entity(props: Dict[str, Any], entity_types: List[EntityType], description: str) -> Entity:
+def build_entity(props: dict[str, Any], entity_types: list[EntityType], description: str) -> Entity:
     """Rebuild an Entity from its full stored properties and (possibly empty) list of EntityType nodes.
 
     Rebuilt from the full stored props - not a hand-picked subset - because
@@ -193,7 +192,7 @@ async def generate_consolidated_entities(
     max_neighbors: int = MAX_NEIGHBORS_IN_PROMPT,
     max_neighbor_text_chars: int = MAX_NEIGHBOR_TEXT_CHARS,
     max_completion_tokens: int = PARAGRAPH_MAX_COMPLETION_TOKENS,
-) -> List[DataPoint]:
+) -> list[DataPoint]:
     system_prompt = render_prompt(prompt_name, {})
     semaphore = asyncio.Semaphore(max_concurrent_calls)
 
