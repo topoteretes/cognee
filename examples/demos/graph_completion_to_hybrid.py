@@ -5,7 +5,7 @@ uv run python examples/demos/graph_completion_to_hybrid.py
 
 import asyncio
 import pathlib
-from typing import List, cast
+from typing import cast
 
 import cognee
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
@@ -26,121 +26,121 @@ DOCUMENTS = [
 ]
 
 
-def triplets_to_hybrid(edges: List[Edge]) -> dict:
-    """Map GraphCompletion edges into Hybrid's chunks/ entities/ facts channels.
+def node_label(node: Node) -> str:
+    return node.attributes.get("name") or node.attributes.get("text") or node.id
 
-    Relationships already attached to an entity are not repeated as facts.
-    ``made_from`` edges (summary -> chunk) are structural and skipped as facts,
-    but still used below to pair a summary with its source chunk.
 
-    Chunks and summaries are tracked separately, matching how Hybrid itself
-    splits them (see ``hybrid/context.py::format_passages``): a summary whose
-    source chunk was also retrieved is paired with it via ``chunk_summaries``
-    (rendered as "[Passage Summary]: ...\\n[Raw Passage]: ..."), never shown
-    as a second, unrelated passage. A summary whose source chunk was not
-    retrieved is still shown -- as a standalone passage -- instead of being
-    dropped.
+def create_chunk_entry(node: Node) -> dict:
+    return {"id": node.id, "text": node.attributes.get("text")}
 
-    Note: ``TextSummary.source_chunk_id`` is *not* exposed on the retrieved
-    node's attributes here (verified empirically -- GraphCompletionRetriever's
-    node projection only carries id/description/name/type/text/
-    importance_weight/vector_distance), so pairing is derived from the
-    ``made_from`` edge itself instead.
+
+def create_entity_entry(node: Node) -> dict:
+    return {
+        "id": node.id,
+        "name": node.attributes.get("name") or node.id,
+        "description": node.attributes.get("description"),
+        "type": node.attributes.get("type"),
+        "edges": [],
+    }
+
+
+def create_entity_edge_entry(edge: Edge) -> dict:
+    relationship = edge.attributes.get("relationship_name") or edge.attributes.get(
+        "relationship_type"
+    )
+    text = edge.attributes.get("edge_text") or (
+        f"{node_label(edge.node1)} -- {relationship} -- {node_label(edge.node2)}"
+    )
+    return {
+        "text": text,
+        "source": node_label(edge.node1),
+        "target": node_label(edge.node2),
+        "source_id": edge.node1.id,
+        "relationship": relationship,
+        "target_id": edge.node2.id,
+        "edge_object_id": edge.attributes.get("edge_object_id"),
+    }
+
+
+def create_fact_entry(edge: Edge) -> dict:
+    return {
+        "id": f"{edge.node1.id}:{edge.node2.id}",
+        "text": create_entity_edge_entry(edge)["text"],
+    }
+
+
+def triplets_to_hybrid(edges: list[Edge]) -> dict:
+    """Map GraphCompletion edges into Hybrid's chunks / entities / facts channels.
+
+    ``made_from`` edges pair a summary with its source chunk (GraphCompletion
+    does not project ``TextSummary.source_chunk_id``). Unpaired summaries are
+    kept as passages. Edges that already hang off an entity are not repeated
+    as facts.
     """
-    document_chunks_by_id, summaries_by_id, entities_by_id, facts = {}, {}, {}, []
-    summary_to_chunk_id: dict = {}
-
-    def label(n: Node) -> str:
-        return n.attributes.get("name") or n.attributes.get("text") or n.id
+    chunks, summaries, entities, facts = {}, {}, {}, []
+    summary_to_chunk = {}
 
     for edge in edges:
         for node in (edge.node1, edge.node2):
             ntype = node.attributes.get("type")
             text = node.attributes.get("text")
-            if ntype == "DocumentChunk" and text and node.id not in document_chunks_by_id:
-                document_chunks_by_id[node.id] = {"id": node.id, "text": text}
-            elif ntype == "TextSummary" and text and node.id not in summaries_by_id:
-                summaries_by_id[node.id] = {"id": node.id, "text": text}
-            elif ntype == "Entity" and node.id not in entities_by_id:
-                entities_by_id[node.id] = {
-                    "id": node.id,
-                    "name": node.attributes.get("name") or node.id,
-                    "description": node.attributes.get("description"),
-                    "edges": [],
-                }
+            if ntype == "DocumentChunk" and text:
+                chunks.setdefault(node.id, create_chunk_entry(node))
+            elif ntype == "TextSummary" and text:
+                summaries.setdefault(node.id, create_chunk_entry(node))
+            elif ntype == "Entity":
+                entities.setdefault(node.id, create_entity_entry(node))
 
-        rel = (
-            edge.attributes.get("relationship_type")
-            or edge.attributes.get("relationship_name")
-            or edge.attributes.get("edge_text")
-        )
-
-        if rel == "made_from":
-            n1_type = edge.node1.attributes.get("type")
-            n2_type = edge.node2.attributes.get("type")
-            if n1_type == "TextSummary" and n2_type == "DocumentChunk":
-                summary_to_chunk_id[edge.node1.id] = edge.node2.id
-            elif n2_type == "TextSummary" and n1_type == "DocumentChunk":
-                summary_to_chunk_id[edge.node2.id] = edge.node1.id
+        relationship = edge.attributes.get("relationship_name")
+        types = (edge.node1.attributes.get("type"), edge.node2.attributes.get("type"))
+        if relationship == "made_from":
+            if types == ("TextSummary", "DocumentChunk"):
+                summary_to_chunk[edge.node1.id] = edge.node2.id
+            elif types == ("DocumentChunk", "TextSummary"):
+                summary_to_chunk[edge.node2.id] = edge.node1.id
             continue
 
-        if not rel:
+        if not relationship and not edge.attributes.get("edge_text"):
             continue
 
-        bullet = f"{label(edge.node1)} -- {rel} -- {label(edge.node2)}"
-        touches_entity = False
+        edge_entry = create_entity_edge_entry(edge)
+        attached = False
         for node in (edge.node1, edge.node2):
-            entity = entities_by_id.get(node.id)
-            if entity is not None:
-                entity["edges"].append({"text": bullet})
-                touches_entity = True
+            if node.id not in entities:
+                continue
+            entities[node.id]["edges"].append(edge_entry)
+            attached = True
+        if not attached:
+            facts.append(create_fact_entry(edge))
 
-        # Already shown under an entity (or as passage/summary via chunks): skip facts.
-        if not touches_entity:
-            facts.append({"id": f"{edge.node1.id}:{edge.node2.id}", "text": bullet})
-
-    # Pair each retrieved summary with its source chunk when that chunk was
-    # also retrieved; otherwise fall back to showing the summary itself as a
-    # standalone passage instead of dropping it.
-    chunks_by_id = dict(document_chunks_by_id)
-    chunk_summaries: dict = {}
-    for summary_id, summary in summaries_by_id.items():
-        source_chunk_id = summary_to_chunk_id.get(summary_id)
-        if source_chunk_id and source_chunk_id in chunks_by_id:
-            chunk_summaries[source_chunk_id] = summary["text"]
+    chunk_summaries = {}
+    for summary_id, summary in summaries.items():
+        chunk_id = summary_to_chunk.get(summary_id)
+        if chunk_id in chunks:
+            chunk_summaries[chunk_id] = summary["text"]
         else:
-            chunks_by_id.setdefault(summary_id, {"id": summary_id, "text": summary["text"]})
+            chunks.setdefault(summary_id, summary)
 
     return {
-        "chunks": list(chunks_by_id.values()),
+        "chunks": list(chunks.values()),
         "chunk_summaries": chunk_summaries,
-        "entities": list(entities_by_id.values()),
+        "entities": list(entities.values()),
         "facts": facts,
     }
 
 
 async def main() -> None:
-    root = pathlib.Path(__file__).resolve().parents[2]
-    cognee.config.system_root_directory(
-        str(root / ".cognee_system/graph_completion_to_hybrid_demo")
-    )
-    cognee.config.data_root_directory(str(root / ".data_storage/graph_completion_to_hybrid_demo"))
+    demo_dir = pathlib.Path(__file__).parent / ".cognee_system"
+    cognee.config.system_root_directory(str(demo_dir))
+    cognee.config.data_root_directory(str(demo_dir / "data"))
 
     await cognee.forget(everything=True)
     await cognee.remember(DOCUMENTS, dataset_name=DATASET, self_improvement=False)
 
-    retrieved = await GraphCompletionRetriever(top_k=8).get_retrieved_objects(query=QUERY)
-    # get_retrieved_objects() is typed as Union[List[Edge], List[List[Edge]]] because it
-    # also supports query_batch=. This demo only ever passes a single `query=`, so the
-    # result is always a flat List[Edge] -- narrow it explicitly here (both for the type
-    # checker and as a defensive runtime check) instead of accessing .node1/.node2
-    # directly on a value the checker can't prove isn't a nested list.
-    if retrieved and isinstance(retrieved[0], list):
-        raise TypeError(
-            "get_retrieved_objects() returned batch-mode results (List[List[Edge]]); "
-            "this demo only supports the single-query List[Edge] shape."
-        )
-    edges = cast(List[Edge], retrieved)
+    edges = cast(
+        list[Edge],
+        await GraphCompletionRetriever(top_k=8).get_retrieved_objects(query=QUERY),
+    )
 
     print("TRIPLETS\n", format_triplets(edges) if edges else "[none]")
 
