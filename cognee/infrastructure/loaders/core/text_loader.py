@@ -3,8 +3,7 @@ from typing import Any
 
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
-from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
-from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
+from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface, LoaderResult
 from cognee.infrastructure.loaders.store_derived_text import store_derived_text
 
 
@@ -47,10 +46,9 @@ class TextLoader(LoaderInterface):
         Returns:
             True if file can be handled, False otherwise
         """
-        if extension in self.supported_extensions and mime_type in self.supported_mime_types:
-            return True
-
-        return False
+        return bool(
+            extension in self.supported_extensions and mime_type in self.supported_mime_types
+        )
 
     async def load(
         self, file_path: str, encoding: str = "utf-8", **kwargs: Any

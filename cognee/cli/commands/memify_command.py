@@ -1,10 +1,10 @@
 import argparse
 import asyncio
 
-from cognee.cli.reference import SupportsCliCommand
-from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
+from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.reference import SupportsCliCommand
 
 
 class MemifyCommand(SupportsCliCommand):
@@ -60,8 +60,9 @@ Examples:
         try:
 
             async def run():
-                import cognee
                 from uuid import UUID
+
+                import cognee
                 from cognee.cli.user_resolution import resolve_cli_user
 
                 user = await resolve_cli_user(getattr(args, "user_id", None))
@@ -94,4 +95,4 @@ Examples:
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(f"Memify failed: {str(e)}", error_code=1) from e
+            raise CliCommandException(f"Memify failed: {e!s}", error_code=1) from e

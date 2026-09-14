@@ -1,22 +1,26 @@
-from cognee.shared.logging_utils import get_logger
+from collections.abc import Callable
 from os.path import basename
 from uuid import NAMESPACE_OID, uuid5
 
-from cognee.tasks.chunks import chunk_by_paragraph
 from cognee.modules.chunking.Chunker import Chunker
+from cognee.shared.logging_utils import get_logger
+from cognee.tasks.chunks import chunk_by_paragraph
+
 from .models.DocumentChunk import DocumentChunk
 
 logger = get_logger()
 
 
 class TextChunkerWithOverlap(Chunker):
+    chunker_id = "text_chunker_overlap_v1"
+
     def __init__(
         self,
         document,
-        get_text: callable,
+        get_text: Callable,
         max_chunk_size: int,
         chunk_overlap_ratio: float = 0.0,
-        get_chunk_data: callable = None,
+        get_chunk_data: Callable | None = None,
     ):
         super().__init__(document, get_text, max_chunk_size)
         self.document_name = document.name or basename(document.raw_data_location)
@@ -71,7 +75,8 @@ class TextChunkerWithOverlap(Chunker):
         """Create a DocumentChunk with standard metadata."""
         try:
             return DocumentChunk(
-                id=chunk_id or uuid5(NAMESPACE_OID, f"{str(self.document.id)}-{self.chunk_index}"),
+                chunker_id=self.chunker_id,
+                id=chunk_id or uuid5(NAMESPACE_OID, f"{self.document.id!s}-{self.chunk_index}"),
                 text=text,
                 chunk_size=size,
                 is_part_of=self.document,
@@ -84,7 +89,7 @@ class TextChunkerWithOverlap(Chunker):
             )
         except Exception as e:
             logger.error(e)
-            raise e
+            raise
 
     def _create_chunk_from_accumulation(self):
         """Create a DocumentChunk from current accumulated chunk_data."""

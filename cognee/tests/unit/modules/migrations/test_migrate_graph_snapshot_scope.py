@@ -76,6 +76,10 @@ async def test_rekey_provenance_moves_are_batched_by_run():
     engine.find_nodes_by_source_ref.return_value = ["n1", "n2", "n3"]
     engine.find_edges_by_source_ref.return_value = []
     engine.get_node_delete_data.return_value = {n: snapshot for n in ("n1", "n2", "n3")}
+    # The v1 sweep this test asserts on is followed by the chunk-scoped (v2)
+    # sweep, which reads the dataset's ref maps; no v2 refs in this fixture.
+    engine.find_node_source_refs_by_dataset.return_value = {}
+    engine.find_edge_source_refs_by_dataset.return_value = {}
 
     with patch.object(rk, "stores_provenance_in_graph", new=AsyncMock(return_value=True)):
         await rk._rekey_graph_provenance(engine, [(old_id, new_id, dataset_id)])

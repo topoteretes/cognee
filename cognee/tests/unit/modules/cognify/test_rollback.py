@@ -134,19 +134,29 @@ async def test_cognify_rollback_deletes_graph_before_relational(monkeypatch):
 async def test_graph_provenance_rollback_resets_status_without_ingestion_info(monkeypatch):
     """Startup recovery passes no data_ingestion_info, so the graph-provenance branch
     must derive the affected data ids from graph provenance and still reset the
-    per-data cognify status (otherwise re-cognify would skip the data)."""
-    from cognee.infrastructure.databases.provenance import make_source_ref_key
+    per-data cognify status (otherwise re-cognify would skip the data).
+
+    The run's refs carry BOTH key versions: chunk-produced artifacts are stamped
+    with the chunk-scoped v2 key, so a v1-only parser here throws before
+    rollback_by_pipeline_run_id ever runs — and run_tasks only logs rollback
+    errors, so the failed cognify would silently keep its partial graph.
+    """
+    from cognee.infrastructure.databases.provenance import (
+        make_chunk_source_ref_key,
+        make_source_ref_key,
+    )
 
     pipeline_run_id = uuid4()
     dataset_id = uuid4()
     data_id = uuid4()
     source_ref_key = make_source_ref_key(dataset_id, data_id)
+    chunk_source_ref_key = make_chunk_source_ref_key(dataset_id, data_id, uuid4())
 
     rolled_back = []
 
     class _FakeGraph:
         async def find_node_source_refs_by_pipeline_run(self, _run):
-            return {"n1": [source_ref_key]}
+            return {"n1": [source_ref_key], "n2": [chunk_source_ref_key]}
 
         async def find_edge_source_refs_by_pipeline_run(self, _run):
             return {}

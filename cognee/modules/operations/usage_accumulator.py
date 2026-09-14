@@ -10,10 +10,11 @@ This module must stay import-light (no cognee imports) so it can be
 imported from ``usage_tracking`` without pulling in the package-init chain.
 """
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Iterator, Optional
+from typing import Optional
 from uuid import UUID
 
 
@@ -33,12 +34,12 @@ class OperationUsage:
             self.parent.add(tokens_in, tokens_out)
 
 
-_active_operation_usage: ContextVar[Optional[OperationUsage]] = ContextVar(
+_active_operation_usage: ContextVar[OperationUsage | None] = ContextVar(
     "cognee_operation_usage", default=None
 )
 
 
-def get_active_operation_usage() -> Optional[OperationUsage]:
+def get_active_operation_usage() -> OperationUsage | None:
     """Return the innermost active operation accumulator, if any."""
     return _active_operation_usage.get()
 
@@ -83,12 +84,12 @@ class ParentRun:
     parent: Optional["ParentRun"] = None
 
 
-_current_parent_run: ContextVar[Optional[ParentRun]] = ContextVar(
+_current_parent_run: ContextVar[ParentRun | None] = ContextVar(
     "cognee_current_parent_run", default=None
 )
 
 
-def get_parent_run_id(excluding: Optional[UUID] = None) -> Optional[UUID]:
+def get_parent_run_id(excluding: UUID | None = None) -> UUID | None:
     """The innermost enclosing run id — the value for ``parent_operation_id``.
 
     ``excluding`` skips the caller's own scope: a pipeline's terminal-row

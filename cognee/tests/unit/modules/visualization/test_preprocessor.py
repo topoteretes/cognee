@@ -21,6 +21,8 @@ from cognee.modules.visualization.preprocessor import (
     SCHEMA_MAX_ENTITY_TYPES,
     STAGE_ORDER,
     PreprocessedGraph,
+    build_node_set_colors,
+    generate_provenance_colors,
     preprocess,
 )
 
@@ -225,6 +227,31 @@ def test_color_maps_have_expected_keys():
     # task color map should contain both tasks
     assert "extract_chunks_from_documents" in result.color_maps["task"]
     assert "extract_graph_from_data" in result.color_maps["task"]
+
+
+def test_node_set_colors_pin_the_memory_sets_and_rotate_the_rest():
+    """The rule preprocess() colors node sets by, callable on its own so a
+    caller deriving the same map from outside a graph (the brains summary
+    reads node sets relationally) cannot drift from what gets rendered."""
+    colors = build_node_set_colors(["slack", "session_learnings", None, "slack"])
+
+    # Pinned so distilled lessons stay recognizable across graphs.
+    assert colors["session_learnings"] == "#FFC53D"
+    assert colors["slack"] == generate_provenance_colors(["session_learnings", "slack"])["slack"]
+    # Empty values never become a color key.
+    assert set(colors) == {"slack", "session_learnings"}
+
+
+def test_node_set_colors_are_the_ones_preprocess_puts_in_its_color_map():
+    graph = (
+        [
+            ("n1", {"type": "Entity", "name": "a", "source_node_set": "slack"}),
+            ("n2", {"type": "Entity", "name": "b", "source_node_set": "notion"}),
+        ],
+        [],
+    )
+
+    assert preprocess(graph).color_maps["node_set"] == build_node_set_colors(["slack", "notion"])
 
 
 def test_pipeline_stages_in_canonical_order():

@@ -1,39 +1,39 @@
-from typing import Union, Optional, List, Sequence, Type, Any
+from collections.abc import Sequence
+from typing import Any
 from uuid import UUID
 
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.data.constants import DEFAULT_DATASET_NAME
-
-from cognee.modules.retrieval.utils.brute_force_triplet_search import get_memory_fragment
 from cognee.context_global_variables import set_database_global_context_variables
-from cognee.modules.engine.models.node_set import NodeSet
-from cognee.modules.pipelines import run_pipeline
-from cognee.modules.pipelines.tasks.task import Task
-from cognee.modules.users.models import User
-from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
-    resolve_authorized_user_datasets,
-)
-from cognee.modules.engine.operations.setup import setup
-from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 from cognee.memify_pipelines.memify_default_tasks import (
     get_default_memify_enrichment_tasks,
     get_default_memify_extraction_tasks,
 )
 from cognee.memify_pipelines.memify_task_registry import resolve_memify_tasks
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+from cognee.modules.engine.models.node_set import NodeSet
+from cognee.modules.engine.operations.setup import setup
+from cognee.modules.pipelines import run_pipeline
+from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
+from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
+    resolve_authorized_user_datasets,
+)
+from cognee.modules.pipelines.tasks.task import Task
+from cognee.modules.retrieval.utils.brute_force_triplet_search import get_memory_fragment
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("memify")
 
 
 async def memify(
-    extraction_tasks: Optional[Sequence[Union[Task, str]]] = None,
-    enrichment_tasks: Optional[Sequence[Union[Task, str]]] = None,
-    data: Optional[Any] = None,
-    dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
+    extraction_tasks: Sequence[Task | str] | None = None,
+    enrichment_tasks: Sequence[Task | str] | None = None,
+    data: Any | None = None,
+    dataset: str | UUID = DEFAULT_DATASET_NAME,
     user: User = None,
-    node_type: Optional[Type] = NodeSet,
-    node_name: Optional[List[str]] = None,
-    vector_db_config: Optional[dict] = None,
-    graph_db_config: Optional[dict] = None,
+    node_type: type | None = NodeSet,
+    node_name: list[str] | None = None,
+    vector_db_config: dict | None = None,
+    graph_db_config: dict | None = None,
     run_in_background: bool = False,
 ):
     """

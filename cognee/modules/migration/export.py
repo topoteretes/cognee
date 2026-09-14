@@ -14,9 +14,10 @@ Formats:
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any
 from uuid import UUID
 
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.migration.cogx import (
     COGXArchiveWriter,
     COGXDocument,
@@ -28,7 +29,6 @@ from cognee.modules.migration.cogx import (
 from cognee.modules.migration.formats import write_cypher, write_graphml, write_json
 from cognee.modules.migration.snapshot import GraphSnapshot, build_snapshot
 from cognee.shared.logging_utils import get_logger
-from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger("migration.export")
 
@@ -53,7 +53,7 @@ class ExportResult:
         )
 
 
-def _user_payload(user_row) -> Dict[str, Any]:
+def _user_payload(user_row) -> dict[str, Any]:
     return {
         "email": user_row.email,
         "hashed_password": user_row.hashed_password,
@@ -63,7 +63,7 @@ def _user_payload(user_row) -> Dict[str, Any]:
     }
 
 
-async def _gather_social_layer(dataset_obj) -> Dict[str, Any]:
+async def _gather_social_layer(dataset_obj) -> dict[str, Any]:
     """The dataset's owner and ACL grants, including user credentials.
 
     Emails, password hashes, and account flags are included so a
@@ -88,7 +88,7 @@ async def _gather_social_layer(dataset_obj) -> Dict[str, Any]:
             )
         ).all()
 
-    grants: Dict[str, Dict[str, Any]] = {}
+    grants: dict[str, dict[str, Any]] = {}
     for user_row, permission_name in rows:
         grant = grants.setdefault(
             user_row.email, {"user": _user_payload(user_row), "permissions": []}
@@ -100,7 +100,7 @@ async def _gather_social_layer(dataset_obj) -> Dict[str, Any]:
     }
 
 
-async def _stored_migration_revision(dataset_id) -> Optional[str]:
+async def _stored_migration_revision(dataset_id) -> str | None:
     """The source store's stamped data-migration revision, for the manifest.
 
     Per-dataset bookkeeping with backend access control on, the global row
@@ -127,8 +127,10 @@ async def _stored_migration_revision(dataset_id) -> Optional[str]:
         async with db_engine.get_async_session() as session:
             record = await session.get(GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID)
         return record.global_migration_revision if record else None
-    except Exception as error:  # noqa: BLE001 — manifest metadata is best effort
-        logger.debug("Could not determine migration revision for manifest: %s", error)
+    except Exception as error:  # — manifest metadata is best effort
+        logger.debug(
+            "Could not determine migration revision for manifest: %s", error, exc_info=True
+        )
         return None
 
 
@@ -137,8 +139,8 @@ def _write_cogx(
     edges,
     destination: Path,
     dataset_name: str,
-    embedding_model: Optional[str] = None,
-    migration_revision: Optional[str] = None,
+    embedding_model: str | None = None,
+    migration_revision: str | None = None,
 ) -> None:
     """Map graph nodes/edges onto typed COGX records; keep the rest raw."""
     with COGXArchiveWriter(destination, source_system="cognee") as writer:
@@ -194,13 +196,13 @@ def _write_cogx(
 
 
 async def export_dataset(
-    dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
+    dataset: str | UUID = DEFAULT_DATASET_NAME,
     format: str = "pydantic",
-    destination: Optional[Union[str, Path]] = None,
+    destination: str | Path | None = None,
     user=None,
     link_relations: bool = False,
     include_permissions: bool = False,
-) -> Union[ExportResult, GraphSnapshot]:
+) -> ExportResult | GraphSnapshot:
     """Export an authorized dataset's graph. Requires read permission.
 
     ``include_permissions`` (cogx only): additionally write the dataset's
@@ -271,8 +273,10 @@ async def export_dataset(
             )
 
             embedding_model = get_embedding_context_config().embedding_model
-        except Exception as error:  # noqa: BLE001 — manifest metadata is best effort
-            logger.debug("Could not determine embedding model for manifest: %s", error)
+        except Exception as error:  # — manifest metadata is best effort
+            logger.debug(
+                "Could not determine embedding model for manifest: %s", error, exc_info=True
+            )
         _write_cogx(
             nodes,
             edges,

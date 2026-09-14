@@ -241,8 +241,10 @@ def deploy_cognee():
         [
             "bash",
             "-lc",
-            f"nohup {VENV_PYTHON} -m uvicorn cognee.api.client:app --host 0.0.0.0 --port {API_PORT} "
-            "> /tmp/cognee-server.log 2>&1 & echo started",
+            (
+                f"nohup {VENV_PYTHON} -m uvicorn cognee.api.client:app --host 0.0.0.0 --port {API_PORT} "
+                "> /tmp/cognee-server.log 2>&1 & echo started"
+            ),
         ],
         timeout_secs=30,
         label="server",

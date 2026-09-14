@@ -247,7 +247,7 @@ class TestUnsupportedInputsFallBack:
         )
 
         assert should_run_concurrent(retriever, **call_kwargs) is False
-        objects, context, completion = await run_session_aware_completion(
+        _objects, context, completion = await run_session_aware_completion(
             retriever, raw_query="question", **call_kwargs
         )
 

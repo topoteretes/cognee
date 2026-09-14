@@ -1,8 +1,7 @@
-from typing import List
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
-from typing_extensions import Annotated
 
 from cognee.api.v1.validate.validate import ValidationReport, ValidationStatus, validate
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
@@ -19,7 +18,7 @@ def get_validate_router() -> APIRouter:
     @validate_router.get("", response_model=ValidationReport)
     async def run_validate(
         dataset: Annotated[
-            List[str],
+            list[str],
             Query(
                 description=("Dataset name(s) to validate. Omit to validate the default dataset."),
             ),
@@ -33,16 +32,20 @@ def get_validate_router() -> APIRouter:
         longer matches cognee's own dedup contract, and nodes present in the
         graph but missing from the vector index (unreachable by semantic
         search). Read-only — never modifies any store.
+
+        ## Query Parameters
+        - **dataset** (List[str]): Dataset name(s) to validate. Omit to validate the default
+          dataset.
         """
         try:
             report = await validate(dataset=dataset, user=user)
             status_code = 503 if report.status == ValidationStatus.UNHEALTHY else 200
             return JSONResponse(status_code=status_code, content=report.model_dump(mode="json"))
-        except Exception as error:
-            logger.error("validate() failed: %s", error, exc_info=True)
+        except Exception:
+            logger.exception("validate() failed")
             return JSONResponse(
                 status_code=500,
-                content={"status": "error", "reason": f"validation failed: {str(error)}"},
+                content={"status": "error", "reason": "validation failed; see server logs."},
             )
 
     return validate_router

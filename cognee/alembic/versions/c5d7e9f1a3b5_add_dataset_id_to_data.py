@@ -14,17 +14,16 @@ Create Date: 2026-08-11
 
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "c5d7e9f1a3b5"
-down_revision: Union[str, None] = "e5a7b9c1d3f4"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "e5a7b9c1d3f4"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 INDEX_NAME = "data_dataset_content_lookup"
 

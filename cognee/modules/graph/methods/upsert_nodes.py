@@ -1,13 +1,13 @@
-from typing import List, Optional
 from uuid import NAMESPACE_OID, UUID, uuid5
-from fastapi.encoders import jsonable_encoder
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.dialects.postgresql import insert
 
-from cognee.modules.graph.models import Node
-from cognee.infrastructure.engine.models.DataPoint import DataPoint
+from fastapi.encoders import jsonable_encoder
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from cognee.infrastructure.databases.relational.with_async_session import with_async_session
+from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
+from cognee.modules.graph.models import Node
 
 UPSERT_BATCH_SIZE = 1000
 
@@ -17,13 +17,13 @@ UPSERT_BATCH_SIZE = 1000
 # ``@with_async_session`` opens one and commits it.
 @with_async_session
 async def upsert_nodes(
-    nodes: List[DataPoint],
+    nodes: list[DataPoint],
     tenant_id: UUID,
     user_id: UUID,
     dataset_id: UUID,
     data_id: UUID,
     session: AsyncSession,
-    pipeline_run_id: Optional[UUID] = None,
+    pipeline_run_id: UUID | None = None,
 ):
     """
     Adds nodes to the nodes table.

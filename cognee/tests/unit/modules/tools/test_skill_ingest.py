@@ -10,7 +10,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
-
 _SKILL = """\
 ---
 description: Review code changes for correctness and regressions.

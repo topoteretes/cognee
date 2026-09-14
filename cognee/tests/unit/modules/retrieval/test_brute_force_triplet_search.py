@@ -1,16 +1,18 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 
 from cognee.exceptions import CogneeValidationError
-from cognee.modules.retrieval.utils.brute_force_triplet_search import (
-    brute_force_triplet_search,
-    get_memory_fragment,
-    format_triplets,
-)
-from cognee.modules.graph.models.EdgeType import EdgeType
+from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
-from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
+from cognee.modules.graph.models.EdgeType import EdgeType
+from cognee.modules.retrieval.utils.brute_force_triplet_search import (
+    brute_force_triplet_search,
+    format_triplets,
+    get_memory_fragment,
+)
 
 
 class MockScoredResult:
@@ -453,6 +455,72 @@ async def test_brute_force_triplet_search_passes_top_k_to_importance_calculation
 
 
 @pytest.mark.asyncio
+async def test_brute_force_triplet_search_applies_personal_weights():
+    """personal_weights are handed to the fragment after distance mapping."""
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
+    mock_vector_engine.search = AsyncMock(return_value=[MockScoredResult("n1", 0.95)])
+
+    mock_fragment = AsyncMock(
+        map_vector_distances_to_graph_nodes=AsyncMock(),
+        map_vector_distances_to_graph_edges=AsyncMock(),
+        calculate_top_triplet_importances=AsyncMock(return_value=[]),
+    )
+    # apply_personal_weights is a plain (sync) method on CogneeGraph.
+    mock_fragment.apply_personal_weights = MagicMock()
+
+    with (
+        patch(
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
+            return_value=mock_vector_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.utils.brute_force_triplet_search.get_memory_fragment",
+            return_value=mock_fragment,
+        ),
+    ):
+        await brute_force_triplet_search(
+            query="test", node_name=["node"], personal_weights={"n1": 0.9}
+        )
+
+    mock_fragment.apply_personal_weights.assert_called_once_with({"n1": 0.9})
+    mock_fragment.map_vector_distances_to_graph_nodes.assert_awaited_once()
+    mock_fragment.map_vector_distances_to_graph_edges.assert_awaited_once()
+    mock_fragment.calculate_top_triplet_importances.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_brute_force_triplet_search_skips_personal_weights_when_absent():
+    """Without personal_weights the fragment is never touched — byte-identical path."""
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
+    mock_vector_engine.search = AsyncMock(return_value=[MockScoredResult("n1", 0.95)])
+
+    mock_fragment = AsyncMock(
+        map_vector_distances_to_graph_nodes=AsyncMock(),
+        map_vector_distances_to_graph_edges=AsyncMock(),
+        calculate_top_triplet_importances=AsyncMock(return_value=[]),
+    )
+    mock_fragment.apply_personal_weights = MagicMock()
+
+    with (
+        patch(
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
+            return_value=mock_vector_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.utils.brute_force_triplet_search.get_memory_fragment",
+            return_value=mock_fragment,
+        ),
+    ):
+        await brute_force_triplet_search(query="test", node_name=["node"])
+
+    mock_fragment.apply_personal_weights.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_get_memory_fragment_projects_feedback_weight_only_when_feedback_influence_enabled():
     """Test that feedback_weight properties are projected only when feedback_influence > 0."""
     mock_graph_engine = AsyncMock()
@@ -891,9 +959,9 @@ async def test_brute_force_triplet_search_generic_exception():
             "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
+        pytest.raises(Exception, match="Generic error"),
     ):
-        with pytest.raises(Exception, match="Generic error"):
-            await brute_force_triplet_search(query="test query")
+        await brute_force_triplet_search(query="test query")
 
 
 @pytest.mark.asyncio
@@ -1161,7 +1229,7 @@ async def test_brute_force_triplet_search_batch_error_fallback():
 @pytest.mark.asyncio
 async def test_cognee_graph_mapping_batch_shapes():
     """Test that CogneeGraph mapping methods accept list-of-lists with query_list_length set."""
-    from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
+    from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
 
     graph = CogneeGraph()
     node1 = Node("node1", {"name": "Node1"})
@@ -1196,3 +1264,56 @@ async def test_cognee_graph_mapping_batch_shapes():
     assert node1.attributes.get("vector_distance") == [0.95, 6.5]
     assert node2.attributes.get("vector_distance") == [6.5, 0.87]
     assert edge.attributes.get("vector_distance") == [0.92, 0.88]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unsupported", [False, True])
+async def test_neighborhood_scores_only_expansion_ids(unsupported):
+    from cognee.modules.retrieval.utils.brute_force_triplet_search import (
+        _get_top_triplet_importances,
+    )
+    from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
+
+    seed_id = UUID("00000000-0000-0000-0000-000000000001")
+    neighbor_id = UUID("00000000-0000-0000-0000-000000000002")
+    seed = MockScoredResult(seed_id, 0.1)
+    neighbor = MockScoredResult(neighbor_id, 0.8)
+    engine = AsyncMock()
+    engine.search.return_value = []
+    engine.score_by_ids.return_value = [neighbor]
+    if unsupported:
+        engine.score_by_ids.side_effect = NotImplementedError
+    search = NodeEdgeVectorSearch(vector_engine=engine)
+    search.query_vector = [1.0, 0.0]
+    search.node_distances = {"Entity_name": [seed]}
+    graph = AsyncMock()
+    # Graph IDs may be UUIDs while vector search exposes string IDs.
+    graph.nodes = {seed_id: object(), neighbor_id: object()}
+    with patch(
+        "cognee.modules.retrieval.utils.brute_force_triplet_search.get_memory_fragment",
+        return_value=graph,
+    ):
+        await _get_top_triplet_importances(
+            memory_fragment=None,
+            vector_search=search,
+            properties_to_project=None,
+            node_type=None,
+            node_name=None,
+            node_name_filter_operator="OR",
+            triplet_distance_penalty=6.5,
+            feedback_influence=0.0,
+            wide_search_limit=1,
+            top_k=5,
+            neighborhood_depth=1,
+        )
+    expected = [seed] if unsupported else [seed, neighbor]
+    assert search.node_distances["Entity_name"] == expected
+    engine.score_by_ids.assert_awaited_once_with(
+        collection_name="Entity_name",
+        data_point_ids=[str(neighbor_id)],
+        query_vector=[1.0, 0.0],
+    )
+    engine.search.assert_not_awaited()
+    graph.map_vector_distances_to_graph_nodes.assert_awaited_once_with(
+        node_distances={"Entity_name": expected}, query_list_length=None
+    )

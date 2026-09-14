@@ -37,6 +37,7 @@ from cognee.modules.observability import (
 )
 from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.modules.search.types import SearchType
+from cognee.modules.user_preferences import warm_preference_cache
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("session_aware_completion")
@@ -84,9 +85,7 @@ def can_run_as_turn(
         return False
     if only_context:
         return False
-    if retriever_type not in _eligible_retriever_types():
-        return False
-    return True
+    return retriever_type in _eligible_retriever_types()
 
 
 def should_run_concurrent(
@@ -203,6 +202,12 @@ async def _retrieve_merged_objects(
     )
 
     if use_conversational_lane:
+        # gather runs each lane in its own task with a *copy* of this context,
+        # so a preference read memoized inside one lane is invisible to its
+        # sibling and to the answer step in this (parent) context. Warm the
+        # cache here first so both lane copies and the later completion-side
+        # read inherit a single graph read. No-op when personalization is off.
+        await warm_preference_cache()
         raw_result, conversational_result = await asyncio.gather(
             retriever.get_retrieved_objects(query=raw_query),
             retriever.get_retrieved_objects(query=conversational_query),

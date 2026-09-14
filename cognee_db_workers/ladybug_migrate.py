@@ -15,7 +15,6 @@ import sys
 import tempfile
 import warnings
 
-
 # Maps the on-disk storage version code (read from catalog.kz) to a ladybug
 # release that can open that format. The code is shared across patch/minor
 # releases that keep the same on-disk format, so there is one entry per format,
@@ -128,6 +127,7 @@ def _try_create_env(python_exe: str, base: str, package_name: str, version: str)
         [py_bin, "-m", "pip", "install", f"{package_name}=={version}"],
         capture_output=True,
         text=True,
+        check=False,
     )
     if result.returncode == 0:
         return py_bin
@@ -197,6 +197,7 @@ conn.execute({cypher!r})
         text=True,
         cwd=tempfile.gettempdir(),
         env=env,
+        check=False,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"{cypher} failed:\n{proc.stderr}")
@@ -210,7 +211,7 @@ def ladybug_migration(
     """
     print(f"Migrating graph database from {old_version} to {new_version}", file=sys.stderr)
     print(f"Source: {old_db}", file=sys.stderr)
-    print("", file=sys.stderr)
+    print(file=sys.stderr)
 
     # If version of old database is not provided try to determine it based on file info
     if not old_version:

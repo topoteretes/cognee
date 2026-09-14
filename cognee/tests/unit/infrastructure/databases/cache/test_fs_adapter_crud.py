@@ -1,11 +1,12 @@
 """Unit tests for FsCacheAdapter CRUD operations."""
 
-from datetime import datetime
-from uuid import uuid4
 import tempfile
 from contextlib import contextmanager
-import pytest
+from datetime import datetime, timezone
 from unittest.mock import patch
+from uuid import uuid4
+
+import pytest
 
 from cognee.infrastructure.databases.exceptions import (
     CacheConnectionError,
@@ -18,18 +19,20 @@ from cognee.tasks.memify.feedback_weights_constants import (
 
 @pytest.fixture
 def adapter():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with patch(
+    with (
+        tempfile.TemporaryDirectory() as tmpdir,
+        patch(
             "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
             return_value={"data_root_directory": tmpdir},
-        ):
-            from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
-                FSCacheAdapter,
-            )
+        ),
+    ):
+        from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
+            FSCacheAdapter,
+        )
 
-            inst = FSCacheAdapter()
-            yield inst
-            inst.cache.close()
+        inst = FSCacheAdapter()
+        yield inst
+        inst.cache.close()
 
 
 @pytest.mark.asyncio
@@ -199,7 +202,7 @@ async def test_append_agent_trace_step_sanitizes_non_json_safe_values(adapter):
         status="success",
         method_params={
             "trip_id": uuid4(),
-            "created_at": datetime(2026, 4, 14, 12, 0, 0),
+            "created_at": datetime(2026, 4, 14, 12, 0, 0, tzinfo=timezone.utc),
             "obj": _Obj(),
         },
         method_return_value={"result_id": uuid4(), "owner": _Obj()},
@@ -334,6 +337,45 @@ async def test_update_memify_metadata_merges_existing_keys(adapter):
     assert entries[0].memify_metadata == {
         "persist_sessions_in_knowledge_graph": True,
         MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_concurrent_update_qa_writers_both_keep_their_metadata_keys(adapter):
+    """Two concurrent update_qa calls, each passing only its own key, both land.
+
+    This is the two-improve()-stages scenario: the feedback-weights stage and
+    the preference stage each mark the same QA row with their own
+    memify_metadata key. Because each writer passes ONLY its own keys and the
+    adapter overlays them onto the stored dict, neither wipes the other.
+    """
+    import asyncio
+
+    from cognee.infrastructure.session.session_manager import SessionManager
+
+    await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
+    manager = SessionManager(cache_engine=adapter)
+
+    results = await asyncio.gather(
+        manager.update_qa(
+            user_id="u1",
+            session_id="s1",
+            qa_id="id1",
+            memify_metadata={MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: True},
+        ),
+        manager.update_qa(
+            user_id="u1",
+            session_id="s1",
+            qa_id="id1",
+            memify_metadata={"preference_turn_counted": False},
+        ),
+    )
+
+    assert results == [True, True]
+    entries = await adapter.get_all_qa_entries("u1", "s1")
+    assert entries[0].memify_metadata == {
+        MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: True,
+        "preference_turn_counted": False,
     }
 
 

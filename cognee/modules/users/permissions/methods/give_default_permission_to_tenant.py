@@ -1,7 +1,8 @@
 from uuid import UUID
-from sqlalchemy.future import select
+
 from sqlalchemy import insert
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.future import select
 
 from cognee.infrastructure.databases.exceptions import EntityAlreadyExistsError
 from cognee.infrastructure.databases.relational import get_relational_engine

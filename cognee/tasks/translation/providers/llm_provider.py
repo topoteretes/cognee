@@ -1,10 +1,9 @@
 import asyncio
-from typing import Optional
 
 from pydantic import BaseModel
 
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.config import get_llm_config
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.shared.logging_utils import get_logger
 
@@ -18,7 +17,7 @@ class TranslationOutput(BaseModel):
 
     translated_text: str
     detected_source_language: str
-    translation_notes: Optional[str] = None
+    translation_notes: str | None = None
 
 
 class LLMTranslationProvider(TranslationProvider):
@@ -44,7 +43,7 @@ class LLMTranslationProvider(TranslationProvider):
         self,
         text: str,
         target_language: str = "en",
-        source_language: Optional[str] = None,
+        source_language: str | None = None,
     ) -> TranslationResult:
         """
         Translate text using the configured LLM.
@@ -107,7 +106,7 @@ class LLMTranslationProvider(TranslationProvider):
         self,
         texts: list[str],
         target_language: str = "en",
-        source_language: Optional[str] = None,
+        source_language: str | None = None,
         max_concurrent: int = 5,
     ) -> list[TranslationResult]:
         """
@@ -140,4 +139,8 @@ class LLMTranslationProvider(TranslationProvider):
             # Check if API key is configured (required for most providers)
             return bool(llm_config.llm_api_key)
         except Exception:
+            logger.debug(
+                "Falling back to False after error in LLMTranslationProvider.is_available",
+                exc_info=True,
+            )
             return False
