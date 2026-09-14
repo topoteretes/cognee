@@ -22,6 +22,7 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
     raw_trace_content: bool = False,
     last_n_steps: int | None = None,
     run_in_background: bool = False,
+    incremental: bool = True,
 ):
     """
     Persist agent trace content into the knowledge graph via memify pipeline.
@@ -41,6 +42,7 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
         last_n_steps: Optional number of most recent trace steps to persist per
             session. When None, all stored steps are persisted.
         run_in_background: If True, runs memify asynchronously and returns immediately.
+        incremental: Persist only trace steps above the last successful watermark.
     """
     await set_session_user_context_variable(user)
     dataset_to_write = await get_authorized_existing_datasets(
@@ -64,6 +66,7 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
             session_ids=session_ids,
             raw_trace_content=raw_trace_content,
             last_n_steps=last_n_steps,
+            incremental=incremental,
         )
     ]
     enrichment_tasks = [
@@ -92,6 +95,7 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
             "node_set_name": node_set_name,
             "raw_trace_content": raw_trace_content,
             "last_n_steps": last_n_steps,
+            "incremental": incremental,
         },
     )
     return result
