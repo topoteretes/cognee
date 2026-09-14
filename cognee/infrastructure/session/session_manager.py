@@ -4,7 +4,7 @@ from typing import Any
 from cognee.context_global_variables import current_dataset_id, session_user
 from cognee.infrastructure.databases.cache import SessionAgentTraceEntry, SessionQAEntry
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
-from cognee.infrastructure.databases.cache.config import get_cache_config
+from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
 from cognee.infrastructure.databases.exceptions import SessionParameterValidationError
 from cognee.infrastructure.session.session_agent_trace import (
@@ -314,7 +314,10 @@ class SessionManager:
         """Return True if session (history + save) is available for completion."""
         if not user_id or not self.is_available:
             return False
-        return bool(get_cache_config().caching)
+        # Fresh read, not the lru-cached accessor: `import cognee` fills that
+        # cache, and CACHING/AUTO_FEEDBACK are toggled after import (the demo
+        # command, library tests) — the gates must see the live env.
+        return bool(CacheConfig().caching)
 
     def is_auto_feedback_enabled(self) -> bool:
         """Return True if caching and automatic turn-feedback analysis are both enabled.
@@ -323,7 +326,7 @@ class SessionManager:
         turn handling and the improve stages all ask here rather than re-reading
         the cache config themselves.
         """
-        cache_config = get_cache_config()
+        cache_config = CacheConfig()  # fresh read — see is_session_available_for_completion
         return bool(cache_config.caching and cache_config.auto_feedback)
 
     async def prepare_session_turn(

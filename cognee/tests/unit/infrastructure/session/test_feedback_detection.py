@@ -338,7 +338,7 @@ class TestRatingSectionFollowsAutoFeedback:
             }[name]
 
         with (
-            patch.object(feedback_detection_module, "get_cache_config", lambda: cache_config),
+            patch.object(feedback_detection_module, "CacheConfig", lambda: cache_config),
             patch.object(feedback_detection_module, "read_query_prompt", side_effect=_prompt),
             patch.object(
                 feedback_detection_module.LLMGateway, "acreate_structured_output", llm_mock
@@ -348,19 +348,17 @@ class TestRatingSectionFollowsAutoFeedback:
         return llm_mock.await_args.kwargs["system_prompt"]
 
     def test_is_auto_feedback_enabled_needs_both_flags(self):
-        with patch.object(
-            feedback_detection_module, "get_cache_config", lambda: self._cache_config()
-        ):
+        with patch.object(feedback_detection_module, "CacheConfig", lambda: self._cache_config()):
             assert is_auto_feedback_enabled() is True
         with patch.object(
             feedback_detection_module,
-            "get_cache_config",
+            "CacheConfig",
             lambda: self._cache_config(auto_feedback=False),
         ):
             assert is_auto_feedback_enabled() is False
         with patch.object(
             feedback_detection_module,
-            "get_cache_config",
+            "CacheConfig",
             lambda: self._cache_config(caching=False),
         ):
             assert is_auto_feedback_enabled() is False

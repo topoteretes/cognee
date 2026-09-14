@@ -821,9 +821,7 @@ class TestSessionManager:
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"
             ) as mock_session_user,
-            patch(
-                "cognee.infrastructure.session.session_manager.get_cache_config"
-            ) as mock_config_cls,
+            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
                 "cognee.infrastructure.session.session_manager.generate_completion",
                 new_callable=AsyncMock,
@@ -855,9 +853,7 @@ class TestSessionManager:
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"
             ) as mock_session_user,
-            patch(
-                "cognee.infrastructure.session.session_manager.get_cache_config"
-            ) as mock_config_cls,
+            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
                 "cognee.infrastructure.session.session_turn.generate_session_completion_with_optional_summary",
                 new_callable=AsyncMock,
@@ -930,9 +926,7 @@ class TestSessionManager:
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"
             ) as mock_session_user,
-            patch(
-                "cognee.infrastructure.session.session_manager.get_cache_config"
-            ) as mock_config_cls,
+            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
                 "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
@@ -977,9 +971,7 @@ class TestSessionManager:
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"
             ) as mock_session_user,
-            patch(
-                "cognee.infrastructure.session.session_manager.get_cache_config"
-            ) as mock_config_cls,
+            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
                 "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
@@ -1029,9 +1021,7 @@ class TestSessionManager:
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"
             ) as mock_session_user,
-            patch(
-                "cognee.infrastructure.session.session_manager.get_cache_config"
-            ) as mock_config_cls,
+            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
                 "cognee.infrastructure.session.session_turn.generate_session_completion_with_optional_summary",
                 new_callable=AsyncMock,
@@ -1068,9 +1058,7 @@ class TestSessionManager:
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"
             ) as mock_session_user,
-            patch(
-                "cognee.infrastructure.session.session_manager.get_cache_config"
-            ) as mock_config_cls,
+            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
                 "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
@@ -1114,9 +1102,7 @@ class TestSessionManager:
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"
             ) as mock_session_user,
-            patch(
-                "cognee.infrastructure.session.session_manager.get_cache_config"
-            ) as mock_config_cls,
+            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
                 "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
@@ -1164,9 +1150,7 @@ class TestSessionManager:
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"
             ) as mock_session_user,
-            patch(
-                "cognee.infrastructure.session.session_manager.get_cache_config"
-            ) as mock_config_cls,
+            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
                 "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
@@ -1206,9 +1190,7 @@ class TestSessionManager:
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"
             ) as mock_session_user,
-            patch(
-                "cognee.infrastructure.session.session_manager.get_cache_config"
-            ) as mock_config_cls,
+            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
                 "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
@@ -1258,9 +1240,7 @@ class TestSessionManager:
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"
             ) as mock_session_user,
-            patch(
-                "cognee.infrastructure.session.session_manager.get_cache_config"
-            ) as mock_config_cls,
+            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
                 "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
@@ -1427,22 +1407,28 @@ class TestSessionContextEntryValidation:
 
 
 class TestAutoFeedbackPredicate:
-    """is_auto_feedback_enabled is the one gate; it reads the cached config accessor."""
+    """is_auto_feedback_enabled is the one gate; it must read the live env, not a cache."""
 
     @pytest.mark.parametrize(
         ("caching", "auto_feedback", "expected"),
         [(True, True, True), (True, False, False), (False, True, False), (False, False, False)],
     )
-    def test_reads_get_cache_config(self, caching, auto_feedback, expected):
+    def test_reads_a_fresh_cache_config(self, caching, auto_feedback, expected):
         sm = SessionManager(cache_engine=MagicMock())
         with patch(
-            "cognee.infrastructure.session.session_manager.get_cache_config",
+            "cognee.infrastructure.session.session_manager.CacheConfig",
             return_value=MagicMock(caching=caching, auto_feedback=auto_feedback),
-        ) as accessor:
+        ) as config_cls:
             assert sm.is_auto_feedback_enabled() is expected
-        accessor.assert_called_once_with()
+        config_cls.assert_called_once_with()
 
-    def test_module_no_longer_builds_cache_config_directly(self):
-        import cognee.infrastructure.session.session_manager as module
-
-        assert not hasattr(module, "CacheConfig")
+    def test_gate_tracks_env_changes_after_import(self, monkeypatch):
+        """The lru-cached accessor is filled during `import cognee`; the gate must
+        not use it — AUTO_FEEDBACK is toggled after import (demo command, library
+        tests) and the gate has to see the flip."""
+        sm = SessionManager(cache_engine=MagicMock())
+        monkeypatch.setenv("CACHING", "true")
+        monkeypatch.setenv("AUTO_FEEDBACK", "true")
+        assert sm.is_auto_feedback_enabled() is True
+        monkeypatch.setenv("AUTO_FEEDBACK", "false")
+        assert sm.is_auto_feedback_enabled() is False

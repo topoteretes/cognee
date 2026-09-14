@@ -1,6 +1,6 @@
 """Session turn analysis from user messages via LLM."""
 
-from cognee.infrastructure.databases.cache.config import get_cache_config
+from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
@@ -39,8 +39,12 @@ def _render_served_context(served_context) -> str:
 
 
 def is_auto_feedback_enabled() -> bool:
-    """True when session caching and automatic turn-feedback analysis are both on."""
-    cache_config = get_cache_config()
+    """True when session caching and automatic turn-feedback analysis are both on.
+
+    Fresh read, not the lru-cached accessor: ``import cognee`` fills that cache,
+    and AUTO_FEEDBACK is toggled after import (the demo command, library tests).
+    """
+    cache_config = CacheConfig()
     return bool(cache_config.caching and cache_config.auto_feedback)
 
 
