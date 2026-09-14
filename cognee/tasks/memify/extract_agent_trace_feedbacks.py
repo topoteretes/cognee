@@ -54,6 +54,24 @@ def resolve_trace_window(
     return effective, pending
 
 
+async def has_new_trace_steps(session_manager, user_id: str, session_ids: list[str]) -> bool:
+    """Whether any session holds trace steps the persist watermark hasn't covered.
+
+    The improve stage's pre-check (counts only, no step reads): when False, the
+    stage reports ``already_completed`` without running the memify pipeline —
+    an unconditional run logs a completed ``memify_pipeline`` row even with
+    nothing new, which the enrichment change-check would count as a graph write.
+    """
+    for session_id in session_ids:
+        total = await session_manager.get_agent_trace_count(user_id=user_id, session_id=session_id)
+        if not total:
+            continue
+        persisted = await TRACE_PERSIST_WATERMARK.read_count(session_manager, user_id, session_id)
+        if resolve_trace_window(total, persisted, None, session_id=session_id)[1] > 0:
+            return True
+    return False
+
+
 async def extract_agent_trace_feedbacks(
     data,
     session_ids: list[str] | None = None,

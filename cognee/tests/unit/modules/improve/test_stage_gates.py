@@ -300,3 +300,105 @@ def test_inputs_are_frozen():
     with pytest.raises(TypeError):
         inputs.memify_kwargs["data"] = 1  # type: ignore[index]
     assert not hasattr(inputs, "run_in_background")
+
+
+# --- persist stages' nothing-new pre-check ----------------------------------
+
+
+class _CoveredSessionManager:
+    """Every session fully covered: entries exist, watermarks match the counts."""
+
+    is_available = True
+
+    def __init__(self):
+        self.entry = types.SimpleNamespace(question="q", answer="a")
+
+    async def get_session(self, *, user_id, session_id=None, formatted=False):
+        return [self.entry]
+
+    async def get_agent_trace_count(self, *, user_id, session_id=None):
+        return 1
+
+    async def get_session_context_entries(self, *, user_id, session_id=None):
+        # One watermark row per kind; both stages read through StateRowWatermark.
+        return [
+            {
+                "id": "session_persist_watermark",
+                "kind": "session_persist_watermark_state",
+                "persisted_qa_count": 1,
+            },
+            {
+                "id": "agent_trace_persist_watermark",
+                "kind": "agent_trace_persist_watermark_state",
+                "persisted_trace_count": 1,
+            },
+        ]
+
+
+def _install_covered_manager(monkeypatch):
+    manager = _CoveredSessionManager()
+    sm_module = importlib.import_module("cognee.infrastructure.session.get_session_manager")
+    monkeypatch.setattr(sm_module, "get_session_manager", lambda: manager)
+    return manager
+
+
+@pytest.mark.asyncio
+async def test_persist_qa_reports_already_completed_without_running_the_pipeline(monkeypatch):
+    """A covered session must not run memify: an unconditional run logs a
+    completed memify_pipeline row even with nothing new, which the enrichment
+    change-check counts as a graph write."""
+    from cognee.modules.improve.stages import REASON_NO_NEW_SESSION_ENTRIES
+
+    _install_covered_manager(monkeypatch)
+    pipeline_mod = importlib.import_module(
+        "cognee.memify_pipelines.persist_sessions_in_knowledge_graph"
+    )
+    pipeline = AsyncMock()
+    monkeypatch.setattr(pipeline_mod, "persist_sessions_in_knowledge_graph_pipeline", pipeline)
+
+    result = await PersistSessionQAStage().run(_inputs(session_ids=("s1",)))
+
+    assert result.status == "already_completed"
+    assert result.reason == REASON_NO_NEW_SESSION_ENTRIES
+    pipeline.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_persist_traces_reports_already_completed_without_running_the_pipeline(monkeypatch):
+    from cognee.modules.improve.stages import REASON_NO_NEW_TRACE_STEPS, PersistAgentTracesStage
+
+    _install_covered_manager(monkeypatch)
+    pipeline_mod = importlib.import_module(
+        "cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph"
+    )
+    pipeline = AsyncMock()
+    monkeypatch.setattr(
+        pipeline_mod, "persist_agent_trace_feedbacks_in_knowledge_graph_pipeline", pipeline
+    )
+
+    result = await PersistAgentTracesStage().run(_inputs(session_ids=("s1",)))
+
+    assert result.status == "already_completed"
+    assert result.reason == REASON_NO_NEW_TRACE_STEPS
+    pipeline.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_persist_precheck_fails_open_to_running_the_pipeline(monkeypatch):
+    class BrokenManager:
+        is_available = True
+
+        async def get_session(self, **kwargs):
+            raise RuntimeError("cache down")
+
+    sm_module = importlib.import_module("cognee.infrastructure.session.get_session_manager")
+    monkeypatch.setattr(sm_module, "get_session_manager", lambda: BrokenManager())
+    pipeline_mod = importlib.import_module(
+        "cognee.memify_pipelines.persist_sessions_in_knowledge_graph"
+    )
+    pipeline = AsyncMock(return_value={})
+    monkeypatch.setattr(pipeline_mod, "persist_sessions_in_knowledge_graph_pipeline", pipeline)
+
+    await PersistSessionQAStage().run(_inputs(session_ids=("s1",)))
+
+    pipeline.assert_awaited_once()

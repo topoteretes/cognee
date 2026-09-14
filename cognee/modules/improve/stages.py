@@ -28,6 +28,48 @@ REASON_PERSONALIZATION_DISABLED = "personalization_disabled"
 REASON_OPT_IN_DISABLED = "opt_in_disabled"
 REASON_TRIPLET_EMBEDDING_DISABLED = "triplet_embedding_disabled"
 REASON_NO_WRITES_SINCE_LAST_IMPROVE = "no_writes_since_last_improve"
+REASON_NO_NEW_SESSION_ENTRIES = "no_new_entries"
+REASON_NO_NEW_TRACE_STEPS = "no_new_trace_steps"
+
+
+def _already_completed(stage_name: str, reason: str) -> StageResult:
+    result = StageResult(stage=stage_name, status="already_completed", reason=reason)
+    result._raw_run = {}
+    return result
+
+
+async def _watermarks_show_nothing_new(inputs: ImproveRunInputs, *, kind: str) -> bool:
+    """Pre-pipeline check for the persist stages: is every session fully covered?
+
+    True only when the stage's own persist watermarks cover every given
+    session, so the memify pipeline need not run at all — an unconditional run
+    logs a completed ``memify_pipeline`` row even with nothing new, which the
+    enrichment change-check counts as a graph write (a repeat session improve
+    would then re-embed the whole dataset). Fail-open: any error here means
+    "run the pipeline"; the extraction tasks keep their own watermark logic,
+    so this check is an optimization, never the correctness gate.
+    """
+    try:
+        from cognee.infrastructure.session.get_session_manager import get_session_manager
+
+        session_manager = get_session_manager()
+        if not session_manager.is_available:
+            return False
+        user_id = str(inputs.user.id)
+        if kind == "qa":
+            from cognee.tasks.memify.extract_user_sessions import has_new_session_qa
+
+            return not await has_new_session_qa(session_manager, user_id, inputs.session_id_list)
+        from cognee.tasks.memify.extract_agent_trace_feedbacks import has_new_trace_steps
+
+        return not await has_new_trace_steps(session_manager, user_id, inputs.session_id_list)
+    except Exception as error:
+        logger.debug(
+            "improve: persist pre-check could not decide, running the pipeline: %s",
+            error,
+            exc_info=True,
+        )
+        return False
 
 
 class FeedbackWeightsStage(BaseStage):
@@ -76,6 +118,9 @@ class PersistSessionQAStage(BaseStage):
             persist_sessions_in_knowledge_graph_pipeline,
         )
 
+        if await _watermarks_show_nothing_new(inputs, kind="qa"):
+            return _already_completed(self.name, REASON_NO_NEW_SESSION_ENTRIES)
+
         result = await persist_sessions_in_knowledge_graph_pipeline(
             user=inputs.user,
             session_ids=inputs.session_id_list,
@@ -96,6 +141,9 @@ class PersistAgentTracesStage(BaseStage):
         from cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph import (
             persist_agent_trace_feedbacks_in_knowledge_graph_pipeline,
         )
+
+        if await _watermarks_show_nothing_new(inputs, kind="traces"):
+            return _already_completed(self.name, REASON_NO_NEW_TRACE_STEPS)
 
         result = await persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
             user=inputs.user,
