@@ -11,9 +11,21 @@ echo "Environment: $ENV"
 DEBUG_PORT=${DEBUG_PORT:-5678}
 HTTP_PORT=${HTTP_PORT:-8000}
 BIND_ADDRESS=${BIND_ADDRESS:-"0.0.0.0"}
+# One gunicorn worker means one event loop for the whole API: a single slow
+# request stalls every other request, and a worker that dies takes every
+# in-flight connection with it. Serve with several so one bad request degrades
+# only itself. Debugging is the exception -- breakpoints spread across forked
+# workers are not useful -- so DEBUG=true defaults to one. Override either
+# default with API_WORKERS; memory scales with the count.
+if [ "$DEBUG" = "true" ]; then
+    API_WORKERS=${API_WORKERS:-1}
+else
+    API_WORKERS=${API_WORKERS:-4}
+fi
 echo "Debug port: $DEBUG_PORT"
 echo "HTTP port: $HTTP_PORT"
 echo "Bind address: $BIND_ADDRESS"
+echo "API workers: $API_WORKERS"
 
 # Run migrations through cognee's own migration system rather than raw
 # alembic: it knows a fresh database from an existing one (fresh -> create
@@ -53,10 +65,10 @@ sleep 2
 if [ "$ENV" = "dev" ] || [ "$ENV" = "local" ]; then
     if [ "$DEBUG" = "true" ]; then
         echo "Waiting for the debugger to attach..."
-        exec debugpy --wait-for-client --listen $BIND_ADDRESS:$DEBUG_PORT -m gunicorn -w 1 -k uvicorn.workers.UvicornWorker -t 30000 --bind=$BIND_ADDRESS:$HTTP_PORT --log-level debug --reload --access-logfile - --error-logfile - cognee.api.client:app
+        exec debugpy --wait-for-client --listen $BIND_ADDRESS:$DEBUG_PORT -m gunicorn -w $API_WORKERS -k uvicorn.workers.UvicornWorker -t 30000 --bind=$BIND_ADDRESS:$HTTP_PORT --log-level debug --reload --access-logfile - --error-logfile - cognee.api.client:app
     else
-        exec gunicorn -w 1 -k uvicorn.workers.UvicornWorker -t 30000 --bind=$BIND_ADDRESS:$HTTP_PORT --log-level debug --reload --access-logfile - --error-logfile - cognee.api.client:app
+        exec gunicorn -w $API_WORKERS -k uvicorn.workers.UvicornWorker -t 30000 --bind=$BIND_ADDRESS:$HTTP_PORT --log-level debug --reload --access-logfile - --error-logfile - cognee.api.client:app
     fi
 else
-    exec gunicorn -w 1 -k uvicorn.workers.UvicornWorker -t 30000 --bind=$BIND_ADDRESS:$HTTP_PORT --log-level error --access-logfile - --error-logfile - cognee.api.client:app
+    exec gunicorn -w $API_WORKERS -k uvicorn.workers.UvicornWorker -t 30000 --bind=$BIND_ADDRESS:$HTTP_PORT --log-level error --access-logfile - --error-logfile - cognee.api.client:app
 fi
