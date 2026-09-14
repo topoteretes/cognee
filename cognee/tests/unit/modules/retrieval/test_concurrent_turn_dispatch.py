@@ -403,16 +403,23 @@ class TestNoAnswerTurns:
         monkeypatch.setattr(LLMGateway, "acreate_structured_output", staticmethod(fake_llm))
         retriever = build_retriever(CompletionRetriever)
 
-        _objects, _context, completion = await run_session_aware_completion(
+        objects, context, completion = await run_session_aware_completion(
             retriever, raw_query="thanks, that was helpful!"
         )
 
         assert completion == ["Got it."]
         retriever.append_references.assert_not_awaited()
+        # Same return shape as the sequential runner: an acknowledged turn reports no
+        # retrieval, so include_references cannot cite the answer that was discarded.
+        assert objects is None
+        assert context is None
         assert len(concurrent_env.manager.qas) == 1
         qa = concurrent_env.manager.qas[0]
         assert qa["question"] == "thanks, that was helpful!"
         assert qa["answer"] == "Got it."
+        # The next turn's analysis is handed these to rate. The user saw neither.
+        assert qa["used_graph_element_ids"] is None
+        assert qa["used_session_context_ids"] is None
 
 
 def test_session_facade_stays_free_of_search_mode_state():

@@ -4,7 +4,9 @@ Public door: ``run_session_aware_completion`` → concurrent or sequential runne
 Both return ``(retrieved_objects, context, completion)``. Retriever ``get_completion``
 stays as on ``dev`` and does not call this module.
 
-Session I/O for the concurrent path lives in ``session_concurrent_turn``.
+Session I/O for the concurrent path lives in ``session_concurrent_turn``; the one
+exception is ``_record_no_answer_turn``, the sequential early return's own QA write,
+which has no ``_run_session_turn`` to go through.
 """
 
 from __future__ import annotations
@@ -348,10 +350,15 @@ async def run_concurrent_session_turn(
             user_id=user_cache_key,
             session_id=session_id,
             used_graph_element_ids=retriever.extract_context_object_ids(retrieved_objects),
+            answered=should_answer,
         )
 
+    # Match the sequential runner: a turn that was acknowledged rather than answered has
+    # no retrieval to report. Returning the discarded lane's objects would put them on the
+    # SearchResultPayload and let include_references append a `Sources:` block to the
+    # acknowledgement.
     if not should_answer:
-        return retrieved_objects, context, [stored_answer]
+        return None, None, [stored_answer]
     completions = await retriever.append_references([generated_answer], retrieved_objects)
     return retrieved_objects, context, completions
 
@@ -377,7 +384,7 @@ async def _record_no_answer_turn(retriever, *, raw_query: str, answer: str) -> N
             session_id=session_id,
         )
     except Exception as error:
-        logger.warning("Sequential no-answer turn QA write failed open: %s", error)
+        logger.warning("Sequential no-answer turn QA write failed open: %s", error, exc_info=True)
 
 
 async def run_sequential_session_turn(
