@@ -54,7 +54,10 @@ def _overrides_interface(engine: Any, method_name: str) -> bool:
 
     interface_method = getattr(GraphDBInterface, method_name, None)
     if isinstance(engine, GraphDBInterface):
-        adapter_method = getattr(type(engine), method_name, None)
+        # engine.__class__, not type(engine): get_graph_engine() hands back the
+        # engine wrapped in lease/handle proxies whose type defines none of the
+        # adapter methods but whose __class__ forwards to the real adapter class.
+        adapter_method = getattr(engine.__class__, method_name, None)
         if adapter_method is None:
             return False
         return adapter_method is not interface_method
@@ -81,7 +84,7 @@ def probe_graph_capabilities(engine: Any) -> GraphCapabilities:
             engine, "supports_feedback_weights", _FEEDBACK_WEIGHT_METHODS
         ),
         supports_truth_state=_supports(engine, "supports_truth_state", _TRUTH_STATE_METHODS),
-        adapter=type(engine).__name__,
+        adapter=engine.__class__.__name__,
     )
 
 

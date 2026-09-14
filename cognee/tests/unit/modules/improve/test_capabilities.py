@@ -129,6 +129,25 @@ def test_neo4j_adapter_reports_feedback_weights_but_no_truth_state():
     assert caps.supports_truth_state is False
 
 
+def test_probe_resolves_through_the_engine_handle():
+    """get_graph_engine() hands back a _GraphEngineHandle proxy, not the adapter.
+
+    The probe must read methods off ``engine.__class__`` (forwarded to the real
+    adapter class) — ``type(engine)`` is the handle class, which defines none of
+    the adapter methods, and would report every real backend as unsupported.
+    """
+    from cognee.infrastructure.databases.graph.get_graph_engine import _GraphEngineHandle
+
+    handle = _GraphEngineHandle({})
+    object.__setattr__(handle, "_pinned", FullAdapter())  # live pin: no cache round-trip
+
+    assert type(handle) is _GraphEngineHandle  # the trap the probe must not fall into
+    caps = probe_graph_capabilities(handle)
+    assert caps.supports_feedback_weights is True
+    assert caps.supports_truth_state is True
+    assert caps.adapter == "FullAdapter"
+
+
 def test_capabilities_are_frozen():
     caps = GraphCapabilities.assume_supported()
     with pytest.raises(ValidationError):
