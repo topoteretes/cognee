@@ -305,7 +305,7 @@ Copy `.env.template` to `.env` and configure:
 ```bash
 # Minimal setup (defaults to OpenAI + local file-based databases)
 LLM_API_KEY="your_openai_api_key"
-LLM_MODEL="openai/gpt-5-mini"  # Default model
+LLM_MODEL="openai/gpt-5.6-luna"  # Default model
 ```
 
 **Important**: If you configure only LLM or only embeddings, the other defaults to OpenAI. Ensure you have a working OpenAI API key, or configure both to avoid unexpected defaults.
@@ -475,7 +475,7 @@ Supported providers: OpenAI (default), Azure OpenAI, Google Gemini, Anthropic, A
 #### OpenAI (Recommended - Minimal Setup)
 ```bash
 LLM_API_KEY="your_openai_api_key"
-LLM_MODEL="openai/gpt-5-mini"  # default; or gpt-5, gpt-4o, gpt-4o-mini, etc.
+LLM_MODEL="openai/gpt-5.6-luna"  # default; or gpt-5.6-terra, gpt-5-mini, gpt-4o, etc.
 LLM_PROVIDER="openai"
 ```
 
