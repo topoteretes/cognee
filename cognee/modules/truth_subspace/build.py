@@ -9,7 +9,9 @@ coordinates when the chunk's ``truth_epoch`` equals the live centroids' epoch,
 so the centroids are the commit point. A build that moves the epoch from N to
 N+1 therefore scores and persists the chunk coordinates at N+1 *first* and
 upserts the N+1 centroids *last*: a failure anywhere before that final write
-leaves epoch N live and every chunk it had scored still valid. Chunks whose
+leaves epoch N live. Chunks rewritten at N+1 before such a failure no longer
+match the live epoch, so the reranker ignores them until a later build
+succeeds — degraded reranking, never wrong reranking. Chunks whose
 embedding batch failed are skipped outright rather than stored as all-zero
 "neutral" coordinates, and the backend's ``set_node_truth_state`` support is
 probed before the first embedding call.
@@ -414,6 +416,18 @@ async def build_truth_subspace(
             )
 
         nodes_scored = sum(1 for ok in write_result.values() if ok)
+        if nodes_scored == 0:
+            # Every write was refused (adapter read failure, or the chunks were
+            # deleted meanwhile). Committing N+1 centroids over zero live-epoch
+            # chunks would silently turn truth reranking off — keep epoch N,
+            # mirroring the no-embeddings guard above.
+            logger.warning(
+                "truth_subspace: no node accepted its truth state (%d skipped), "
+                "keeping epoch %d live",
+                nodes_skipped,
+                previous_epoch,
+            )
+            return live_epoch_result(nodes_skipped=nodes_skipped, error="no truth state written")
 
         # Step 6: ... and only then move the centroids to N+1. Until this write
         # lands, epoch N is what the reranker sees.

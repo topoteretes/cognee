@@ -285,6 +285,28 @@ async def test_failed_node_load_leaves_epoch_n_live(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_all_truth_state_writes_refused_skips_the_commit(monkeypatch):
+    """set_node_truth_state returning all False (adapter read failure, chunks
+    deleted meanwhile) must keep epoch N live: committing N+1 centroids over
+    zero live-epoch chunks would silently turn truth reranking off."""
+    graph_engine = _graph_engine(
+        [("chunk-1", {"type": "DocumentChunk", "text": "alpha corpus"})],
+    )
+    graph_engine.set_node_truth_state = AsyncMock(
+        side_effect=lambda scored: {node_id: False for node_id in scored}
+    )
+
+    result, vector_engine = await _run_build(
+        monkeypatch, graph_engine=graph_engine, embedding_engine=RecordingEmbeddingEngine()
+    )
+
+    assert result["status"] == STATUS_ERRORED
+    assert result["truth_epoch"] == 0
+    assert result["nodes_scored"] == 0
+    vector_engine.upsert_raw_vectors.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_no_scoreable_chunks_still_commits_the_new_centroids(monkeypatch):
     """With nothing to score, nothing can be left inconsistent: centroids go live."""
     graph_engine = _graph_engine([("entity-1", {"type": "Entity", "name": "not a chunk"})])
