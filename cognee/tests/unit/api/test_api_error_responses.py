@@ -445,6 +445,33 @@ class TestMemifyEndpoint:
         assert resp.json()["error"] == "Internal server error"
 
 
+class TestAddExistingDocument:
+    def test_add_of_a_changed_existing_file_returns_409_with_the_update_endpoint(self, client):
+        import cognee.api.v1.add as add_pkg
+        from cognee.api.v1.exceptions import DocumentUpdateRequiredError
+
+        data_id = uuid4()
+        add_pkg.add = AsyncMock(
+            side_effect=DocumentUpdateRequiredError(
+                [{"name": "report.txt", "data_id": data_id}], MOCK_DATASET_ID
+            )
+        )
+
+        resp = client.post(
+            "/add",
+            files={"data": ("report.txt", b"version two", "text/plain")},
+            data={"datasetName": "test_dataset"},
+        )
+
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["error"] == "Document already exists; use the update endpoint"
+        assert (
+            f"PATCH /api/v1/update?data_id={data_id}&dataset_id={MOCK_DATASET_ID}" in body["detail"]
+        )
+        assert "report.txt" in body["detail"]
+
+
 # ---------------------------------------------------------------------------
 # Update endpoint
 # ---------------------------------------------------------------------------
@@ -465,10 +492,22 @@ class TestUpdateEndpoint:
         assert resp.status_code == 422
         update.assert_not_awaited()
 
-    def test_update_pipeline_errored_returns_500(self, client):
+    def test_update_failed_result_returns_500_with_the_result_body(self, client):
+        """A failed rebuild keeps the one result shape: the client reads the
+        error from the same fields it would read counters from, and retries."""
         import cognee.api.v1.update as update_pkg
+        from cognee.api.v1.update import UpdateResult
 
-        update_pkg.update = AsyncMock(return_value={"run": _make_errored(error="update failed")})
+        failed = UpdateResult(
+            status="failed",
+            data_id=uuid4(),
+            dataset_id=MOCK_DATASET_ID,
+            duration_seconds=2.5,
+            pipeline_run_id=MOCK_PIPELINE_RUN_ID,
+            fallback={"reason": "no_baseline", "detail": "no stored processed text"},
+            error={"error_class": "RuntimeError", "message": "update failed"},
+        ).model_dump()
+        update_pkg.update = AsyncMock(return_value=failed)
 
         resp = client.patch(
             "/update",
@@ -477,14 +516,21 @@ class TestUpdateEndpoint:
             data={"node_set": ""},
         )
         assert resp.status_code == 500
-        body = resp.json()
-        assert body["error"] == "Pipeline run errored"
+        assert resp.json() == UpdateResult.model_validate(failed).model_dump(mode="json")
 
-    def test_update_success_returns_200(self, client):
+    def test_update_full_rebuild_returns_200(self, client):
         import cognee.api.v1.update as update_pkg
+        from cognee.api.v1.update import UpdateResult
 
-        completed = _make_completed()
-        update_pkg.update = AsyncMock(return_value={str(MOCK_DATASET_ID): completed})
+        rebuilt = UpdateResult(
+            status="full_rebuild",
+            data_id=uuid4(),
+            dataset_id=MOCK_DATASET_ID,
+            duration_seconds=4.0,
+            pipeline_run_id=MOCK_PIPELINE_RUN_ID,
+            fallback={"reason": "disabled", "detail": "chunk_level_diff=False was requested"},
+        ).model_dump()
+        update_pkg.update = AsyncMock(return_value=rebuilt)
 
         resp = client.patch(
             "/update",
@@ -493,21 +539,35 @@ class TestUpdateEndpoint:
             data={"node_set": ""},
         )
         assert resp.status_code == 200
+        body = resp.json()
+        assert body == UpdateResult.model_validate(rebuilt).model_dump(mode="json")
+        assert body["kept_chunks"] is None and body["fallback"]["reason"] == "disabled"
 
     @pytest.mark.parametrize("incremental_status", ["incremental", "unchanged"])
-    def test_update_incremental_summary_returns_200(self, client, incremental_status):
+    def test_update_incremental_result_returns_200(self, client, incremental_status):
+        """The old summary keys travel unchanged, the new ones beside them."""
         import cognee.api.v1.update as update_pkg
+        from cognee.api.v1.update import UpdateResult
 
+        changed = incremental_status == "incremental"
         summary = {
             "status": incremental_status,
-            "regions": 1 if incremental_status == "incremental" else 0,
-            "deleted_chunks": 1 if incremental_status == "incremental" else 0,
-            "added_chunks": 1 if incremental_status == "incremental" else 0,
+            "regions": int(changed),
+            "deleted_chunks": int(changed),
+            "added_chunks": int(changed),
             "reused_chunks": 0,
             "kept_chunks": 2,
             "reindexed_chunks": 1,
         }
-        update_pkg.update = AsyncMock(return_value=summary)
+        result = UpdateResult(
+            **summary,
+            total_chunks=2 + int(changed),
+            data_id=uuid4(),
+            dataset_id=MOCK_DATASET_ID,
+            duration_seconds=0.4,
+            pipeline_run_id=MOCK_PIPELINE_RUN_ID if changed else None,
+        ).model_dump()
+        update_pkg.update = AsyncMock(return_value=result)
 
         resp = client.patch(
             "/update",
@@ -517,7 +577,9 @@ class TestUpdateEndpoint:
         )
 
         assert resp.status_code == 200
-        assert resp.json() == summary
+        body = resp.json()
+        assert {key: body[key] for key in summary} == summary
+        assert body == UpdateResult.model_validate(result).model_dump(mode="json")
         assert update_pkg.update.await_args.kwargs["node_set"] is None
 
     def test_update_internal_error_returns_500(self, client):

@@ -1,6 +1,7 @@
 """Remote HTTP client that proxies V2 operations to a Cognee Cloud instance."""
 
 import io
+import json
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -24,6 +25,19 @@ def _text_upload_filename(text: str) -> str:
     (FileContentHashingError 409s).
     """
     return create_text_data(text).get_metadata()["name"]
+
+
+def _failed_update_result(body: str) -> dict | None:
+    """Parse a 500 body as an update result when it is one with status "failed"."""
+    from cognee.api.v1.update.result import UpdateResult
+
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        return None
+    if isinstance(payload, dict) and payload.get("status") == "failed" and "data_id" in payload:
+        return UpdateResult.model_validate(payload).model_dump()
+    return None
 
 
 class CloudClient:
@@ -382,13 +396,23 @@ class CloudClient:
             "dataset_id": str(dataset_id),
             "chunk_level_diff": "true" if chunk_level_diff else "false",
         }
+        from cognee.api.v1.update.result import UpdateResult
+
         async with session.patch(
             f"{self.service_url}/api/v1/update", params=params, data=form
         ) as resp:
             if resp.status >= 400:
                 body = await resp.text()
+                # A failed rebuild travels with a 500 but is still a result, in
+                # the same shape the local path returns, so the caller can read
+                # the error and retry. Anything else is a remote error.
+                failed = _failed_update_result(body)
+                if failed is not None:
+                    return failed
                 raise RuntimeError(f"Remote update failed ({resp.status}): {body}")
-            return await resp.json()
+            # Through the schema so the dict matches the local result exactly:
+            # UUIDs as UUID objects, the fallback reason as its enum member.
+            return UpdateResult.model_validate(await resp.json()).model_dump()
 
     async def list_data(self, dataset_id: UUID) -> list:
         """GET /api/v1/datasets/{dataset_id}/data — the documents in a dataset."""
