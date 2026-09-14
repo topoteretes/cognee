@@ -2067,6 +2067,9 @@ class Neo4jAdapter(GraphDBInterface):
         try:
             label = node_type.__name__
 
+            if node_name_filter_operator not in {"OR", "AND"}:
+                raise ValueError("node_name_filter_operator must be 'OR' or 'AND'")
+
             if node_name_filter_operator == "OR":
                 query = f"""
                 UNWIND $names AS wantedName
