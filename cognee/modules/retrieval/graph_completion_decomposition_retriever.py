@@ -6,7 +6,7 @@ from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
-from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError, QueryValidationError
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.retrieval.utils.query_decomposition import (
@@ -162,12 +162,11 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
         is_empty = await self._unified_engine.graph.is_empty()
 
         if is_empty:
-            logger.warning("Search attempt on an empty knowledge graph")
-            self._decomposition_state = DecompositionRunState(
-                original_query=query,
-                subqueries=[SubqueryRunState(query=query)],
+            # Same contract as GraphCompletionRetriever.get_retrieved_objects:
+            # an empty graph is a loud state error, not a quiet miss.
+            raise NoDataError(
+                "The knowledge graph is empty. Add data and run cognify before searching."
             )
-            return []
 
         subqueries = await self._decompose_query(query)
         state = DecompositionRunState(

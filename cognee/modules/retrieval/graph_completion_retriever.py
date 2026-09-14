@@ -11,6 +11,7 @@ from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.base_retriever import BaseRetriever
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.retrieval.utils.completion import (
     generate_completion,
@@ -136,8 +137,14 @@ class GraphCompletionRetriever(BaseRetriever):
         is_empty = await self._unified_engine.graph.is_empty()
 
         if is_empty:
-            logger.warning("Search attempt on an empty knowledge graph")
-            return []
+            # An empty graph is a state problem, not a query miss: surface it
+            # loudly (404 over the API) the same way the RAG retriever raises
+            # on a missing vector collection, instead of quietly returning
+            # nothing. A populated graph with no matching triplets still
+            # yields an empty result below — that is a normal miss.
+            raise NoDataError(
+                "The knowledge graph is empty. Add data and run cognify before searching."
+            )
 
         triplets = await self.get_triplets(query, query_batch)
 
