@@ -6,7 +6,7 @@ from uuid import NAMESPACE_OID, UUID, uuid5
 
 from pydantic import BaseModel
 
-from cognee import prune, visualize_graph
+from cognee import SearchType, prune, search, visualize_graph
 from cognee.low_level import DataPoint, setup
 from cognee.modules.data.methods import load_or_create_datasets
 from cognee.modules.users.methods import get_default_user
@@ -134,6 +134,19 @@ async def main():
         )
     )
     await visualize_graph(graph_file_path)
+
+    # Ask a question against the graph that was just built. only_context=True
+    # returns the retrieval context instead of an LLM answer, so this example
+    # needs only an embedding provider configured - no LLM.
+    results = await search(
+        query_text="Who works for GreenFuture Solutions?",
+        query_type=SearchType.GRAPH_COMPLETION,
+        dataset_ids=datasets[0].id,
+        user=user,
+        only_context=True,
+    )
+    for result in results:
+        print(result.search_result)
 
 
 if __name__ == "__main__":

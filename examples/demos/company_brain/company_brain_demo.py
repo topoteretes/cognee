@@ -2,12 +2,14 @@
 
     python -m pip install "cognee==1.5.4"
     export LLM_API_KEY="YOUR_OPENAI_API_KEY"
-    python examples/demos/company_brain_demo.py
-    python examples/demos/company_brain_demo.py --recall-only
+    python examples/demos/company_brain/company_brain_demo.py
+    python examples/demos/company_brain/company_brain_demo.py --recall-only
 
 Requires an LLM and embedding provider for text, session learning, and answers.
-Code extraction uses Enola (downloaded automatically on first use). The tiny code
-fixture and default storage live beside this script under .cognee-readme-demo.
+Code extraction uses Enola (downloaded automatically on first use) and embeds the
+extracted symbols, so it needs an embedding provider but makes no LLM calls. The
+tiny code fixture and default storage live beside this script under
+.cognee-readme-demo.
 Existing storage environment variables take precedence. No memory is deleted.
 Distillation is model-dependent; the script reports when no lesson is published.
 """
@@ -28,7 +30,8 @@ LESSON = (
 )
 QUESTION = (
     "Who maintains the payments API, which database does it use, "
-    "and what release rule did we learn?"
+    "what release rule did we learn, and which function guards against "
+    "duplicate charges?"
 )
 CODE = '''"""Payments API: guard against duplicate webhook delivery."""
 
@@ -81,7 +84,7 @@ async def recall_saved_memory(cognee):
     print_answers(
         await cognee.recall(
             QUESTION,
-            query_type=cognee.SearchType.RAG_COMPLETION,
+            query_type=cognee.SearchType.GRAPH_COMPLETION,
             datasets=[DATASET],
             session_id=f"readme-verification-{uuid4().hex}",
         )
@@ -93,7 +96,9 @@ async def index_code(cognee, root):
     repo.mkdir(parents=True, exist_ok=True)
     (repo / "payments.py").write_text(CODE)
     print("\nIndexing the sample code:", flush=True)
-    await cognee.remember(str(repo), dataset_name=DATASET, content_type="code")
+    # index_vectors writes CodeSymbol embeddings too, so the final
+    # GRAPH_COMPLETION answer can reach the code alongside text and lessons.
+    await cognee.remember(str(repo), dataset_name=DATASET, content_type="code", index_vectors=True)
     facts = await cognee.search(
         query_type=cognee.SearchType.CODE,
         query_text="",
