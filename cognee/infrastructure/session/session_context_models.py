@@ -9,9 +9,13 @@ VALID_RATINGS = {"helpful", "harmful"}
 MAX_CONTEXT_CONTENT_CHARS = 280
 
 # One threshold, declared once in ``cognee.modules.improve.constants``: a
-# candidate must clear it to be stored, and a stored entry must clear it (and
-# never have been rated harmful) to be served, distilled, or folded into
-# preferences. The two names are kept for their existing importers.
+# candidate must clear it to be stored, and a stored entry must clear it to be
+# served, distilled, or folded into preferences. The harmful-rating rule
+# differs by consumer: serving and preferences require never-rated-harmful
+# (``is_context_entry_usable``), while distillation uses net helpfulness
+# (``session_distillation.distill.is_entry_distillable`` — an entry rated
+# harmful once and helpful three times is still distillable). The two names
+# are kept for their existing importers.
 MIN_CANDIDATE_CONFIDENCE = GATE_CONFIDENCE
 MIN_GATE_CONFIDENCE = GATE_CONFIDENCE
 
@@ -490,11 +494,13 @@ class SessionContextEntry(BaseModel):
 
 
 def is_context_entry_usable(entry: SessionContextEntry) -> bool:
-    """Shared downstream gate: never rated harmful and confidence clears the threshold.
+    """Serving/preferences gate: never rated harmful and confidence clears the threshold.
 
-    Both session distillation and preference personalization consume stored guidance
-    through this one check, so the two features can never drift apart on what counts
-    as a usable entry.
+    Session serving and preference personalization consume stored guidance through
+    this check. Distillation deliberately does NOT: it gates on net helpfulness
+    (``session_distillation.distill.is_entry_distillable``), so an entry rated
+    harmful once and helpful three times can still be distilled while it is
+    withheld from live serving.
     """
     return entry.harmful_count == 0 and entry.confidence >= MIN_GATE_CONFIDENCE
 

@@ -16,9 +16,12 @@ from cognee.modules.improve.constants import GATE_CONFIDENCE
 
 # -- Tunables ----------------------------------------------------------------
 
-# Gate: a context entry is distillable only when it passes the shared usability
-# check (never rated harmful, confidence clears the threshold). The threshold
-# is the loop-wide GATE_CONFIDENCE; the local name is kept for its importers.
+# Gate: a context entry is distillable when its NET helpfulness is
+# non-negative and its confidence clears the threshold
+# (``distill.is_entry_distillable``) — deliberately looser than the
+# never-rated-harmful rule serving and preferences use
+# (``is_context_entry_usable``). The threshold is the loop-wide
+# GATE_CONFIDENCE; the local name is kept for its importers.
 MIN_GATE_CONFIDENCE = GATE_CONFIDENCE
 
 # Batching: pack capped timeline blocks into coarse batches. Six worst-case QA
