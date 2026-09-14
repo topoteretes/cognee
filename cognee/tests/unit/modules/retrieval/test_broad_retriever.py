@@ -779,7 +779,9 @@ def test_a_label_form_never_stands_in_for_a_name():
     assert _canonical_spelling(["ORTIZ", "Dr. Lena Ortiz"], Counter(ORTIZ=50)) == "Dr. Lena Ortiz"
     assert _canonical_spelling(["@ann", "Ann Lee"], Counter({"@ann": 9, "Ann Lee": 1})) == "Ann Lee"
     assert _canonical_spelling(["REID", "@reid"], Counter(REID=3)) == "REID"
-    assert _canonical_spelling(["PR-7", "pr-7"], Counter({"PR-7": 2})) == "pr-7"  # only the capitals form is a label
+    assert (
+        _canonical_spelling(["PR-7", "pr-7"], Counter({"PR-7": 2})) == "pr-7"
+    )  # only the capitals form is a label
 
 
 @pytest.mark.asyncio
@@ -1553,3 +1555,76 @@ async def test_target_match_sees_passages_where_the_name_is_written(monkeypatch)
     assert matched == ["U03CCC"]
     assert "Passages where the question's name is written:" in prompts[0]
     assert '"real_name": "Priya Natarajan"' in prompts[0]
+
+
+def test_vote_keeps_what_a_majority_of_readings_listed():
+    """Three readings of one shard: an entry two of them list stays, a stray one goes,
+    keys spelled differently for the same item still agree, and unkeyed entries take
+    the median reading per unit."""
+    from cognee.modules.retrieval.broad_retriever import _vote
+
+    def keyed(unit, key, group="Rojas"):
+        return ExtractedItem(unit=unit, key=key, group=group, evidence=key)
+
+    readings = [
+        ShardItems(
+            items=[
+                keyed(0, "Matchday 5, Rojas 12'"),
+                keyed(0, "Matchday 5, Rojas 70'"),
+                keyed(1, "Matchday 9, Demir 3'"),
+            ],
+            aliases=[["Rojas", "the Lighthouse"]],
+        ),
+        ShardItems(
+            items=[keyed(0, "Matchday 5: Rojas, 12th minute"), keyed(0, "Matchday 5, Rojas 70'")]
+        ),
+        ShardItems(items=[keyed(0, "Matchday 5, Rojas 12'"), keyed(0, "Matchday 5, Rojas 44'")]),
+    ]
+    voted = _vote(readings)
+    assert sorted(item.key for item in voted.items) == [
+        "Matchday 5, Rojas 12'",
+        "Matchday 5, Rojas 70'",
+    ]
+    assert voted.aliases == [["Rojas", "the Lighthouse"]]
+
+    def unkeyed(unit, quote):
+        return ExtractedItem(unit=unit, evidence=quote)
+
+    readings = [
+        ShardItems(items=[unkeyed(0, "a"), unkeyed(0, "b"), unkeyed(0, "c")]),
+        ShardItems(items=[unkeyed(0, "a")]),
+        ShardItems(items=[unkeyed(0, "a"), unkeyed(0, "b")]),
+    ]
+    assert len(_vote(readings).items) == 2
+    assert _vote(readings[:1]) is readings[0]
+
+
+def test_same_identity_needs_the_same_digits():
+    from cognee.modules.retrieval.broad_retriever import _same_identity
+
+    assert _same_identity("Matchday 5, Rojas 12'", "Matchday 5: Rojas, 12th minute")
+    assert not _same_identity("Matchday 5, Rojas 12'", "Matchday 5, Rojas 70'")
+    assert not _same_identity("PR 42", "issue 43")
+    assert _same_identity("PR 42", "pr-42")
+
+
+@pytest.mark.asyncio
+async def test_three_readings_make_three_calls_per_shard_and_the_context_says_so(monkeypatch):
+    calls = []
+
+    def respond(model, text_input):
+        calls.append(model)
+        return (
+            ShardItems(items=[_item("Ann", "1")]) if model is ShardItems else NameGroups(groups=[])
+        )
+
+    _stub_llm(monkeypatch, respond)
+    retriever = BroadRetriever(shard_tokens=10_000, readings=3)
+    result = await retriever.count_by_reading(
+        _plan(group_by="assignee", dedup_key="the id"), _units(2, words=2)
+    )
+
+    assert calls.count(ShardItems) == 3 and result.total == 1 and result.llm_calls == 3
+    assert "read 3 times" in await retriever.get_context_from_objects("q", result)
+    with pytest.raises(ValueError):
+        BroadRetriever(readings=0)
