@@ -122,19 +122,70 @@ def test_format_edges_with_endpoints_ignores_incoming_is_a_edge():
     # cognify writes Entity --is_a--> EntityType (get_graph_from_model emits
     # (data_point.id, target.id, ...)), so an is_a edge pointing at this node
     # types something else, not this entity.
+    #
+    # Shaped the way the DEFAULT backend reports it: ladybug matches
+    # undirected and always returns the queried node in the source slot, so an
+    # incoming edge still arrives node-first and only source_node_id tells the
+    # truth. A test built the other way round would pass without exercising
+    # the check on the backend most deployments run.
     node_id = "entity-1"
 
     edges_with_endpoints = [
         (
-            {"id": "type-person", "name": "Person", "type": "EntityType"},
-            {"relationship_name": "is_a"},
             {"id": node_id, "name": "Marco", "type": "Entity"},
+            {
+                "relationship_name": "is_a",
+                "source_node_id": "type-person",
+                "target_node_id": node_id,
+            },
+            {"id": "type-person", "name": "Person", "type": "EntityType"},
         ),
     ]
 
     entity_types, _, _ = format_edges_with_endpoints(node_id, edges_with_endpoints)
 
     assert entity_types == []
+
+
+def test_format_edges_with_endpoints_keeps_outgoing_is_a_reported_target_first():
+    # The direction-preserving backends (neo4j, neptune, turso, postgres) put
+    # this node in the source slot for an outgoing edge; source_node_id agrees.
+    node_id = "entity-1"
+
+    edges_with_endpoints = [
+        (
+            {"id": node_id, "name": "Marco", "type": "Entity"},
+            {
+                "relationship_name": "is_a",
+                "source_node_id": node_id,
+                "target_node_id": "type-person",
+            },
+            {"id": "type-person", "name": "Person", "type": "EntityType"},
+        ),
+    ]
+
+    entity_types, _, _ = format_edges_with_endpoints(node_id, edges_with_endpoints)
+
+    assert [entity_type["id"] for entity_type in entity_types] == ["type-person"]
+
+
+def test_format_edges_with_endpoints_falls_back_to_slot_order_without_edge_provenance():
+    # An edge written without source_node_id (adapter-level write, older
+    # graph) keeps the pre-existing slot-order behaviour rather than being
+    # dropped.
+    node_id = "entity-1"
+
+    edges_with_endpoints = [
+        (
+            {"id": node_id, "name": "Marco", "type": "Entity"},
+            {"relationship_name": "is_a"},
+            {"id": "type-person", "name": "Person", "type": "EntityType"},
+        ),
+    ]
+
+    entity_types, _, _ = format_edges_with_endpoints(node_id, edges_with_endpoints)
+
+    assert [entity_type["id"] for entity_type in entity_types] == ["type-person"]
 
 
 def test_format_edges_with_endpoints_dedupes_repeated_type_edges():
@@ -858,11 +909,14 @@ def test_apply_type_description_updates_one_relations_slot_without_touching_the_
 
 
 @pytest.mark.asyncio
-async def test_generate_consolidated_entities_keeps_the_entities_that_succeeded():
+async def test_generate_consolidated_entities_keeps_a_failed_entity_unchanged():
     # add_data_points runs after this task, so raising would discard every
-    # entity that did succeed over one provider hiccup.
+    # entity that did succeed over one provider hiccup. Dropping the failed
+    # entity instead would remove it from its type's member list, and
+    # total_member_count - which the summary must state - would silently
+    # shrink to however many entities happened to succeed.
     nodes = [
-        _node(str(uuid4()), f"E{i}", "old", edges={}, neighbors=[], entity_types=[])
+        _node(str(uuid4()), f"E{i}", f"old {i}", edges={}, neighbors=[], entity_types=[])
         for i in range(3)
     ]
 
@@ -878,7 +932,50 @@ async def test_generate_consolidated_entities_keeps_the_entities_that_succeeded(
     ):
         entities = await generate_consolidated_entities(nodes)
 
-    assert [entity.name for entity in entities] == ["E0", "E2"]
+    assert [entity.name for entity in entities] == ["E0", "E1", "E2"]
+    by_name = {entity.name: entity.description for entity in entities}
+    assert by_name["E0"] == "new description"
+    assert by_name["E2"] == "new description"
+    assert by_name["E1"] == "old 1"
+
+
+@pytest.mark.asyncio
+async def test_generate_consolidated_entities_propagates_cancellation():
+    # CancelledError is a BaseException, so a blanket handler would log it as
+    # an ordinary failure and let a cancelled run keep working (CLO-365).
+    nodes = [_node(str(uuid4()), "E0", "old", edges={}, neighbors=[], entity_types=[])]
+
+    async def fake_llm(**_kwargs):
+        raise asyncio.CancelledError()
+
+    with (
+        patch.object(
+            rewrite_entities.LLMGateway,
+            "acreate_structured_output",
+            new=AsyncMock(side_effect=fake_llm),
+        ),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await generate_consolidated_entities(nodes)
+
+
+@pytest.mark.asyncio
+async def test_generate_type_descriptions_propagates_cancellation():
+    entity_type = EntityType(name="Person", description="Person")
+    marco = Entity(name="Marco", is_a=entity_type, description="d")
+
+    async def fake_llm(**_kwargs):
+        raise asyncio.CancelledError()
+
+    with (
+        patch.object(
+            generate_type_description_module.LLMGateway,
+            "acreate_structured_output",
+            new=AsyncMock(side_effect=fake_llm),
+        ),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await describe_types.generate_type_descriptions([marco])
 
 
 @pytest.mark.asyncio

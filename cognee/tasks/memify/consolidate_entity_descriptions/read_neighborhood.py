@@ -45,6 +45,27 @@ async def get_edges_with_endpoints(graph_engine, node_id):
     return await graph_engine.get_connections(node_id)
 
 
+def _is_outgoing(edge_info: dict[str, Any], node_id: str, node_in_source_slot: bool) -> bool:
+    """Whether this edge points away from node_id.
+
+    Read from the edge's own source_node_id rather than the triple's slot
+    order, because the two disagree by backend. Ladybug's get_connections
+    matches undirected (``MATCH (n)-[r:EDGE]-(m)`` with ``n`` pinned to the
+    queried node), so it returns the queried node in the source slot for
+    incoming edges too; Neo4j, Neptune, Turso and the Postgres adapters
+    preserve the real direction. get_graph_from_model stamps source_node_id
+    on every edge cognee writes, so it is the one answer that holds
+    everywhere - same fallback delete_chunks_incremental uses.
+
+    Edges written without that property (an adapter-level write, an older
+    graph) fall back to slot order, which is what this code did before.
+    """
+    edge_source_id = edge_info.get("source_node_id")
+    if edge_source_id is None:
+        return node_in_source_slot
+    return str(edge_source_id) == str(node_id)
+
+
 def format_edges_with_endpoints(
     node_id: str,
     edges_with_endpoints: list[Any],
@@ -92,10 +113,15 @@ def format_edges_with_endpoints(
             continue
 
         source, edge_info, target = triple
-        is_outgoing = str(source.get("id")) == str(node_id)
-        neighbor = target if is_outgoing else source
+        # Slot order finds the NEIGHBOR on every backend - whichever endpoint
+        # is not this node - but it does not give the edge's direction: the
+        # default backend matches undirected and always returns the queried
+        # node in the source slot, so the two questions need two answers.
+        node_in_source_slot = str(source.get("id")) == str(node_id)
+        neighbor = target if node_in_source_slot else source
         neighbor_id = str(neighbor.get("id", ""))
         relationship_name = str(edge_info.get("relationship_name") or "related to")
+        is_outgoing = _is_outgoing(edge_info, node_id, node_in_source_slot)
 
         edges.setdefault(neighbor_id, []).append(
             {

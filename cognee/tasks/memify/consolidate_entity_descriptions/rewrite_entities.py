@@ -185,6 +185,20 @@ async def generate_consolidated_entity(
     return entity
 
 
+def build_unchanged_entity(node) -> Entity:
+    """Rebuild an entity with the description it already had.
+
+    Used when the rewrite call for this entity fails. Dropping it instead
+    would also drop it from its EntityType's member list, and
+    total_member_count - which the type summary must state, and which decides
+    whether members are named individually - would silently shrink to however
+    many entities happened to succeed.
+    """
+    props = node["properties"]
+    entity_types = [build_entity_type(entity_type) for entity_type in node["entity_types"]]
+    return build_entity(props, entity_types, props.get("description") or "")
+
+
 async def generate_consolidated_entities(
     nodes,
     max_concurrent_calls: int = MAX_CONCURRENT_ENTITY_LLM_CALLS,
@@ -197,27 +211,30 @@ async def generate_consolidated_entities(
 
     async def generate_with_limit(node):
         async with semaphore:
-            return await generate_consolidated_entity(
-                node,
-                system_prompt,
-                max_neighbor_lines,
-                max_neighbor_text_chars,
-                max_completion_tokens,
-            )
+            try:
+                return await generate_consolidated_entity(
+                    node,
+                    system_prompt,
+                    max_neighbor_lines,
+                    max_neighbor_text_chars,
+                    max_completion_tokens,
+                )
+            except asyncio.CancelledError:
+                # A BaseException since 3.8, so it would slip past `except
+                # Exception` - and swallowing it keeps a cancelled run doing
+                # LLM work and writing partial results (same reason run_tasks
+                # catches it explicitly, CLO-365).
+                raise
+            except Exception as error:
+                # add_data_points runs after every enrichment task, so raising
+                # here would discard every entity that did succeed over one
+                # provider hiccup.
+                logger.warning(
+                    "generate_consolidated_entities: keeping %r unchanged (%s)",
+                    node["properties"].get("name"),
+                    error,
+                    exc_info=True,
+                )
+                return build_unchanged_entity(node)
 
-    consolidate_entity_descriptions_tasks = (generate_with_limit(node) for node in nodes)
-
-    # An entity whose LLM call fails is dropped from this pass, not fatal:
-    # add_data_points runs after every enrichment task, so raising here would
-    # discard every entity that did succeed over one provider hiccup.
-    results = await asyncio.gather(*consolidate_entity_descriptions_tasks, return_exceptions=True)
-    failures = [result for result in results if isinstance(result, BaseException)]
-    if failures:
-        logger.warning(
-            "generate_consolidated_entities: %d of %d entities failed and were left unchanged "
-            "(first error: %r)",
-            len(failures),
-            len(results),
-            failures[0],
-        )
-    return [result for result in results if not isinstance(result, BaseException)]
+    return await asyncio.gather(*(generate_with_limit(node) for node in nodes))

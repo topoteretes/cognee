@@ -55,47 +55,51 @@ async def generate_type_descriptions(
     async def process_group(group: dict[str, Any]) -> None:
         entity_type = group["entity_type"]
         members = group["members"]
-        description = await generate_type_summary(
-            entity_type,
-            members,
-            system_prompt,
-            merge_system_prompt,
-            semaphore,
-            max_members_per_batch,
-            max_named_members,
-            max_member_card_chars,
-            max_merge_partial_chars,
-            max_completion_tokens,
-        )
-        is_a_texts = await generate_is_a_lines(
-            entity_type,
-            members,
-            description,
-            is_a_system_prompt,
-            semaphore,
-            max_members_per_batch,
-            max_member_card_chars,
-            tokens_per_is_a_line,
-        )
-        apply_type_description(
-            entity_type,
-            members,
-            description,
-            is_a_texts,
-            max_persisted_is_a_chars,
-        )
+        try:
+            description = await generate_type_summary(
+                entity_type,
+                members,
+                system_prompt,
+                merge_system_prompt,
+                semaphore,
+                max_members_per_batch,
+                max_named_members,
+                max_member_card_chars,
+                max_merge_partial_chars,
+                max_completion_tokens,
+            )
+            is_a_texts = await generate_is_a_lines(
+                entity_type,
+                members,
+                description,
+                is_a_system_prompt,
+                semaphore,
+                max_members_per_batch,
+                max_member_card_chars,
+                tokens_per_is_a_line,
+            )
+            apply_type_description(
+                entity_type,
+                members,
+                description,
+                is_a_texts,
+                max_persisted_is_a_chars,
+            )
+        except asyncio.CancelledError:
+            # A BaseException since 3.8, so it would slip past `except
+            # Exception` - and swallowing it keeps a cancelled run doing LLM
+            # work and writing partial results (CLO-365, see run_tasks).
+            raise
+        except Exception as error:
+            # add_data_points runs after this task, so raising would throw
+            # away every entity rewrite and every other type in the graph.
+            logger.warning(
+                "generate_type_descriptions: leaving %r unsummarized (%s)",
+                entity_type.name,
+                error,
+                exc_info=True,
+            )
 
-    results = await asyncio.gather(
-        *(process_group(group) for group in groups.values()), return_exceptions=True
-    )
-    failures = [result for result in results if isinstance(result, BaseException)]
-    if failures:
-        logger.warning(
-            "generate_type_descriptions: %d of %d types failed and were left unsummarized "
-            "(first error: %r)",
-            len(failures),
-            len(results),
-            failures[0],
-        )
+    await asyncio.gather(*(process_group(group) for group in groups.values()))
 
     return entities
