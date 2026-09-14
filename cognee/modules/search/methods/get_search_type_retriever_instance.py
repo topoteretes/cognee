@@ -9,7 +9,7 @@ from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
 from cognee.modules.retrieval.broad_retriever import (
     BROAD_MAX_PARALLEL_CALLS,
-    BROAD_READINGS,
+    BROAD_READING_PASSES,
     BROAD_SHARD_TOKENS,
     BroadRetriever,
 )
@@ -296,7 +296,9 @@ async def get_search_type_retriever_instance(
                 "max_parallel_calls": retriever_specific_config.get(
                     "max_parallel_calls", BROAD_MAX_PARALLEL_CALLS
                 ),
-                "readings": retriever_specific_config.get("readings", BROAD_READINGS),
+                "reading_passes": retriever_specific_config.get(
+                    "reading_passes", BROAD_READING_PASSES
+                ),
             },
         ),
         SearchType.GRAPH_SUMMARY_COMPLETION: (

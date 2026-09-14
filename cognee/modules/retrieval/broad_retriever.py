@@ -43,10 +43,15 @@ logger = get_logger("BroadRetriever")
 # on its own, so the smallest call is one full chunk as ingestion stored it.
 BROAD_SHARD_TOKENS = 2_000
 BROAD_MAX_PARALLEL_CALLS = 16
-# Times every chunk is read. One reading lists each item once; the misses and extras of
-# a single reading are not the same entry twice, so with three readings an entry listed
-# by a majority is kept and a stray one is not. Cost scales with the number of readings.
-BROAD_READINGS = 1
+# How many times every chunk is read (one pass = one LLM listing call per chunk).
+# With one pass, what that call lists is what gets counted. With three, each chunk is
+# read three times in parallel and an entry counts only when a majority of the passes
+# listed it: a single pass over a dense chunk misses or doubles an entry now and then,
+# and those slips are not the same entry twice, so the vote removes most of them
+# (football season, gpt-5.6-luna: 8 of 14 exact with one pass, 11 with three). It
+# cannot fix a miss every pass agrees on. Cost and reading calls scale with the number
+# of passes; use an odd number so the majority is never a tie.
+BROAD_READING_PASSES = 1
 # A reading call that hangs holds the whole wave: one call stalled for 84 and then
 # for 168 minutes. A call is retried once after this long, then the search fails.
 BROAD_CALL_TIMEOUT_SECONDS = 300
@@ -183,8 +188,8 @@ class CountResult:
     # Entries the reading calls returned before repeated mentions were removed: the
     # gap to items_listed is what dedup took out, and the answer states it.
     entries_read: int = 0
-    # Times every chunk was read; above 1, an entry counts when a majority listed it.
-    readings: int = 1
+    # Passes over every chunk; above 1, an entry counted when a majority of them listed it.
+    reading_passes: int = 1
     llm_calls: int = 0
     tokens_read: int = 0
 
@@ -361,7 +366,7 @@ def _is_label(name: str) -> bool:
 
 
 def _same_identity(a: str, b: str) -> bool:
-    """Two keys written for the same item by different readings ("Matchday 5, Rojas 12'"
+    """Two keys written for the same item by different passes ("Matchday 5, Rojas 12'"
     and "Matchday 5: Rojas, 12th minute"): no digit on one side that the other side
     contradicts, and one's words within the other's or most of them shared."""
     a, b = a.lower(), b.lower()
@@ -376,23 +381,23 @@ def _same_identity(a: str, b: str) -> bool:
     return wa <= wb or wb <= wa or len(wa & wb) / len(wa | wb) >= 0.5
 
 
-def _vote(readings: list[ShardItems]) -> ShardItems:
-    """One listing from several readings of the same shard.
+def _vote(passes: list[ShardItems]) -> ShardItems:
+    """One listing from several passes over the same shard.
 
-    A keyed item is kept when a majority of readings list it (keys matched loosely,
-    within one unit). Unkeyed entries have no identity across readings, so each unit
-    keeps the reading whose count of them is the median. Aliases are pooled.
+    A keyed item is kept when a majority of passes list it (keys matched loosely,
+    within one unit). Unkeyed entries have no identity across passes, so each unit
+    keeps the pass whose count of them is the median. Aliases are pooled.
     """
-    if len(readings) == 1:
-        return readings[0]
-    majority = len(readings) // 2 + 1
-    # clusters[unit] = list of (the readings that listed one item, keyed by reading)
+    if len(passes) == 1:
+        return passes[0]
+    majority = len(passes) // 2 + 1
+    # clusters[unit] = list of (the passes that listed one item, keyed by pass number)
     clusters: dict[int, list[dict[int, ExtractedItem]]] = {}
     unkeyed: dict[int, list[list[ExtractedItem]]] = {}
-    for n, reading in enumerate(readings):
+    for n, reading in enumerate(passes):
         for item in reading.items:
             if not item.key:
-                unkeyed.setdefault(item.unit, [[] for _ in readings])[n].append(item)
+                unkeyed.setdefault(item.unit, [[] for _ in passes])[n].append(item)
                 continue
             for members in clusters.setdefault(item.unit, []):
                 first = next(iter(members.values()))
@@ -406,9 +411,9 @@ def _vote(readings: list[ShardItems]) -> ShardItems:
         for members in unit_clusters:
             if len(members) < majority:
                 continue
-            # The kept entry is the first reading's, under the group spelling most of
-            # its readings used: one reading's "the Wall" must not stand for an item
-            # the others filed under "Leon Fischer", or the name match splits them.
+            # The kept entry is the first pass's, under the group spelling most of the
+            # passes used: one pass's "the Wall" must not stand for an item the others
+            # filed under "Leon Fischer", or the name match splits them.
             kept = next(iter(members.values()))
             groups = Counter(m.group for m in members.values() if m.group)
             if groups:
@@ -417,7 +422,7 @@ def _vote(readings: list[ShardItems]) -> ShardItems:
                 items.append(kept)
     for lists in unkeyed.values():
         items += sorted(lists, key=len)[len(lists) // 2]
-    return ShardItems(items=items, aliases=[a for r in readings for a in r.aliases])
+    return ShardItems(items=items, aliases=[a for r in passes for a in r.aliases])
 
 
 def _canonical_spelling(names: list[str], used: Counter) -> str:
@@ -429,23 +434,35 @@ def _canonical_spelling(names: list[str], used: Counter) -> str:
 
 
 class BroadRetriever(CompletionRetriever):
-    """Count-and-aggregate search over every unit of a dataset."""
+    """Count-and-aggregate search over every unit of a dataset.
+
+    Settings (all optional, passed through ``retriever_specific_config``):
+
+    - ``shard_tokens``: packing budget for small units (table rows, short chunks); a
+      stored chunk larger than it is read whole, alone, never split.
+    - ``max_parallel_calls``: reading calls in flight at once.
+    - ``call_timeout``: seconds one reading call may take before it is retried once.
+    - ``reading_passes``: how many times every chunk is read, default 1. Above 1 the
+      passes vote: an entry is counted when a majority of them listed it, so the slips
+      of a single pass over a dense chunk cancel out. Cost scales with the number of
+      passes; use an odd number.
+    """
 
     def __init__(
         self,
         shard_tokens: int = BROAD_SHARD_TOKENS,
         call_timeout: float = BROAD_CALL_TIMEOUT_SECONDS,
         max_parallel_calls: int = BROAD_MAX_PARALLEL_CALLS,
-        readings: int = BROAD_READINGS,
+        reading_passes: int = BROAD_READING_PASSES,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.shard_tokens = shard_tokens
         self.call_timeout = call_timeout
         self.max_parallel_calls = max_parallel_calls
-        if readings < 1:
-            raise ValueError(f"BROAD readings must be at least 1, got {readings}")
-        self.readings = readings
+        if reading_passes < 1:
+            raise ValueError(f"BROAD reading_passes must be at least 1, got {reading_passes}")
+        self.reading_passes = reading_passes
         self.tokenizer = TikTokenTokenizer()
 
     async def get_retrieved_objects(self, query: str) -> CountResult:
@@ -674,13 +691,13 @@ class BroadRetriever(CompletionRetriever):
                 raise TimeoutError(f"BROAD: reading call for {shard[0].id} timed out twice")
 
         async def read(shard: list[Unit]) -> tuple[str, ShardItems]:
-            readings = await asyncio.gather(*(read_once(shard) for _ in range(self.readings)))
-            voted = _vote(list(readings))
-            if self.readings > 1:
+            passes = await asyncio.gather(*(read_once(shard) for _ in range(self.reading_passes)))
+            voted = _vote(list(passes))
+            if self.reading_passes > 1:
                 logger.info(
-                    "BROAD vote on %s: %s entries per reading, %d kept by majority",
+                    "BROAD vote on %s: %s entries per pass, %d kept by majority",
                     shard[0].id,
-                    [len(r.items) for r in readings],
+                    [len(r.items) for r in passes],
                     len(voted.items),
                 )
             return shard[0].id, voted
@@ -794,9 +811,9 @@ class BroadRetriever(CompletionRetriever):
             names_merged=canonical is not None,
             target_names=target_names,
             unkeyed=unkeyed,
-            llm_calls=len(shards) * self.readings,
-            tokens_read=tokens_read * self.readings,
-            readings=self.readings,
+            llm_calls=len(shards) * self.reading_passes,
+            tokens_read=tokens_read * self.reading_passes,
+            reading_passes=self.reading_passes,
         )
 
     # --- reading helpers ------------------------------------------------------------
@@ -1101,10 +1118,10 @@ class BroadRetriever(CompletionRetriever):
             lines.append(f"Condition: {plan.condition}")
         if plan.dedup_key:
             lines.append(f"Repeated mentions of one item removed by: {plan.dedup_key}")
-        if result.readings > 1:
+        if result.reading_passes > 1:
             lines.append(
-                f"(every chunk was read {result.readings} times; an entry counts when a "
-                "majority of the readings listed it)"
+                f"(every chunk was read {result.reading_passes} times; an entry counts when "
+                "a majority of the passes listed it)"
             )
         if result.entries_read > result.items_listed:
             # Said out loud so a key that folds different items together is visible

@@ -1628,7 +1628,7 @@ async def test_three_readings_make_three_calls_per_shard_and_the_context_says_so
         )
 
     _stub_llm(monkeypatch, respond)
-    retriever = BroadRetriever(shard_tokens=10_000, readings=3)
+    retriever = BroadRetriever(shard_tokens=10_000, reading_passes=3)
     result = await retriever.count_by_reading(
         _plan(group_by="assignee", dedup_key="the id"), _units(2, words=2)
     )
@@ -1636,4 +1636,4 @@ async def test_three_readings_make_three_calls_per_shard_and_the_context_says_so
     assert calls.count(ShardItems) == 3 and result.total == 1 and result.llm_calls == 3
     assert "read 3 times" in await retriever.get_context_from_objects("q", result)
     with pytest.raises(ValueError):
-        BroadRetriever(readings=0)
+        BroadRetriever(reading_passes=0)
