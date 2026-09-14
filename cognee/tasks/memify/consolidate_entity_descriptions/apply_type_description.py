@@ -4,7 +4,7 @@ from cognee.modules.engine.models import EntityType
 from cognee.modules.engine.models.Entity import Entity
 from cognee.shared.logging_utils import get_logger
 
-from .constants import MAX_TYPE_TEXT_CHARS, truncate
+from .constants import MAX_PERSISTED_IS_A_CHARS, truncate
 from .models import MemberIsAText
 from .type_links import iter_type_links, update_type_link
 
@@ -32,7 +32,7 @@ def apply_type_description(
     members: list[Entity],
     new_description: str,
     is_a_texts: list[MemberIsAText] | None = None,
-    max_type_text_chars: int = MAX_TYPE_TEXT_CHARS,
+    max_persisted_is_a_chars: int = MAX_PERSISTED_IS_A_CHARS,
 ) -> EntityType:
     """Build one updated EntityType (same id, all other fields preserved) and
     point every member's is_a at that same shared instance.
@@ -44,7 +44,7 @@ def apply_type_description(
 
     When a member has a matching is_a_text, is_a becomes the
     (Edge(relationship_type="is_a", edge_text=...), updated_entity_type) tuple
-    so the text is searchable on the edge - truncated to max_type_text_chars
+    so the text is searchable on the edge - truncated to max_persisted_is_a_chars
     before it's persisted, regardless of what the LLM call's own output
     budget let through. A member with no matching text (name mismatch, or
     none produced) falls back to the bare EntityType rather than raising -
@@ -70,7 +70,7 @@ def apply_type_description(
             # Bounds what actually gets persisted, independent of the output
             # token budget on the LLM call that produced it - that budget caps
             # generation, this caps what's written to the graph afterward.
-            is_a_text = truncate(is_a_text, max_type_text_chars)
+            is_a_text = truncate(is_a_text, max_persisted_is_a_chars)
         else:
             missed_count += 1
 

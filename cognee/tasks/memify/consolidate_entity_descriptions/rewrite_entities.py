@@ -11,28 +11,18 @@ from cognee.modules.engine.models import EntityType
 from cognee.modules.engine.models.Entity import Entity
 from cognee.shared.logging_utils import get_logger
 
-from .constants import REASONING_HEADROOM_TOKENS, truncate
+from .constants import (
+    MAX_CONCURRENT_ENTITY_LLM_CALLS,
+    MAX_NEIGHBOR_LINES_IN_PROMPT,
+    MAX_NEIGHBOR_TEXT_CHARS,
+    PARAGRAPH_MAX_COMPLETION_TOKENS,
+    prompt_name,
+    truncate,
+)
 from .models import NodeDescription
 from .type_links import set_type_links
 
 logger = get_logger("consolidate_entity_descriptions")
-
-prompt_name = "consolidate_entity_details.txt"
-MAX_CONCURRENT_ENTITY_LLM_CALLS = 10
-# Counted in prompt LINES, not neighbors: one neighbor contributes one line per
-# distinct edge connecting it, so a neighbor cap bounds nothing an over-connected
-# entity can do to the prompt.
-MAX_NEIGHBOR_LINES_IN_PROMPT = 20
-MAX_NEIGHBOR_TEXT_CHARS = 500
-# The response is one short paragraph - this call never needs more than the
-# model deciding to ramble, and MAX_NEIGHBOR_TEXT_CHARS (~500 chars, ~125
-# tokens) is already the target length once this description gets reused
-# elsewhere as a compact card. REASONING_HEADROOM_TOKENS covers the rest:
-# reasoning models spend hidden reasoning tokens out of this same budget
-# (see constants.py), so a little slack above the content target isn't
-# enough on its own - confirmed empirically against cognee's own default
-# model, where 250 with no headroom intermittently returned empty content.
-PARAGRAPH_MAX_COMPLETION_TOKENS = REASONING_HEADROOM_TOKENS + 250
 
 
 def load_metadata_to_dict(value: Any) -> dict[str, Any]:
@@ -217,4 +207,17 @@ async def generate_consolidated_entities(
 
     consolidate_entity_descriptions_tasks = (generate_with_limit(node) for node in nodes)
 
-    return await asyncio.gather(*consolidate_entity_descriptions_tasks)
+    # An entity whose LLM call fails is dropped from this pass, not fatal:
+    # add_data_points runs after every enrichment task, so raising here would
+    # discard every entity that did succeed over one provider hiccup.
+    results = await asyncio.gather(*consolidate_entity_descriptions_tasks, return_exceptions=True)
+    failures = [result for result in results if isinstance(result, BaseException)]
+    if failures:
+        logger.warning(
+            "generate_consolidated_entities: %d of %d entities failed and were left unchanged "
+            "(first error: %r)",
+            len(failures),
+            len(results),
+            failures[0],
+        )
+    return [result for result in results if not isinstance(result, BaseException)]

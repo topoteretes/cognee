@@ -10,10 +10,5 @@ class MemberIsAText(BaseModel):
     is_a_text: str
 
 
-class EntityTypeDescription(BaseModel):
-    description: str
-    is_a_texts: list[MemberIsAText] = []
-
-
 class EntityIsATexts(BaseModel):
     is_a_texts: list[MemberIsAText] = []

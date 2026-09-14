@@ -26,7 +26,6 @@ from cognee.tasks.memify.consolidate_entity_descriptions import (
 )
 from cognee.tasks.memify.consolidate_entity_descriptions.models import (
     EntityIsATexts,
-    EntityTypeDescription,
     MemberIsAText,
     NodeDescription,
 )
@@ -507,7 +506,7 @@ def test_build_entity_type_prompt_reports_total_separately_from_shown_members():
 
 
 def test_build_entity_type_prompt_truncates_long_member_cards():
-    long_description = "x" * (constants.MAX_TYPE_TEXT_CHARS + 100)
+    long_description = "x" * (constants.MAX_MEMBER_CARD_CHARS + 100)
     members = [Entity(name=f"E{i}", description=long_description) for i in range(50)]
 
     prompt = generate_type_description_module.build_entity_type_prompt(
@@ -515,12 +514,12 @@ def test_build_entity_type_prompt_truncates_long_member_cards():
     )
 
     assert long_description not in prompt
-    truncated = "x" * constants.MAX_TYPE_TEXT_CHARS + "..."
+    truncated = "x" * constants.MAX_MEMBER_CARD_CHARS + "..."
     assert prompt.count(truncated) == len(members)
 
 
 def test_build_is_a_only_prompt_truncates_long_member_cards():
-    long_description = "x" * (constants.MAX_TYPE_TEXT_CHARS + 100)
+    long_description = "x" * (constants.MAX_MEMBER_CARD_CHARS + 100)
     members = [Entity(name="E0", description=long_description)]
 
     prompt = generate_type_description_module.build_is_a_only_prompt(
@@ -528,17 +527,17 @@ def test_build_is_a_only_prompt_truncates_long_member_cards():
     )
 
     assert long_description not in prompt
-    assert "x" * constants.MAX_TYPE_TEXT_CHARS + "..." in prompt
+    assert "x" * constants.MAX_MEMBER_CARD_CHARS + "..." in prompt
 
 
 def test_build_type_merge_prompt_truncates_long_partials():
-    long_partial = "y" * (constants.MAX_TYPE_TEXT_CHARS + 100)
+    long_partial = "y" * (constants.MAX_MERGE_PARTIAL_CHARS + 100)
     partials = [long_partial, "a short partial"]
 
     prompt = generate_type_description_module.build_type_merge_prompt("Person", 70, partials)
 
     assert long_partial not in prompt
-    assert "y" * constants.MAX_TYPE_TEXT_CHARS + "..." in prompt
+    assert "y" * constants.MAX_MERGE_PARTIAL_CHARS + "..." in prompt
     assert "a short partial" in prompt
 
 
@@ -590,15 +589,19 @@ async def test_generate_type_description_single_call_under_threshold():
         "acreate_structured_output",
         new=AsyncMock(side_effect=fake_llm),
     ):
-        result = await generate_type_description_module.generate_type_description(
-            entity_type, members, "system", "merge-system", "is-a-system", asyncio.Semaphore(10)
+        semaphore = asyncio.Semaphore(10)
+        description = await generate_type_description_module.generate_type_summary(
+            entity_type, members, "system", "merge-system", semaphore
+        )
+        is_a_texts = await generate_type_description_module.generate_is_a_lines(
+            entity_type, members, description, "is-a-system", semaphore
         )
 
-    assert result.description == "This graph has 3 Person entities."
+    assert description == "This graph has 3 Person entities."
     assert len(description_calls) == 1
     assert len(is_a_calls) == 1
-    assert len(result.is_a_texts) == 1
-    assert result.is_a_texts[0].is_a_text == "E0 is a Person."
+    assert len(is_a_texts) == 1
+    assert is_a_texts[0].is_a_text == "E0 is a Person."
 
 
 @pytest.mark.asyncio
@@ -640,19 +643,18 @@ async def test_generate_type_description_batches_and_merges_when_over_threshold(
         "acreate_structured_output",
         new=AsyncMock(side_effect=fake_llm),
     ):
-        result = await generate_type_description_module.generate_type_description(
-            entity_type,
-            members,
-            "batch-system",
-            "merge-system",
-            "is-a-system",
-            asyncio.Semaphore(10),
+        semaphore = asyncio.Semaphore(10)
+        description = await generate_type_description_module.generate_type_summary(
+            entity_type, members, "batch-system", "merge-system", semaphore
+        )
+        is_a_texts = await generate_type_description_module.generate_is_a_lines(
+            entity_type, members, description, "is-a-system", semaphore
         )
 
-    assert result.description == "FINAL MERGED"
+    assert description == "FINAL MERGED"
     assert len(batch_calls) == 3
     assert len(is_a_calls) == 3
-    assert len(result.is_a_texts) == 3
+    assert len(is_a_texts) == 3
 
 
 @pytest.mark.asyncio
@@ -690,8 +692,11 @@ async def test_generate_type_description_bounds_concurrency_across_batches():
         "acreate_structured_output",
         new=AsyncMock(side_effect=fake_llm),
     ):
-        await generate_type_description_module.generate_type_description(
-            entity_type, members, "batch-system", "merge-system", "is-a-system", semaphore
+        description = await generate_type_description_module.generate_type_summary(
+            entity_type, members, "batch-system", "merge-system", semaphore
+        )
+        await generate_type_description_module.generate_is_a_lines(
+            entity_type, members, description, "is-a-system", semaphore
         )
 
     assert max_concurrent <= small_cap
@@ -747,7 +752,7 @@ def test_apply_type_description_builds_is_a_edge_tuple_when_text_matches(caplog)
 def test_apply_type_description_truncates_long_is_a_text_before_persisting():
     entity_type = EntityType(name="Person", description="Person")
     marco = Entity(name="Marco", is_a=entity_type, description="d1")
-    long_is_a_text = "x" * (constants.MAX_TYPE_TEXT_CHARS + 100)
+    long_is_a_text = "x" * (constants.MAX_PERSISTED_IS_A_CHARS + 100)
     is_a_texts = [MemberIsAText(member_name="Marco", is_a_text=long_is_a_text)]
 
     apply_type_description_module.apply_type_description(
@@ -755,7 +760,7 @@ def test_apply_type_description_truncates_long_is_a_text_before_persisting():
     )
 
     marco_edge, _ = marco.is_a
-    assert marco_edge.edge_text == "x" * constants.MAX_TYPE_TEXT_CHARS + "..."
+    assert marco_edge.edge_text == "x" * constants.MAX_PERSISTED_IS_A_CHARS + "..."
 
 
 def test_apply_type_description_logs_nothing_when_every_member_matches(caplog):
@@ -818,23 +823,90 @@ def test_apply_type_description_updates_one_relations_slot_without_touching_the_
 
 
 @pytest.mark.asyncio
+async def test_generate_consolidated_entities_keeps_the_entities_that_succeeded():
+    # add_data_points runs after this task, so raising would discard every
+    # entity that did succeed over one provider hiccup.
+    nodes = [
+        _node(str(uuid4()), f"E{i}", "old", edges={}, neighbors=[], entity_types=[])
+        for i in range(3)
+    ]
+
+    async def fake_llm(*, text_input, **_kwargs):
+        if "E1" in text_input:
+            raise RuntimeError("provider blew up")
+        return NodeDescription(description="new description")
+
+    with patch.object(
+        rewrite_entities.LLMGateway,
+        "acreate_structured_output",
+        new=AsyncMock(side_effect=fake_llm),
+    ):
+        entities = await generate_consolidated_entities(nodes)
+
+    assert [entity.name for entity in entities] == ["E0", "E2"]
+
+
+@pytest.mark.asyncio
+async def test_generate_type_descriptions_skips_a_failing_type_and_keeps_the_rest():
+    person = EntityType(name="Person", description="Person")
+    city = EntityType(name="City", description="City")
+    marco = Entity(name="Marco", is_a=person, description="d")
+    milano = Entity(name="Milano", is_a=city, description="d")
+
+    async def fake_llm(*, text_input, system_prompt, response_model, **_kwargs):
+        if "Entity type: City" in text_input:
+            raise RuntimeError("provider blew up")
+        if response_model is EntityIsATexts:
+            return EntityIsATexts(is_a_texts=[])
+        return NodeDescription(description="Aggregate description")
+
+    with patch.object(
+        generate_type_description_module.LLMGateway,
+        "acreate_structured_output",
+        new=AsyncMock(side_effect=fake_llm),
+    ):
+        result = await describe_types.generate_type_descriptions([marco, milano])
+
+    assert result == [marco, milano]
+    assert marco.is_a.description == "Aggregate description"
+    # The failing type is left exactly as it was, not half-written.
+    assert milano.is_a is city
+    assert milano.is_a.description == "City"
+
+
+def _paragraph_or_is_a(description: str):
+    """Fake LLM that answers each call with the model that call actually asks for."""
+
+    async def fake_llm(*, text_input, system_prompt, response_model, **_kwargs):
+        if response_model is EntityIsATexts:
+            return EntityIsATexts(is_a_texts=[])
+        return NodeDescription(description=description)
+
+    return fake_llm
+
+
+@pytest.mark.asyncio
 async def test_generate_type_descriptions_produces_is_a_edge_text_end_to_end():
     entity_type = EntityType(name="Person", description="Person")
     marco = Entity(name="Marco", is_a=entity_type, description="d1")
     anna = Entity(name="Anna", is_a=entity_type, description="d2")
 
-    llm_response = EntityTypeDescription(
-        description="Aggregate description",
-        is_a_texts=[
-            MemberIsAText(member_name="Marco", is_a_text="Marco is a Person: works in Milan."),
-            MemberIsAText(member_name="Anna", is_a_text="Anna is a Person: works in Rome."),
-        ],
-    )
+    async def fake_llm(*, text_input, system_prompt, response_model, **_kwargs):
+        if response_model is EntityIsATexts:
+            return EntityIsATexts(
+                is_a_texts=[
+                    MemberIsAText(
+                        member_name="Marco", is_a_text="Marco is a Person: works in Milan."
+                    ),
+                    MemberIsAText(member_name="Anna", is_a_text="Anna is a Person: works in Rome."),
+                ]
+            )
+        return NodeDescription(description="Aggregate description")
 
     with patch.object(
         generate_type_description_module.LLMGateway,
         "acreate_structured_output",
-        new=AsyncMock(return_value=llm_response),
+        new=AsyncMock(side_effect=fake_llm),
     ):
         await describe_types.generate_type_descriptions([marco, anna])
 
@@ -856,7 +928,7 @@ async def test_generate_type_descriptions_updates_typed_and_skips_untyped():
     with patch.object(
         generate_type_description_module.LLMGateway,
         "acreate_structured_output",
-        new=AsyncMock(return_value=EntityTypeDescription(description="Aggregate description")),
+        new=AsyncMock(side_effect=_paragraph_or_is_a("Aggregate description")),
     ):
         result = await describe_types.generate_type_descriptions(entities)
 
@@ -886,10 +958,12 @@ async def test_generate_type_descriptions_updates_all_types_for_multi_type_entit
     entities = [cognee]
 
     async def fake_llm(*, text_input, system_prompt, response_model, **_kwargs):
+        if response_model is EntityIsATexts:
+            return EntityIsATexts(is_a_texts=[])
         if "Entity type: Tool" in text_input:
-            return EntityTypeDescription(description="Tool aggregate description")
+            return NodeDescription(description="Tool aggregate description")
         if "Entity type: Organization" in text_input:
-            return EntityTypeDescription(description="Organization aggregate description")
+            return NodeDescription(description="Organization aggregate description")
         raise AssertionError(f"Unexpected text_input: {text_input}")
 
     with patch.object(
@@ -920,7 +994,9 @@ async def test_generate_type_descriptions_bounds_llm_concurrency():
         await asyncio.sleep(0.01)
         async with lock:
             concurrent -= 1
-        return EntityTypeDescription(description="d")
+        if response_model is EntityIsATexts:
+            return EntityIsATexts(is_a_texts=[])
+        return NodeDescription(description="d")
 
     entities = []
     for i in range(constants.MAX_CONCURRENT_TYPE_LLM_CALLS * 3):
@@ -1119,7 +1195,7 @@ async def test_pipeline_forwards_tuning_parameter_overrides_to_tasks():
             type_max_concurrent_calls=5,
             type_max_members_per_batch=6,
             type_max_named_members=7,
-            type_max_text_chars=8,
+            type_max_persisted_is_a_chars=8,
             type_description_max_completion_tokens=9,
             type_tokens_per_is_a_line=10,
         )
@@ -1138,7 +1214,7 @@ async def test_pipeline_forwards_tuning_parameter_overrides_to_tasks():
         "max_concurrent_calls": 5,
         "max_members_per_batch": 6,
         "max_named_members": 7,
-        "max_type_text_chars": 8,
+        "max_persisted_is_a_chars": 8,
         "max_completion_tokens": 9,
         "tokens_per_is_a_line": 10,
     }

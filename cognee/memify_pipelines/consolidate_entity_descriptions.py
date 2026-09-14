@@ -19,22 +19,15 @@ from cognee.tasks.memify.consolidate_entity_descriptions import (
     get_entities_with_neighborhood,
 )
 from cognee.tasks.memify.consolidate_entity_descriptions.constants import (
+    MAX_CONCURRENT_ENTITY_LLM_CALLS,
     MAX_CONCURRENT_TYPE_LLM_CALLS,
     MAX_MEMBERS_PER_TYPE_PROMPT,
     MAX_NAMED_MEMBERS,
-    MAX_TYPE_TEXT_CHARS,
-    TOKENS_PER_IS_A_LINE,
-)
-from cognee.tasks.memify.consolidate_entity_descriptions.constants import (
-    PARAGRAPH_MAX_COMPLETION_TOKENS as TYPE_PARAGRAPH_MAX_COMPLETION_TOKENS,
-)
-from cognee.tasks.memify.consolidate_entity_descriptions.rewrite_entities import (
-    MAX_CONCURRENT_ENTITY_LLM_CALLS,
     MAX_NEIGHBOR_LINES_IN_PROMPT,
     MAX_NEIGHBOR_TEXT_CHARS,
-)
-from cognee.tasks.memify.consolidate_entity_descriptions.rewrite_entities import (
-    PARAGRAPH_MAX_COMPLETION_TOKENS as ENTITY_PARAGRAPH_MAX_COMPLETION_TOKENS,
+    MAX_PERSISTED_IS_A_CHARS,
+    PARAGRAPH_MAX_COMPLETION_TOKENS,
+    TOKENS_PER_IS_A_LINE,
 )
 from cognee.tasks.storage import add_data_points
 
@@ -48,12 +41,12 @@ async def consolidate_entity_descriptions_pipeline(
     entity_max_concurrent_calls: int = MAX_CONCURRENT_ENTITY_LLM_CALLS,
     entity_max_neighbor_lines: int = MAX_NEIGHBOR_LINES_IN_PROMPT,
     entity_max_neighbor_text_chars: int = MAX_NEIGHBOR_TEXT_CHARS,
-    entity_description_max_completion_tokens: int = ENTITY_PARAGRAPH_MAX_COMPLETION_TOKENS,
+    entity_description_max_completion_tokens: int = PARAGRAPH_MAX_COMPLETION_TOKENS,
     type_max_concurrent_calls: int = MAX_CONCURRENT_TYPE_LLM_CALLS,
     type_max_members_per_batch: int = MAX_MEMBERS_PER_TYPE_PROMPT,
     type_max_named_members: int = MAX_NAMED_MEMBERS,
-    type_max_text_chars: int = MAX_TYPE_TEXT_CHARS,
-    type_description_max_completion_tokens: int = TYPE_PARAGRAPH_MAX_COMPLETION_TOKENS,
+    type_max_persisted_is_a_chars: int = MAX_PERSISTED_IS_A_CHARS,
+    type_description_max_completion_tokens: int = PARAGRAPH_MAX_COMPLETION_TOKENS,
     type_tokens_per_is_a_line: int = TOKENS_PER_IS_A_LINE,
 ):
     """Rewrite Entity descriptions from their graph neighborhood, then summarize
@@ -88,8 +81,12 @@ async def consolidate_entity_descriptions_pipeline(
             prompt before batching + merging kicks in.
         type_max_named_members: At or below this member count, the type
             summary names members individually; above it, it doesn't.
-        type_max_text_chars: Max characters per member card, merge partial,
-            and persisted is_a edge text.
+        type_max_persisted_is_a_chars: Max characters of is_a edge text
+            written to the graph, independent of the LLM call's own output
+            budget - that budget caps generation, this caps what is stored.
+            The prompt-side caps (member cards, merge partials) are module
+            constants in constants.py; they bound prompt size rather than
+            anything a caller sees.
         type_description_max_completion_tokens: Output token budget for the
             type description and merge calls.
         type_tokens_per_is_a_line: Output token budget per member for the
@@ -115,7 +112,7 @@ async def consolidate_entity_descriptions_pipeline(
             max_concurrent_calls=type_max_concurrent_calls,
             max_members_per_batch=type_max_members_per_batch,
             max_named_members=type_max_named_members,
-            max_type_text_chars=type_max_text_chars,
+            max_persisted_is_a_chars=type_max_persisted_is_a_chars,
             max_completion_tokens=type_description_max_completion_tokens,
             tokens_per_is_a_line=type_tokens_per_is_a_line,
         ),
