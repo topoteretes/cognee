@@ -169,13 +169,19 @@ async def release_improve_lock_many(keys: Iterable[str]) -> None:
         _improving_sessions.difference_update(wanted)
 
 
-def improve_lock_keys(session_ids: Iterable[str] | None, dataset_id: Any) -> tuple[str, ...]:
+def improve_lock_keys(
+    session_ids: Iterable[str] | None, dataset_id: Any, user_id: Any
+) -> tuple[str, ...]:
     """The claim keys for one improve run: its session ids plus its dataset id.
 
-    Every run claims the dataset key, session-fed or not, so a session-keyed
-    bridge run and a dataset-keyed run over the same dataset exclude each
-    other — improves for one dataset serialize; an overlapping claim loses and
-    returns ``lock_held``.
+    Session keys carry the user id because session state is scoped per
+    ``(user_id, session_id)`` everywhere else — two users who both call a
+    session "chat" must never block each other. Every run also claims the
+    dataset key, session-fed or not, so a session-keyed bridge run and a
+    dataset-keyed run over the same dataset exclude each other — improves for
+    one dataset serialize; an overlapping claim loses and returns ``lock_held``.
     """
-    sessions = tuple(session_id for session_id in (session_ids or ()) if session_id)
+    sessions = tuple(
+        f"session:{user_id}:{session_id}" for session_id in (session_ids or ()) if session_id
+    )
     return (*sessions, f"dataset:{dataset_id}")

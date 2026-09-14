@@ -154,13 +154,24 @@ async def test_lock_held_returns_every_stage_skipped_never_empty_dict(harness):
 async def test_lock_is_keyed_to_session_ids_and_the_dataset(harness):
     calls = []
     harness.use_stages([FakeStage("a", calls=calls)])
-    # Another run holding one of our sessions blocks us.
-    assert await session_lock.try_acquire_improve_lock_many(["chat_2"])
+    # Another run holding one of our sessions blocks us. Session keys carry
+    # the user id: session state is scoped per (user, session) everywhere.
+    session_key = f"session:{harness.user.id}:chat_2"
+    assert await session_lock.try_acquire_improve_lock_many([session_key])
     try:
         blocked = await harness.improve(session_ids=["chat_1", "chat_2"])
     finally:
-        await session_lock.release_improve_lock_many(["chat_2"])
+        await session_lock.release_improve_lock_many([session_key])
     assert _lock_held(blocked)
+
+    # A DIFFERENT user's session of the same name never blocks us.
+    other_users_key = f"session:{uuid4()}:chat_1"
+    assert await session_lock.try_acquire_improve_lock_many([other_users_key])
+    try:
+        allowed = await harness.improve(session_ids=["chat_1"])
+    finally:
+        await session_lock.release_improve_lock_many([other_users_key])
+    assert not _lock_held(allowed)
 
     # So does a dataset-keyed run over the same dataset: a session-keyed
     # bridge and a plain improve(dataset=...) must never write concurrently.
@@ -174,9 +185,13 @@ async def test_lock_is_keyed_to_session_ids_and_the_dataset(harness):
 
     allowed = await harness.improve(session_ids=["chat_1", "chat_2"])
     assert not _lock_held(allowed)
-    assert calls == ["a"]
+    assert calls == ["a", "a"]  # the other-user run above plus this one
     # And every claim — sessions and dataset — is released afterwards.
-    all_keys = ["chat_1", "chat_2", dataset_key]
+    all_keys = [
+        f"session:{harness.user.id}:chat_1",
+        f"session:{harness.user.id}:chat_2",
+        dataset_key,
+    ]
     assert await session_lock.try_acquire_improve_lock_many(all_keys)
     await session_lock.release_improve_lock_many(all_keys)
 

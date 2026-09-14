@@ -201,7 +201,7 @@ async def improve(
             # One claim per session id plus one for the dataset, so bridge
             # runs and dataset runs exclude each other; held until the last
             # stage finishes, background included.
-            lock_keys = improve_lock_keys(inputs.session_ids, inputs.dataset_id)
+            lock_keys = improve_lock_keys(inputs.session_ids, inputs.dataset_id, inputs.user.id)
             if not await try_acquire_improve_lock_many(lock_keys):
                 return report(_skip_lock_held_run(operation, inputs, lock_keys))
 
