@@ -149,10 +149,8 @@ async def improve(
                 stage_result = await execute_stage(stage, inputs)
                 result.record(stage_result)
                 if stage_result.run_info_stamp:
-                    # A stage may ask for ``run_info`` on the operation row
-                    # (stage 8's enrichment watermark). The stage decides when
-                    # and what it stamps; this loop only merges stamps onto
-                    # the row the run owns.
+                    # The stage decides when and what it stamps; this loop
+                    # only merges stamps onto the row the run owns.
                     operation.set_run_info(
                         {**(operation.run_info or {}), **stage_result.run_info_stamp}
                     )
