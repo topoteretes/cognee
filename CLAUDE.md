@@ -266,6 +266,10 @@ Available search types (from `cognee/modules/search/types/SearchType.py`), passe
 - **FEELING_LUCKY** - Automatic search type selection
 - **CODING_RULES** - Code-specific search rules
 - **SKILLS** - Semantic discovery of skill playbooks (metadata-only, no LLM; requires exactly one dataset)
+- **GRAPH_COMPLETION_DECOMPOSITION** - Splits the question into focused sub-queries, then runs graph completion over the merged context
+- **AGENTIC_COMPLETION** - Multi-step LLM loop that can load `skills` and call `tools`; bounded by `max_iter`
+- **CODE** - Deterministic operations over the code graph via `code_query` (no LLM); see "Code Files" below
+- **GRAPH_REPORT** - Graph insight report: hub nodes, cross-node-set connections, edge provenance, suggested questions
 
 `recall()` picks one of these automatically when `query_type` is omitted. The CLI is narrower: `cognee-cli recall --query-type` accepts only the choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES` and defaults to `HYBRID_COMPLETION`; the rest are SDK-only.
 
@@ -590,7 +594,7 @@ SYSTEM_ROOT_DIRECTORY="s3://your-bucket/cognee/system"
 1. **New Task Type**: Create task function in `cognee/tasks/`, return Task object, register in pipeline
 2. **New Database Backend**: Implement `GraphDBInterface` or `VectorDBInterface` in `cognee/infrastructure/databases/`
 3. **New LLM Provider**: Add configuration in LLM config (uses litellm)
-4. **New Document Processor**: Extend loaders in `cognee/modules/data/processing/`
+4. **New Document Processor**: Implement `LoaderInterface` in `cognee/infrastructure/loaders/` and register it in `supported_loaders.py` there
 5. **New Search Type**: Add to `SearchType` enum and implement retriever in `cognee/modules/retrieval/`
 6. **Custom Graph Models**: Define Pydantic models extending `DataPoint` in your code
 
@@ -712,7 +716,7 @@ For production deployments, review and tighten these settings.
 
 ### Creating a Custom Pipeline Task
 ```python
-from cognee.modules.pipelines.tasks.Task import Task
+from cognee.modules.pipelines.tasks.task import Task
 
 
 async def my_custom_task(data):
@@ -736,10 +740,9 @@ vector_engine = await get_vector_engine_async()
 
 ### Using LLM Gateway
 ```python
-from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
-llm_client = get_llm_client()
-response = await llm_client.acreate_structured_output(
+response = await LLMGateway.acreate_structured_output(
     text_input="Your prompt", system_prompt="System instructions", response_model=YourPydanticModel
 )
 ```

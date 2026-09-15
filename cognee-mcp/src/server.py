@@ -481,9 +481,15 @@ async def recall(
     query : str
         Natural language query to search for.
     search_type : str, optional
-        Override auto-routing. Options: GRAPH_COMPLETION,
-        GRAPH_COMPLETION_COT, RAG_COMPLETION, CHUNKS, SUMMARIES,
-        TEMPORAL, FEELING_LUCKY, etc.
+        Override auto-routing with one SearchType name. Completion types
+        (answer written by an LLM): HYBRID_COMPLETION (the default when
+        routing is off), GRAPH_COMPLETION, GRAPH_COMPLETION_COT,
+        GRAPH_COMPLETION_CONTEXT_EXTENSION, GRAPH_COMPLETION_DECOMPOSITION,
+        GRAPH_SUMMARY_COMPLETION, RAG_COMPLETION, TRIPLET_COMPLETION,
+        TEMPORAL, AGENTIC_COMPLETION. Retrieval-only types (no LLM):
+        CHUNKS, CHUNKS_LEXICAL, SUMMARIES, SKILLS, CODE. Other: CYPHER,
+        NATURAL_LANGUAGE, CODING_RULES, GRAPH_REPORT, FEELING_LUCKY.
+        An unknown name is rejected with a validation error.
     datasets : str, optional
         Comma-separated dataset names to search within.
     session_id : str, optional
@@ -493,7 +499,7 @@ async def recall(
         falls back to COGNEE_MCP_RECALL_SYSTEM_PROMPT / _FILE if configured
         on the server.
     top_k : int
-        Maximum results to return (default: 10).
+        Maximum results to return (default: 15).
     """
     with redirect_stdout(sys.stderr):
         try:
