@@ -185,9 +185,7 @@ def _format_completion_results(
     )
 
 
-def format_recall_results(
-    results: Any, *, json_encoder: type[json.JSONEncoder] | None = None
-) -> str:
+def format_recall_body(results: Any, *, json_encoder: type[json.JSONEncoder] | None = None) -> str:
     """Render recall results, including normalized response envelopes."""
     results = _unwrap_results(results)
     if not results:
@@ -206,3 +204,127 @@ def format_recall_results(
         lines.append(f"{prefix}{rendered}")
 
     return "\n\n".join(lines)
+
+
+@dataclass(frozen=True)
+class RecallState:
+    state: str
+    completed: int | None = None
+    total: int | None = None
+
+
+def recall_items(results: Any) -> list[Any]:
+    """Count returned entries, not requested top_k, graph nodes, or system markers."""
+    results = _unwrap_results(results)
+    items = results if isinstance(results, list) else [results]
+    return [
+        item
+        for item in items
+        if item is not None
+        and item != ""
+        and item != {}
+        and item != []
+        and _get_field(item, "_source", "source") != "system"
+    ]
+
+
+def recall_marker_state(results: Any) -> RecallState | None:
+    results = _unwrap_results(results)
+    for item in results if isinstance(results, list) else [results]:
+        if (
+            _get_field(item, "_source", "source") == "system"
+            and _get_field(item, "status") == "build_failed"
+        ):
+            return RecallState("build_failed")
+    return None
+
+
+def classify_recall_state(progress: dict, graphs: list[dict]) -> RecallState:
+    """Classify authorized datasets from existing status and graph-summary responses."""
+    runs = []
+    graph_runs = []
+    for value in progress.values():
+        if "status" in value:
+            runs.append(value)
+            graph_runs.append(value)
+        else:
+            runs.extend(value.values())
+            graph_runs.extend(run for pipeline, run in value.items() if pipeline != "add_pipeline")
+    active = [
+        run
+        for run in runs
+        if run.get("status")
+        in (
+            "DATASET_PROCESSING_STARTED",
+            "DATASET_PROCESSING_INITIATED",
+        )
+    ]
+    if active:
+        tick = (active[0].get("progress") or {}) if len(active) == 1 else {}
+        completed, total = tick.get("completed_items"), tick.get("total_items")
+        if type(completed) is int and type(total) is int and 0 <= completed <= total and total > 0:
+            return RecallState("indexing", completed, total)
+        return RecallState("indexing")
+    if any(run.get("status") == "DATASET_PROCESSING_ERRORED" for run in runs):
+        return RecallState("build_failed")
+    if not graphs:
+        return RecallState("unknown")
+    if any(graph.get("num_nodes", graph.get("numNodes", 0)) > 0 for graph in graphs):
+        return RecallState("no_match")
+    # A zero from an unavailable graph store is not proof that memory is empty.
+    if any(
+        graph.get("pipeline_run_id", graph.get("pipelineRunId")) is not None
+        and graph.get("computed_at", graph.get("computedAt")) is None
+        for graph in graphs
+    ):
+        return RecallState("unknown")
+    if all(graph.get("computed_at", graph.get("computedAt")) is not None for graph in graphs):
+        return RecallState("empty")
+    # Graph summaries cover cognify, not arbitrary/custom or code pipelines.
+    # A completed run with no corresponding graph count must not look empty.
+    if any(run.get("status") == "DATASET_PROCESSING_COMPLETED" for run in graph_runs):
+        return RecallState("no_match")
+    return RecallState("not_indexed")
+
+
+def format_recall_results(
+    results: Any,
+    *,
+    json_encoder: type[json.JSONEncoder] | None = None,
+    empty_state: RecallState | None = None,
+) -> str:
+    """Add one summary line; preserve the existing body beneath it."""
+    items = recall_items(results)
+    count = len(items)
+    if count:
+        summary = f"{count} {'memory' if count == 1 else 'memories'} found"
+        sources: dict[str, int] = {}
+        for item in items:
+            dataset = _get_field(item, "dataset_name")
+            source = _get_field(item, "_source", "source")
+            hint = dataset or {"session": "sessions", "graph": "graph"}.get(source, source)
+            if hint:
+                # Metadata must not create another summary line or an unbounded header.
+                hint = " ".join(str(hint).split())[:60]
+                sources[hint] = sources.get(hint, 0) + 1
+        if sources:
+            hints = [f"{n} from {hint}" for hint, n in list(sources.items())[:3]]
+            summary += " (" + ", ".join(hints) + ")"
+    else:
+        state = empty_state or recall_marker_state(results) or RecallState("unknown")
+        summary = {
+            "empty": "memory graph is empty — no indexed memories available",
+            "not_indexed": "memory has not been indexed yet — add data and run indexing",
+            "no_match": "no matching memories",
+            "indexing": "still indexing — retry shortly",
+            "build_failed": "memory indexing failed — check cognify_status",
+            "unknown": "no matching memories returned — memory status unavailable",
+        }.get(state.state, "no matching memories returned — memory status unavailable")
+        if state.state == "indexing" and state.total is not None:
+            summary = (
+                f"still indexing — {state.completed}/{state.total} items processed, retry shortly"
+            )
+    body = (
+        format_recall_body(results, json_encoder=json_encoder) if _unwrap_results(results) else ""
+    )
+    return f"{summary}\n{body}" if body else summary
