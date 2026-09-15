@@ -18,7 +18,6 @@ would be data loss: it stops the run and raises, carrying the partial
 import asyncio
 from collections.abc import Callable, Coroutine, Iterator, Sequence
 from contextlib import contextmanager
-from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -144,30 +143,18 @@ async def improve(
         operation: Any,
     ) -> None:
         """One ``StageResult`` per registry stage, in order; then free the lock."""
-        from cognee.modules.improve.graph_changes import (
-            ENRICHMENT_WATERMARK_KEY,
-            enrichment_watermark_stamp,
-        )
-
         stages = list(DEFAULT_STAGES)
         try:
             for index, stage in enumerate(stages):
-                stage_started_at = datetime.now(timezone.utc)
                 stage_result = await execute_stage(stage, inputs)
                 result.record(stage_result)
-                if (
-                    stage.name == ENRICHMENT_WATERMARK_KEY
-                    and stage_result.status in ("completed", "already_completed")
-                    and not inputs.node_name
-                    and not inputs.has_custom_memify_tasks
-                ):
-                    # The stage-8 watermark: only a full, unscoped enrichment
-                    # that actually ran (or verified nothing changed) gates a
-                    # later run — a skipped stage 8 must never stamp, and the
-                    # stamp carries the stage START so a write racing the row
-                    # close stays visible to the next gate.
+                if stage_result.run_info_stamp:
+                    # A stage may ask for ``run_info`` on the operation row
+                    # (stage 8's enrichment watermark). The stage decides when
+                    # and what it stamps; this loop only merges stamps onto
+                    # the row the run owns.
                     operation.set_run_info(
-                        enrichment_watermark_stamp(stage_result.status, stage_started_at)
+                        {**(operation.run_info or {}), **stage_result.run_info_stamp}
                     )
                 if stage.fatal and stage_result.status == "errored":
                     raise _abort_run(result, stages[index + 1 :], stage, stage_result)

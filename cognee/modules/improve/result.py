@@ -64,6 +64,12 @@ class StageResult(BaseModel):
     # orchestrator can tell the two apart and re-raise the original.
     _exception: BaseException | None = PrivateAttr(default=None)
 
+    # ``run_info`` the stage wants stamped on the improve operation row
+    # (stage 8's enrichment watermark). The stage decides when it stamps; the
+    # orchestrator only copies this onto the row it owns. Off the schema: it
+    # is row bookkeeping, not part of the reported result.
+    _run_info_stamp: dict | None = PrivateAttr(default=None)
+
     @model_validator(mode="after")
     def _skipped_needs_reason(self) -> "StageResult":
         if self.status == "skipped" and not self.reason:
@@ -77,6 +83,10 @@ class StageResult(BaseModel):
     @property
     def exception(self) -> BaseException | None:
         return self._exception
+
+    @property
+    def run_info_stamp(self) -> dict | None:
+        return self._run_info_stamp
 
     @classmethod
     def skipped(cls, stage: str, reason: str) -> "StageResult":

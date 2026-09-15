@@ -281,6 +281,66 @@ async def test_triplet_enrichment_custom_tasks_skip_the_change_check(monkeypatch
     assert result.raw_run == {"ok": 1}
 
 
+def _enrichment_stamp(result):
+    from cognee.modules.improve.graph_changes import ENRICHMENT_WATERMARK_KEY
+
+    return (result.run_info_stamp or {}).get(ENRICHMENT_WATERMARK_KEY)
+
+
+def _patch_enrichment_deps(monkeypatch, *, changed, memify_returns):
+    changes_mod = importlib.import_module("cognee.modules.improve.graph_changes")
+    monkeypatch.setattr(
+        changes_mod, "has_graph_changed_since_last_improve", AsyncMock(return_value=changed)
+    )
+    memify_mod = importlib.import_module("cognee.modules.memify")
+    monkeypatch.setattr(memify_mod, "memify", AsyncMock(return_value=memify_returns))
+
+
+@pytest.mark.asyncio
+async def test_triplet_enrichment_stamps_full_scope_runs(monkeypatch):
+    """The watermark's write side: a full-scope stage 8 that enriched (or
+    verified nothing changed) stamps its own START time, so a write racing
+    the operation-row close stays visible to the next run's gate."""
+    from datetime import datetime, timezone
+
+    _patch_enrichment_deps(monkeypatch, changed=True, memify_returns={"ok": 1})
+    before = datetime.now(timezone.utc)
+
+    enriched = await TripletEnrichmentStage().run(_inputs())
+
+    stamp = _enrichment_stamp(enriched)
+    assert stamp["status"] == "completed"
+    assert before <= datetime.fromisoformat(stamp["started_at"]) <= datetime.now(timezone.utc)
+
+    _patch_enrichment_deps(monkeypatch, changed=False, memify_returns={"ok": 1})
+    verified = await TripletEnrichmentStage().run(_inputs())
+    assert _enrichment_stamp(verified)["status"] == "already_completed"
+
+
+@pytest.mark.asyncio
+async def test_triplet_enrichment_never_stamps_scoped_or_errored_runs(monkeypatch):
+    """node_name / custom-task runs do narrower or different work, and an
+    errored run enriched nothing; 'nothing changed since' for the whole
+    dataset must not be inferred from any of them."""
+    from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunErrored
+
+    _patch_enrichment_deps(monkeypatch, changed=True, memify_returns={"ok": 1})
+    scoped = await TripletEnrichmentStage().run(_inputs(node_name=["only_this"]))
+    assert scoped.run_info_stamp is None
+    custom = await TripletEnrichmentStage().run(
+        _inputs(memify_kwargs={"extraction_tasks": [object()]})
+    )
+    assert custom.run_info_stamp is None
+
+    errored_run = PipelineRunErrored(
+        pipeline_run_id=uuid4(), dataset_id=uuid4(), dataset_name="docs", error_message="bad"
+    )
+    _patch_enrichment_deps(monkeypatch, changed=True, memify_returns=errored_run)
+    errored = await TripletEnrichmentStage().run(_inputs())
+    assert errored.status == "errored"
+    assert errored.run_info_stamp is None
+
+
 # --- stage 9 ---------------------------------------------------------------
 
 

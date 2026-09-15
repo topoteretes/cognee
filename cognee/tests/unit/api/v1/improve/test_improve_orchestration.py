@@ -5,7 +5,6 @@ All stages are fakes; nothing below the orchestrator runs.
 
 import asyncio
 import importlib
-from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
@@ -652,67 +651,55 @@ async def test_cancellation_during_the_probe_releases_the_lock(harness):
     assert not _lock_held(retry)
 
 
-def _enrichment_stamp(operation):
-    from cognee.modules.improve.graph_changes import ENRICHMENT_WATERMARK_KEY
+def _stamped_stage(name: str, stamp: dict) -> FakeStage:
+    def run(_inputs):
+        result = StageResult.completed(name)
+        result._run_info_stamp = stamp
+        return result
 
-    return (operation.run_info or {}).get(ENRICHMENT_WATERMARK_KEY)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("status", ["completed", "already_completed"])
-async def test_full_scope_enrichment_stamps_the_watermark(harness, status):
-    """The stamp is the stage-8 watermark's write side; it must carry the
-    stage START so a write racing the row close stays visible next run."""
-    run_started = {}
-
-    def enrichment_run(_inputs):
-        run_started["at"] = datetime.now(timezone.utc)
-        return StageResult(stage="triplet_enrichment", status=status)
-
-    harness.use_stages([FakeStage("triplet_enrichment", run=enrichment_run)])
-
-    await harness.improve()
-
-    stamp = _enrichment_stamp(harness.operations[-1])
-    assert stamp["status"] == status
-    assert datetime.fromisoformat(stamp["started_at"]) <= run_started["at"]
+    return FakeStage(name, run=run)
 
 
 @pytest.mark.asyncio
-async def test_skipped_or_errored_enrichment_never_stamps(harness):
-    """A skipped or errored stage 8 verified nothing; a stamp would gate the
-    next run off over unenriched writes."""
-    harness.use_stages([FakeStage("triplet_enrichment", gate_reason="triplet_embedding_disabled")])
-    await harness.improve()
-    assert _enrichment_stamp(harness.operations[-1]) is None
+async def test_stage_stamps_are_merged_onto_the_operation_row(harness):
+    """The generic channel behind the stage-8 watermark: which runs stamp is
+    the stage's decision (tested with the stage); the loop only merges what a
+    stage asked for onto the row the run owns."""
+    harness.use_stages(
+        [
+            _stamped_stage("s1", {"s1": {"status": "completed"}}),
+            FakeStage("s2"),
+            _stamped_stage("s3", {"s3": {"status": "already_completed"}}),
+        ]
+    )
 
-    harness.use_stages([FakeStage("triplet_enrichment", run=lambda _i: RuntimeError("boom"))])
     await harness.improve()
-    assert _enrichment_stamp(harness.operations[-1]) is None
+
+    assert harness.operations[-1].run_info == {
+        "s1": {"status": "completed"},
+        "s3": {"status": "already_completed"},
+    }
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "scoping", [{"node_name": ["only_this"]}, {"extraction_tasks": ["custom"]}]
-)
-async def test_scoped_runs_never_stamp_the_watermark(harness, scoping):
-    """node_name / custom-task runs do narrower or different work; 'nothing
-    changed since' for the whole dataset must not be inferred from them."""
-    harness.use_stages([FakeStage("triplet_enrichment")])
+async def test_stages_without_a_stamp_leave_the_row_unstamped(harness):
+    """No stage stamped, so the row must carry no run_info: a leftover stamp
+    would stand in as the enrichment watermark for work that never ran."""
+    harness.use_stages([FakeStage("s1"), FakeStage("s2")])
 
-    await harness.improve(**scoping)
+    await harness.improve()
 
-    assert _enrichment_stamp(harness.operations[-1]) is None
+    assert not harness.operations[-1].run_info
 
 
 @pytest.mark.asyncio
 async def test_background_run_carries_the_stamp_on_the_deferred_row(harness):
     """The deferred row is written by _run_detached from the same context the
     stages stamped; losing the stamp there would unmoor the watermark."""
-    harness.use_stages([FakeStage("triplet_enrichment")])
+    harness.use_stages([_stamped_stage("s1", {"s1": {"status": "completed"}})])
 
     result = await harness.improve(run_in_background=True)
     await result.wait()
 
-    assert _enrichment_stamp(harness.operations[-1])["status"] == "completed"
+    assert harness.operations[-1].run_info == {"s1": {"status": "completed"}}
     assert harness.finish_calls[-1]["context"] is harness.operations[-1]

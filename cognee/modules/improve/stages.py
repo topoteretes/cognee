@@ -387,16 +387,25 @@ class TripletEnrichmentStage(BaseStage):
         return None
 
     async def run(self, inputs: ImproveRunInputs) -> StageResult:
+        from datetime import datetime, timezone
+
         from cognee.modules.memify import memify
 
-        from .graph_changes import has_graph_changed_since_last_improve
+        from .graph_changes import (
+            enrichment_watermark_stamp,
+            has_graph_changed_since_last_improve,
+        )
 
-        if (
-            not inputs.has_custom_memify_tasks
-            and not inputs.node_name
-            and not await has_graph_changed_since_last_improve(
-                inputs.dataset_id, exclude_operation_id=inputs.improve_operation_id
-            )
+        # Only a full, unscoped enrichment stamps the watermark: the stamp
+        # says "the whole dataset was enriched as of started_at", which
+        # narrower or different work cannot claim. started_at is captured
+        # before the change check and the memify run, so a write racing the
+        # row close stays visible to the next run's gate.
+        full_scope = not inputs.has_custom_memify_tasks and not inputs.node_name
+        started_at = datetime.now(timezone.utc)
+
+        if full_scope and not await has_graph_changed_since_last_improve(
+            inputs.dataset_id, exclude_operation_id=inputs.improve_operation_id
         ):
             result = StageResult(
                 stage=self.name,
@@ -404,6 +413,7 @@ class TripletEnrichmentStage(BaseStage):
                 reason=REASON_NO_WRITES_SINCE_LAST_IMPROVE,
             )
             result._raw_run = {}
+            result._run_info_stamp = enrichment_watermark_stamp(result.status, started_at)
             return result
 
         kwargs = dict(inputs.memify_kwargs)
@@ -420,14 +430,17 @@ class TripletEnrichmentStage(BaseStage):
         if not inputs.has_custom_memify_tasks:
             kwargs["data"] = [{}]
 
-        result = await memify(
+        run_result = await memify(
             dataset=inputs.dataset_id,
             node_name=inputs.node_name,
             user=inputs.user,
             run_in_background=False,
             **kwargs,
         )
-        return StageResult.from_pipeline_run(self.name, result)
+        result = StageResult.from_pipeline_run(self.name, run_result)
+        if full_scope and result.status in ("completed", "already_completed"):
+            result._run_info_stamp = enrichment_watermark_stamp(result.status, started_at)
+        return result
 
 
 class GlobalContextIndexStage(BaseStage):
