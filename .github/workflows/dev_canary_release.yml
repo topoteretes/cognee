@@ -95,7 +95,14 @@ jobs:
         run: ./scripts/fetch_ladybug_json_extension.sh
 
       - name: Build distributions
-        run: uv build
+        # Two separate builds on purpose. Plain ``uv build`` builds the wheel from
+        # the sdist, and the sdist never contains the gitignored Ladybug extension
+        # binaries (the hatchling ``artifacts`` rule is wheel-only), so the wheel
+        # came out without them and the guard below failed. Building the wheel
+        # from the source tree keeps the binaries in; the sdist stays lean.
+        run: |
+          uv build --sdist
+          uv build --wheel
 
       # A wheel without the binaries would still pass every test (the loader
       # falls back to the remote repo), so assert their presence explicitly:
