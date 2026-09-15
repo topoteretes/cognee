@@ -59,6 +59,7 @@ export default function FilesTable({
     );
   }
 
+  // The paging hook owns the live cap; this protects independent consumers.
   const { visible, hidden } = capRows(files);
 
   return (

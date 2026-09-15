@@ -23,3 +23,7 @@ class DataDTO(OutDTO):
     dataset_id: UUID
     label: str | None = None
     external_metadata: dict | None = None
+    # Serialized as `dataSize` (OutDTO camel-cases aliases). The UI has always
+    # rendered a size column against this row; without the field it read
+    # undefined and showed a dash for every file.
+    data_size: int | None = None

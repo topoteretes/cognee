@@ -40,6 +40,7 @@ def _row(index: int) -> SimpleNamespace:
         dataset_id=None,
         label=None,
         external_metadata=None,
+        data_size=1024 + index,
     )
 
 
@@ -60,7 +61,8 @@ def client(monkeypatch):
 
     methods = importlib.import_module("cognee.modules.data.methods")
 
-    async def _get_dataset_data(dataset_id, limit=None, offset=0):
+    async def _get_dataset_data(dataset_id, limit=None, offset=0, *, order_by="size"):
+        assert order_by == "created_at"
         window = ROWS[offset:]
         return window[:limit] if limit is not None else window
 
@@ -168,6 +170,14 @@ def test_count_segment_is_not_shadowed_by_a_parameter_route():
     shadowing = [path for path in get_paths if sibling.match(path)]
 
     assert not shadowing, f"these GET routes would swallow /data/count: {shadowing}"
+
+
+@pytest.mark.parametrize("size", [0, 1024, None])
+def test_data_size_is_serialized_with_camel_case_alias(client, monkeypatch, size):
+    monkeypatch.setattr(ROWS[0], "data_size", size)
+    response = client.get(f"/api/v1/datasets/{DATASET_ID}/data?limit=1")
+    assert response.status_code == 200
+    assert response.json()[0]["dataSize"] == size
 
 
 @pytest.mark.parametrize("suffix", ["data", "data/count"])

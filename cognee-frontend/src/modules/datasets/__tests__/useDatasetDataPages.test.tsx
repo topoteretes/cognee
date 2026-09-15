@@ -181,3 +181,15 @@ test("loadMore keeps its identity while pages arrive", async () => {
   await act(async () => { await result.current.load("a"); });
   expect(result.current.loadMore).toBe(loadMore);
 });
+
+
+test("trimming a prepended row to the render cap is not a server deletion", async () => {
+  const { fetch, result } = setup(100);
+  fetch.mockImplementation((url: string) => Promise.resolve(response(
+    url.endsWith("/count") ? { count: 200 } : page(0, 100)
+  )));
+  await act(async () => { await result.current.load("a"); });
+  act(() => { result.current.setData(previous => [{ id: "new" }, ...previous]); });
+  expect(result.current.data).toHaveLength(100);
+  expect(result.current.total).toBe(200);
+});

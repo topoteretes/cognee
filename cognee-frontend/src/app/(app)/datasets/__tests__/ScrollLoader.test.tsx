@@ -69,7 +69,7 @@ describe("ScrollLoader", () => {
     expect(observed).toBeNull();
     scrollIntoView();
     expect(onLoadMore).not.toHaveBeenCalled();
-    expect(screen.getByText(/Showing the first 2,000/)).toBeInTheDocument();
+    expect(screen.getByText(/This view is limited to 2,000/)).toBeInTheDocument();
     expect(screen.queryByText("Load more")).not.toBeInTheDocument();
   });
 
@@ -84,7 +84,7 @@ describe("ScrollLoader", () => {
   it("does not claim a cap when the cap is exactly the total", () => {
     setup({ loaded: 2000, total: 2000, maxLoaded: 2000 });
 
-    expect(screen.queryByText(/Showing the first/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/This view is limited/)).not.toBeInTheDocument();
   });
 
   it("degrades to the button where IntersectionObserver is unavailable", () => {

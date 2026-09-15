@@ -112,7 +112,7 @@ export default function ScrollLoader({
 
       {atCap && more && (total === null || loaded < total) && (
         <span style={{ color: "rgba(237,236,234,0.3)", textAlign: "center" }}>
-          Showing the first {maxLoaded.toLocaleString()} {noun}. This view is limited to {maxLoaded.toLocaleString()} {noun}.
+          This view is limited to {maxLoaded.toLocaleString()} {noun}.
         </span>
       )}
 

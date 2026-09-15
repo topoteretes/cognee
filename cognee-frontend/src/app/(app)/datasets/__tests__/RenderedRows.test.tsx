@@ -22,3 +22,11 @@ test("FilesTable caps actual rows and does not render a hidden file", () => {
   expect(screen.queryByText(`file-${MAX_RENDERED_ROWS}.txt`)).not.toBeInTheDocument();
   expect(screen.getByText(`Showing ${MAX_RENDERED_ROWS.toLocaleString()} of ${files.length.toLocaleString()} files`)).toBeInTheDocument();
 });
+
+
+test("DocumentList displays raw API sizes and mapped sizes", () => {
+  render(<DocumentList docs={[{ id: "raw", name: "raw.txt", dataSize: 1024 },
+    { id: "mapped", name: "mapped.txt", size: 2048 }]} onDelete={jest.fn()} />);
+  expect(screen.getByText("1.0 KB")).toBeInTheDocument();
+  expect(screen.getByText("2.0 KB")).toBeInTheDocument();
+});

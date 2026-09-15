@@ -50,8 +50,9 @@ export default function useDatasetDataPages<T extends { id: string }>(
   // do not. Keep the consumed offset separate from the rendered row count.
   const setData = useCallback((action: SetStateAction<T[]>) => {
     const previous = rows.current;
-    const next = (typeof action === "function" ? action(previous) : action).slice(0, maxRows);
-    const keptIds = new Set(next.map(row => row.id));
+    const requested = typeof action === "function" ? action(previous) : action;
+    const next = requested.slice(0, maxRows);
+    const keptIds = new Set(requested.map(row => row.id));
     const removed = previous.filter(row => !keptIds.has(row.id)).length;
     invalidate();
     nextOffset.current = Math.max(0, nextOffset.current - removed);

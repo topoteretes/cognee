@@ -182,20 +182,16 @@ export function useBrainsData(): UseBrainsDataResult {
       }),
     );
     if (completedSelectedId) {
-      // The document list is a page; the badge is a total. Two questions now,
-      // so ask them separately rather than counting whichever rows arrived.
-      Promise.all([
-        loadDocs(completedSelectedId),
-        getDatasetDataCount(completedSelectedId, cogniInstance),
-      ])
-        .then(([, count]) => {
-          setDatasets((prev) => prev.map((d) => d.id === completedSelectedId ? { ...d, documents: count } : d));
-        })
-        .catch((err) => {
-          console.error("Failed to refresh dataset document count:", err);
-        });
+      // The paged loader fetches the total along with the first page.
+      void loadDocs(completedSelectedId);
     }
   }, [statusDetails, cogniInstance, selectedId, loadDocs]);
+
+  useEffect(() => {
+    if (selectedId && docsTotal !== null) {
+      setDatasets(prev => prev.map(d => d.id === selectedId ? { ...d, documents: docsTotal } : d));
+    }
+  }, [selectedId, docsTotal]);
 
   async function refreshSelectedDocs(id: string): Promise<void> {
     await loadDocs(id);
@@ -257,10 +253,12 @@ export function useBrainsData(): UseBrainsDataResult {
 
     const refreshDocs = async (): Promise<void> => {
       // list is a page, so it cannot supply the badge's total — count separately.
-      const [, count] = await Promise.all([
-        fetchSelectedDocs(),
-        getDatasetDataCount(ds.id, cogniInstance).catch(() => null),
-      ]);
+      let count: number | null = null;
+      if (selectedIdRef.current === ds.id) {
+        await loadDocs(ds.id);
+      } else {
+        count = await getDatasetDataCount(ds.id, cogniInstance).catch(() => null);
+      }
       // "completed", NOT "running": onProcessed fires only after the status
       // poll reached COMPLETED (useBrainUpload.ts). Writing "running" here
       // left the row stuck on "Processing" forever when the shared status
@@ -365,11 +363,14 @@ export function useBrainsData(): UseBrainsDataResult {
 
   async function handleDeleteFile(docId: string): Promise<void> {
     if (!cogniInstance || !selectedId) return;
+    const datasetId = selectedId;
     setDeletingDocId(docId);
     try {
-      await deleteDatasetData(selectedId, docId, cogniInstance);
-      setSelectedDocs((prev) => prev.filter((d) => d.id !== docId));
-      setDatasets((prev) => prev.map((d) => d.id === selectedId ? { ...d, documents: Math.max(0, d.documents - 1) } : d));
+      await deleteDatasetData(datasetId, docId, cogniInstance);
+      if (selectedIdRef.current === datasetId) {
+        setSelectedDocs((prev) => prev.filter((d) => d.id !== docId));
+      }
+      setDatasets((prev) => prev.map((d) => d.id === datasetId ? { ...d, documents: Math.max(0, d.documents - 1) } : d));
       setDeleteDocTarget(null);
     } catch (err) {
       console.error("Failed to delete file:", err);
