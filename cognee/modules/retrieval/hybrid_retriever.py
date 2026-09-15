@@ -30,6 +30,7 @@ from cognee.modules.retrieval.utils.completion import (
     generate_completion,
     generate_completion_batch,
 )
+from cognee.modules.retrieval.utils.evidence import hybrid_context_evidence
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
     load_root_text,
@@ -299,6 +300,10 @@ class HybridRetriever(BaseRetriever):
             retrieved_objects,
             enabled=self.include_references and self.response_model is str,
         )
+
+    def get_context_evidence(self, retrieved_objects: Any, dataset_id: Any = None):
+        """Return the exact chunks, entities and edge bullets rendered into hybrid context."""
+        return hybrid_context_evidence(retrieved_objects, dataset_id=dataset_id)
 
     def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
         return merge_hybrid_results(

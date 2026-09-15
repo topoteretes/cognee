@@ -173,6 +173,109 @@ def graph_context_evidence(
     return references
 
 
+def hybrid_context_evidence(
+    retrieved_objects: Any,
+    dataset_id: Any = None,
+) -> list[EvidenceReference]:
+    """Describe the exact chunks, entities and edge bullets rendered into hybrid context.
+
+    The hybrid prompt is built from ``{"chunks", "chunk_summaries", "entities", "facts"}``:
+
+    - ``chunks`` become ``segment`` items, exactly as for RAG.
+    - each entity block becomes a ``graph_node`` labelled with the entity name.
+    - each edge bullet becomes a ``graph_edge`` between its endpoints, and the
+      endpoints become ``graph_node`` items, as the graph builder does for every
+      edge it renders. The id is the ``edge_object_id`` the graph stamped, else the
+      deterministic id the graph builder derives. A bullet missing an endpoint or
+      its relationship is not cited rather than given an invented id.
+    - ``facts`` are not cited: they are EdgeType vector rows keyed by relationship
+      *type*, not graph edges, so they carry no stable identity to point at.
+    - ``chunk_summaries`` are not rendered as passages and are not cited.
+
+    A batch result (one dict per query) is flattened in order. Every
+    ``(kind, artifact_id)`` appears once; ranks run chunks, then nodes, then edges.
+    """
+    if isinstance(retrieved_objects, dict):
+        results = [retrieved_objects]
+    elif isinstance(retrieved_objects, (list, tuple)):
+        results = [result for result in retrieved_objects if isinstance(result, dict)]
+    else:
+        return []
+
+    normalized_dataset_id = _string(dataset_id)
+    chunks: list[EvidenceReference] = []
+    nodes: list[tuple[str, str | None]] = []
+    edges: list[tuple[str, str, str, str]] = []
+    seen_chunk_ids: set[str] = set()
+    seen_node_ids: set[str] = set()
+    seen_edge_ids: set[str] = set()
+
+    def add_node(node_id: str, label: str | None) -> None:
+        if node_id in seen_node_ids:
+            return
+        seen_node_ids.add(node_id)
+        # Hybrid falls back to the id when a node has no name; that is not a label.
+        nodes.append((node_id, label if label != node_id else None))
+
+    for result in results:
+        for reference in chunk_context_evidence(result.get("chunks") or [], dataset_id=dataset_id):
+            if reference.artifact_id not in seen_chunk_ids:
+                seen_chunk_ids.add(reference.artifact_id)
+                chunks.append(reference)
+
+        for entity in result.get("entities") or []:
+            if not isinstance(entity, dict):
+                continue
+            entity_id = _string(entity.get("id"))
+            if entity_id is not None:
+                add_node(entity_id, _string(entity.get("name")))
+
+            for bullet in entity.get("edges") or []:
+                if not isinstance(bullet, dict):
+                    continue
+                source_node_id = _string(bullet.get("source_id"))
+                target_node_id = _string(bullet.get("target_id"))
+                relationship_name = _string(bullet.get("relationship"))
+                if source_node_id is None or target_node_id is None or relationship_name is None:
+                    continue
+                add_node(source_node_id, _string(bullet.get("source")))
+                add_node(target_node_id, _string(bullet.get("target")))
+                edge_id = _string(bullet.get("edge_object_id")) or generate_edge_object_id(
+                    source_node_id, target_node_id, relationship_name
+                )
+                if edge_id in seen_edge_ids:
+                    continue
+                seen_edge_ids.add(edge_id)
+                edges.append((edge_id, source_node_id, target_node_id, relationship_name))
+
+    references = [chunk.model_copy(update={"rank": rank}) for rank, chunk in enumerate(chunks)]
+    node_rank_offset = len(references)
+    references.extend(
+        EvidenceReference(
+            kind="graph_node",
+            artifact_id=node_id,
+            dataset_id=normalized_dataset_id,
+            label=label,
+            rank=node_rank_offset + rank,
+        )
+        for rank, (node_id, label) in enumerate(nodes)
+    )
+    edge_rank_offset = len(references)
+    references.extend(
+        EvidenceReference(
+            kind="graph_edge",
+            artifact_id=edge_id,
+            dataset_id=normalized_dataset_id,
+            source_node_id=source_node_id,
+            target_node_id=target_node_id,
+            relationship_name=relationship_name,
+            rank=edge_rank_offset + rank,
+        )
+        for rank, (edge_id, source_node_id, target_node_id, relationship_name) in enumerate(edges)
+    )
+    return references
+
+
 async def graph_source_evidence(
     context_evidence: list[EvidenceReference],
     dataset_id: Any,
