@@ -114,7 +114,9 @@ class CogneeClient:
             # the slash-less form. Without following redirects, GETs like
             # list_datasets() silently read the empty redirect body as "no data".
             self.client = httpx.AsyncClient(
-                timeout=300.0, follow_redirects=True
+                timeout=300.0,
+                follow_redirects=True,
+                event_hooks={"response": [self._hint_on_unauthorized]},
             )  # 5 minute timeout for long operations
         else:
             logger.info("Cognee client initialized in direct mode")
@@ -122,6 +124,25 @@ class CogneeClient:
             import cognee as _cognee
 
             self.cognee = _cognee
+
+    async def _hint_on_unauthorized(self, response: httpx.Response) -> None:
+        """Point at --api-auth-scheme when the default Bearer header is rejected.
+
+        A self-hosted backend accepts server-issued API keys only as X-Api-Key
+        (issue #5023). A JWT has three dot-separated segments; an API key has none,
+        so a dot-less token that got a 401 under the default scheme is almost
+        certainly an API key sent on the wrong transport.
+        """
+        if response.status_code != 401 or not self.api_token:
+            return
+        if self.api_auth_scheme or self.tenant_id or "." in self.api_token:
+            return
+        logger.warning(
+            "%s returned 401. --api-token does not look like a JWT and the API accepts "
+            "API keys only as X-Api-Key; retry with --api-auth-scheme x-api-key "
+            "(or COGNEE_API_AUTH_SCHEME=x-api-key).",
+            response.request.url.path,
+        )
 
     def _get_headers(self, include_content_type: bool = True) -> dict[str, str]:
         """Get headers for API requests.
