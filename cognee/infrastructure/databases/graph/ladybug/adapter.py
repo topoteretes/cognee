@@ -2860,7 +2860,8 @@ class LadybugAdapter(GraphDBInterface):
 
         rows = await self.query(
             """
-            MATCH (n:Node)-[e:EDGE]-()
+            MATCH (n:Node)
+            OPTIONAL MATCH (n)-[e:EDGE]-()
             RETURN n.id AS id, count(e) AS degree
             ORDER BY degree DESC, id
             LIMIT $top_k

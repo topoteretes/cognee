@@ -552,6 +552,9 @@ class GraphDBInterface(ABC):
         worth starting from". Ranking exactly is what made this unusable: see
         below.
 
+        ``top_k`` must be positive. Isolated nodes are valid seeds; a graph
+        without edges should still produce a nonempty view if it has nodes.
+
         Deliberately NOT abstract: every adapter inherits this working
         implementation, so a community adapter keeps loading. But the default
         is the expensive one — it reads the whole graph and counts degree in
@@ -567,6 +570,9 @@ class GraphDBInterface(ABC):
         into 5.59M distinct ids. Overriding adapters should bound the work,
         not just move it into the database.
         """
+        if top_k < 1:
+            raise ValueError("top_k must be >= 1")
+
         logger.warning(
             "%s has no native get_top_degree_node_ids; falling back to a full "
             "graph read to rank %d seeds. This is O(graph) in memory.",

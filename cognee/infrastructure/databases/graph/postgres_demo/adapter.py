@@ -712,6 +712,9 @@ class PostgresDemoAdapter(GraphDBInterface):
     async def get_top_degree_node_ids(self, top_k: int) -> list[str]:
         """Approximately highest-degree node ids, from a bounded edge sample.
 
+        When the sample yields fewer than ``top_k`` ids, a limited node-id
+        query fills the remaining slots, including graphs without edges.
+
         Ranking exactly is the wrong trade here. The inherited default reads
         every node and edge into Python and gets the worker OOM-killed at this
         scale; an exact SQL aggregate avoids the OOM but has to group all 71M
@@ -754,7 +757,18 @@ class PostgresDemoAdapter(GraphDBInterface):
                 ),
                 {"sample": self._SEED_SAMPLE_ROWS, "top_k": top_k},
             )
-            return [str(row[0]) for row in result.all()]
+            seed_ids = [str(row[0]) for row in result.all()]
+            if len(seed_ids) < top_k:
+                # Include isolated nodes when the edge sample cannot fill the
+                # view. Fetch only missing ids, never full nodes or degrees.
+                result = await session.execute(
+                    text(
+                        "SELECT id FROM graph_node WHERE NOT (id = ANY(:seed_ids)) LIMIT :remaining"
+                    ),
+                    {"seed_ids": seed_ids, "remaining": top_k - len(seed_ids)},
+                )
+                return seed_ids + [str(row[0]) for row in result.all()]
+            return seed_ids
 
     async def get_graph_data(
         self,

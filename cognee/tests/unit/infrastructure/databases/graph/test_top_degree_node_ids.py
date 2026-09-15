@@ -12,6 +12,8 @@ community adapter keeps working — which is exactly why it needs a test of its
 own rather than being deleted.
 """
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
@@ -73,6 +75,24 @@ async def test_default_on_empty_graph_returns_no_seeds():
 
 
 @pytest.mark.asyncio
+async def test_default_includes_isolated_nodes():
+    adapter = _FullReadAdapter([("a", {}), ("b", {})], [])
+
+    assert set(await adapter.get_top_degree_node_ids(5)) == {"a", "b"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("top_k", [0, -1])
+async def test_default_rejects_invalid_limit_before_reading(top_k):
+    adapter = _FullReadAdapter(*_star())
+
+    with pytest.raises(ValueError, match="top_k must be >= 1"):
+        await adapter.get_top_degree_node_ids(top_k)
+
+    assert adapter.full_reads == 0
+
+
+@pytest.mark.asyncio
 async def test_default_tolerates_top_k_larger_than_the_graph():
     nodes, edges = _star(2)
 
@@ -108,13 +128,11 @@ def test_the_default_is_inherited_not_abstract():
 )
 def test_in_tree_adapters_override_the_expensive_default(adapter_module):
     """These are the adapters cognee ships; none should be on the full-read path."""
-    import importlib
     import inspect
 
     # Each adapter's driver is an optional extra, so an uninstalled one is
     # skipped rather than reported as a missing override.
     module = pytest.importorskip(adapter_module)
-    module = importlib.import_module(adapter_module)
     adapters = [
         obj
         for _, obj in inspect.getmembers(module, inspect.isclass)
@@ -180,13 +198,15 @@ async def test_postgres_ranking_is_bounded_not_an_exact_aggregate():
     assert params["sample"] == PostgresDemoAdapter._SEED_SAMPLE_ROWS
     assert params["top_k"] == 2
 
-    # It must read edges only: touching graph_node reintroduces the full read.
+    # A full seed sample needs no node lookup. Sparse graphs use a separate
+    # LIMIT-bounded id lookup to include isolated nodes.
     assert "graph_node" not in sql
     assert sql.count("graph_edge") == 2
 
 
 @pytest.mark.asyncio
-async def test_postgres_ranking_rejects_a_meaningless_top_k():
+@pytest.mark.parametrize("top_k", [0, -1])
+async def test_postgres_ranking_rejects_a_meaningless_top_k(top_k):
     from cognee.infrastructure.databases.graph.postgres_demo.adapter import (
         PostgresDemoAdapter,
     )
@@ -194,4 +214,47 @@ async def test_postgres_ranking_rejects_a_meaningless_top_k():
     adapter = object.__new__(PostgresDemoAdapter)
 
     with pytest.raises(ValueError):
-        await adapter.get_top_degree_node_ids(0)
+        await adapter.get_top_degree_node_ids(top_k)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("sampled", "extra", "top_k"),
+    [([], [], 5), ([], ["a", "b"], 5), (["hub", "spoke"], ["isolated"], 3)],
+)
+async def test_postgres_fills_sparse_samples_with_bounded_node_ids(sampled, extra, top_k):
+    from cognee.infrastructure.databases.graph.postgres_demo.adapter import PostgresDemoAdapter
+
+    adapter = object.__new__(PostgresDemoAdapter)
+    adapter.sessionmaker = MagicMock()
+    session = adapter.sessionmaker.return_value.__aenter__.return_value
+    results = [MagicMock(), MagicMock()]
+    results[0].all.return_value = [(node_id,) for node_id in sampled]
+    results[1].all.return_value = [(node_id,) for node_id in extra]
+    session.execute = AsyncMock(side_effect=results)
+
+    assert await adapter.get_top_degree_node_ids(top_k) == sampled + extra
+
+    assert session.execute.await_count == 2
+    statement, params = session.execute.await_args.args
+    assert str(statement) == (
+        "SELECT id FROM graph_node WHERE NOT (id = ANY(:seed_ids)) LIMIT :remaining"
+    )
+    assert params == {"seed_ids": sampled, "remaining": top_k - len(sampled)}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("top_k", [0, -1])
+@pytest.mark.parametrize(
+    ("module_name", "class_name"),
+    [("ladybug", "LadybugAdapter"), ("neo4j_driver", "Neo4jAdapter")],
+)
+async def test_cypher_adapters_reject_invalid_limit_before_query(module_name, class_name, top_k):
+    module = pytest.importorskip(f"cognee.infrastructure.databases.graph.{module_name}.adapter")
+    adapter = object.__new__(getattr(module, class_name))
+    adapter.query = AsyncMock()
+
+    with pytest.raises(ValueError, match="top_k must be >= 1"):
+        await adapter.get_top_degree_node_ids(top_k)
+
+    adapter.query.assert_not_awaited()
