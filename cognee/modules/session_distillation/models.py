@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from cognee.modules.improve.constants import GATE_CONFIDENCE
+from cognee.infrastructure.session.session_context_models import GATE_CONFIDENCE
 
 # -- Tunables ----------------------------------------------------------------
 
@@ -20,7 +20,7 @@ from cognee.modules.improve.constants import GATE_CONFIDENCE
 # non-negative and its confidence clears the threshold
 # (``distill.is_entry_distillable``) — deliberately looser than the
 # never-rated-harmful rule serving and preferences use
-# (``is_context_entry_usable``). The threshold is the loop-wide
+# (``is_context_entry_usable``). The threshold is the session layer's
 # GATE_CONFIDENCE; the local name is kept for its importers.
 MIN_GATE_CONFIDENCE = GATE_CONFIDENCE
 

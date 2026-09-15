@@ -3,9 +3,10 @@
 One declaration per literal that the improve stages, their pipelines and the
 visualization layer used to spell out by hand (plan Appendix D). Nothing here
 changes a formula: ``DEFAULT_FEEDBACK_ALPHA`` is the learning rate the
-feedback-weight task has always used, and ``GATE_CONFIDENCE`` is the single
-threshold that ``MIN_CANDIDATE_CONFIDENCE`` and ``MIN_GATE_CONFIDENCE`` both
-stood for.
+feedback-weight task has always used. (The session-context confidence
+threshold, ``GATE_CONFIDENCE``, lives with the models it gates in
+``cognee.infrastructure.session.session_context_models`` — the loop never
+reads it.)
 """
 
 # Node sets written by the loop's stages.
@@ -18,13 +19,9 @@ SKILLS_NODE_SET = "skills"  # skill ingestion / skill improvement
 # Learning rate for streaming feedback-weight updates, in (0, 1].
 DEFAULT_FEEDBACK_ALPHA = 0.1
 
-# Minimum confidence for a session-context candidate to count as gated guidance.
-GATE_CONFIDENCE = 0.75
-
 __all__ = [
     "AGENT_TRACE_FEEDBACKS_NODE_SET",
     "DEFAULT_FEEDBACK_ALPHA",
-    "GATE_CONFIDENCE",
     "SESSION_LEARNINGS_NODE_SET",
     "SKILLS_NODE_SET",
     "USER_PREFERENCES_NODE_SET",

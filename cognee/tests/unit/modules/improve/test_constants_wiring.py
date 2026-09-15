@@ -29,10 +29,13 @@ def test_constants_module_imports_nothing_from_cognee():
 
 
 def test_confidence_threshold_is_declared_once():
-    assert session_context_models.MIN_CANDIDATE_CONFIDENCE is constants.GATE_CONFIDENCE
-    assert session_context_models.MIN_GATE_CONFIDENCE is constants.GATE_CONFIDENCE
-    assert distillation_models.MIN_GATE_CONFIDENCE is constants.GATE_CONFIDENCE
-    assert constants.GATE_CONFIDENCE == 0.75
+    """Declared with the session-context models it gates — the improve loop
+    never reads it, so it must not live in (or be re-exported by) improve."""
+    assert session_context_models.MIN_CANDIDATE_CONFIDENCE is session_context_models.GATE_CONFIDENCE
+    assert session_context_models.MIN_GATE_CONFIDENCE is session_context_models.GATE_CONFIDENCE
+    assert distillation_models.MIN_GATE_CONFIDENCE is session_context_models.GATE_CONFIDENCE
+    assert session_context_models.GATE_CONFIDENCE == 0.75
+    assert not hasattr(constants, "GATE_CONFIDENCE")
 
 
 def test_session_learnings_node_set_is_shared():

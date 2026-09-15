@@ -3,19 +3,18 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from cognee.modules.improve.constants import GATE_CONFIDENCE
-
 VALID_RATINGS = {"helpful", "harmful"}
 MAX_CONTEXT_CONTENT_CHARS = 280
 
-# One threshold, declared once in ``cognee.modules.improve.constants``: a
-# candidate must clear it to be stored, and a stored entry must clear it to be
-# served, distilled, or folded into preferences. The harmful-rating rule
-# differs by consumer: serving and preferences require never-rated-harmful
+# One threshold, declared once here with the models it gates: a candidate must
+# clear it to be stored, and a stored entry must clear it to be served,
+# distilled, or folded into preferences. The harmful-rating rule differs by
+# consumer: serving and preferences require never-rated-harmful
 # (``is_context_entry_usable``), while distillation uses net helpfulness
 # (``session_distillation.distill.is_entry_distillable`` — an entry rated
-# harmful once and helpful three times is still distillable). The two names
-# are kept for their existing importers.
+# harmful once and helpful three times is still distillable). The two legacy
+# names are kept for their existing importers.
+GATE_CONFIDENCE = 0.75
 MIN_CANDIDATE_CONFIDENCE = GATE_CONFIDENCE
 MIN_GATE_CONFIDENCE = GATE_CONFIDENCE
 
