@@ -159,12 +159,6 @@ This repository has no `CHANGELOG.md`. Release notes are compiled from merged PR
 release is cut (see `.github/docs/release.md`), so your PR title *is* the changelog entry: use the
 conventional `type: Summary` form described above and make it understandable on its own.
 
-## Unreleased
-
-### Fixed
-- Clarify the minimal Docker Compose setup for first-time contributors.
-```
-
 > **Reviewers are auto-routed.** Cognee uses a [`CODEOWNERS`](.github/CODEOWNERS)
 > file to request reviews automatically based on the directories your PR touches.
 > No manual ping required — the right person will get notified when you open the PR.
