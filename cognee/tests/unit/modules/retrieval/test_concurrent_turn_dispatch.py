@@ -374,8 +374,18 @@ class TestNoAnswerTurns:
         assert qa["answer"] == "Got it."
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "acknowledgement",
+        [
+            "Got it.",
+            (
+                "You're welcome! I'm glad the explanation about TechCorp was helpful. "
+                "Thank you for letting me know; I appreciate your feedback."
+            ),
+        ],
+    )
     async def test_concurrent_no_answer_turn_stores_and_returns_acknowledgement(
-        self, concurrent_env, monkeypatch
+        self, concurrent_env, monkeypatch, acknowledgement
     ):
         """The answer lane's generated text must not be returned or stored once the
         analysis lane decides the turn is feedback-only."""
@@ -395,7 +405,7 @@ class TestNoAnswerTurns:
         async def fake_llm(text_input, system_prompt, response_model, **kwargs):
             concurrent_env.llm_calls.append(response_model)
             if response_model is SessionTurnAnalysis:
-                return SessionTurnAnalysis(response_to_user="Got it.")
+                return SessionTurnAnalysis(response_to_user=acknowledgement)
             if response_model is str:
                 return "a generated answer that must be discarded"
             return response_model(text="a generated answer that must be discarded")
@@ -407,7 +417,7 @@ class TestNoAnswerTurns:
             retriever, raw_query="thanks, that was helpful!"
         )
 
-        assert completion == ["Got it."]
+        assert completion == [acknowledgement]
         retriever.append_references.assert_not_awaited()
         # Same return shape as the sequential runner: an acknowledged turn reports no
         # retrieval, so include_references cannot cite the answer that was discarded.
@@ -416,7 +426,7 @@ class TestNoAnswerTurns:
         assert len(concurrent_env.manager.qas) == 1
         qa = concurrent_env.manager.qas[0]
         assert qa["question"] == "thanks, that was helpful!"
-        assert qa["answer"] == "Got it."
+        assert qa["answer"] == acknowledgement
         # The next turn's analysis is handed these to rate. The user saw neither.
         assert qa["used_graph_element_ids"] is None
         assert qa["used_session_context_ids"] is None

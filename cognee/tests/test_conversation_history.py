@@ -444,16 +444,14 @@ async def main():
     assert stored_answer_autofeedback, (
         "Feedback-only turn must store an acknowledgement as the QA entry's answer"
     )
-    # Truthiness alone is not enough: before this fix the concurrent path stored the
-    # generated answer here, which is also truthy. Pin the shape instead — short, and
-    # not about the retrieved subject.
-    assert len(stored_answer_autofeedback) < 120, (
-        "Feedback-only turn must store the short acknowledgement, not the generated "
-        f"answer; got {len(stored_answer_autofeedback)} chars: "
-        f"{stored_answer_autofeedback[:200]}"
+    # The LLM's acknowledgement may mention TechCorp or vary in length. Check the
+    # no-answer turn's recorded provenance instead of guessing from its wording:
+    # discarded retrieval and session guidance must not be recorded as served.
+    assert second_entry_autofeedback.used_graph_element_ids is None, (
+        "Feedback-only turn must not claim the discarded answer's retrieved graph context"
     )
-    assert "TechCorp" not in stored_answer_autofeedback, (
-        "Feedback-only turn stored a generated answer about the retrieved subject"
+    assert second_entry_autofeedback.used_session_context_ids is None, (
+        "Feedback-only turn must not claim the discarded answer's session guidance"
     )
     assert getattr(second_entry_autofeedback, "feedback_text", None) is None
     assert getattr(second_entry_autofeedback, "feedback_score", None) is None
