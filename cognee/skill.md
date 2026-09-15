@@ -135,14 +135,14 @@ Useful options:
 await cognee.remember(
     "...",
     dataset_name="research",
-    self_improvement=False,   # skip the improve() stage (faster, no triplet index)
-    run_in_background=True,   # return immediately; poll the pipeline status
+    self_improvement=False,  # skip the improve() stage (faster, no triplet index)
+    run_in_background=True,  # return immediately; poll the pipeline status
     chunk_size=1024,
     custom_prompt="Extract companies, products, and partnerships.",
-    extractor="gliner",       # LLM-free extraction; needs cognee[gliner]
-    dry_run=True,             # estimate LLM tokens/cost without ingesting
+    extractor="gliner",  # LLM-free extraction; needs cognee[gliner]
+    dry_run=True,  # estimate LLM tokens/cost without ingesting
 )
-await cognee.remember("./my_repo", dataset_name="code")              # code graph, no LLM
+await cognee.remember("./my_repo", dataset_name="code")  # code graph, no LLM
 await cognee.remember("./skills", dataset_name="ops", content_type="skills")  # SKILL.md playbooks
 ```
 
@@ -198,10 +198,10 @@ await cognee.improve(dataset="research", build_global_context_index=True)
 `forget()` is the single deletion entry point.
 
 ```python
-await cognee.forget(data_id=data_id, dataset_id=dataset_id)   # one document
-await cognee.forget(dataset="research")                         # a dataset: raw data + graph + vectors
-await cognee.forget(dataset="research", memory_only=True)       # graph + vectors only, keep raw files
-await cognee.forget(everything=True)                            # everything the current user owns
+await cognee.forget(data_id=data_id, dataset_id=dataset_id)  # one document
+await cognee.forget(dataset="research")  # a dataset: raw data + graph + vectors
+await cognee.forget(dataset="research", memory_only=True)  # graph + vectors only, keep raw files
+await cognee.forget(everything=True)  # everything the current user owns
 ```
 
 ### Update a document in place
@@ -229,7 +229,7 @@ class Person(DataPoint):
 
 class Company(DataPoint):
     name: str
-    employs: list[Person] = []      # a DataPoint field becomes an edge named after the field
+    employs: list[Person] = []  # a DataPoint field becomes an edge named after the field
     metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
 
@@ -502,7 +502,7 @@ If only the LLM or only embeddings are configured, the other defaults to OpenAI.
 ```python
 datasets = await cognee.datasets.list_datasets()
 data = await cognee.datasets.list_data(dataset_id)
-await cognee.forget(dataset="research")            # preferred over datasets.empty_dataset / delete_all
+await cognee.forget(dataset="research")  # preferred over datasets.empty_dataset / delete_all
 ```
 
 ## Visualization
