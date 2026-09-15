@@ -595,10 +595,13 @@ class CogneeClient:
         custom_prompt: str | None = None,
         filename: str | None = None,
         content_base64: str | None = None,
+        self_improvement: bool | None = None,
     ) -> dict[str, Any]:
         """Store data in memory via remember().
 
-        With session_id: stores in session cache only (fast).
+        With session_id: direct mode may bridge cache entries to the graph;
+        self_improvement=False disables that bridge. API typed entries stay
+        cache-only for every value. Omission preserves the core default.
         Without session_id: full add + cognify pipeline (permanent).
 
         Pass either `data` (text) or `filename` + `content_base64` (file
@@ -633,6 +636,8 @@ class CogneeClient:
                     "dataset_name": dataset_name,
                     "session_id": session_id,
                 }
+                if self_improvement is not None:
+                    payload["self_improvement"] = self_improvement
                 response = await self.client.post(
                     endpoint,
                     json=payload,
@@ -644,6 +649,8 @@ class CogneeClient:
             endpoint = f"{self.api_url}/api/v1/remember"
             files = self._build_upload(data, filename, content_base64)
             form_data = {"datasetName": dataset_name}
+            if self_improvement is not None:
+                form_data["self_improvement"] = str(self_improvement).lower()
             if custom_prompt:
                 form_data["custom_prompt"] = custom_prompt
             response = await self.client.post(
@@ -670,6 +677,8 @@ class CogneeClient:
                     "data": remember_data,
                     "dataset_name": dataset_name,
                 }
+                if self_improvement is not None:
+                    kwargs["self_improvement"] = self_improvement
                 if session_id:
                     kwargs["session_id"] = session_id
                 if custom_prompt:
