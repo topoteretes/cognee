@@ -57,6 +57,8 @@ export interface UseBrainsDataResult {
   selectedDocs: FileEntry[];
   docsLoading: boolean;
   docsError: boolean;
+  hasMoreDocs: boolean;
+  loadMoreDocs: () => void;
   retryDocs: () => void;
   outdatedDatasets: Set<string>;
   refreshing: boolean;

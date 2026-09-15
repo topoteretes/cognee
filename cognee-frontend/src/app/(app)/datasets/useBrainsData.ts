@@ -6,7 +6,8 @@ import { captureException, recordUploadSuccess, recordUploadFailure } from "@/ut
 import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
 import getDatasets from "@/modules/datasets/getDatasets";
-import getDatasetData, { getDatasetDataCount } from "@/modules/datasets/getDatasetData";
+import { getDatasetDataCount } from "@/modules/datasets/getDatasetData";
+import useDatasetDataPages from "@/modules/datasets/useDatasetDataPages";
 import createDataset from "@/modules/datasets/createDataset";
 import deleteDataset from "@/modules/datasets/deleteDataset";
 import deleteDatasetData from "@/modules/datasets/deleteDatasetData";
@@ -49,9 +50,12 @@ export function useBrainsData(): UseBrainsDataResult {
   const [outdatedDatasets, setOutdated] = useState<Set<string>>(new Set());
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [selectedDocs, setSelectedDocs] = useState<FileEntry[]>([]);
-  const [docsLoading, setDocsLoading] = useState(false);
-  const [docsError, setDocsError] = useState(false);
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
+  const {
+    data: selectedDocs, setData: setSelectedDocs, loading: docsLoading,
+    error: docsError, hasMore: hasMoreDocs, load: loadDocs, loadMore: loadMoreDocs, reset: resetDocs,
+  } = useDatasetDataPages<FileEntry>(cogniInstance);
 
   const { isUploading, stage: uploadStage, progress: uploadProgress, upload } = useBrainUpload(cogniInstance);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -167,34 +171,20 @@ export function useBrainsData(): UseBrainsDataResult {
       // The document list is a page; the badge is a total. Two questions now,
       // so ask them separately rather than counting whichever rows arrived.
       Promise.all([
-        getDatasetData(completedSelectedId, cogniInstance),
+        loadDocs(completedSelectedId),
         getDatasetDataCount(completedSelectedId, cogniInstance),
       ])
-        .then(([docs, count]) => {
-          setSelectedDocs(Array.isArray(docs) ? docs : []);
+        .then(([, count]) => {
           setDatasets((prev) => prev.map((d) => d.id === completedSelectedId ? { ...d, documents: count } : d));
         })
         .catch((err) => {
-          console.error("Failed to fetch dataset documents:", err);
-          setSelectedDocs([]);
+          console.error("Failed to refresh dataset document count:", err);
         });
     }
-  }, [statusDetails, cogniInstance, selectedId]);
+  }, [statusDetails, cogniInstance, selectedId, loadDocs]);
 
   async function refreshSelectedDocs(id: string): Promise<void> {
-    if (!cogniInstance) return;
-    setDocsLoading(true);
-    try {
-      const data = await getDatasetData(id, cogniInstance);
-      setSelectedDocs(Array.isArray(data) ? data : []);
-      setDocsError(false);
-    } catch {
-      // Surface the fetch failure instead of rendering a false "no documents"
-      // empty state.
-      setDocsError(true);
-    } finally {
-      setDocsLoading(false);
-    }
+    await loadDocs(id);
   }
 
   async function handleRefresh(): Promise<void> {
@@ -207,7 +197,6 @@ export function useBrainsData(): UseBrainsDataResult {
     if (selectedId === id) return;
     setSelectedId(id);
     setSelectedDocs([]);
-    setDocsError(false);
     await refreshSelectedDocs(id);
   }
 
@@ -248,11 +237,8 @@ export function useBrainsData(): UseBrainsDataResult {
 
     // Shared by the success and processing-error paths below; only the
     // success path also updates the dataset's status.
-    const fetchSelectedDocs = async (): Promise<FileEntry[]> => {
-      const data = (await getDatasetData(ds.id, cogniInstance)) as FileEntry[];
-      const list = Array.isArray(data) ? data : [];
-      setSelectedDocs(list);
-      return list;
+    const fetchSelectedDocs = async (): Promise<void> => {
+      if (selectedIdRef.current === ds.id) await loadDocs(ds.id);
     };
 
     const refreshDocs = async (): Promise<void> => {
@@ -383,7 +369,7 @@ export function useBrainsData(): UseBrainsDataResult {
     // Optimistic delete: drop the dataset from the UI right away and let the
     // backend request complete in the background.
     setDatasets((prev) => prev.filter((d) => d.id !== ds.id));
-    if (selectedId === ds.id) { setSelectedId(null); setSelectedDocs([]); }
+    if (selectedId === ds.id) { setSelectedId(null); resetDocs(); }
     setDeleteTarget(null);
     refreshFilterDatasets();
     trackEvent({ pageName: "Brains", eventName: "dataset_deleted", additionalProperties: { dataset_id: ds.id, dataset_name: ds.name } });
@@ -414,7 +400,7 @@ export function useBrainsData(): UseBrainsDataResult {
       trackEvent({ pageName: "Brains", eventName: "dataset_created", additionalProperties: { dataset_name: ds.name, template: templateKey ?? "blank" } });
       setDatasets((prev) => [...prev, { ...ds, documents: 0, status: "empty" as DisplayStatus }]);
       setSelectedId(ds.id);
-      setSelectedDocs([]);
+      resetDocs();
       setNewName(""); setCreateError(""); setShowCreate(false);
       refreshFilterDatasets();
       if (templateKey) {
@@ -455,6 +441,8 @@ export function useBrainsData(): UseBrainsDataResult {
     selectedDocs,
     docsLoading,
     docsError,
+    hasMoreDocs,
+    loadMoreDocs,
     retryDocs: () => { if (selectedId) refreshSelectedDocs(selectedId); },
     outdatedDatasets,
     refreshing,
