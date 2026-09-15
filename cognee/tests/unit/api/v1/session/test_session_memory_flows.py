@@ -596,6 +596,98 @@ class TestSearchSession:
 
         assert results == []
 
+    @pytest.mark.asyncio
+    async def test_stopword_only_overlap_no_hit(self):
+        """Sharing only stopwords ("what", "is", "the", "of") must not match."""
+        from cognee.api.v1.recall.recall import _search_session
+
+        mock_user = MagicMock()
+        mock_user.id = "u1"
+
+        entries = [
+            SessionQAEntry(
+                time=datetime.now(timezone.utc).isoformat(),
+                question="What is the weather in Paris?",
+                context="",
+                answer="It is sunny in Paris today.",
+            ),
+        ]
+
+        mock_sm = MagicMock()
+        mock_sm.is_available = True
+        mock_sm.get_session = AsyncMock(return_value=entries)
+
+        with patch.object(_mod_sm, "get_session_manager", return_value=mock_sm):
+            ceo = await _search_session("Who is the CEO of Acme?", "s1", user=mock_user)
+            migration = await _search_session(
+                "What did we decide about the migration?", "s1", user=mock_user
+            )
+
+        assert ceo == []
+        assert migration == []
+
+    @pytest.mark.asyncio
+    async def test_shared_content_word_still_hits(self):
+        """A single shared content word is enough, stopwords around it or not."""
+        from cognee.api.v1.recall.recall import _search_session
+
+        mock_user = MagicMock()
+        mock_user.id = "u1"
+
+        entries = [
+            SessionQAEntry(
+                time=datetime.now(timezone.utc).isoformat(),
+                question="What is the weather in Paris?",
+                context="",
+                answer="It is sunny in Paris today.",
+            ),
+        ]
+
+        mock_sm = MagicMock()
+        mock_sm.is_available = True
+        mock_sm.get_session = AsyncMock(return_value=entries)
+
+        with patch.object(_mod_sm, "get_session_manager", return_value=mock_sm):
+            results = await _search_session(
+                "What is the population of Paris?", "s1", user=mock_user
+            )
+
+        assert len(results) == 1
+        assert "paris" in results[0].question.lower()
+
+
+class TestSearchTrace:
+    @pytest.mark.asyncio
+    async def test_stopword_only_overlap_no_hit(self):
+        """Trace lane shares the tokenizer: stopword-only overlap must not match."""
+        from cognee.api.v1.recall.recall import _search_trace
+        from cognee.infrastructure.databases.cache import SessionAgentTraceEntry
+
+        mock_user = MagicMock()
+        mock_user.id = "u1"
+
+        entries = [
+            SessionAgentTraceEntry(
+                trace_id="t1",
+                origin_function="lookup",
+                status="ok",
+                memory_query="What is the weather in Paris?",
+                memory_context="It is sunny in Paris today.",
+            ),
+        ]
+
+        mock_sm = MagicMock()
+        mock_sm.is_available = True
+        mock_sm.get_agent_trace_session = AsyncMock(return_value=entries)
+
+        with patch.object(_mod_sm, "get_session_manager", return_value=mock_sm):
+            miss = await _search_trace("Who is the CEO of Acme?", "s1", user=mock_user)
+            hit = await _search_trace("weather forecast", "s1", user=mock_user)
+
+        assert miss == []
+        assert len(hit) == 1
+        assert hit[0].source == "trace"
+
 
 # ---------------------------------------------------------------------------
 # recall() session-only vs graph fallthrough
@@ -683,6 +775,51 @@ class TestRecallSessionMode:
         assert len(results) == 1
         assert results[0].source == "graph"
         assert results[0].text == "graph result"
+
+    @pytest.mark.asyncio
+    async def test_fallthrough_to_graph_on_stopword_only_session_overlap(self):
+        """A session entry sharing only stopwords must not short-circuit graph recall."""
+        recall_mod = _get_recall_module()
+
+        mock_user = MagicMock()
+        mock_user.id = uuid4()
+        mock_payload = SearchResultPayload(
+            result_object="graph result", search_type=SearchType.GRAPH_COMPLETION
+        )
+        entries = [
+            SessionQAEntry(
+                time=datetime.now(timezone.utc).isoformat(),
+                question="What is the weather in Paris?",
+                context="",
+                answer="It is sunny in Paris today.",
+            ),
+        ]
+        mock_sm = MagicMock()
+        mock_sm.is_available = True
+        mock_sm.get_session = AsyncMock(return_value=entries)
+
+        with (
+            patch.object(_mod_sm, "get_session_manager", return_value=mock_sm),
+            patch.object(
+                recall_mod, "_resolve_session_cache_user_id", AsyncMock(return_value="u1")
+            ),
+            patch.object(
+                _mod_search_methods,
+                "authorized_search",
+                AsyncMock(return_value=[mock_payload]),
+            ) as authorized_search,
+            patch.object(
+                _mod_query_router,
+                "route_query",
+                return_value=MagicMock(search_type=MagicMock()),
+            ),
+        ):
+            results = await recall_mod.recall(
+                "Who is the CEO of Acme?", session_id="s1", user=mock_user
+            )
+
+        authorized_search.assert_awaited_once()
+        assert [r.source for r in results] == ["graph"]
 
     @pytest.mark.asyncio
     async def test_explicit_query_type_skips_session_search(self):
