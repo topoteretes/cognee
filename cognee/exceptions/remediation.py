@@ -38,6 +38,13 @@ from __future__ import annotations
 
 # ``CogneeApiError.__str__`` appends its own remediation after this marker. Call sites
 # that print ``str(exc)`` check for it so a hint is never shown twice.
+#
+# Invariant: no hint cognee produces may itself contain this marker -- a hint that did
+# would both read as "Fix: ... Fix: ..." once a consumer labels it, and make the
+# "already hinted" check above fire on its own output. Enforced by
+# ``cognee/tests/unit/exceptions/test_remediation_field.py``. (A *foreign* message that
+# happens to contain " Fix: " still suppresses the table lookup; that is the intended
+# trade -- it means some other layer already told the user what to do.)
 REMEDIATION_MARKER = " Fix: "
 
 # Ordering matters: the first match wins, so narrower patterns come first.
@@ -48,7 +55,7 @@ _TABLE: tuple[tuple[tuple[str, ...], str], ...] = (
     (
         ("authenticationerror", "invalid api key", "incorrect api key"),
         (
-            "The LLM provider rejected the API key. Fix: set LLM_API_KEY in "
+            "The LLM provider rejected the API key. Set LLM_API_KEY in "
             "your .env to a valid key for the LLM_PROVIDER you configured "
             "(default provider: openai)."
         ),
@@ -56,8 +63,8 @@ _TABLE: tuple[tuple[tuple[str, ...], str], ...] = (
     (
         ("permissiondeniederror", "insufficient_quota", "billing"),
         (
-            "The LLM provider accepted the key but denied the request. Fix: "
-            "confirm the account has active billing and quota, or switch "
+            "The LLM provider accepted the key but denied the request. "
+            "Confirm the account has active billing and quota, or switch "
             "LLM_PROVIDER/LLM_MODEL to one your account can use."
         ),
     ),
@@ -65,7 +72,7 @@ _TABLE: tuple[tuple[tuple[str, ...], str], ...] = (
         # Real error: LLMAPIKeyNotSetError("LLM API key is not set.").
         ("llmapikeynotset", "api key is not set", "no api key"),
         (
-            "LLM_API_KEY is not set. Fix: copy .env.template to .env and "
+            "LLM_API_KEY is not set. Copy .env.template to .env and "
             "populate LLM_API_KEY. Cognee defaults to the OpenAI provider "
             "so an OpenAI key is the simplest starting point."
         ),
@@ -76,15 +83,15 @@ _TABLE: tuple[tuple[tuple[str, ...], str], ...] = (
         # EMBEDDING_ENDPOINT connectivity."
         ("embedding_endpoint", "cannot connect to embedding", "embedding request timed out"),
         (
-            "The configured EMBEDDING_ENDPOINT is not reachable. Fix: verify "
-            "the URL, that the host is running, and that the port is open. "
+            "The configured EMBEDDING_ENDPOINT is not reachable. Verify the "
+            "URL, that the host is running, and that the port is open. "
             "Unset EMBEDDING_ENDPOINT to fall back to the provider default."
         ),
     ),
     (
         ("ontology file not found",),
         (
-            "The --ontology-file path does not exist. Fix: pass an absolute "
+            "The --ontology-file path does not exist. Pass an absolute "
             "path to an .owl / .ttl file, or drop the flag to use the built-in "
             "resolver."
         ),

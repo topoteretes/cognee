@@ -62,6 +62,36 @@ def test_remediation_for_prefers_own_hint_and_never_repeats():
     assert remediation_for(RuntimeError("unrelated")) is None
 
 
+def test_no_hint_embeds_the_marker_it_is_labelled_with():
+    """Every consumer labels the hint itself, so no hint may carry its own "Fix:".
+
+    A hint that did would render as "Fix: ... Fix: ..." in the CLI note, the REST
+    ``remediation`` key and the MCP tool text, and would make the "already hinted"
+    check in ``remediation_for``/``_cognee.py`` fire on cognee's own output.
+    """
+    from cognee.exceptions.remediation import _TABLE
+
+    offenders = [needles[0] for needles, hint in _TABLE if REMEDIATION_MARKER in hint]
+    assert offenders == [], f"table hints embed {REMEDIATION_MARKER!r}: {offenders}"
+
+    for error in (
+        LLMAPIKeyNotSetError(),
+        S3FileSystemNotFoundError(),
+        UnsupportedDBProviderError(),
+    ):
+        assert REMEDIATION_MARKER not in error.remediation
+        # str() appends the marker exactly once, so the fix is labelled one time.
+        assert str(error).count(REMEDIATION_MARKER) == 1
+
+
+def test_labelled_hint_reads_once_for_a_foreign_error():
+    """The most common first-run failure, rendered the way MCP/CLI render it."""
+    foreign = RuntimeError("AuthenticationError: invalid api key")
+    hint = remediation_for(foreign)
+    assert hint is not None
+    assert f"Fix: {hint}".count("Fix:") == 1
+
+
 @pytest.mark.asyncio
 async def test_rest_handler_adds_remediation_key_only_when_known():
     from cognee.api.client import exception_handler
