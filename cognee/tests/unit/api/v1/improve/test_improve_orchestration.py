@@ -682,9 +682,7 @@ async def test_full_scope_enrichment_stamps_the_watermark(harness, status):
 async def test_skipped_or_errored_enrichment_never_stamps(harness):
     """A skipped or errored stage 8 verified nothing; a stamp would gate the
     next run off over unenriched writes."""
-    harness.use_stages(
-        [FakeStage("triplet_enrichment", gate_reason="triplet_embedding_disabled")]
-    )
+    harness.use_stages([FakeStage("triplet_enrichment", gate_reason="triplet_embedding_disabled")])
     await harness.improve()
     assert _enrichment_stamp(harness.operations[-1]) is None
 
