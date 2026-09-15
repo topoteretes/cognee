@@ -364,11 +364,14 @@ export function useBrainsData(): UseBrainsDataResult {
 
   async function handleDeleteFile(docId: string): Promise<void> {
     if (!cogniInstance || !selectedId) return;
+    const datasetId = selectedId;
     setDeletingDocId(docId);
     try {
-      await deleteDatasetData(selectedId, docId, cogniInstance);
-      setSelectedDocs((prev) => prev.filter((d) => d.id !== docId));
-      setDatasets((prev) => prev.map((d) => d.id === selectedId ? { ...d, documents: Math.max(0, d.documents - 1) } : d));
+      await deleteDatasetData(datasetId, docId, cogniInstance);
+      if (selectedIdRef.current === datasetId) {
+        setSelectedDocs((prev) => prev.filter((d) => d.id !== docId));
+      }
+      setDatasets((prev) => prev.map((d) => d.id === datasetId ? { ...d, documents: Math.max(0, d.documents - 1) } : d));
       setDeleteDocTarget(null);
     } catch (err) {
       console.error("Failed to delete file:", err);
