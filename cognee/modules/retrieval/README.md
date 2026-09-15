@@ -57,8 +57,9 @@ class flags `supports_session_turn_preparation` / `supports_prompt_preview`.
    constructor kwargs it needs.
 3. Add a row to the table above and a `*_test.py` in `cognee/tests/unit/modules/retrieval/`.
 4. If it should be reachable from the CLI, add it to `SEARCH_TYPE_CHOICES` in
-   `cognee/cli/config.py`; if `recall()` should route to it, extend the rules in
-   `cognee/modules/recall/`.
+   `cognee/cli/config.py`; if `recall()` should route to it, add a scoring rule to
+   `cognee/api/v1/recall/query_router.py` (`cognee/modules/recall/` is session
+   recall, not the router).
 
 Supporting folders: `hybrid/` (the hybrid lanes), `context_providers/` (triplet
 context formatting), `entity_extractors/`, `utils/` (completion, evidence, ranking
