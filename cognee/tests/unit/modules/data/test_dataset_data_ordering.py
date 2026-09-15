@@ -52,10 +52,9 @@ async def test_method_issues_the_indexed_ordering(monkeypatch):
     Compiled SQL, not the module source: a comment naming the old column would
     satisfy a text search while the query still sorted the wrong way.
     """
+    import importlib
     import uuid
     from contextlib import asynccontextmanager
-
-    import importlib
 
     # import_module, not `from ... import get_dataset_data`: the package
     # re-exports the function under the module's own name, so the plain import
