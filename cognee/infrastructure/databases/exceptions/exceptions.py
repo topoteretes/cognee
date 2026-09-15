@@ -1,9 +1,10 @@
 from fastapi import status
+
 from cognee.exceptions import (
     CogneeApiError,
+    CogneeConfigurationError,
     CogneeSystemError,
     CogneeValidationError,
-    CogneeConfigurationError,
 )
 
 
@@ -25,6 +26,18 @@ class DatabaseNotCreatedError(CogneeSystemError):
         log_level: str = "ERROR",
     ):
         super().__init__(message, name, status_code, log=log, log_level=log_level)
+
+
+class UnsupportedGraphOperation(CogneeApiError):
+    """Raised when a graph adapter does not implement a narrow optional operation."""
+
+    def __init__(
+        self,
+        message: str = "This graph backend does not support this operation.",
+        name: str = "UnsupportedGraphOperation",
+        status_code: int = status.HTTP_501_NOT_IMPLEMENTED,
+    ):
+        super().__init__(message, name, status_code)
 
 
 class UnsupportedProvenanceCapability(CogneeApiError):

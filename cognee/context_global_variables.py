@@ -1,20 +1,12 @@
 import os
 import warnings
 from contextvars import ContextVar
-from typing import Optional
 from uuid import UUID
+
+from typing_extensions import Self
 
 from cognee.base_config import get_base_config
 from cognee.exceptions import CogneeValidationError
-from cognee.infrastructure.llm.config import LLMConfig
-from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
-from cognee.infrastructure.databases.vector.config import (
-    get_vectordb_config,
-    get_vectordb_context_config,
-)
-
-from cognee.infrastructure.files.storage.config import file_storage_config
-from cognee.modules.users.methods import get_user
 from cognee.infrastructure.databases.graph.config import get_graph_config, get_graph_context_config
 from cognee.infrastructure.databases.utils.get_or_create_dataset_database import (
     get_or_create_dataset_database,
@@ -22,22 +14,28 @@ from cognee.infrastructure.databases.utils.get_or_create_dataset_database import
 from cognee.infrastructure.databases.utils.resolve_dataset_database_connection_info import (
     resolve_dataset_database_connection_info,
 )
+from cognee.infrastructure.databases.vector.config import (
+    get_vectordb_config,
+    get_vectordb_context_config,
+)
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.files.storage.config import file_storage_config
+from cognee.infrastructure.llm.config import LLMConfig
+from cognee.modules.users.methods import get_user
 
 # Note: ContextVar allows us to use different graph db configurations in Cognee
 #       for different async tasks, threads and processes
 vector_db_config = ContextVar("vector_db_config", default=None)
 graph_db_config = ContextVar("graph_db_config", default=None)
-current_dataset_id: ContextVar[Optional[UUID]] = ContextVar("current_dataset_id", default=None)
+current_dataset_id: ContextVar[UUID | None] = ContextVar("current_dataset_id", default=None)
 # Note: same mechanism for LLM and embedding configs so that the LiteLLM client
 #       and the embedding engine can use per-context (e.g. per-request) configs.
-llm_config: ContextVar[Optional[LLMConfig]] = ContextVar("llm_config", default=None)
+llm_config: ContextVar[LLMConfig | None] = ContextVar("llm_config", default=None)
 embedding_config = ContextVar("embedding_config", default=None)
 session_user = ContextVar("session_user", default=None)
 # Labels the pipeline stage (extraction | summarization | query) whose LLM
 # config is currently active on `llm_config`, for tracing (see pipeline_stage).
-current_pipeline_stage: ContextVar[Optional[str]] = ContextVar(
-    "current_pipeline_stage", default=None
-)
+current_pipeline_stage: ContextVar[str | None] = ContextVar("current_pipeline_stage", default=None)
 
 
 async def set_session_user_context_variable(user):
@@ -55,14 +53,14 @@ def multi_user_support_possible():
     )
 
     if graph_handler not in supported_dataset_database_handlers:
-        raise EnvironmentError(
+        raise OSError(
             "Unsupported graph dataset to database handler configured. Cannot add support for multi-user access control mode. Please use a supported graph dataset to database handler or set the environment variables ENABLE_BACKEND_ACCESS_CONTROL to false to switch off multi-user access control mode.\n"
             f"Selected graph dataset to database handler: {graph_handler}\n"
             f"Supported dataset to database handlers: {list(supported_dataset_database_handlers.keys())}\n"
         )
 
     if vector_handler not in supported_dataset_database_handlers:
-        raise EnvironmentError(
+        raise OSError(
             "Unsupported vector dataset to database handler configured. Cannot add support for multi-user access control mode. Please use a supported vector dataset to database handler or set the environment variables ENABLE_BACKEND_ACCESS_CONTROL to false to switch off multi-user access control mode.\n"
             f"Selected vector dataset to database handler: {vector_handler}\n"
             f"Supported dataset to database handlers: {list(supported_dataset_database_handlers.keys())}\n"
@@ -76,7 +74,7 @@ def multi_user_support_possible():
         return (providers,) if isinstance(providers, str) else providers
 
     if graph_db_config.graph_database_provider not in compatible_providers(graph_handler):
-        raise EnvironmentError(
+        raise OSError(
             "The selected graph dataset to database handler does not work with the configured graph database provider. Cannot add support for multi-user access control mode. Please use a supported graph dataset to database handler or set the environment variables ENABLE_BACKEND_ACCESS_CONTROL to false to switch off multi-user access control mode.\n"
             f"Selected graph database provider: {graph_db_config.graph_database_provider}\n"
             f"Selected graph dataset to database handler: {graph_handler}\n"
@@ -84,7 +82,7 @@ def multi_user_support_possible():
         )
 
     if vector_db_config.vector_db_provider not in compatible_providers(vector_handler):
-        raise EnvironmentError(
+        raise OSError(
             "The selected vector dataset to database handler does not work with the configured vector database provider. Cannot add support for multi-user access control mode. Please use a supported vector dataset to database handler or set the environment variables ENABLE_BACKEND_ACCESS_CONTROL to false to switch off multi-user access control mode.\n"
             f"Selected vector database provider: {vector_db_config.vector_db_provider}\n"
             f"Selected vector dataset to database handler: {vector_handler}\n"
@@ -106,8 +104,33 @@ def backend_access_control_enabled():
     return False
 
 
-VECTOR_DBS_WITH_MULTI_USER_SUPPORT = ["lancedb", "pgvector", "falkor"]
-GRAPH_DBS_WITH_MULTI_USER_SUPPORT = ["ladybug", "kuzu", "falkor", "postgres"]
+async def _get_dataset_owner_id(dataset_id: UUID) -> UUID:
+    """Return the owner id of an existing dataset; raise if it does not exist.
+
+    No authorization here on purpose — this resolves where the dataset's
+    databases live (storage identity), not who may touch them.
+    """
+    # Imported lazily to avoid circular imports at module load.
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.exceptions import DatasetNotFoundError
+    from cognee.modules.data.models import Dataset
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        dataset = await session.get(Dataset, dataset_id)
+
+    if dataset is None:
+        raise DatasetNotFoundError(f"Dataset {dataset_id} does not exist.")
+    return dataset.owner_id
+
+
+async def _verify_dataset_access(user_id: UUID, dataset_id: UUID, permission_type: str) -> None:
+    """Raise PermissionDeniedError unless the user holds the given permission
+    on the dataset."""
+    # Imported lazily to avoid circular imports at module load.
+    from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
+
+    await get_specific_user_permission_datasets(user_id, permission_type, [dataset_id])
 
 
 class DatabaseContextManager:
@@ -119,34 +142,40 @@ class DatabaseContextManager:
     """
 
     __slots__ = (
-        "_dataset",
-        "_user_id",
-        "_llm_config",
-        "_embedding_config",
         "_applied",
+        "_dataset",
         "_dataset_token",
-        "_llm_token",
+        "_embedding_config",
         "_embedding_token",
+        "_llm_config",
+        "_llm_token",
+        "_permission_type",
+        "_user_id",
     )
 
     def __init__(
         self,
-        dataset: Optional[UUID],
-        user_id: UUID,
-        llm_config: Optional[LLMConfig] = None,
-        embedding_config: Optional[EmbeddingConfig] = None,
+        dataset: UUID | None,
+        user_id: UUID | None = None,
+        llm_config: LLMConfig | None = None,
+        embedding_config: EmbeddingConfig | None = None,
+        permission_type: str | None = None,
     ) -> None:
         self._dataset = dataset
         self._user_id = user_id
         self._llm_config = llm_config
         self._embedding_config = embedding_config
+        self._permission_type = permission_type
         self._applied = False
         self._dataset_token = None
         self._llm_token = None
         self._embedding_token = None
 
     async def apply_database_context_variables(
-        self, dataset: Optional[UUID], user_id: UUID
+        self,
+        dataset: UUID | None,
+        user_id: UUID | None = None,
+        permission_type: str | None = None,
     ) -> None:
         # current_dataset_id always carries a dataset *id* (a UUID object) or
         # None. Exactly one input type: callers resolve names/strings to a UUID
@@ -184,19 +213,60 @@ class DatabaseContextManager:
 
         await dataset_queue().ensure_slot(dataset)
 
-        user = await get_user(user_id)
+        try:
+            await self._bind_dataset_databases(dataset, user_id, permission_type)
+        except BaseException:
+            # The slot is taken above, but everything below it can still raise
+            # (a deleted dataset owner, a provisioning or connection failure).
+            # When it does, __aenter__ never returns, so __aexit__ never runs
+            # and nothing hands the slot back. In a request task the queue's
+            # task-end cleanup eventually does; in the API lifespan task, which
+            # ends only with the process, it never does, and
+            # DATASET_QUEUE_MAX_CONCURRENT leaked slots wedge every later
+            # ensure_slot. Releasing here is the missing half of the pair.
+            #
+            # Only reachable once ensure_slot has returned, so this never
+            # releases a slot that was not acquired -- which is what keeps a
+            # re-entrant inner apply from dropping the permit its outer scope
+            # still holds.
+            await dataset_queue().release_slot_for(dataset)
+            raise
+
+    async def _bind_dataset_databases(
+        self,
+        dataset: UUID,
+        user_id: UUID | None,
+        permission_type: str | None,
+    ) -> None:
+        """Resolve and bind the dataset's own databases. Runs holding a queue slot."""
+        # Optional permission gate: checked only when the caller asked for it
+        # by passing a permission_type — callers that already authorized at the
+        # API layer pass nothing and no check is performed here.
+        if permission_type is not None:
+            if user_id is None:
+                raise CogneeValidationError(
+                    "permission_type requires a user_id to check the permission for."
+                )
+            await _verify_dataset_access(user_id, dataset, permission_type)
+
+        # Storage is namespaced by the dataset's OWNER, never by the caller:
+        # the dataset_database row, the physical database paths, and the data
+        # root all live under the owner (#4829). Resolve the owner from the
+        # dataset itself so a caller identity can never redirect them.
+        owner_id = await _get_dataset_owner_id(dataset)
+        owner = await get_user(owner_id)
 
         # To ensure permissions are enforced properly all datasets will have their own databases
-        dataset_database = await get_or_create_dataset_database(dataset, user)
+        dataset_database = await get_or_create_dataset_database(dataset, owner)
         # Ensure that all connection info is resolved properly
         dataset_database = await resolve_dataset_database_connection_info(dataset_database)
 
         base_config = get_base_config()
         data_root_directory = os.path.join(
-            base_config.data_root_directory, str(user.tenant_id or user.id)
+            base_config.data_root_directory, str(owner.tenant_id or owner.id)
         )
         databases_directory_path = os.path.join(
-            base_config.system_root_directory, "databases", str(user.id)
+            base_config.system_root_directory, "databases", str(owner.id)
         )
 
         # Set vector and graph database configuration based on dataset database information
@@ -277,7 +347,9 @@ class DatabaseContextManager:
     async def _apply(self) -> None:
         if self._applied:
             return
-        await self.apply_database_context_variables(self._dataset, self._user_id)
+        await self.apply_database_context_variables(
+            self._dataset, self._user_id, self._permission_type
+        )
         self._applied = True
 
     def __await__(self):
@@ -294,7 +366,7 @@ class DatabaseContextManager:
         )
         return self._apply().__await__()
 
-    async def __aenter__(self) -> "DatabaseContextManager":
+    async def __aenter__(self) -> Self:
         await self._apply()
         return self
 
@@ -314,7 +386,7 @@ class DatabaseContextManager:
                 setattr(self, token_attr, None)
 
         if not backend_access_control_enabled():
-            return None
+            return
 
         from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -322,10 +394,11 @@ class DatabaseContextManager:
 
 
 def set_database_global_context_variables(
-    dataset: Optional[UUID],
-    user_id: UUID,
-    llm_config: Optional[LLMConfig] = None,
-    embedding_config: Optional[EmbeddingConfig] = None,
+    dataset: UUID | None,
+    user_id: UUID | None = None,
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
+    permission_type: str | None = None,
 ) -> "DatabaseContextManager":
     """Returns a dual-mode helper that is both awaitable and an async context manager.
 
@@ -358,14 +431,22 @@ def set_database_global_context_variables(
     callers can keep reading the dataset databases.
 
     Args:
-        dataset: Cognee dataset name or id
-        user_id: UUID of the owner of the dataset
+        dataset: Cognee dataset id
+        user_id: Optional UUID of the user entering the context. Storage
+            (registry row, database paths, data root) always resolves under
+            the dataset's owner, never this value — it is consulted only by
+            the optional permission check below, and therefore required when
+            ``permission_type`` is set.
         llm_config: Optional ``LLMConfig`` to use for LLM calls in this context.
         embedding_config: Optional ``EmbeddingConfig`` to use for embedding calls
             in this context.
+        permission_type: Optional permission ("read"/"write"/"delete"/"share")
+            to verify for ``user_id`` on the dataset before entering. When
+            omitted, no permission check is performed here — callers are
+            expected to have authorized at the API layer.
 
     Returns:
         A :class:`DatabaseContextManager` that can be awaited or used as an
         async context manager.
     """
-    return DatabaseContextManager(dataset, user_id, llm_config, embedding_config)
+    return DatabaseContextManager(dataset, user_id, llm_config, embedding_config, permission_type)

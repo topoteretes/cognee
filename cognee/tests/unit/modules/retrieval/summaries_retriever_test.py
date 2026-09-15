@@ -1,10 +1,11 @@
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
-from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+import pytest
+
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 
 
 def _make_unified_mock(vector_engine):
@@ -58,12 +59,14 @@ async def test_get_context_collection_not_found_error(mock_vector_engine):
 
     retriever = SummariesRetriever()
 
-    with patch(
-        "cognee.modules.retrieval.summaries_retriever.get_unified_engine",
-        return_value=_make_unified_mock(mock_vector_engine),
+    with (
+        patch(
+            "cognee.modules.retrieval.summaries_retriever.get_unified_engine",
+            return_value=_make_unified_mock(mock_vector_engine),
+        ),
+        pytest.raises(NoDataError, match="No data found"),
     ):
-        with pytest.raises(NoDataError, match="No data found"):
-            await retriever.get_retrieved_objects("test query")
+        await retriever.get_retrieved_objects("test query")
 
 
 @pytest.mark.asyncio
@@ -194,3 +197,58 @@ async def test_get_completion_with_session_id(mock_vector_engine):
 
     assert len(completion) == 1
     assert completion[0]["text"] == "S.R."
+
+
+@pytest.mark.asyncio
+async def test_get_completion_from_context_includes_score(mock_vector_engine):
+    """Test that get_completion_from_context attaches each summary's score to its payload."""
+    mock_result1 = MagicMock()
+    mock_result1.payload = {"text": "S.R.", "made_from": "chunk1"}
+    mock_result1.score = 0.12
+    mock_result2 = MagicMock()
+    mock_result2.payload = {"text": "M.B.", "made_from": "chunk2"}
+    mock_result2.score = 0.34
+
+    mock_vector_engine.search.return_value = [mock_result1, mock_result2]
+
+    retriever = SummariesRetriever(top_k=5)
+
+    with patch(
+        "cognee.modules.retrieval.summaries_retriever.get_unified_engine",
+        return_value=_make_unified_mock(mock_vector_engine),
+    ):
+        retrieved_objects = await retriever.get_retrieved_objects("test query")
+        completion = await retriever.get_completion_from_context(
+            query="test query", retrieved_objects=retrieved_objects, context=None
+        )
+
+    assert completion[0] == {"text": "S.R.", "made_from": "chunk1", "score": 0.12}
+    assert completion[1] == {"text": "M.B.", "made_from": "chunk2", "score": 0.34}
+
+
+@pytest.mark.asyncio
+async def test_get_completion_from_context_empty_returns_empty_list():
+    """Test that get_completion_from_context returns [] when there are no retrieved objects."""
+    retriever = SummariesRetriever()
+
+    completion = await retriever.get_completion_from_context(
+        query="test query", retrieved_objects=[], context=None
+    )
+
+    assert completion == []
+
+
+@pytest.mark.asyncio
+async def test_get_completion_from_context_none_payload_still_returns_score():
+    """A ScoredResult with payload=None yields a dict carrying only the score, not a TypeError."""
+    result = MagicMock()
+    result.payload = None
+    result.score = 0.42
+
+    retriever = SummariesRetriever()
+
+    completion = await retriever.get_completion_from_context(
+        query="test query", retrieved_objects=[result], context=None
+    )
+
+    assert completion == [{"score": 0.42}]

@@ -73,12 +73,38 @@ async def load_preference_lines_safe() -> list[str]:
     try:
         return await load_active_preference_lines()
     except Exception as error:
-        logger.debug("Session turn: preference lookup failed open: %s", error)
+        logger.debug("Session turn: preference lookup failed open: %s", error, exc_info=True)
         return []
 
 
 def _empty_turn_preparation(query: str) -> SessionTurnPreparation:
     return SessionTurnPreparation(should_answer=True, effective_query=query)
+
+
+DEFAULT_NO_ANSWER_ACK = "Got it."
+
+
+def should_answer_turn(analysis: SessionTurnAnalysis, *, has_previous_qa: bool) -> bool:
+    """Whether sequential and concurrent session paths should generate an answer.
+
+    Answers when the analysis names a query to answer, when the analysis found nothing
+    worth acting on (so there is nothing to acknowledge instead), or when there is no
+    previous QA entry for the message to be feedback about.
+    """
+    query_to_answer = (analysis.query_to_answer or "").strip()
+    response_to_user = (analysis.response_to_user or "").strip()
+    has_analysis_signal = bool(
+        query_to_answer
+        or response_to_user
+        or analysis.candidate_context_updates
+        or analysis.served_context_ratings
+    )
+    return bool(query_to_answer or not has_analysis_signal or not has_previous_qa)
+
+
+def acknowledgement_for_turn(response_to_user: str | None) -> str:
+    """Acknowledgement stored and returned when a turn does not generate an answer."""
+    return (response_to_user or "").strip() or DEFAULT_NO_ANSWER_ACK
 
 
 def coerce_qa_entry(entry: Any) -> dict:
@@ -128,7 +154,7 @@ async def select_session_history(
                 include_context=False,
             )
     except Exception as error:
-        logger.warning("Session history: hybrid selection failed open: %s", error)
+        logger.warning("Session history: hybrid selection failed open: %s", error, exc_info=True)
 
     history = await session_manager.get_session(
         user_id=user_id,
@@ -253,7 +279,7 @@ async def build_active_context_block_safe(
             stamp_served=stamp_served,
         )
     except Exception as e:
-        logger.warning("Active session-context block failed: %s", e)
+        logger.warning("Active session-context block failed: %s", e, exc_info=True)
         return "", []
 
 
@@ -282,7 +308,7 @@ async def load_served_context_payload(
                 by_id[str(entry_id)] = row.get("content", "")
         return [{"id": cid, "content": by_id[cid]} for cid in served_ids if cid in by_id]
     except Exception as e:
-        logger.warning("Session turn: load served context failed: %s", e)
+        logger.warning("Session turn: load served context failed: %s", e, exc_info=True)
         return []
 
 
@@ -332,9 +358,12 @@ async def apply_served_context_ratings(
                 )
                 counts[entry_id] = next_counts
             except Exception:
+                logger.debug(
+                    "Skipping item after error in apply_served_context_ratings", exc_info=True
+                )
                 continue
     except Exception as e:
-        logger.warning("Session turn: served-context rating update failed: %s", e)
+        logger.warning("Session turn: served-context rating update failed: %s", e, exc_info=True)
 
 
 async def apply_session_turn_analysis(
@@ -399,7 +428,7 @@ async def apply_session_turn_analysis(
         )
         return touched_ids
     except Exception as e:
-        logger.warning("Session turn: feedback application failed: %s", e)
+        logger.warning("Session turn: feedback application failed: %s", e, exc_info=True)
         return []
 
 
@@ -461,7 +490,7 @@ async def prepare_session_turn(
             served_context=served_context,
         )
     except Exception as error:
-        logger.warning("Session turn preparation failed open: %s", error)
+        logger.warning("Session turn preparation failed open: %s", error, exc_info=True)
         return _empty_turn_preparation(query)
 
     try:
@@ -475,27 +504,20 @@ async def prepare_session_turn(
             served_ids=[str(entry_id) for entry_id in previous_served_ids],
         )
     except Exception as error:
-        logger.warning("Session turn analysis application failed open: %s", error)
+        logger.warning("Session turn analysis application failed open: %s", error, exc_info=True)
         accepted_context_ids = []
 
-    query_to_answer = (analysis.query_to_answer or "").strip()
-    response_to_user = (analysis.response_to_user or "").strip() or None
-    has_analysis_signal = bool(
-        query_to_answer
-        or response_to_user
-        or analysis.candidate_context_updates
-        or analysis.served_context_ratings
+    should_answer = should_answer_turn(analysis, has_previous_qa=bool(previous_qa_id))
+    response_to_user = (
+        acknowledgement_for_turn(analysis.response_to_user)
+        if not should_answer
+        else ((analysis.response_to_user or "").strip() or None)
     )
-    has_previous_answer = bool(previous_qa_id)
-    should_answer = bool(query_to_answer or not has_analysis_signal or not has_previous_answer)
-    effective_query = query_to_answer or query
-    if not should_answer and not response_to_user:
-        response_to_user = "Got it."
 
     return SessionTurnPreparation(
         should_answer=should_answer,
         response_to_user=response_to_user,
-        effective_query=effective_query,
+        effective_query=(analysis.query_to_answer or "").strip() or query,
         analysis=analysis,
         accepted_context_ids=accepted_context_ids,
         previous_qa_id=previous_qa_id,

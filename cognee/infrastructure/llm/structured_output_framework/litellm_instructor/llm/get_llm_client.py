@@ -1,9 +1,10 @@
 """Get the LLM client."""
 
+from collections.abc import Hashable
 from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
-from typing import Any, Hashable, TypeGuard
+from typing import Any, TypeGuard
 
 from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.infrastructure.llm.exceptions import (

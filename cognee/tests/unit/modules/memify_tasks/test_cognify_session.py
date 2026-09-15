@@ -1,10 +1,11 @@
 import sys
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+from cognee.exceptions import CogneeSystemError, CogneeValidationError
 from cognee.infrastructure.session.session_persist_watermark import SessionPersistWindow
 from cognee.tasks.memify.cognify_session import cognify_session
-from cognee.exceptions import CogneeValidationError, CogneeSystemError
 
 # Get the actual module object (not the function) for patching
 cognify_session_module = sys.modules["cognee.tasks.memify.cognify_session"]

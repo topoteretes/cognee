@@ -18,10 +18,9 @@ import sys
 # dragging in `cognee/__init__.py` and its heavy dependency tree.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import pytest  # noqa: E402
-
-from compose_utils import wait_for_http_ok  # noqa: E402
-from config import CONFIG  # noqa: E402
+import pytest
+from compose_utils import wait_for_http_ok
+from config import CONFIG
 
 
 @pytest.fixture(scope="session")

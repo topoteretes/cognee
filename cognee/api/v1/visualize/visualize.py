@@ -1,19 +1,28 @@
+import asyncio
 import json
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Tuple, Optional, Union
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
 
+from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+from cognee.modules.data.methods import get_authorized_existing_datasets, get_datasets_graph_counts
+from cognee.modules.data.models import Data
+from cognee.modules.users.exceptions import PermissionDeniedError
+from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models.User import User
-
+from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
 from cognee.modules.visualization.cognee_network_visualization import (
-    cognee_network_visualization,
     aggregate_multi_user_graphs,
-    build_visualization_payload,
-    build_semantic_payload,
     build_brain_summary_payload,
+    build_semantic_payload,
+    build_visualization_payload,
+    cognee_network_visualization,
 )
 from cognee.modules.visualization.preprocessor import build_node_set_colors
 from cognee.modules.visualization.session_events import collect_session_events
@@ -23,38 +32,25 @@ from cognee.modules.visualization.subgraph_data import (
     DEFAULT_SEED_TOP_K,
     fetch_visualization_graph_data,
 )
-from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.data.methods import get_authorized_existing_datasets, get_datasets_graph_counts
-from cognee.modules.data.models import Data
-from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
-from cognee.modules.users.methods import get_default_user
-from cognee.context_global_variables import set_database_global_context_variables
-from cognee.shared.logging_utils import get_logger, setup_logging, ERROR
-
-
-import asyncio
-from cognee.modules.data.constants import DEFAULT_DATASET_NAME
-
+from cognee.shared.logging_utils import ERROR, get_logger, setup_logging
 
 logger = get_logger()
 
 
 async def fetch_visualization_data(
-    user: Optional[User] = None,
-    dataset: Optional[Union[str, UUID]] = DEFAULT_DATASET_NAME,
+    user: User | None = None,
+    dataset: str | UUID | None = DEFAULT_DATASET_NAME,
     *,
     full: bool = False,
-    query: Optional[str] = None,
-    seed_node_ids: Optional[List[str]] = None,
-    recall_result: Optional[Any] = None,
+    query: str | None = None,
+    seed_node_ids: list[str] | None = None,
+    recall_result: Any | None = None,
     neighborhood_depth: int = DEFAULT_NEIGHBORHOOD_DEPTH,
     neighborhood_seed_top_k: int = DEFAULT_SEED_TOP_K,
     max_nodes: int = DEFAULT_MAX_NODES,
     include_session_events: bool = True,
-    session_ids: list = None,
-) -> Tuple[Any, Optional[list]]:
+    session_ids: list | None = None,
+) -> tuple[Any, list | None]:
     """Authorize, fetch and bound the graph data behind a visualization.
 
     Shared by the HTML renderer (``visualize_graph``) and the JSON payload
@@ -93,20 +89,35 @@ async def fetch_visualization_data(
 
     search_events = None
     if include_session_events:
-        from cognee.modules.visualization.session_events import collect_session_events
-
-        search_events = await collect_session_events(user=user, session_ids=session_ids)
+        if dataset and resolved_dataset is None:
+            # A named dataset that did not resolve: missing, or the caller
+            # cannot read it. get_authorized_existing_datasets reports that by
+            # returning [] rather than raising, so falling through here would
+            # collect with dataset_id=None and widen the listing to every
+            # dataset the caller has queried. Failing a scope check must scope
+            # to nothing, not to everything.
+            search_events = []
+        else:
+            # Scope to the dataset authorized above, so this page's timeline
+            # shows this dataset's activity rather than every dataset the
+            # caller has queried. No dataset asked for at all leaves the
+            # listing unscoped, which is all a datasetless render can show.
+            search_events = await collect_session_events(
+                user=user,
+                session_ids=session_ids,
+                dataset_id=resolved_dataset.id if resolved_dataset else None,
+            )
 
     return graph_data, search_events
 
 
 async def fetch_dataset_graph_data(
-    dataset: Optional[Any],
+    dataset: Any | None,
     *,
     full: bool = False,
-    query: Optional[str] = None,
-    seed_node_ids: Optional[List[str]] = None,
-    recall_result: Optional[Any] = None,
+    query: str | None = None,
+    seed_node_ids: list[str] | None = None,
+    recall_result: Any | None = None,
     neighborhood_depth: int = DEFAULT_NEIGHBORHOOD_DEPTH,
     neighborhood_seed_top_k: int = DEFAULT_SEED_TOP_K,
     max_nodes: int = DEFAULT_MAX_NODES,
@@ -141,16 +152,16 @@ async def fetch_dataset_graph_data(
 
 
 async def visualize_graph(
-    destination_file_path: str = None,
+    destination_file_path: str | None = None,
     include_session_events: bool = True,
-    session_ids: list = None,
-    user: Optional[User] = None,
-    dataset: Optional[Union[str, UUID]] = DEFAULT_DATASET_NAME,
+    session_ids: list | None = None,
+    user: User | None = None,
+    dataset: str | UUID | None = DEFAULT_DATASET_NAME,
     *,
     full: bool = False,
-    query: Optional[str] = None,
-    seed_node_ids: Optional[List[str]] = None,
-    recall_result: Optional[Any] = None,
+    query: str | None = None,
+    seed_node_ids: list[str] | None = None,
+    recall_result: Any | None = None,
     neighborhood_depth: int = DEFAULT_NEIGHBORHOOD_DEPTH,
     neighborhood_seed_top_k: int = DEFAULT_SEED_TOP_K,
     max_nodes: int = DEFAULT_MAX_NODES,
@@ -170,8 +181,9 @@ async def visualize_graph(
             spotlights, rated answers as reinforcement (improve) events.
             Collection never fails the render; an unavailable session layer
             simply yields no events.
-        session_ids: Restrict event collection to these sessions. Defaults to
-            the user's most recently active sessions.
+        session_ids: Restrict event collection to these sessions. An explicit
+            list is used as given and is not narrowed to ``dataset``. Defaults
+            to the user's most recently active sessions *for* ``dataset``.
         user: User whose sessions are read. Defaults to the default user.
         dataset: Dataset to render, given by name or UUID. Wrapped into a
             single-element list for get_authorized_existing_datasets; the
@@ -219,14 +231,14 @@ async def visualize_graph(
 
 async def visualize_graph_json(
     include_session_events: bool = True,
-    session_ids: list = None,
-    user: Optional[User] = None,
-    dataset: Optional[Union[str, UUID]] = DEFAULT_DATASET_NAME,
+    session_ids: list | None = None,
+    user: User | None = None,
+    dataset: str | UUID | None = DEFAULT_DATASET_NAME,
     *,
     full: bool = False,
-    query: Optional[str] = None,
-    seed_node_ids: Optional[List[str]] = None,
-    recall_result: Optional[Any] = None,
+    query: str | None = None,
+    seed_node_ids: list[str] | None = None,
+    recall_result: Any | None = None,
     neighborhood_depth: int = DEFAULT_NEIGHBORHOOD_DEPTH,
     neighborhood_seed_top_k: int = DEFAULT_SEED_TOP_K,
     max_nodes: int = DEFAULT_MAX_NODES,
@@ -264,13 +276,13 @@ async def visualize_graph_json(
 
 
 async def visualize_semantic_json(
-    user: Optional[User] = None,
-    dataset: Optional[Union[str, UUID]] = DEFAULT_DATASET_NAME,
+    user: User | None = None,
+    dataset: str | UUID | None = DEFAULT_DATASET_NAME,
     *,
     full: bool = False,
-    query: Optional[str] = None,
-    seed_node_ids: Optional[List[str]] = None,
-    recall_result: Optional[Any] = None,
+    query: str | None = None,
+    seed_node_ids: list[str] | None = None,
+    recall_result: Any | None = None,
     neighborhood_depth: int = DEFAULT_NEIGHBORHOOD_DEPTH,
     neighborhood_seed_top_k: int = DEFAULT_SEED_TOP_K,
     max_nodes: int = DEFAULT_MAX_NODES,
@@ -302,7 +314,7 @@ async def visualize_semantic_json(
 
 
 async def build_brains_payload(
-    user: Optional[User] = None,
+    user: User | None = None,
     max_nodes: int = DEFAULT_MAX_NODES,
 ) -> dict:
     """Every dataset the caller may read, each as a small graph preview.
@@ -334,7 +346,7 @@ async def build_brains_payload(
     return payload
 
 
-def _parse_node_set(raw: Any) -> List[str]:
+def _parse_node_set(raw: Any) -> list[str]:
     """The node set names on one ``Data`` row, defensively.
 
     ``Data.node_set`` is written by ingestion as ``json.dumps(list)`` — a JSON
@@ -363,7 +375,7 @@ def _parse_node_set(raw: Any) -> List[str]:
     return [name.strip() for name in raw if isinstance(name, str) and name.strip()]
 
 
-async def _fetch_dataset_node_sets(dataset_ids: List[UUID]) -> Dict[UUID, List[List[str]]]:
+async def _fetch_dataset_node_sets(dataset_ids: list[UUID]) -> dict[UUID, list[list[str]]]:
     """Every dataset's node sets, one entry per ingested document, in one query.
 
     Reads the two columns it needs for every dataset at once — the point of the
@@ -391,7 +403,7 @@ async def _fetch_dataset_node_sets(dataset_ids: List[UUID]) -> Dict[UUID, List[L
             )
         ).all()
 
-    node_sets: Dict[UUID, List[List[str]]] = defaultdict(list)
+    node_sets: dict[UUID, list[list[str]]] = defaultdict(list)
     for dataset_id, raw in rows:
         names = _parse_node_set(raw)
         if names:
@@ -400,7 +412,7 @@ async def _fetch_dataset_node_sets(dataset_ids: List[UUID]) -> Dict[UUID, List[L
     return node_sets
 
 
-async def build_brains_summary_payload(user: Optional[User] = None) -> dict:
+async def build_brains_summary_payload(user: User | None = None) -> dict:
     """Every dataset the caller may read, described from relational metadata.
 
     ``{dataset_id: {"name", "source_names", "node_count", "node_set_colors"}}``
@@ -479,7 +491,7 @@ def _as_naive_utc(value: datetime) -> datetime:
     return value
 
 
-def _event_time(event: Dict[str, Any]) -> Optional[datetime]:
+def _event_time(event: dict[str, Any]) -> datetime | None:
     raw = event.get("time")
     if not raw:
         return None
@@ -491,24 +503,32 @@ def _event_time(event: Dict[str, Any]) -> Optional[datetime]:
 
 async def get_live_events(
     dataset_id: UUID,
-    since: Optional[datetime] = None,
-    user: Optional[User] = None,
-) -> Dict[str, Any]:
+    since: datetime | None = None,
+    user: User | None = None,
+) -> dict[str, Any]:
     """Delta of search/improve events since a cursor, for the Memory tab's
     live timeline.
 
-    ``dataset_id`` gates who may call this — the same read-permission check
-    every other visualize endpoint runs (``get_authorized_existing_datasets``)
-    — not which events come back. Session events are collected per *user*,
-    not per dataset, matching how ``visualize_graph``'s own
-    ``include_session_events`` already embeds the same events into whichever
-    dataset's page happens to be open. Scoping the event *content* to one
-    dataset would mean checking each event's referenced node/edge ids against
-    that dataset's graph membership — real extra cost that this endpoint's
-    one job (avoid recomputing the whole graph payload every ~1.5s just to
-    refresh a timeline) does not need, and it would make this endpoint
-    disagree with the very same events already shown in ``search_events`` on
-    ``/visualize/json`` for that dataset.
+    ``dataset_id`` both gates and scopes. It gates as on every other visualize
+    endpoint (``get_authorized_existing_datasets``, read permission), and it
+    scopes the events: only sessions attributed to that dataset contribute.
+    Attribution is one SQL predicate on the session listing — the row's
+    ``dataset_id``, or the per-dataset default session's
+    ``{default_session_id}_{dataset_id}`` suffix — not a graph-membership
+    check per event, so scoping costs nothing this endpoint's one job (avoid
+    recomputing the whole graph payload every ~1.5s just to refresh a
+    timeline) cannot afford. ``visualize_graph``'s ``include_session_events``
+    scopes the same way, so ``/visualize/json``'s ``search_events`` and this
+    endpoint agree for a given dataset.
+
+    A session attributed to no dataset contributes to neither. It could belong
+    to any dataset the caller has queried, so surfacing it under all of them
+    would reopen exactly the over-disclosure this scoping closes.
+
+    Attribution is per session, not per answered turn, and that is the limit
+    of this guarantee: a session id reused across datasets keeps the first one
+    it touched, so its later turns show on that dataset's timeline instead of
+    the one they came from. ``_list_recent_session_ids`` has the detail.
 
     ``since=None`` returns every available event — the first call, before a
     client has a cursor of its own.
@@ -531,7 +551,7 @@ async def get_live_events(
     if not authorized:
         raise PermissionDeniedError(message="Not authorized to read this dataset")
 
-    events = await collect_session_events(user=user)
+    events = await collect_session_events(user=user, dataset_id=dataset_id)
 
     if since is not None:
         cutoff = _as_naive_utc(since)
@@ -550,8 +570,8 @@ async def get_live_events(
 
 
 async def visualize_multi_user_graph(
-    user_dataset_pairs: List[Tuple[Any, Any]],
-    destination_file_path: str = None,
+    user_dataset_pairs: list[tuple[Any, Any]],
+    destination_file_path: str | None = None,
 ) -> Any:
     """Generate a visualization combining graph data from multiple user+dataset pairs.
 

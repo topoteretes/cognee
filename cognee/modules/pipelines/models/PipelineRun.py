@@ -1,7 +1,9 @@
 import enum
-from uuid import uuid4
 from datetime import datetime, timezone
-from sqlalchemy import Boolean, Column, DateTime, Enum, Index, Integer, JSON, String, UUID
+from uuid import uuid4
+
+from sqlalchemy import JSON, UUID, Boolean, Column, DateTime, Enum, Index, Integer, String
+
 from cognee.infrastructure.databases.relational import Base
 
 
@@ -38,14 +40,13 @@ class PipelineRun(Base):
             "pipeline_name",
             "created_at",
         ),
+        # Readers of this table page newest-first with id as the tiebreaker
+        # (ORDER BY created_at DESC, id DESC) or range-scan a created_at window,
+        # so the two columns are indexed together. Composite, not created_at
+        # alone: without id, OFFSET paging re-serves rows sharing a timestamp.
+        # Mirrored by migration c4e8a1f6b3d7 for databases created before it.
+        Index("ix_pipeline_runs_created_at_id", "created_at", "id"),
     )
-
-    # Readers of this table page newest-first with id as the tiebreaker
-    # (ORDER BY created_at DESC, id DESC) or range-scan a created_at window,
-    # so the two columns are indexed together. Composite, not created_at
-    # alone: without id, OFFSET paging re-serves rows sharing a timestamp.
-    # Mirrored by migration c4e8a1f6b3d7 for databases created before it.
-    __table_args__ = (Index("ix_pipeline_runs_created_at_id", "created_at", "id"),)
 
     id = Column(UUID, primary_key=True, default=uuid4)
 

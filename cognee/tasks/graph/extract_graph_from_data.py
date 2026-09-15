@@ -1,18 +1,13 @@
 import asyncio
 import inspect
-from typing import Type, List, Literal, Optional
+from typing import Literal
+
 from pydantic import BaseModel
 
-from cognee.modules.pipelines.tasks.task import task_summary
-from cognee.modules.ontology.ontology_config import Config
-from cognee.modules.ontology.get_default_ontology_resolver import (
-    get_configured_ontology_mode,
-    get_configured_ontology_resolver,
-)
-from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
-from cognee.modules.ontology.construct_data_points_and_edges_with_ontology import (
-    construct_data_points_and_edges_with_ontology,
-)
+from cognee.infrastructure.databases.provenance import EdgeIdentity
+from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.llm.extraction import extract_content_graph
+from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.graph.utils import (
     attach_new_edges_to_data_points,
@@ -20,15 +15,22 @@ from cognee.modules.graph.utils import (
     construct_data_points_and_edges,
     find_existing_edge_identities,
 )
+from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
+from cognee.modules.ontology.construct_data_points_and_edges_with_ontology import (
+    construct_data_points_and_edges_with_ontology,
+)
+from cognee.modules.ontology.get_default_ontology_resolver import (
+    get_configured_ontology_mode,
+    get_configured_ontology_resolver,
+)
+from cognee.modules.ontology.ontology_config import Config
+from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.infrastructure.llm.extraction import extract_content_graph
-from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
-from cognee.infrastructure.engine import DataPoint
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.graph.exceptions import (
-    InvalidGraphModelError,
-    InvalidDataChunksError,
     InvalidChunkGraphInputError,
+    InvalidDataChunksError,
+    InvalidGraphModelError,
     InvalidOntologyAdapterError,
 )
 
@@ -85,14 +87,15 @@ def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
 async def integrate_chunk_graphs(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list,
-    graph_model: Type[BaseModel],
-    ontology_resolver: Optional[BaseOntologyResolver],
-    chunk_attachment: Optional[Literal["direct", "all"]] = None,
-    pipeline_name: str = None,
-    task_name: str = None,
-    ontology_mode: Optional[str] = None,
+    graph_model: type[BaseModel],
+    ontology_resolver: BaseOntologyResolver | None,
+    chunk_attachment: Literal["direct", "all"] | None = None,
+    pipeline_name: str | None = None,
+    task_name: str | None = None,
+    ontology_mode: str | None = None,
+    ctx=None,
     **kwargs,
-) -> List[DocumentChunk]:
+) -> list[DocumentChunk]:
     """Convert extracted graphs into linked data points for later storage.
 
     Graphs take the pure construction path when no ontology resolver is provided.
@@ -156,7 +159,20 @@ async def integrate_chunk_graphs(
             ontology_mode=ontology_mode,
         )
 
-    existing_edge_identities = await find_existing_edge_identities(edges_by_identity.keys())
+    # What each chunk's own extraction yielded, recorded during construction —
+    # the same record chunk ownership is derived from. These relationships get
+    # chunk-scoped refs from add_data_points, so the document-scoped attach
+    # below must skip them or they gain an owner no chunk deletion can retire.
+    chunk_owned_identities = {
+        EdgeIdentity(*identity)
+        for chunk in data_chunks
+        for identity in getattr(chunk, "_produced_edge_identities", ())
+    }
+    existing_edge_identities = await find_existing_edge_identities(
+        edges_by_identity.keys(),
+        ctx=ctx,
+        chunk_owned=chunk_owned_identities,
+    )
     attach_new_edges_to_data_points(
         data_points_by_id,
         edges_by_identity,
@@ -180,14 +196,14 @@ async def integrate_chunk_graphs(
 
 @task_summary("Extracted graph from {n} chunk(s)")
 async def extract_graph_from_data(
-    data_chunks: List[DocumentChunk],
-    graph_model: Type[BaseModel],
-    config: Optional[Config] = None,
-    custom_prompt: Optional[str] = None,
+    data_chunks: list[DocumentChunk],
+    graph_model: type[BaseModel],
+    config: Config | None = None,
+    custom_prompt: str | None = None,
     ctx=None,
-    chunk_attachment: Optional[Literal["direct", "all"]] = None,
+    chunk_attachment: Literal["direct", "all"] | None = None,
     **kwargs,
-) -> List[DocumentChunk]:
+) -> list[DocumentChunk]:
     """
     Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model.
     """
@@ -234,6 +250,7 @@ async def extract_graph_from_data(
         pipeline_name=pipeline_name,
         task_name=task_name,
         ontology_mode=ontology_mode,
+        ctx=ctx,
         **kwargs,
     )
 

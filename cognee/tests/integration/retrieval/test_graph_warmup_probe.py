@@ -15,9 +15,11 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 
 import cognee
 from cognee.infrastructure.databases.relational import create_db_and_tables, get_relational_engine
+from cognee.modules.operations import record_operation
 from cognee.modules.pipelines.models import PipelineRun
 from cognee.modules.pipelines.models.PipelineRun import PipelineRunStatus
 from cognee.modules.recall.methods.graph_warmup import (
@@ -108,6 +110,37 @@ async def test_errored_staging_run_keeps_failsafe_warm(clean_test_environment, m
 
     probe = await get_graph_build_status(_USER, [dataset_id])
     assert probe.state == STATE_WARM
+
+
+@pytest.mark.asyncio
+async def test_operation_record_does_not_make_unbuilt_dataset_warm(
+    clean_test_environment, monkeypatch
+):
+    """A session-only remember record is not evidence of a built graph."""
+    dataset_id = uuid4()
+    _permit(monkeypatch, [dataset_id])
+
+    # This is the row produced by remember(..., session_id=...): it carries
+    # the dataset for attribution, but has no pipeline_name or status.
+    async with record_operation("remember", dataset_id=dataset_id, session_id="session-1"):
+        pass
+
+    async with get_relational_engine().get_async_session() as session:
+        rows = (
+            (await session.execute(select(PipelineRun).where(PipelineRun.dataset_id == dataset_id)))
+            .scalars()
+            .all()
+        )
+
+    assert len(rows) == 1
+    operation_row = rows[0]
+    assert operation_row.dataset_id == dataset_id
+    assert operation_row.operation_name == "remember"
+    assert operation_row.pipeline_name is None
+    assert operation_row.status is None
+
+    probe = await get_graph_build_status(_USER, [dataset_id])
+    assert probe.state == STATE_NEVER_BUILT
 
 
 @pytest.mark.asyncio

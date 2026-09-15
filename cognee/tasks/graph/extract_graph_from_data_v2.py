@@ -1,28 +1,26 @@
 import asyncio
-from typing import List
 
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
-from cognee.tasks.graph.cascade_extract.utils.extract_nodes import extract_nodes
+from cognee.modules.pipelines.tasks.task import task_summary
+from cognee.shared.data_models import KnowledgeGraph
 from cognee.tasks.graph.cascade_extract.utils.extract_content_nodes_and_relationship_names import (
     extract_content_nodes_and_relationship_names,
 )
 from cognee.tasks.graph.cascade_extract.utils.extract_edge_triplets import (
     extract_edge_triplets,
 )
+from cognee.tasks.graph.cascade_extract.utils.extract_nodes import extract_nodes
 from cognee.tasks.graph.extract_graph_from_data import integrate_chunk_graphs
-
-
-from cognee.modules.pipelines.tasks.task import task_summary
 
 
 @task_summary("Extracted graph from {n} chunk(s)")
 async def extract_graph_from_data(
-    data_chunks: List[DocumentChunk],
+    data_chunks: list[DocumentChunk],
     n_rounds: int = 2,
     ontology_resolver: BaseOntologyResolver = None,
-) -> List[DocumentChunk]:
+    ctx=None,
+) -> list[DocumentChunk]:
     """Extract and update graph data from document chunks using cascade extraction.
 
     This function performs multi-step graph extraction from document chunks,
@@ -63,4 +61,5 @@ async def extract_graph_from_data(
         chunk_graphs=chunk_graphs,
         graph_model=KnowledgeGraph,
         ontology_resolver=ontology_resolver,
+        ctx=ctx,
     )

@@ -13,7 +13,7 @@ a true upsert — and the store still works on any in-tree backend.
 caller's job, so exactly one place knows the formula.
 """
 
-from typing import Dict, Iterable, Mapping, Optional, Tuple
+from collections.abc import Iterable, Mapping
 from uuid import UUID
 
 from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
@@ -41,7 +41,7 @@ def preference_node_id(user_id: str, dataset_id: str) -> UUID:
 
 async def load_preference_state(
     user_id: str, dataset_id: str
-) -> Tuple[Optional[dict], Dict[str, dict]]:
+) -> tuple[dict | None, dict[str, dict]]:
     """Load the preference node and its stored prefers weights in one round trip.
 
     Returns ``(node_properties, weights)`` where ``weights`` maps target node id

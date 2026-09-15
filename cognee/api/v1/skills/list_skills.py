@@ -128,7 +128,7 @@ async def _delete_skill_in_context(skill_id: str, dataset: UUID) -> bool:
         vector_engine = await get_vector_engine_async()
         await vector_engine.delete_data_points("Skill_search_text", [str(skill.id)])
     except Exception as exc:
-        logger.warning("Skill vector cleanup skipped (non-fatal): %s", exc)
+        logger.warning("Skill vector cleanup skipped (non-fatal): %s", exc, exc_info=True)
     return True
 
 

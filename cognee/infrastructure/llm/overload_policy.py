@@ -31,9 +31,10 @@ def overload_evidence(error: BaseException) -> str | None:
 
     Overload evidence is a rate-limit error (cloud providers), a timeout (how
     overwhelmed local servers usually surface — they never send rate limits),
-    or an HTTP 429/503/529 overload status. Wrappers hide the signal —
-    instructor re-raises provider errors inside InstructorRetryException — so
-    the cause chain is checked, not just the top-level type.
+    or an HTTP 429/503/529 overload status. Wrappers hide the signal — the
+    structured-output adapters re-raise provider errors inside their own
+    retry-exhausted exceptions — so the cause chain is checked, not just the
+    top-level type.
 
     Recognition is deliberately provider-neutral: HTTP statuses are read from
     any exception's ``status_code`` attribute (openai, anthropic, and litellm

@@ -16,7 +16,7 @@ import base64
 import json
 import time
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 import aiohttp
 from cryptography.hazmat.primitives import hashes, serialization
@@ -39,7 +39,7 @@ def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
 
-def build_app_jwt(*, now: Optional[int] = None) -> str:
+def build_app_jwt(*, now: int | None = None) -> str:
     """Sign a short-lived RS256 JWT identifying the app itself.
 
     ``now`` is injectable for tests; production callers omit it.
@@ -81,36 +81,39 @@ async def get_installation(installation_id: int) -> dict[str, Any]:
     Raises ``RuntimeError`` when GitHub rejects the lookup (unknown id,
     suspended installation, bad app credentials).
     """
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-        async with session.get(
+    async with (
+        aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+        session.get(
             f"{API_BASE_URL}/app/installations/{installation_id}",
             headers=_api_headers(build_app_jwt()),
-        ) as response:
-            if response.status != 200:
-                raise RuntimeError(
-                    f"GitHub installation lookup failed for {installation_id}: "
-                    f"HTTP {response.status}"
-                )
-            return await response.json()
+        ) as response,
+    ):
+        if response.status != 200:
+            raise RuntimeError(
+                f"GitHub installation lookup failed for {installation_id}: HTTP {response.status}"
+            )
+        return await response.json()
 
 
-async def mint_installation_token(installation_id: int) -> tuple[str, Optional[datetime]]:
+async def mint_installation_token(installation_id: int) -> tuple[str, datetime | None]:
     """Mint a fresh installation access token (valid ~1 hour).
 
     Returns ``(token, expires_at)``. Callers use the token immediately and
     discard it — it is never written to the credential store.
     """
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-        async with session.post(
+    async with (
+        aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+        session.post(
             f"{API_BASE_URL}/app/installations/{installation_id}/access_tokens",
             headers=_api_headers(build_app_jwt()),
-        ) as response:
-            if response.status != 201:
-                raise RuntimeError(
-                    f"GitHub installation token mint failed for {installation_id}: "
-                    f"HTTP {response.status}"
-                )
-            payload = await response.json()
+        ) as response,
+    ):
+        if response.status != 201:
+            raise RuntimeError(
+                f"GitHub installation token mint failed for {installation_id}: "
+                f"HTTP {response.status}"
+            )
+        payload = await response.json()
 
     expires_at = None
     expires_raw = payload.get("expires_at")
@@ -130,7 +133,7 @@ async def user_can_access_installation(user_token: str, installation_id: int) ->
     completed the OAuth leg actually has access to that installation, so a
     user can't bind another org's installation to their own cognee account.
     """
-    url: Optional[str] = f"{API_BASE_URL}/user/installations?per_page=100"
+    url: str | None = f"{API_BASE_URL}/user/installations?per_page=100"
     async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
         while url:
             async with session.get(url, headers=_api_headers(user_token)) as response:

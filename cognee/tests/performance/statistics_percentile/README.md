@@ -1,6 +1,7 @@
 # Nightly performance corpora
 
-The nightly percentile benchmark (`.github/workflows/nightly_tests.yml`) runs each
+The nightly percentile benchmark (`.github/workflows/nightly_tests.yml`, dispatched by
+`.github/workflows/nightly_scheduler.yml` — main daily, dev weekly) runs each
 corpus through `statistics_percentile_report.py` on four backends. A corpus is two
 S3 objects under
 `s3://github-runner-cognee-tests/nightly_ci_artifacts/performance_test_artifacts/`:
@@ -18,12 +19,11 @@ so adding a corpus there is a separate PR.
 
 | Label | Shape | Size |
 |---|---|---|
-| `50_small_documents` | short synthetic documents | 21 KB |
 | `war_and_peace` | one very long document | 3.2 MB |
 | `war_and_peace_large` | the War and Peace corpus replayed against a 27×-inflated graph (~100k nodes) | 39 MB cassette |
-| `henkel` | 164 medium-sized real product datasheets | 1.4 MB |
+| `datasheets` | 164 medium-sized real product datasheets | 1.4 MB |
 
-`henkel` exists because neither of the first two covers the common case: many
+`datasheets` exists because neither of the first two covers the common case: many
 medium documents rather than one long one or a handful of short ones.
 
 ## Rebuilding a corpus
@@ -35,7 +35,7 @@ committed — `war_and_peace_large` cannot currently be rebuilt from source.
 ### 1. Corpus, from a directory of documents
 
 ```bash
-python build_corpus.py --from-dir ~/path/to/Henkel --output henkel.json
+python build_corpus.py --from-dir ~/path/to/datasheets --output datasheets.json
 ```
 
 Handles `.pdf` (via pypdf), `.txt`, `.md`. It also **enforces title uniqueness**,
@@ -48,9 +48,9 @@ wrong knowledge graph and the benchmark measures the wrong thing.
 
 ```bash
 # Smoke-test on two documents before spending tokens on the whole corpus
-python capture_mock.py --memories henkel.json --num-memories 2 --output /tmp/probe.json
+python capture_mock.py --memories datasheets.json --num-memories 2 --output /tmp/probe.json
 
-python capture_mock.py --memories henkel.json --output mock_henkel.json
+python capture_mock.py --memories datasheets.json --output mock_datasheets.json
 ```
 
 `capture_mock.py` **prunes the configured cognee instance** before ingesting. Point
@@ -70,8 +70,8 @@ chunks would replay each other's graph.
 ```bash
 BUCKET=github-runner-cognee-tests
 PREFIX=nightly_ci_artifacts/performance_test_artifacts
-aws s3 cp henkel.json      "s3://$BUCKET/$PREFIX/henkel.json"
-aws s3 cp mock_henkel.json "s3://$BUCKET/$PREFIX/mock_henkel.json"
+aws s3 cp datasheets.json      "s3://$BUCKET/$PREFIX/datasheets.json"
+aws s3 cp mock_datasheets.json "s3://$BUCKET/$PREFIX/mock_datasheets.json"
 ```
 
 Needs `s3:PutObject` on that bucket, which lives in AWS account `463722570299`.
@@ -81,7 +81,13 @@ Needs `s3:PutObject` on that bucket, which lives in AWS account `463722570299`.
 Five caller jobs in `nightly_tests.yml` — `perf-<label>-llm`, `perf-<label>-mock`,
 `perf-<label>-cloud`, `perf-rust-<label>-llm`, `perf-rust-<label>` — plus, in the
 `notify` job, seven `REPORT_KEYS` entries, seven `ARMS` lines, the `needs` list and
-the status gate. Copy the `war_and_peace` block; it is the closest template.
+the status gate. Copy the `war_and_peace` block; it is the closest template — but drop its
+`if: ${{ inputs.cadence != 'daily' }}` line unless the new corpus is also
+meant to be weekly-only. Note the counts above are the pre-restructure
+shape: `50_small_documents` was removed and there is no rust arm for
+`datasheets`, so a new corpus may need fewer than five caller jobs.
+`performance_report_rust.yml` still defaults to `50_small_documents`
+with no remaining caller; that default is orphaned, not live.
 
 Nothing is needed for MotherDuck: `motherduck_nightly_etl.py` discovers labels by
 globbing the S3 report keys, so a new label appears in `ci_analytics.nightly` by

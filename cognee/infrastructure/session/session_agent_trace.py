@@ -75,6 +75,6 @@ async def generate_agent_trace_feedback(
         logger.warning(
             "Agent trace feedback generation failed, using fallback: %s",
             e,
-            exc_info=False,
+            exc_info=True,
         )
         return fallback_feedback
