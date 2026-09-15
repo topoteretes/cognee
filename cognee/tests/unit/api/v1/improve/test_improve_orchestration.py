@@ -5,6 +5,7 @@ All stages are fakes; nothing below the orchestrator runs.
 
 import asyncio
 import importlib
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
@@ -649,3 +650,71 @@ async def test_cancellation_during_the_probe_releases_the_lock(harness):
     harness.monkeypatch.setattr(harness.improve_mod, "resolve_graph_capabilities", probe_mock)
     retry = await harness.improve()
     assert not _lock_held(retry)
+
+
+def _enrichment_stamp(operation):
+    from cognee.modules.improve.graph_changes import ENRICHMENT_WATERMARK_KEY
+
+    return (operation.run_info or {}).get(ENRICHMENT_WATERMARK_KEY)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["completed", "already_completed"])
+async def test_full_scope_enrichment_stamps_the_watermark(harness, status):
+    """The stamp is the stage-8 watermark's write side; it must carry the
+    stage START so a write racing the row close stays visible next run."""
+    run_started = {}
+
+    def enrichment_run(_inputs):
+        run_started["at"] = datetime.now(timezone.utc)
+        return StageResult(stage="triplet_enrichment", status=status)
+
+    harness.use_stages([FakeStage("triplet_enrichment", run=enrichment_run)])
+
+    await harness.improve()
+
+    stamp = _enrichment_stamp(harness.operations[-1])
+    assert stamp["status"] == status
+    assert datetime.fromisoformat(stamp["started_at"]) <= run_started["at"]
+
+
+@pytest.mark.asyncio
+async def test_skipped_or_errored_enrichment_never_stamps(harness):
+    """A skipped or errored stage 8 verified nothing; a stamp would gate the
+    next run off over unenriched writes."""
+    harness.use_stages(
+        [FakeStage("triplet_enrichment", gate_reason="triplet_embedding_disabled")]
+    )
+    await harness.improve()
+    assert _enrichment_stamp(harness.operations[-1]) is None
+
+    harness.use_stages([FakeStage("triplet_enrichment", run=lambda _i: RuntimeError("boom"))])
+    await harness.improve()
+    assert _enrichment_stamp(harness.operations[-1]) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "scoping", [{"node_name": ["only_this"]}, {"extraction_tasks": ["custom"]}]
+)
+async def test_scoped_runs_never_stamp_the_watermark(harness, scoping):
+    """node_name / custom-task runs do narrower or different work; 'nothing
+    changed since' for the whole dataset must not be inferred from them."""
+    harness.use_stages([FakeStage("triplet_enrichment")])
+
+    await harness.improve(**scoping)
+
+    assert _enrichment_stamp(harness.operations[-1]) is None
+
+
+@pytest.mark.asyncio
+async def test_background_run_carries_the_stamp_on_the_deferred_row(harness):
+    """The deferred row is written by _run_detached from the same context the
+    stages stamped; losing the stamp there would unmoor the watermark."""
+    harness.use_stages([FakeStage("triplet_enrichment")])
+
+    result = await harness.improve(run_in_background=True)
+    await result.wait()
+
+    assert _enrichment_stamp(harness.operations[-1])["status"] == "completed"
+    assert harness.finish_calls[-1]["context"] is harness.operations[-1]
