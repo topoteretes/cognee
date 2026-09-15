@@ -77,6 +77,14 @@ install_websocket_query_param_redaction()
 
 app_environment = os.getenv("ENV", "prod")
 
+# How long the shutdown hook waits for background tasks (B6). The default must
+# fit inside the smallest shipped kill window WITH room left for the engine
+# close below it: compose ships stop_grace_period: 15s (bare docker stops at
+# 10s), so a longer drain gets the worker SIGKILLed mid-WAL-checkpoint — the
+# exact failure the close exists to prevent. Raise this together with the
+# stop timeout (K8s/gunicorn default 30s).
+BACKGROUND_DRAIN_TIMEOUT_SECONDS = float(os.getenv("BACKGROUND_DRAIN_TIMEOUT_SECONDS", "8"))
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -103,10 +111,30 @@ async def lifespan(app: FastAPI):
 
     await recover_stale_cognify_runs_on_startup()
 
+    # Fail the boot, not every later request: a bad IMPROVE_* value (an
+    # IMPROVE_STAGES_DISABLED typo, an out-of-range alpha) raises here with the
+    # full message instead of surfacing as a generic 409 per improve call.
+    from cognee.modules.improve import get_improve_config
+
+    get_improve_config()
+
     # Emit a clear startup message for docker logs
     logger.info("Backend server has started")
 
     yield
+
+    # Let in-flight background work (background remember runs, the session
+    # improve bridge) finish before the engines below are torn down under it.
+    # Bounded so a stuck task cannot hold the process hostage; nothing is
+    # cancelled on timeout, it is only reported.
+    from cognee.infrastructure.background_tasks import wait_for_background_tasks
+
+    logger.info("Shutting down: draining background tasks")
+    if not await wait_for_background_tasks(timeout=BACKGROUND_DRAIN_TIMEOUT_SECONDS):
+        logger.warning(
+            "Shutting down with background tasks still running after %.0fs",
+            BACKGROUND_DRAIN_TIMEOUT_SECONDS,
+        )
 
     # Flush and close all cached database adapters so Ladybug can
     # CHECKPOINT its WAL before the process exits.  Without this,
