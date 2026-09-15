@@ -2850,25 +2850,10 @@ class LadybugAdapter(GraphDBInterface):
     # Graph-wide Operations
 
     async def get_top_degree_node_ids(self, top_k: int) -> list[str]:
-        """Rank seeds in the query engine rather than in Python.
+        """Rank a bounded edge sample in the store; include isolated nodes."""
+        from cognee.infrastructure.databases.graph.degree_seeds import cypher_degree_seeds
 
-        The inherited default reads the whole graph to keep ten ids, which is
-        what makes the default visualization unopenable on a large graph.
-        """
-        if top_k < 1:
-            raise ValueError("top_k must be >= 1")
-
-        rows = await self.query(
-            """
-            MATCH (n:Node)
-            OPTIONAL MATCH (n)-[e:EDGE]-()
-            RETURN n.id AS id, count(e) AS degree
-            ORDER BY degree DESC, id
-            LIMIT $top_k
-            """,
-            {"top_k": top_k},
-        )
-        return [str(row[0]) for row in rows if row and row[0] is not None]
+        return await cypher_degree_seeds(self, top_k, typed=True)
 
     async def get_graph_data(
         self,

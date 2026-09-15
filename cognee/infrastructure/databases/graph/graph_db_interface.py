@@ -21,6 +21,9 @@ EdgeData = tuple[
 Node = tuple[str, NodeData]  # (node_id, properties)
 
 
+_warned_degree_fallbacks: set[type] = set()
+
+
 class GraphDBInterface(ABC):
     """
     Define an interface for graph database operations to be implemented by concrete classes.
@@ -573,12 +576,15 @@ class GraphDBInterface(ABC):
         if top_k < 1:
             raise ValueError("top_k must be >= 1")
 
-        logger.warning(
-            "%s has no native get_top_degree_node_ids; falling back to a full "
-            "graph read to rank %d seeds. This is O(graph) in memory.",
-            type(self).__name__,
-            top_k,
-        )
+        adapter_type = type(self)
+        if adapter_type not in _warned_degree_fallbacks:
+            _warned_degree_fallbacks.add(adapter_type)
+            logger.warning(
+                "%s has no native get_top_degree_node_ids; falling back to a full "
+                "graph read to rank %d seeds. This is O(graph) in memory.",
+                adapter_type.__name__,
+                top_k,
+            )
         nodes, edges = await self.get_graph_data()
         if not nodes:
             return []

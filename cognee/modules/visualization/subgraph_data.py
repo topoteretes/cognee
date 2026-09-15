@@ -128,7 +128,13 @@ async def resolve_seeds_by_degree(graph_engine: Any, top_k: int) -> list[str]:
     The in-memory count still exists as ``GraphDBInterface``'s inherited
     default, so an adapter without a native ranking keeps working.
     """
-    return await graph_engine.get_top_degree_node_ids(top_k)
+    method = getattr(graph_engine, "get_top_degree_node_ids", None)
+    if callable(method):
+        return await method(top_k)
+    # Community registration permits duck-typed adapters, not only subclasses.
+    from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+
+    return await GraphDBInterface.get_top_degree_node_ids(graph_engine, top_k)
 
 
 async def resolve_seed_node_ids(

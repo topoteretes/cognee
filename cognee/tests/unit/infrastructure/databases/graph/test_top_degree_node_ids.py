@@ -124,6 +124,8 @@ def test_the_default_is_inherited_not_abstract():
         "cognee.infrastructure.databases.graph.postgres_demo.adapter",
         "cognee.infrastructure.databases.graph.neo4j_driver.adapter",
         "cognee.infrastructure.databases.graph.ladybug.adapter",
+        "cognee.infrastructure.databases.graph.turso.adapter",
+        "cognee.infrastructure.databases.graph.neptune_driver.adapter",
     ],
 )
 def test_in_tree_adapters_override_the_expensive_default(adapter_module):
@@ -193,15 +195,16 @@ async def test_postgres_ranking_is_bounded_not_an_exact_aggregate():
     sql = captured["sql"]
     params = captured["params"]
 
-    # A bounded sample per side, with the bound actually bound.
-    assert sql.count("LIMIT :sample") == 2, "both endpoint columns must be sampled"
+    # Both endpoint directions use one bounded edge sample.
+    assert sql.count("LIMIT :sample") == 1, "one coherent edge sample feeds both endpoints"
     assert params["sample"] == PostgresDemoAdapter._SEED_SAMPLE_ROWS
     assert params["top_k"] == 2
 
     # A full seed sample needs no node lookup. Sparse graphs use a separate
     # LIMIT-bounded id lookup to include isolated nodes.
     assert "graph_node" not in sql
-    assert sql.count("graph_edge") == 2
+    assert sql.count("graph_edge") == 1
+    assert "AS MATERIALIZED" in sql
 
 
 @pytest.mark.asyncio
@@ -258,3 +261,76 @@ async def test_cypher_adapters_reject_invalid_limit_before_query(module_name, cl
         await adapter.get_top_degree_node_ids(top_k)
 
     adapter.query.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_duck_typed_adapter_without_new_method_keeps_working(monkeypatch):
+    from types import SimpleNamespace
+    from cognee.modules.visualization.subgraph_data import resolve_seeds_by_degree
+
+    adapter = SimpleNamespace(get_graph_data=AsyncMock(return_value=_star()))
+    assert await resolve_seeds_by_degree(adapter, 1) == ["hub"]
+
+
+@pytest.mark.asyncio
+async def test_full_read_warning_is_once_per_adapter_type(monkeypatch):
+    import cognee.infrastructure.databases.graph.graph_db_interface as module
+
+    monkeypatch.setattr(module, "_warned_degree_fallbacks", set())
+    warning = MagicMock()
+    monkeypatch.setattr(module.logger, "warning", warning)
+    for _ in range(2):
+        await _FullReadAdapter(*_star()).get_top_degree_node_ids(1)
+    warning.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("typed", [False, True])
+async def test_cypher_limits_edges_before_aggregating(typed):
+    from types import SimpleNamespace
+    from cognee.infrastructure.databases.graph.degree_seeds import (
+        cypher_degree_seeds,
+        EDGE_SAMPLE_ROWS,
+    )
+
+    row = ("hub", 2) if typed else {"id": "hub", "degree": 2}
+    adapter = SimpleNamespace(query=AsyncMock(return_value=[row]))
+    assert await cypher_degree_seeds(adapter, 1, typed=typed) == ["hub"]
+    sql, params = adapter.query.await_args.args
+    assert sql.index("LIMIT $sample") < sql.index("count(*)")
+    assert params == {"sample": EDGE_SAMPLE_ROWS, "top_k": 1}
+    assert "COUNT {" not in sql
+
+
+@pytest.mark.asyncio
+async def test_turso_native_seed_selection(tmp_path):
+    from cognee.infrastructure.databases.graph.turso.adapter import TursoAdapter
+    from types import SimpleNamespace
+
+    adapter = TursoAdapter(f"sqlite+aiosqlite:///{tmp_path / 'seed-test.db'}")
+    adapter.get_graph_data = AsyncMock(side_effect=AssertionError("unexpected full graph read"))
+    try:
+        assert await adapter.get_top_degree_node_ids(5) == []
+        for node_id in ["hub", "incoming", "outgoing", "isolated"]:
+            await adapter.add_node(
+                SimpleNamespace(
+                    model_dump=lambda node_id=node_id: {
+                        "id": node_id,
+                        "name": node_id,
+                        "type": "Node",
+                    }
+                )
+            )
+        assert len(await adapter.get_top_degree_node_ids(5)) == 4
+        await adapter.add_edge("incoming", "hub", "rel")
+        await adapter.add_edge("hub", "outgoing", "rel")
+        assert await adapter.get_top_degree_node_ids(1) == ["hub"]
+        assert set(await adapter.get_top_degree_node_ids(5)) == {
+            "hub",
+            "incoming",
+            "outgoing",
+            "isolated",
+        }
+        adapter.get_graph_data.assert_not_awaited()
+    finally:
+        await adapter.close()
