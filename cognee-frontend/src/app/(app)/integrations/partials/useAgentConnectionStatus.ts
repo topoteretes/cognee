@@ -36,6 +36,6 @@ export function useAgentConnectionStatus(): Record<string, boolean> {
     return () => { cancelled = true; };
   }, [cogniInstance, isInitializing, tenantReady]);
 
-  const detected = useConnectedIntegrations(sessions, tenant?.tenant_id ?? null);
+  const detected = useConnectedIntegrations(sessions, tenant?.tenant_id ?? null, cogniInstance);
   return { ...UNCONNECTED, ...detected };
 }
