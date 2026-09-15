@@ -169,3 +169,13 @@ async def test_cloud_client_list_data_follows_pages(monkeypatch, fail_second_pag
     else:
         assert await client.list_data(uuid4()) == first_page + [{"id": "1000"}]
     assert offsets == [0, 1000]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("size", [1000, 1001])
+async def test_cloud_client_stops_when_server_ignores_paging(monkeypatch, size):
+    client, _ = _client_with_fake_get(
+        monkeypatch, _FakeResponse(payload=[{"id": str(i)} for i in range(size)])
+    )
+    with pytest.raises(RuntimeError, match="pagination"):
+        await client.list_data(uuid4())

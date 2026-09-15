@@ -59,6 +59,7 @@ export default function DocumentsPanel<T extends DocRow>({
   onRetryBuild: () => void;
   onRetryDocs: () => void;
 }): ReactElement {
+  const displayedCount = total != null && total >= 0 ? total : docs.length;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -94,7 +95,7 @@ export default function DocumentsPanel<T extends DocRow>({
               <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.55)", letterSpacing: "0.08em", textTransform: "uppercase" }}>{selectedName}</span>
               <span style={{ fontSize: 11, color: "rgba(255,255,255,0.2)" }}>·</span>
               <span style={{ fontSize: 11, color: "rgba(237,236,234,0.35)", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                {docsLoading ? <SkeletonBar width={36} height={8} /> : processing ? "processing" : <>{total != null && total >= 0 ? total : docs.length} docs</>}
+                {docsLoading ? <SkeletonBar width={36} height={8} /> : processing ? "processing" : <>{displayedCount} doc{displayedCount !== 1 ? "s" : ""}</>}
               </span>
               <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
                 <button onClick={() => fileInputRef.current?.click()} className="hover:bg-[#5A0ED6] cursor-pointer" style={{ background: "#6510F4", color: "#fff", border: "none", borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 500, cursor: "pointer" }}>Add files</button>
@@ -160,7 +161,7 @@ export default function DocumentsPanel<T extends DocRow>({
           ) : (
             <DocumentList docs={docs} onDelete={onDeleteDoc} />
           )}
-          {selectedId && hasMore && (
+          {selectedId && hasMore && (total == null || total < 0 || docs.length < total) && (
             <button onClick={onLoadMore} disabled={docsLoading}
               style={{ margin: 16, padding: "8px 16px", color: "#EDECEA", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8 }}>
               {docsLoading ? "Loading…" : docsError ? "Retry loading more documents" : "Load more documents"}

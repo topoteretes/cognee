@@ -101,11 +101,11 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
   const [, setLastSynced] = useState<string | null>(null);
   const {
     data: rawFiles, setData: setFiles, error: filesError, loading,
-    hasMore, load: loadFilePage, loadMore,
+    total: filesTotal, hasMore, load: loadFilePage, loadMore,
   } = useDatasetDataPages<FileEntry & {
     rawDataLocation?: string; originalExtension?: string; original_extension?: string;
     originalMimeType?: string; original_mime_type?: string; size_bytes?: number; file_size?: number;
-  }>(cogniInstance);
+  }>(cogniInstance, Infinity, true);
   const files = useMemo(() => rawFiles.map(d => ({
     id: d.id,
     name: d.name || d.rawDataLocation?.split("/").pop() || d.id,
@@ -713,7 +713,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
             )}
           </div>
           <span style={{ fontSize: 14, color: "rgba(237,236,234,0.55)", display: "flex", alignItems: "center", gap: 6 }}>
-            {files.length} documents
+            {filesTotal === null ? `${files.length} loaded` : filesTotal} documents
             {datasetStatus === "processing" || processing ? (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "#6510F4", fontWeight: 500 }}>
                 · <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6510F4" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg>
@@ -1005,7 +1005,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
         onRetry={loadFiles}
         deletingId={deletingFileId}
       />
-      {hasMore && (
+      {hasMore && (filesTotal === null || files.length < filesTotal) && (
         <button onClick={loadMore} disabled={loading}
           style={{ padding: "8px 16px", color: "#EDECEA", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8 }}>
           {loading ? "Loading…" : filesError ? "Retry loading more files" : "Load more files"}

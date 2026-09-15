@@ -394,6 +394,7 @@ class CloudClient:
         """Return every document, following the HTTP endpoint's bounded pages."""
         session = await self._get_session()
         rows = []
+        seen_ids = set()
         limit = 1000
         while True:
             async with session.get(
@@ -406,6 +407,10 @@ class CloudClient:
                 page = await resp.json()
             if not isinstance(page, list):
                 raise RuntimeError("Remote list_data returned an invalid document list")
+            page_ids = {str(row["id"]) for row in page if isinstance(row, dict) and "id" in row}
+            if len(page) > limit or (page and page_ids and page_ids <= seen_ids):
+                raise RuntimeError("Remote server did not honor dataset pagination")
+            seen_ids.update(page_ids)
             rows.extend(page)
             if len(page) < limit:
                 return rows

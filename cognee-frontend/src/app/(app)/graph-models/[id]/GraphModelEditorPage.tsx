@@ -9,7 +9,7 @@ import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
 import { syncGraphModels, loadGraphModelsConfig } from "@/modules/configuration/userConfiguration";
 import { inferSchema, downloadRawData } from "@/modules/llm/managementLlmApi";
-import { getAllDatasetData } from "@/modules/datasets/getDatasetData";
+import useDatasetDataPages from "@/modules/datasets/useDatasetDataPages";
 import { v4 as uuid } from "uuid";
 import { TrackPageView, trackEvent } from "@/modules/analytics";
 
@@ -58,9 +58,12 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
   const [showRegenerateModal, setShowRegenerateModal] = useState(false);
   const [regenDatasets, setRegenDatasets] = useState<{ id: string; name: string }[]>([]);
   const [regenSelectedDataset, setRegenSelectedDataset] = useState<string | null>(null);
-  const [regenFiles, setRegenFiles] = useState<{ id: string; name: string }[]>([]);
+  const { data: regenData, loading: regenLoadingFiles, error: regenFilesError,
+    hasMore: regenHasMore, load: loadRegenFiles, loadMore: loadMoreRegenFiles, reset: resetRegenFiles,
+  } = useDatasetDataPages<{ id: string; name?: string; rawDataLocation?: string }>(cogniInstance);
+  const regenFiles = regenData.map(d => ({ id: d.id, name: d.name || d.rawDataLocation?.split("/").pop() || d.id }));
   const [regenSelectedFiles, setRegenSelectedFiles] = useState<Set<string>>(new Set());
-  const [regenLoadingFiles, setRegenLoadingFiles] = useState(false);
+
 
   // ── Load model from sessionStorage (fast) or backend config ─────────────────
   useEffect(() => {
@@ -191,7 +194,7 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
     }
     setShowRegenerateModal(true);
     setRegenSelectedDataset(null);
-    setRegenFiles([]);
+    resetRegenFiles();
     setRegenSelectedFiles(new Set());
     try {
       const datasetList = contextDatasets.map((d) => ({ id: d.id, name: d.name }));
@@ -211,20 +214,7 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
     if (!cogniInstance) return;
     setRegenSelectedDataset(datasetId);
     setRegenSelectedFiles(new Set());
-    setRegenLoadingFiles(true);
-    try {
-      const data = await getAllDatasetData(datasetId, cogniInstance);
-      const files = Array.isArray(data) ? data.map((d: any) => ({
-        id: d.id,
-        name: d.name || d.rawDataLocation?.split("/").pop() || d.id,
-      })) : [];
-      setRegenFiles(files);
-      setRegenSelectedFiles(new Set(files.map((f: { id: string }) => f.id)));
-    } catch {
-      setRegenFiles([]);
-    } finally {
-      setRegenLoadingFiles(false);
-    }
+    await loadRegenFiles(datasetId);
   }
 
   async function handleRegenerate() {
@@ -693,10 +683,12 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
                       className="cursor-pointer"
                       style={{ background: "none", border: "none", fontSize: 11, color: "#6510F4", fontWeight: 500, fontFamily: "inherit", padding: 0 }}
                     >
-                      {regenSelectedFiles.size === regenFiles.length ? "Deselect all" : "Select all"}
+                      {regenSelectedFiles.size === regenFiles.length ? "Deselect loaded files" : "Select loaded files"}
                     </button>
                   )}
                 </div>
+                {regenFilesError && <div role="alert">Couldn&apos;t load files. <button onClick={loadMoreRegenFiles}>Retry</button></div>}
+                {regenHasMore && !regenFilesError && <button disabled={regenLoadingFiles} onClick={loadMoreRegenFiles}>Load more files</button>}
                 {regenLoadingFiles ? (
                   <div style={{ padding: "12px 0", textAlign: "center", fontSize: 13, color: "rgba(237,236,234,0.55)" }}>Loading files...</div>
                 ) : regenFiles.length === 0 ? (

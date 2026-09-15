@@ -20,57 +20,10 @@ CogneeClient = importlib.import_module("src.cognee_client").CogneeClient
 server_utils = importlib.import_module("src.server_utils")
 retrieval_utils = importlib.import_module("src.retrieval_utils")
 format_recall_results = server_utils.format_recall_results
-format_search_results = server_utils.format_search_results
 normalize_delete_mode = server_utils.normalize_delete_mode
-parse_cognify_data = server_utils.parse_cognify_data
-validate_cognify_file_paths = server_utils.validate_cognify_file_paths
 validate_top_k = server_utils.validate_top_k
 get_chunk_neighbors_from_graph = retrieval_utils.get_chunk_neighbors_from_graph
 get_document_from_graph = retrieval_utils.get_document_from_graph
-
-
-def test_parse_cognify_data_accepts_plain_text():
-    parsed = parse_cognify_data("plain text")
-
-    assert parsed.items == ["plain text"]
-    assert parsed.is_batch is False
-
-
-def test_parse_cognify_data_accepts_json_batch():
-    parsed = parse_cognify_data(json.dumps(["/tmp/a.txt", "inline memory"]))
-
-    assert parsed.items == ["/tmp/a.txt", "inline memory"]
-    assert parsed.is_batch is True
-
-
-@pytest.mark.parametrize("payload", ["[]", "[1]", '[""]', "[1, 2]"])
-def test_parse_cognify_data_rejects_invalid_batches(payload):
-    with pytest.raises(ValueError):
-        parse_cognify_data(payload)
-
-
-def test_parse_cognify_data_preserves_plain_text_starting_with_bracket():
-    parsed = parse_cognify_data("[note: inline memory")
-
-    assert parsed.items == ["[note: inline memory"]
-    assert parsed.is_batch is False
-
-
-def test_validate_cognify_file_paths_reports_batch_index():
-    error = validate_cognify_file_paths(
-        ["/missing/file.txt"],
-        path_exists=lambda _: False,
-    )
-
-    assert "File not found: /missing/file.txt" in error
-
-    batch_error = validate_cognify_file_paths(
-        ["inline text", "/missing/file.txt"],
-        path_exists=lambda _: False,
-    )
-
-    assert "Invalid batch item at index 1" in batch_error
-    assert "File not found: /missing/file.txt" in batch_error
 
 
 def test_validate_top_k_and_delete_mode():
@@ -85,36 +38,6 @@ def test_validate_top_k_and_delete_mode():
         normalize_delete_mode("unsafe")
 
 
-def test_format_search_results_handles_envelope_and_completion_rows():
-    rendered = format_search_results(
-        {
-            "query": "what matters?",
-            "results": [
-                {"dataset_name": "alpha", "search_result": ["first answer", "second answer"]},
-                {"dataset_name": "beta", "text": "third answer"},
-            ],
-        },
-        "GRAPH_COMPLETION",
-    )
-
-    assert "[alpha] first answer" in rendered
-    assert "[alpha] second answer" in rendered
-    assert "[beta] third answer" in rendered
-
-
-def test_format_search_results_renders_hybrid_through_completion_branch():
-    rendered = format_search_results(
-        {
-            "results": [
-                {"dataset_name": "alpha", "search_result": ["hybrid answer"]},
-            ],
-        },
-        "HYBRID_COMPLETION",
-    )
-
-    assert rendered == "[alpha] hybrid answer"
-
-
 def test_format_recall_results_handles_normalized_rows():
     rendered = format_recall_results(
         {
@@ -127,6 +50,52 @@ def test_format_recall_results_handles_normalized_rows():
 
     assert "[session] cached answer" in rendered
     assert "[graph] graph answer" in rendered
+
+
+def test_cognee_client_auth_schemes():
+    # 1. Default non-tenant URL -> Bearer token
+    client = CogneeClient(api_url="http://localhost:8000", api_token="secret_key")
+    headers = client._get_headers()
+    assert headers["Authorization"] == "Bearer secret_key"
+    assert "X-Api-Key" not in headers
+
+    # 2. Explicit x-api-key scheme -> X-Api-Key header
+    client_key = CogneeClient(
+        api_url="http://localhost:8000",
+        api_token="secret_key",
+        api_auth_scheme="x-api-key",
+    )
+    headers_key = client_key._get_headers()
+    assert headers_key["X-Api-Key"] == "secret_key"
+    assert "Authorization" not in headers_key
+
+    # 3. Explicit bearer scheme -> Bearer token
+    client_bearer = CogneeClient(
+        api_url="http://localhost:8000",
+        api_token="secret_key",
+        api_auth_scheme="bearer",
+    )
+    headers_bearer = client_bearer._get_headers()
+    assert headers_bearer["Authorization"] == "Bearer secret_key"
+    assert "X-Api-Key" not in headers_bearer
+
+    # 4. Cloud tenant URL -> X-Api-Key + X-Tenant-Id
+    tenant_url = "https://tenant-12345678-1234-1234-1234-123456789abc.cognee.ai"
+    client_cloud = CogneeClient(api_url=tenant_url, api_token="secret_key")
+    headers_cloud = client_cloud._get_headers()
+    assert headers_cloud["X-Api-Key"] == "secret_key"
+    assert headers_cloud["X-Tenant-Id"] == "12345678-1234-1234-1234-123456789abc"
+    assert "Authorization" not in headers_cloud
+
+    # 5. COGNEE_API_AUTH_SCHEME environment variable
+    os.environ["COGNEE_API_AUTH_SCHEME"] = "x-api-key"
+    try:
+        client_env = CogneeClient(api_url="http://localhost:8000", api_token="secret_key")
+        headers_env = client_env._get_headers()
+        assert headers_env["X-Api-Key"] == "secret_key"
+        assert "Authorization" not in headers_env
+    finally:
+        os.environ.pop("COGNEE_API_AUTH_SCHEME", None)
 
 
 # Tools that the MCP server is expected to expose. Kept as named groups so the
@@ -385,6 +354,8 @@ class FakeCogneeModule:
         # client deletes it as soon as remember() returns.
         if isinstance(data, str) and os.path.isfile(data):
             self.seen_paths.append(data)
+            # A blocking read is fine in a test double: no event loop to
+            # starve, and the file is a few bytes on tmpfs.
             with open(data, "rb") as handle:
                 self.seen_payloads.append(handle.read())
         if self._error is not None:
@@ -806,58 +777,6 @@ async def test_cognee_client_api_delete_uses_mode_aware_endpoint():
     assert requests[0].url.params["mode"] == "hard"
 
 
-@pytest.mark.asyncio
-async def test_cognify_tool_batches_add_calls(monkeypatch, tmp_path):
-    from src import server
-
-    data_file = tmp_path / "memory.txt"
-    data_file.write_text("memory", encoding="utf-8")
-
-    class FakeClient:
-        use_api = False
-
-        def __init__(self):
-            self.added = []
-            self.cognified = None
-
-        async def add(self, data, dataset_name="main_dataset"):
-            self.added.append((data, dataset_name))
-
-        async def cognify(self, datasets=None, custom_prompt=None, graph_model=None):
-            self.cognified = {
-                "datasets": datasets,
-                "custom_prompt": custom_prompt,
-                "graph_model": graph_model,
-            }
-
-    fake_client = FakeClient()
-    created_tasks = []
-    original_create_task = asyncio.create_task
-
-    def capture_task(coro):
-        task = original_create_task(coro)
-        created_tasks.append(task)
-        return task
-
-    monkeypatch.setattr(server, "cognee_client", fake_client)
-    monkeypatch.setattr(server.asyncio, "create_task", capture_task)
-
-    result = await server.cognify(
-        json.dumps([str(data_file), "inline memory"]),
-        dataset_name="batch_ds",
-        custom_prompt="extract carefully",
-    )
-
-    assert "Queued 2 item(s)" in result[0].text
-    await created_tasks[0]
-    assert fake_client.added == [(str(data_file), "batch_ds"), ("inline memory", "batch_ds")]
-    assert fake_client.cognified == {
-        "datasets": ["batch_ds"],
-        "custom_prompt": "extract carefully",
-        "graph_model": None,
-    }
-
-
 class FakeGraph:
     def __init__(self, nodes=None, connections=None, subgraphs=None):
         self.nodes = nodes or {}
@@ -991,50 +910,6 @@ async def test_get_chunk_neighbors_from_graph_validates_inputs():
         await get_chunk_neighbors_from_graph(graph, "chunk-1", direction="sideways")
 
 
-@pytest.mark.asyncio
-async def test_document_retrieval_tools_format_json(monkeypatch):
-    from src import server
-
-    class FakeClient:
-        async def get_document(self, document_id, include_metadata=True, max_chunks=0):
-            return {
-                "document_id": document_id,
-                "include_metadata": include_metadata,
-                "max_chunks": max_chunks,
-                "chunks": [],
-            }
-
-        async def get_chunk_neighbors(
-            self,
-            chunk_id,
-            neighbor_count=2,
-            include_target=True,
-            direction="both",
-        ):
-            return {
-                "target_chunk_id": chunk_id,
-                "neighbor_count": neighbor_count,
-                "include_target": include_target,
-                "direction": direction,
-                "chunks": [],
-            }
-
-    monkeypatch.setattr(server, "cognee_client", FakeClient())
-
-    document_result = await server.get_document("doc-1", include_metadata=False, max_chunks=3)
-    neighbors_result = await server.get_chunk_neighbors(
-        "chunk-1",
-        neighbor_count=1,
-        include_target=False,
-        direction="forward",
-    )
-
-    assert json.loads(document_result[0].text)["document_id"] == "doc-1"
-    neighbor_payload = json.loads(neighbors_result[0].text)
-    assert neighbor_payload["target_chunk_id"] == "chunk-1"
-    assert neighbor_payload["direction"] == "forward"
-
-
 def _recall_payload(requests: "list[httpx.Request]") -> dict:
     """Payload of the recall POST; a bare recall sends a GET /datasets preflight first."""
     recall_request = next(r for r in requests if r.url.path == "/api/v1/recall")
@@ -1141,3 +1016,118 @@ async def test_recall_without_env_default_omits_system_prompt(monkeypatch):
 
     payload = _recall_payload(requests)
     assert "system_prompt" not in payload
+
+
+# ---------------------------------------------------------------------------
+# Transport security: Host/Origin (DNS-rebinding) guard
+#
+# FastMCP installs its guard on the streamable-http app only; create_sse_app()
+# accepts no such option, so http_app() silently drops the allow-lists when
+# transport="sse" and the guard never runs. The server mounts the middleware
+# itself to close that gap. These exercise it over a real ASGI round trip.
+#
+# A permitted SSE request opens an event stream and never completes, so
+# "accepted" is observed as a timeout rather than a status code.
+# ---------------------------------------------------------------------------
+
+TRANSPORT_PATHS = {"http": ("/mcp", "POST"), "sse": ("/sse", "GET")}
+_ACCEPTED = "accepted"
+
+
+def _probe(app, transport, path=None, **headers):
+    """Return the status code, or _ACCEPTED if the request opened a stream."""
+    import logging
+    import threading
+
+    from starlette.testclient import TestClient
+
+    default_path, method = TRANSPORT_PATHS[transport]
+    target = path or default_path
+    result = []
+
+    def run():
+        try:
+            with TestClient(app, base_url="http://127.0.0.1:8000") as client:
+                result.append(client.request(method, target, headers=headers, json={}).status_code)
+        except Exception as exc:
+            # Broad on purpose. An empty result reads as _ACCEPTED, so a crash
+            # in this thread would satisfy the `!= 421` / `!= 404` assertions.
+            # Recording it keeps a failure from masquerading as "accepted";
+            # the log gives the traceback the assertion message cannot carry.
+            logging.getLogger(__name__).exception("probe request failed")
+            result.append(repr(exc))
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(timeout=10)
+    return result[0] if result else _ACCEPTED
+
+
+@pytest.mark.parametrize("transport", ["http", "sse"])
+@pytest.mark.parametrize("bind", ["0.0.0.0", "127.0.0.1"])
+def test_transport_rejects_foreign_host_and_origin(monkeypatch, transport, bind):
+    """Both transports reject rebinding attempts, on any bind address.
+
+    DNS rebinding targets loopback services, so 127.0.0.1 must be guarded too.
+    """
+    monkeypatch.delenv("MCP_DISABLE_DNS_REBINDING_PROTECTION", raising=False)
+    monkeypatch.delenv("MCP_ALLOWED_HOSTS", raising=False)
+
+    from src import server
+
+    app = server._build_http_app(transport, bind)
+
+    assert _probe(app, transport, Host="attacker.example") == 421, (
+        f"{transport} on {bind} accepted a foreign Host header"
+    )
+    assert _probe(app, transport, Origin="http://attacker.example") == 403, (
+        f"{transport} on {bind} accepted a foreign Origin header"
+    )
+
+
+@pytest.mark.parametrize("transport", ["http", "sse"])
+def test_mcp_allowed_hosts_admits_named_host(monkeypatch, transport):
+    """The documented escape hatch works on both transports."""
+    monkeypatch.delenv("MCP_DISABLE_DNS_REBINDING_PROTECTION", raising=False)
+    monkeypatch.setenv("MCP_ALLOWED_HOSTS", "10.0.0.5:*")
+
+    from src import server
+
+    app = server._build_http_app(transport, "0.0.0.0")
+
+    assert _probe(app, transport, Host="10.0.0.5:8000") != 421
+    assert _probe(app, transport, Host="attacker.example") == 421
+
+
+@pytest.mark.parametrize("transport", ["http", "sse"])
+def test_dns_rebinding_protection_can_be_disabled(monkeypatch, transport):
+    monkeypatch.setenv("MCP_DISABLE_DNS_REBINDING_PROTECTION", "true")
+    monkeypatch.delenv("MCP_ALLOWED_HOSTS", raising=False)
+
+    from src import server
+
+    app = server._build_http_app(transport, "0.0.0.0")
+
+    assert _probe(app, transport, Host="attacker.example") != 421
+
+
+@pytest.mark.parametrize(
+    "transport,explicit,expected",
+    [
+        ("http", None, "/mcp"),
+        ("http", "/custom", "/custom"),
+        ("sse", None, "/sse"),
+        ("sse", "/events", "/events"),
+    ],
+)
+def test_path_flag_moves_endpoint_without_clobbering_defaults(transport, explicit, expected):
+    """--path applies, and omitting it leaves each transport's own default.
+
+    The transports have different defaults (/mcp, /sse). Forwarding a single
+    "/mcp" default to both silently relocated the SSE endpoint.
+    """
+    from src import server
+
+    app = server._build_http_app(transport, "127.0.0.1", explicit)
+
+    assert _probe(app, transport, path=expected) != 404

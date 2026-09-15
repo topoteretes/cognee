@@ -80,18 +80,24 @@ export function useBrainsData(): UseBrainsDataResult {
 
   const { statusDetails } = useDatasetStatuses(datasets.length > 0);
 
+  const listGeneration = useRef(0);
+  const invalidateList = useCallback(() => { listGeneration.current++; }, []);
+
   const loadDatasets = useCallback(async (): Promise<void> => {
     if (!cogniInstance) return;
+    const generation = ++listGeneration.current;
     try {
       let list: DatasetRaw[];
       try {
         const fetched = await getDatasets(cogniInstance);
+        if (generation !== listGeneration.current) return;
         // A non-array body is just as much a failed fetch as a thrown error —
         // treat it the same way instead of silently rendering an empty list.
         if (!Array.isArray(fetched)) throw new Error("Unexpected /v1/datasets response shape");
         list = fetched;
         setDatasetsError(false);
       } catch (err) {
+        if (generation !== listGeneration.current) return;
         captureException(err, { stage: "load_datasets" });
         // Fall back to FilterContext's list (which can itself be empty or
         // stale) rather than leaving the page with nothing — but flag the
@@ -108,7 +114,10 @@ export function useBrainsData(): UseBrainsDataResult {
         });
       }
       const initial = list.map((ds) => ({ ...ds, documents: -1, status: "loading" as DisplayStatus }));
-      setDatasets(initial);
+      setDatasets(previous => initial.map(ds => {
+        const known = previous.find(d => d.id === ds.id);
+        return known ? { ...ds, documents: known.documents, status: known.status } : ds;
+      }));
       setLoading(false);
 
       // The shared client's default GET timeout races a caller's own signal
@@ -124,18 +133,21 @@ export function useBrainsData(): UseBrainsDataResult {
         ? normalizeDatasetStatusResponse(await statusResp.json())
         : {};
 
+      if (generation !== listGeneration.current) return;
       for (const ds of list) {
         // Only the count is wanted here. Fetching the rows to measure them
         // downloaded every dataset in full, once per dataset on this page.
         getDatasetDataCount(ds.id, cogniInstance)
           .then((count) => {
+            if (generation !== listGeneration.current) return;
             setDatasets((prev) => prev.map((d) => d.id === ds.id ? { ...d, documents: count, status: mapProcessingStatus(statusData[ds.id]?.status, count, statusData[ds.id]?.reason ?? null) } : d));
           })
           .catch(() => {
-            setDatasets((prev) => prev.map((d) => d.id === ds.id ? { ...d, documents: 0, status: mapProcessingStatus(statusData[ds.id]?.status, 0, statusData[ds.id]?.reason ?? null) } : d));
+            // Keep the last known count (or -1 for unknown), never invent zero.
           });
       }
     } catch (err) {
+      if (generation !== listGeneration.current) return;
       captureException(err, { stage: "load_datasets_unexpected" });
       setDatasets([]);
       setDatasetsError(true);
@@ -149,7 +161,8 @@ export function useBrainsData(): UseBrainsDataResult {
     loadGraphModelsConfig(cogniInstance)
       .then((cfg) => setOutdated(new Set(cfg.outdatedDatasets ?? [])))
       .catch((err) => { console.error("Failed to load graph models config:", err); });
-  }, [cogniInstance, isInitializing, loadDatasets]);
+    return invalidateList;
+  }, [cogniInstance, isInitializing, loadDatasets, invalidateList]);
 
   useEffect(() => {
     if (!cogniInstance || Object.keys(statusDetails).length === 0) return;
