@@ -57,6 +57,7 @@ export interface UseBrainsDataResult {
   selectedDocs: FileEntry[];
   docsLoading: boolean;
   docsError: boolean;
+  docsTotal: number | null;
   hasMoreDocs: boolean;
   loadMoreDocs: () => void;
   retryDocs: () => void;
