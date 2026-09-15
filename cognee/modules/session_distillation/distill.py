@@ -23,9 +23,13 @@ from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.infrastructure.session.session_context_builder import coerce_active_context_entries
-from cognee.infrastructure.session.session_context_models import (
-    SessionContextEntry,
-    is_context_entry_usable,
+from cognee.infrastructure.session.session_context_models import SessionContextEntry
+from cognee.infrastructure.session.session_distillation_watermark import (
+    filter_distillable_entries,
+    filter_distillable_qa_rows,
+    next_distillation_watermark,
+    read_distillation_watermark,
+    save_distillation_watermark,
 )
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.models import Dataset
@@ -121,12 +125,19 @@ async def resolve_distillation_scope(
 async def load_distillable_session_inputs(
     scope: SessionDistillationScope,
 ) -> tuple[list[dict], list[SessionContextEntry]]:
-    """Load QA turns and keep context entries worth distilling."""
+    """Load QA turns and context entries worth distilling that the curator has not seen yet.
+
+    Both lists are cut at the session's distillation watermark (see
+    ``session_distillation_watermark``), so a session that gained nothing since the
+    last distillation yields no entries and ``distill_session`` returns without an
+    LLM call. The watermark itself is read from the same context rows.
+    """
     session_manager = get_session_manager()
     context_rows = await session_manager.get_session_context_entries(
         user_id=scope.user_id,
         session_id=scope.session_id,
     )
+    watermark = read_distillation_watermark(context_rows)
 
     raw_qa = await session_manager.get_session(
         user_id=scope.user_id,
@@ -138,12 +149,46 @@ async def load_distillable_session_inputs(
         for entry in (raw_qa if isinstance(raw_qa, list) else [])
     ]
 
-    context_entries = [
-        entry
-        for entry in coerce_active_context_entries(context_rows)
-        if is_context_entry_usable(entry)
-    ]
-    return qa_rows, context_entries
+    context_entries = filter_distillable_entries(
+        coerce_active_context_entries(context_rows), watermark
+    )
+    return filter_distillable_qa_rows(qa_rows, watermark), context_entries
+
+
+async def advance_distillation_watermark(
+    scope: SessionDistillationScope,
+    qa_rows: list[dict],
+    context_entries: list[SessionContextEntry],
+) -> None:
+    """Record that the curator consumed these inputs. Best-effort: never raises."""
+    session_manager = get_session_manager()
+    try:
+        context_rows = await session_manager.get_session_context_entries(
+            user_id=scope.user_id,
+            session_id=scope.session_id,
+        )
+        current = read_distillation_watermark(context_rows)
+        new_watermark = next_distillation_watermark(qa_rows, context_entries, current)
+        if new_watermark == current:
+            return
+        await save_distillation_watermark(
+            session_manager,
+            user_id=scope.user_id,
+            session_id=scope.session_id,
+            distilled_through=new_watermark,
+        )
+        logger.info(
+            "Session %s distillation watermark advanced to %s",
+            scope.session_id,
+            new_watermark,
+        )
+    except Exception as error:
+        logger.warning(
+            "Distillation watermark for session %s not advanced: %s",
+            scope.session_id,
+            error,
+            exc_info=True,
+        )
 
 
 def build_curator_batches(
@@ -396,11 +441,17 @@ async def distill_session(
 
     proposed = await propose_lessons(qa_rows, context_entries)
     if not proposed:
+        await advance_distillation_watermark(scope, qa_rows, context_entries)
         return scope.result("no_proposed_lessons")
 
     accepted = await accept_proposed_lessons(scope, proposed, context_entries)
     if not accepted:
+        await advance_distillation_watermark(scope, qa_rows, context_entries)
         return scope.result("no_accepted_lessons")
 
     documents = await publish_distilled_lessons(scope, accepted)
+    # Only after the lessons landed: a failed publish leaves the watermark put so
+    # the same window is re-curated on the next improve() (add-level content-hash
+    # dedup makes that retry safe).
+    await advance_distillation_watermark(scope, qa_rows, context_entries)
     return scope.result("completed", documents=documents)

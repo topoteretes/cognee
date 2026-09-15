@@ -160,11 +160,8 @@ def _extract_state_row(raw_entries: list) -> dict | None:
     return None
 
 
-async def _get_processed_trace_count(session_manager, user_id: str, session_id: str) -> int:
-    """Read the count watermark. Missing or malformed state means no traces processed yet."""
-    raw_entries = await session_manager.get_session_context_entries(
-        user_id=user_id, session_id=session_id
-    )
+def read_processed_trace_count(raw_entries: list) -> int:
+    """Read the count watermark out of already-loaded context rows (0 when absent/malformed)."""
     row = _extract_state_row(raw_entries)
     if row is None:
         return 0
@@ -172,6 +169,14 @@ async def _get_processed_trace_count(session_manager, user_id: str, session_id: 
         return max(0, int(row.get("processed_trace_count") or 0))
     except (TypeError, ValueError):
         return 0
+
+
+async def _get_processed_trace_count(session_manager, user_id: str, session_id: str) -> int:
+    """Read the count watermark. Missing or malformed state means no traces processed yet."""
+    raw_entries = await session_manager.get_session_context_entries(
+        user_id=user_id, session_id=session_id
+    )
+    return read_processed_trace_count(raw_entries)
 
 
 async def _save_processed_trace_count(

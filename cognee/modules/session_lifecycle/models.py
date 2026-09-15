@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import UUID, Column, DateTime, Float, Integer, String, Text
+from sqlalchemy import UUID, Boolean, Column, DateTime, Float, Integer, String, Text, false
 
 from cognee.infrastructure.databases.relational import Base
 
@@ -71,6 +71,17 @@ class SessionRecord(Base):
     # attribute correctly.
     last_model = Column(Text, nullable=True)
 
+    # Cross-worker ``improve()`` lock (SDK-593). ``improve_lock_token`` is the
+    # opaque token of the current holder (NULL = free); a lock whose
+    # ``improve_lock_acquired_at`` is older than ``IMPROVE_LOCK_TTL_SECONDS``
+    # counts as expired and may be taken over. ``improve_rerun_requested`` is
+    # set by a caller that found the lock busy, so the holder runs one more
+    # watermark-driven pass before releasing. See
+    # ``cognee/infrastructure/locks/session_lock.py``.
+    improve_lock_token = Column(String, nullable=True)
+    improve_lock_acquired_at = Column(DateTime(timezone=True), nullable=True)
+    improve_rerun_requested = Column(Boolean, nullable=False, default=False, server_default=false())
+
     def to_dict(self) -> dict:
         started = getattr(self, "started_at", None)
         last_act = getattr(self, "last_activity_at", None)
@@ -90,6 +101,8 @@ class SessionRecord(Base):
             "cost_usd": self.cost_usd,
             "error_count": self.error_count,
             "last_model": self.last_model,
+            "improve_lock_held": getattr(self, "improve_lock_token", None) is not None,
+            "improve_rerun_requested": bool(getattr(self, "improve_rerun_requested", False)),
         }
 
 

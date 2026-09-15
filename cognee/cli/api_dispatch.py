@@ -14,6 +14,7 @@ import os
 import cognee.cli.echo as fmt
 from cognee.cli.api_client import CogneeApiClient, is_connection_error
 from cognee.cli.config import COMPLETION_SEARCH_TYPES, DEFAULT_SEARCH_TYPE
+from cognee.cli.improve_output import echo_improve_result, improve_status
 
 SUPPORTED_COMMANDS = {
     "add",
@@ -368,6 +369,9 @@ def _dispatch_improve(client: CogneeApiClient, args: argparse.Namespace) -> None
         session_ids=getattr(args, "session_ids", None),
         run_in_background=getattr(args, "background", False),
     )
+    if improve_status(result) is not None:
+        echo_improve_result(result, background=bool(getattr(args, "background", False)))
+        return
     if getattr(args, "background", False):
         fmt.success("Improvement started in background!")
     else:
