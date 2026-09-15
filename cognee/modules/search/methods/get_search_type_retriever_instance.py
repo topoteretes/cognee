@@ -27,6 +27,9 @@ from cognee.modules.retrieval.graph_report_retriever import GraphReportRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
+from cognee.modules.retrieval.hybrid_decomposition_retriever import (
+    HybridDecompositionRetriever,
+)
 from cognee.modules.retrieval.hybrid_retriever import DEFAULT_HYBRID_LANE_TOP_K, HybridRetriever
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
 from cognee.modules.retrieval.skills_retriever import SkillsRetriever
@@ -93,6 +96,30 @@ async def get_search_type_retriever_instance(
     include_references = kwargs.get("include_references", False)
     dataset = kwargs.get("dataset")
 
+    # HYBRID_COMPLETION and its decomposition variant share one lane configuration.
+    hybrid_kwargs = {
+        "chunks_top_k": _hybrid_lane_top_k(retriever_specific_config, "chunks_top_k", top_k),
+        "entities_top_k": _hybrid_lane_top_k(retriever_specific_config, "entities_top_k", top_k),
+        "max_edges_per_entity": retriever_specific_config.get("max_edges_per_entity", 10),
+        "node_name": node_name,
+        "node_name_filter_operator": node_name_filter_operator,
+        "system_prompt_path": system_prompt_path,
+        "system_prompt": system_prompt,
+        "session_id": session_id,
+        "response_model": retriever_specific_config.get("response_model", str),
+        "include_global_context_index": retriever_specific_config.get(
+            "include_global_context_index", False
+        ),
+        "global_context_index_top_k": retriever_specific_config.get(
+            "global_context_index_top_k", 3
+        ),
+        "text_summaries_top_k": retriever_specific_config.get("text_summaries_top_k"),
+        "use_importance_weight": retriever_specific_config.get("use_importance_weight", True),
+        "use_truth_weight": retriever_specific_config.get("use_truth_weight", False),
+        "facts_top_k": _hybrid_lane_top_k(retriever_specific_config, "facts_top_k", top_k),
+        "include_references": include_references,
+    }
+
     # Registry mapping search types to their corresponding retriever classes and input parameters
     search_core_registry: dict[SearchType, tuple[BaseRetriever, dict]] = {
         SearchType.CODE: (
@@ -134,33 +161,22 @@ async def get_search_type_retriever_instance(
         ),
         SearchType.HYBRID_COMPLETION: (
             HybridRetriever,
+            hybrid_kwargs,
+        ),
+        SearchType.HYBRID_COMPLETION_DECOMPOSITION: (
+            HybridDecompositionRetriever,
             {
-                "chunks_top_k": _hybrid_lane_top_k(
-                    retriever_specific_config, "chunks_top_k", top_k
+                **hybrid_kwargs,
+                "max_subqueries": retriever_specific_config.get("max_subqueries", 7),
+                "decomposition_system_prompt": retriever_specific_config.get(
+                    "decomposition_system_prompt"
                 ),
-                "entities_top_k": _hybrid_lane_top_k(
-                    retriever_specific_config, "entities_top_k", top_k
+                "decomposition_system_prompt_path": retriever_specific_config.get(
+                    "decomposition_system_prompt_path", "hybrid_decomposition_system_prompt.txt"
                 ),
-                "max_edges_per_entity": retriever_specific_config.get("max_edges_per_entity", 10),
-                "node_name": node_name,
-                "node_name_filter_operator": node_name_filter_operator,
-                "system_prompt_path": system_prompt_path,
-                "system_prompt": system_prompt,
-                "session_id": session_id,
-                "response_model": retriever_specific_config.get("response_model", str),
-                "include_global_context_index": retriever_specific_config.get(
-                    "include_global_context_index", False
-                ),
-                "global_context_index_top_k": retriever_specific_config.get(
-                    "global_context_index_top_k", 3
-                ),
-                "text_summaries_top_k": retriever_specific_config.get("text_summaries_top_k"),
-                "use_importance_weight": retriever_specific_config.get(
-                    "use_importance_weight", True
-                ),
-                "use_truth_weight": retriever_specific_config.get("use_truth_weight", False),
-                "facts_top_k": _hybrid_lane_top_k(retriever_specific_config, "facts_top_k", top_k),
-                "include_references": include_references,
+                "merged_chunks_limit": retriever_specific_config.get("merged_chunks_limit"),
+                "merged_entities_limit": retriever_specific_config.get("merged_entities_limit"),
+                "merged_facts_limit": retriever_specific_config.get("merged_facts_limit"),
             },
         ),
         SearchType.TRIPLET_COMPLETION: (

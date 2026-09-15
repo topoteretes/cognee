@@ -100,3 +100,114 @@ def test_each_channel_reserves_slots_for_conversational_only_items(channel, make
         "raw2",
         "ctx0",
     ]
+
+
+# ------------------------------------------------------------- N-way union
+
+
+def _leg(chunks=(), entities=(), facts=(), summaries=None, **extra):
+    return {
+        "chunks": list(chunks),
+        "chunk_summaries": dict(summaries or {}),
+        "entities": list(entities),
+        "facts": list(facts),
+        **extra,
+    }
+
+
+def test_union_interleaves_legs_round_robin_and_dedupes_by_content_id():
+    from cognee.modules.retrieval.hybrid.merge import merge_hybrid_results_union
+
+    pass_one = _leg(chunks=[result("c1", "pass one")])
+    leg_a = _leg(chunks=[result("c2", "a"), result("c3", "from a")])
+    leg_b = _leg(chunks=[result("c3", "from b"), result("c4", "b")])
+
+    merged = merge_hybrid_results_union(
+        [pass_one, leg_a, leg_b], chunks_limit=None, entities_limit=None, facts_limit=None
+    )
+
+    assert [item_id(chunk) for chunk in merged["chunks"]] == ["c1", "c2", "c3", "c4"]
+    # c3 sits at rank 1 in leg a and rank 0 in leg b: it is placed by its best rank and
+    # represented by that leg's object.
+    assert merged["chunks"][2].payload["text"] == "from b"
+
+
+def test_union_caps_each_channel_and_keeps_every_leg_represented():
+    from cognee.modules.retrieval.hybrid.merge import merge_hybrid_results_union
+
+    legs = [
+        _leg(
+            chunks=[result(f"{leg}-{rank}", "t") for rank in range(3)],
+            entities=[{"id": f"e-{leg}-{rank}"} for rank in range(3)],
+            facts=[{"id": f"f-{leg}-{rank}", "text": "fact"} for rank in range(3)],
+        )
+        for leg in ("p", "a", "b")
+    ]
+
+    merged = merge_hybrid_results_union(legs, chunks_limit=3, entities_limit=2, facts_limit=0)
+
+    # Rank 0 of every leg before rank 1 of any leg.
+    assert [item_id(chunk) for chunk in merged["chunks"]] == ["p-0", "a-0", "b-0"]
+    assert [entity["id"] for entity in merged["entities"]] == ["e-p-0", "e-a-0"]
+    assert merged["facts"] == []
+
+
+def test_union_rebuilds_summaries_for_surviving_chunks_only():
+    from cognee.modules.retrieval.hybrid.merge import merge_hybrid_results_union
+
+    pass_one = _leg(chunks=[result("c1", "t")], summaries={"c1": "from pass one", "gone": "x"})
+    leg_a = _leg(
+        chunks=[result("c1", "t"), result("c2", "t")],
+        summaries={"c1": "from leg a", "c2": "summary two"},
+    )
+
+    merged = merge_hybrid_results_union(
+        [pass_one, leg_a], chunks_limit=1, entities_limit=None, facts_limit=None
+    )
+
+    assert [item_id(chunk) for chunk in merged["chunks"]] == ["c1"]
+    # The earliest leg with a summary for a surviving chunk wins; dropped chunks vanish.
+    assert merged["chunk_summaries"] == {"c1": "from pass one"}
+
+
+def test_union_takes_unowned_keys_from_the_first_result_and_skips_empty_legs():
+    from cognee.modules.retrieval.hybrid.merge import merge_hybrid_results_union
+
+    pass_one = _leg(chunks=[result("c1", "t")], global_context="built once")
+    leg_a = _leg(chunks=[result("c2", "t")], global_context="ignored")
+
+    merged = merge_hybrid_results_union(
+        [pass_one, None, {}, leg_a], chunks_limit=None, entities_limit=None, facts_limit=None
+    )
+
+    assert merged["global_context"] == "built once"
+    assert [item_id(chunk) for chunk in merged["chunks"]] == ["c1", "c2"]
+
+
+def test_union_of_nothing_is_the_empty_shape():
+    from cognee.modules.retrieval.hybrid.merge import merge_hybrid_results_union
+    from cognee.modules.retrieval.hybrid.results import empty_hybrid_result
+
+    assert (
+        merge_hybrid_results_union([], chunks_limit=5, entities_limit=5, facts_limit=5)
+        == empty_hybrid_result()
+    )
+    assert (
+        merge_hybrid_results_union([None, {}], chunks_limit=5, entities_limit=5, facts_limit=5)
+        == empty_hybrid_result()
+    )
+
+
+def test_union_never_merges_away_items_without_an_identity():
+    from cognee.modules.retrieval.hybrid.merge import merge_hybrid_results_union
+
+    anonymous = MagicMock()
+    anonymous.id = None
+    anonymous.payload = {"text": "no id"}
+    legs = [_leg(chunks=[anonymous]), _leg(chunks=[anonymous])]
+
+    merged = merge_hybrid_results_union(
+        legs, chunks_limit=None, entities_limit=None, facts_limit=None
+    )
+
+    assert len(merged["chunks"]) == 2

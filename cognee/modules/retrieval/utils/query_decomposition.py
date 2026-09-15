@@ -39,8 +39,10 @@ class DecompositionRunState:
     final_context: str | None = None
 
 
-def normalize_subqueries(original_query: str, subqueries: list[str] | None) -> list[str]:
-    """Clean and bound decomposed subqueries."""
+def normalize_subqueries(
+    original_query: str, subqueries: list[str] | None, max_subqueries: int = 5
+) -> list[str]:
+    """Clean and bound decomposed subqueries to at most ``max_subqueries``."""
 
     normalized_queries: list[str] = []
     for subquery in subqueries or []:
@@ -48,7 +50,7 @@ def normalize_subqueries(original_query: str, subqueries: list[str] | None) -> l
         if not cleaned_query or cleaned_query in normalized_queries:
             continue
         normalized_queries.append(cleaned_query)
-        if len(normalized_queries) >= 5:
+        if len(normalized_queries) >= max_subqueries:
             break
 
     if normalized_queries:

@@ -236,6 +236,64 @@ async def test_hybrid_completion_retriever_receives_config():
 
 
 @pytest.mark.asyncio
+async def test_hybrid_completion_decomposition_retriever_receives_config():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.retrieval.hybrid_decomposition_retriever import (
+        HybridDecompositionRetriever,
+    )
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.HYBRID_COMPLETION_DECOMPOSITION,
+        query_text="q",
+        top_k=30,
+        include_references=True,
+        retriever_specific_config={
+            "chunks_top_k": 7,
+            "max_subqueries": 3,
+            "decomposition_system_prompt": "INLINE",
+            "decomposition_system_prompt_path": "custom_decomposition.txt",
+            "merged_chunks_limit": 12,
+            "merged_entities_limit": 8,
+            "merged_facts_limit": 4,
+        },
+    )
+
+    assert isinstance(retriever_instance, HybridDecompositionRetriever)
+    # Hybrid lane configuration is shared with HYBRID_COMPLETION.
+    assert retriever_instance.chunks_top_k == 7
+    assert retriever_instance.entities_top_k == 10  # top_k=30 capped to the lane default
+    assert retriever_instance.include_references is True
+    # Decomposition knobs come from retriever_specific_config.
+    assert retriever_instance.max_subqueries == 3
+    assert retriever_instance.decomposition_system_prompt == "INLINE"
+    assert retriever_instance.decomposition_system_prompt_path == "custom_decomposition.txt"
+    assert retriever_instance.merged_chunks_limit == 12
+    assert retriever_instance.merged_entities_limit == 8
+    assert retriever_instance.merged_facts_limit == 4
+
+
+@pytest.mark.asyncio
+async def test_hybrid_completion_decomposition_defaults_match_hybrid_plus_seven_subqueries():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    decomposition = await mod.get_search_type_retriever_instance(
+        SearchType.HYBRID_COMPLETION_DECOMPOSITION, query_text="q", top_k=11
+    )
+    hybrid = await mod.get_search_type_retriever_instance(
+        SearchType.HYBRID_COMPLETION, query_text="q", top_k=11
+    )
+
+    for attribute in ("chunks_top_k", "entities_top_k", "facts_top_k", "text_summaries_top_k"):
+        assert getattr(decomposition, attribute) == getattr(hybrid, attribute)
+    assert decomposition.max_subqueries == 7
+    assert decomposition.decomposition_system_prompt is None
+    assert (
+        decomposition.decomposition_system_prompt_path == "hybrid_decomposition_system_prompt.txt"
+    )
+    assert decomposition.merged_chunks_limit is None
+
+
+@pytest.mark.asyncio
 async def test_hybrid_completion_caps_default_channel_limits():
     import cognee.modules.search.methods.get_search_type_retriever_instance as mod
 
