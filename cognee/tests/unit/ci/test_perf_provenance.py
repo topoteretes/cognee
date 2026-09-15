@@ -73,7 +73,10 @@ def test_stamp_uses_checked_out_commit_and_preserves_results(tmp_path, filename,
     result = json.loads(report.read_text())
     rust = filename == "performance_report_rust.yml"
     assert result["git_sha"] == (rust_sha if rust else workflow_sha)
-    assert result["commit_timestamp"] == (rust_date if rust else workflow_date)
+    # Git versions spell UTC as either Z or +00:00. Both represent the
+    # same commit time; compare instants rather than serialization choices.
+    actual_time = datetime.fromisoformat(result["commit_timestamp"].replace("Z", "+00:00"))
+    assert actual_time == datetime.fromisoformat(rust_date if rust else workflow_date)
     assert result["git_repository"] == ("topoteretes/cognee-rs" if rust else "topoteretes/cognee")
     if rust:
         assert result["workflow_git_sha"] == workflow_sha
