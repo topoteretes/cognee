@@ -114,12 +114,12 @@ async def sync_recent_issues(credential: IntegrationCredential, limit: int = 50)
     # startup (via the adapter registration), and cognee's package root is
     # heavyweight.
     from cognee.api.v1.remember.remember import remember as cognee_remember
-    from cognee.modules.users.methods import get_user
 
     # Imported here, not at module top: the adapter imports this module to
     # wire on_installed, so a top-level import back into it would be
     # circular.
     from cognee.modules.integrations.linear.adapter import access_token_for
+    from cognee.modules.users.methods import get_user
 
     data = await graphql(access_token_for(credential), _RECENT_ISSUES_QUERY, {"limit": limit})
     issues = ((data.get("issues") or {}).get("nodes")) or []

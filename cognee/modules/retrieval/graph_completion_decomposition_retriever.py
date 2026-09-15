@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, List, Optional, Type
+from typing import Any
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.unified import get_unified_engine
@@ -7,10 +7,10 @@ from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import (
     DEFAULT_TRIPLET_DISTANCE_PENALTY,
 )
-from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.retrieval.utils.query_decomposition import (
     DecompositionMode,
@@ -37,18 +37,18 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
         self,
         user_prompt_path: str = "graph_context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
-        system_prompt: Optional[str] = None,
-        top_k: Optional[int] = 5,
-        node_type: Optional[Type] = None,
-        node_name: Optional[List[str]] = None,
+        system_prompt: str | None = None,
+        top_k: int | None = 5,
+        node_type: type | None = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
-        wide_search_top_k: Optional[int] = 100,
-        triplet_distance_penalty: Optional[float] = DEFAULT_TRIPLET_DISTANCE_PENALTY,
+        wide_search_top_k: int | None = 100,
+        triplet_distance_penalty: float | None = DEFAULT_TRIPLET_DISTANCE_PENALTY,
         feedback_influence: float = get_base_config().default_feedback_influence,
-        session_id: Optional[str] = None,
-        response_model: Type = str,
-        neighborhood_depth: Optional[int] = None,
-        neighborhood_seed_top_k: Optional[int] = 10,
+        session_id: str | None = None,
+        response_model: type = str,
+        neighborhood_depth: int | None = None,
+        neighborhood_seed_top_k: int | None = 10,
         decomposition_mode: DecompositionMode = DecompositionMode.ANSWER_PER_SUBQUERY,
         include_references: bool = False,
     ):
@@ -70,12 +70,12 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
             include_references=include_references,
         )
         self.decomposition_mode = DecompositionMode(decomposition_mode)
-        self._decomposition_state: Optional[DecompositionRunState] = None
+        self._decomposition_state: DecompositionRunState | None = None
 
     def _validate_single_query_input(
         self,
-        query: Optional[str],
-        query_batch: Optional[List[str]],
+        query: str | None,
+        query_batch: list[str] | None,
     ) -> None:
         """Validate the retriever's single-query public contract."""
 
@@ -88,7 +88,7 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
             )
         validate_retriever_input(query, None, self._use_session_cache())
 
-    async def _decompose_query(self, query: str) -> List[str]:
+    async def _decompose_query(self, query: str) -> list[str]:
         """Decompose the original query into focused subqueries."""
 
         system_prompt = read_query_prompt("graph_completion_decomposition_system_prompt.txt")
@@ -106,13 +106,13 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
             logger.warning(
                 "Query decomposition failed, falling back to original query: %s",
                 error,
-                exc_info=False,
+                exc_info=True,
             )
             return [query]
 
         return normalize_subqueries(query, getattr(decomposition, "subqueries", None))
 
-    async def _ensure_state(self, query: Optional[str]) -> DecompositionRunState:
+    async def _ensure_state(self, query: str | None) -> DecompositionRunState:
         """Return cached run state or initialize it from the query."""
 
         if (
@@ -132,7 +132,7 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
     async def _resolve_subquery_context_and_answer(
         self,
         subquery: str,
-        edge_batch: List[Edge],
+        edge_batch: list[Edge],
     ) -> tuple[str, str]:
         """Resolve context and answer for one subquery."""
 
@@ -154,8 +154,8 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
         return subquery_context, subquery_answer
 
     async def get_retrieved_objects(
-        self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
-    ) -> List[Edge]:
+        self, query: str | None = None, query_batch: list[str] | None = None
+    ) -> list[Edge]:
         """Retrieve and merge edges for the decomposed subqueries."""
 
         self._validate_single_query_input(query, query_batch)
@@ -194,8 +194,8 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
 
     async def get_context_from_objects(
         self,
-        query: Optional[str] = None,
-        query_batch: Optional[List[str]] = None,
+        query: str | None = None,
+        query_batch: list[str] | None = None,
         retrieved_objects=None,
     ) -> str:
         """Build the final context for the original query."""
@@ -235,13 +235,13 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
 
     async def get_completion_from_context(
         self,
-        query: Optional[str] = None,
-        query_batch: Optional[List[str]] = None,
-        retrieved_objects: Optional[List[Edge]] = None,
-        context: str = None,
-        effective_query: Optional[str] = None,
+        query: str | None = None,
+        query_batch: list[str] | None = None,
+        retrieved_objects: list[Edge] | None = None,
+        context: str | None = None,
+        effective_query: str | None = None,
         turn_preparation=None,
-    ) -> List[Any]:
+    ) -> list[Any]:
         """Generate the final completion for the original query."""
 
         self._validate_single_query_input(query, query_batch)

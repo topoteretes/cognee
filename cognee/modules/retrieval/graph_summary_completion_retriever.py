@@ -1,10 +1,8 @@
-from typing import Optional, Type, List
-
 from cognee.base_config import get_base_config
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import (
     DEFAULT_TRIPLET_DISTANCE_PENALTY,
 )
-from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import summarize_text
 
 
@@ -25,15 +23,15 @@ class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
         user_prompt_path: str = "graph_context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
         summarize_prompt_path: str = "summarize_search_results.txt",
-        system_prompt: Optional[str] = None,
-        top_k: Optional[int] = 5,
-        node_type: Optional[Type] = None,
-        node_name: Optional[List[str]] = None,
+        system_prompt: str | None = None,
+        top_k: int | None = 5,
+        node_type: type | None = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
-        wide_search_top_k: Optional[int] = 100,
-        triplet_distance_penalty: Optional[float] = DEFAULT_TRIPLET_DISTANCE_PENALTY,
+        wide_search_top_k: int | None = 100,
+        triplet_distance_penalty: float | None = DEFAULT_TRIPLET_DISTANCE_PENALTY,
         feedback_influence: float = get_base_config().default_feedback_influence,
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
         include_references: bool = False,
     ):
         """Initialize retriever with default prompt paths and search parameters."""

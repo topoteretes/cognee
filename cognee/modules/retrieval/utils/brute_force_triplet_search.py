@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple, Type, Union, cast
-
-from cognee.modules.observability import OtelStatusCode as StatusCode
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, cast
 
 from cognee.base_config import get_base_config
+from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.modules.graph.cognee_graph.CogneeGraph import (
@@ -19,10 +19,10 @@ from cognee.modules.observability import (
     COGNEE_VECTOR_RESULT_COUNT,
     new_span,
 )
+from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
 from cognee.modules.retrieval.utils.validate_queries import validate_queries
 from cognee.shared.logging_utils import ERROR, get_logger
-from cognee.exceptions import CogneeValidationError
 
 if TYPE_CHECKING:
     from cognee.infrastructure.databases.unified import UnifiedStoreEngine
@@ -36,7 +36,7 @@ _CAPTURE_POOL_CAP = 500
 _CAPTURE_STAGE = "brute_force_triplet_search"
 
 
-def _distance_at(attributes: Dict, query_index: int, default: float) -> float:
+def _distance_at(attributes: dict, query_index: int, default: float) -> float:
     """The vector distance an element carries for one query; ``default`` when unset."""
     distances = attributes.get("vector_distance")
     if isinstance(distances, list) and query_index < len(distances):
@@ -48,7 +48,7 @@ def _distance_at(attributes: Dict, query_index: int, default: float) -> float:
 
 
 def _scored_for_query(
-    scored: Sequence, query_index: int, query_list_length: Optional[int]
+    scored: Sequence, query_index: int, query_list_length: int | None
 ) -> Sequence:
     """One query's slice of a ``NodeEdgeVectorSearch`` distance list.
 
@@ -65,9 +65,9 @@ def _retrieval_candidates_payload(
     vector_search: NodeEdgeVectorSearch,
     top_edges: Sequence[Edge],
     query_index: int,
-    query_list_length: Optional[int],
+    query_list_length: int | None,
     default_penalty: float,
-) -> Dict:
+) -> dict:
     """Flat ``retrieval.candidates`` payload for one query (SDK-529). Scalars only.
 
     The pool is rebuilt from the ``id``/``score`` attributes of the vector-search
@@ -87,7 +87,7 @@ def _retrieval_candidates_payload(
     closure inside ``CogneeGraph._calculate_query_top_triplet_importances`` and is
     not stored on the edge; it is deliberately not duplicated here.
     """
-    per_collection: List[Tuple[str, Sequence]] = [
+    per_collection: list[tuple[str, Sequence]] = [
         (collection, _scored_for_query(scored, query_index, query_list_length))
         for collection, scored in vector_search.node_distances.items()
     ]
@@ -157,9 +157,9 @@ def _retrieval_candidates_payload(
 
 def _emit_retrieval_candidates(
     vector_search: NodeEdgeVectorSearch,
-    results: Union[List[Edge], List[List[Edge]]],
-    query_list_length: Optional[int],
-    triplet_distance_penalty: Optional[float],
+    results: list[Edge] | list[list[Edge]],
+    query_list_length: int | None,
+    triplet_distance_penalty: float | None,
 ) -> None:
     """Emit one ``retrieval.candidates`` event per query (SDK-529). Sync; never raises.
 
@@ -176,9 +176,9 @@ def _emit_retrieval_candidates(
         )
         # Single mode carries one flat edge list; batch mode one list per query.
         per_query: list[tuple[int, Sequence[Edge]]] = (
-            [(0, cast(List[Edge], results))]
+            [(0, cast(list[Edge], results))]
             if query_list_length is None
-            else list(enumerate(cast(List[List[Edge]], results)))
+            else list(enumerate(cast(list[list[Edge]], results)))
         )
         for query_index, top_edges in per_query:
             eval_capture.emit(
@@ -215,17 +215,17 @@ def format_triplets(edges):
 
 
 async def get_memory_fragment(
-    properties_to_project: Optional[List[str]] = None,
-    node_type: Optional[Type] = None,
-    node_name: Optional[List[str]] = None,
+    properties_to_project: list[str] | None = None,
+    node_type: type | None = None,
+    node_name: list[str] | None = None,
     node_name_filter_operator: str = "OR",
-    relevant_ids_to_filter: Optional[List[str]] = None,
-    memory_fragment_filter: Optional[List[dict]] = None,
-    triplet_distance_penalty: Optional[float] = DEFAULT_TRIPLET_DISTANCE_PENALTY,
+    relevant_ids_to_filter: list[str] | None = None,
+    memory_fragment_filter: list[dict] | None = None,
+    triplet_distance_penalty: float | None = DEFAULT_TRIPLET_DISTANCE_PENALTY,
     feedback_influence: float = get_base_config().default_feedback_influence,
     graph_engine=None,
-    neighborhood_depth: Optional[int] = None,
-    neighborhood_seed_top_k: Optional[int] = 10,
+    neighborhood_depth: int | None = None,
+    neighborhood_seed_top_k: int | None = 10,
 ) -> CogneeGraph:
     """Creates and initializes a CogneeGraph memory fragment with optional property projections."""
     if properties_to_project is None:
@@ -278,29 +278,29 @@ async def get_memory_fragment(
             )
     except EntityNotFoundError:
         pass
-    except Exception as e:
-        logger.error(f"Error during memory fragment creation: {str(e)}")
+    except Exception:
+        logger.exception("Error during memory fragment creation")
 
     return memory_fragment
 
 
 async def _get_top_triplet_importances(
-    memory_fragment: Optional[CogneeGraph],
+    memory_fragment: CogneeGraph | None,
     vector_search: NodeEdgeVectorSearch,
-    properties_to_project: Optional[List[str]],
-    node_type: Optional[Type],
-    node_name: Optional[List[str]],
+    properties_to_project: list[str] | None,
+    node_type: type | None,
+    node_name: list[str] | None,
     node_name_filter_operator: str,
     triplet_distance_penalty: float,
     feedback_influence: float,
-    wide_search_limit: Optional[int],
+    wide_search_limit: int | None,
     top_k: int,
-    query_list_length: Optional[int] = None,
+    query_list_length: int | None = None,
     graph_engine=None,
-    neighborhood_depth: Optional[int] = None,
-    neighborhood_seed_top_k: Optional[int] = 10,
-    personal_weights: Optional[Dict[str, float]] = None,
-) -> Union[List[Edge], List[List[Edge]]]:
+    neighborhood_depth: int | None = None,
+    neighborhood_seed_top_k: int | None = 10,
+    personal_weights: dict[str, float] | None = None,
+) -> list[Edge] | list[list[Edge]]:
     """Creates memory fragment (if needed), maps distances, and calculates top triplet importances.
 
     Args:
@@ -338,37 +338,36 @@ async def _get_top_triplet_importances(
             neighborhood_seed_top_k=neighborhood_seed_top_k,
         )
 
-        # Re-score expansion nodes discovered via neighborhood traversal.
-        # These nodes have no vector scores yet — run an ID-filtered vector
-        # search so they participate in triplet ranking instead of getting
-        # the default penalty score.
+        # Score only newly discovered IDs; node_name filters NodeSet membership,
+        # not node IDs. This path is single-query only (batch mode has no seed IDs).
         if (
             neighborhood_depth is not None
             and relevant_node_ids
             and vector_search.query_vector is not None
         ):
-            seed_set = set(relevant_node_ids)
-            expansion_ids = [nid for nid in memory_fragment.nodes if nid not in seed_set]
-            if expansion_ids:
-                for collection_name in list(vector_search.node_distances.keys()):
+            seed_set = {str(node_id) for node_id in relevant_node_ids}
+            expansion_ids = list(
+                dict.fromkeys(
+                    str(node_id)
+                    for node_id in memory_fragment.nodes
+                    if str(node_id) not in seed_set
+                )
+            )
+            score_by_ids = getattr(vector_search.vector_engine, "score_by_ids", None)
+            if expansion_ids and score_by_ids is not None:
+                for collection_name, distances in vector_search.node_distances.items():
                     try:
-                        extra_scores = await vector_search.vector_engine.search(
+                        extra_scores = await score_by_ids(
                             collection_name=collection_name,
+                            data_point_ids=expansion_ids,
                             query_vector=vector_search.query_vector,
-                            limit=len(expansion_ids),
-                            node_name=expansion_ids,
                         )
-                        if extra_scores:
-                            if vector_search.query_list_length is None:
-                                vector_search.node_distances[collection_name].extend(extra_scores)
-                            else:
-                                for qi, per_query in enumerate(extra_scores):
-                                    if qi < len(vector_search.node_distances[collection_name]):
-                                        vector_search.node_distances[collection_name][qi].extend(
-                                            per_query
-                                        )
                     except CollectionNotFoundError:
-                        pass
+                        continue
+                    except NotImplementedError:
+                        logger.debug("Vector adapter does not support neighborhood ID scoring")
+                        break
+                    distances.extend(extra_scores)
 
     await memory_fragment.map_vector_distances_to_graph_nodes(
         node_distances=vector_search.node_distances, query_list_length=query_list_length
@@ -390,23 +389,23 @@ async def _get_top_triplet_importances(
 
 
 async def brute_force_triplet_search(
-    query: Optional[str] = None,
-    query_batch: Optional[List[str]] = None,
+    query: str | None = None,
+    query_batch: list[str] | None = None,
     top_k: int = 5,
-    collections: Optional[List[str]] = None,
-    properties_to_project: Optional[List[str]] = None,
-    memory_fragment: Optional[CogneeGraph] = None,
-    node_type: Optional[Type] = None,
-    node_name: Optional[List[str]] = None,
+    collections: list[str] | None = None,
+    properties_to_project: list[str] | None = None,
+    memory_fragment: CogneeGraph | None = None,
+    node_type: type | None = None,
+    node_name: list[str] | None = None,
     node_name_filter_operator: str = "OR",
-    wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = DEFAULT_TRIPLET_DISTANCE_PENALTY,
+    wide_search_top_k: int | None = 100,
+    triplet_distance_penalty: float | None = DEFAULT_TRIPLET_DISTANCE_PENALTY,
     feedback_influence: float = get_base_config().default_feedback_influence,
-    unified_engine: Optional[UnifiedStoreEngine] = None,
-    neighborhood_depth: Optional[int] = None,
-    neighborhood_seed_top_k: Optional[int] = 10,
-    personal_weights: Optional[Dict[str, float]] = None,
-) -> Union[List[Edge], List[List[Edge]]]:
+    unified_engine: UnifiedStoreEngine | None = None,
+    neighborhood_depth: int | None = None,
+    neighborhood_seed_top_k: int | None = 10,
+    personal_weights: dict[str, float] | None = None,
+) -> list[Edge] | list[list[Edge]]:
     """
     Performs a brute force search to retrieve the top triplets from the graph.
 
@@ -572,4 +571,4 @@ async def brute_force_triplet_search(
                 query_batch if query_list_length else [query],
                 error,
             )
-            raise error
+            raise

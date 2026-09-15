@@ -1,16 +1,15 @@
 import asyncio
-from typing import Optional, List, Type, Union
 
 from cognee.base_config import get_base_config
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
-from cognee.modules.retrieval.utils.query_state import QueryState
-from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
-from cognee.shared.logging_utils import get_logger
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import (
     DEFAULT_TRIPLET_DISTANCE_PENALTY,
 )
-from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import generate_completion_batch
+from cognee.modules.retrieval.utils.query_state import QueryState
+from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
@@ -25,19 +24,19 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         self,
         user_prompt_path: str = "graph_context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
-        system_prompt: Optional[str] = None,
-        top_k: Optional[int] = 5,
-        node_type: Optional[Type] = None,
-        node_name: Optional[List[str]] = None,
+        system_prompt: str | None = None,
+        top_k: int | None = 5,
+        node_type: type | None = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
-        wide_search_top_k: Optional[int] = 100,
-        triplet_distance_penalty: Optional[float] = DEFAULT_TRIPLET_DISTANCE_PENALTY,
+        wide_search_top_k: int | None = 100,
+        triplet_distance_penalty: float | None = DEFAULT_TRIPLET_DISTANCE_PENALTY,
         feedback_influence: float = get_base_config().default_feedback_influence,
         context_extension_rounds: int = 4,
-        session_id: Optional[str] = None,
-        response_model: Type = str,
-        neighborhood_depth: Optional[int] = None,
-        neighborhood_seed_top_k: Optional[int] = 10,
+        session_id: str | None = None,
+        response_model: type = str,
+        neighborhood_depth: int | None = None,
+        neighborhood_seed_top_k: int | None = 10,
         include_references: bool = False,
     ):
         super().__init__(
@@ -60,8 +59,8 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         self.context_extension_rounds = context_extension_rounds
 
     async def get_retrieved_objects(
-        self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
-    ) -> Union[List[Edge], List[List[Edge]]]:
+        self, query: str | None = None, query_batch: list[str] | None = None
+    ) -> list[Edge] | list[list[Edge]]:
         """
         Extends the context for a given query by retrieving related triplets and generating new
         completions based on them.
@@ -136,8 +135,8 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
 
     @staticmethod
     def _collect_triplets(
-        states: dict, query: Optional[str], query_batch: List[str]
-    ) -> Union[List[Edge], List[List[Edge]]]:
+        states: dict, query: str | None, query_batch: list[str]
+    ) -> list[Edge] | list[list[Edge]]:
         """Extract final triplet lists from states."""
         if query:
             return states[query].triplets

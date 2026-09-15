@@ -1,20 +1,17 @@
 import asyncio
+from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
-
-from typing import Any, Awaitable, Callable, List, Optional, Union
+from typing import Any
 from uuid import UUID
 
+from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
-from cognee.modules.users.models import User
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.users.methods import get_default_user
-from cognee.modules.pipelines.utils import generate_pipeline_id
+from cognee.modules.operations import scrub_error_message
+from cognee.modules.operations.usage_accumulator import operation_usage_scope, parent_run_scope
 from cognee.modules.pipelines.exceptions import PipelineRunFailedError
-from cognee.tasks.ingestion import resolve_data_directories
 from cognee.modules.pipelines.layers.validate_pipeline_tasks import validate_pipeline_tasks
 from cognee.modules.pipelines.models import OperationOutcome, PipelineContext
 from cognee.modules.pipelines.models.PipelineRunInfo import (
@@ -22,16 +19,20 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunErrored,
     PipelineRunStarted,
 )
-from cognee.modules.operations.usage_accumulator import operation_usage_scope, parent_run_scope
 from cognee.modules.pipelines.operations import (
-    log_pipeline_run_start,
     log_pipeline_run_complete,
     log_pipeline_run_error,
     log_pipeline_run_progress,
+    log_pipeline_run_start,
 )
-from .run_tasks_data_item import run_tasks_data_item
-from ..tasks.task import Task
+from cognee.modules.pipelines.utils import generate_pipeline_id
+from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
+from cognee.tasks.ingestion import resolve_data_directories
 
+from ..tasks.task import Task
+from .run_tasks_data_item import run_tasks_data_item
 
 logger = get_logger("run_tasks(tasks: [Task], data)")
 
@@ -57,17 +58,17 @@ async def _close_capture_run(eval_capture, capture_scope) -> None:
 
 
 async def run_tasks(
-    tasks: Union[List[Task], Callable[[Any], List[Task]]],
+    tasks: list[Task] | Callable[[Any], list[Task]],
     dataset_id: UUID,
-    data: Optional[List[Any]] = None,
-    user: Optional[User] = None,
+    data: list[Any] | None = None,
+    user: User | None = None,
     pipeline_name: str = "unknown_pipeline",
     incremental_loading: bool = False,
     data_per_batch: int = 20,
-    extras: Optional[dict] = None,
-    rollback_handler: Optional[Callable[..., Awaitable[None]]] = None,
-    llm_config: Optional[LLMConfig] = None,
-    embedding_config: Optional[EmbeddingConfig] = None,
+    extras: dict | None = None,
+    rollback_handler: Callable[..., Awaitable[None]] | None = None,
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = False,
 ):
     """Run a pipeline over a dataset as ONE logical run.
@@ -213,11 +214,10 @@ async def run_tasks(
                             total_items=total_items,
                             current_stage=progress_state["current_stage"],
                         )
-                    except Exception as progress_error:
+                    except Exception:
                         # Progress reporting must never fail the pipeline run.
-                        logger.error(
-                            f"Failed to log pipeline run progress: {progress_error}",
-                            exc_info=True,
+                        logger.exception(
+                            "Failed to log pipeline run progress",
                         )
 
                 async def _run_item(data_item, item_tasks):
@@ -257,9 +257,11 @@ async def run_tasks(
 
                 # Separate successes from unhandled exceptions
                 results = []
+                first_item_error: BaseException | None = None
                 for i, result in enumerate(gathered):
                     if isinstance(result, BaseException):
                         logger.error(f"Item {i} failed: {result}", exc_info=result)
+                        first_item_error = first_item_error or result
                         results.append(
                             {
                                 "run_info": PipelineRunErrored(
@@ -267,6 +269,8 @@ async def run_tasks(
                                     payload=repr(result),
                                     dataset_id=dataset.id,
                                     dataset_name=dataset.name,
+                                    error_class=type(result).__name__,
+                                    error_message=scrub_error_message(result),
                                 ),
                             }
                         )
@@ -279,10 +283,20 @@ async def run_tasks(
                     for result in results
                     if isinstance(result["run_info"], PipelineRunErrored)
                 ]
+                for errored_result in errored_results:
+                    # The non-raising per-item path hands the root cause along
+                    # in the result dict rather than as a gathered exception.
+                    first_item_error = first_item_error or errored_result.get("error")
                 if errored_results:
-                    raise PipelineRunFailedError(
+                    failure = PipelineRunFailedError(
                         message="Pipeline run failed. Data item could not be processed."
                     )
+                    # Keep the underlying exception reachable: the outer handler
+                    # logs/classifies the ROOT cause, not this generic wrapper —
+                    # "Pipeline run failed" as the only recorded error text is
+                    # exactly the observability gap this exists to close.
+                    failure.first_error = first_item_error
+                    raise failure
 
                 # Flush durable storage BEFORE marking the run complete. If a push
                 # fails it must be treated as a failure of this run (rollback +
@@ -348,8 +362,15 @@ async def run_tasks(
                             data_ingestion_info=locals().get("results"),
                             error=error,
                         )
-                    except Exception as rollback_error:
-                        logger.error("Rollback errored: %s", rollback_error, exc_info=True)
+                    except Exception:
+                        logger.exception("Rollback errored")
+
+                # Per-item failures arrive wrapped in a generic
+                # PipelineRunFailedError; record and surface the ROOT cause so
+                # the run record and the yielded run info say what actually
+                # broke ("AuthenticationError: invalid api key"), not
+                # "Pipeline run failed".
+                root_error = getattr(error, "first_error", None) or error
 
                 await log_pipeline_run_error(
                     pipeline_run_id,
@@ -357,7 +378,7 @@ async def run_tasks(
                     pipeline_name,
                     dataset.id,
                     data,
-                    error,
+                    root_error,
                     user=user,
                     started_at=run_started_at,
                     tokens_in=run_usage.tokens_in,
@@ -373,14 +394,16 @@ async def run_tasks(
 
                 yield PipelineRunErrored(
                     pipeline_run_id=pipeline_run_id,
-                    payload=repr(error),
+                    payload=repr(root_error),
                     dataset_id=dataset.id,
                     dataset_name=dataset.name,
                     data_ingestion_info=locals().get(
                         "results"
                     ),  # Returns results if they exist or returns None
+                    error_class=type(root_error).__name__,
+                    error_message=scrub_error_message(root_error),
                 )
 
                 # In case of error during incremental loading of data just let the user know the pipeline Errored, don't raise error
                 if not isinstance(error, PipelineRunFailedError):
-                    raise error
+                    raise

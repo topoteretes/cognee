@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
-
 
 # Free-form on purpose: the set of client types keeps growing (Claude Code,
 # Codex, Slack, OpenCode, Cursor, Windsurf, ...) and gating it behind a
@@ -36,8 +35,8 @@ MemorySourceType = Literal["dataset", "company_brain", "knowledge_wiki", "projec
 
 
 class AgentDatasetRef(BaseModel):
-    id: Optional[str] = None
-    name: Optional[str] = None
+    id: str | None = None
+    name: str | None = None
     role: str = "read"
     type: MemorySourceType = "dataset"
 
@@ -47,14 +46,14 @@ class AgentConnection(BaseModel):
     agent_session_name: str
     type: AgentConnectionType = "unknown"
     memory_mode: AgentMemoryMode = "unknown"
-    session_id: Optional[str] = None
-    user_id: Optional[UUID] = None
-    tenant_id: Optional[UUID] = None
+    session_id: str | None = None
+    user_id: UUID | None = None
+    tenant_id: UUID | None = None
     datasets: list[AgentDatasetRef] = Field(default_factory=list)
-    last_active_at: Optional[datetime] = None
+    last_active_at: datetime | None = None
     status: AgentStatus = "unknown"
     source: AgentSource = "session_trace"
-    origin_function: Optional[str] = None
+    origin_function: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -62,8 +61,8 @@ class MemorySourceConnection(BaseModel):
     id: str
     name: str
     type: MemorySourceType = "dataset"
-    owner_id: Optional[UUID] = None
-    tenant_id: Optional[UUID] = None
+    owner_id: UUID | None = None
+    tenant_id: UUID | None = None
     status: AgentStatus = "active"
     connected_agent_ids: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -93,11 +92,11 @@ class RegisterAgentRequest(BaseModel):
     )
     type: AgentConnectionType = "api"
     memory_mode: AgentMemoryMode = "unknown"
-    session_id: Optional[str] = None
+    session_id: str | None = None
     dataset_ids: list[str] = Field(default_factory=list)
     dataset_names: list[str] = Field(default_factory=list)
     source: AgentSource = "api"
-    origin_function: Optional[str] = None
+    origin_function: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

@@ -9,4 +9,4 @@ from .PipelineRunInfo import (
     PipelineRunErrored,
     PipelineRunProgress,
 )
-from .DataItemStatus import DataItemStatus
+from .DataItemStatus import DataItemStatus, is_data_item_completed

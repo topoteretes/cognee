@@ -9,10 +9,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from dotenv import load_dotenv
-
 from cli import parse_args
 from corpus import read_source, sampled_chunks_from
+from dotenv import load_dotenv
 from measure import run_measurements
 from report import build_report
 

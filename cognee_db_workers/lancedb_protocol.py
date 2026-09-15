@@ -27,6 +27,11 @@ OP_TABLE_ADD = 122
 OP_TABLE_DELETE = 123  # handle_id; args: (where: str)
 OP_TABLE_RELEASE = 124  # handle_id; release the table handle (no-op if already gone)
 OP_TABLE_OPTIMIZE = 125  # handle_id; compact the table (lancedb AsyncTable.optimize)
+# handle_id; returns the table's Arrow schema, IPC-serialized like the schema
+# in OP_CREATE_TABLE (not pickled — same reasoning). Callers that build an
+# Arrow table to merge_insert need the stored schema: plain dicts make
+# merge_insert re-infer types and choke on the fixed-size-list vector column.
+OP_TABLE_SCHEMA = 126
 
 # Builder ops. args: (root_args, chain_steps, terminal_name, terminal_args,
 # terminal_kwargs) where root_args is the tuple passed to the root call

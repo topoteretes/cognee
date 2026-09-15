@@ -1,9 +1,9 @@
 import os
 from typing import Any
 
-from instructor.core import InstructorRetryException
 from pydantic import BaseModel
 
+from cognee.infrastructure.llm.exceptions import is_structured_output_validation_error
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.infrastructure.llm.prompts import read_query_prompt
@@ -73,7 +73,12 @@ async def extract_code_summary(content: str):
     else:
         try:
             result = await extract_summary(content, response_model=SummarizedCode)
-        except InstructorRetryException as e:
+        except Exception as e:
+            # Only a validation failure (the model answered, but never with a valid
+            # SummarizedCode) degrades to the mock summary. Transport, auth, quota
+            # and content-policy errors keep propagating so they stay actionable.
+            if not is_structured_output_validation_error(e):
+                raise
             logger.error("Failed to extract code summary, falling back to mock summary", exc_info=e)
             result = get_mock_summarized_code()
 

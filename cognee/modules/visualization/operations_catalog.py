@@ -21,12 +21,12 @@ present type of the same name.
 """
 
 from copy import deepcopy
-from typing import Any, Dict, List
+from typing import Any
 
 # effect ∈ {"produces", "enriches", "modifies", "removes"}
 # kind   ∈ {"pipeline", "self_improve", "lifecycle"}
 # scope  ∈ {"whole", "subset"}
-_OPERATIONS: List[Dict[str, Any]] = [
+_OPERATIONS: list[dict[str, Any]] = [
     {
         "name": "cognify",
         "label": "cognify",
@@ -115,9 +115,14 @@ _OPERATIONS: List[Dict[str, Any]] = [
         "kind": "pipeline",
         "scope": "whole",
         "pipeline_name": "memify_pipeline",
-        "summary": "Rewrites Entity descriptions from their neighborhood.",
+        "summary": "Rewrites Entity descriptions from their neighborhood, summarizes each "
+        "EntityType from its members, and writes is_a edge text.",
         "effects": [
             {"effect": "modifies", "target_type": "Entity", "property": "description"},
+            {"effect": "modifies", "target_type": "EntityType", "property": "description"},
+            # The field is Entity.is_a and the artifact is the entity->type edge,
+            # so this effect belongs to Entity, not to the type node.
+            {"effect": "modifies", "target_type": "Entity", "property": "is_a.edge_text"},
         ],
     },
     {
@@ -195,6 +200,6 @@ _OPERATIONS: List[Dict[str, Any]] = [
 ]
 
 
-def get_operations_catalog() -> List[Dict[str, Any]]:
+def get_operations_catalog() -> list[dict[str, Any]]:
     """Return the operation catalog (list of operation dicts)."""
     return deepcopy(_OPERATIONS)

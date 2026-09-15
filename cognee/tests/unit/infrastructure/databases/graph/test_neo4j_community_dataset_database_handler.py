@@ -8,10 +8,6 @@ from cognee.infrastructure.databases.dataset_database_handler.supported_dataset_
     supported_dataset_database_handlers,
 )
 from cognee.infrastructure.databases.graph.config import get_graph_config
-from cognee.infrastructure.databases.graph.neo4j_driver.Neo4jCommunityDatasetDatabaseHandler import (
-    NEO4J_COMMUNITY_DATASET_DATABASE_HANDLER,
-    Neo4jCommunityDatasetDatabaseHandler,
-)
 from cognee.infrastructure.databases.graph.neo4j_driver import neo4j_community_containers
 from cognee.infrastructure.databases.graph.neo4j_driver.neo4j_community_containers import (
     Neo4jCommunityContainerManager,
@@ -19,8 +15,11 @@ from cognee.infrastructure.databases.graph.neo4j_driver.neo4j_community_containe
     container_name_for_dataset,
     volume_name_for_dataset,
 )
+from cognee.infrastructure.databases.graph.neo4j_driver.Neo4jCommunityDatasetDatabaseHandler import (
+    NEO4J_COMMUNITY_DATASET_DATABASE_HANDLER,
+    Neo4jCommunityDatasetDatabaseHandler,
+)
 from cognee.infrastructure.databases.vector.config import get_vectordb_config
-
 
 DATASET_ID = UUID("12345678-1234-5678-1234-567812345678")
 CONTAINER_NAME = "cognee-neo4j-12345678123456781234567812345678"

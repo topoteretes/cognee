@@ -6,7 +6,6 @@ from uuid import uuid4
 import pytest
 
 import cognee.modules.ontology.construct_data_points_and_edges_with_ontology as ontology_module
-
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.observability import capture
 from cognee.modules.observability.capture import KIND_EXTRACTION_FUZZY_MATCH, KIND_RUN_MANIFEST

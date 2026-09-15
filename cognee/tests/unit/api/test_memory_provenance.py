@@ -8,21 +8,21 @@ build_provenance_graph = _module.build_provenance_graph
 
 
 def _scenario():
-    return dict(
-        tenants=[{"id": "T", "name": "Acme Logistics"}],
-        users=[
+    return {
+        "tenants": [{"id": "T", "name": "Acme Logistics"}],
+        "users": [
             {"id": "U1", "name": "alice@x", "tenant_ids": ["T"]},
             {"id": "U2", "name": "bob@x", "tenant_ids": ["T"]},
         ],
-        datasets=[
+        "datasets": [
             {"id": "D1", "name": "Fleet Ops", "owner_id": "U1", "tenant_id": "T"},
             {"id": "D2", "name": "Carrier Intel", "owner_id": "U2", "tenant_id": "T"},
         ],
-        files=[
+        "files": [
             {"id": "F1", "name": "a.txt", "dataset_ids": ["D1"]},
             {"id": "F2", "name": "b.txt", "dataset_ids": ["D1", "D2"]},
         ],
-        agents=[
+        "agents": [
             {
                 "id": "A1",
                 "name": "dispatch-copilot",
@@ -34,11 +34,11 @@ def _scenario():
                 ],
             }
         ],
-        sessions=[
+        "sessions": [
             {"id": "S1", "name": "sess1", "user_id": "U1", "dataset_id": "D1"},
             {"id": "S2", "name": "sess2", "user_id": "U2", "dataset_id": "D2", "agent_id": "A1"},
         ],
-    )
+    }
 
 
 def _build(**overrides):

@@ -22,7 +22,7 @@ async def test_cognify_agent_trace_feedback_success():
         node_set=["agent_trace_feedbacks"],
         user=None,
     )
-    mock_cognify.assert_called_once_with(datasets=["123"], user=None)
+    mock_cognify.assert_called_once_with(datasets=["123"], user=None, raise_on_error=False)
 
 
 @pytest.mark.asyncio
@@ -43,7 +43,7 @@ async def test_cognify_agent_trace_feedback_forwards_user():
         node_set=["agent_trace_feedbacks"],
         user=user,
     )
-    mock_cognify.assert_called_once_with(datasets=["123"], user=user)
+    mock_cognify.assert_called_once_with(datasets=["123"], user=user, raise_on_error=False)
 
 
 @pytest.mark.asyncio
@@ -101,3 +101,28 @@ async def test_cognify_agent_trace_feedback_cognify_failure():
 
         with pytest.raises(CogneeSystemError, match="Failed to cognify agent trace content"):
             await cognify_agent_trace_feedback(trace_content)
+
+
+@pytest.mark.asyncio
+async def test_cognify_agent_trace_feedback_errored_run_info_does_not_raise():
+    """An errored build (raise_on_error=False path) is logged, not raised,
+    so one bad trace session can't kill the whole memify run."""
+    from uuid import uuid4
+
+    from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunErrored
+
+    errored = PipelineRunErrored(
+        pipeline_run_id=uuid4(),
+        dataset_id=uuid4(),
+        dataset_name="ds",
+        error_class="AuthenticationError",
+        error_message="invalid api key",
+    )
+
+    with (
+        patch("cognee.add", new_callable=AsyncMock),
+        patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify,
+    ):
+        mock_cognify.return_value = {"ds": errored}
+
+        await cognify_agent_trace_feedback("Session ID: trace_session\n\nfeedback")

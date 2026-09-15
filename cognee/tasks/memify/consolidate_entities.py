@@ -21,7 +21,7 @@ required or used.
 
 import json
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 from uuid import UUID
 
 import numpy as np
@@ -38,7 +38,7 @@ logger = get_logger("consolidate_entities")
 # ``index_fields=["name"]`` so its collection is ``Entity_name``.
 ENTITY_VECTOR_COLLECTION = "Entity_name"
 
-DEFAULT_CONFIG: Dict[str, Any] = {
+DEFAULT_CONFIG: dict[str, Any] = {
     # Minimum cosine similarity between two entity-name embeddings to treat them
     # as the same entity.
     "similarity_threshold": 0.85,
@@ -57,7 +57,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 }
 
 
-def _resolve_config(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _resolve_config(config: dict[str, Any] | None) -> dict[str, Any]:
     """Merge the caller config over defaults and normalize derived fields."""
     cfg = dict(DEFAULT_CONFIG)
     if config:
@@ -79,7 +79,7 @@ def _normalize_name(name: Any) -> str:
 _SIMILARITY_CHUNK_SIZE = 512
 
 
-def _normalize_rows(vectors: List[List[float]]) -> np.ndarray:
+def _normalize_rows(vectors: list[list[float]]) -> np.ndarray:
     """L2-normalize each row so that a dot product equals cosine similarity.
 
     Returns a 2-D float array, or an empty array when there is nothing to
@@ -132,8 +132,8 @@ def _iter_topk_similar_pairs(
 
 
 def _cluster_entities(
-    members: List[Dict[str, Any]], vectors: List[List[float]], cfg: Dict[str, Any]
-) -> List[List[Dict[str, Any]]]:
+    members: list[dict[str, Any]], vectors: list[list[float]], cfg: dict[str, Any]
+) -> list[list[dict[str, Any]]]:
     """Group entities into duplicate clusters via union-find.
 
     Two entities are united when their name embeddings are at least
@@ -186,7 +186,7 @@ def _cluster_entities(
                 if normalized_names[index] == normalized_names[other] and same_type(index, other):
                     union(index, other)
 
-    clusters: Dict[int, List[Dict[str, Any]]] = {}
+    clusters: dict[int, list[dict[str, Any]]] = {}
     for index in range(count):
         clusters.setdefault(find(index), []).append(members[index])
 
@@ -194,14 +194,14 @@ def _cluster_entities(
 
 
 def _entity_type_map(
-    entity_ids: set, edges: List[Tuple], nodes_by_id: Dict[str, Dict[str, Any]]
-) -> Dict[str, Optional[str]]:
+    entity_ids: set, edges: list[tuple], nodes_by_id: dict[str, dict[str, Any]]
+) -> dict[str, str | None]:
     """Map each entity id to its EntityType name.
 
     Robust to the exact ``is_a`` relationship label: an entity's type is the
     name of any neighbor node whose ``type`` is ``"EntityType"``.
     """
-    type_of: Dict[str, Optional[str]] = {}
+    type_of: dict[str, str | None] = {}
     for edge in edges:
         source, target = str(edge[0]), str(edge[1])
         if source in entity_ids:
@@ -212,8 +212,8 @@ def _entity_type_map(
 
 
 async def detect_entity_duplicates(
-    data: Any = None, config: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
+    data: Any = None, config: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Find clusters of near-duplicate ``Entity`` nodes.
 
     Returns a payload ``{"clusters": [...], "edges": [...]}`` consumed by
@@ -236,7 +236,7 @@ async def detect_entity_duplicates(
     }
     type_of = _entity_type_map(entity_ids, edges, nodes_by_id)
 
-    members: List[Dict[str, Any]] = []
+    members: list[dict[str, Any]] = []
     for node_id, props in nodes:
         node_id = str(node_id)
         if node_id not in entity_ids:
@@ -275,8 +275,8 @@ async def detect_entity_duplicates(
 
 
 def plan_edge_repointing(
-    edges: List[Tuple], remap: Dict[str, str]
-) -> List[Tuple[str, str, str, Dict[str, Any]]]:
+    edges: list[tuple], remap: dict[str, str]
+) -> list[tuple[str, str, str, dict[str, Any]]]:
     """Compute the edges to (re)create on canonical nodes.
 
     Given every directed graph edge and a ``{duplicate_id: canonical_id}`` map,
@@ -286,7 +286,7 @@ def plan_edge_repointing(
     cascade, so this function only needs to add the re-pointed copies. This is
     the backend-agnostic edge-move helper (it does not call any per-edge delete).
     """
-    moved: List[Tuple[str, str, str, Dict[str, Any]]] = []
+    moved: list[tuple[str, str, str, dict[str, Any]]] = []
     for edge in edges:
         source, target, relationship = str(edge[0]), str(edge[1]), edge[2]
         properties = edge[3] if len(edge) > 3 and isinstance(edge[3], dict) else {}
@@ -300,9 +300,9 @@ def plan_edge_repointing(
     return moved
 
 
-def _node_degrees(edges: List[Tuple]) -> Dict[str, int]:
+def _node_degrees(edges: list[tuple]) -> dict[str, int]:
     """Count incident edges (both directions) for every node id."""
-    degree: Dict[str, int] = {}
+    degree: dict[str, int] = {}
     for edge in edges:
         for endpoint in (str(edge[0]), str(edge[1])):
             degree[endpoint] = degree.get(endpoint, 0) + 1
@@ -310,8 +310,8 @@ def _node_degrees(edges: List[Tuple]) -> Dict[str, int]:
 
 
 def _pick_canonical(
-    cluster: List[Dict[str, Any]], degree: Dict[str, int]
-) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    cluster: list[dict[str, Any]], degree: dict[str, int]
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Pick the canonical member of a cluster.
 
     Deterministic rule: highest graph degree wins (it is the most connected,
@@ -319,7 +319,7 @@ def _pick_canonical(
     ``created_at``; remaining ties break lexicographically by normalized name.
     """
 
-    def sort_key(member: Dict[str, Any]):
+    def sort_key(member: dict[str, Any]):
         created_at = member.get("created_at")
         created_at = created_at if isinstance(created_at, (int, float)) else float("inf")
         return (-degree.get(member["id"], 0), created_at, _normalize_name(member["name"]))
@@ -328,9 +328,9 @@ def _pick_canonical(
     return ordered[0], ordered[1:]
 
 
-def _union_descriptions(members: List[Dict[str, Any]]) -> Optional[str]:
+def _union_descriptions(members: list[dict[str, Any]]) -> str | None:
     """Concatenate distinct, non-empty descriptions in member order."""
-    descriptions: List[str] = []
+    descriptions: list[str] = []
     for member in members:
         description = (member.get("description") or "").strip()
         if description and description not in descriptions:
@@ -338,7 +338,7 @@ def _union_descriptions(members: List[Dict[str, Any]]) -> Optional[str]:
     return " ".join(descriptions) if descriptions else None
 
 
-def _belongs_to_set_tags(member: Dict[str, Any]) -> List[str]:
+def _belongs_to_set_tags(member: dict[str, Any]) -> list[str]:
     """Return a member's ``belongs_to_set`` tags as a list of strings.
 
     Reads the member's top-level value (populated by the detect task) and falls
@@ -354,7 +354,7 @@ def _belongs_to_set_tags(member: Dict[str, Any]) -> List[str]:
     if not isinstance(value, (list, tuple, set)):
         value = [value]
 
-    tags: List[str] = []
+    tags: list[str] = []
     for item in value:
         if item is None:
             continue
@@ -369,7 +369,7 @@ def _belongs_to_set_tags(member: Dict[str, Any]) -> List[str]:
     return tags
 
 
-def _union_belongs_to_set(members: List[Dict[str, Any]]) -> Optional[List[str]]:
+def _union_belongs_to_set(members: list[dict[str, Any]]) -> list[str] | None:
     """Union the ``belongs_to_set`` tags across members, preserving first-seen order.
 
     ``belongs_to_set`` is a node property that scopes a node to one or more
@@ -378,7 +378,7 @@ def _union_belongs_to_set(members: List[Dict[str, Any]]) -> Optional[List[str]]:
     scoping. Returns ``None`` when no member carries any tag, so the caller
     leaves the property untouched.
     """
-    unioned: List[str] = []
+    unioned: list[str] = []
     for member in members:
         for tag in _belongs_to_set_tags(member):
             if tag not in unioned:
@@ -387,8 +387,8 @@ def _union_belongs_to_set(members: List[Dict[str, Any]]) -> Optional[List[str]]:
 
 
 def _build_canonical_entity(
-    canonical: Dict[str, Any], duplicates: List[Dict[str, Any]]
-) -> Optional[Entity]:
+    canonical: dict[str, Any], duplicates: list[dict[str, Any]]
+) -> Entity | None:
     """Rebuild the canonical ``Entity`` with unioned description and tags.
 
     The node is reconstructed faithfully from its stored properties so that
@@ -423,12 +423,13 @@ def _build_canonical_entity(
 
     try:
         entity = Entity.from_dict(props)
-    except Exception as error:  # noqa: BLE001 - reconstruction is best-effort
+    except Exception as error:  # reconstruction is best-effort
         logger.warning(
             "consolidate_entities: could not rebuild canonical %s (%s); "
             "leaving its properties unchanged.",
             canonical.get("id"),
             error,
+            exc_info=True,
         )
         return None
 
@@ -447,8 +448,8 @@ def _build_canonical_entity(
 
 
 async def merge_entity_duplicates(
-    payload: Any, config: Optional[Dict[str, Any]] = None
-) -> List[Entity]:
+    payload: Any, config: dict[str, Any] | None = None
+) -> list[Entity]:
     """Collapse each detected cluster into a single canonical node.
 
     Steps per run (skipped entirely when ``dry_run`` is set):
@@ -471,8 +472,8 @@ async def merge_entity_duplicates(
 
     degree = _node_degrees(edges)
 
-    remap: Dict[str, str] = {}
-    plans: List[Tuple[Dict[str, Any], List[Dict[str, Any]]]] = []
+    remap: dict[str, str] = {}
+    plans: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
     for cluster in clusters:
         canonical, duplicates = _pick_canonical(cluster, degree)
         for duplicate in duplicates:
@@ -549,7 +550,7 @@ async def merge_entity_duplicates(
     return updated_canonicals
 
 
-def _unwrap_payload(payload: Any) -> Tuple[List[List[Dict[str, Any]]], List[Tuple]]:
+def _unwrap_payload(payload: Any) -> tuple[list[list[dict[str, Any]]], list[tuple]]:
     """Normalize the detect-task output into ``(clusters, edges)``.
 
     Tolerates the payload being wrapped in a single-element list by the

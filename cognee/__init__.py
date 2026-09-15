@@ -107,5 +107,6 @@ from .api.v1.tools import tools
 
 # Relational DB models
 from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord
-import cognee.modules.migrations.models  # noqa: F401  (registers global_database_version)
-import cognee.modules.tools.models  # noqa: F401  (registers tool_connections)
+import cognee.modules.migrations.models  # registers global_database_version
+import cognee.modules.tools.models  # registers tool_connections
+import cognee.modules.provenance.edge_evidence.models  # registers provenance_edge_evidence

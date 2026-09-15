@@ -1,27 +1,26 @@
 import asyncio
-from typing import List, Optional
 from uuid import uuid5
 
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.shared.logging_utils import get_logger
 
-from .config import get_translation_config, TranslationProviderType
-from .detect_language import detect_language_async, LanguageDetectionResult
-from .exceptions import TranslationError, LanguageDetectionError
-from .models import TranslatedContent, LanguageMetadata
-from .providers import get_translation_provider, TranslationResult
+from .config import TranslationProviderType, get_translation_config
+from .detect_language import LanguageDetectionResult, detect_language_async
+from .exceptions import LanguageDetectionError, TranslationError
+from .models import LanguageMetadata, TranslatedContent
+from .providers import TranslationResult, get_translation_provider
 
 logger = get_logger(__name__)
 
 
 async def translate_content(
-    data_chunks: List[DocumentChunk],
-    target_language: str = None,
+    data_chunks: list[DocumentChunk],
+    target_language: str | None = None,
     translation_provider: TranslationProviderType = None,
-    confidence_threshold: float = None,
+    confidence_threshold: float | None = None,
     skip_if_target_language: bool = True,
     preserve_original: bool = True,
-) -> List[DocumentChunk]:
+) -> list[DocumentChunk]:
     """
     Translate non-English content to the target language.
 
@@ -116,16 +115,15 @@ async def translate_content(
             )
 
             # Skip if already in target language
-            if not detection.requires_translation:
-                if skip_if_target_language:
-                    logger.debug(
-                        f"Skipping chunk {chunk.id}: already in target language "
-                        f"({detection.language_code})"
-                    )
-                    # Add language metadata to chunk
-                    _add_to_chunk_contains(chunk, language_metadata)
-                    processed_chunks.append(chunk)
-                    continue
+            if not detection.requires_translation and skip_if_target_language:
+                logger.debug(
+                    f"Skipping chunk {chunk.id}: already in target language "
+                    f"({detection.language_code})"
+                )
+                # Add language metadata to chunk
+                _add_to_chunk_contains(chunk, language_metadata)
+                processed_chunks.append(chunk)
+                continue
 
             # Translate the content
             logger.debug(
@@ -171,8 +169,8 @@ async def translate_content(
         except TranslationError as e:
             logger.error(f"Translation failed for chunk {chunk.id}: {e}")
             processed_chunks.append(chunk)
-        except Exception as e:
-            logger.error(f"Unexpected error processing chunk {chunk.id}: {e}")
+        except Exception:
+            logger.exception(f"Unexpected error processing chunk {chunk.id}")
             processed_chunks.append(chunk)
 
     logger.info(f"Translation task completed for {len(processed_chunks)} chunks")
@@ -188,9 +186,9 @@ def _add_to_chunk_contains(chunk: DocumentChunk, item) -> None:
 
 async def translate_text(
     text: str,
-    target_language: str = None,
+    target_language: str | None = None,
     translation_provider: TranslationProviderType = None,
-    source_language: Optional[str] = None,
+    source_language: str | None = None,
 ) -> TranslationResult:
     """
     Translate a single text string.
@@ -235,11 +233,11 @@ async def translate_text(
 
 
 async def batch_translate_texts(
-    texts: List[str],
-    target_language: str = None,
+    texts: list[str],
+    target_language: str | None = None,
     translation_provider: TranslationProviderType = None,
-    source_language: Optional[str] = None,
-) -> List[TranslationResult]:
+    source_language: str | None = None,
+) -> list[TranslationResult]:
     """
     Translate multiple text strings in batch.
 

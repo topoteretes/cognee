@@ -1,9 +1,16 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 from pydantic import BaseModel
 
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.streaming.token_sink import (
+    TokenSink,
+    get_active_token_sink,
+    requested_token_sink,
+)
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
 from cognee.infrastructure.session.session_concurrent_turn import (
     SessionTurnContext,
@@ -187,7 +194,7 @@ async def test_answer_uses_the_callers_own_prompts_and_response_model():
     )
 
     with patch(
-        "cognee.infrastructure.session.session_concurrent_turn.generate_completion",
+        "cognee.infrastructure.session.session_concurrent_turn.generate_answer",
         new_callable=AsyncMock,
         return_value=Answer(text="structured"),
     ) as generate:
@@ -219,7 +226,7 @@ async def test_answer_tracks_usage_only_for_uuid_users():
 
     with (
         patch(
-            "cognee.infrastructure.session.session_concurrent_turn.generate_completion",
+            "cognee.infrastructure.session.session_concurrent_turn.generate_answer",
             new_callable=AsyncMock,
             return_value="answer",
         ),
@@ -289,6 +296,48 @@ async def test_commit_applies_the_analysis_then_stores_the_qa():
 
 
 @pytest.mark.asyncio
+async def test_commit_claims_nothing_when_the_turn_was_not_answered():
+    """A discarded answer's retrieval and guidance must not be recorded as served.
+
+    The next turn's analysis is handed a QA row's ``used_*`` fields to rate. On a
+    no-answer turn the user saw an acknowledgement, so claiming either would have the
+    session rate guidance that never reached anyone.
+    """
+    manager = MagicMock()
+    manager.add_qa = AsyncMock()
+    snapshot = SessionTurnContext(
+        raw_message="thanks, that helped",
+        active_context_ids=("ctx-served-now",),
+        previous_qa_id="qa-1",
+        previous_served_context=(("ctx-rated", "Be concise."),),
+    )
+    analysis = SessionTurnAnalysis(response_to_user="Got it.")
+
+    with patch(
+        "cognee.infrastructure.session.session_concurrent_turn.apply_session_turn_analysis",
+        new_callable=AsyncMock,
+    ) as apply_analysis:
+        await commit_turn(
+            manager,
+            snapshot=snapshot,
+            analysis=analysis,
+            answer="Got it.",
+            user_id="u1",
+            session_id="s1",
+            used_graph_element_ids={"node_ids": ["n1"]},
+            answered=False,
+        )
+
+    stored = manager.add_qa.await_args.kwargs
+    assert stored["answer"] == "Got it."
+    assert stored["used_session_context_ids"] is None
+    assert stored["used_graph_element_ids"] is None
+    # The updates still apply: they rate the previous, genuinely answered turn.
+    assert apply_analysis.await_args.kwargs["previous_qa_id"] == "qa-1"
+    assert apply_analysis.await_args.kwargs["served_ids"] == ["ctx-rated"]
+
+
+@pytest.mark.asyncio
 async def test_commit_fails_open_when_the_qa_write_raises():
     """The answer already exists by commit time, so a broken cache must not surface."""
     manager = MagicMock()
@@ -334,3 +383,104 @@ async def test_commit_serializes_a_custom_response_model_for_storage():
         )
 
     assert manager.add_qa.await_args.kwargs["answer"] == '{"text":"structured"}'
+
+
+@pytest.mark.asyncio
+async def test_the_turn_answer_is_the_call_a_listening_client_watches():
+    """complete_turn must reach the LLM through generate_answer.
+
+    The whole streaming feature rests on this one call being the answer call.
+    Point it back at generate_completion and SSE goes silent while every other
+    test in this file still passes — the turn is still produced, still tracked,
+    still committed. Nothing else asserts it, so this is the guard.
+
+    It deliberately does not mock generate_answer: the assertion is that the
+    promotion is live *around the real completion*, which a mock would hide.
+    """
+    observed = {}
+
+    async def _completion_that_looks_around(**_kwargs):
+        observed["active"] = get_active_token_sink()
+        return "answer"
+
+    sink = TokenSink()
+    token = requested_token_sink.set(sink)
+    try:
+        with (
+            patch(
+                "cognee.infrastructure.llm.config.get_llm_context_config",
+                return_value=SimpleNamespace(llm_answer_streaming=True),
+            ),
+            patch(
+                "cognee.modules.retrieval.utils.completion.generate_completion",
+                new=AsyncMock(side_effect=_completion_that_looks_around),
+            ),
+            # Pin the adapter capability: unpinned it reads the ambient LLM
+            # config, so whether this test promotes at all would depend on
+            # whatever provider the host happens to have configured.
+            patch.object(LLMGateway, "supports_answer_streaming", return_value=True),
+        ):
+            answer = await complete_turn(
+                snapshot=SessionTurnContext(raw_message="question"),
+                context="context",
+                user_id="not-a-uuid",
+                session_id="s1",
+                prompts=TurnPrompts(
+                    user_prompt_path="user.txt",
+                    system_prompt_path="system.txt",
+                    system_prompt=None,
+                    response_model=str,
+                ),
+            )
+    finally:
+        requested_token_sink.reset(token)
+
+    assert answer == "answer"
+    assert observed["active"] is sink, (
+        "the turn's answer did not run inside answer_scope — complete_turn is no "
+        "longer routed through generate_answer, so nothing will stream"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_turn_does_not_stream_when_nobody_asked():
+    """The same path with no sink installed promotes nothing.
+
+    Streaming is never load-bearing: with no listener the turn runs exactly as
+    it did before the feature existed.
+    """
+    observed = {}
+
+    async def _completion_that_looks_around(**_kwargs):
+        observed["active"] = get_active_token_sink()
+        return "answer"
+
+    with (
+        patch(
+            "cognee.infrastructure.llm.config.get_llm_context_config",
+            return_value=SimpleNamespace(llm_answer_streaming=True),
+        ),
+        patch(
+            "cognee.modules.retrieval.utils.completion.generate_completion",
+            new=AsyncMock(side_effect=_completion_that_looks_around),
+        ),
+        # Pin the adapter capability: unpinned it reads the ambient LLM
+        # config, so whether this test promotes at all would depend on
+        # whatever provider the host happens to have configured.
+        patch.object(LLMGateway, "supports_answer_streaming", return_value=True),
+    ):
+        answer = await complete_turn(
+            snapshot=SessionTurnContext(raw_message="question"),
+            context="context",
+            user_id="not-a-uuid",
+            session_id="s1",
+            prompts=TurnPrompts(
+                user_prompt_path="user.txt",
+                system_prompt_path="system.txt",
+                system_prompt=None,
+                response_model=str,
+            ),
+        )
+
+    assert answer == "answer"
+    assert observed["active"] is None

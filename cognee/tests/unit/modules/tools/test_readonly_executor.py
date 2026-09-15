@@ -78,12 +78,13 @@ async def test_write_blocked_at_database_level(sample_db):
 
 @pytest.mark.asyncio
 async def test_json_coercion_of_python_types(sample_db):
-    from cognee.modules.tools.text_to_sql.executor import _json_safe
     from decimal import Decimal
     from uuid import uuid4
 
+    from cognee.modules.tools.text_to_sql.executor import _json_safe
+
     assert _json_safe(Decimal("1.5")) == 1.5
-    assert _json_safe(datetime(2026, 1, 1)) == "2026-01-01T00:00:00"
+    assert _json_safe(datetime(2026, 1, 1)) == "2026-01-01T00:00:00"  # noqa: DTZ001 - naive input is a valid case for the converter
     uid = uuid4()
     assert _json_safe(uid) == str(uid)
     assert _json_safe(b"\x00\x01") == "AAE="

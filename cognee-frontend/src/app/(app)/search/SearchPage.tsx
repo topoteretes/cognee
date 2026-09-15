@@ -10,8 +10,7 @@ import getSearchHistory, { type SearchHistoryEntry } from "@/modules/searchHisto
 import { listSessions, getSessionDetail, SEARCH_SESSION_PREFIX, type SessionRow } from "@/modules/sessions/getSessions";
 import { TrackPageView, trackEvent } from "@/modules/analytics";
 import BrainSelector from "@/ui/elements/BrainSelector";
-
-type SearchScope = "documents" | "agent";
+import { isInsufficientCreditsError } from "@/utils/insufficientCredits";
 
 interface SearchResultItem {
   search_result?: string[];
@@ -182,16 +181,25 @@ function dateLabel(dateStr: string): string {
 const LEGACY_PREFIX = "hist-";
 
 function legacyToConversations(entries: SearchHistoryEntry[]): Conversation[] {
-  return entries.map((e) => ({
-    id: `${LEGACY_PREFIX}${e.id}`,
-    title: e.query.slice(0, 60),
-    createdAt: e.created_at,
-    updatedAt: e.created_at,
-    messages: [
-      { id: `hu-${e.id}`, role: "user" as const, content: e.query, timestamp: e.created_at },
-      { id: `ha-${e.id}`, role: "assistant" as const, content: e.answer || "No results found.", dataset: e.dataset_name, timestamp: e.created_at },
-    ],
-  }));
+  return entries.map((e) => {
+    // Some legacy /v1/search rows come back with no query text — and the
+    // same vintage of rows can lack created_at too (both pre-date the
+    // fields being required) — the types say `string` but the backend
+    // doesn't actually guarantee either. A missing timestamp sorts last
+    // and groups under "Older" (dateLabel of an unparseable date).
+    const query = e.query || "";
+    const ts = e.created_at || "";
+    return {
+      id: `${LEGACY_PREFIX}${e.id}`,
+      title: query.slice(0, 60),
+      createdAt: ts,
+      updatedAt: ts,
+      messages: [
+        { id: `hu-${e.id}`, role: "user" as const, content: query, timestamp: ts },
+        { id: `ha-${e.id}`, role: "assistant" as const, content: e.answer || "No results found.", dataset: e.dataset_name, timestamp: ts },
+      ],
+    };
+  });
 }
 
 // ── Convert a backend session (QA entries) → Conversation ──
@@ -255,8 +263,6 @@ export default function SearchPage() {
 
   const [input, setInput] = useState("");
   const [isSearching, setIsSearching] = useState(false);
-  const [scope, setScope] = useState<SearchScope>("documents");
-  const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // Conversations: local (this visit) + session-backed history + legacy entries
@@ -277,7 +283,7 @@ export default function SearchPage() {
     const sessionBacked = [...sessionConvos, ...historyConvos.filter((h) => !localIds.has(h.id))];
     const sessionTitles = new Set(sessionBacked.map((c) => c.title));
     const legacy = legacyConvos.filter((l) => !sessionTitles.has(l.title));
-    return [...sessionBacked, ...legacy].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return [...sessionBacked, ...legacy].sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
   })();
 
   // Rebuild the sidebar from backend sessions on mount: only this page's own
@@ -299,7 +305,6 @@ export default function SearchPage() {
       try {
         const page = await listSessions(cogniInstance, { range: "30d", limit: 50 });
         if (cancelled) return;
-        setSessions(page.sessions);
         const own = page.sessions
           .filter((s) => s.session_id.startsWith(SESSION_PREFIX))
           .slice(0, 20);
@@ -315,7 +320,7 @@ export default function SearchPage() {
               if (!convo) return;
               setHistoryConvos((prev) =>
                 [...prev.filter((c) => c.id !== convo.id), convo]
-                  .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+                  .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "")),
               );
               setActiveConvoId((prev) => prev || convo.id);
             })
@@ -398,19 +403,12 @@ export default function SearchPage() {
     setIsSearching(true);
 
     try {
-      // Agent-memory scope retrieves FROM an agent session, so it must not
-      // pick up this page's own search sessions.
-      const mostRecentAgentSessionId = sessions.find(
-        (s) => !s.session_id.startsWith(SESSION_PREFIX),
-      )?.session_id;
-      const sendScope = scope === "agent" ? ["session", "trace"] : "graph";
-      // Graph searches carry the conversation's session id so the backend
-      // records the Q&A — that's what persists the chat across refreshes.
-      const sendSessionId = scope === "agent" ? mostRecentAgentSessionId : finalConvoId;
+      // The conversation's session id is sent with every search so the
+      // backend records the Q&A — that's what persists the chat across refreshes.
       const data = await recallKnowledge(cogniInstance, {
         query,
-        scope: sendScope as never,
-        sessionId: sendSessionId,
+        scope: "graph",
+        sessionId: finalConvoId,
         datasetIds: searchDatasetIds,
       });
       const resultData = (Array.isArray(data) ? data : []) as SearchResultItem[];
@@ -424,12 +422,24 @@ export default function SearchPage() {
         })
       );
     } catch (err) {
-      setSessionConvos((prev) =>
-        prev.map((c) => {
-          if (c.id !== finalConvoId) return c;
-          return { ...c, messages: c.messages.map((m) => m.id === loadingMsg.id ? { ...m, content: err instanceof Error ? err.message : "Search failed", loading: false, error: true } : m) };
-        })
-      );
+      // On insufficient credits, the pod interceptor (services/http/pod.ts)
+      // already opened the global modal — drop the placeholder message
+      // instead of showing a redundant inline error bubble underneath it.
+      if (isInsufficientCreditsError(err)) {
+        setSessionConvos((prev) =>
+          prev.map((c) => {
+            if (c.id !== finalConvoId) return c;
+            return { ...c, messages: c.messages.filter((m) => m.id !== loadingMsg.id) };
+          })
+        );
+      } else {
+        setSessionConvos((prev) =>
+          prev.map((c) => {
+            if (c.id !== finalConvoId) return c;
+            return { ...c, messages: c.messages.map((m) => m.id === loadingMsg.id ? { ...m, content: err instanceof Error ? err.message : "Search failed", loading: false, error: true } : m) };
+          })
+        );
+      }
     } finally {
       setIsSearching(false);
       setTimeout(() => inputRef.current?.focus(), 100);
@@ -576,6 +586,16 @@ export default function SearchPage() {
                   style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start" }}
                 >
                   <div
+                    // Distinguishes a painted answer from a pending one so e2e
+                    // can fail on a stuck spinner instead of timing out on the
+                    // absence of an error.
+                    data-testid={
+                      msg.role === "assistant"
+                        ? msg.loading
+                          ? "assistant-message-loading"
+                          : "assistant-message"
+                        : "user-message"
+                    }
                     style={{
                       maxWidth: msg.role === "user" ? "70%" : "85%",
                       background: msg.role === "user" ? "#6510F4" : msg.error ? "rgba(239,68,68,0.1)" : "rgba(255,255,255,0.06)",
@@ -617,32 +637,10 @@ export default function SearchPage() {
         {/* Input area */}
         <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", padding: "12px 32px 16px" }}>
           <div style={{ maxWidth: 800, marginInline: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
-            {/* Controls: scope pills + brain selector */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                {(["documents", "agent"] as const).map((s) => {
-                  const active = scope === s;
-                  const label = s === "documents" ? "Company Brain" : "Agent Memory";
-                  return (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => setScope(s)}
-                      className="cursor-pointer"
-                      style={{
-                        background: active ? "rgba(188,155,255,0.35)" : "rgba(255,255,255,0.06)",
-                        color: active ? "#EDECEA" : "rgba(237,236,234,0.6)",
-                        border: active ? "none" : "1px solid rgba(255,255,255,0.1)",
-                        borderRadius: 100, paddingBlock: 4, paddingInline: 10,
-                        fontSize: 11, lineHeight: "16px", fontFamily: "inherit",
-                        cursor: "pointer",
-                      }}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
+            {/* Dataset picker — searches are scoped to one brain
+                (searchDatasetIds), so the scope must be visible and
+                changeable right where the question is typed. */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
               <BrainSelector allowAll={false} align="right" direction="up" />
             </div>
 

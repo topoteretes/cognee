@@ -1,21 +1,22 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID, uuid4
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
-from uuid import uuid4
 
 from cognee.exceptions import CogneeValidationError
+from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
+from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
+from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
+from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.observability import capture
 from cognee.modules.observability.capture import KIND_RETRIEVAL_CANDIDATES
 from cognee.modules.retrieval.utils import brute_force_triplet_search as bfts_module
 from cognee.modules.retrieval.utils.brute_force_triplet_search import (
     brute_force_triplet_search,
-    get_memory_fragment,
     format_triplets,
+    get_memory_fragment,
 )
-from cognee.modules.graph.models.EdgeType import EdgeType
-from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
-from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
-from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
-from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
 
 
 class MockScoredResult:
@@ -962,9 +963,9 @@ async def test_brute_force_triplet_search_generic_exception():
             "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
             return_value=mock_vector_engine,
         ),
+        pytest.raises(Exception, match="Generic error"),
     ):
-        with pytest.raises(Exception, match="Generic error"):
-            await brute_force_triplet_search(query="test query")
+        await brute_force_triplet_search(query="test query")
 
 
 @pytest.mark.asyncio
@@ -1232,7 +1233,7 @@ async def test_brute_force_triplet_search_batch_error_fallback():
 @pytest.mark.asyncio
 async def test_cognee_graph_mapping_batch_shapes():
     """Test that CogneeGraph mapping methods accept list-of-lists with query_list_length set."""
-    from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
+    from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
 
     graph = CogneeGraph()
     node1 = Node("node1", {"name": "Node1"})
@@ -1600,3 +1601,56 @@ async def test_the_default_penalty_is_used_when_none_is_passed(fake_capture_sink
     await capture.drain()
     [event] = _candidate_events(fake_capture_sink)
     assert event["payload"]["top_k"][0]["score"] == pytest.approx(0.5 + 1.5 + 6.5)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unsupported", [False, True])
+async def test_neighborhood_scores_only_expansion_ids(unsupported):
+    from cognee.modules.retrieval.utils.brute_force_triplet_search import (
+        _get_top_triplet_importances,
+    )
+    from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
+
+    seed_id = UUID("00000000-0000-0000-0000-000000000001")
+    neighbor_id = UUID("00000000-0000-0000-0000-000000000002")
+    seed = MockScoredResult(seed_id, 0.1)
+    neighbor = MockScoredResult(neighbor_id, 0.8)
+    engine = AsyncMock()
+    engine.search.return_value = []
+    engine.score_by_ids.return_value = [neighbor]
+    if unsupported:
+        engine.score_by_ids.side_effect = NotImplementedError
+    search = NodeEdgeVectorSearch(vector_engine=engine)
+    search.query_vector = [1.0, 0.0]
+    search.node_distances = {"Entity_name": [seed]}
+    graph = AsyncMock()
+    # Graph IDs may be UUIDs while vector search exposes string IDs.
+    graph.nodes = {seed_id: object(), neighbor_id: object()}
+    with patch(
+        "cognee.modules.retrieval.utils.brute_force_triplet_search.get_memory_fragment",
+        return_value=graph,
+    ):
+        await _get_top_triplet_importances(
+            memory_fragment=None,
+            vector_search=search,
+            properties_to_project=None,
+            node_type=None,
+            node_name=None,
+            node_name_filter_operator="OR",
+            triplet_distance_penalty=6.5,
+            feedback_influence=0.0,
+            wide_search_limit=1,
+            top_k=5,
+            neighborhood_depth=1,
+        )
+    expected = [seed] if unsupported else [seed, neighbor]
+    assert search.node_distances["Entity_name"] == expected
+    engine.score_by_ids.assert_awaited_once_with(
+        collection_name="Entity_name",
+        data_point_ids=[str(neighbor_id)],
+        query_vector=[1.0, 0.0],
+    )
+    engine.search.assert_not_awaited()
+    graph.map_vector_distances_to_graph_nodes.assert_awaited_once_with(
+        node_distances={"Entity_name": expected}, query_list_length=None
+    )

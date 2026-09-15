@@ -1,18 +1,16 @@
 import asyncio
-from typing import Optional, Type
 from uuid import uuid5
+
 from pydantic import BaseModel
 
-from cognee.tasks.summarization.exceptions import InvalidSummaryInputsError
-from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.infrastructure.llm.extraction.extract_summary import extract_summary_with_provenance
 from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
+from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.cognify.config import get_cognify_config
-from cognee.shared.logging_utils import get_logger
-from cognee.tasks.summarization.models import TextSummary
-
-
 from cognee.modules.pipelines.tasks.task import task_summary
+from cognee.shared.logging_utils import get_logger
+from cognee.tasks.summarization.exceptions import InvalidSummaryInputsError
+from cognee.tasks.summarization.models import TextSummary
 
 logger = get_logger("summarize_text")
 
@@ -22,7 +20,7 @@ CAPTURE_STAGE = "summarize_text"
 
 @task_summary("Summarized {n} chunk(s)")
 async def summarize_text(
-    data_chunks: list[DocumentChunk], summarization_model: Optional[Type[BaseModel]] = None
+    data_chunks: list[DocumentChunk], summarization_model: type[BaseModel] | None = None
 ):
     """
     Summarize the text contained in the provided data chunks.
@@ -88,13 +86,13 @@ async def summarize_text(
     summaries: list[TextSummary] = []
     # Run-wide provenance for the manifest; the stage model and prompt are the
     # same for every chunk, so the last chunk's values describe the run.
-    run_model: Optional[str] = None
-    run_prompt_fingerprint: Optional[str] = None
+    run_model: str | None = None
+    run_prompt_fingerprint: str | None = None
 
     for chunk, (llm_output, prompt_text, model_name) in zip(data_chunks, results):
         # Capture-only provenance; never stored on the node.
-        prompt_fingerprint: Optional[str] = None
-        source_text_hash: Optional[str] = None
+        prompt_fingerprint: str | None = None
+        source_text_hash: str | None = None
         if active:
             # The sanctioned snapshot cost: sha256 of the chunk text (and of each
             # distinct prompt) — only while capturing. Guarded: the chunk is
@@ -138,9 +136,9 @@ async def summarize_text(
 def _emit_summary_generated(
     summary: TextSummary,
     chunk: DocumentChunk,
-    model: Optional[str],
-    prompt_fingerprint: Optional[str],
-    source_text_hash: Optional[str],
+    model: str | None,
+    prompt_fingerprint: str | None,
+    source_text_hash: str | None,
 ) -> None:
     """Buffer one ``summary.generated`` event: ids, fingerprints and a size — no text.
 

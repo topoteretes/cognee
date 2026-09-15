@@ -1,11 +1,12 @@
 """Unit tests for FsCacheAdapter CRUD operations."""
 
-from datetime import datetime
-from uuid import uuid4
 import tempfile
 from contextlib import contextmanager
-import pytest
+from datetime import datetime, timezone
 from unittest.mock import patch
+from uuid import uuid4
+
+import pytest
 
 from cognee.infrastructure.databases.exceptions import (
     CacheConnectionError,
@@ -18,18 +19,20 @@ from cognee.tasks.memify.feedback_weights_constants import (
 
 @pytest.fixture
 def adapter():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with patch(
+    with (
+        tempfile.TemporaryDirectory() as tmpdir,
+        patch(
             "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
             return_value={"data_root_directory": tmpdir},
-        ):
-            from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
-                FSCacheAdapter,
-            )
+        ),
+    ):
+        from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
+            FSCacheAdapter,
+        )
 
-            inst = FSCacheAdapter()
-            yield inst
-            inst.cache.close()
+        inst = FSCacheAdapter()
+        yield inst
+        inst.cache.close()
 
 
 @pytest.mark.asyncio
@@ -199,7 +202,7 @@ async def test_append_agent_trace_step_sanitizes_non_json_safe_values(adapter):
         status="success",
         method_params={
             "trip_id": uuid4(),
-            "created_at": datetime(2026, 4, 14, 12, 0, 0),
+            "created_at": datetime(2026, 4, 14, 12, 0, 0, tzinfo=timezone.utc),
             "obj": _Obj(),
         },
         method_return_value={"result_id": uuid4(), "owner": _Obj()},

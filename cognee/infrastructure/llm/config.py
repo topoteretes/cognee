@@ -1,6 +1,6 @@
 import json
 from functools import lru_cache
-from typing import Any, ClassVar
+from typing import Any
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -83,6 +83,7 @@ class LLMConfig(BaseSettings):
     - llm_api_version
     - llm_temperature
     - llm_streaming
+    - llm_answer_streaming
     - llm_max_completion_tokens
     - transcription_model
     - graph_prompt_path
@@ -132,6 +133,19 @@ class LLMConfig(BaseSettings):
     llm_temperature: float = 0.0
     llm_seed: int | None = None
     llm_streaming: bool = False
+
+    # Stream answer tokens out of the plain-text completion path so a caller can
+    # render them as they arrive (env LLM_ANSWER_STREAMING). Off by default: the
+    # returned value is identical either way, so enabling it changes nothing for
+    # a caller that is not consuming a token sink.
+    #
+    # Deliberately NOT llm_streaming above, which is a different, older flag:
+    # that one is unread by OpenAI/Azure, absent from every other provider, and
+    # on Bedrock injects stream=True into the instructor path where nothing
+    # consumes a stream. It is also part of the adapter LRU cache key, so
+    # flipping it changes adapter identity.
+    llm_answer_streaming: bool = False
+
     llm_max_completion_tokens: int = 16384
 
     baml_llm_provider: str = "openai"
@@ -208,9 +222,13 @@ class LLMConfig(BaseSettings):
         """
         for field_name in self.__class__.model_fields:
             value = getattr(self, field_name, None)
-            if isinstance(value, str) and len(value) >= 2:
-                if value[0] == value[-1] and value[0] in ("'", '"'):
-                    setattr(self, field_name, value[1:-1])
+            if (
+                isinstance(value, str)
+                and len(value) >= 2
+                and value[0] == value[-1]
+                and value[0] in ("'", '"')
+            ):
+                setattr(self, field_name, value[1:-1])
 
         return self
 
@@ -289,7 +307,7 @@ class LLMConfig(BaseSettings):
         """
         return _apply_local_rate_limit_default(self)
 
-    def model_post_init(self, __context) -> None:
+    def model_post_init(self, context, /) -> None:
         """Initialize the BAML registry after the model is created."""
         # Check if BAML is selected as structured output framework but not available
         if self.structured_output_framework.lower() == "baml" and ClientRegistry is None:
@@ -392,6 +410,7 @@ class LLMConfig(BaseSettings):
             "temperature": self.llm_temperature,
             "seed": self.llm_seed,
             "streaming": self.llm_streaming,
+            "answer_streaming": self.llm_answer_streaming,
             "max_completion_tokens": self.llm_max_completion_tokens,
             "transcription_model": self.transcription_model,
             "graph_prompt_path": self.graph_prompt_path,
