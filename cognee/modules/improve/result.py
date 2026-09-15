@@ -223,6 +223,23 @@ class ImproveResult(BaseModel):
             return "skipped"
         return "completed"
 
+    @property
+    def lock_held(self) -> bool:
+        """True when the run lost its lock claim and did nothing.
+
+        The shape ``all_skipped(..., REASON_LOCK_HELD)`` builds: every stage
+        skipped with ``lock_held``. This property is the one place that shape
+        is decoded — callers (the remember() bridge) never re-derive it.
+        """
+        return (
+            self.finished
+            and bool(self.stages)
+            and all(
+                stage.status == "skipped" and stage.reason == REASON_LOCK_HELD
+                for stage in self.stages
+            )
+        )
+
     def record(self, stage_result: StageResult) -> None:
         """Append one stage's outcome, nesting the legacy memify return (D4)."""
         self.stages.append(stage_result)

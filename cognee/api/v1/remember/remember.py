@@ -311,18 +311,6 @@ async def _add_to_session(session_id: str, data, user):
     logger.info("remember: added entry to session '%s'", session_id)
 
 
-def _bridge_lost_lock(improve_result) -> bool:
-    """True when the bridge's improve lost its lock claim and did nothing."""
-    from cognee.modules.improve.result import REASON_LOCK_HELD
-
-    stages = getattr(improve_result, "stages", None) or []
-    return (
-        getattr(improve_result, "status", None) == "skipped"
-        and bool(stages)
-        and all(stage.reason == REASON_LOCK_HELD for stage in stages)
-    )
-
-
 async def _rearm_session_improve_debounce(session_id: str, user) -> None:
     """Refund the debounce window a lock-held bridge spent without persisting."""
     from cognee.api.v1.remember.auto_improve_debounce import (
@@ -1839,7 +1827,7 @@ async def _remember_inner(
                                 "remember: session improve reported errors (non-fatal): %s",
                                 result.improve_error,
                             )
-                        elif _bridge_lost_lock(result.improve):
+                        elif result.improve.lock_held:
                             # Nothing was persisted — never log this as bridged.
                             # Refund the debounce window so the next remember()
                             # retries instead of waiting out a window this

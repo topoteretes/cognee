@@ -85,6 +85,21 @@ def test_improve_result_status_summary():
     assert all_skipped.memify_run == {}
 
 
+def test_lock_held_decodes_only_the_lost_claim_shape():
+    """The one decoder of the all-skipped-with-lock_held shape; the remember()
+    bridge reads this instead of re-deriving the pattern."""
+    assert ImproveResult.all_skipped(["a", "b"], REASON_LOCK_HELD).lock_held is True
+
+    assert ImproveResult().lock_held is False  # no stages: nothing was claimed
+    assert ImproveResult.all_skipped(["a"], "no_session_ids").lock_held is False
+    mixed = ImproveResult(
+        stages=[StageResult.skipped("a", REASON_LOCK_HELD), StageResult.completed("b")]
+    )
+    assert mixed.lock_held is False  # something ran, so the lock was won
+    running = ImproveResult(background=True, finished=False)
+    assert running.lock_held is False
+
+
 def test_model_dump_includes_status_and_serializes_run_info():
     info = _info(PipelineRunCompleted)
     result = ImproveResult(
