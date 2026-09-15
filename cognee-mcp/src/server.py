@@ -313,6 +313,7 @@ async def remember(
     session_id: str | None = None,
     custom_prompt: str | None = None,
     background: bool = False,
+    self_improvement: bool | None = None,
 ) -> list:
     """Store data in memory.
 
@@ -322,8 +323,9 @@ async def remember(
     pipeline to ingest data and build the knowledge graph.
 
     With session_id (session memory): Stores the data in the session
-    cache only. Fast, no entity extraction. Omit session_id when the
-    content should be stored as permanent graph memory.
+    cache. Direct mode may also bridge it to the graph in the background;
+    API mode uses typed cache entries and does not bridge to the graph.
+    Omit session_id when the content should be stored as permanent graph memory.
 
     Pass either `data` (text) or `filename` + `content_base64` (a file
     upload, up to 10 MB), not both. File uploads are permanent-memory
@@ -344,9 +346,15 @@ async def remember(
         agent-scoped dataset (e.g. "cursor_vscode_memory"), or
         "main_dataset" if no client identity is detected.
     session_id : str, optional
-        Session ID. When set, stores in session cache only.
+        Session ID. Stores in cache; direct mode may also bridge to the graph
+        unless self_improvement is False.
     custom_prompt : str, optional
         Custom prompt for entity extraction (permanent mode only).
+    self_improvement : bool, optional
+        False skips automatic improvement after permanent ingestion; add and
+        cognify still run. In direct session mode, False disables the background
+        session-to-graph bridge. API session entries are cache-only regardless
+        of this flag. Omit to retain the core default (currently True).
     background : bool
         Queue permanent ingestion as a background task and return immediately
         instead of waiting for the pipeline. Use when the caller has a request
@@ -392,6 +400,8 @@ async def remember(
 
     dataset_name = dataset_name or _agent_scoped_default_dataset()
 
+    improvement_kwargs = {} if self_improvement is None else {"self_improvement": self_improvement}
+
     # Permanent-memory ingestion runs add + cognify (+ improve), which routinely
     # outruns an MCP host's per-request deadline — the same constraint the
     # cognify tool documents as "background process launched due to MCP timeout
@@ -416,6 +426,7 @@ async def remember(
                 dataset_name=dataset_name,
                 session_id=None,
                 custom_prompt=custom_prompt,
+                **improvement_kwargs,
             )
         )
         queued = f"'{filename}'" if content_base64 else "text"
@@ -440,6 +451,7 @@ async def remember(
                 dataset_name=dataset_name,
                 session_id=session_id,
                 custom_prompt=custom_prompt,
+                **improvement_kwargs,
             )
             status = result.get("status", "completed")
             if session_id:

@@ -1131,3 +1131,87 @@ def test_path_flag_moves_endpoint_without_clobbering_defaults(transport, explici
     app = server._build_http_app(transport, "127.0.0.1", explicit)
 
     assert _probe(app, transport, path=expected) != 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag", [None, False, True])
+@pytest.mark.parametrize("use_api", [False, True])
+@pytest.mark.parametrize(
+    ("session_id", "background", "upload"),
+    [
+        (None, False, False),
+        (None, True, False),
+        (None, False, True),
+        (None, True, True),
+        ("s1", False, False),
+        ("s1", True, False),
+    ],
+)
+async def test_remember_self_improvement_end_to_end(
+    monkeypatch, flag, use_api, session_id, background, upload
+):
+    """The tool carries False through real client dispatch, including queued uploads."""
+    from email import policy
+    from email.parser import BytesParser
+
+    server = importlib.import_module("src.server")
+    requests = []
+    fake = FakeCogneeModule()
+    client = await _mock_api_client(requests) if use_api else _local_client(fake)
+    monkeypatch.setattr(server, "cognee_client", client)
+    kwargs = {"dataset_name": "ds", "session_id": session_id, "background": background}
+    if flag is not None:
+        kwargs["self_improvement"] = flag
+    if upload:
+        kwargs.update(filename="note.txt", content_base64=base64.b64encode(b"memory").decode())
+    else:
+        kwargs["data"] = "memory"
+    try:
+        result = await server.remember(**kwargs)
+        if background and not session_id:
+            await asyncio.gather(*server._background_tasks)
+        assert "Error" not in result[0].text
+        if not use_api:
+            assert len(fake.calls) == 1
+            received = fake.calls[0]
+            assert received["dataset_name"] == "ds"
+            if upload:
+                assert fake.seen_payloads == [b"memory"]
+            else:
+                assert received["data"] == "memory"
+        elif session_id:
+            assert requests[-1].url.path == "/api/v1/remember/entry"
+            received = json.loads(requests[-1].content)
+            assert received["entry"]["answer"] == "memory"
+        else:
+            request = requests[-1]
+            assert request.url.path == "/api/v1/remember"
+            message = BytesParser(policy=policy.default).parsebytes(
+                f"Content-Type: {request.headers['content-type']}\r\n\r\n".encode()
+                + request.content
+            )
+            received = {
+                part.get_param("name", header="content-disposition"): part.get_payload(
+                    decode=True
+                ).decode()
+                for part in message.iter_parts()
+            }
+            assert received["data"] == "memory"
+        if flag is None:
+            assert "self_improvement" not in received
+        else:
+            expected = str(flag).lower() if use_api and not session_id else flag
+            assert received["self_improvement"] == expected
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_remember_advertises_optional_self_improvement():
+    server = importlib.import_module("src.server")
+    tools = await server.mcp.list_tools()
+    tool = next(tool for tool in tools if tool.name == "remember")
+    schema = tool.parameters["properties"]["self_improvement"]
+    assert {"type": "boolean"} in schema["anyOf"]
+    assert schema["default"] is None
+    assert "self_improvement" not in tool.parameters.get("required", [])
