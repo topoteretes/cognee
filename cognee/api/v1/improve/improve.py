@@ -5,13 +5,15 @@ gated stage after another, in registry order. The body below it decides when
 and whether — forward to a remote server, resolve the request, claim the
 improve lock, then run in the foreground or detach as one background task.
 
-Two contracts shape everything here. The ``record_operation`` row is the
-stage-8 watermark, so it must describe the *finished* run: an errored stage
+Two contracts shape everything here. First, the row contract: stages may
+stamp durable facts onto the ``record_operation`` row
+(``StageResult.run_info_stamp``), and stamp readers trust only rows whose
+outcome describes a finished, honest run — so a run with an errored stage
 records ``failed``, a run in which nothing executed records ``noop``, and a
-background run defers the row close to the detached task. And the run fails
-open: every stage failure is recorded and the next stage still runs — except
-the one ``fatal`` stage, ``persist_session_qa``, where losing session Q&A
-would be data loss: it stops the run and raises, carrying the partial
+background run defers the row close to the detached task. Second, the run
+fails open: every stage failure is recorded and the next stage still runs —
+except the one ``fatal`` stage, ``persist_session_qa``, where losing session
+Q&A would be data loss: it stops the run and raises, carrying the partial
 ``ImproveResult`` on the exception (decision D2).
 """
 
@@ -159,13 +161,13 @@ async def improve(
             from cognee.modules.pipelines.models import OperationOutcome
 
             if result.status == "errored":
-                # A non-fatal errored stage exits this block cleanly; without
-                # this the row would say "succeeded" and gate off the retry.
+                # A non-fatal errored stage exits this block cleanly; the row
+                # must still say "failed" — conservative: it invalidates any
+                # stamp this run wrote (row contract, module docstring).
                 operation.set_outcome(OperationOutcome.FAILED)
             elif result.status == "skipped":
-                # Every stage skipped means nothing ran, so there is nothing
-                # to watermark: a "succeeded" row would gate enrichment off
-                # until the dataset's next write pipeline.
+                # Nothing ran: record that truthfully, and keep the stamp-less
+                # row out of the bounded scan stamp readers do.
                 operation.set_outcome(OperationOutcome.NOOP)
             await release_improve_lock_many(lock_keys)
 
@@ -194,9 +196,9 @@ async def improve(
             )
             return report(remote_result)
 
-        # Opened across the stage execution, not just the prep: this row is
-        # the stage-8 watermark and must describe the finished run, never the
-        # launch (outcome contract in the module docstring).
+        # Opened across the stage execution, not just the prep: the row must
+        # describe the finished run, never the launch (row contract in the
+        # module docstring).
         async with record_operation("improve") as operation:
             inputs = await _resolve_inputs(
                 operation,
@@ -223,8 +225,8 @@ async def improve(
             claim_owned = True
             try:
                 # Probed only after the claim was won: the probe leases the
-                # graph engine, which every lock loser would otherwise pay for
-                # although only stages 1 and 7 read the answer.
+                # graph engine, which every lock loser would otherwise pay
+                # for although only the capability-gated stages read it.
                 inputs = inputs.with_capabilities(
                     await resolve_graph_capabilities(
                         inputs.dataset_id, getattr(inputs.dataset, "owner_id", None)
@@ -375,10 +377,9 @@ def _skip_lock_held_run(
 ) -> ImproveResult:
     """React to a lost lock claim: log it, record a no-op run, skip every stage.
 
-    Not "succeeded": zero stages ran, and the dataset is already bound to the
-    record, so a succeeded row would stand in as the stage-8 watermark for a
-    dataset this claim may never have improved (a clash on a shared session
-    key). The caller still gets one entry per stage, never ``{}``.
+    Not "succeeded": zero stages ran, and the row contract (module docstring)
+    reserves that outcome for runs whose work actually happened. The caller
+    still gets one entry per stage, never ``{}``.
     """
     from cognee.modules.pipelines.models import OperationOutcome
 
