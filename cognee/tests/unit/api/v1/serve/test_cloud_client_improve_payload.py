@@ -91,6 +91,20 @@ async def test_improve_refuses_options_that_cannot_cross_the_wire():
     assert posts == []
 
 
+def test_the_key_partition_covers_the_memify_passthrough_surface():
+    """Every MEMIFY_PASSTHROUGH_KEYS entry is either forwarded or refused —
+    a key added to the surface must never be silently dropped, and a typo in
+    the serializable list must not invent a key off the surface."""
+    from cognee.api.v1.serve.cloud_client import (
+        _SERIALIZABLE_MEMIFY_TASK_KEYS,
+        _UNSERIALIZABLE_MEMIFY_KEYS,
+    )
+    from cognee.modules.improve import MEMIFY_PASSTHROUGH_KEYS
+
+    handled = {*_SERIALIZABLE_MEMIFY_TASK_KEYS, "data", *_UNSERIALIZABLE_MEMIFY_KEYS}
+    assert handled == set(MEMIFY_PASSTHROUGH_KEYS)
+
+
 @pytest.mark.asyncio
 async def test_improve_defaults_send_only_the_dataset():
     client, posts = _client_with_recorder()
