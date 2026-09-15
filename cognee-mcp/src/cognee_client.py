@@ -23,9 +23,9 @@ import httpx
 from cognee.shared.logging_utils import get_logger
 
 try:
-    from .server_utils import normalize_delete_mode
+    from .server_utils import RecallState, classify_recall_state, normalize_delete_mode
 except ImportError:
-    from server_utils import normalize_delete_mode
+    from server_utils import RecallState, classify_recall_state, normalize_delete_mode
 
 try:
     from .retrieval_utils import get_chunk_neighbors_from_graph, get_document_from_graph
@@ -693,6 +693,73 @@ class CogneeClient:
                     "dataset_name": dataset_name,
                     "session_id": session_id,
                 }
+
+    async def get_recall_state(self, datasets: list[str] | None = None) -> RecallState:
+        """Best-effort empty-result diagnostics; never fetch documents or run an LLM.
+
+        The caller bounds the total duration. Only datasets the caller can read
+        are resolved, and these reads are skipped entirely for successful hits.
+        """
+        pipelines = ["add_pipeline", "cognify_pipeline", "code_graph_pipeline"]
+        if self.use_api:
+            visible = await self.list_datasets()
+            selected = (
+                visible
+                if not datasets
+                else [
+                    d for d in visible if d.get("name") in datasets or str(d.get("id")) in datasets
+                ]
+            )
+            if not selected:
+                return RecallState("unknown" if datasets else "empty")
+            params = [("dataset", str(d["id"])) for d in selected]
+            params.extend(("pipeline", pipeline) for pipeline in pipelines)
+            response = await self.client.get(
+                f"{self.api_url}/api/v1/datasets/status/progress",
+                params=params,
+                headers=self._get_headers(),
+                timeout=2.0,
+            )
+            response.raise_for_status()
+            progress = response.json()
+            state = classify_recall_state(progress, [])
+            if state.state in ("indexing", "build_failed"):
+                return state
+            response = await self.client.get(
+                f"{self.api_url}/api/v1/datasets/graph-summary",
+                params=[("dataset_ids", str(d["id"])) for d in selected],
+                headers=self._get_headers(),
+                timeout=2.0,
+            )
+            response.raise_for_status()
+            graphs = response.json()
+            if len(graphs) != len(selected):
+                return RecallState("unknown")
+            return classify_recall_state(progress, graphs)
+
+        from dataclasses import asdict
+
+        from cognee.modules.data.methods import (
+            get_authorized_existing_datasets,
+            get_datasets_graph_counts,
+        )
+        from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_progress
+        from cognee.modules.users.methods import get_default_user
+
+        user = await get_default_user()
+        selected = await get_authorized_existing_datasets(datasets, "read", user)
+        if not selected:
+            return RecallState("unknown" if datasets else "empty")
+        ids = [dataset.id for dataset in selected]
+        progress = {str(dataset.id): {} for dataset in selected}
+        for pipeline in pipelines:
+            for dataset_id, run in (await get_pipeline_progress(ids, pipeline)).items():
+                progress[str(dataset_id)][pipeline] = run
+        state = classify_recall_state(progress, [])
+        if state.state in ("indexing", "build_failed"):
+            return state
+        counts = await get_datasets_graph_counts(selected)
+        return classify_recall_state(progress, [asdict(counts[dataset.id]) for dataset in selected])
 
     async def recall(
         self,
