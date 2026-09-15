@@ -11,7 +11,10 @@ from cognee.tasks.graph.cascade_extract.utils.extract_edge_triplets import (
     extract_edge_triplets,
 )
 from cognee.tasks.graph.cascade_extract.utils.extract_nodes import extract_nodes
-from cognee.tasks.graph.extract_graph_from_data import integrate_chunk_graphs
+from cognee.tasks.graph.extract_graph_from_data import (
+    capture_chunk_graphs,
+    integrate_chunk_graphs,
+)
 
 
 @task_summary("Extracted graph from {n} chunk(s)")
@@ -55,6 +58,11 @@ async def extract_graph_from_data(
             for chunk, nodes, rels in zip(data_chunks, updated_nodes, relationships)
         ]
     )
+
+    # Eval capture (SDK-529): snapshot the raw graphs before integrate_chunk_graphs
+    # mutates them, so a cascade run's merge-decision events have the
+    # extraction.chunk_graph record their chunk_id joins to.
+    capture_chunk_graphs(data_chunks, chunk_graphs)
 
     return await integrate_chunk_graphs(
         data_chunks=data_chunks,

@@ -10,6 +10,9 @@ from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.utils.brute_force_triplet_search import (
+    DEFAULT_TRIPLET_DISTANCE_PENALTY,
+)
 from cognee.modules.retrieval.utils.completion import (
     batch_llm_completion,
     generate_completion_batch,
@@ -64,7 +67,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
         wide_search_top_k: int | None = 100,
-        triplet_distance_penalty: float | None = 6.5,
+        triplet_distance_penalty: float | None = DEFAULT_TRIPLET_DISTANCE_PENALTY,
         feedback_influence: float = get_base_config().default_feedback_influence,
         max_iter: int = 4,
         session_id: str | None = None,

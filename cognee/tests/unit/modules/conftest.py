@@ -57,3 +57,52 @@ def runner_plumbing(monkeypatch):
         return logs
 
     return _wire
+
+
+class FakeCaptureSink:
+    """In-memory eval-capture sink (SDK-529): records every batch it receives."""
+
+    def __init__(self):
+        self.calls: list[list[dict]] = []
+
+    async def __call__(self, records):
+        self.calls.append(list(records))
+
+    @property
+    def records(self) -> list[dict]:
+        return [record for call in self.calls for record in call]
+
+
+@pytest.fixture
+def capture_reset(event_loop, monkeypatch):
+    """Reset eval-capture module state around a test (SDK-529).
+
+    Depends on ``event_loop`` so this teardown runs BEFORE pytest-asyncio closes
+    the loop: pytest-asyncio 0.21.x closes loops without cancelling tasks, and a
+    flusher task left behind would be destroyed while pending.
+
+    Version assumption: requesting ``event_loop`` directly is deprecated in
+    pytest-asyncio 0.23 and removed in 1.0. The ``dev`` extra pins ``<0.22``;
+    moving past it means replacing this ordering trick (e.g. a loop-scoped
+    fixture or an ``asyncio`` ``pytest_fixture_post_finalizer`` hook).
+
+    Also detaches ``CaptureConfig`` from the repo ``.env`` so a developer's
+    ``COGNEE_CAPTURE_*`` settings cannot flip the off-path tests; the tests set
+    the environment they need explicitly.
+    """
+    from cognee.modules.observability.capture import CaptureConfig, hook
+
+    monkeypatch.setitem(CaptureConfig.model_config, "env_file", None)
+    hook._reset_for_tests()
+    yield
+    hook._reset_for_tests()
+
+
+@pytest.fixture
+def fake_capture_sink(capture_reset):
+    """Register a FakeCaptureSink as the process-wide capture sink."""
+    from cognee.modules.observability import capture
+
+    sink = FakeCaptureSink()
+    capture.register_capture_sink(sink)
+    return sink

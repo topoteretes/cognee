@@ -1,6 +1,6 @@
 import heapq
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from typing import Any
 
 from cognee.base_config import get_base_config
@@ -17,6 +17,11 @@ from cognee.modules.user_preferences.weights import personal_factor
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("CogneeGraph")
+
+# Distance assigned to a projected node or edge the vector search did not score,
+# and the default for every ``triplet_distance_penalty`` parameter up the stack
+# (projection, brute-force search, the retrievers, the capture payload).
+DEFAULT_TRIPLET_DISTANCE_PENALTY = 6.5
 
 
 class CogneeGraph(CogneeAbstractGraph):
@@ -40,7 +45,7 @@ class CogneeGraph(CogneeAbstractGraph):
         self.edges = []
         self.edges_by_distance_key = {}
         self.directed = directed
-        self.triplet_distance_penalty = 6.5
+        self.triplet_distance_penalty = DEFAULT_TRIPLET_DISTANCE_PENALTY
         self.feedback_influence = get_base_config().default_feedback_influence
         self.personal_influence = get_base_config().personalization_influence
 
@@ -243,7 +248,7 @@ class CogneeGraph(CogneeAbstractGraph):
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
         relevant_ids_to_filter: list[str] | None = None,
-        triplet_distance_penalty: float = 6.5,
+        triplet_distance_penalty: float = DEFAULT_TRIPLET_DISTANCE_PENALTY,
         feedback_influence: float = get_base_config().default_feedback_influence,
     ) -> None:
         if memory_fragment_filter is None:
@@ -294,7 +299,7 @@ class CogneeGraph(CogneeAbstractGraph):
         directed: bool = True,
         node_dimension: int = 1,
         edge_dimension: int = 1,
-        triplet_distance_penalty: float = 6.5,
+        triplet_distance_penalty: float = DEFAULT_TRIPLET_DISTANCE_PENALTY,
         feedback_influence: float = get_base_config().default_feedback_influence,
     ) -> None:
         """

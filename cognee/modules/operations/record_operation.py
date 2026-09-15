@@ -17,7 +17,7 @@ Guarantees:
 """
 
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
@@ -82,6 +82,10 @@ class OperationContext:
         self.session_id = session_id
         self.background = background
         self.parent_operation_id = parent_operation_id
+        # The eval-capture run scope opened for this operation, when capture is
+        # active (SDK-529). Bound by ``record_operation`` so ``set_dataset``
+        # can forward the dataset the moment the caller learns it.
+        self._capture_scope = None
 
     def set_user(self, user) -> None:
         """Bind the triggering user (tolerates None and partial objects)."""
@@ -91,8 +95,19 @@ class OperationContext:
         self.tenant_id = getattr(user, "tenant_id", None)
 
     def set_dataset(self, dataset_id: UUID | None) -> None:
-        """Bind the target dataset, when the operation has exactly one."""
+        """Bind the target dataset, when the operation has exactly one.
+
+        Forwarded to the eval-capture scope immediately, not at operation exit:
+        capture resolves an event's dataset when the event is FLUSHED, and the
+        flusher ticks every ``FLUSH_INTERVAL_S`` (2 s) while a search's LLM
+        completion runs for longer than that. Binding only in the ``finally``
+        filed essentially every search's ``retrieval.candidates`` under
+        ``nodataset/`` while its manifest landed under ``<dataset>/``.
+        """
         self.dataset_id = dataset_id
+        capture_scope = self._capture_scope
+        if capture_scope is not None:
+            capture_scope.set_dataset(dataset_id)
 
     def set_session_id(self, session_id: str | None) -> None:
         """Bind the active session-cache id (joins SessionModelUsage)."""
@@ -179,24 +194,54 @@ async def record_operation(
         outcome = OperationOutcome.SUCCEEDED
         error_class: str | None = None
         error_message: str | None = None
-        try:
-            with parent_run_scope(context.operation_id):
-                yield context
-        except BaseException as exc:
-            outcome = OperationOutcome.FAILED
-            error_class = type(exc).__name__
-            error_message = scrub_error_message(exc)
-            raise
-        finally:
-            _current_operation.reset(context_token)
+
+        # Eval capture (SDK-529). Imported lazily so ``import cognee`` never pays
+        # for the capture package; is_active() is one global read once
+        # initialized, and the OFF path constructs no scope at all. No drain()
+        # here: this wraps the user-facing recall/search path, and the manifest
+        # lands within FLUSH_INTERVAL_S like any other event. The manifest
+        # mirrors the row's attribution fields (operation, outcome,
+        # error_class) so a captured run can be filtered offline without
+        # joining back to ``pipeline_runs``.
+        from cognee.modules.observability import capture as eval_capture
+
+        capture_scope_cm = (
+            eval_capture.run_scope(context.operation_id, dataset_id, kind="operation")
+            if eval_capture.is_active()
+            else nullcontext()
+        )
+        with capture_scope_cm as capture_scope:
+            if capture_scope is not None:
+                capture_scope.note("operation", operation_name)
+                # So context.set_dataset() reaches the scope as soon as the
+                # caller resolves its dataset; the ``finally`` below is only a
+                # backstop for callers that never call it.
+                context._capture_scope = capture_scope
             try:
-                await _write_operation_row(
-                    context, started_at, outcome.value, error_class, error_message
-                )
-            except Exception as write_error:
-                logger.warning(
-                    "record_operation: failed to persist %s record (%s)",
-                    operation_name,
-                    write_error,
-                    exc_info=True,
-                )
+                with parent_run_scope(context.operation_id):
+                    yield context
+            except BaseException as exc:
+                outcome = OperationOutcome.FAILED
+                error_class = type(exc).__name__
+                error_message = scrub_error_message(exc)
+                raise
+            finally:
+                if capture_scope is not None:
+                    # Backstop: set_dataset() already forwarded the dataset when
+                    # the caller bound it; this covers a dataset passed at entry.
+                    capture_scope.set_dataset(context.dataset_id)
+                    capture_scope.note("outcome", outcome.value)
+                    # None on success, kept for a stable manifest shape.
+                    capture_scope.note("error_class", error_class)
+                _current_operation.reset(context_token)
+                try:
+                    await _write_operation_row(
+                        context, started_at, outcome.value, error_class, error_message
+                    )
+                except Exception as write_error:
+                    logger.warning(
+                        "record_operation: failed to persist %s record (%s)",
+                        operation_name,
+                        write_error,
+                        exc_info=True,
+                    )

@@ -1,4 +1,3 @@
-import asyncio
 import os
 from datetime import datetime, timezone
 from operator import itemgetter
@@ -9,6 +8,9 @@ from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.llm import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.utils.brute_force_triplet_search import (
+    DEFAULT_TRIPLET_DISTANCE_PENALTY,
+)
 from cognee.modules.retrieval.utils.used_graph_elements import extract_from_temporal_dict
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.temporal_graph.models import QueryInterval
@@ -42,7 +44,7 @@ class TemporalRetriever(GraphCompletionRetriever):
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
         wide_search_top_k: int | None = 100,
-        triplet_distance_penalty: float | None = 6.5,
+        triplet_distance_penalty: float | None = DEFAULT_TRIPLET_DISTANCE_PENALTY,
         feedback_influence: float = get_base_config().default_feedback_influence,
         session_id: str | None = None,
         response_model: type = str,

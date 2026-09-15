@@ -1,5 +1,6 @@
 import asyncio
-from typing import TYPE_CHECKING, Optional
+from collections import Counter
+from typing import TYPE_CHECKING, Any, Optional
 
 from cognee.infrastructure.databases.provenance import (
     EdgeIdentity,
@@ -20,6 +21,12 @@ from cognee.modules.graph.utils import (
     ensure_default_edge_properties,
     get_graph_from_model,
 )
+from cognee.modules.observability import (
+    MEMORY_OPERATION,
+    MEMORY_SYSTEM,
+    increment_graph_edges,
+    increment_graph_nodes,
+)
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.modules.provenance.edge_evidence.capture import capture_graph_provenance
 from cognee.shared.logging_utils import get_logger
@@ -36,6 +43,11 @@ if TYPE_CHECKING:
     from cognee.modules.pipelines.models import PipelineContext
 
 logger = get_logger("add_data_points")
+
+# Past this many nodes the storage.delta capture event carries the node count
+# and type histogram only, not the id list, so one bulk write cannot produce an
+# unbounded event.
+_STORAGE_DELTA_MAX_NODE_IDS = 500
 
 
 def _group_by_all_keys(owner_map: dict) -> dict:
@@ -131,6 +143,10 @@ async def add_data_points(
         if isinstance(custom_edges, list) and custom_edges
         else None
     )
+    # Counted before the writes: ``edges`` absorbs ``custom_edges`` further down
+    # (for the hybrid attach pass and triplet embedding).
+    edge_count = len(edges)
+    custom_edge_count = len(custom_edges) if custom_edges else 0
 
     if graph_only:
         from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
@@ -411,6 +427,8 @@ async def add_data_points(
             await index_data_points(triplets, vector_engine=vector_engine)
             logger.info(f"Created and indexed {len(triplets)} triplets from graph structure")
 
+    _record_graph_metrics(len(nodes), edge_count + custom_edge_count)
+    _emit_storage_delta(nodes, edge_count, custom_edge_count, pipeline_run_id)
     # Capture only after graph/vector writes succeeded. This is memory-only for
     # normal documents and is flushed once at data-item completion; very large
     # documents use a bounded bulk flush configured by EDGE_EVIDENCE_FLUSH_THRESHOLD.
@@ -420,6 +438,84 @@ async def add_data_points(
     await capture_graph_provenance(data_points, edges, ctx)
 
     return data_points
+
+
+def _record_graph_metrics(node_count: int, total_edges: int) -> None:
+    """Report the nodes/edges this call wrote to the OTel graph counters.
+
+    Unconditional and independent of eval capture: these are the ordinary
+    process metrics, ``_NullInstrument`` no-ops without a meter provider. The
+    counters were previously defined but never called from anywhere; this is
+    their first live call site.
+    """
+    attributes = {MEMORY_SYSTEM: "cognee", MEMORY_OPERATION: "process"}
+    increment_graph_nodes(node_count, attributes)
+    increment_graph_edges(total_edges, attributes)
+
+
+def _emit_storage_delta(
+    nodes: list[DataPoint],
+    edge_count: int,
+    custom_edge_count: int,
+    pipeline_run_id: Any,
+) -> None:
+    """Buffer this call's ``storage.delta`` eval-capture event (SDK-529).
+
+    ``add_data_points`` is the one choke point every graph write goes through
+    (cognify, memify, the code-graph route, every backend path above), so the
+    per-run node/edge delta is taken here once rather than in each caller. A
+    structural no-op when capture is off: one global read, then return — no id
+    list, no type histogram, no event.
+    """
+    node_count = len(nodes)
+    total_edges = edge_count + custom_edge_count
+
+    # Lazy on purpose: ``import cognee`` must not load the capture package.
+    from cognee.modules.observability import capture as eval_capture
+
+    if not eval_capture.is_active():
+        return
+
+    # Guarded like every other emit point: the payload reads ``id``/``type`` off
+    # caller-supplied DataPoints, and capture must never break the write it
+    # observes.
+    try:
+        eval_capture.bump("storage.nodes_written", node_count)
+        eval_capture.bump("storage.edges_written", total_edges)
+        eval_capture.emit(
+            eval_capture.KIND_STORAGE_DELTA,
+            _storage_delta_payload(nodes, edge_count, custom_edge_count, pipeline_run_id),
+            payload_kind="json",
+            stage="add_data_points",
+        )
+    except Exception as exc:
+        logger.debug("storage delta capture skipped (%s)", exc)
+
+
+def _storage_delta_payload(
+    nodes: list[DataPoint],
+    edge_count: int,
+    custom_edge_count: int,
+    pipeline_run_id: Any,
+) -> dict[str, Any]:
+    """Ids, types and counts only — never the DataPoint instances.
+
+    The event is serialized later by the capture flusher, so this plain dict is
+    what gets buffered; a DataPoint would drag its whole subgraph along
+    (``DocumentChunk.contains`` recurses). Above ``_STORAGE_DELTA_MAX_NODE_IDS``
+    the id list is replaced by ``None``; the count and histogram stay.
+    """
+    node_count = len(nodes)
+    return {
+        "node_count": node_count,
+        "edge_count": edge_count,
+        "custom_edge_count": custom_edge_count,
+        "node_types": dict(Counter(node.type for node in nodes)),
+        "node_ids": (
+            [str(node.id) for node in nodes] if node_count <= _STORAGE_DELTA_MAX_NODE_IDS else None
+        ),
+        "pipeline_run_id": str(pipeline_run_id) if pipeline_run_id else None,
+    }
 
 
 def _extract_embeddable_text_from_datapoint(data_point: DataPoint) -> str:

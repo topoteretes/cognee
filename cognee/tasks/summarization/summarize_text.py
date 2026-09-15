@@ -3,13 +3,19 @@ from uuid import uuid5
 
 from pydantic import BaseModel
 
-from cognee.infrastructure.llm.extraction import extract_summary
+from cognee.infrastructure.llm.extraction.extract_summary import extract_summary_with_provenance
 from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.pipelines.tasks.task import task_summary
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.summarization.exceptions import InvalidSummaryInputsError
 from cognee.tasks.summarization.models import TextSummary
+
+logger = get_logger("summarize_text")
+
+# Stage label on the summary.generated events (SDK-529).
+CAPTURE_STAGE = "summarize_text"
 
 
 @task_summary("Summarized {n} chunk(s)")
@@ -23,6 +29,15 @@ async def summarize_text(
     configuration. It processes the data chunks asynchronously and returns summaries for
     each chunk. If the provided list of data chunks is empty, it simply returns the list as
     is.
+
+    While eval capture is active (SDK-529) one ``summary.generated`` event per chunk is
+    emitted, carrying that summary's provenance — the model id, the fingerprint of the
+    summarization prompt and the fingerprint of the source chunk text — alongside the
+    chunk and summary ids and a character count; never the summary or chunk text. The
+    provenance is computed for the event only and is deliberately NOT stored on the
+    ``TextSummary`` node: the event is keyed by ``summary_id``, so offline joins have it
+    either way, and graph content must not depend on whether capture happened to be on.
+    With capture off nothing is hashed and nothing is emitted.
 
     Parameters:
     -----------
@@ -52,21 +67,99 @@ async def summarize_text(
         cognee_config = get_cognify_config()
         summarization_model = cognee_config.summarization_model
 
+    # Lazy on purpose: ``import cognee`` must not load the capture package.
+    from cognee.modules.observability import capture as eval_capture
+
+    # One global read, hoisted out of the per-chunk loop.
+    active = eval_capture.is_active()
+
     with pipeline_stage("summarization"):
-        chunk_summaries = await asyncio.gather(
-            *[extract_summary(chunk.text, summarization_model) for chunk in data_chunks]
+        results = await asyncio.gather(
+            *[
+                extract_summary_with_provenance(chunk.text, summarization_model)
+                for chunk in data_chunks
+            ]
         )
 
-    summaries = [
-        TextSummary(
+    # Every chunk reads the same prompt file, so its fingerprint is computed once.
+    prompt_fingerprints: dict[str, str] = {}
+    summaries: list[TextSummary] = []
+    # Run-wide provenance for the manifest; the stage model and prompt are the
+    # same for every chunk, so the last chunk's values describe the run.
+    run_model: str | None = None
+    run_prompt_fingerprint: str | None = None
+
+    for chunk, (llm_output, prompt_text, model_name) in zip(data_chunks, results):
+        # Capture-only provenance; never stored on the node.
+        prompt_fingerprint: str | None = None
+        source_text_hash: str | None = None
+        if active:
+            # The sanctioned snapshot cost: sha256 of the chunk text (and of each
+            # distinct prompt) — only while capturing. Guarded: the chunk is
+            # duck-typed (only ``.text`` is validated), and a text that will not
+            # hash must cost this chunk's provenance, never the summarization.
+            try:
+                prompt_fingerprint = prompt_fingerprints.get(prompt_text)
+                if prompt_fingerprint is None:
+                    prompt_fingerprint = eval_capture.prompt_fingerprint(prompt_text)
+                    prompt_fingerprints[prompt_text] = prompt_fingerprint
+                source_text_hash = eval_capture.prompt_fingerprint(chunk.text)
+            except Exception as exc:
+                logger.debug("summary provenance capture skipped (%s)", exc)
+                prompt_fingerprint = source_text_hash = None
+
+        summary = TextSummary(
             id=uuid5(chunk.id, "TextSummary"),
             made_from=chunk,
             source_chunk_id=str(chunk.id),
             belongs_to_set=chunk.belongs_to_set,
-            text=chunk_summaries[chunk_index].summary,
+            text=llm_output.summary,
             importance_weight=chunk.importance_weight,
         )
-        for (chunk_index, chunk) in enumerate(data_chunks)
-    ]
+        summaries.append(summary)
+
+        if active:
+            _emit_summary_generated(
+                summary, chunk, model_name, prompt_fingerprint, source_text_hash
+            )
+            run_model, run_prompt_fingerprint = model_name, prompt_fingerprint
+
+    if active:
+        # Once per run, not per chunk. Taken from the locals that produced the
+        # summaries, not from the node (which no longer carries them).
+        eval_capture.note("summarization.model", run_model)
+        eval_capture.note("summarization.prompt_fingerprint", run_prompt_fingerprint)
 
     return summaries
+
+
+def _emit_summary_generated(
+    summary: TextSummary,
+    chunk: DocumentChunk,
+    model: str | None,
+    prompt_fingerprint: str | None,
+    source_text_hash: str | None,
+) -> None:
+    """Buffer one ``summary.generated`` event: ids, fingerprints and a size — no text.
+
+    Guarded like every other emit point: capture never breaks the summarization it
+    observes, so a summary that will not attribute costs its own event and nothing else.
+    """
+    from cognee.modules.observability import capture as eval_capture
+
+    try:
+        eval_capture.emit(
+            eval_capture.KIND_SUMMARY_GENERATED,
+            {
+                "chunk_id": str(chunk.id),
+                "summary_id": str(summary.id),
+                "model": model,
+                "prompt_fingerprint": prompt_fingerprint,
+                "source_text_hash": source_text_hash,
+                "summary_chars": len(summary.text),
+            },
+            payload_kind="json",
+            stage=CAPTURE_STAGE,
+        )
+    except Exception as exc:
+        logger.debug("summary capture skipped (%s)", exc)
