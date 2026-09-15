@@ -11,10 +11,13 @@ session history; e2e for session SDK (get_session, add_feedback, delete_feedback
 import os
 import pathlib
 from collections import Counter
+from unittest.mock import patch
 
 import cognee
 from cognee.infrastructure.databases.cache import SessionQAEntry, get_cache_engine
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.session.session_turn import acknowledgement_for_turn, should_answer_turn
+from cognee.modules.retrieval import session_aware_completion
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -418,10 +421,25 @@ async def main():
         query_text="What is TechCorp?",
         session_id=session_id_autofeedback,
     )
-    result_autofeedback = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
-        query_text="Thanks, that was really helpful!",
-        session_id=session_id_autofeedback,
+    analyses = []
+    analyze_turn = session_aware_completion.analyze_turn
+
+    async def observe_analysis(snapshot):
+        analysis = await analyze_turn(snapshot)
+        analyses.append(analysis)
+        return analysis
+
+    # Observe the real LLM analysis without changing the retrieval or cache paths.
+    with patch.object(session_aware_completion, "analyze_turn", side_effect=observe_analysis):
+        result_autofeedback = await cognee.search(
+            query_type=SearchType.GRAPH_COMPLETION,
+            query_text="Thanks, that was really helpful!",
+            session_id=session_id_autofeedback,
+        )
+    assert len(analyses) == 1, "Concurrent feedback analysis must run exactly once"
+    [feedback_analysis] = analyses
+    assert not should_answer_turn(feedback_analysis, has_previous_qa=True), (
+        "The feedback-only message should route to an acknowledgement"
     )
     assert result_autofeedback is not None, (
         "Second search (feedback-like message) should return a result"
@@ -444,16 +462,12 @@ async def main():
     assert stored_answer_autofeedback, (
         "Feedback-only turn must store an acknowledgement as the QA entry's answer"
     )
-    # Truthiness alone is not enough: before this fix the concurrent path stored the
-    # generated answer here, which is also truthy. Pin the shape instead — short, and
-    # not about the retrieved subject.
-    assert len(stored_answer_autofeedback) < 120, (
-        "Feedback-only turn must store the short acknowledgement, not the generated "
-        f"answer; got {len(stored_answer_autofeedback)} chars: "
-        f"{stored_answer_autofeedback[:200]}"
-    )
-    assert "TechCorp" not in stored_answer_autofeedback, (
-        "Feedback-only turn stored a generated answer about the retrieved subject"
+    # An acknowledgement may mention the subject or exceed an arbitrary length.
+    # Compare against the actual analysis output: storing the independently
+    # generated answer instead must still fail this regression check.
+    expected_ack = acknowledgement_for_turn(feedback_analysis.response_to_user)
+    assert stored_answer_autofeedback == expected_ack, (
+        "Feedback-only turn must store the analysis acknowledgement, not the generated answer"
     )
     assert getattr(second_entry_autofeedback, "feedback_text", None) is None
     assert getattr(second_entry_autofeedback, "feedback_score", None) is None
