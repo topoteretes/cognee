@@ -8,7 +8,7 @@ Anything ending in *_COMPLETION still needs an LLM to write the answer.
 
 Requirements::
 
-    pip install "cognee[gliner]" "fastembed<=0.8.0"
+    pip install "cognee[gliner,fastembed]"
 
 First run downloads the GLiNER model (~800 MB) and the bge-small embedding
 model (~130 MB).
@@ -52,7 +52,7 @@ async def main():
     # embeddings, no LLM — so it is safe to leave self_improvement on.
     await cognee.remember(TEXT, dataset_name="no_llm")
 
-    # No query_type: on the gliner backend this is CHUNKS.
+    # No query_type: with no usable LLM key this resolves to CHUNKS.
     results = await cognee.recall("Where was Marie Curie born?", datasets=["no_llm"], top_k=3)
     print(f"\ndefault ({results[0].search_type}): {len(results)} result(s)")
     for item in results:
