@@ -273,6 +273,12 @@ async def test_graph_completion_decomposition_combined_mode_session_stores_only_
         patch(
             "cognee.infrastructure.session.session_manager.CacheConfig"
         ) as mock_session_cache_config,
+        # The auto-feedback gate reads CacheConfig in feedback_detection
+        # (session_manager delegates to it), so auto_feedback=False must be
+        # patched there or the turn analysis runs against the LLM fake.
+        patch(
+            "cognee.infrastructure.session.feedback_detection.CacheConfig"
+        ) as mock_detection_cache_config,
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.session_user"
         ) as mock_retriever_session_user,
@@ -288,6 +294,7 @@ async def test_graph_completion_decomposition_combined_mode_session_stores_only_
         session_cache_config.caching = True
         session_cache_config.auto_feedback = False
         mock_session_cache_config.return_value = session_cache_config
+        mock_detection_cache_config.return_value = session_cache_config
 
         mock_retriever_session_user.get.return_value = user
         mock_session_manager_user.get.return_value = user

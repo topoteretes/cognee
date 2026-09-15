@@ -8,6 +8,7 @@ from cognee.infrastructure.session.session_manager import SessionManager
 from cognee.tasks.memify.apply_feedback_weights import apply_feedback_weights
 from cognee.tasks.memify.extract_feedback_qas import extract_feedback_qas
 from cognee.tasks.memify.feedback_weights_constants import (
+    FEEDBACK_WEIGHTS_MAX_ATTEMPTS,
     MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY,
     MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_NODE_IDS_KEY,
 )
@@ -178,13 +179,14 @@ async def test_feedback_weights_first_run_then_idempotent(session_manager_with_b
 
 @pytest.mark.asyncio
 async def test_feedback_weights_mixed_success_prunes_and_applies_once(session_manager_with_backend):
-    """A deleted element id must not keep the row eligible forever.
+    """A missing element id neither compounds the survivors nor seals the row early.
 
-    Before the B1 fix a QA whose ``used_graph_element_ids`` referenced one missing
-    element stayed ``feedback_weights_applied=False``, so every later improve()
-    re-applied the same alpha step to the surviving elements (compounding drift).
-    Now the missing id is pruned, the surviving element moves exactly once, and
-    the row is marked processed so a second run extracts nothing.
+    The surviving element moves exactly once — later runs skip it via the
+    applied-ids bookkeeping, so there is no compounding drift (the B1 regression).
+    The missing id keeps the row PENDING rather than marking it applied, because
+    an id absent here may belong to another dataset's graph and that dataset's
+    improve must still be able to consume the row; the attempt cap bounds the
+    rescans a genuinely deleted id can cost, and only then is the row sealed.
     """
     sm = session_manager_with_backend
     user = _make_user()
@@ -227,7 +229,7 @@ async def test_feedback_weights_mixed_success_prunes_and_applies_once(session_ma
     assert len(items) == 1
     assert result is not None
     assert result["processed"] == 1
-    assert result["applied"] == 1
+    assert result["applied"] == 0  # the missing edge keeps the row pending
 
     weight_after_first_run = graph.node_weights["n1"]
     assert weight_after_first_run > 0.5  # the surviving node moved
@@ -235,10 +237,20 @@ async def test_feedback_weights_mixed_success_prunes_and_applies_once(session_ma
 
     entries = await sm.get_session(user_id="u1", session_id="s1", formatted=False)
     metadata = entries[0].memify_metadata
-    assert metadata[MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY] is True
+    assert metadata[MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY] is False
     assert "n1" in metadata[MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_NODE_IDS_KEY]
 
-    # A second improve() run finds nothing eligible and moves nothing.
+    # Later runs re-extract the pending row but never re-move the applied node;
+    # at the attempt cap the row is sealed for good.
+    for _ in range(FEEDBACK_WEIGHTS_MAX_ATTEMPTS - 1):
+        items, result = await run_once()
+        assert len(items) == 1
+        assert graph.node_weights["n1"] == weight_after_first_run  # no compounding
+
+    entries = await sm.get_session(user_id="u1", session_id="s1", formatted=False)
+    assert entries[0].memify_metadata[MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY] is True
+
+    # Once sealed, nothing is eligible and nothing moves.
     items, result = await run_once()
     assert items == []
     assert result is None
