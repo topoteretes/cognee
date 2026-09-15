@@ -10,6 +10,7 @@ together.
 | SearchType | Retriever | Module | LLM answer? | Notes |
 |---|---|---|---|---|
 | `HYBRID_COMPLETION` | `HybridRetriever` | `hybrid_retriever.py` | yes | Default. Chunk + entity (+ global-context) lanes. Defers to `GRAPH_COMPLETION` when given a custom `node_type` or when the chunk collection is missing (`search/methods/hybrid_deferral.py`) |
+| `HYBRID_COMPLETION_DECOMPOSITION` | `HybridDecompositionRetriever` | `hybrid_decomposition_retriever.py` | yes | Hybrid pass for the full question, then LLM decomposition of question + that context into up to 7 subqueries, each retrieved through the hybrid lanes and merged content-keyed. Single query only |
 | `GRAPH_COMPLETION` | `GraphCompletionRetriever` | `graph_completion_retriever.py` | yes | Triplet search + neighbourhood expansion; base for the variants below |
 | `GRAPH_COMPLETION_COT` | `GraphCompletionCotRetriever` | `graph_completion_cot_retriever.py` | yes | Chain-of-thought rounds |
 | `GRAPH_COMPLETION_CONTEXT_EXTENSION` | `GraphCompletionContextExtensionRetriever` | `graph_completion_context_extension_retriever.py` | yes | Iteratively widens context |
