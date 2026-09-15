@@ -149,11 +149,9 @@ async def improve(
                 stage_result = await execute_stage(stage, inputs)
                 result.record(stage_result)
                 if stage_result.run_info_stamp:
-                    # The stage decides when and what it stamps; this loop
-                    # only merges stamps onto the row the run owns.
-                    operation.set_run_info(
-                        {**(operation.run_info or {}), **stage_result.run_info_stamp}
-                    )
+                    # The stage decides when and what it stamps; the row's
+                    # merge is append-style, so no stage can drop another's.
+                    operation.merge_run_info(stage_result.run_info_stamp)
                 if stage.fatal and stage_result.status == "errored":
                     raise _abort_run(result, stages[index + 1 :], stage, stage_result)
         finally:

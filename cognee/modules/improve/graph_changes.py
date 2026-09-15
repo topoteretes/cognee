@@ -16,6 +16,14 @@ against ``ended_at`` its write would be invisible forever.
 
 Conservative by construction: when there is no stamped improve for the
 dataset, or the query cannot decide, the answer is "changed", so the stage runs.
+
+TODO(SDK-416 follow-up): the watermark is stage-owned state parked in the run
+record because cognee has no per-dataset state store. ``run_info`` was a
+dormant column improve itself has no use for, and the read side derives the
+current watermark from a bounded scan of run history instead of a key lookup.
+A dedicated dataset-keyed state row would turn the scan into a lookup and give
+the operation record back — at the cost of a migration (this PR needs none)
+and of rebuilding the invalidation the row's outcome provides for free.
 """
 
 from collections.abc import Iterable

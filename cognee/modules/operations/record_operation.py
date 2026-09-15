@@ -126,9 +126,23 @@ class OperationContext:
         """Override the outcome recorded for a body that exits cleanly."""
         self.outcome = outcome
 
-    def set_run_info(self, run_info: dict | None) -> None:
-        """Attach a JSON payload to the row's ``run_info`` column."""
-        self.run_info = run_info
+    def merge_run_info(self, run_info: dict) -> None:
+        """Merge a payload into the row's ``run_info`` column, append-style.
+
+        Writers namespace their entries by key (improve stages stamp under
+        their stage name), so a merge never drops an earlier writer's entry.
+        Overwriting an existing key is legal (last writer wins) but logged:
+        it means two writers chose the same namespace.
+        """
+        existing = self.run_info or {}
+        clobbered = [key for key in run_info if key in existing and existing[key] != run_info[key]]
+        if clobbered:
+            logger.warning(
+                "record_operation: run_info keys overwritten on %s record: %s",
+                self.operation_name,
+                ", ".join(sorted(clobbered)),
+            )
+        self.run_info = {**existing, **run_info}
 
     def defer_close(self) -> None:
         """Hand the row write to background work — see ``finish_operation``.

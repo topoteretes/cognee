@@ -682,6 +682,25 @@ async def test_stage_stamps_are_merged_onto_the_operation_row(harness):
 
 
 @pytest.mark.asyncio
+async def test_stamp_merge_is_append_style(harness):
+    """A later stamp never drops an earlier stage's entry; reusing a key is
+    last-writer-wins (and logged by merge_run_info as a namespace clash)."""
+    harness.use_stages(
+        [
+            _stamped_stage("s1", {"shared": {"by": "s1"}, "s1": {"ok": True}}),
+            _stamped_stage("s2", {"shared": {"by": "s2"}}),
+        ]
+    )
+
+    await harness.improve()
+
+    assert harness.operations[-1].run_info == {
+        "s1": {"ok": True},
+        "shared": {"by": "s2"},
+    }
+
+
+@pytest.mark.asyncio
 async def test_stages_without_a_stamp_leave_the_row_unstamped(harness):
     """No stage stamped, so the row must carry no run_info: a leftover stamp
     would stand in as the enrichment watermark for work that never ran."""
