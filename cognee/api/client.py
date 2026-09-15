@@ -103,6 +103,11 @@ async def lifespan(app: FastAPI):
 
     await recover_stale_cognify_runs_on_startup()
 
+    from cognee.modules.users.authentication.get_auth_secret import resolve_auth_secrets
+
+    # Warns at startup, not on the first login, when a token secret was generated.
+    resolve_auth_secrets()
+
     # Emit a clear startup message for docker logs
     logger.info("Backend server has started")
 
