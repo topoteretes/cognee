@@ -673,3 +673,109 @@ async def test_explicit_call_kwarg_beats_stored_cap():
             max_completion_tokens=99,
         )
     assert _call_kwargs(mock)["max_completion_tokens"] == 99
+
+
+@pytest.mark.parametrize(
+    "config_key,call_key",
+    [("max_tokens", "max_completion_tokens"), ("max_completion_tokens", "max_tokens")],
+)
+@pytest.mark.asyncio
+async def test_call_token_limit_overrides_configuration_alias(config_key, call_key):
+    from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+        NativeLiteLLMAdapter,
+    )
+
+    configured_args = {config_key: 24000, "temperature": 0.5}
+    adapter = NativeLiteLLMAdapter(
+        api_key="test-key",
+        model="openai/gpt-5-mini",
+        max_completion_tokens=4096,
+        llm_args=configured_args,
+    )
+    mock = AsyncMock(return_value=_make_mock_response("plain text"))
+    with patch("litellm.acompletion", mock):
+        await adapter.acreate_structured_output(
+            text_input="x", system_prompt="y", response_model=str, **{call_key: 99}
+        )
+        sent = mock.call_args.kwargs
+        assert sent[call_key] == 99
+        assert config_key not in sent
+        assert sent["temperature"] == 0.5
+        # A call-specific override must not change the next call's configuration.
+        await adapter.acreate_structured_output(
+            text_input="x", system_prompt="y", response_model=str
+        )
+    assert mock.call_args.kwargs[config_key] == 24000
+    assert call_key not in mock.call_args.kwargs
+    assert configured_args == {config_key: 24000, "temperature": 0.5}
+
+
+@pytest.mark.asyncio
+async def test_stored_cap_survives_json_validation_retry():
+    from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+        NativeLiteLLMAdapter,
+    )
+
+    adapter = NativeLiteLLMAdapter(
+        api_key="test-key", model="ollama/llama3", max_completion_tokens=4096
+    )
+    mock = AsyncMock(
+        side_effect=[
+            _make_mock_response('{"name": "A"}'),
+            _make_mock_response('{"name": "A", "age": 1}'),
+        ]
+    )
+    with (
+        patch("litellm.acompletion", mock),
+        patch(
+            "cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter._supports_native_schema",
+            return_value=False,
+        ),
+    ):
+        result = await adapter.acreate_structured_output(
+            text_input="x", system_prompt="y", response_model=PersonModel
+        )
+    assert result.age == 1
+    assert mock.call_count == 2
+    for call in mock.call_args_list:
+        assert call.kwargs["max_completion_tokens"] == 4096
+        assert "max_tokens" not in call.kwargs
+
+
+@pytest.mark.asyncio
+async def test_stored_cap_reaches_content_policy_fallback():
+    from litellm.exceptions import ContentPolicyViolationError
+    from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+        NativeLiteLLMAdapter,
+    )
+
+    adapter = NativeLiteLLMAdapter(
+        api_key="test-key",
+        model="openai/gpt-5-mini",
+        max_completion_tokens=4096,
+        fallback_model="openai/gpt-4o",
+        fallback_api_key="fallback-key",
+    )
+    mock = AsyncMock(
+        side_effect=[
+            ContentPolicyViolationError(
+                message="filtered", model=adapter.model, llm_provider="openai"
+            ),
+            _make_mock_response('{"name": "A", "age": 1}'),
+        ]
+    )
+    with (
+        patch("litellm.acompletion", mock),
+        patch(
+            "cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter._supports_native_schema",
+            return_value=True,
+        ),
+    ):
+        await adapter.acreate_structured_output(
+            text_input="x", system_prompt="y", response_model=PersonModel
+        )
+    assert [call.kwargs["model"] for call in mock.call_args_list] == [
+        adapter.model,
+        adapter.fallback_model,
+    ]
+    assert all(call.kwargs["max_completion_tokens"] == 4096 for call in mock.call_args_list)

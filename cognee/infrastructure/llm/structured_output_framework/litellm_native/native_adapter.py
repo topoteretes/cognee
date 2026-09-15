@@ -371,12 +371,15 @@ class NativeLiteLLMAdapter:
         fallback model before raising ``ContentPolicyFilterError``.
         """
         merged_kwargs = {**self.llm_args, **kwargs}
-        # The stored cap is min(model limit, llm_max_completion_tokens) — see
-        # get_native_client. Without it in the request, a reasoning model bills
-        # unbounded reasoning output. Inject it as the base layer unless the
-        # caller already caps via either alias: sending max_tokens AND
-        # max_completion_tokens together is an API error on some providers.
-        if not ({"max_completion_tokens", "max_tokens"} & merged_kwargs.keys()):
+        token_limit_keys = {"max_completion_tokens", "max_tokens"}
+        # Per-call limits override configuration even when the aliases differ.
+        # Keep the shared llm_args unchanged for subsequent calls.
+        if token_limit_keys & kwargs.keys():
+            for key in token_limit_keys - kwargs.keys():
+                merged_kwargs.pop(key, None)
+        # Use the factory's model/configuration cap unless an explicit limit
+        # exists. Sending both aliases can cause provider errors.
+        if not (token_limit_keys & merged_kwargs.keys()):
             merged_kwargs["max_completion_tokens"] = self.max_completion_tokens
 
         # A plain string needs no schema — skip structured output entirely.
