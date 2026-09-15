@@ -384,6 +384,48 @@ async def test_context_to_store_fails_open_and_skips_blank_context():
 
 
 @pytest.mark.asyncio
+async def test_commit_claims_nothing_when_the_turn_was_not_answered():
+    """A discarded answer's retrieval and guidance must not be recorded as served.
+
+    The next turn's analysis is handed a QA row's ``used_*`` fields to rate. On a
+    no-answer turn the user saw an acknowledgement, so claiming either would have the
+    session rate guidance that never reached anyone.
+    """
+    manager = MagicMock()
+    manager.add_qa = AsyncMock()
+    snapshot = SessionTurnContext(
+        raw_message="thanks, that helped",
+        active_context_ids=("ctx-served-now",),
+        previous_qa_id="qa-1",
+        previous_served_context=(("ctx-rated", "Be concise."),),
+    )
+    analysis = SessionTurnAnalysis(response_to_user="Got it.")
+
+    with patch(
+        "cognee.infrastructure.session.session_concurrent_turn.apply_session_turn_analysis",
+        new_callable=AsyncMock,
+    ) as apply_analysis:
+        await commit_turn(
+            manager,
+            snapshot=snapshot,
+            analysis=analysis,
+            answer="Got it.",
+            user_id="u1",
+            session_id="s1",
+            used_graph_element_ids={"node_ids": ["n1"]},
+            answered=False,
+        )
+
+    stored = manager.add_qa.await_args.kwargs
+    assert stored["answer"] == "Got it."
+    assert stored["used_session_context_ids"] is None
+    assert stored["used_graph_element_ids"] is None
+    # The updates still apply: they rate the previous, genuinely answered turn.
+    assert apply_analysis.await_args.kwargs["previous_qa_id"] == "qa-1"
+    assert apply_analysis.await_args.kwargs["served_ids"] == ["ctx-rated"]
+
+
+@pytest.mark.asyncio
 async def test_commit_fails_open_when_the_qa_write_raises():
     """The answer already exists by commit time, so a broken cache must not surface."""
     manager = MagicMock()

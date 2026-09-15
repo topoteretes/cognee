@@ -18,6 +18,7 @@ from cognee.infrastructure.session.session_embeddings import (
 )
 from cognee.infrastructure.session.session_turn import (
     SessionTurnPreparation,
+    acknowledgement_for_turn,
     generate_session_answer,
 )
 from cognee.infrastructure.session.session_turn import (
@@ -459,7 +460,7 @@ class SessionManager:
         else:
             # Feedback-only turn: nothing to answer, but we still record the exchange
             # (question + acknowledgement) so it stays in history and vector recall.
-            answer = turn_preparation.response_to_user or "Thanks for your feedback."
+            answer = acknowledgement_for_turn(turn_preparation.response_to_user)
             context_to_store = ""
             used_session_context_ids = None
             graph_elements = None

@@ -170,8 +170,10 @@ async def load_turn_context(
 async def analyze_turn(snapshot: SessionTurnContext) -> SessionTurnAnalysis:
     """Analyze one turn under a timeout. Fail open to no context updates.
 
-    Concurrent mode uses only the two context-maintenance outputs; the routing fields are
-    ignored because retrieval and the answer are already in flight by the time this lands.
+    Retrieval and the answer are already in flight by the time this lands, so the
+    routing fields (``query_to_answer`` / ``response_to_user``) cannot steer them — but
+    the caller still uses them, via ``should_answer_turn``, to decide whether
+    to keep the generated answer or store an acknowledgement instead.
     """
     try:
         return await asyncio.wait_for(
@@ -258,6 +260,7 @@ async def commit_turn(
     used_graph_element_ids: dict | None,
     context: Any = "",
     summarize_context: bool = False,
+    answered: bool = True,
 ) -> None:
     """Apply the turn's context updates, then store the QA pair.
 
@@ -269,6 +272,13 @@ async def commit_turn(
     the QA row under exactly the rule the sequential path applies (see
     ``context_to_store_for_turn``), so the row is identical regardless of
     ``SESSION_SEARCH_MODE``.
+
+    ``answered`` is False when the analysis decided the generated answer should be
+    discarded for an acknowledgement. That acknowledgement came from neither retrieval nor
+    session guidance, so the row must not claim either: a QA row's ``used_*`` fields are
+    exactly what the *next* turn's analysis is handed to rate, and rating guidance the user
+    never saw is how the session teaches itself from nothing. The context updates above
+    still apply — they rate the previous, genuinely answered turn.
     """
     await apply_session_turn_analysis(
         session_manager,
@@ -287,8 +297,10 @@ async def commit_turn(
             context=context_to_store,
             answer=answer.model_dump_json() if isinstance(answer, BaseModel) else str(answer),
             session_id=session_id,
-            used_graph_element_ids=used_graph_element_ids,
-            used_session_context_ids=list(snapshot.active_context_ids) or None,
+            used_graph_element_ids=used_graph_element_ids if answered else None,
+            used_session_context_ids=(
+                (list(snapshot.active_context_ids) or None) if answered else None
+            ),
         )
     except Exception as error:
         logger.warning("Concurrent turn QA write failed open: %s", error, exc_info=True)
