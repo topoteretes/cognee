@@ -266,6 +266,7 @@ async def test_cypher_adapters_reject_invalid_limit_before_query(module_name, cl
 @pytest.mark.asyncio
 async def test_duck_typed_adapter_without_new_method_keeps_working(monkeypatch):
     from types import SimpleNamespace
+
     from cognee.modules.visualization.subgraph_data import resolve_seeds_by_degree
 
     adapter = SimpleNamespace(get_graph_data=AsyncMock(return_value=_star()))
@@ -288,9 +289,10 @@ async def test_full_read_warning_is_once_per_adapter_type(monkeypatch):
 @pytest.mark.parametrize("typed", [False, True])
 async def test_cypher_limits_edges_before_aggregating(typed):
     from types import SimpleNamespace
+
     from cognee.infrastructure.databases.graph.degree_seeds import (
-        cypher_degree_seeds,
         EDGE_SAMPLE_ROWS,
+        cypher_degree_seeds,
     )
 
     row = ("hub", 2) if typed else {"id": "hub", "degree": 2}
@@ -304,8 +306,9 @@ async def test_cypher_limits_edges_before_aggregating(typed):
 
 @pytest.mark.asyncio
 async def test_turso_native_seed_selection(tmp_path):
-    from cognee.infrastructure.databases.graph.turso.adapter import TursoAdapter
     from types import SimpleNamespace
+
+    from cognee.infrastructure.databases.graph.turso.adapter import TursoAdapter
 
     adapter = TursoAdapter(f"sqlite+aiosqlite:///{tmp_path / 'seed-test.db'}")
     adapter.get_graph_data = AsyncMock(side_effect=AssertionError("unexpected full graph read"))
