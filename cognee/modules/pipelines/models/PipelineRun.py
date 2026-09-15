@@ -59,6 +59,32 @@ class PipelineRun(Base):
     dataset_id = Column(UUID, index=True)
     run_info = Column(JSON)
 
+    # When this run last showed a sign of life. Written by
+    # log_pipeline_run_progress, which already UPDATEs the STARTED row in
+    # place, so recording it costs no extra write and no extra row.
+    #
+    # Its resolution is one item completion, throttled in run_tasks.py to ~20
+    # per run. So it advances for a multi-item run and does NOT advance while
+    # a run is inside a single long item: a one-item cognify stamps exactly
+    # once, when that item finishes, and nothing before it — the run's start
+    # is only created_at, since log_pipeline_run_start records no liveness.
+    # Treating a frozen value as proof of death is therefore wrong for that
+    # shape; bounding the gap inside one item needs an event source inside
+    # the task, which this column does not provide.
+    #
+    # Nullable with no backfill: rows written before this column existed stay
+    # NULL, and readers fall back to created_at for them. NULL therefore means
+    # "no evidence either way, judge by age", never "dead" — several paths
+    # legitimately hold a STARTED row without ever ticking (an update() run
+    # driven outside run_tasks, a dataset still queued behind others in a
+    # background multi-dataset run).
+    #
+    # Readers must normalize before comparing: SQLite drops the tzinfo on a
+    # DateTime(timezone=True) round trip and returns naive UTC, while Postgres
+    # returns it aware, so `value < datetime.now(timezone.utc)` raises on the
+    # default backend. recovery.py does this for created_at already.
+    last_heartbeat_at = Column(DateTime(timezone=True))
+
     # Operation-record columns (SDK-399). All nullable: rows written before
     # this change stay NULL — no backfill. Non-pipeline operations (search,
     # recall, forget, remember, delete, prune) write exactly one row with

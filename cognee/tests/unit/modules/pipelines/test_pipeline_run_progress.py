@@ -17,6 +17,7 @@ Covered here:
   the same way it already does for the other PipelineRunInfo subclasses.
 """
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -314,3 +315,112 @@ def test_queue_round_trips_pipeline_run_progress():
         assert received.current_stage == "extract_graph_from_data"
     finally:
         queues_module.remove_queue(pipeline_run_id)
+
+
+def _as_utc(value):
+    """SQLite drops the tzinfo on a DateTime(timezone=True) round trip, so a
+    value read back from the default backend is naive UTC. Postgres returns it
+    aware. Readers of last_heartbeat_at have to normalize either way; these
+    tests do the same so they assert the instant, not the backend."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
+async def _stored_heartbeat(pipeline_run_id):
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        row = (
+            await session.execute(
+                select(PipelineRun)
+                .filter(PipelineRun.pipeline_run_id == pipeline_run_id)
+                .filter(PipelineRun.status == PipelineRunStatus.DATASET_PROCESSING_STARTED)
+            )
+        ).scalar_one()
+        return row.last_heartbeat_at
+
+
+@pytest.mark.asyncio
+async def test_progress_write_stamps_a_real_utc_instant():
+    """A tick only happens because the run did something, so the same UPDATE
+    records when that was. Asserting the value lands inside a window taken
+    around the call catches the two ways this silently breaks: a stamp that
+    never advances, and a stamp taken off the local clock instead of UTC
+    (the latter only where local time is not UTC, so CI cannot see it)."""
+    await create_db_and_tables()
+
+    dataset_id = uuid4()
+    pipeline_id = uuid4()
+
+    pipeline_run = await log_pipeline_run_start(pipeline_id, "cognify_pipeline", dataset_id, None)
+    pipeline_run_id = pipeline_run.pipeline_run_id
+
+    # Starting is not evidence of progress: a run that dies immediately must
+    # not look alive, so log_pipeline_run_start records no liveness of its own.
+    assert await _stored_heartbeat(pipeline_run_id) is None
+
+    before = datetime.now(timezone.utc)
+    await log_pipeline_run_progress(
+        pipeline_run_id=pipeline_run_id,
+        pipeline_id=pipeline_id,
+        pipeline_name="cognify_pipeline",
+        dataset_id=dataset_id,
+        completed_items=1,
+        total_items=2,
+    )
+    after = datetime.now(timezone.utc)
+
+    first = _as_utc(await _stored_heartbeat(pipeline_run_id))
+    assert before <= first <= after
+
+
+@pytest.mark.asyncio
+async def test_each_progress_write_advances_the_stamp():
+    """The column answers "how recently was this alive", so a value written
+    once and then left alone is the failure mode worth pinning: a stamp that
+    is merely non-NULL says nothing."""
+    await create_db_and_tables()
+
+    dataset_id = uuid4()
+    pipeline_id = uuid4()
+
+    pipeline_run = await log_pipeline_run_start(pipeline_id, "cognify_pipeline", dataset_id, None)
+    pipeline_run_id = pipeline_run.pipeline_run_id
+
+    stamps = []
+    for tick in (1, 2, 3):
+        await log_pipeline_run_progress(
+            pipeline_run_id=pipeline_run_id,
+            pipeline_id=pipeline_id,
+            pipeline_name="cognify_pipeline",
+            dataset_id=dataset_id,
+            completed_items=tick,
+            total_items=3,
+        )
+        stamps.append(_as_utc(await _stored_heartbeat(pipeline_run_id)))
+
+    assert stamps[0] < stamps[1] < stamps[2]
+
+
+@pytest.mark.asyncio
+async def test_the_insert_fallback_stamps_the_row_it_creates():
+    """The fallback INSERT runs when a tick finds no row for the run at all.
+    A tick still drove it, so the row it writes carries the same evidence an
+    UPDATE would have; leaving it NULL would claim the run never ticked."""
+    await create_db_and_tables()
+
+    dataset_id = uuid4()
+    pipeline_id = uuid4()
+    pipeline_run_id = uuid4()  # no log_pipeline_run_start: no row exists yet
+
+    before = datetime.now(timezone.utc)
+    await log_pipeline_run_progress(
+        pipeline_run_id=pipeline_run_id,
+        pipeline_id=pipeline_id,
+        pipeline_name="cognify_pipeline",
+        dataset_id=dataset_id,
+        completed_items=1,
+        total_items=1,
+    )
+    after = datetime.now(timezone.utc)
+
+    stamped = _as_utc(await _stored_heartbeat(pipeline_run_id))
+    assert before <= stamped <= after
