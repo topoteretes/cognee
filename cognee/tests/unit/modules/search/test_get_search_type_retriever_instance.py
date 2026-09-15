@@ -218,6 +218,8 @@ async def test_hybrid_completion_retriever_receives_config():
             "text_summaries_top_k": 0,
             "use_importance_weight": False,
             "facts_top_k": 4,
+            "include_external_metadata": True,
+            "external_metadata_keys": ["created_at", "source_id"],
         },
     )
 
@@ -233,6 +235,8 @@ async def test_hybrid_completion_retriever_receives_config():
     assert retriever_instance.text_summaries_top_k == 0
     assert retriever_instance.use_importance_weight is False
     assert retriever_instance.facts_top_k == 4
+    assert retriever_instance.include_external_metadata is True
+    assert retriever_instance.external_metadata_keys == ["created_at", "source_id"]
 
 
 @pytest.mark.asyncio
@@ -310,6 +314,9 @@ async def test_hybrid_completion_caps_default_channel_limits():
     assert retriever_instance.use_importance_weight is True
     assert retriever_instance.facts_top_k == 10
     assert retriever_instance.include_references is False
+    # Metadata surfacing is opt-in: off, with an empty allowlist, unless asked for.
+    assert retriever_instance.include_external_metadata is False
+    assert retriever_instance.external_metadata_keys == []
 
 
 @pytest.mark.asyncio

@@ -1,7 +1,8 @@
-from pydantic import PrivateAttr
+from pydantic import PrivateAttr, model_validator
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.models.Edge import Edge
+from cognee.modules.chunking.external_metadata import document_external_metadata
 from cognee.modules.data.processing.document_types import Document
 from cognee.modules.engine.models import Entity
 from cognee.tasks.temporal_graph.models import Event
@@ -25,6 +26,9 @@ class DocumentChunk(DataPoint):
     - contains: A list of entities or events contained within the chunk (default is None).
     - document_id: Flat string id of the source document, for reference rendering.
     - document_name: Display name (basename) of the source document, for reference rendering.
+    - external_metadata: The parent document's external_metadata as JSON text, copied onto
+    every new chunk so hybrid retrieval can surface allowlisted keys; None when the document
+    carries none.
     - metadata: A dictionary to hold meta information related to the chunk, including index
     fields.
     """
@@ -51,6 +55,11 @@ class DocumentChunk(DataPoint):
     importance_weight: float | None = 0.5
     document_id: str | None = None
     document_name: str | None = None
+    # The parent document's external_metadata as JSON text (see
+    # chunking/external_metadata.py for why text, not dict). Filled from
+    # ``is_part_of`` by the validator below unless a caller passes it; never
+    # embedded, never part of the chunk id.
+    external_metadata: str | None = None
     # Optional truth-alignment fields; never embedded (kept out of index_fields)
     # and not part of id/dedup.
     truth_alignment: list[float] | None = None
@@ -71,3 +80,16 @@ class DocumentChunk(DataPoint):
     # Per-chunk semantic graph identities used by the provenance sidecar,
     # carrying the edge text and every occurrence rather than a unique set.
     _provenance_edges: list = PrivateAttr(default_factory=list)
+
+    @model_validator(mode="after")
+    def _inherit_document_external_metadata(self):
+        """Carry the parent document's external_metadata unless the caller set one.
+
+        Every place that builds a chunk (the chunkers, the incremental assembler,
+        rehydrate) already passes ``is_part_of``, so deriving here means no
+        construction site can forget the copy. An explicit value, such as the one
+        rehydrate copies from a stored node, always wins.
+        """
+        if self.external_metadata is None:
+            self.external_metadata = document_external_metadata(self.is_part_of)
+        return self

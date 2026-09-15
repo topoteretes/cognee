@@ -64,6 +64,7 @@ from cognee.modules.chunking.chunk_policy import (
     IncrementalPlanError,
     stored_chunker_id,
 )
+from cognee.modules.chunking.external_metadata import normalize_external_metadata
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.config import get_cognify_config
@@ -341,6 +342,9 @@ def _rehydrate_chunk(document: Document, node: dict, chunk_index: int) -> Docume
         importance_weight=node.get("importance_weight", document.importance_weight),
         document_id=str(document.id),
         document_name=document.name,
+        # Stored as JSON text; a graph backend that hands back a dict is
+        # re-serialised so the field survives the MERGE either way.
+        external_metadata=normalize_external_metadata(node.get("external_metadata")),
         truth_alignment=truth_alignment if isinstance(truth_alignment, list) else None,
         truth_epoch=node.get("truth_epoch"),
         ontology_valid=bool(node.get("ontology_valid", False)),
