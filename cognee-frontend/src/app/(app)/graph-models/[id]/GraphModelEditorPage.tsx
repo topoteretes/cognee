@@ -9,7 +9,7 @@ import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
 import { syncGraphModels, loadGraphModelsConfig } from "@/modules/configuration/userConfiguration";
 import { inferSchema, downloadRawData } from "@/modules/llm/managementLlmApi";
-import getDatasetData from "@/modules/datasets/getDatasetData";
+import { getAllDatasetData } from "@/modules/datasets/getDatasetData";
 import { v4 as uuid } from "uuid";
 import { TrackPageView, trackEvent } from "@/modules/analytics";
 
@@ -213,7 +213,7 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
     setRegenSelectedFiles(new Set());
     setRegenLoadingFiles(true);
     try {
-      const data = await getDatasetData(datasetId, cogniInstance);
+      const data = await getAllDatasetData(datasetId, cogniInstance);
       const files = Array.isArray(data) ? data.map((d: any) => ({
         id: d.id,
         name: d.name || d.rawDataLocation?.split("/").pop() || d.id,

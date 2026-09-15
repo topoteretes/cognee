@@ -20,7 +20,10 @@ async def get_dataset_data(
     """
     db_engine = get_relational_engine()
 
-    query = select(Data).filter(Data.dataset_id == dataset_id).order_by(Data.data_size.desc())
+    # A unique tie-breaker keeps equal-sized documents in the same order across pages.
+    query = (
+        select(Data).filter(Data.dataset_id == dataset_id).order_by(Data.data_size.desc(), Data.id)
+    )
 
     if offset:
         query = query.offset(offset)

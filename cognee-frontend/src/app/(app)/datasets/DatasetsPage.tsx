@@ -24,11 +24,10 @@ export default function DatasetsPage() {
     selectedDocs,
     docsLoading,
     docsError,
-    retryDocs,
     docsTotal,
-    docsLoadingMore,
-    docsMaxLoaded,
+    hasMoreDocs,
     loadMoreDocs,
+    retryDocs,
     outdatedDatasets,
     refreshing,
     isUploading,
@@ -172,6 +171,9 @@ export default function DatasetsPage() {
             docsLoading={docsLoading}
             docsError={docsError}
             docs={selectedDocs}
+            hasMore={hasMoreDocs}
+            onLoadMore={loadMoreDocs}
+            total={docsTotal ?? selectedDataset?.documents}
             processing={selectedDataset?.status === "pending" || selectedDataset?.status === "running"}
             isUploading={isUploading}
             uploadStage={uploadStage}
@@ -184,10 +186,6 @@ export default function DatasetsPage() {
             onClearUploadError={() => setUploadError(null)}
             onRetryBuild={handleRetryBuild}
             onRetryDocs={retryDocs}
-            docsTotal={docsTotal}
-            docsLoadingMore={docsLoadingMore}
-            docsMaxLoaded={docsMaxLoaded}
-            onLoadMoreDocs={loadMoreDocs}
           />
 
         </div>

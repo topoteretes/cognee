@@ -96,3 +96,37 @@ describe("ScrollLoader", () => {
     expect(onLoadMore).toHaveBeenCalledTimes(1);
   });
 });
+
+
+test("failed pages pause automatic loading and offer an explicit retry", () => {
+  const { onLoadMore } = setup({ error: true });
+  expect(observed).toBeNull();
+  expect(screen.getByRole("alert")).toHaveTextContent("Couldn’t load more");
+  fireEvent.click(screen.getByText("Retry loading more"));
+  expect(onLoadMore).toHaveBeenCalledTimes(1);
+});
+
+test("duplicate observer callbacks request only one page", () => {
+  const { onLoadMore } = setup();
+  scrollIntoView();
+  scrollIntoView();
+  expect(onLoadMore).toHaveBeenCalledTimes(1);
+});
+
+test("a finished page stops scrolling even if the count is stale", () => {
+  setup({ hasMore: false });
+  expect(observed).toBeNull();
+  expect(screen.queryByText("Load more")).not.toBeInTheDocument();
+});
+
+test("search can pause automatic loading without removing manual loading", () => {
+  const { onLoadMore } = setup({ autoLoad: false });
+  expect(observed).toBeNull();
+  fireEvent.click(screen.getByText("Load more"));
+  expect(onLoadMore).toHaveBeenCalledTimes(1);
+});
+
+test("unknown totals are reported as loaded rows", () => {
+  setup({ total: null, hasMore: true });
+  expect(screen.getByText("100 loaded documents")).toBeInTheDocument();
+});

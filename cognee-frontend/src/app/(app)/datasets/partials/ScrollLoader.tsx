@@ -24,15 +24,21 @@ export default function ScrollLoader({
   total,
   maxLoaded,
   busy,
+  error = false,
+  hasMore: moreAvailable,
+  autoLoad = true,
   onLoadMore,
   rootRef,
   noun = "documents",
   compact,
 }: {
   loaded: number;
-  total: number;
+  total: number | null;
   maxLoaded: number;
   busy?: boolean;
+  error?: boolean;
+  hasMore?: boolean;
+  autoLoad?: boolean;
   onLoadMore: () => void;
   rootRef?: RefObject<HTMLElement | null>;
   noun?: string;
@@ -41,7 +47,8 @@ export default function ScrollLoader({
   const sentinel = useRef<HTMLDivElement | null>(null);
 
   const atCap = loaded >= maxLoaded;
-  const hasMore = loaded < total && !atCap;
+  const more = moreAvailable ?? (total !== null && loaded < total);
+  const hasMore = more && !atCap;
 
   // onLoadMore is typically a fresh closure each render; a ref keeps the
   // observer from being torn down and rebuilt on every one of them.
@@ -49,14 +56,19 @@ export default function ScrollLoader({
   loadMore.current = onLoadMore;
 
   useEffect(() => {
-    if (!hasMore || busy) return;
+    if (!hasMore || busy || error || !autoLoad) return;
 
     const target = sentinel.current;
     if (!target || typeof IntersectionObserver === "undefined") return;
 
+    let active = true;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) loadMore.current();
+        if (active && entries.some((entry) => entry.isIntersecting)) {
+          active = false;
+          observer.disconnect();
+          loadMore.current();
+        }
       },
       {
         root: rootRef?.current ?? null,
@@ -67,11 +79,11 @@ export default function ScrollLoader({
     );
 
     observer.observe(target);
-    return () => observer.disconnect();
-  }, [hasMore, busy, rootRef]);
+    return () => { active = false; observer.disconnect(); };
+  }, [hasMore, busy, error, autoLoad, loaded, rootRef]);
 
   // Nothing to say when the list already is the dataset.
-  if (total <= loaded && !atCap) return null;
+  if (!more && !error && (total === null || total <= loaded)) return null;
 
   const fontSize = compact ? 11 : 12;
   const padding = compact ? "10px 16px" : "14px 20px";
@@ -95,19 +107,21 @@ export default function ScrollLoader({
         <span>Loading more…</span>
       ) : (
         <span>
-          {loaded.toLocaleString()} of {total.toLocaleString()} {noun}
+          {loaded.toLocaleString()}{total === null ? " loaded" : ` of ${Math.max(total, loaded).toLocaleString()}`} {noun}
         </span>
       )}
 
-      {atCap && loaded < total && (
+      {atCap && more && (total === null || loaded < total) && (
         <span style={{ color: "rgba(237,236,234,0.3)", textAlign: "center" }}>
-          Showing the first {maxLoaded.toLocaleString()} — search to narrow the list.
+          Showing the first {maxLoaded.toLocaleString()} {noun}. This view is limited to {maxLoaded.toLocaleString()} {noun}.
         </span>
       )}
+
+      {error && <span role="alert">Couldn’t load more {noun}. Try again.</span>}
 
       {/* Scrolling is the normal path; the button is the fallback for anyone
           whose browser has no IntersectionObserver, and for keyboard users. */}
-      {hasMore && !busy && (
+      {(hasMore || error) && !busy && (
         <button
           onClick={() => loadMore.current()}
           className="cursor-pointer hover:bg-white/10"
@@ -122,7 +136,7 @@ export default function ScrollLoader({
             cursor: "pointer",
           }}
         >
-          Load more
+          {error ? "Retry loading more" : "Load more"}
         </button>
       )}
     </div>

@@ -391,14 +391,24 @@ class CloudClient:
             return await resp.json()
 
     async def list_data(self, dataset_id: UUID) -> list:
-        """GET /api/v1/datasets/{dataset_id}/data — the documents in a dataset."""
+        """Return every document, following the HTTP endpoint's bounded pages."""
         session = await self._get_session()
-
-        async with session.get(f"{self.service_url}/api/v1/datasets/{dataset_id}/data") as resp:
-            if resp.status >= 400:
-                body = await resp.text()
-                raise RuntimeError(f"Remote list_data failed ({resp.status}): {body}")
-            return await resp.json()
+        rows = []
+        limit = 1000
+        while True:
+            async with session.get(
+                f"{self.service_url}/api/v1/datasets/{dataset_id}/data",
+                params={"limit": limit, "offset": len(rows)},
+            ) as resp:
+                if resp.status >= 400:
+                    body = await resp.text()
+                    raise RuntimeError(f"Remote list_data failed ({resp.status}): {body}")
+                page = await resp.json()
+            if not isinstance(page, list):
+                raise RuntimeError("Remote list_data returned an invalid document list")
+            rows.extend(page)
+            if len(page) < limit:
+                return rows
 
     async def cognify(self, datasets: Any = None, **kwargs) -> dict:
         """POST /api/v1/cognify — build the knowledge graph."""

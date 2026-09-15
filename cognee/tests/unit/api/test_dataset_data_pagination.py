@@ -158,3 +158,25 @@ def test_count_segment_is_not_shadowed_by_a_parameter_route():
     shadowing = [path for path in get_paths if sibling.match(path)]
 
     assert not shadowing, f"these GET routes would swallow /data/count: {shadowing}"
+
+
+@pytest.mark.parametrize("suffix", ["data", "data/count"])
+def test_unauthorized_dataset_does_not_query_data(client, monkeypatch, suffix):
+    import importlib
+    from unittest.mock import AsyncMock
+
+    module = importlib.import_module("cognee.api.v1.datasets.routers.get_datasets_router")
+    methods = importlib.import_module("cognee.modules.data.methods")
+    authorized = AsyncMock(return_value=[])
+    listing = AsyncMock()
+    counting = AsyncMock()
+    monkeypatch.setattr(module, "get_authorized_existing_datasets", authorized)
+    monkeypatch.setattr(methods, "get_dataset_data", listing)
+    monkeypatch.setattr(methods, "count_dataset_data", counting)
+
+    response = client.get(f"/api/v1/datasets/{DATASET_ID}/{suffix}")
+
+    assert response.status_code == 404
+    assert authorized.await_args.args[:2] == ([DATASET_ID], "read")
+    listing.assert_not_awaited()
+    counting.assert_not_awaited()

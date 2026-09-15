@@ -7,8 +7,8 @@
  *
  * This is also the ceiling on infinite scroll: appending indefinitely would
  * walk the page straight back into that freeze, just more slowly. 2,000 rows is
- * roughly a dozen scroll steps — far enough to browse without hitting a wall,
- * and around 12k DOM nodes, which stays responsive. Reaching six figures needs
+ * twenty 100-row pages — far enough to browse without hitting a wall,
+ * while keeping the DOM bounded. Reaching six figures needs
  * windowing or server-side search, not a bigger number here.
  *
  * One constant, so both the loader and the tables agree, and raising it (or

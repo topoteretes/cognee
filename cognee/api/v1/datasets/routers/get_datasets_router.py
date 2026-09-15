@@ -510,7 +510,7 @@ def get_datasets_router() -> APIRouter:
             "Datasets API Endpoint Invoked",
             user,
             additional_properties={
-                "endpoint": f"GET /v1/datasets/{str(dataset_id)}/data/count",
+                "endpoint": f"GET /v1/datasets/{dataset_id!s}/data/count",
                 "dataset_id": str(dataset_id),
                 "cognee_version": cognee_version,
             },
@@ -525,7 +525,7 @@ def get_datasets_router() -> APIRouter:
             return JSONResponse(
                 status_code=404,
                 content=ErrorResponseDTO(
-                    message=f"Dataset ({str(dataset_id)}) not found."
+                    message=f"Dataset ({dataset_id!s}) not found."
                 ).model_dump(),
             )
 
