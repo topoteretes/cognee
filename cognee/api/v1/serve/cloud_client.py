@@ -391,15 +391,21 @@ class CloudClient:
             return await resp.json()
 
     async def list_data(self, dataset_id: UUID) -> list:
-        """Return every document, following the HTTP endpoint's bounded pages."""
+        """Traverse bounded pages, deduplicating overlaps during concurrent ingest.
+
+        This is not a snapshot: inserts/deletes can make rows unreachable during
+        offset traversal. Above offset 1,000,000 the server rejects requests;
+        /data/count still reports the full dataset size.
+        """
         session = await self._get_session()
         rows = []
         seen_ids = set()
         limit = 1000
+        offset = 0
         while True:
             async with session.get(
                 f"{self.service_url}/api/v1/datasets/{dataset_id}/data",
-                params={"limit": limit, "offset": len(rows)},
+                params={"limit": limit, "offset": offset},
             ) as resp:
                 if resp.status >= 400:
                     body = await resp.text()
@@ -410,8 +416,13 @@ class CloudClient:
             page_ids = {str(row["id"]) for row in page if isinstance(row, dict) and "id" in row}
             if len(page) > limit or (page and page_ids and page_ids <= seen_ids):
                 raise RuntimeError("Remote server did not honor dataset pagination")
-            seen_ids.update(page_ids)
-            rows.extend(page)
+            # Advance by consumed server rows, independently of deduplication.
+            offset += len(page)
+            for row in page:
+                row_id = str(row["id"])
+                if row_id not in seen_ids:
+                    seen_ids.add(row_id)
+                    rows.append(row)
             if len(page) < limit:
                 return rows
 

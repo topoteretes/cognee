@@ -3,7 +3,9 @@
 The data endpoint now defaults to 100 rows (maximum limit 1000). Increasing
 limit alone does not retrieve a larger dataset: advance offset until a short
 page is returned. Use /data/count for totals. The Python datasets.list_data()
-API still returns all rows, both locally and when connected to a server.
+API follows pages remotely. The server rejects offsets above 1,000,000, so
+remote traversal beyond that bound raises even though /data/count remains exact.
+Local list_data has no offset cap.
 
 Usage: COGNEE_API_TOKEN=... python examples/python/dataset_data_pagination.py DATASET_UUID
 Optional: COGNEE_API_URL=http://localhost:8000
