@@ -6,7 +6,8 @@ import { captureException, recordUploadSuccess, recordUploadFailure } from "@/ut
 import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
 import getDatasets from "@/modules/datasets/getDatasets";
-import getDatasetData, { getDatasetDataCount } from "@/modules/datasets/getDatasetData";
+import { getDatasetDataCount } from "@/modules/datasets/getDatasetData";
+import useDatasetDataPages from "@/modules/datasets/useDatasetDataPages";
 import createDataset from "@/modules/datasets/createDataset";
 import deleteDataset from "@/modules/datasets/deleteDataset";
 import deleteDatasetData from "@/modules/datasets/deleteDatasetData";
@@ -49,9 +50,12 @@ export function useBrainsData(): UseBrainsDataResult {
   const [outdatedDatasets, setOutdated] = useState<Set<string>>(new Set());
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [selectedDocs, setSelectedDocs] = useState<FileEntry[]>([]);
-  const [docsLoading, setDocsLoading] = useState(false);
-  const [docsError, setDocsError] = useState(false);
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
+  const {
+    data: selectedDocs, setData: setSelectedDocs, loading: docsLoading,
+    error: docsError, hasMore: hasMoreDocs, load: loadDocs, loadMore: loadMoreDocs, reset: resetDocs,
+  } = useDatasetDataPages<FileEntry>(cogniInstance);
 
   const { isUploading, stage: uploadStage, progress: uploadProgress, upload } = useBrainUpload(cogniInstance);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -76,18 +80,24 @@ export function useBrainsData(): UseBrainsDataResult {
 
   const { statusDetails } = useDatasetStatuses(datasets.length > 0);
 
+  const listGeneration = useRef(0);
+  const invalidateList = useCallback(() => { listGeneration.current++; }, []);
+
   const loadDatasets = useCallback(async (): Promise<void> => {
     if (!cogniInstance) return;
+    const generation = ++listGeneration.current;
     try {
       let list: DatasetRaw[];
       try {
         const fetched = await getDatasets(cogniInstance);
+        if (generation !== listGeneration.current) return;
         // A non-array body is just as much a failed fetch as a thrown error —
         // treat it the same way instead of silently rendering an empty list.
         if (!Array.isArray(fetched)) throw new Error("Unexpected /v1/datasets response shape");
         list = fetched;
         setDatasetsError(false);
       } catch (err) {
+        if (generation !== listGeneration.current) return;
         captureException(err, { stage: "load_datasets" });
         // Fall back to FilterContext's list (which can itself be empty or
         // stale) rather than leaving the page with nothing — but flag the
@@ -104,7 +114,10 @@ export function useBrainsData(): UseBrainsDataResult {
         });
       }
       const initial = list.map((ds) => ({ ...ds, documents: -1, status: "loading" as DisplayStatus }));
-      setDatasets(initial);
+      setDatasets(previous => initial.map(ds => {
+        const known = previous.find(d => d.id === ds.id);
+        return known ? { ...ds, documents: known.documents, status: known.status } : ds;
+      }));
       setLoading(false);
 
       // The shared client's default GET timeout races a caller's own signal
@@ -120,18 +133,21 @@ export function useBrainsData(): UseBrainsDataResult {
         ? normalizeDatasetStatusResponse(await statusResp.json())
         : {};
 
+      if (generation !== listGeneration.current) return;
       for (const ds of list) {
         // Only the count is wanted here. Fetching the rows to measure them
         // downloaded every dataset in full, once per dataset on this page.
         getDatasetDataCount(ds.id, cogniInstance)
           .then((count) => {
+            if (generation !== listGeneration.current) return;
             setDatasets((prev) => prev.map((d) => d.id === ds.id ? { ...d, documents: count, status: mapProcessingStatus(statusData[ds.id]?.status, count, statusData[ds.id]?.reason ?? null) } : d));
           })
           .catch(() => {
-            setDatasets((prev) => prev.map((d) => d.id === ds.id ? { ...d, documents: 0, status: mapProcessingStatus(statusData[ds.id]?.status, 0, statusData[ds.id]?.reason ?? null) } : d));
+            // Keep the last known count (or -1 for unknown), never invent zero.
           });
       }
     } catch (err) {
+      if (generation !== listGeneration.current) return;
       captureException(err, { stage: "load_datasets_unexpected" });
       setDatasets([]);
       setDatasetsError(true);
@@ -145,7 +161,8 @@ export function useBrainsData(): UseBrainsDataResult {
     loadGraphModelsConfig(cogniInstance)
       .then((cfg) => setOutdated(new Set(cfg.outdatedDatasets ?? [])))
       .catch((err) => { console.error("Failed to load graph models config:", err); });
-  }, [cogniInstance, isInitializing, loadDatasets]);
+    return invalidateList;
+  }, [cogniInstance, isInitializing, loadDatasets, invalidateList]);
 
   useEffect(() => {
     if (!cogniInstance || Object.keys(statusDetails).length === 0) return;
@@ -167,34 +184,20 @@ export function useBrainsData(): UseBrainsDataResult {
       // The document list is a page; the badge is a total. Two questions now,
       // so ask them separately rather than counting whichever rows arrived.
       Promise.all([
-        getDatasetData(completedSelectedId, cogniInstance),
+        loadDocs(completedSelectedId),
         getDatasetDataCount(completedSelectedId, cogniInstance),
       ])
-        .then(([docs, count]) => {
-          setSelectedDocs(Array.isArray(docs) ? docs : []);
+        .then(([, count]) => {
           setDatasets((prev) => prev.map((d) => d.id === completedSelectedId ? { ...d, documents: count } : d));
         })
         .catch((err) => {
-          console.error("Failed to fetch dataset documents:", err);
-          setSelectedDocs([]);
+          console.error("Failed to refresh dataset document count:", err);
         });
     }
-  }, [statusDetails, cogniInstance, selectedId]);
+  }, [statusDetails, cogniInstance, selectedId, loadDocs]);
 
   async function refreshSelectedDocs(id: string): Promise<void> {
-    if (!cogniInstance) return;
-    setDocsLoading(true);
-    try {
-      const data = await getDatasetData(id, cogniInstance);
-      setSelectedDocs(Array.isArray(data) ? data : []);
-      setDocsError(false);
-    } catch {
-      // Surface the fetch failure instead of rendering a false "no documents"
-      // empty state.
-      setDocsError(true);
-    } finally {
-      setDocsLoading(false);
-    }
+    await loadDocs(id);
   }
 
   async function handleRefresh(): Promise<void> {
@@ -207,7 +210,6 @@ export function useBrainsData(): UseBrainsDataResult {
     if (selectedId === id) return;
     setSelectedId(id);
     setSelectedDocs([]);
-    setDocsError(false);
     await refreshSelectedDocs(id);
   }
 
@@ -248,11 +250,8 @@ export function useBrainsData(): UseBrainsDataResult {
 
     // Shared by the success and processing-error paths below; only the
     // success path also updates the dataset's status.
-    const fetchSelectedDocs = async (): Promise<FileEntry[]> => {
-      const data = (await getDatasetData(ds.id, cogniInstance)) as FileEntry[];
-      const list = Array.isArray(data) ? data : [];
-      setSelectedDocs(list);
-      return list;
+    const fetchSelectedDocs = async (): Promise<void> => {
+      if (selectedIdRef.current === ds.id) await loadDocs(ds.id);
     };
 
     const refreshDocs = async (): Promise<void> => {
@@ -383,7 +382,7 @@ export function useBrainsData(): UseBrainsDataResult {
     // Optimistic delete: drop the dataset from the UI right away and let the
     // backend request complete in the background.
     setDatasets((prev) => prev.filter((d) => d.id !== ds.id));
-    if (selectedId === ds.id) { setSelectedId(null); setSelectedDocs([]); }
+    if (selectedId === ds.id) { setSelectedId(null); resetDocs(); }
     setDeleteTarget(null);
     refreshFilterDatasets();
     trackEvent({ pageName: "Brains", eventName: "dataset_deleted", additionalProperties: { dataset_id: ds.id, dataset_name: ds.name } });
@@ -414,7 +413,7 @@ export function useBrainsData(): UseBrainsDataResult {
       trackEvent({ pageName: "Brains", eventName: "dataset_created", additionalProperties: { dataset_name: ds.name, template: templateKey ?? "blank" } });
       setDatasets((prev) => [...prev, { ...ds, documents: 0, status: "empty" as DisplayStatus }]);
       setSelectedId(ds.id);
-      setSelectedDocs([]);
+      resetDocs();
       setNewName(""); setCreateError(""); setShowCreate(false);
       refreshFilterDatasets();
       if (templateKey) {
@@ -455,6 +454,8 @@ export function useBrainsData(): UseBrainsDataResult {
     selectedDocs,
     docsLoading,
     docsError,
+    hasMoreDocs,
+    loadMoreDocs,
     retryDocs: () => { if (selectedId) refreshSelectedDocs(selectedId); },
     outdatedDatasets,
     refreshing,

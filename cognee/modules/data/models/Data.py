@@ -21,7 +21,13 @@ class Data(Base):
         # e7f9a1c3d5b8.
         # text() rather than created_at.desc(): __table_args__ is evaluated
         # before the columns below exist.
-        Index("ix_data_dataset_created", "dataset_id", text("created_at DESC"), "id"),
+        # PostgreSQL defaults DESC to NULLS FIRST; SQLite already puts NULLs last.
+        Index(
+            "ix_data_dataset_created", "dataset_id", text("created_at DESC NULLS LAST"), "id"
+        ).ddl_if(dialect="postgresql"),
+        Index("ix_data_dataset_created", "dataset_id", text("created_at DESC"), "id").ddl_if(
+            dialect="sqlite"
+        ),
     )
 
     id = Column(UUID, primary_key=True, default=uuid4)

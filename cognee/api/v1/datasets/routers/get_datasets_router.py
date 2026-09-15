@@ -80,6 +80,25 @@ class PipelineRunStatusWithProgress(BaseModel):
     )
 
 
+class DataItemProcessingStatusDTO(OutDTO):
+    """One data item's completion state for the requested pipeline."""
+
+    id: UUID
+    name: str
+    completed: bool
+
+
+class DatasetProcessingStatusDTO(OutDTO):
+    """Item-level completion counts for one dataset and one pipeline."""
+
+    total: int = Field(description="Number of data items in the dataset")
+    completed: int = Field(description="Items carrying the per-item completion stamp")
+    pending: int = Field(description="Items without the stamp (total - completed)")
+    items: list[DataItemProcessingStatusDTO] = Field(
+        description="One entry per data item, in the same order as GET /datasets/{id}/data"
+    )
+
+
 class DatasetDTO(OutDTO):
     id: UUID
     name: str
@@ -381,6 +400,7 @@ def get_datasets_router() -> APIRouter:
         offset: int = Query(
             0,
             ge=0,
+            le=1_000_000,
             description="Number of data items to skip before returning results.",
         ),
         user: User = Depends(get_authenticated_user),
@@ -446,7 +466,9 @@ def get_datasets_router() -> APIRouter:
 
         dataset_id = dataset[0].id
 
-        dataset_data = await get_dataset_data(dataset_id=dataset_id, limit=limit, offset=offset)
+        dataset_data = await get_dataset_data(
+            dataset_id=dataset_id, limit=limit, offset=offset, order_by="created_at"
+        )
 
         if dataset_data is None:
             return []
@@ -511,7 +533,7 @@ def get_datasets_router() -> APIRouter:
             "Datasets API Endpoint Invoked",
             user,
             additional_properties={
-                "endpoint": f"GET /v1/datasets/{str(dataset_id)}/data/count",
+                "endpoint": f"GET /v1/datasets/{dataset_id!s}/data/count",
                 "dataset_id": str(dataset_id),
                 "cognee_version": cognee_version,
             },
@@ -526,7 +548,7 @@ def get_datasets_router() -> APIRouter:
             return JSONResponse(
                 status_code=404,
                 content=ErrorResponseDTO(
-                    message=f"Dataset ({str(dataset_id)}) not found."
+                    message=f"Dataset ({dataset_id!s}) not found."
                 ).model_dump(),
             )
 
@@ -953,5 +975,89 @@ def get_datasets_router() -> APIRouter:
                 session.add(config)
             await session.commit()
         return {"status": "ok"}
+
+    @router.get(
+        "/{dataset_id}/processing-status",
+        response_model=DatasetProcessingStatusDTO,
+        responses={404: {"model": ErrorResponseDTO}},
+    )
+    async def get_dataset_processing_status(
+        dataset_id: UUID = PathParam(
+            description="Dataset UUID, the id field from GET /api/v1/datasets (not the name)",
+            examples=["b8a7c3de-4f5a-4b6c-8d9e-0f1a2b3c4d5e"],
+        ),
+        pipeline: str = Query(
+            "cognify_pipeline",
+            description=(
+                "Pipeline whose per-item completion to count: 'cognify_pipeline'"
+                " (default), 'add_pipeline', or 'code_graph_pipeline'."
+            ),
+            examples=["cognify_pipeline"],
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Get item-level processing status for a dataset.
+
+        `GET /status` reports whether a pipeline *run* is in progress or done for a
+        dataset. This endpoint answers the finer question operators need when
+        triaging incremental loads: which of the dataset's data items carry the
+        per-item completion stamp for a pipeline, and which are still pending.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): The unique identifier of the dataset
+
+        ## Query Parameters
+        - **pipeline** (str, optional): Pipeline name to inspect. Defaults to
+          `cognify_pipeline`.
+
+        ## Response
+        - **total**: Number of data items in the dataset
+        - **completed**: Items whose per-item status for the pipeline is completed
+          (both the legacy string and the dict status representation are recognised)
+        - **pending**: `total - completed`
+        - **items**: `[{id, name, completed}]`, one entry per data item, in the same
+          order as `GET /datasets/{id}/data`. `id` is the data_id accepted by
+          `DELETE /datasets/{id}/data/{data_id}` and `forget(data_id=...)`
+
+        Per-item errored state is not persisted, so it is not reported: a pending
+        item may be untouched, in progress, or failed.
+
+        ## Error Codes
+        - **404 Not Found**: Dataset doesn't exist or user doesn't have access
+        - **409 Conflict**: Error computing the status
+        """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user,
+            additional_properties={
+                "endpoint": f"GET /v1/datasets/{dataset_id!s}/processing-status",
+                "dataset_id": str(dataset_id),
+                "pipeline": pipeline,
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.modules.data.methods import get_dataset_processing_status
+
+        # Verify user has permission to read dataset
+        dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
+
+        if not dataset:
+            return JSONResponse(
+                status_code=404,
+                content=ErrorResponseDTO(
+                    message=f"Dataset ({dataset_id!s}) not found."
+                ).model_dump(),
+            )
+
+        try:
+            return await get_dataset_processing_status(dataset[0].id, pipeline_name=pipeline)
+        except Exception:
+            logger.exception("Error retrieving dataset processing status")
+            return JSONResponse(
+                status_code=409,
+                content={"error": "Unable to retrieve dataset processing status."},
+            )
 
     return router

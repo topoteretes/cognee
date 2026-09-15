@@ -1,3 +1,4 @@
+from typing import Literal
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -10,6 +11,8 @@ async def get_dataset_data(
     dataset_id: UUID,
     limit: int | None = None,
     offset: int = 0,
+    *,
+    order_by: Literal["size", "created_at"] = "size",
 ) -> list[Data]:
     """Return a dataset's data rows.
 
@@ -20,15 +23,15 @@ async def get_dataset_data(
     """
     db_engine = get_relational_engine()
 
-    # Newest first, tiebroken on id so paging is stable when timestamps collide.
-    # This ordering (with the dataset_id filter) is served end to end by
-    # ix_data_dataset_created; the previous order_by(data_size.desc()) was on an
-    # unindexed column, so every listing seq-scanned the table and sorted it --
-    # externally, spilling to disk, on a dataset of any size. A LIMIT does not
-    # avoid that: the whole partition still has to be sorted to find the top N.
-    query = (
-        select(Data).filter(Data.dataset_id == dataset_id).order_by(Data.created_at.desc(), Data.id)
-    )
+    # Pipelines retain largest-first batching. HTTP listings opt into the
+    # timestamp order covered by ix_data_dataset_created.
+    if order_by == "created_at":
+        ordering = Data.created_at.desc().nullslast()
+    elif order_by == "size":
+        ordering = Data.data_size.desc()
+    else:
+        raise ValueError(f"Unsupported dataset data ordering: {order_by}")
+    query = select(Data).filter(Data.dataset_id == dataset_id).order_by(ordering, Data.id)
 
     if offset:
         query = query.offset(offset)

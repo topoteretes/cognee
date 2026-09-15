@@ -61,7 +61,8 @@ def client(monkeypatch):
 
     methods = importlib.import_module("cognee.modules.data.methods")
 
-    async def _get_dataset_data(dataset_id, limit=None, offset=0):
+    async def _get_dataset_data(dataset_id, limit=None, offset=0, *, order_by="size"):
+        assert order_by == "created_at"
         window = ROWS[offset:]
         return window[:limit] if limit is not None else window
 
@@ -108,7 +109,17 @@ def test_limit_and_offset_page_through_without_gaps_or_repeats(client):
     assert len(set(seen)) == ROW_COUNT, "paging must not repeat or skip rows"
 
 
-@pytest.mark.parametrize("query", ["limit=0", "limit=1001", "limit=-1", "offset=-1"])
+@pytest.mark.parametrize(
+    "query",
+    [
+        "limit=0",
+        "limit=1001",
+        "limit=-1",
+        "offset=-1",
+        "offset=1000001",
+        "offset=999999999999999999999",
+    ],
+)
 def test_out_of_range_paging_is_rejected(client, query):
     """Rejected loudly, not silently clamped.
 
@@ -167,3 +178,25 @@ def test_data_size_is_serialized_with_camel_case_alias(client, monkeypatch, size
     response = client.get(f"/api/v1/datasets/{DATASET_ID}/data?limit=1")
     assert response.status_code == 200
     assert response.json()[0]["dataSize"] == size
+
+
+@pytest.mark.parametrize("suffix", ["data", "data/count"])
+def test_unauthorized_dataset_does_not_query_data(client, monkeypatch, suffix):
+    import importlib
+    from unittest.mock import AsyncMock
+
+    module = importlib.import_module("cognee.api.v1.datasets.routers.get_datasets_router")
+    methods = importlib.import_module("cognee.modules.data.methods")
+    authorized = AsyncMock(return_value=[])
+    listing = AsyncMock()
+    counting = AsyncMock()
+    monkeypatch.setattr(module, "get_authorized_existing_datasets", authorized)
+    monkeypatch.setattr(methods, "get_dataset_data", listing)
+    monkeypatch.setattr(methods, "count_dataset_data", counting)
+
+    response = client.get(f"/api/v1/datasets/{DATASET_ID}/{suffix}")
+
+    assert response.status_code == 404
+    assert authorized.await_args.args[:2] == ([DATASET_ID], "read")
+    listing.assert_not_awaited()
+    counting.assert_not_awaited()

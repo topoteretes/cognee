@@ -11,9 +11,8 @@ end to end.
 import re
 
 import pytest
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, create_mock_engine, inspect, text
 from sqlalchemy.dialects import postgresql, sqlite
-from sqlalchemy.schema import CreateIndex
 
 from cognee.modules.data.models import Data
 
@@ -34,9 +33,16 @@ def test_model_declares_the_listing_index():
 @pytest.mark.parametrize("dialect", [postgresql.dialect(), sqlite.dialect()])
 def test_index_covers_filter_and_sort_in_order(dialect):
     """Column order is what makes it usable: filter first, then the sort keys."""
-    ddl = str(CreateIndex(_listing_index()).compile(dialect=dialect))
-
-    assert "(dataset_id, created_at DESC, id)" in " ".join(ddl.split())
+    statements = []
+    engine = create_mock_engine(
+        f"{dialect.name}://",
+        lambda ddl, *a, **kw: statements.append(str(ddl.compile(dialect=dialect))),
+    )
+    Data.__table__.create(engine)
+    indexes = [ddl for ddl in statements if INDEX_NAME in ddl]
+    assert len(indexes) == 1
+    nulls = " NULLS LAST" if dialect.name == "postgresql" else ""
+    assert f"(dataset_id, created_at DESC{nulls}, id)" in " ".join(indexes[0].split())
 
 
 @pytest.mark.asyncio
@@ -79,11 +85,11 @@ async def test_method_issues_the_indexed_ordering(monkeypatch):
 
     monkeypatch.setattr(module, "get_relational_engine", lambda: _Engine())
 
-    await module.get_dataset_data(uuid.uuid4())
+    await module.get_dataset_data(uuid.uuid4(), order_by="created_at")
 
     order_by = re.search(r"ORDER BY (.+?)(?: LIMIT|$)", captured["sql"]).group(1).strip()
     assert "data_size" not in order_by, "the unindexed column must be gone from the sort"
-    assert "created_at DESC" in order_by
+    assert "created_at DESC NULLS LAST" in order_by
     assert order_by.endswith("data.id"), "id tiebreak keeps paging stable"
 
 
@@ -162,7 +168,7 @@ def test_postgres_migration_recovers_invalid_index(monkeypatch, valid):
         assert statements == []
     else:
         expected = [
-            f"CREATE INDEX CONCURRENTLY {INDEX_NAME} ON data (dataset_id, created_at DESC, id)"
+            f"CREATE INDEX CONCURRENTLY {INDEX_NAME} ON data (dataset_id, created_at DESC NULLS LAST, id)"
         ]
         if valid is False:
             expected.insert(0, f"DROP INDEX CONCURRENTLY IF EXISTS {INDEX_NAME}")
@@ -211,14 +217,25 @@ async def test_pages_preserve_timestamp_ties_and_dataset_isolation(monkeypatch):
                 Data(id=UUID(int=base + 5), dataset_id=UUID(int=base + 101), created_at=now)
             )
             await session.commit()
-        pages = [await module.get_dataset_data(dataset_id, limit=2, offset=o) for o in (0, 2, 4)]
+        # A legacy writer may omit the ORM's timestamp default.
+        async with sessions() as session:
+            from sqlalchemy import update
+
+            await session.execute(
+                update(Data).where(Data.id == UUID(int=base + 4)).values(created_at=None)
+            )
+            await session.commit()
+        pages = [
+            await module.get_dataset_data(dataset_id, limit=2, offset=o, order_by="created_at")
+            for o in (0, 2, 4)
+        ]
         assert [len(page) for page in pages] == [2, 2, 0]
         assert [row.id.int - base for page in pages for row in page] == [1, 2, 3, 4]
         assert [row.id.int - base for row in await module.get_dataset_data(dataset_id)] == [
-            1,
-            2,
-            3,
             4,
+            3,
+            2,
+            1,
         ]
     finally:
         await engine.dispose()

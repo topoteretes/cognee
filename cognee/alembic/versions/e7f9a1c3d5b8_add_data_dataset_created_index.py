@@ -51,7 +51,7 @@ def upgrade() -> None:
             if valid is False:
                 op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {INDEX_NAME}")
             op.execute(
-                f"CREATE INDEX CONCURRENTLY {INDEX_NAME} ON data (dataset_id, created_at DESC, id)"
+                f"CREATE INDEX CONCURRENTLY {INDEX_NAME} ON data (dataset_id, created_at DESC NULLS LAST, id)"
             )
     elif INDEX_NAME not in {idx["name"] for idx in inspect(conn).get_indexes("data")}:
         op.execute(f"CREATE INDEX {INDEX_NAME} ON data (dataset_id, created_at DESC, id)")

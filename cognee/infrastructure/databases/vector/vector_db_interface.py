@@ -94,6 +94,18 @@ class VectorDBInterface(Protocol):
         """
         raise NotImplementedError
 
+    async def score_by_ids(
+        self, collection_name: str, data_point_ids: list[str], query_vector: list[float]
+    ):
+        """Return raw cosine distances for existing requested IDs, with no top-k cutoff.
+
+        Empty IDs return []; missing IDs are omitted and result order is unspecified.
+        Implementations must filter by ID before scoring and bound query batches,
+        rather than searching the whole collection. This optional capability raises
+        NotImplementedError on adapters that do not support neighborhood re-scoring.
+        """
+        raise NotImplementedError("score_by_ids is not implemented for this adapter")
+
     """ Search """
 
     @abstractmethod

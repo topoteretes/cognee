@@ -21,7 +21,12 @@ export default function getDatasetData(
   const query = new URLSearchParams({ limit: String(limit), offset: String(offset) });
 
   return instance.fetch(`/v1/datasets/${datasetId}/data?${query}`, { signal })
-      .then((response) => response.json());
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Could not load documents (${response.status})`);
+        const body = await response.json();
+        if (!Array.isArray(body)) throw new Error("Unexpected dataset data response");
+        return body;
+      });
 }
 
 /**
@@ -37,6 +42,28 @@ export function getDatasetDataCount(
   signal?: AbortSignal,
 ): Promise<number> {
   return instance.fetch(`/v1/datasets/${datasetId}/data/count`, { signal })
-      .then((response) => response.json())
-      .then((body) => (typeof body?.count === "number" ? body.count : 0));
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Could not count documents (${response.status})`);
+        const body = await response.json();
+        if (!Number.isSafeInteger(body?.count) || body.count < 0) {
+          throw new Error("Unexpected dataset count response");
+        }
+        return body.count;
+      });
+}
+
+/** Explicit full traversal for callers that need every document, such as schema regeneration. */
+export async function getAllDatasetData(datasetId: string, instance: CogneeInstance) {
+  const rows = [];
+  const seen = new Set<string>();
+  for (;;) {
+    const page = await getDatasetData(datasetId, instance, { limit: 1000, offset: rows.length });
+    const ids = page.map((row: { id: string }) => String(row.id));
+    if (page.length > 1000 || (page.length > 0 && ids.every((id: string) => seen.has(id)))) {
+      throw new Error("Server did not honor dataset pagination");
+    }
+    ids.forEach((id: string) => seen.add(id));
+    rows.push(...page);
+    if (page.length < 1000) return rows;
+  }
 }
