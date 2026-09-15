@@ -42,9 +42,9 @@ leaves the sink open because a later call in the same request may still stream.
 A consumer that iterates a sink nobody closes waits forever, which is why the
 transport in ``api/v1/recall/recall_stream.py`` closes in a ``finally``.
 
-**Deltas are a preview, not the payload.** Two things make the streamed text a
-strict prefix of what the caller finally receives, and a consumer must treat the
-returned value as authoritative rather than concatenating deltas and stopping:
+**Deltas are a preview, not the payload.** A consumer must treat the returned
+value as authoritative rather than concatenating deltas and stopping. Two things
+make the streamed text a strict prefix of what the caller finally receives:
 
 * ``append_references`` runs *after* the answer call, so with
   ``include_references=True`` the citations are appended to the completion and
@@ -57,6 +57,15 @@ returned value as authoritative rather than concatenating deltas and stopping:
   ``summarize_text`` alongside the answer, and a shared hook would leak the
   summariser's tokens into the user's stream — the same interleaving problem the
   two-ContextVar split exists to prevent.
+
+One case breaks that property outright, and a consumer must be ready for it:
+a concurrent session turn can discard its own answer. Turn analysis runs beside the
+answer call, and when it decides the message was feedback-only the generated text is
+replaced by a short acknowledgement — after this sink has already been closed by
+:func:`answer_scope`, so no ``reset`` can be sent. The deltas are then not a prefix of
+the payload; they are a different answer. Until the turn rather than ``answer_scope``
+owns terminating the sink, **render ``final`` over what was streamed, never append to
+it.**
 """
 
 from __future__ import annotations

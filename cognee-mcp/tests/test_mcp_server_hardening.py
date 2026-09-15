@@ -52,6 +52,52 @@ def test_format_recall_results_handles_normalized_rows():
     assert "[graph] graph answer" in rendered
 
 
+def test_cognee_client_auth_schemes():
+    # 1. Default non-tenant URL -> Bearer token
+    client = CogneeClient(api_url="http://localhost:8000", api_token="secret_key")
+    headers = client._get_headers()
+    assert headers["Authorization"] == "Bearer secret_key"
+    assert "X-Api-Key" not in headers
+
+    # 2. Explicit x-api-key scheme -> X-Api-Key header
+    client_key = CogneeClient(
+        api_url="http://localhost:8000",
+        api_token="secret_key",
+        api_auth_scheme="x-api-key",
+    )
+    headers_key = client_key._get_headers()
+    assert headers_key["X-Api-Key"] == "secret_key"
+    assert "Authorization" not in headers_key
+
+    # 3. Explicit bearer scheme -> Bearer token
+    client_bearer = CogneeClient(
+        api_url="http://localhost:8000",
+        api_token="secret_key",
+        api_auth_scheme="bearer",
+    )
+    headers_bearer = client_bearer._get_headers()
+    assert headers_bearer["Authorization"] == "Bearer secret_key"
+    assert "X-Api-Key" not in headers_bearer
+
+    # 4. Cloud tenant URL -> X-Api-Key + X-Tenant-Id
+    tenant_url = "https://tenant-12345678-1234-1234-1234-123456789abc.cognee.ai"
+    client_cloud = CogneeClient(api_url=tenant_url, api_token="secret_key")
+    headers_cloud = client_cloud._get_headers()
+    assert headers_cloud["X-Api-Key"] == "secret_key"
+    assert headers_cloud["X-Tenant-Id"] == "12345678-1234-1234-1234-123456789abc"
+    assert "Authorization" not in headers_cloud
+
+    # 5. COGNEE_API_AUTH_SCHEME environment variable
+    os.environ["COGNEE_API_AUTH_SCHEME"] = "x-api-key"
+    try:
+        client_env = CogneeClient(api_url="http://localhost:8000", api_token="secret_key")
+        headers_env = client_env._get_headers()
+        assert headers_env["X-Api-Key"] == "secret_key"
+        assert "Authorization" not in headers_env
+    finally:
+        os.environ.pop("COGNEE_API_AUTH_SCHEME", None)
+
+
 # Tools that the MCP server is expected to expose. Kept as named groups so the
 # contract documents intent rather than just enumerating names. The hardening
 # rule is that the LLM-direct memory API stays minimal (V2: remember/recall/

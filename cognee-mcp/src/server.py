@@ -842,6 +842,15 @@ async def main():
         "authentication enabled). Can also be set via the COGNEE_API_KEY env var.",
     )
 
+    parser.add_argument(
+        "--api-auth-scheme",
+        choices=["bearer", "x-api-key"],
+        default=os.getenv("COGNEE_API_AUTH_SCHEME"),
+        help="Authentication scheme for API mode: 'bearer' (default, sends Authorization: Bearer <token>) "
+        "or 'x-api-key' (sends X-Api-Key: <token>, required for self-hosted API keys). "
+        "Can also be set via the COGNEE_API_AUTH_SCHEME env var.",
+    )
+
     # Cognee Cloud connection options
     parser.add_argument(
         "--serve-url",
@@ -860,7 +869,11 @@ async def main():
     args = parser.parse_args()
 
     # Initialize the global CogneeClient
-    cognee_client = CogneeClient(api_url=args.api_url, api_token=args.api_token)
+    cognee_client = CogneeClient(
+        api_url=args.api_url,
+        api_token=args.api_token,
+        api_auth_scheme=args.api_auth_scheme,
+    )
 
     host = args.host
     port = int(args.port)
