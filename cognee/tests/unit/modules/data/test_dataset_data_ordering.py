@@ -131,8 +131,7 @@ def test_sqlite_migration_upgrade_retry_and_downgrade():
 
 
 @pytest.mark.parametrize("valid", [None, False, True])
-def test_postgres_migration_recovers_invalid_index(monkeypatch, valid):
-    from contextlib import contextmanager
+def test_postgres_migration_repairs_index_without_releasing_transaction(monkeypatch, valid):
     from types import SimpleNamespace
     from unittest.mock import Mock
 
@@ -140,39 +139,39 @@ def test_postgres_migration_recovers_invalid_index(monkeypatch, valid):
     connection = Mock()
     connection.dialect.name = "postgresql"
     connection.execute.return_value.scalar_one_or_none.return_value = valid
-    statements = []
-    in_autocommit = False
-
-    @contextmanager
-    def autocommit_block():
-        nonlocal in_autocommit
-        in_autocommit = True
-        yield
-        in_autocommit = False
-
-    def execute(statement):
-        assert in_autocommit, "concurrent DDL must be outside a transaction"
-        statements.append(statement)
-
     monkeypatch.setattr(
-        migration,
-        "op",
-        SimpleNamespace(
-            get_bind=lambda: connection,
-            get_context=lambda: SimpleNamespace(autocommit_block=autocommit_block),
-            execute=execute,
-        ),
+        migration, "inspect", lambda conn: SimpleNamespace(get_table_names=lambda: ["data"])
+    )
+    execute = Mock()
+    # No autocommit API: using it would release the upgrader's version-row lock.
+    monkeypatch.setattr(
+        migration, "op", SimpleNamespace(get_bind=lambda: connection, execute=execute)
     )
     migration.upgrade()
+    statements = [call.args[0] for call in execute.call_args_list]
     if valid is True:
         assert statements == []
     else:
         expected = [
-            f"CREATE INDEX CONCURRENTLY {INDEX_NAME} ON data (dataset_id, created_at DESC NULLS LAST, id)"
+            f"CREATE INDEX IF NOT EXISTS {INDEX_NAME} ON data (dataset_id, created_at DESC NULLS LAST, id)"
         ]
         if valid is False:
-            expected.insert(0, f"DROP INDEX CONCURRENTLY IF EXISTS {INDEX_NAME}")
+            expected.insert(0, f"DROP INDEX IF EXISTS {INDEX_NAME}")
         assert statements == expected
+
+
+def test_migration_skips_absent_data_table():
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    engine = create_engine("sqlite://")
+    try:
+        with engine.begin() as conn, Operations.context(MigrationContext.configure(conn)):
+            _migration().upgrade()
+            _migration().downgrade()
+            assert inspect(conn).get_table_names() == []
+    finally:
+        engine.dispose()
 
 
 @pytest.mark.asyncio

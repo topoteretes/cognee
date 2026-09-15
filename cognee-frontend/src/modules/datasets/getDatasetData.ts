@@ -52,18 +52,25 @@ export function getDatasetDataCount(
       });
 }
 
-/** Explicit full traversal for callers that need every document, such as schema regeneration. */
+/** Traverse pages with overlap deduplication. Concurrent mutations are not a snapshot. */
 export async function getAllDatasetData(datasetId: string, instance: CogneeInstance) {
   const rows = [];
   const seen = new Set<string>();
+  let offset = 0;
   for (;;) {
-    const page = await getDatasetData(datasetId, instance, { limit: 1000, offset: rows.length });
+    const page = await getDatasetData(datasetId, instance, { limit: 1000, offset });
     const ids = page.map((row: { id: string }) => String(row.id));
     if (page.length > 1000 || (page.length > 0 && ids.every((id: string) => seen.has(id)))) {
       throw new Error("Server did not honor dataset pagination");
     }
-    ids.forEach((id: string) => seen.add(id));
-    rows.push(...page);
+    offset += page.length;
+    for (const row of page) {
+      const id = String(row.id);
+      if (!seen.has(id)) {
+        seen.add(id);
+        rows.push(row);
+      }
+    }
     if (page.length < 1000) return rows;
   }
 }

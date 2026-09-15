@@ -36,3 +36,13 @@ test.each([1000, 1001])("stops traversal when an old server ignores pagination (
   await expect(getAllDatasetData("a", instance)).rejects.toThrow("pagination");
   expect(fetch.mock.calls.length).toBeLessThanOrEqual(2);
 });
+
+
+test("overlap deduplication does not rewind server offsets", async () => {
+  const rows = (start: number, end: number) => Array.from({ length: end - start }, (_, i) => ({ id: start + i }));
+  fetch.mockResolvedValueOnce(response(rows(0, 1000)))
+    .mockResolvedValueOnce(response(rows(999, 1999)))
+    .mockResolvedValueOnce(response(rows(1999, 2000)));
+  expect(await getAllDatasetData("a", instance)).toEqual(rows(0, 2000));
+  expect(fetch.mock.calls[2][0]).toContain("offset=2000");
+});
