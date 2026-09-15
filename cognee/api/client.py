@@ -58,7 +58,7 @@ from cognee.api.v1.users.routers import (
 )
 from cognee.api.v1.validate.routers import get_validate_router
 from cognee.api.v1.visualize.routers import get_schema_router
-from cognee.exceptions import CogneeApiError
+from cognee.exceptions import CogneeApiError, remediation_for
 from cognee.modules.users.authentication.redact_websocket_query_secrets import (
     install_websocket_query_param_redaction,
 )
@@ -232,7 +232,14 @@ async def exception_handler(_: Request, exc: CogneeApiError) -> JSONResponse:
 
     # log the stack trace for easier serverside debugging
     logger.error(format_exc())
-    return JSONResponse(status_code=status_code, content={"detail": detail["message"]})
+    content = {"detail": detail["message"]}
+    # A hint the caller can act on: the exception's own remediation first, else the
+    # shared first-run table. Only present when a fix is known, so existing clients
+    # that read only `detail` are unaffected.
+    remediation = remediation_for(exc)
+    if remediation:
+        content["remediation"] = remediation
+    return JSONResponse(status_code=status_code, content=content)
 
 
 app.include_router(get_auth_router(), prefix="/api/v1/auth", tags=["auth"])

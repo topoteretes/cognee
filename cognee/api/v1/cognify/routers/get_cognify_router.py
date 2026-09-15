@@ -122,6 +122,7 @@ def get_cognify_router() -> APIRouter:
 
     @router.post(
         "",
+        summary="Cognify (low level): build the knowledge graph from already-added data",
         response_model=dict[UUID, PipelineRunInfo],
         responses={
             400: {"model": ErrorResponse},

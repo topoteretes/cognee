@@ -21,6 +21,16 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 
 from cognee.modules.storage.utils import JSONEncoder
+
+try:
+    from cognee.exceptions.remediation import REMEDIATION_MARKER, find_remediation
+except ImportError:  # cognee-mcp pins a released cognee; older cores have no hint table
+    REMEDIATION_MARKER = " Fix: "
+
+    def find_remediation(message: str) -> str | None:
+        return None
+
+
 from cognee.shared.logging_utils import get_log_file_location, get_logger, setup_logging
 
 try:
@@ -56,6 +66,22 @@ registry = ToolRegistry(mcp)
 logger = get_logger()
 
 cognee_client: CogneeClient | None = None
+
+
+def _tool_error_text(prefix: str, error: Exception) -> str:
+    """Render a tool failure for the agent, with a fix hint when one is known.
+
+    ``str()`` of a cognee error already ends in ``Fix: ...``; for anything else
+    (provider auth failures, unreachable endpoints) the shared first-run table
+    supplies the hint, so the agent sees the env var to change, not just a trace.
+    """
+    text = f"{prefix}: {error!s}"
+    if REMEDIATION_MARKER not in text:
+        hint = find_remediation(str(error))
+        if hint:
+            text = f"{text}\nFix: {hint}"
+    return text
+
 
 # Per-dataset error ring buffer (bounded so long-running servers don't accumulate
 # unbounded memory). Each entry is (iso_timestamp, error_message).
@@ -453,7 +479,7 @@ async def remember(
                 text = f"Stored permanently in knowledge graph (dataset={dataset_name}, status={status})."
             return [types.TextContent(type="text", text=text)]
         except Exception as e:
-            error_msg = f"Remember failed: {e!s}"
+            error_msg = _tool_error_text("Remember failed", e)
             logger.exception(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
@@ -520,7 +546,7 @@ async def recall(
                 )
             ]
         except Exception as e:
-            error_msg = f"Recall failed: {e!s}"
+            error_msg = _tool_error_text("Recall failed", e)
             logger.exception(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
@@ -597,7 +623,7 @@ async def forget(
                 text = f"Dataset '{dataset or dataset_id}' deleted (status={status})."
             return [types.TextContent(type="text", text=text)]
         except Exception as e:
-            error_msg = f"Forget failed: {e!s}"
+            error_msg = _tool_error_text("Forget failed", e)
             logger.exception(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
