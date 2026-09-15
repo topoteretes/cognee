@@ -86,11 +86,11 @@ def get_improve_router() -> APIRouter:
 
         ## Error Codes
         - **400 Bad Request**: Neither dataset_id nor dataset_name provided
-        - **409 Conflict**: The fatal `persist_session_qa` stage failed — the body
-          carries the abort reason and the partial `improve_result` (what ran
-          before the abort) — or a non-Cognee error aborted the run (body
-          carries the reason). Other Cognee errors return their own status
-          codes.
+        - **409 Conflict**: The fatal `persist_session_qa` stage failed — for a
+          Cognee error the body carries the abort reason and the partial
+          `improve_result` (what ran before the abort); a non-Cognee error
+          returns a deliberately generic body (details go to the logs, never
+          the wire). Other Cognee errors return their own status codes.
         """
         send_telemetry(
             "Improve API Endpoint Invoked",

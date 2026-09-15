@@ -79,11 +79,10 @@ app_environment = os.getenv("ENV", "prod")
 
 # How long the shutdown hook waits for background tasks (B6). The default must
 # fit inside the smallest shipped kill window WITH room left for the engine
-# close below it: Docker stops containers after 10s (compose ships no
-# stop_grace_period), so a longer drain gets the worker SIGKILLed mid-WAL-
-# checkpoint — the exact failure the close exists to prevent. Operators with
-# longer grace periods (K8s/gunicorn default 30s) can raise it together with
-# their stop timeout.
+# close below it: compose ships stop_grace_period: 15s (bare docker stops at
+# 10s), so a longer drain gets the worker SIGKILLed mid-WAL-checkpoint — the
+# exact failure the close exists to prevent. Raise this together with the
+# stop timeout (K8s/gunicorn default 30s).
 BACKGROUND_DRAIN_TIMEOUT_SECONDS = float(os.getenv("BACKGROUND_DRAIN_TIMEOUT_SECONDS", "8"))
 
 
