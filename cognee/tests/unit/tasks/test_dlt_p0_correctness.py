@@ -2,7 +2,6 @@
 
 Covers the DB-free behaviors:
   - dropped FK references are recorded for reporting (no longer silent)
-  - unparseable external_metadata is logged with the object id (no longer silent)
 
 The DB-dependent behaviors (PK-collision warning, failed-orphan tracking, and
 deferred orphan cleanup) require mocked engines and belong with the broader
@@ -11,7 +10,6 @@ mocked DLT suite.
 
 from types import SimpleNamespace
 
-from cognee.tasks.ingestion.dlt_utils import parse_external_metadata
 from cognee.tasks.ingestion.resolve_dlt_sources import _resolve_fk_references
 
 
@@ -38,7 +36,7 @@ def test_resolved_fk_reference_is_returned_when_target_loaded():
     assert missing == []
     assert len(refs) == 1
     assert refs[0]["target_table"] == "customers"
-    assert refs[0]["target_data_id"] == str(target_id)
+    assert refs[0]["target_node_id"] == str(target_id)
 
 
 def test_missing_fk_target_is_recorded_not_silently_dropped():
@@ -75,28 +73,3 @@ def test_null_fk_value_is_skipped_without_being_recorded():
     assert _resolve_fk_references(row, {}, missing) == []
     # A NULL FK column is a legitimate absence, not a dropped edge.
     assert missing == []
-
-
-def test_parse_external_metadata_dict_passthrough():
-    obj = SimpleNamespace(external_metadata={"source": "dlt"}, id="d1")
-    assert parse_external_metadata(obj) == {"source": "dlt"}
-
-
-def test_parse_external_metadata_valid_json_string():
-    obj = SimpleNamespace(external_metadata='{"source": "dlt"}', id="d2")
-    assert parse_external_metadata(obj) == {"source": "dlt"}
-
-
-def test_parse_external_metadata_absent_is_silent(caplog):
-    obj = SimpleNamespace(external_metadata=None, id="d3")
-    with caplog.at_level("WARNING"):
-        assert parse_external_metadata(obj) is None
-    assert "Failed to parse external_metadata" not in caplog.text
-
-
-def test_parse_external_metadata_malformed_logs_with_id(caplog):
-    obj = SimpleNamespace(external_metadata="{not valid json", id="doc-123")
-    with caplog.at_level("WARNING"):
-        assert parse_external_metadata(obj) is None
-    assert "Failed to parse external_metadata" in caplog.text
-    assert "doc-123" in caplog.text

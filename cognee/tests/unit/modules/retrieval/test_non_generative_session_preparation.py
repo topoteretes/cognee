@@ -5,10 +5,11 @@ contract is explicitly non-generative" can skip `prepare_session_turn_for_retrie
 which may call an LLM before retrieval. The retrievers whose own
 `get_completion_from_context` docstring says they "do not generate a completion, we just
 return the payloads" belong in that set; otherwise a sub-second deterministic lookup pays
-for a chat completion whose rewritten query it never benefits from.
+for conversational analysis instead of searching the caller's original query.
 """
 
 import importlib
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -108,3 +109,49 @@ async def test_generative_search_still_prepares_a_session_turn():
     """Guard the other direction: generative search types keep the conversational turn."""
     prepare = await _search_with(CompletionRetriever(), SearchType.RAG_COMPLETION)
     prepare.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "search_type,retriever_class",
+    [
+        (SearchType.CHUNKS, ChunksRetriever),
+        (SearchType.SUMMARIES, SummariesRetriever),
+        (SearchType.CHUNKS_LEXICAL, BM25ChunksRetriever),
+    ],
+)
+@pytest.mark.parametrize("only_context", [False, True])
+@pytest.mark.parametrize("has_results", [False, True])
+async def test_raw_search_preserves_query_and_payload(
+    monkeypatch, search_type, retriever_class, only_context, has_results
+):
+    """Exercise the real factory and rendering, stubbing storage and session I/O."""
+    payload = {"text": "A stored fact", "score": 0.2}
+    objects = (
+        (
+            [payload]
+            if search_type is SearchType.CHUNKS_LEXICAL
+            else [SimpleNamespace(payload={"text": "A stored fact"}, score=0.2)]
+        )
+        if has_results
+        else []
+    )
+    retrieve = AsyncMock(return_value=objects)
+    prepare = AsyncMock(side_effect=AssertionError("Raw search must not analyze a turn"))
+    monkeypatch.setattr(retriever_class, "get_retrieved_objects", retrieve)
+    monkeypatch.setattr(retriever_class, "prepare_session_turn_for_retrieval", prepare)
+    monkeypatch.setattr(
+        get_retriever_output_module, "get_graph_engine", AsyncMock(return_value=_FakeGraphEngine())
+    )
+    runner = importlib.import_module("cognee.modules.retrieval.session_aware_completion")
+    monkeypatch.setattr(runner, "update_node_access_timestamps", AsyncMock())
+
+    result = await get_retriever_output(
+        search_type, "the original query", only_context=only_context, session_id="test-session"
+    )
+
+    retrieve.assert_awaited_once_with(query="the original query")
+    prepare.assert_not_awaited()
+    assert result.result_object == objects
+    assert result.context == ("A stored fact" if has_results else "")
+    assert result.completion == (None if only_context else [payload] if has_results else [])

@@ -2,14 +2,14 @@ from uuid import UUID
 
 from cognee.api.v1.exceptions.exceptions import DocumentSubgraphNotFoundError
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.models import Data
+from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElements
 from cognee.modules.graph.models.EdgeType import EdgeType
+from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.vector import get_vector_engine_async
-from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
-
 
 logger = get_logger()
 
@@ -26,7 +26,11 @@ def _get_edge_vector_text(edge: dict) -> str:
 async def legacy_delete(data: Data, mode: str = "soft"):
     """Delete a single document by its content hash."""
 
-    # Delete from graph database
+    # Delete from graph database. A fork row's graph node is re-keyed to the
+    # canonical id by the rekey_fork_document_ids startup migration; if that
+    # migration has not run (ENABLE_AUTO_MIGRATIONS=false without
+    # `cognee-cli upgrade`), this raises DocumentSubgraphNotFoundError on
+    # purpose — un-migrated stores must not be mutated by guesswork.
     deleted_node_ids = await delete_document_subgraph(data.id, mode)
 
     # Delete from vector database
@@ -58,6 +62,8 @@ async def legacy_delete(data: Data, mode: str = "soft"):
             await vector_engine.delete_data_points(
                 collection, [str(node_id) for node_id in deleted_node_ids]
             )
+
+    return DeletedGraphElements(node_ids={str(node_id) for node_id in deleted_node_ids})
 
 
 async def delete_document_subgraph(document_id: UUID, mode: str = "soft"):

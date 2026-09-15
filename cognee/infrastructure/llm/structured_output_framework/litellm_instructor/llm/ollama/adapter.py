@@ -1,30 +1,36 @@
+"""Adapter for a generic OpenAI-compatible API backend used for Ollama models.
+
+``import asyncio`` below has no direct caller in this module's own body, but it
+is load-bearing: ``test_ollama_adapter.py`` patches ``asyncio.to_thread`` by
+name on this module's namespace, which requires ``asyncio`` to be importable
+here regardless of whether this file calls it. ``F401`` is ignored repo-wide,
+so nothing else would catch its removal; do not delete it as dead code.
+"""
+
 import asyncio
 import base64
 import logging
 from typing import Any
 
 import instructor
-import litellm
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_not_exception_type,
     stop_after_attempt,
     wait_exponential_jitter,
 )
 
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
 from cognee.infrastructure.llm.retry_config import (
     llm_retry_condition,
     llm_retry_stop_condition,
 )
-
-from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
     get_instructor_mode,
 )
-from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, is_budget_exhausted_error
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
@@ -71,6 +77,7 @@ class OllamaAPIAdapter(LLMInterface):
         max_completion_tokens: int,
         instructor_mode: str | None = None,
         llm_args: dict[str, Any] | None = None,
+        ollama_num_ctx: int | None = None,
     ) -> None:
         self.name = name
         self.model = model.removeprefix("ollama/") if model.startswith("ollama/") else model
@@ -78,6 +85,7 @@ class OllamaAPIAdapter(LLMInterface):
         self.endpoint = endpoint
         self.max_completion_tokens = max_completion_tokens
         self.llm_args: dict[str, Any] = llm_args or {}
+        self.ollama_num_ctx = ollama_num_ctx
 
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
@@ -122,6 +130,11 @@ class OllamaAPIAdapter(LLMInterface):
         """
         merged_kwargs = {**self.llm_args, **kwargs}
 
+        if self.ollama_num_ctx is not None:
+            extra_body = merged_kwargs.get("extra_body", {}) or {}
+            if "num_ctx" not in extra_body:
+                merged_kwargs["extra_body"] = {**extra_body, "num_ctx": self.ollama_num_ctx}
+
         # A plain string needs no schema — skip instructor and hit the OpenAI-
         # compatible endpoint directly. Instructor's JSON/tool-call schemas cause
         # parse failures and retry storms on local llama.cpp-compatible servers.
@@ -158,21 +171,15 @@ class OllamaAPIAdapter(LLMInterface):
 
             return response
         except Exception as e:
-            if is_budget_exhausted_error(e):
-                raise LLMPaymentRequiredError() from e
+            # Same detail-carrying message as the other adapters.
+            raise_if_budget_exhausted(e)
             raise
 
     @observe(as_type="transcription")
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-            )
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
@@ -211,13 +218,7 @@ class OllamaAPIAdapter(LLMInterface):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-            )
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )

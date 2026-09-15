@@ -49,9 +49,9 @@ import cognee
 from cognee.tasks.codingagents.coding_rule_associations import get_existing_rules
 
 
-await cognee.add(["agent.md"])# Add data (text or file paths)
-await cognee.cognify() # Create Knowledge Graph
-await cognee.memify()# Enrich Graph (Extract Rules automatically)
+await cognee.add(["agent.md"])  # Add data (text or file paths)
+await cognee.cognify()  # Create Knowledge Graph
+await cognee.memify()  # Enrich Graph (Extract Rules automatically)
 
 rules = await get_existing_rules("coding_agent_rules")
 if rules:
@@ -67,8 +67,7 @@ You can run the task directly on specific data.
 from cognee.tasks.codingagents.coding_rule_associations import add_rule_associations
 
 await add_rule_associations(
-    data="Always use type hints in Python functions.",
-    rules_nodeset_name="coding_agent_rules"
+    data="Always use type hints in Python functions.", rules_nodeset_name="coding_agent_rules"
 )
 ```
 
@@ -94,8 +93,7 @@ rule = Rule(text="Use snake_case for function names.")
 # 2. Link it to the source (the text that implies the rule)
 # 'data' is used to find the original document chunk in the graph
 edges = await get_origin_edges(
-    data="We strictly follow PEP8. Function names must use snake_case.",
-    rules=[rule]
+    data="We strictly follow PEP8. Function names must use snake_case.", rules=[rule]
 )
 ```
 

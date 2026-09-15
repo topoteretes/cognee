@@ -1,5 +1,12 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any
+
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
+if TYPE_CHECKING:
+    from cognee.modules.search.models.EvidenceReference import EvidenceReference
 
 
 class BaseRetriever(ABC):
@@ -8,8 +15,9 @@ class BaseRetriever(ABC):
 
     The retrieval workflow follows a three-step pipeline:
     1. get_retrieved_objects: Fetch raw data (e.g., Graph Edges, Vector chunks).
-    2. get_context: Process raw data into a format suitable for an LLM (e.g., text string).
-    3. get_completion: Generate a final response with the help of an LLM using the context and original query.
+    2. get_context_from_objects: Process raw data into a format suitable for an LLM.
+    3. get_completion_from_context: Generate a final response with the help of an LLM
+       using the context and original query.
     """
 
     # Deterministic retrievers can opt out of conversational session analysis.
@@ -17,8 +25,14 @@ class BaseRetriever(ABC):
     # for search types whose contract is explicitly non-generative.
     supports_session_turn_preparation = True
 
+    # Whether get_completion_from_context sends exactly one prompt built from this
+    # retriever's (user_prompt_path, system_prompt_path). only_context previews render
+    # that pair; retrievers that never prompt an LLM, or that run several rounds on
+    # other templates, opt out so a preview does not invent a prompt for them.
+    supports_prompt_preview = True
+
     @abstractmethod
-    async def get_retrieved_objects(self, query: Optional[str], query_batch: Optional[str]) -> Any:
+    async def get_retrieved_objects(self, query: str | None, query_batch: str | None) -> Any:
         """
         Retrieves the raw data points from the underlying storage (Graph or Vector DB).
 
@@ -30,15 +44,14 @@ class BaseRetriever(ABC):
             List[Any]: A list of raw objects (e.g., Edge objects, Document chunks)
                        relevant to the query.
         """
-        pass
 
     @abstractmethod
     async def get_context_from_objects(
         self,
-        query: Optional[str] = None,
-        query_batch: Optional[str] = None,
+        query: str | None = None,
+        query_batch: str | None = None,
         retrieved_objects: Any = None,
-    ) -> Union[str, List[str]]:
+    ) -> str | list[str]:
         """
         Transforms raw retrieved objects into a structured context for the LLM.
 
@@ -51,16 +64,15 @@ class BaseRetriever(ABC):
             Any: The formatted context (typically a string or a list of strings)
                  to be injected into a prompt.
         """
-        pass
 
     @abstractmethod
     async def get_completion_from_context(
         self,
-        query: Optional[str] = None,
-        query_batch: Optional[List[str]] = None,
+        query: str | None = None,
+        query_batch: list[str] | None = None,
         retrieved_objects: Any = None,
         context: Any = None,
-    ) -> Union[List[str], List[dict]]:
+    ) -> list[str] | list[dict]:
         """
         Generates a final output or answer based on the query and retrieved context.
 
@@ -74,15 +86,42 @@ class BaseRetriever(ABC):
         Returns:
             List[Any]: A list containing the generated completions or response objects.
         """
-        pass
 
-    def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+    def extract_context_object_ids(self, retrieved_objects: Any) -> dict[str, list[str]] | None:
         """
         Extract node_ids and edge_ids from retrieved_objects for session QA.
         Override in retrievers that use session and have graph elements to store.
         Only called when session is enabled.
         """
         return None
+
+    def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
+        """Combine two retrievals of this retriever's own result shape.
+
+        Called when one turn retrieves twice — a session turn runs the raw question and a
+        conversational rewrite of it — so the retriever formats context from both at once.
+        Only the retriever knows its object shape, so only it can merge them.
+
+        The default keeps whichever retrieval it has: either lane may be None when the
+        other one failed, and dropping the surviving lane would discard a good result.
+        """
+        return primary if primary is not None else secondary
+
+    async def append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
+        """Apply retriever-owned references; unsupported retrievers leave answers unchanged."""
+        return completions
+
+    def get_context_evidence(
+        self,
+        retrieved_objects: Any,
+        dataset_id: Any = None,
+    ) -> list["EvidenceReference"]:
+        """Return structured identifiers for artifacts included in completion context.
+
+        Retrievers opt in by overriding this pure, synchronous hook. The default
+        intentionally returns no evidence so community retrievers remain compatible.
+        """
+        return []
 
     async def prepare_session_turn_for_retrieval(self, query: str):
         """Analyze a session turn before retrieval and fail open to the original query."""
@@ -99,11 +138,15 @@ class BaseRetriever(ABC):
                 query=query,
             )
         except Exception:
+            logger.debug(
+                "Falling back after error in BaseRetriever.prepare_session_turn_for_retrieval",
+                exc_info=True,
+            )
             from cognee.infrastructure.session.session_manager import SessionTurnPreparation
 
             return SessionTurnPreparation(should_answer=True, effective_query=query or "")
 
-    async def get_completion(self, query: str) -> Union[List[str], List[dict]]:
+    async def get_completion(self, query: str) -> list[str] | list[dict]:
         """
         Generates a final output or answer based on the query and retrieved context.
 

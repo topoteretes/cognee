@@ -30,8 +30,8 @@ export const POD_DEPENDENT_PATHS = [
   "/datasets",
   "/skills",
   "/knowledge-graph",
-  "/schema",
   "/sessions",
+  "/business",
 ];
 
 function isPodDependent(pathname: string): boolean {
@@ -71,7 +71,11 @@ export default function CustomAppShell({ children }: PropsWithChildren) {
       <TopBar />
       <div className="flex flex-1 overflow-hidden">
         <CustomAppShellNavbar />
-        <main className="flex-1 overflow-auto flex flex-col" style={{ background: "transparent" }}>
+        {/* scrollbar-gutter:stable reserves the scrollbar's width even when no
+            scrollbar is showing, so pages whose height crosses the scroll
+            threshold (e.g. expanding a panel) don't reflow every element's
+            width when the classic scrollbar appears/disappears. */}
+        <main className="flex-1 overflow-auto flex flex-col [scrollbar-gutter:stable]" style={{ background: "transparent" }}>
           {/* App-wide provisioning banner — shown only while still connecting.
               Suppressed once podUnreachable is terminal, otherwise the
               "Setting up your workspace" banner contradicted the "trouble

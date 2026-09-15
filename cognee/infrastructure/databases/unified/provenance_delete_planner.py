@@ -22,6 +22,9 @@ Vector ids mirror ``delete_from_graph_and_vector``:
     ``Triplet_text`` (best-effort; the collection may not exist).
 """
 
+import dataclasses
+from dataclasses import dataclass
+
 from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
     EdgeIdentity,
@@ -33,6 +36,19 @@ from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrie
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("provenance_delete_planner")
+
+
+@dataclass
+class SourceRefRemovalResult:
+    """Artifacts hard-deleted by a source-ref removal (survivors are excluded).
+
+    Consumed by session invalidation to find cached answers that used the
+    deleted elements. Instances are always truthy — "handled, deleted nothing"
+    must still read as handled.
+    """
+
+    deleted_node_ids: list[str] = dataclasses.field(default_factory=list)
+    deleted_edges: list[EdgeIdentity] = dataclasses.field(default_factory=list)
 
 
 def _is_unowned(current_refs: list[str], removed_refs: list[str]) -> bool:
@@ -59,7 +75,7 @@ async def execute_source_ref_removal(
     edge_data: dict[EdgeIdentity, EdgeDeleteData],
     refs_by_node: dict[str, list[str]],
     refs_by_edge: dict[EdgeIdentity, list[str]],
-) -> None:
+) -> SourceRefRemovalResult:
     """Remove the given source refs and hard-delete artifacts that become unowned."""
     # ------------------------------------------------------------------
     # 1. Partition matched artifacts into unowned (delete) vs surviving (detach).
@@ -150,6 +166,11 @@ async def execute_source_ref_removal(
     await _cleanup_orphaned_edge_types(graph_engine, vector_engine, unowned_edges, edge_data)
     await _cleanup_orphaned_nodeset_tags(graph_engine, vector_engine, unowned_node_ids, node_data)
 
+    return SourceRefRemovalResult(
+        deleted_node_ids=list(unowned_node_ids),
+        deleted_edges=list(unowned_edges),
+    )
+
 
 async def _cleanup_orphaned_edge_types(
     graph_engine,
@@ -202,9 +223,11 @@ async def _cleanup_orphaned_edge_types(
                     "EdgeType_relationship_name", orphaned_edge_type_ids
                 )
             except Exception as error:
-                logger.warning("EdgeType vector cleanup failed (non-fatal): %s", error)
+                logger.warning(
+                    "EdgeType vector cleanup failed (non-fatal): %s", error, exc_info=True
+                )
     except Exception as error:
-        logger.warning("EdgeType cleanup failed (non-fatal): %s", error)
+        logger.warning("EdgeType cleanup failed (non-fatal): %s", error, exc_info=True)
 
 
 async def _cleanup_orphaned_nodeset_tags(
@@ -229,9 +252,9 @@ async def _cleanup_orphaned_nodeset_tags(
     try:
         await graph_engine.remove_belongs_to_set_tags(tags_to_remove)
     except Exception as error:
-        logger.warning("Graph NodeSet tag cleanup failed (non-fatal): %s", error)
+        logger.warning("Graph NodeSet tag cleanup failed (non-fatal): %s", error, exc_info=True)
 
     try:
         await vector_engine.remove_belongs_to_set_tags(tags_to_remove)
     except Exception as error:
-        logger.warning("Vector NodeSet tag cleanup failed (non-fatal): %s", error)
+        logger.warning("Vector NodeSet tag cleanup failed (non-fatal): %s", error, exc_info=True)

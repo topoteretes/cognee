@@ -1,6 +1,7 @@
 from cognee.infrastructure.loaders import LoaderInterface
 from cognee.infrastructure.loaders.core import (
     AudioLoader,
+    CodeLoader,
     CsvLoader,
     ImageLoader,
     TextLoader,
@@ -12,6 +13,7 @@ from cognee.infrastructure.loaders.external import PyPdfLoader
 supported_loaders: dict[str, type[LoaderInterface]] = {
     PyPdfLoader.loader_name: PyPdfLoader,
     TextLoader.loader_name: TextLoader,
+    CodeLoader.loader_name: CodeLoader,
     ImageLoader.loader_name: ImageLoader,
     AudioLoader.loader_name: AudioLoader,
     VideoLoader.loader_name: VideoLoader,
@@ -44,5 +46,15 @@ try:
     from cognee.infrastructure.loaders.external import DoclingLoader
 
     supported_loaders[DoclingLoader.loader_name] = DoclingLoader
+except ImportError:
+    pass
+
+# Structured CSV ingestion through dlt; registered above csv_loader in the
+# engine's priority order, so with the dlt extra installed CSVs take the
+# DLT manifest route instead of text flattening.
+try:
+    from cognee.infrastructure.loaders.external import DltCsvLoader
+
+    supported_loaders[DltCsvLoader.loader_name] = DltCsvLoader
 except ImportError:
     pass

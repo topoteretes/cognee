@@ -1,11 +1,11 @@
 import argparse
 import asyncio
 
-from cognee.cli.reference import SupportsCliCommand
-from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
-from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 from cognee.api.v1.datasets.datasets import datasets as cognee_datasets
+from cognee.cli import DEFAULT_DOCS_URL
+from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.reference import SupportsCliCommand
 from cognee.modules.data.methods import get_datasets_by_name
 from cognee.modules.data.methods.get_deletion_counts import get_deletion_counts
 
@@ -54,7 +54,7 @@ Be careful with deletion operations as they are irreversible.
                         )
                     )
                 except CliCommandException as e:
-                    fmt.error(f"Error occurred when fetching preview data: {str(e)}")
+                    fmt.error(f"Error occurred when fetching preview data: {e!s}")
                     return
 
                 if not preview_data:
@@ -100,7 +100,7 @@ Be careful with deletion operations as they are irreversible.
                             )
                         await cognee_datasets.empty_dataset(dataset_id=datasets[0].id, user=user)
                 except Exception as e:
-                    raise CliCommandInnerException(f"Failed to delete: {str(e)}") from e
+                    raise CliCommandInnerException(f"Failed to delete: {e!s}") from e
 
             asyncio.run(run_delete())
             fmt.success(f"Successfully deleted {operation}")
@@ -108,4 +108,4 @@ Be careful with deletion operations as they are irreversible.
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(f"Error deleting data: {str(e)}", error_code=1) from e
+            raise CliCommandException(f"Error deleting data: {e!s}", error_code=1) from e

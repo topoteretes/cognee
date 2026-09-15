@@ -5,27 +5,26 @@ and ScrapingJob data points, and store them in a Ladybug graph database. It supp
 scheduled scraping tasks and ensures that node updates preserve existing graph edges.
 """
 
-import os
 import hashlib
-from datetime import datetime
-from typing import Union, List
+import os
+from datetime import datetime, timezone
 from urllib.parse import urlparse
-from uuid import uuid5, NAMESPACE_OID, NAMESPACE_URL
+from uuid import NAMESPACE_OID, NAMESPACE_URL, uuid5
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.provenance import graph_provenance_write_kwargs
+from cognee.modules.engine.operations.setup import setup
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage.index_data_points import index_data_points
 from cognee.tasks.storage.index_graph_edges import index_graph_edges
-from cognee.modules.engine.operations.setup import setup
 
-from .models import WebPage, WebSite, ScrapingJob
-from .config import DefaultCrawlerConfig, TavilyConfig
+from .config import DefaultCrawlerConfig, KeenableConfig, TavilyConfig
+from .models import ScrapingJob, WebPage, WebSite
 from .utils import fetch_page_content
 
 try:
-    from apscheduler.triggers.cron import CronTrigger
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from apscheduler.triggers.cron import CronTrigger
 except ImportError:
     raise ImportError("Please install apscheduler by pip install APScheduler>=3.10")
 
@@ -43,13 +42,14 @@ def get_scheduler():
 
 
 async def cron_web_scraper_task(
-    url: Union[str, List[str]],
+    url: str | list[str],
     *,
-    schedule: str = None,
-    extraction_rules: dict = None,
+    schedule: str | None = None,
+    extraction_rules: dict | None = None,
     tavily_api_key: str = os.getenv("TAVILY_API_KEY"),
     soup_crawler_config: DefaultCrawlerConfig = None,
     tavily_config: TavilyConfig = None,
+    keenable_config: KeenableConfig = None,
     job_name: str = "scraping",
     ctx=None,
 ):
@@ -66,6 +66,8 @@ async def cron_web_scraper_task(
         tavily_api_key: API key for Tavily. Defaults to TAVILY_API_KEY environment variable.
         soup_crawler_config: Configuration for BeautifulSoup crawler.
         tavily_config: Configuration for Tavily API.
+        keenable_config: Configuration for Keenable API. Defaults to KEENABLE_API_KEY
+            environment variable when set.
         job_name: Name of the scraping job. Defaults to "scraping".
 
     Returns:
@@ -75,7 +77,7 @@ async def cron_web_scraper_task(
         ValueError: If the schedule is an invalid cron expression.
         ImportError: If APScheduler is not installed.
     """
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     job_name = job_name or f"scrape_{now.strftime('%Y%m%d_%H%M%S')}"
     if schedule:
         try:
@@ -93,6 +95,7 @@ async def cron_web_scraper_task(
                 "tavily_api_key": tavily_api_key,
                 "soup_crawler_config": soup_crawler_config,
                 "tavily_config": tavily_config,
+                "keenable_config": keenable_config,
                 "job_name": job_name,
                 "ctx": ctx,
             },
@@ -106,7 +109,7 @@ async def cron_web_scraper_task(
         return
 
     # If no schedule, run immediately
-    logger.info(f"[{datetime.now()}] Running web scraper task immediately...")
+    logger.info(f"[{datetime.now(timezone.utc)}] Running web scraper task immediately...")
     return await web_scraper_task(
         url=url,
         schedule=schedule,
@@ -114,20 +117,22 @@ async def cron_web_scraper_task(
         tavily_api_key=tavily_api_key,
         soup_crawler_config=soup_crawler_config,
         tavily_config=tavily_config,
+        keenable_config=keenable_config,
         job_name=job_name,
         ctx=ctx,
     )
 
 
 async def web_scraper_task(
-    url: Union[str, List[str]],
+    url: str | list[str],
     *,
-    schedule: str = None,
-    extraction_rules: dict = None,
+    schedule: str | None = None,
+    extraction_rules: dict | None = None,
     tavily_api_key: str = os.getenv("TAVILY_API_KEY"),
     soup_crawler_config: DefaultCrawlerConfig = None,
     tavily_config: TavilyConfig = None,
-    job_name: str = None,
+    keenable_config: KeenableConfig = None,
+    job_name: str | None = None,
     ctx=None,
 ):
     """Scrape URLs and store data points in a Graph database.
@@ -145,6 +150,8 @@ async def web_scraper_task(
         tavily_api_key: API key for Tavily. Defaults to TAVILY_API_KEY environment variable.
         soup_crawler_config: Configuration for BeautifulSoup crawler.
         tavily_config: Configuration for Tavily API.
+        keenable_config: Configuration for Keenable API. Defaults to KEENABLE_API_KEY
+            environment variable when set.
         job_name: Name of the scraping job. Defaults to a timestamp-based name.
 
     Returns:
@@ -160,10 +167,10 @@ async def web_scraper_task(
     if isinstance(url, str):
         url = [url]
 
-    soup_crawler_config, tavily_config, preferred_tool = check_arguments(
-        tavily_api_key, extraction_rules, tavily_config, soup_crawler_config
+    soup_crawler_config, tavily_config, keenable_config, preferred_tool = check_arguments(
+        tavily_api_key, extraction_rules, tavily_config, soup_crawler_config, keenable_config
     )
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     job_name = job_name or f"scrape_{now.strftime('%Y%m%d_%H%M%S')}"
     provenance_kwargs = await graph_provenance_write_kwargs(
         graph_db,
@@ -208,6 +215,7 @@ async def web_scraper_task(
         urls=url,
         preferred_tool=preferred_tool,
         tavily_config=tavily_config,
+        keenable_config=keenable_config,
         soup_crawler_config=soup_crawler_config,
     )
     for page_url, content in results.items():
@@ -343,7 +351,9 @@ async def web_scraper_task(
     return await graph_db.get_graph_data()
 
 
-def check_arguments(tavily_api_key, extraction_rules, tavily_config, soup_crawler_config):
+def check_arguments(
+    tavily_api_key, extraction_rules, tavily_config, soup_crawler_config, keenable_config=None
+):
     """Validate and configure arguments for web_scraper_task.
 
     Args:
@@ -351,13 +361,15 @@ def check_arguments(tavily_api_key, extraction_rules, tavily_config, soup_crawle
         extraction_rules: Extraction rules for BeautifulSoup.
         tavily_config: Configuration for Tavily API.
         soup_crawler_config: Configuration for BeautifulSoup crawler.
+        keenable_config: Configuration for Keenable API.
 
     Returns:
-        Tuple[DefaultCrawlerConfig, TavilyConfig, str]: Configured soup_crawler_config,
-            tavily_config, and preferred_tool ("tavily" or "beautifulsoup").
+        Tuple[DefaultCrawlerConfig, TavilyConfig, KeenableConfig, str]: Configured
+            soup_crawler_config, tavily_config, keenable_config, and preferred_tool
+            ("tavily", "keenable", or "beautifulsoup").
 
     Raises:
-        TypeError: If neither tavily_config nor soup_crawler_config is provided.
+        TypeError: If no scraping configuration is provided.
     """
     preferred_tool = "beautifulsoup"
 
@@ -372,10 +384,16 @@ def check_arguments(tavily_api_key, extraction_rules, tavily_config, soup_crawle
         if not extraction_rules and not soup_crawler_config:
             preferred_tool = "tavily"
 
-    if not tavily_config and not soup_crawler_config:
+    if not tavily_api_key and (keenable_config or os.getenv("KEENABLE_API_KEY")):
+        if not keenable_config:
+            keenable_config = KeenableConfig()
+        if not extraction_rules and not soup_crawler_config:
+            preferred_tool = "keenable"
+
+    if not tavily_config and not keenable_config and not soup_crawler_config:
         raise TypeError("Make sure you pass arguments for web_scraper_task")
 
-    return soup_crawler_config, tavily_config, preferred_tool
+    return soup_crawler_config, tavily_config, keenable_config, preferred_tool
 
 
 def get_path_after_base(base_url: str, url: str) -> str:

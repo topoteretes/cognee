@@ -26,7 +26,6 @@ class Storage(Protocol):
 
             - bool: True if the file exists, otherwise False.
         """
-        pass
 
     async def is_file(self, file_path: str) -> bool:
         """
@@ -42,7 +41,6 @@ class Storage(Protocol):
 
             - bool: True if the file is a regular file, otherwise False.
         """
-        pass
 
     async def get_size(self, file_path: str) -> int:
         """
@@ -58,7 +56,6 @@ class Storage(Protocol):
 
             - int: The size of the file in bytes.
         """
-        pass
 
     async def store(self, file_path: str, data: BinaryIO | str, overwrite: bool):
         """
@@ -71,7 +68,6 @@ class Storage(Protocol):
             - data (bytes): The binary data to be stored.
             - overwrite (bool): If True, overwrite the existing file.
         """
-        pass
 
     @asynccontextmanager
     def open(self, file_path: str, mode: str = "r") -> AsyncGenerator[FileBufferedReader]:
@@ -84,7 +80,6 @@ class Storage(Protocol):
             - file_path (str): The path from where the data will be retrieved.
             - mode (str): The mode to open the file, with "r" as the default for reading text
         """
-        pass
 
     async def copy_file(self, source_file_path: str, destination_file_path: str) -> str:
         """
@@ -101,7 +96,6 @@ class Storage(Protocol):
 
             - str: The path to the copied file.
         """
-        pass
 
     async def ensure_directory_exists(self, directory_path: str = "") -> None:
         """
@@ -114,7 +108,6 @@ class Storage(Protocol):
 
             - directory_path (str): The path of the directory to check or create.
         """
-        pass
 
     async def remove(self, file_path: str) -> None:
         """
@@ -125,7 +118,6 @@ class Storage(Protocol):
 
             - file_path (str): The path of the file to be removed.
         """
-        pass
 
     async def list_files(self, directory_path: str, recursive: bool = False) -> list[str]:
         """
@@ -140,7 +132,6 @@ class Storage(Protocol):
         --------
             - list[str]: List of file paths relative to the storage root
         """
-        pass
 
     async def remove_all(self, root_path: str | None = None) -> None:
         """
@@ -154,4 +145,3 @@ class Storage(Protocol):
 
             - tree_path (str): The root path of the directory tree to be removed.
         """
-        pass

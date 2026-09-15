@@ -35,13 +35,13 @@ runs:
 
     - name: Set up Python
       if: steps.detect-env.outputs.in-container != 'true'
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
       with:
         python-version: ${{ inputs.python-version }}
 
     - name: Install uv
       if: steps.detect-env.outputs.in-container != 'true'
-      uses: astral-sh/setup-uv@v4
+      uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4.2.0
       with:
         enable-cache: true
 
@@ -70,8 +70,17 @@ runs:
       run: |
         # Persist for all subsequent steps so uv run uses /app/.venv
         echo "UV_PROJECT_ENVIRONMENT=/app/.venv" >> "$GITHUB_ENV"
-        # Install project into the pre-built venv; --inexact keeps pre-installed extras intact
-        uv sync --frozen --inexact
+        # Install project into the pre-built venv; --inexact keeps pre-installed extras intact.
+        # Extras not baked into the CI image (extra-dependencies input) are installed
+        # here from the lockfile, mirroring the bare-runner branch.
+        EXTRA_ARGS=""
+        if [ -n "${{ inputs.extra-dependencies }}" ]; then
+          IFS=' ' read -r -a deps <<< "${{ inputs.extra-dependencies }}"
+          for extra in "${deps[@]}"; do
+            EXTRA_ARGS="$EXTRA_ARGS --extra $extra"
+          done
+        fi
+        uv sync --frozen --inexact $EXTRA_ARGS
         # Prevent uv run from re-syncing and stripping extras
         echo "UV_NO_SYNC=true" >> "$GITHUB_ENV"
 

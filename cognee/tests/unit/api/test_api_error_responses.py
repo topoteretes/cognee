@@ -8,54 +8,77 @@ Tests cover:
 
 import importlib
 from types import SimpleNamespace
-from uuid import uuid4
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
-
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from cognee.modules.users.methods import get_authenticated_user
-from cognee.modules.pipelines.models import PipelineRunErrored, PipelineRunCompleted
-from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
-from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.api.v1.add.routers.get_add_router import get_add_router
 from cognee.api.v1.cognify.routers.get_cognify_router import get_cognify_router
 from cognee.api.v1.datasets.routers.get_datasets_router import get_datasets_router
-from cognee.api.v1.memify.routers.get_memify_router import get_memify_router
 from cognee.api.v1.improve.routers.get_improve_router import get_improve_router
+from cognee.api.v1.memify.routers.get_memify_router import get_memify_router
 from cognee.api.v1.recall.routers.get_recall_router import get_recall_router
 from cognee.api.v1.remember.routers.get_remember_router import get_remember_router
 from cognee.api.v1.search.routers.get_search_router import get_search_router
 from cognee.api.v1.update.routers.get_update_router import get_update_router
 from cognee.exceptions import CogneeApiError, CogneeValidationError
-
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
+from cognee.modules.pipelines.models import PipelineRunCompleted, PipelineRunErrored
+from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
+from cognee.modules.users.methods import get_authenticated_user
 
 MOCK_USER = SimpleNamespace(id=uuid4(), email="test@example.com", is_active=True, tenant_id=uuid4())
 MOCK_DATASET_ID = uuid4()
 MOCK_PIPELINE_RUN_ID = uuid4()
 
+# The tests below stub package-level API functions by plain assignment
+# (e.g. ``cognify_pkg.cognify = AsyncMock(...)``). Package modules are
+# process-global, so without restoration the stubs leak into every later
+# test module in the same pytest session — a leaked payment-error mock on
+# cognify() made unrelated remember() tests fail with a bogus 402.
+_STUBBED_API_FUNCTIONS = ("add", "cognify", "search", "memify", "update", "remember")
+
+
+_MISSING = object()  # some packages (memify) gain the attribute only via the stub
+
+
+@pytest.fixture(autouse=True)
+def _restore_stubbed_api_functions():
+    saved = []
+    for name in _STUBBED_API_FUNCTIONS:
+        package = importlib.import_module(f"cognee.api.v1.{name}")
+        saved.append((package, name, getattr(package, name, _MISSING)))
+    yield
+    for package, name, original in saved:
+        if original is _MISSING:
+            if hasattr(package, name):
+                delattr(package, name)
+        else:
+            setattr(package, name, original)
+
 
 def _make_completed(**kwargs):
-    defaults = dict(
-        pipeline_run_id=MOCK_PIPELINE_RUN_ID,
-        dataset_id=MOCK_DATASET_ID,
-        dataset_name="test_dataset",
-        status="completed",
-    )
+    defaults = {
+        "pipeline_run_id": MOCK_PIPELINE_RUN_ID,
+        "dataset_id": MOCK_DATASET_ID,
+        "dataset_name": "test_dataset",
+        "status": "completed",
+    }
     defaults.update(kwargs)
     return PipelineRunCompleted(**defaults)
 
 
 def _make_errored(error="pipeline failed", **kwargs):
-    defaults = dict(
-        pipeline_run_id=MOCK_PIPELINE_RUN_ID,
-        dataset_id=MOCK_DATASET_ID,
-        dataset_name="test_dataset",
-        status="errored",
-        error=error,
-    )
+    defaults = {
+        "pipeline_run_id": MOCK_PIPELINE_RUN_ID,
+        "dataset_id": MOCK_DATASET_ID,
+        "dataset_name": "test_dataset",
+        "status": "errored",
+        "error": error,
+    }
     defaults.update(kwargs)
     return PipelineRunErrored(**defaults)
 
@@ -109,9 +132,12 @@ def _restore_api_package_functions():
     """
     import cognee.api.v1.add as add_pkg
     import cognee.api.v1.cognify as cognify_pkg
-    import cognee.api.v1.memify as memify_pkg
     import cognee.api.v1.search as search_pkg
     import cognee.api.v1.update as update_pkg
+
+    # The memify router imports from cognee.modules.memify (not cognee.api.v1.memify),
+    # so that is the package the memify tests patch and the one that must be restored.
+    import cognee.modules.memify as memify_pkg
 
     targets = [
         (add_pkg, "add"),
@@ -467,6 +493,32 @@ class TestUpdateEndpoint:
             data={"node_set": ""},
         )
         assert resp.status_code == 200
+
+    @pytest.mark.parametrize("incremental_status", ["incremental", "unchanged"])
+    def test_update_incremental_summary_returns_200(self, client, incremental_status):
+        import cognee.api.v1.update as update_pkg
+
+        summary = {
+            "status": incremental_status,
+            "regions": 1 if incremental_status == "incremental" else 0,
+            "deleted_chunks": 1 if incremental_status == "incremental" else 0,
+            "added_chunks": 1 if incremental_status == "incremental" else 0,
+            "reused_chunks": 0,
+            "kept_chunks": 2,
+            "reindexed_chunks": 1,
+        }
+        update_pkg.update = AsyncMock(return_value=summary)
+
+        resp = client.patch(
+            "/update",
+            params={"data_id": str(uuid4()), "dataset_id": str(uuid4())},
+            files={"data": ("updated.txt", b"updated content", "text/plain")},
+            data={"node_set": ""},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == summary
+        assert update_pkg.update.await_args.kwargs["node_set"] is None
 
     def test_update_internal_error_returns_500(self, client):
         import cognee.api.v1.update as update_pkg

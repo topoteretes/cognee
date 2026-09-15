@@ -1,0 +1,6 @@
+Procurement Policies and Preferences:
+        1. Preferred vendors must have 3+ year warranty coverage
+        2. Maximum delivery time: 30 days for non-critical items
+        3. Bulk discount requirements: minimum 5% for orders over $50,000
+        4. Prioritize vendors with sustainable/green practices
+        5. Vendor rating system: require minimum 4/5 rating for new contracts

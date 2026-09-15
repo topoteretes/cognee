@@ -1,10 +1,10 @@
 import argparse
 import asyncio
 
-from cognee.cli.reference import SupportsCliCommand
-from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
+from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.reference import SupportsCliCommand
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 
@@ -76,7 +76,7 @@ tasks on an existing knowledge graph to add context, rules, and connections.
                     )
                     return result
                 except Exception as e:
-                    raise CliCommandInnerException(f"Failed to improve: {str(e)}") from e
+                    raise CliCommandInnerException(f"Failed to improve: {e!s}") from e
 
             result = asyncio.run(run_improve())
 
@@ -93,4 +93,4 @@ tasks on an existing knowledge graph to add context, rules, and connections.
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(f"Error improving: {str(e)}", error_code=1) from e
+            raise CliCommandException(f"Error improving: {e!s}", error_code=1) from e

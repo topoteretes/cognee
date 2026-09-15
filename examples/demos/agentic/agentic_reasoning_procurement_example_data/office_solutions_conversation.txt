@@ -1,0 +1,21 @@
+Assistant: Hi, this is Martin from vendor Office Solutions. How can we assist you?
+
+        User: We need 50 laptops for our engineers.
+        Specs: i7 CPU, 16GB RAM, 512GB SSD, dedicated GPU.
+        We can spend up to $80,000. Can you meet this?
+
+        Assistant: Office Solutions can offer HP ZBook Power G9 for $1,600 each.
+        Comes with 2-year warranty, delivery time is 4–5 weeks.
+
+        User: That's a bit long — any options to speed it up?
+
+        Assistant: We can expedite for $75 per unit, bringing delivery to 3–4 weeks.
+        Also, for orders over $60,000 we give 6% off.
+
+        So:
+        - Base price = $1,600 → $1,504 with discount
+        - Expedited price = $1,579
+
+        User: Understood. Any room for better warranty terms?
+
+        Assistant: We’re working on adding a 3-year warranty option next quarter for enterprise clients.

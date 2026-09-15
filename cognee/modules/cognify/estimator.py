@@ -20,9 +20,10 @@ Known approximations:
 import inspect
 import json
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Optional, Type
+from typing import Any
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 from uuid import NAMESPACE_OID, UUID, uuid5
@@ -32,8 +33,8 @@ from pydantic import BaseModel
 from cognee.infrastructure.llm.config import get_llm_config
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
-from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_existing_datasets
@@ -41,7 +42,6 @@ from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data
 from cognee.modules.data.processing.document_types import (
     AudioDocument,
-    DltRowDocument,
     ImageDocument,
     PdfDocument,
     TextDocument,
@@ -50,10 +50,13 @@ from cognee.modules.data.processing.document_types import (
 from cognee.modules.session_lifecycle.usage_tracking import estimate_cost_usd
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.shared.graph_model_utils import datapoint_model_to_basemodel
+from cognee.shared.llm_graph_model import datapoint_model_to_basemodel
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.documents import classify_documents
 from cognee.tasks.documents.classify_documents import EXTENSION_TO_DOCUMENT_CLASS
 from cognee.tasks.ingestion.data_item import DataItem
+
+logger = get_logger("cognify.estimator")
 
 SUMMARY_OUTPUT_TOKENS_PER_CHUNK = 150
 GRAPH_OUTPUT_TOKEN_RATIO = 0.5
@@ -181,6 +184,7 @@ def _llm_tokenizer() -> TikTokenTokenizer:
         return TikTokenTokenizer(model=model)
     except Exception:
         # Model unknown to tiktoken — fall back to its default encoding.
+        logger.debug("Falling back after error in _llm_tokenizer", exc_info=True)
         return TikTokenTokenizer(model=None)
 
 
@@ -188,13 +192,13 @@ def _count_tokens(text: str, tokenizer: TikTokenTokenizer) -> int:
     return tokenizer.count_tokens(text) if text else 0
 
 
-def _schema_tokens(model: Type[BaseModel], tokenizer: TikTokenTokenizer) -> int:
+def _schema_tokens(model: type[BaseModel], tokenizer: TikTokenTokenizer) -> int:
     if isinstance(model, type) and issubclass(model, BaseModel):
         return _count_tokens(json.dumps(model.model_json_schema(), sort_keys=True), tokenizer)
     return 0
 
 
-def _graph_prompt(custom_prompt: Optional[str]) -> str:
+def _graph_prompt(custom_prompt: str | None) -> str:
     """The graph-extraction system prompt — mirrors ``extract_content_graph``."""
     if custom_prompt:
         return custom_prompt
@@ -207,7 +211,7 @@ def _graph_prompt(custom_prompt: Optional[str]) -> str:
     return render_prompt(prompt_path, {}, base_directory=base_directory)
 
 
-def _simplify_graph_model(graph_model: Type[BaseModel]) -> Type[BaseModel]:
+def _simplify_graph_model(graph_model: type[BaseModel]) -> type[BaseModel]:
     """DataPoint models are sent simplified — mirrors ``extract_content_graph``."""
     from cognee.infrastructure.engine import DataPoint
 
@@ -220,23 +224,24 @@ def estimate_chunks(
     chunks: list[DocumentChunk],
     *,
     operation: str,
-    graph_model: Type[BaseModel] = KnowledgeGraph,
-    custom_prompt: Optional[str] = None,
+    graph_model: type[BaseModel] = KnowledgeGraph,
+    custom_prompt: str | None = None,
     skipped_items: int = 0,
+    skipped_dlt_chunks: int = 0,
+    skipped_code_items: int = 0,
 ) -> DryRunEstimate:
-    """Estimate the per-chunk LLM stages of the default cognify pipeline."""
+    """Estimate the per-chunk LLM stages of the default cognify pipeline.
+
+    DLT and code items never reach this function's chunk list: the cognify
+    estimate routes them out (same policy as execution — cognify_route_for)
+    before any document is read, and reports them via ``skipped_dlt_chunks``
+    and ``skipped_code_items``.
+    """
     tokenizer = _llm_tokenizer()
     model = get_llm_config().llm_model
     summarization_model = get_cognify_config().summarization_model
 
-    # The real pipeline skips LLM extraction and summarization for DLT row
-    # chunks (see extract_graph_from_data / summarize_text).
-    llm_chunks = [
-        chunk
-        for chunk in chunks
-        if not isinstance(getattr(chunk, "is_part_of", None), DltRowDocument)
-    ]
-    skipped_dlt_chunks = len(chunks) - len(llm_chunks)
+    llm_chunks = chunks
 
     chunk_token_counts = [_count_tokens(chunk.text, tokenizer) for chunk in llm_chunks]
     chunk_tokens = sum(chunk_token_counts)
@@ -288,6 +293,11 @@ def estimate_chunks(
             f"Skipped {skipped_dlt_chunks} DLT row chunk(s) because they do not use "
             "LLM extraction or summarization."
         )
+    if skipped_code_items:
+        warnings.append(
+            f"Skipped {skipped_code_items} code file(s) because they run the "
+            "deterministic code graph pipeline — no LLM calls."
+        )
     if output_multiplier != 1:
         warnings.append(
             f"{model} is a reasoning model: output tokens and cost include a rough "
@@ -304,7 +314,7 @@ def estimate_chunks(
         chunks=len(llm_chunks),
         chunk_tokens=chunk_tokens,
         stages=stages,
-        skipped_items=skipped_items + skipped_dlt_chunks,
+        skipped_items=skipped_items + skipped_dlt_chunks + skipped_code_items,
         warnings=warnings,
     )
 
@@ -332,7 +342,7 @@ def _accept_local_file_path() -> bool:
     return settings.accept_local_file_path
 
 
-def _path_candidate(value: str) -> Optional[Path]:
+def _path_candidate(value: str) -> Path | None:
     """The local path this string refers to, or None when it is raw text.
 
     Mirrors ``save_data_item_to_storage``: remote URLs are loud errors and
@@ -446,7 +456,7 @@ async def _input_to_texts(data: Any) -> list[str]:
 async def _chunks_from_texts(
     texts: Iterable[str],
     *,
-    chunker: Type[Any],
+    chunker: type[Any],
     chunk_size: int,
 ) -> list[DocumentChunk]:
     chunks: list[DocumentChunk] = []
@@ -473,10 +483,43 @@ async def _chunks_from_texts(
 async def _chunks_from_data_items(
     data_items: list[Data],
     *,
-    chunker: Type[Any],
+    chunker: type[Any],
     chunk_size: int,
-) -> tuple[list[DocumentChunk], int]:
-    documents = await classify_documents(data_items)
+) -> tuple[list[DocumentChunk], int, int, int]:
+    """Chunk the LLM-bound items; DLT and code items are routed out BEFORE any read.
+
+    Uses the same routing policy as execution (cognify_route_for), so the
+    estimate cannot drift from what cognify actually runs. Manifest chunk
+    counts come from system_metadata["row_count"] — a dry run never opens
+    a (potentially multi-GB) manifest file. Code files run the deterministic
+    code graph pipeline (no LLM calls), so they are counted, not chunked.
+    """
+    from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
+
+    llm_items: list[Data] = []
+    skipped_dlt_chunks = 0
+    skipped_code_items = 0
+    for data_item in data_items:
+        route = cognify_route_for(data_item)
+        if route is CognifyRoute.DLT_SOURCE:
+            system_metadata = data_item.system_metadata
+            row_count = (
+                system_metadata.get("row_count") if isinstance(system_metadata, dict) else None
+            )
+            if row_count is None:
+                logger.warning(
+                    "DLT manifest %s has no row_count in system_metadata; "
+                    "counting 0 skipped chunks for it.",
+                    data_item.id,
+                )
+                row_count = 0
+            skipped_dlt_chunks += row_count
+        elif route in (CognifyRoute.CODE, CognifyRoute.CODE_REPO):
+            skipped_code_items += 1
+        else:
+            llm_items.append(data_item)
+
+    documents = await classify_documents(llm_items)
     chunks: list[DocumentChunk] = []
     skipped = 0
     for document in documents:
@@ -485,16 +528,16 @@ async def _chunks_from_data_items(
             continue
         async for chunk in document.read(chunker_cls=chunker, max_chunk_size=chunk_size):
             chunks.append(chunk)
-    return chunks, skipped
+    return chunks, skipped, skipped_dlt_chunks, skipped_code_items
 
 
 async def estimate_remember_dry_run(
     data: Any,
     *,
-    chunker: Type[Any] = TextChunker,
+    chunker: type[Any] = TextChunker,
     chunk_size: int,
-    graph_model: Type[BaseModel] = KnowledgeGraph,
-    custom_prompt: Optional[str] = None,
+    graph_model: type[BaseModel] = KnowledgeGraph,
+    custom_prompt: str | None = None,
 ) -> DryRunEstimate:
     """Estimate ``remember(data)`` for permanent add+cognify inputs."""
     chunks = await _chunks_from_texts(
@@ -509,10 +552,10 @@ async def estimate_cognify_dry_run(
     datasets,
     *,
     user=None,
-    chunker: Type[Any] = TextChunker,
+    chunker: type[Any] = TextChunker,
     chunk_size: int,
-    graph_model: Type[BaseModel] = KnowledgeGraph,
-    custom_prompt: Optional[str] = None,
+    graph_model: type[BaseModel] = KnowledgeGraph,
+    custom_prompt: str | None = None,
 ) -> DryRunEstimate:
     """Estimate ``cognify(datasets)`` over all data in the authorized datasets.
 
@@ -530,12 +573,21 @@ async def estimate_cognify_dry_run(
 
     chunks: list[DocumentChunk] = []
     skipped = 0
+    skipped_dlt = 0
+    skipped_code = 0
     for dataset in authorized_datasets:
-        dataset_chunks, skipped_items = await _chunks_from_data_items(
+        (
+            dataset_chunks,
+            skipped_items,
+            skipped_dlt_chunks,
+            skipped_code_items,
+        ) = await _chunks_from_data_items(
             await get_dataset_data(dataset.id), chunker=chunker, chunk_size=chunk_size
         )
         chunks.extend(dataset_chunks)
         skipped += skipped_items
+        skipped_dlt += skipped_dlt_chunks
+        skipped_code += skipped_code_items
 
     return estimate_chunks(
         chunks,
@@ -543,4 +595,6 @@ async def estimate_cognify_dry_run(
         graph_model=graph_model,
         custom_prompt=custom_prompt,
         skipped_items=skipped,
+        skipped_dlt_chunks=skipped_dlt,
+        skipped_code_items=skipped_code,
     )

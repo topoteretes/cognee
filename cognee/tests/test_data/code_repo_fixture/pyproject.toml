@@ -1,0 +1,5 @@
+[project]
+name = "inventory-fixture"
+version = "0.0.1"
+description = "Pinned mini repository for cognee's code-graph end-to-end test."
+dependencies = ["requests>=2.0"]

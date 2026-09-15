@@ -29,12 +29,12 @@ class PacerSpy:
 
 
 def _config(**overrides):
-    defaults = dict(
-        llm_rate_limit_enabled=False,
-        auto_rate_limit=True,
-        llm_rate_limit_requests=60,
-        llm_rate_limit_interval=60,
-    )
+    defaults = {
+        "llm_rate_limit_enabled": False,
+        "auto_rate_limit": True,
+        "llm_rate_limit_requests": 60,
+        "llm_rate_limit_interval": 60,
+    }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
 

@@ -1,26 +1,25 @@
-import os
-import gc
 import asyncio
-from os import path
+import gc
+import os
 import tempfile
-from uuid import UUID
-from typing import Optional
-from typing import AsyncGenerator, List
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from sqlalchemy.orm import joinedload
-from sqlalchemy.exc import NoResultFound
-from sqlalchemy import NullPool, event, text, select, MetaData, Table, delete, inspect, func
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from os import path
+from urllib.parse import unquote
+from uuid import UUID
 
-from cognee.modules.data.models.Data import Data
-from cognee.modules.data.models.DatasetData import DatasetData
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.utils.run_sync import run_sync
+from sqlalchemy import MetaData, NullPool, Table, delete, event, func, inspect, or_, select, text
+from sqlalchemy.exc import NoResultFound
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import joinedload
+
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
+from cognee.infrastructure.utils.run_sync import run_sync
+from cognee.modules.data.models.Data import Data
+from cognee.shared.logging_utils import get_logger
 
 from ..ModelBase import Base
-
 
 logger = get_logger()
 
@@ -31,7 +30,12 @@ class SQLAlchemyAdapter:
     functions.
     """
 
-    def __init__(self, connection_string: str, connect_args: dict = None, pool_args: dict = None):
+    def __init__(
+        self,
+        connection_string: str,
+        connect_args: dict | None = None,
+        pool_args: dict | None = None,
+    ):
         """
         Initialize the SQLAlchemy adapter with connection settings.
 
@@ -109,7 +113,7 @@ class SQLAlchemyAdapter:
             self.engine = create_async_engine(
                 connection_string,
                 **(sqlite_pool_args or {"poolclass": NullPool}),
-                connect_args={**{"timeout": 120}, **final_connect_args},
+                connect_args={"timeout": 120, **final_connect_args},
             )
 
             # SQLite defaults to rollback-journal mode, where a connection that
@@ -257,7 +261,7 @@ class SQLAlchemyAdapter:
             )
             await connection.close()
 
-    async def delete_table(self, table_name: str, schema_name: Optional[str] = "public"):
+    async def delete_table(self, table_name: str, schema_name: str | None = "public"):
         """
         Delete a table from the specified schema, if it exists.
 
@@ -282,7 +286,7 @@ class SQLAlchemyAdapter:
         self,
         table_name: str,
         data: list[dict],
-        schema_name: Optional[str] = "public",
+        schema_name: str | None = "public",
     ) -> int:
         """
         Insert data into a specified table, returning the number of rows inserted.
@@ -327,10 +331,10 @@ class SQLAlchemyAdapter:
                 return result.rowcount
 
         except Exception as e:
-            logger.error(f"Insert failed: {str(e)}")
-            raise e  # Re-raise for error handling upstream
+            logger.error(f"Insert failed: {e!s}")
+            raise  # Re-raise for error handling upstream
 
-    async def get_schema_list(self) -> List[str]:
+    async def get_schema_list(self) -> list[str]:
         """
         Return a list of all schema names in the database, excluding system schemas.
 
@@ -353,7 +357,7 @@ class SQLAlchemyAdapter:
         return []
 
     async def delete_entity_by_id(
-        self, table_name: str, data_id: UUID, schema_name: Optional[str] = "public"
+        self, table_name: str, data_id: UUID, schema_name: str | None = "public"
     ):
         """
         Delete an entity from the specified table based on its unique ID.
@@ -399,67 +403,86 @@ class SQLAlchemyAdapter:
                 # so must be enabled for each database connection/session separately.
                 await session.execute(text("PRAGMA foreign_keys = ON;"))
 
-            # Delete DatasetData instances referencing this data_id first to maintain referential integrity.
-            await session.execute(
-                delete(DatasetData).where(
-                    DatasetData.data_id == data_id,
-                    DatasetData.dataset_id == dataset_id,
-                )
-            )
-            # Flush to ensure the count in the next step is accurate within the transaction
-            await session.flush()
-
-            # Check if any references to this data_id still exist in the DatasetData table
-            remaining_refs = (
-                await session.execute(
-                    select(func.count())
-                    .select_from(DatasetData)
-                    .where(DatasetData.data_id == data_id)
-                )
-            ).scalar()
-
-            # If there are still datasets using this data, we stop here.
-            if remaining_refs > 0:
-                await session.commit()
-                return
-
+            # Rows are dataset-scoped: the (data_id, dataset_id) pair must
+            # match — a mismatch means a mispinned id, not a membership to
+            # silently unlink.
             try:
-                data_entity = (await session.scalars(select(Data).where(Data.id == data_id))).one()
-            except (ValueError, NoResultFound) as e:
-                raise EntityNotFoundError(message=f"Entity not found: {str(e)}") from e
-
-            # Check if other data objects point to the same raw data location
-            raw_data_location_entities = (
-                await session.execute(
-                    select(Data.raw_data_location).where(
-                        Data.raw_data_location == data_entity.raw_data_location
+                data_entity = (
+                    await session.scalars(
+                        select(Data).where(Data.id == data_id, Data.dataset_id == dataset_id)
                     )
-                )
-            ).all()
+                ).one()
+            except (ValueError, NoResultFound) as e:
+                raise EntityNotFoundError(
+                    message=f"Data {data_id} not found in dataset {dataset_id}: {e!s}"
+                ) from e
 
-            # Don't delete local file unless this is the only reference to the file in the database
-            if len(raw_data_location_entities) == 1:
-                # delete local file only if it's created by cognee
-                storage_config = get_storage_config()
-
-                if (
-                    storage_config["data_root_directory"]
-                    in raw_data_location_entities[0].raw_data_location
-                ):
-                    file_storage = get_file_storage(storage_config["data_root_directory"])
-
-                    file_path = os.path.basename(raw_data_location_entities[0].raw_data_location)
-
-                    if await file_storage.file_exists(file_path):
-                        await file_storage.remove(file_path)
-                    else:
-                        # Report bug as file should exist
-                        logger.error("Local file which should exist can't be found.")
+            raw_data_location = data_entity.raw_data_location
+            original_data_location = data_entity.original_data_location
 
             await session.execute(delete(Data).where(Data.id == data_id))
             await session.commit()
 
-    async def get_table(self, table_name: str, schema_name: Optional[str] = "public") -> Table:
+        # Edge-evidence rows have no foreign key to Data (graph deletion must
+        # never depend on the sidecar), so they are swept here explicitly.
+        from cognee.modules.provenance.edge_evidence.cleanup import delete_edge_evidence
+
+        await delete_edge_evidence(dataset_id, data_id)
+
+        # Storage cleanup runs after the commit so the reference count reflects
+        # the deletion. Both the derived text (raw_data_location) and the
+        # stored original (original_data_location) are collected — originals
+        # live under content-addressed keys shared by identical payloads, so
+        # each is removed only once nothing references it.
+        await self.remove_data_file_if_unreferenced(raw_data_location)
+        await self.remove_data_file_if_unreferenced(original_data_location)
+
+    async def remove_data_file_if_unreferenced(self, file_location: str | None) -> None:
+        """Remove a cognee-managed stored file once no ``Data`` row references it.
+
+        A location outside the data root is a user's own file (a local path, an
+        external s3:// URL) and is never touched. Content-addressed keys are
+        shared by design — two rows with identical payloads point at one object
+        — so the reference count spans both location columns of every dataset.
+        """
+        if not file_location:
+            return
+
+        storage_config = get_storage_config()
+        data_root = storage_config["data_root_directory"]
+        if data_root not in file_location:
+            return
+
+        async with self.get_async_session() as session:
+            references = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(Data)
+                    .where(
+                        or_(
+                            Data.raw_data_location == file_location,
+                            Data.original_data_location == file_location,
+                        )
+                    )
+                )
+            ).scalar()
+
+        if references:
+            return
+
+        relative_path = file_location.split(data_root, 1)[1].lstrip("/\\")
+        if file_location.startswith("file://"):
+            # file:// locations carry percent-encoding (spaces as %20); storage
+            # keys are the decoded form.
+            relative_path = unquote(relative_path)
+
+        file_storage = get_file_storage(data_root)
+        if await file_storage.file_exists(relative_path):
+            await file_storage.remove(relative_path)
+        else:
+            logger.warning("Stored file to clean up was already gone: %s", file_location)
+
+    async def get_table(self, table_name: str, schema_name: str | None = "public") -> Table:
         """
         Load a table dynamically using the specified name and schema information.
 
@@ -477,10 +500,20 @@ class SQLAlchemyAdapter:
         """
         async with self.engine.begin() as connection:
             if self.engine.dialect.name == "sqlite":
-                # Load the schema information into the MetaData object
-                await connection.run_sync(Base.metadata.reflect)
+                # Prefer the declarative table: it carries the models' Python-side
+                # type converters (a raw reflected sqlite table would return e.g.
+                # datetimes as strings).
                 if table_name in Base.metadata.tables:
                     return Base.metadata.tables[table_name]
+                # Unknown to the imported models — reflect into a throwaway
+                # MetaData, never into Base.metadata: registering an on-disk
+                # table whose model module has not been imported yet makes that
+                # model's later declarative definition fail with "Table ... is
+                # already defined for this MetaData instance".
+                metadata = MetaData()
+                await connection.run_sync(metadata.reflect)
+                if table_name in metadata.tables:
+                    return metadata.tables[table_name]
                 else:
                     raise EntityNotFoundError(message=f"Table '{table_name}' not found.")
             else:
@@ -498,7 +531,7 @@ class SQLAlchemyAdapter:
                     return metadata.tables[full_table_name]
                 raise EntityNotFoundError(message=f"Table '{full_table_name}' not found.")
 
-    async def get_table_names(self) -> List[str]:
+    async def get_table_names(self) -> list[str]:
         """
         Return a list of all table names in the database, regardless of their model definitions.
 
@@ -528,7 +561,7 @@ class SQLAlchemyAdapter:
 
         return table_names
 
-    async def get_data(self, table_name: str, filters: dict = None):
+    async def get_data(self, table_name: str, filters: dict | None = None):
         """
         Retrieve data from a specified table using optional filtering conditions.
 
@@ -633,12 +666,21 @@ class SQLAlchemyAdapter:
                 logger.debug("Database tables dropped successfully.")
             except Exception as e:
                 logger.error(f"Error dropping database tables: {e}")
-                raise e
+                raise
 
-    async def create_database(self):
+    async def create_database(self, script_location: str | None = None):
         """
-        Create the database if it does not exist, ensuring necessary directories are in place
-        for SQLite.
+        Create the database by applying the Alembic migration chain: prepare the
+        storage (SQLite directory, pgvector extension), then ``alembic upgrade
+        head``. The initial revision carries the frozen base schema and every
+        revision is existence-guarded, so the chain builds the complete schema
+        on an empty database and no-ops per revision on an existing one. There
+        is no stamping: ``alembic_version`` only ever records revisions that
+        actually executed.
+
+        ``script_location`` overrides the Alembic scripts directory (falls back
+        to ``COGNEE_ALEMBIC_PATH``, then cognee's packaged chain). The chain runs
+        against THIS adapter's database.
         """
         if self.engine.dialect.name == "sqlite":
             db_directory = path.dirname(self.db_path)
@@ -658,8 +700,11 @@ class SQLAlchemyAdapter:
                 and self.engine.dialect.name == "postgresql"
             ):
                 await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
-            if len(Base.metadata.tables.keys()) > 0:
-                await connection.run_sync(Base.metadata.create_all)
+
+        # Imported at call time: the migrations module sits above this adapter layer.
+        from cognee.modules.migrations.startup import run_relational_migrations
+
+        await run_relational_migrations("head", script_location, engine=self)
 
     async def delete_database(self):
         """
@@ -731,7 +776,7 @@ class SQLAlchemyAdapter:
 
         except Exception as e:
             logger.error(f"Error deleting database: {e}")
-            raise e
+            raise
 
         logger.info("Database deleted successfully.")
 
@@ -790,7 +835,9 @@ class SQLAlchemyAdapter:
                 for schema_name in schema_list:
                     # Get tables for the current schema via the inspector.
                     tables = await connection.run_sync(
-                        lambda sync_conn: inspect(sync_conn).get_table_names(schema=schema_name)
+                        lambda sync_conn, schema_name=schema_name: inspect(
+                            sync_conn
+                        ).get_table_names(schema=schema_name)
                     )
                     for table_name in tables:
                         # Optionally, qualify the table name with the schema if not in the default schema.

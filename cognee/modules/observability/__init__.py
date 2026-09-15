@@ -1,4 +1,3 @@
-from typing import Optional
 from contextlib import contextmanager
 
 from .trace_context import (
@@ -99,7 +98,7 @@ class _NullSpan:
         return lambda *args, **kwargs: None
 
 
-def get_tracer_if_enabled() -> Optional[object]:
+def get_tracer_if_enabled() -> object | None:
     """Return the OTEL tracer if tracing is enabled, None otherwise."""
     if is_tracing_enabled():
         return get_tracer()

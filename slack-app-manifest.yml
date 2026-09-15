@@ -29,8 +29,13 @@
 #      Confirm — no key to create or paste. This makes /cognee-ask and
 #      "Remember this" use your own memory, not just the workspace
 #      installer's.
-#   9. Run /cognee-ask <your question> in any channel the bot can see (or a
-#      DM with it) to test the full round-trip.
+#   9. Run /cognee-remember <a fact> to put something in memory, then
+#      /cognee-ask <your question> in any channel the bot can see (or a DM
+#      with it) to test the full round-trip. Asking before anything has been
+#      ingested fails on a missing vector collection, not an empty answer.
+#
+# NOTE: adding a slash command to an existing app requires reinstalling it to
+# each workspace — Slack does not grant new commands to an existing install.
 
 display_information:
   name: Cognee
@@ -57,6 +62,10 @@ features:
       url: https://<public-host>/api/v1/slack/commands
       description: Ask your Cognee memory a question — reviewed privately before you share it
       usage_hint: what do we know about the Q3 launch?
+    - command: /cognee-remember
+      url: https://<public-host>/api/v1/slack/commands
+      description: Save a decision or fact worth keeping — for things Slack never saw
+      usage_hint: we chose Neon for v2, branching is cheaper
     - command: /cognee-link
       url: https://<public-host>/api/v1/slack/commands
       description: Get a private link to connect this Slack account to your own Cognee memory

@@ -22,7 +22,6 @@ import tarfile
 import tempfile
 import urllib.request
 from pathlib import Path
-from typing import Optional
 
 from fastapi import status
 
@@ -31,18 +30,20 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("enola")
 
-ENOLA_PINNED_VERSION = "0.1.34"
+ENOLA_PINNED_VERSION = "0.4.12"
 
 _RELEASE_URL_TEMPLATE = "https://github.com/enola-labs/enola/releases/download/v{version}/{asset}"
 
 # SHA-256 of each release archive, pinned from the .sha256 files published
-# alongside the v0.1.34 release assets. Bumping ENOLA_PINNED_VERSION requires
-# re-pinning these.
+# alongside the v0.4.12 release assets (2026-09-01). Bumping
+# ENOLA_PINNED_VERSION requires re-pinning these; the e2e known answers in
+# tests/test_code_graph_e2e.py are pinned to the same version.
 ENOLA_RELEASE_CHECKSUMS = {
-    "darwin-arm64": "d0a5a59426a58848b3867557a624012dd01b74c426c87064808b4b71611f9c22",
-    "linux-amd64": "bbdef9309512ba27b6cba64aaa30bcd7c4119204d03c477192cd76663fa87cd4",
-    "linux-arm64": "2d092e45d43f66236d50c91ce363bbf73b783cda5ee69e5d0385ac32b073e288",
-    "windows-amd64": "ea38eebbb9726319484cbfe9b4e69b509c8fee0430921d828e6b12b00be9b3c4",
+    "darwin-arm64": "b6da39f34cb869368e98f33a2ddcf7caffa16269de1d31d57cfc08eee4b1fd6b",
+    "darwin-amd64": "db105ae8235b482c776a280bde54afe43f0ecad3c992316ea445a29ec0e0bd7e",
+    "linux-amd64": "108767f9053b7d01651eef819d08301ae3b4e4e5cd06bfc6c36dcce1648f8cbf",
+    "linux-arm64": "2f3e1cb8d172977da873c16b6fccca9baadb8fdd0211c801d1064c2802872a8f",
+    "windows-amd64": "5f9dfc5914dd0dec5452d272f0f1413dc33ba58b73519d3a6c8cfbd4d92f473a",
 }
 
 _FALSEY = {"false", "0", "no", "off"}
@@ -93,34 +94,47 @@ def installed_binary_path() -> Path:
 
 
 def _download(url: str, destination: Path) -> None:
-    with urllib.request.urlopen(url, timeout=_DOWNLOAD_TIMEOUT_SECONDS) as response:
-        with open(destination, "wb") as archive_file:
-            while True:
-                chunk = response.read(1024 * 1024)
-                if not chunk:
-                    break
-                archive_file.write(chunk)
+    with (
+        urllib.request.urlopen(url, timeout=_DOWNLOAD_TIMEOUT_SECONDS) as response,
+        open(destination, "wb") as archive_file,
+    ):
+        while True:
+            chunk = response.read(1024 * 1024)
+            if not chunk:
+                break
+            archive_file.write(chunk)
 
 
 def _extract_single_binary(archive_path: Path, destination: Path) -> None:
-    """Extract the archive's single binary member without trusting member paths."""
+    """Extract the archive's single enola binary member without trusting member paths.
+
+    Releases up to 0.1.x shipped the binary alone; 0.3.x and later add LICENSE
+    and NOTICE next to it. Exactly one top-level `enola*` member must exist, and
+    no member name may contain a path separator or start with a dot.
+    """
     with tarfile.open(archive_path, "r:gz") as archive:
         members = [member for member in archive.getmembers() if member.isreg()]
-        if len(members) != 1 or "/" in members[0].name or members[0].name.startswith("."):
+        if any("/" in member.name or member.name.startswith(".") for member in members):
             names = [member.name for member in archive.getmembers()]
             raise EnolaInstallError(
                 message=f"Unexpected enola archive layout {names}; refusing to extract."
             )
-        extracted = archive.extractfile(members[0])
+        binaries = [member for member in members if member.name.startswith("enola")]
+        if len(binaries) != 1:
+            names = [member.name for member in archive.getmembers()]
+            raise EnolaInstallError(
+                message=f"Unexpected enola archive layout {names}; refusing to extract."
+            )
+        extracted = archive.extractfile(binaries[0])
         if extracted is None:
             raise EnolaInstallError(
-                message=f"Could not read '{members[0].name}' from the enola archive."
+                message=f"Could not read '{binaries[0].name}' from the enola archive."
             )
         with open(destination, "wb") as binary_file:
             binary_file.write(extracted.read())
 
 
-def install_enola(install_dir: Optional[Path] = None) -> str:
+def install_enola(install_dir: Path | None = None) -> str:
     """Install the pinned enola release and return the binary path.
 
     Idempotent: returns the existing binary without any network access when it

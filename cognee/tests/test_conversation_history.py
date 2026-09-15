@@ -408,6 +408,9 @@ async def main():
     ###### END E2E: NEW SESSION SDK #####
 
     ###### E2E: Automatic feedback detection (when caching and auto_feedback enabled) ######
+    # Runs in the default concurrent mode: every session turn, answered or not, must land
+    # in QA history, so a feedback-only message is stored as its own acknowledgement entry
+    # rather than silently dropped or answered as a normal question.
     logger.info("Starting e2e tests for automatic feedback detection")
     session_id_autofeedback = "test_session_autofeedback"
     await cognee.search(
@@ -426,18 +429,36 @@ async def main():
     entries_autofeedback = await cognee.session.get_session(
         session_id=session_id_autofeedback, user=user, last_n=10
     )
-    assert len(entries_autofeedback) == 1, (
-        "With auto_feedback enabled, a feedback-only message must not create a new QA; "
-        f"expected 1 entry, got {len(entries_autofeedback)}"
+    assert len(entries_autofeedback) == 2, (
+        "A feedback-only message must still be recorded as its own QA entry; "
+        f"expected 2 entries, got {len(entries_autofeedback)}"
     )
-    entry_autofeedback = entries_autofeedback[0]
-    assert entry_autofeedback.question == "What is TechCorp?", (
-        "Single entry must be the first question; feedback-only text was not stored as new QA"
+    first_entry_autofeedback, second_entry_autofeedback = entries_autofeedback
+    assert first_entry_autofeedback.question == "What is TechCorp?", (
+        "First entry must be the original question"
     )
-    assert getattr(entry_autofeedback, "feedback_text", None) is None
-    assert getattr(entry_autofeedback, "feedback_score", None) is None
+    assert second_entry_autofeedback.question == "Thanks, that was really helpful!", (
+        "Feedback-only turn's raw message must be stored as the QA entry's question"
+    )
+    stored_answer_autofeedback = second_entry_autofeedback.answer or ""
+    assert stored_answer_autofeedback, (
+        "Feedback-only turn must store an acknowledgement as the QA entry's answer"
+    )
+    # Truthiness alone is not enough: before this fix the concurrent path stored the
+    # generated answer here, which is also truthy. Pin the shape instead — short, and
+    # not about the retrieved subject.
+    assert len(stored_answer_autofeedback) < 120, (
+        "Feedback-only turn must store the short acknowledgement, not the generated "
+        f"answer; got {len(stored_answer_autofeedback)} chars: "
+        f"{stored_answer_autofeedback[:200]}"
+    )
+    assert "TechCorp" not in stored_answer_autofeedback, (
+        "Feedback-only turn stored a generated answer about the retrieved subject"
+    )
+    assert getattr(second_entry_autofeedback, "feedback_text", None) is None
+    assert getattr(second_entry_autofeedback, "feedback_score", None) is None
     logger.info(
-        "Automatic feedback detection e2e passed without auto-populating QA feedback fields",
+        "Automatic feedback detection e2e passed: feedback-only turn stored as its own QA entry",
     )
     ###### END E2E: Automatic feedback detection #####
 

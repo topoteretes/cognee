@@ -14,7 +14,8 @@ The wrapper also applies ``@log_usage`` so the two can't drift: every tool is
 logged as ``MCP <tool_name>``, which is what all of them already did by hand.
 """
 
-from typing import Any, Callable, Iterable
+from collections.abc import Callable, Iterable
+from typing import Any
 
 from cognee.shared.usage_logger import log_usage
 

@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import relationship, Mapped
 from sqlalchemy import Column, Text, DateTime, UUID
 from cognee.infrastructure.databases.relational import Base
-from .DatasetData import DatasetData
 
 
 class Dataset(Base):
@@ -28,12 +27,14 @@ class Dataset(Base):
         cascade="all, delete-orphan",
     )
 
+    # Data rows are dataset-scoped (Data.dataset_id); this is a read-only view
+    # over that column — membership no longer has its own table. Writes go
+    # through Data.dataset_id directly.
     data: Mapped[List["Data"]] = relationship(
         "Data",
-        secondary=DatasetData.__tablename__,
-        back_populates="datasets",
+        primaryjoin="Dataset.id == foreign(Data.dataset_id)",
         lazy="noload",
-        cascade="all, delete",
+        viewonly=True,
     )
 
     def to_json(self) -> dict:
