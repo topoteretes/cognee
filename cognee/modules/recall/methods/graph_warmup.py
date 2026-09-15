@@ -87,7 +87,7 @@ async def get_graph_build_status(user, dataset_ids: list[UUID] | None) -> Warmup
     list is filtered down to the datasets the user can read, so unpermitted
     or nonexistent ids contribute nothing (they can never leak state).
     """
-    from sqlalchemy import and_, exists, select
+    from sqlalchemy import and_, exists, or_, select
 
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.pipelines.models import PipelineRun
@@ -126,6 +126,17 @@ async def get_graph_build_status(user, dataset_ids: list[UUID] | None) -> Warmup
         # graph, and counting them would flip datasets that only ever staged
         # data — including custom pipelines that build graphs without logging
         # runs — from the warm fail-safe below into build_failed.
+        #
+        # Runs the startup recovery closed are excluded for the same reason
+        # (SDK-577). Such a run was ended by a process death, not by anything
+        # about this dataset, and for a pipeline with no rollback policy
+        # nothing was unwound at all, so counting it would report build_failed
+        # over an intact graph and would mask the real cause when an older row
+        # carries one. A genuine failure still reports itself here. The NULL
+        # check matters: rows written before error_class existed carry none,
+        # and `!=` alone would silently drop them.
+        from cognee.modules.pipelines.exceptions import AbandonedPipelineRunError
+
         latest_errored = (
             await session.execute(
                 select(PipelineRun.error_class, PipelineRun.error_message)
@@ -134,6 +145,10 @@ async def get_graph_build_status(user, dataset_ids: list[UUID] | None) -> Warmup
                         PipelineRun.dataset_id.in_(ids),
                         PipelineRun.status == PipelineRunStatus.DATASET_PROCESSING_ERRORED,
                         PipelineRun.pipeline_name != _STAGING_PIPELINE,
+                        or_(
+                            PipelineRun.error_class.is_(None),
+                            PipelineRun.error_class != AbandonedPipelineRunError.__name__,
+                        ),
                     )
                 )
                 .order_by(PipelineRun.created_at.desc(), PipelineRun.id.desc())
