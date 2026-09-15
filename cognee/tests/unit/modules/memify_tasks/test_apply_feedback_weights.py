@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from cognee.exceptions import CogneeValidationError
+from cognee.infrastructure.databases.cache.models import SessionQAEntry
 from cognee.modules.improve.constants import DEFAULT_FEEDBACK_ALPHA
 from cognee.tasks.memify.apply_feedback_weights import (
     apply_feedback_weights,
@@ -134,7 +135,9 @@ class InMemoryGraphWithNestedEdgeProperties:
 
 
 class RecordingSessionManager:
-    """Stores memify_metadata the way the cache adapters do: overlay incoming keys."""
+    """Stores memify_metadata the way the cache adapters do: overlay incoming keys,
+    validated through the real ``SessionQAEntry`` — a value the model's whitelist
+    rejects must fail here, not first in the e2e smoke test against a live cache."""
 
     def __init__(self):
         self.is_available = True
@@ -142,8 +145,16 @@ class RecordingSessionManager:
         self.update_qa = AsyncMock(side_effect=self._update_qa)
 
     async def _update_qa(self, *, user_id, session_id, qa_id, memify_metadata, **_):
-        existing = self.metadata.get(qa_id, {})
-        self.metadata[qa_id] = {**existing, **memify_metadata}
+        merged = {**self.metadata.get(qa_id, {}), **memify_metadata}
+        SessionQAEntry(
+            time="2026-01-01T00:00:00",
+            question="q",
+            context="",
+            answer="a",
+            qa_id=qa_id,
+            memify_metadata=merged,
+        )
+        self.metadata[qa_id] = merged
         return True
 
 
