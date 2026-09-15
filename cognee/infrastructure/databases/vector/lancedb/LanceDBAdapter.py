@@ -21,7 +21,10 @@ from lancedb.pydantic import LanceModel, Vector
 from pydantic import BaseModel
 
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
-from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.exceptions import (
+    CollectionNotFoundError,
+    VectorDimensionMismatchError,
+)
 from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
@@ -413,6 +416,38 @@ class LanceDBAdapter(VectorDBInterface):
         connection = await self.get_connection()
         return await connection.open_table(collection_name)
 
+    @staticmethod
+    def _vector_dimension_from_schema(schema) -> int | None:
+        """Return the fixed size of the schema's vector field, when available."""
+        vector_index = schema.get_field_index("vector")
+        if vector_index < 0:
+            return None
+        vector_type = schema.field(vector_index).type
+        dimension = getattr(vector_type, "list_size", None)
+        return dimension if isinstance(dimension, int) else None
+
+    async def _validate_collection_vector_dimension(
+        self,
+        collection_name: str,
+        collection,
+        incoming_dimension: int,
+    ) -> None:
+        """Raise when the collection schema confirms a vector dimension mismatch."""
+        schema = collection.schema()
+        if inspect.isawaitable(schema):
+            schema = await schema
+
+        stored_dimension = self._vector_dimension_from_schema(schema)
+        if stored_dimension is None or stored_dimension == incoming_dimension:
+            return
+
+        raise VectorDimensionMismatchError(
+            f"Vector dimension mismatch for collection '{collection_name}': "
+            f"the collection stores {stored_dimension}-dimensional vectors, but the "
+            f"embedding engine produces {incoming_dimension}-dimensional vectors. "
+            "Re-create the collection or migrate its vectors before retrying."
+        )
+
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set with any prior rows."""
         payload_schema = type(data_points[0])
@@ -427,11 +462,11 @@ class LanceDBAdapter(VectorDBInterface):
 
         collection = await self.get_collection(collection_name)
 
+        vector_size = self.embedding_engine.get_vector_size()
+
         data_vectors = await self.embed_data(
             [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
         )
-
-        vector_size = self.embedding_engine.get_vector_size()
 
         # One LanceDataPoint class per (payload schema, vector size), cached
         # globally. Building a new class per call — let alone per record —
@@ -534,6 +569,23 @@ class LanceDBAdapter(VectorDBInterface):
                     .execute(self._records_for_write(lance_data_points))
                 )
         except (ValueError, OSError, RuntimeError) as e:
+            try:
+                await self._validate_collection_vector_dimension(
+                    collection_name,
+                    collection,
+                    vector_size,
+                )
+            except VectorDimensionMismatchError as mismatch_error:
+                raise mismatch_error from e
+            # Diagnosis must never replace the original LanceDB write failure.
+            except Exception as diagnosis_error:  # noqa: BLE001
+                logger.debug(
+                    "Unable to verify vector dimensions for collection '%s' "
+                    "after a LanceDB write failure: %s",
+                    collection_name,
+                    diagnosis_error,
+                )
+
             # Two LanceDB schema-drift failure modes are recoverable by rebuilding
             # the table via Pydantic validation (which fills defaults from the
             # current DataPoint subclass):
