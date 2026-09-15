@@ -55,6 +55,7 @@ from cognee.modules.recall_coverage.repository import (
     delete_curated_question,
     delete_topic,
     dismiss_topic_suggestion,
+    expire_stale_runs,
     get_run,
     list_curated_questions,
     list_runs,
@@ -539,8 +540,14 @@ def get_recall_coverage_router() -> APIRouter:
             else None
         )
 
+        owners = owner_scope_ids(user)
+        # The trend is also where an abandoned row is most visible, so this is
+        # where it gets closed: reading the list is what a UI does while it waits
+        # for a run, and until something looks, nothing else will ever close it.
+        await expire_stale_runs(owners, stale_after_seconds=config.run_stale_after_seconds)
+
         runs = await list_runs(
-            owner_scope_ids(user),
+            owners,
             label,
             limit=limit if limit is not None else config.runs_list_default_limit,
         )

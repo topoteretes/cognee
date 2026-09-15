@@ -73,6 +73,7 @@ from cognee.modules.recall_coverage.repository import (
     RunRecord,
     SuggestionRecord,
     create_run,
+    expire_stale_runs,
     fail_run,
     load_active_topics,
     load_curated_asks,
@@ -144,6 +145,12 @@ async def start_recall_coverage_run(
 
     scope = resolve_agent_scope(agent_label, user=user, config=config)
     coverage_params = build_params(params, config)
+
+    # Close abandoned rows before reading the guard, so the row a user sees and
+    # the row the guard sees agree. The guard has always ignored them, which is
+    # why the 409 cleared on its own after the window; the status did not, so the
+    # UI went on reporting a run in progress that nothing would ever finish.
+    await expire_stale_runs((user.id,), stale_after_seconds=config.run_stale_after_seconds)
 
     in_flight = await runs_in_flight(
         user.id, scope.label, stale_after_seconds=config.run_stale_after_seconds

@@ -561,6 +561,127 @@ async def test_a_run_killed_in_flight_stops_blocking_after_the_staleness_bound(r
     ] == [fresh.id]
 
 
+# --- abandoned runs ----------------------------------------------------------
+
+
+async def _backdate(engine, run_id, *, hours: int) -> None:
+    """Age a row the way a pod rescheduled mid-run leaves it."""
+    async with engine.get_async_session() as session:
+        row = (
+            await session.execute(select(RecallCoverageRun).where(RecallCoverageRun.id == run_id))
+        ).scalar_one()
+        row.created_at = datetime.now(timezone.utc) - timedelta(hours=hours)
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_expire_stale_runs_fails_a_row_no_process_will_ever_close(run_engine):
+    """The guard already ignored these; the status did not, and readers act on status.
+
+    A row left at ``running`` by a dead process reported "Scoring…" indefinitely to
+    a user who had started nothing, and the only recovery was manual SQL.
+    """
+    owner_id = uuid4()
+    killed = await repository.create_run(owner_id, AGENT_LABEL, params=_params())
+    await repository.mark_run_running(killed.id)
+    await _backdate(run_engine, killed.id, hours=6)
+
+    closed = await repository.expire_stale_runs((owner_id,), stale_after_seconds=3600)
+
+    assert [run.id for run in closed] == [killed.id]
+    settled = await repository.get_run(killed.id, (owner_id,))
+    assert settled.status == RunStatus.FAILED.value
+    assert not settled.is_in_flight
+    assert settled.finished_at is not None
+
+
+@pytest.mark.asyncio
+async def test_expire_stale_runs_says_the_run_was_abandoned_not_that_it_failed(run_engine):
+    """It may well have done the work; what is known is that it stopped reporting."""
+    owner_id = uuid4()
+    killed = await repository.create_run(owner_id, AGENT_LABEL, params=_params())
+    await _backdate(run_engine, killed.id, hours=6)
+
+    await repository.expire_stale_runs((owner_id,), stale_after_seconds=3600)
+
+    settled = await repository.get_run(killed.id, (owner_id,))
+    assert "abandoned" in settled.summary["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_expire_stale_runs_leaves_a_run_that_could_still_be_working(run_engine):
+    owner_id = uuid4()
+    fresh = await repository.create_run(owner_id, AGENT_LABEL, params=_params())
+    await repository.mark_run_running(fresh.id)
+
+    assert await repository.expire_stale_runs((owner_id,), stale_after_seconds=3600) == []
+    assert (await repository.get_run(fresh.id, (owner_id,))).status == RunStatus.RUNNING.value
+
+
+@pytest.mark.asyncio
+async def test_expire_stale_runs_never_rewrites_a_run_that_already_ended(run_engine):
+    """A complete run is old by definition; only in-flight statuses are candidates."""
+    owner_id = uuid4()
+    params = _params(min_scored_questions_per_topic=1)
+    done = await repository.create_run(owner_id, AGENT_LABEL, params=params)
+    rows = [_row(user_id=uuid4(), topic_id=uuid4(), coverage_score=4)]
+    await repository.persist_run_results(
+        done.id, rows, summarize(rows, params=params), run_counters(rows, recall_count=9)
+    )
+    await _backdate(run_engine, done.id, hours=6)
+
+    assert await repository.expire_stale_runs((owner_id,), stale_after_seconds=3600) == []
+    assert (await repository.get_run(done.id, (owner_id,))).status == RunStatus.COMPLETE.value
+
+
+@pytest.mark.asyncio
+async def test_expire_stale_runs_only_touches_the_owners_it_was_given(run_engine):
+    mine, theirs = uuid4(), uuid4()
+    my_run = await repository.create_run(mine, AGENT_LABEL, params=_params())
+    their_run = await repository.create_run(theirs, AGENT_LABEL, params=_params())
+    await _backdate(run_engine, my_run.id, hours=6)
+    await _backdate(run_engine, their_run.id, hours=6)
+
+    closed = await repository.expire_stale_runs((mine,), stale_after_seconds=3600)
+
+    assert [run.id for run in closed] == [my_run.id]
+    assert (await repository.get_run(their_run.id, (theirs,))).status == RunStatus.PENDING.value
+
+
+@pytest.mark.asyncio
+async def test_expire_stale_runs_does_nothing_without_a_window(run_engine):
+    """`0` disables the bound, exactly as it does for the in-flight guard."""
+    owner_id = uuid4()
+    killed = await repository.create_run(owner_id, AGENT_LABEL, params=_params())
+    await _backdate(run_engine, killed.id, hours=6)
+
+    assert await repository.expire_stale_runs((owner_id,), stale_after_seconds=0) == []
+    assert (await repository.get_run(killed.id, (owner_id,))).status == RunStatus.PENDING.value
+
+
+@pytest.mark.asyncio
+async def test_a_slow_run_that_outlived_the_window_still_lands_its_results(run_engine):
+    """Failing an abandoned row is not destructive if the process is in fact alive.
+
+    ``persist_run_results`` writes ``complete`` unconditionally, so the only cost of
+    calling a slow run abandoned is that it reads as abandoned until it finishes.
+    """
+    owner_id = uuid4()
+    params = _params(min_scored_questions_per_topic=1)
+    slow = await repository.create_run(owner_id, AGENT_LABEL, params=params)
+    await repository.mark_run_running(slow.id)
+    await _backdate(run_engine, slow.id, hours=6)
+    await repository.expire_stale_runs((owner_id,), stale_after_seconds=3600)
+
+    rows = [_row(user_id=uuid4(), topic_id=uuid4(), coverage_score=4)]
+    completed = await repository.persist_run_results(
+        slow.id, rows, summarize(rows, params=params), run_counters(rows, recall_count=9)
+    )
+
+    assert completed.status == RunStatus.COMPLETE.value
+    assert completed.question_count == 1
+
+
 # --- counters ----------------------------------------------------------------
 
 

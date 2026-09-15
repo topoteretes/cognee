@@ -1110,6 +1110,74 @@ async def list_runs(
         return [_to_run_record(row) for row in result.scalars().all()]
 
 
+async def expire_stale_runs(
+    owner_ids: Sequence[UUID], *, stale_after_seconds: int
+) -> list[RunRecord]:
+    """Fail every pending or running row older than the window, and report them.
+
+    Status is written by the process executing the run, so a process that dies
+    writes nothing: a pod rescheduled mid-run leaves ``running`` on the row for
+    ever. There is no cancel or delete route and no supervisor that would
+    notice, so the row outlives the only thing that could ever have closed it.
+
+    That was tolerated because nobody knows how such a run ended, and the guard
+    was bounded instead — :func:`runs_in_flight` has always ignored these rows,
+    so the 409 clears on its own. What was left behind is a status no reader can
+    act on: the coverage UI reported "Scoring…" against a dataset where nothing
+    was running, indefinitely, to a user who had started nothing. Not knowing how
+    a run ended is not a reason to keep claiming it is still going. The one thing
+    certain is that it is not in flight, and ``summary.error`` says that much and
+    no more.
+
+    Marking it failed is not destructive if the process turns out to be alive:
+    :func:`persist_run_results` writes ``complete`` unconditionally, so a slow run
+    that outlived the window still lands its rows and its summary.
+
+    Bounded by ``stale_after_seconds`` — the same window the in-flight guard uses,
+    so this cannot close a run the guard would still be blocking on.
+    """
+    if stale_after_seconds <= 0 or not owner_ids:
+        return []
+
+    cutoff = _utc_now() - timedelta(seconds=stale_after_seconds)
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        result = await session.execute(
+            select(RecallCoverageRun).where(
+                RecallCoverageRun.owner_id.in_(tuple(owner_ids)),
+                RecallCoverageRun.status.in_((RunStatus.PENDING.value, RunStatus.RUNNING.value)),
+                RecallCoverageRun.created_at < cutoff,
+            )
+        )
+        rows = list(result.scalars().all())
+        if not rows:
+            return []
+
+        for row in rows:
+            row.status = RunStatus.FAILED.value
+            row.finished_at = _utc_now()
+            # Not "the run failed": it may well have done the work. What is known
+            # is that it stopped reporting, and a reader deciding whether to
+            # start another one needs those two to read differently.
+            row.summary = {
+                "error": (
+                    "Run abandoned: no ending was reported within "
+                    f"{stale_after_seconds}s, so the process that owned it is gone."
+                )
+            }
+
+        await session.commit()
+        closed = [_to_run_record(row) for row in rows]
+
+    logger.info(
+        "recall_coverage: failed %s abandoned run(s) older than %ss: %s",
+        len(closed),
+        stale_after_seconds,
+        ", ".join(str(run.id) for run in closed),
+    )
+    return closed
+
+
 async def runs_in_flight(
     owner_id: UUID, agent_label: str, *, stale_after_seconds: Optional[int] = None
 ) -> list[RunRecord]:

@@ -259,8 +259,23 @@ def app(monkeypatch) -> FastAPI:
     monkeypatch.setattr(router_module, "send_telemetry", lambda *args, **kwargs: None)
     # A developer's .env must not be able to move a threshold or a default limit.
     monkeypatch.setattr(router_module, "get_recall_coverage_config", _config)
+    # The abandoned-run sweep on GET /runs is the one repository call the routes
+    # make that nothing here stubs per-test, and it wants a real table. Recorded
+    # rather than merely silenced, so one test can assert the route runs it.
+    monkeypatch.setattr(router_module, "expire_stale_runs", _record_expiry(application))
 
     return application
+
+
+def _record_expiry(application):
+    """A no-op ``expire_stale_runs`` that remembers how it was called."""
+    application.state.expiry_calls = []
+
+    async def fake_expire(owner_ids, *, stale_after_seconds):
+        application.state.expiry_calls.append((tuple(owner_ids), stale_after_seconds))
+        return []
+
+    return fake_expire
 
 
 @pytest.fixture
@@ -701,6 +716,20 @@ def test_every_reserved_and_mapped_label_resolves(client, monkeypatch, label):
 
 
 # --- 2: listing runs ----------------------------------------------------------
+
+
+def test_listing_runs_closes_abandoned_rows_first(client, app, monkeypatch):
+    """Nothing else will: the process that owned the row is gone, and no other
+    caller passes through here. Reading the trend is what a UI does while it
+    waits for a run, so this is where the row stops claiming to be in flight."""
+
+    async def fake_list(owner_ids, agent_label=None, *, limit=None):
+        return []
+
+    monkeypatch.setattr(router_module, "list_runs", fake_list)
+
+    assert client.get(f"{PREFIX}/runs").status_code == 200
+    assert app.state.expiry_calls == [((OWNER_ID,), _config().run_stale_after_seconds)]
 
 
 def test_listing_runs_applies_the_configured_default_limit(client, monkeypatch):
