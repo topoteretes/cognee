@@ -415,6 +415,9 @@ def get_datasets_router() -> APIRouter:
         Results are paginated. The response is capped at **limit** items (100 by
         default), so this endpoint stays fast on datasets with many documents; page
         through with **offset**. Use `GET /{dataset_id}/data/count` for the total.
+        That total is uncapped; offsets above 1,000,000 are rejected, so datasets
+        larger than 1,001,000 items cannot be fully traversed by this endpoint.
+        Concurrent inserts/deletes can shift offsets; this is not a snapshot.
 
         ## Path Parameters
         - **dataset_id** (UUID): The unique identifier of the dataset
