@@ -531,6 +531,63 @@ async def test_cognee_client_api_recall_sends_session_id_prompt_and_null_search_
     assert payload["top_k"] == 5
 
 
+OWNED_ID = "11111111-1111-1111-1111-111111111111"
+SHARED_ID = "22222222-2222-2222-2222-222222222222"
+LISTED_DATASETS = [
+    {"id": OWNED_ID, "name": "mine", "owner_id": "me"},
+    {"id": SHARED_ID, "name": "team_memory", "owner_id": "someone-else"},
+]
+
+
+async def _record_scoped_call(method: str, **kwargs) -> tuple[dict, bool]:
+    """Run one API-mode recall/search against a mock that lists an owned and a
+    shared dataset; return the query payload and whether datasets were listed."""
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/api/v1/datasets/":
+            return httpx.Response(200, json=LISTED_DATASETS)
+        return httpx.Response(200, json=[])
+
+    client = CogneeClient(api_url="http://cognee.local", api_token="token")
+    await client.client.aclose()
+    client.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        await getattr(client, method)("hello", **kwargs)
+    finally:
+        await client.close()
+
+    query = [r for r in requests if r.url.path == f"/api/v1/{method}"]
+    assert len(query) == 1
+    listed = any(r.url.path == "/api/v1/datasets/" for r in requests)
+    return json.loads(query[0].content.decode()), listed
+
+
+@pytest.mark.parametrize("method,kwargs", [("recall", {}), ("search", {"query_type": "CHUNKS"})])
+@pytest.mark.asyncio
+async def test_unscoped_query_sends_ids_of_every_listed_dataset(method, kwargs):
+    """Names only resolve to datasets the caller owns, so a shared dataset silently
+    dropped out of the fallback (and a shared-only caller 404'd). Ids are what the
+    server ACL-checks, so send them; names ride along for servers that predate
+    dataset_ids."""
+    payload, listed = await _record_scoped_call(method, **kwargs)
+
+    assert listed
+    assert payload["dataset_ids"] == [OWNED_ID, SHARED_ID]
+    assert payload["datasets"] == ["mine", "team_memory"]
+
+
+@pytest.mark.parametrize("method,kwargs", [("recall", {}), ("search", {"query_type": "CHUNKS"})])
+@pytest.mark.asyncio
+async def test_explicit_datasets_forwarded_as_names_without_listing(method, kwargs):
+    payload, listed = await _record_scoped_call(method, datasets=["mine"], **kwargs)
+
+    assert not listed
+    assert payload["datasets"] == ["mine"]
+    assert "dataset_ids" not in payload
+
+
 class RecordingRememberClient:
     """Fake cognee_client that records what the remember tool forwarded."""
 
