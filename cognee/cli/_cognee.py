@@ -367,8 +367,12 @@ def main() -> int:
                 fmt.echo(f"The interface is available at: http://localhost:{frontend_port}")
                 if start_backend:
                     fmt.echo(f"The API backend is available at: http://localhost:{backend_port}")
-                if start_mcp:
+                if start_mcp and docker_container:
                     fmt.echo(f"The MCP server is available at: http://localhost:{mcp_port}")
+                elif start_mcp:
+                    fmt.note(
+                        "The optional MCP server was skipped or failed to start; see logs above."
+                    )
                 fmt.note("Press Ctrl+C to stop the server...")
 
                 try:

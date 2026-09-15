@@ -98,10 +98,7 @@ class TestStartUiDockerIntegration:
     @patch("cognee.api.v1.ui.ui.prompt_user_for_download", return_value=False)
     @patch("cognee.api.v1.ui.ui.find_frontend_path", return_value=None)
     @patch("cognee.api.v1.ui.ui._check_docker_available")
-    @patch(
-        "cognee.api.v1.ui.ui._check_required_ports",
-        side_effect=[(True, []), (False, ["MCP Server (port 8001)"])],
-    )
+    @patch("cognee.api.v1.ui.ui._is_port_available", side_effect=lambda port: port != 8001)
     def test_skips_mcp_when_its_optional_port_is_occupied(
         self, mock_ports, mock_docker, mock_frontend, mock_prompt
     ):
@@ -114,10 +111,7 @@ class TestStartUiDockerIntegration:
             start_backend=False,
         )
 
-        assert mock_ports.call_args_list == [
-            call([(3000, "Frontend UI")]),
-            call([(8001, "MCP Server")]),
-        ]
+        assert mock_ports.call_args_list == [call(3000), call(8001)]
         mock_docker.assert_not_called()
         mock_frontend.assert_called_once()
         mock_prompt.assert_called_once()

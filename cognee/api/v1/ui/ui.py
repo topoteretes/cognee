@@ -492,16 +492,12 @@ def start_ui(
         logger.error("Please stop the conflicting services or change the port configuration.")
         return None
 
-    if start_mcp:
-        mcp_port_available, unavailable_mcp_services = _check_required_ports(
-            [(mcp_port, "MCP Server")]
+    if start_mcp and not _is_port_available(mcp_port):
+        logger.warning(
+            f"Port {mcp_port} is already in use. Skipping the optional MCP server; "
+            "the UI and backend can start without it."
         )
-        if not mcp_port_available:
-            logger.warning(
-                "The optional MCP server port is already in use: "
-                f"{', '.join(unavailable_mcp_services)}. Skipping MCP server startup."
-            )
-            start_mcp = False
+        start_mcp = False
 
     logger.info("✓ All required UI ports are available")
     backend_process = None
