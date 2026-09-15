@@ -37,6 +37,7 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 
 from cognee.infrastructure.databases.relational import Base
 from cognee.infrastructure.databases.relational.create_relational_engine import (
@@ -651,6 +652,37 @@ async def test_a_second_run_for_the_same_owner_and_label_is_a_conflict(
     # A different label, and a different owner, are both unaffected.
     await pipeline.start_recall_coverage_run(caller, "claude-code", config=_config())
     await pipeline.start_recall_coverage_run(_user(), "codex", config=_config())
+
+
+@pytest.mark.asyncio
+async def test_starting_a_run_closes_the_abandoned_row_it_steps_over(
+    coverage_engine, monkeypatch
+):
+    """The guard already ignored it; the row went on claiming to be in flight.
+
+    A pod rescheduled mid-run leaves ``running`` behind for ever, so the status a
+    reader sees disagreed with the status the guard read — the UI reported a run
+    in progress that nothing would ever finish, and no route could close it.
+    """
+    caller = _user()
+    monkeypatch.setattr(pipeline, "schedule_recall_coverage_run", lambda *a, **k: None)
+    killed = await pipeline.start_recall_coverage_run(caller, "codex", config=_config())
+    await repository.mark_run_running(killed.id)
+
+    async with coverage_engine.get_async_session() as session:
+        row = (
+            await session.execute(
+                select(RecallCoverageRun).where(RecallCoverageRun.id == killed.id)
+            )
+        ).scalar_one()
+        row.created_at = datetime.now(timezone.utc) - timedelta(hours=6)
+        await session.commit()
+
+    await pipeline.start_recall_coverage_run(caller, "codex", config=_config())
+
+    settled = await repository.get_run(killed.id, (caller.id,))
+    assert settled.status == RunStatus.FAILED.value
+    assert "abandoned" in settled.summary["error"].lower()
 
 
 @pytest.mark.asyncio

@@ -163,13 +163,19 @@ class RecallCoverageConfig(BaseSettings):
     store_context_max_chars_ceiling: int = 100000
 
     # --- Runs --------------------------------------------------------------
-    # How long a pending or running run keeps blocking the next run for the same
-    # (owner, agent_label). A run is minutes of LLM calls, so a row still in
-    # flight after this lost its process: a pod rescheduled mid-run leaves the
-    # row at "running" for ever, and with no age bound the 409 guard would refuse
-    # every later run for that pair with no way out — there is no cancel or
-    # delete route, so the only fix would be manual SQL. The stale row is left
-    # alone rather than marked failed: nobody knows how it ended.
+    # How long a pending or running run is believed. A run is minutes of LLM
+    # calls, so a row still in flight after this lost its process: a pod
+    # rescheduled mid-run leaves the row at "running" for ever, and with no age
+    # bound the 409 guard would refuse every later run for that pair with no way
+    # out — there is no cancel or delete route.
+    #
+    # Past this window the row is both ignored by the guard and failed outright
+    # (expire_stale_runs). It used to be only the first, on the grounds that
+    # nobody knows how such a run ended — which left a status no reader could
+    # act on: "Scoring…" for ever, against a dataset where nothing was running.
+    # Failing it is safe for a run that was merely slow: persist_run_results
+    # writes "complete" unconditionally, so a live process still lands its
+    # results afterwards.
     run_stale_after_seconds: int = 3600
 
     # --- Read endpoints ----------------------------------------------------
