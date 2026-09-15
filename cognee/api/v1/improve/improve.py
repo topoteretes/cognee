@@ -232,38 +232,58 @@ async def improve(
             if not await try_acquire_improve_lock_many(lock_keys):
                 return report(_skip_lock_held_run(operation, inputs, lock_keys))
 
-            # Probed only after the claim was won: the probe leases the graph
-            # engine, which every lock loser would otherwise pay for although
-            # only stages 1 and 7 read the answer.
-            inputs = inputs.with_capabilities(
-                await resolve_graph_capabilities(
-                    inputs.dataset_id, getattr(inputs.dataset, "owner_id", None)
+            # The claim is owned here until it is handed to execute_stages,
+            # whose finally releases it. The probe below awaits real engine
+            # setup and cancellation is not an Exception, so a raise before
+            # the handoff must release or the keys leak for the process
+            # lifetime.
+            claim_owned = True
+            try:
+                # Probed only after the claim was won: the probe leases the
+                # graph engine, which every lock loser would otherwise pay for
+                # although only stages 1 and 7 read the answer.
+                inputs = inputs.with_capabilities(
+                    await resolve_graph_capabilities(
+                        inputs.dataset_id, getattr(inputs.dataset, "owner_id", None)
+                    )
                 )
-            )
 
-            # Created before the stages run: background mode hands this result
-            # to the caller while the detached task is still filling it.
-            result = ImproveResult(
-                dataset_id=inputs.dataset_id,
-                dataset_name=inputs.dataset_name,
-                session_ids=inputs.session_id_list,
-                memify_run={},
-                background=run_in_background,
-                finished=False,
-            )
+                # Created before the stages run: background mode hands this
+                # result to the caller while the detached task is still
+                # filling it.
+                result = ImproveResult(
+                    dataset_id=inputs.dataset_id,
+                    dataset_name=inputs.dataset_name,
+                    session_ids=inputs.session_id_list,
+                    memify_run={},
+                    background=run_in_background,
+                    finished=False,
+                )
 
-            if run_in_background:
-                operation.defer_close()
-                # ``operation`` is passed twice on purpose: the coroutine's own
-                # finally sets the outcome from the finished stages, while
-                # _run_detached closes the deferred row even on cancellation.
-                run = _run_detached(execute_stages(inputs, result, lock_keys, operation), operation)
-                task = register_background_task(asyncio.create_task(run))
-                result.attach_background_task(task)
+                if run_in_background:
+                    operation.defer_close()
+                    # ``operation`` is passed twice on purpose: the coroutine's
+                    # own finally sets the outcome from the finished stages,
+                    # while _run_detached closes the deferred row even on
+                    # cancellation.
+                    run = _run_detached(
+                        execute_stages(inputs, result, lock_keys, operation), operation
+                    )
+                    task = asyncio.create_task(run)
+                    # Scheduled: execute_stages' finally owns the release now.
+                    claim_owned = False
+                    result.attach_background_task(register_background_task(task))
+                    return report(result)
+
+                # Awaiting the coroutine enters execute_stages synchronously up
+                # to its try, so its finally owns the release from here.
+                claim_owned = False
+                await execute_stages(inputs, result, lock_keys, operation)
                 return report(result)
-
-            await execute_stages(inputs, result, lock_keys, operation)
-            return report(result)
+            except BaseException:
+                if claim_owned:
+                    await release_improve_lock_many(lock_keys)
+                raise
 
 
 @contextmanager

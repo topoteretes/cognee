@@ -622,3 +622,30 @@ async def test_lock_loser_never_probes_the_graph_engine(harness):
     winner = await harness.improve()
     assert not _lock_held(winner)
     resolve_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_the_probe_releases_the_lock(harness):
+    """The probe runs after the claim but before execute_stages' finally
+    exists; a task cancelled there (client disconnect, wait_for timeout) must
+    not strand the keys, or every later improve on the dataset skips
+    lock_held until restart."""
+    harness.use_stages([FakeStage("a")])
+    probe_mock = harness.improve_mod.resolve_graph_capabilities  # AsyncMock in conftest
+    probing = asyncio.Event()
+
+    async def blocked_probe(_dataset_id, _owner_id):
+        probing.set()
+        await asyncio.Event().wait()  # blocks until cancelled
+
+    harness.monkeypatch.setattr(harness.improve_mod, "resolve_graph_capabilities", blocked_probe)
+
+    task = asyncio.create_task(harness.improve())
+    await probing.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    harness.monkeypatch.setattr(harness.improve_mod, "resolve_graph_capabilities", probe_mock)
+    retry = await harness.improve()
+    assert not _lock_held(retry)
