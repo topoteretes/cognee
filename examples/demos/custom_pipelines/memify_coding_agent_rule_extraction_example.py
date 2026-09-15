@@ -1,3 +1,13 @@
+"""Distill coding-agent conversations into Rule nodes with memify() and recall them via CODING_RULES.
+
+Two team chats about coding rules are remembered, then memify runs extract_subgraph_chunks as the
+extraction task and add_rule_associations (node set coding_agent_rules) as the enrichment task.
+Graphs before and after are written to .artifacts/ and the extracted rules are printed.
+
+Requires: LLM_API_KEY.
+Run: uv run python examples/demos/custom_pipelines/memify_coding_agent_rule_extraction_example.py
+"""
+
 import asyncio
 import os
 import pathlib

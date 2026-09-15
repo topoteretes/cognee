@@ -38,7 +38,11 @@ class ImprovePayloadDTO(InDTO):
 def get_improve_router() -> APIRouter:
     router = APIRouter()
 
-    @router.post("", response_model=dict[UUID, PipelineRunInfo])
+    @router.post(
+        "",
+        summary="Improve: enrich and index the graph, optionally bridging sessions into it",
+        response_model=dict[UUID, PipelineRunInfo],
+    )
     @log_usage(function_name="POST /v1/improve", log_type="api_endpoint")
     async def improve(payload: ImprovePayloadDTO, user: User = Depends(get_authenticated_user)):
         """

@@ -21,6 +21,16 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 
 from cognee.modules.storage.utils import JSONEncoder
+
+try:
+    from cognee.exceptions.remediation import REMEDIATION_MARKER, find_remediation
+except ImportError:  # cognee-mcp pins a released cognee; older cores have no hint table
+    REMEDIATION_MARKER = " Fix: "
+
+    def find_remediation(message: str) -> str | None:
+        return None
+
+
 from cognee.shared.logging_utils import get_log_file_location, get_logger, setup_logging
 
 try:
@@ -56,6 +66,22 @@ registry = ToolRegistry(mcp)
 logger = get_logger()
 
 cognee_client: CogneeClient | None = None
+
+
+def _tool_error_text(prefix: str, error: Exception) -> str:
+    """Render a tool failure for the agent, with a fix hint when one is known.
+
+    ``str()`` of a cognee error already ends in ``Fix: ...``; for anything else
+    (provider auth failures, unreachable endpoints) the shared first-run table
+    supplies the hint, so the agent sees the env var to change, not just a trace.
+    """
+    text = f"{prefix}: {error!s}"
+    if REMEDIATION_MARKER not in text:
+        hint = find_remediation(str(error))
+        if hint:
+            text = f"{text}\nFix: {hint}"
+    return text
+
 
 # Per-dataset error ring buffer (bounded so long-running servers don't accumulate
 # unbounded memory). Each entry is (iso_timestamp, error_message).
@@ -453,7 +479,7 @@ async def remember(
                 text = f"Stored permanently in knowledge graph (dataset={dataset_name}, status={status})."
             return [types.TextContent(type="text", text=text)]
         except Exception as e:
-            error_msg = f"Remember failed: {e!s}"
+            error_msg = _tool_error_text("Remember failed", e)
             logger.exception(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
@@ -481,9 +507,15 @@ async def recall(
     query : str
         Natural language query to search for.
     search_type : str, optional
-        Override auto-routing. Options: GRAPH_COMPLETION,
-        GRAPH_COMPLETION_COT, RAG_COMPLETION, CHUNKS, SUMMARIES,
-        TEMPORAL, FEELING_LUCKY, etc.
+        Override auto-routing with one SearchType name. Completion types
+        (answer written by an LLM): HYBRID_COMPLETION (the default when
+        routing is off), GRAPH_COMPLETION, GRAPH_COMPLETION_COT,
+        GRAPH_COMPLETION_CONTEXT_EXTENSION, GRAPH_COMPLETION_DECOMPOSITION,
+        GRAPH_SUMMARY_COMPLETION, RAG_COMPLETION, TRIPLET_COMPLETION,
+        TEMPORAL, AGENTIC_COMPLETION. Retrieval-only types (no LLM):
+        CHUNKS, CHUNKS_LEXICAL, SUMMARIES, SKILLS, CODE. Other: CYPHER,
+        NATURAL_LANGUAGE, CODING_RULES, GRAPH_REPORT, FEELING_LUCKY.
+        An unknown name is rejected with a validation error.
     datasets : str, optional
         Comma-separated dataset names to search within.
     session_id : str, optional
@@ -493,7 +525,7 @@ async def recall(
         falls back to COGNEE_MCP_RECALL_SYSTEM_PROMPT / _FILE if configured
         on the server.
     top_k : int
-        Maximum results to return (default: 10).
+        Maximum results to return (default: 15).
     """
     with redirect_stdout(sys.stderr):
         try:
@@ -514,7 +546,7 @@ async def recall(
                 )
             ]
         except Exception as e:
-            error_msg = f"Recall failed: {e!s}"
+            error_msg = _tool_error_text("Recall failed", e)
             logger.exception(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
@@ -591,7 +623,7 @@ async def forget(
                 text = f"Dataset '{dataset or dataset_id}' deleted (status={status})."
             return [types.TextContent(type="text", text=text)]
         except Exception as e:
-            error_msg = f"Forget failed: {e!s}"
+            error_msg = _tool_error_text("Forget failed", e)
             logger.exception(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 

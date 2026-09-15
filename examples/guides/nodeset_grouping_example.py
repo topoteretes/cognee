@@ -1,3 +1,12 @@
+"""Group remembered texts into node sets with the node_set argument and visualize the result.
+
+Three texts are tagged AI/FinTech, AI and MedTech; the graph with its NodeSet groupings is written
+to .artifacts/nodeset_grouping.html. No recall is performed.
+
+Requires: LLM_API_KEY.
+Run: uv run python examples/guides/nodeset_grouping_example.py
+"""
+
 import asyncio
 import os
 
