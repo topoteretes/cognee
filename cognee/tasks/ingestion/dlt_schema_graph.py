@@ -13,6 +13,7 @@ from uuid import NAMESPACE_OID, UUID, uuid5
 from cognee.infrastructure.databases.provenance import graph_provenance_write_kwargs
 from cognee.modules.engine.models import DltColumn
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.ingestion.dlt_row_data import fk_columns
 from cognee.tasks.schema.models import SchemaRelationship, SchemaTable
 from cognee.tasks.storage.index_data_points import index_data_points
 
@@ -102,9 +103,10 @@ async def emit_dlt_schema_graph(
     relationship_count = 0
     for table_name, table_meta in tables.items():
         for fk in table_meta["foreign_keys"]:
-            fk_col = fk.get("column", "")
+            fk_cols, ref_cols = fk_columns(fk)
+            fk_col = ",".join(fk_cols)
             ref_table = fk.get("ref_table", "")
-            ref_col = fk.get("ref_column", "")
+            ref_col = ",".join(ref_cols)
 
             if not fk_col or not ref_table:
                 continue

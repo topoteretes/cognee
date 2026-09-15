@@ -12,7 +12,7 @@ from cognee.infrastructure.databases.postgres.admin import create_pg_database_if
 from cognee.infrastructure.databases.relational.config import get_relational_config
 from cognee.modules.data.models import Data
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.ingestion.dlt_row_data import DltRowData
+from cognee.tasks.ingestion.dlt_row_data import DltRowData, join_key_values
 from cognee.tasks.ingestion.exceptions.exceptions import (
     DLTIngestionError,
     InvalidDLTArgumentError,
@@ -156,6 +156,11 @@ async def ingest_dlt_source(
         raise DLTIngestionError(
             message=f"Failed to extract schema from DLT database '{dlt_db_name}': {e}"
         ) from e
+
+    # The staging tables dlt wrote carry no PK/FK constraints (its sqlalchemy
+    # destination does not create them), so the reflected schema has none.
+    # dlt's own schema kept what the source declared; fill the gaps from it.
+    _apply_key_hints(filtered_schema, _dlt_schema_key_hints(pipeline, loaded_tables))
 
     # Read rows from each table and produce DltRowData objects
     from cognee.tasks.ingestion.config import get_ingestion_config
@@ -362,7 +367,8 @@ async def _read_single_table(
         column_names = list(raw_columns.keys())
 
     # Auto-detect primary key with validation
-    pk_col = _resolve_primary_key(primary_key, table_info, column_names, table_name)
+    pk_cols = _resolve_primary_key(primary_key, table_info, column_names, table_name)
+    pk_col = ",".join(pk_cols)
 
     # Compute schema hash for evolution detection
     schema_hash = _compute_schema_hash(raw_columns)
@@ -386,7 +392,7 @@ async def _read_single_table(
 
     # Validate PK uniqueness
     if rows:
-        pk_values = [str(row.get(pk_col, "")) for row in rows]
+        pk_values = [join_key_values(row.get(col, "") for col in pk_cols) for row in rows]
         pk_counts = Counter(pk_values)
         duplicates = {v: c for v, c in pk_counts.items() if c > 1}
         if duplicates:
@@ -404,7 +410,7 @@ async def _read_single_table(
     row_data_list = []
     for row in rows:
         row_dict = {k: v for k, v in row.items()}
-        pk_value = str(row_dict.get(pk_col, ""))
+        pk_value = join_key_values(row_dict.get(col, "") for col in pk_cols)
 
         row_keys = list(row_dict.keys())
         for k in row_keys:
@@ -427,6 +433,7 @@ async def _read_single_table(
                 foreign_keys=foreign_keys,
                 dlt_db_name=dlt_db_name,
                 dataset_name=dataset_name,
+                primary_key_columns=pk_cols,
             )
         )
 
@@ -438,10 +445,10 @@ def _resolve_primary_key(
     table_info: dict,
     column_names: list,
     table_name: str = "",
-) -> str:
-    """Resolve the primary key column for a table with validation and logging."""
+) -> list[str]:
+    """Resolve the primary key column(s) for a table with validation and logging."""
     if provided_pk and provided_pk in column_names:
-        return provided_pk
+        return [provided_pk]
 
     if provided_pk and provided_pk not in column_names:
         logger.warning(
@@ -452,18 +459,19 @@ def _resolve_primary_key(
             column_names,
         )
 
-    # Check schema-level primary_key
+    # Check schema-level primary_key — a list keeps every column of a composite key.
     schema_pk = table_info.get("primary_key")
+    if isinstance(schema_pk, str):
+        schema_pk = [schema_pk]
     if schema_pk:
-        if isinstance(schema_pk, list) and len(schema_pk) > 0:
-            return schema_pk[0]
-        if isinstance(schema_pk, str):
-            return schema_pk
+        pk_cols = [col for col in schema_pk if col in column_names]
+        if pk_cols:
+            return pk_cols
 
     # Fallback to 'id' column
     if "id" in column_names:
         logger.info("Table '%s': no explicit primary key found, using 'id' column.", table_name)
-        return "id"
+        return ["id"]
 
     # Last resort: first column (with warning)
     if column_names:
@@ -474,9 +482,72 @@ def _resolve_primary_key(
             table_name,
             column_names[0],
         )
-        return column_names[0]
+        return [column_names[0]]
 
-    return "id"
+    return ["id"]
+
+
+def _dlt_schema_key_hints(pipeline, loaded_tables: set) -> dict[str, dict]:
+    """Primary-key columns and foreign-key constraints per loaded table, as dlt
+    reflected them from the *source*.
+
+    ``primary_key`` is a column hint; ``references`` is the table hint the
+    sql_database source fills when built with ``resolve_foreign_keys=True``.
+    Each FK entry keeps the grouped ``columns``/``ref_columns`` lists and the
+    single-column fields (comma-joined when composite) older readers expect.
+    """
+    hints: dict[str, dict] = {}
+    try:
+        tables = pipeline.default_schema.tables
+    except Exception:  # no schema (nothing loaded) — nothing to add
+        logger.debug("No dlt schema available for key hints", exc_info=True)
+        return hints
+
+    for table_name, table in tables.items():
+        if table_name.startswith("_dlt") or table_name not in loaded_tables:
+            continue
+        pk_cols = [name for name, col in table.get("columns", {}).items() if col.get("primary_key")]
+        foreign_keys = []
+        for ref in table.get("references") or []:
+            columns = list(ref.get("columns") or [])
+            ref_columns = list(ref.get("referenced_columns") or [])
+            ref_table = ref.get("referenced_table")
+            if not columns or not ref_table or len(columns) != len(ref_columns):
+                continue
+            foreign_keys.append(
+                {
+                    "column": ",".join(columns),
+                    "ref_table": ref_table,
+                    "ref_column": ",".join(ref_columns),
+                    "columns": columns,
+                    "ref_columns": ref_columns,
+                }
+            )
+        if pk_cols or foreign_keys:
+            hints[table_name] = {"primary_key": pk_cols, "foreign_keys": foreign_keys}
+    return hints
+
+
+def _apply_key_hints(schema: dict, hints: dict[str, dict]) -> None:
+    """Fill PK/FK metadata the staging reflection lacks from dlt's schema hints.
+
+    Reflected values win when present. Postgres schema keys are
+    ``dataset.table``; referenced tables are qualified the same way so FK
+    targets match the row table names used for FK resolution.
+    """
+    for qualified_name, table_info in schema.items():
+        bare_name = qualified_name.split(".")[-1]
+        hint = hints.get(bare_name)
+        if not hint:
+            continue
+        prefix = qualified_name[: -len(bare_name) - 1] if "." in qualified_name else ""
+        if not table_info.get("primary_key") and hint["primary_key"]:
+            table_info["primary_key"] = list(hint["primary_key"])
+        if not table_info.get("foreign_keys") and hint["foreign_keys"]:
+            table_info["foreign_keys"] = [
+                {**fk, "ref_table": f"{prefix}.{fk['ref_table']}" if prefix else fk["ref_table"]}
+                for fk in hint["foreign_keys"]
+            ]
 
 
 # Identity map over the identifier alphabet. Rebuilding the sanitized name from

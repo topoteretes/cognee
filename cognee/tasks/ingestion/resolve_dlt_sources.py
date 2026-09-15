@@ -31,7 +31,7 @@ from .create_dlt_source import (
     is_csv_upload,
 )
 from .data_item import DataItem
-from .dlt_row_data import DltRowData
+from .dlt_row_data import DltRowData, fk_columns, join_key_values, pk_columns
 from .dlt_utils import document_source_tag
 from .ingest_dlt_source import ingest_dlt_source
 
@@ -341,6 +341,10 @@ async def _build_source_manifest_item(
             )
         fk_lookup[fk_key] = node_id
 
+    # FK targets are looked up by the referenced table's key value, so the
+    # resolver needs each table's key columns to assemble composite values.
+    target_key_columns = {row.table_name: pk_columns(row) for row in unique_rows.values()}
+
     tables: dict[str, dict] = {}
     manifest_rows: list[dict] = []
     # (source_table, fk_column, ref_table, fk_value) for FKs whose target row
@@ -361,7 +365,9 @@ async def _build_source_manifest_item(
             "primary_key_value": row.primary_key_value,
             "content_hash": row.content_hash,
             "text": _build_schema_context_text(row),
-            "fk_references": _resolve_fk_references(row, fk_lookup, missing_fk_targets),
+            "fk_references": _resolve_fk_references(
+                row, fk_lookup, missing_fk_targets, target_key_columns
+            ),
         }
         column_values = _selected_column_values(row, column_value_columns)
         if column_values:
@@ -466,10 +472,12 @@ def _selected_column_values(dlt_row: DltRowData, selection: dict | None) -> dict
     take_all = "*" in columns
     max_value_length = get_ingestion_config().dlt_max_column_value_length
 
-    fk_columns = {fk.get("column", "") for fk in dlt_row.foreign_keys}
+    excluded = set(pk_columns(dlt_row))
+    for fk in dlt_row.foreign_keys:
+        excluded.update(fk_columns(fk)[0])
     picked = {}
     for column, value in dlt_row.row_data.items():
-        if column == dlt_row.primary_key_column or column in fk_columns:
+        if column in excluded:
             continue
         if not take_all and column not in columns:
             continue
@@ -594,10 +602,11 @@ def _build_schema_context_text(dlt_row: DltRowData) -> str:
     if dlt_row.foreign_keys:
         fk_lines = []
         for fk in dlt_row.foreign_keys:
-            col = fk.get("column", "")
+            columns, ref_columns = fk_columns(fk)
             ref_table = fk.get("ref_table", "")
-            ref_col = fk.get("ref_column", "")
-            fk_lines.append(f"  - {col} references {ref_table}.{ref_col}")
+            fk_lines.append(
+                f"  - {', '.join(columns)} references {ref_table}.{', '.join(ref_columns)}"
+            )
         if fk_lines:
             lines.append("Foreign Keys:")
             lines.extend(fk_lines)
@@ -615,12 +624,19 @@ def _resolve_fk_references(
     dlt_row: DltRowData,
     row_id_lookup: dict,
     missing_targets: list | None = None,
+    target_key_columns: dict[str, list[str]] | None = None,
 ) -> list:
     """Resolve foreign key columns to target row node ids for graph edge creation.
 
     Returns a list of dicts:
     [{"column": "dept_id", "target_table": "departments", "target_pk_value": "10",
-      "target_node_id": "uuid-string", "relationship_name": "dept_id_references_departments"}]
+      "target_node_id": "uuid-string", "relationship_name": "dept_id_references_departments",
+      "columns": ["dept_id"], "target_columns": ["id"]}]
+
+    ``row_id_lookup`` is keyed by ``(table, primary_key_value)``. A composite FK
+    is assembled into that value in the target's key-column order, taken from
+    ``target_key_columns`` ({table: [key columns]}); this only resolves when the
+    FK references exactly the target's key columns.
 
     When ``missing_targets`` is provided, FK references whose target row was not
     loaded are appended to it as ``(source_table, column, ref_table, value)`` so
@@ -628,29 +644,40 @@ def _resolve_fk_references(
     """
     references = []
     for fk in dlt_row.foreign_keys:
-        fk_column = fk.get("column", "")
+        columns, ref_columns = fk_columns(fk)
         ref_table = fk.get("ref_table", "")
-        ref_column = fk.get("ref_column", "")
 
-        if not fk_column or not ref_table:
+        if not columns or not ref_table:
             continue
 
-        # Get the FK value from the row data
-        fk_value = dlt_row.row_data.get(fk_column)
-        if fk_value is None:
+        # Get the FK values from the row data
+        values = [dlt_row.row_data.get(column) for column in columns]
+        if any(value is None for value in values):
             continue
 
-        fk_value_str = str(fk_value)
-        target_key = (ref_table, fk_value_str)
-        target_node_id = row_id_lookup.get(target_key)
+        target_key = (target_key_columns or {}).get(ref_table)
+        if (
+            target_key
+            and len(ref_columns) == len(target_key)
+            and set(ref_columns) == set(target_key)
+        ):
+            value_by_ref_column = dict(zip(ref_columns, values))
+            values = [value_by_ref_column[column] for column in target_key]
+        fk_value_str = join_key_values(values)
+        fk_column = ",".join(columns)
+        ref_column = ",".join(ref_columns)
+
+        target_node_id = row_id_lookup.get((ref_table, fk_value_str))
 
         if target_node_id is not None:
             relationship_name = f"{fk_column}_references_{ref_table}"
             references.append(
                 {
                     "column": fk_column,
+                    "columns": columns,
                     "target_table": ref_table,
                     "target_column": ref_column,
+                    "target_columns": ref_columns,
                     "target_pk_value": fk_value_str,
                     "target_node_id": str(target_node_id),
                     "relationship_name": relationship_name,
