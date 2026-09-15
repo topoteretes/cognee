@@ -191,9 +191,15 @@ async def mark_auto_improve_fired(
     Written before the improve runs, so back-to-back ``remember()`` calls see
     the advanced watermark. A launched bridge that then loses its lock claim
     gets the window refunded (``rearm_auto_improve_debounce``), so its entries
-    never wait out a window behind a bridge that did nothing. Never raises:
-    losing the row only means the next call fires one improve earlier than
-    the thresholds ask for.
+    never wait out a window behind a bridge that did nothing. The refund is
+    ONLY for lock loss: a bridge that errors keeps the mark on purpose —
+    refunding would hammer a failing backend once per remember, and the
+    persist stages' own watermarks make the next successful improve pick up
+    everything anyway. Corollary: while a long improve holds the lock, every
+    remember fires a losing-then-refunded attempt, so the debounce holds
+    nothing back under contention (claims fail fast, so that is cheap).
+    Never raises: losing the row only means the next call fires one improve
+    earlier than the thresholds ask for.
     """
     try:
         if qa_count is None:
