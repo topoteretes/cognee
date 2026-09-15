@@ -200,3 +200,10 @@ def test_unauthorized_dataset_does_not_query_data(client, monkeypatch, suffix):
     assert authorized.await_args.args[:2] == ([DATASET_ID], "read")
     listing.assert_not_awaited()
     counting.assert_not_awaited()
+
+
+def test_legacy_null_timestamp_is_returned_on_the_last_page(client, monkeypatch):
+    monkeypatch.setattr(ROWS[-1], "created_at", None)
+    response = client.get(f"/api/v1/datasets/{DATASET_ID}/data?limit=100&offset=200")
+    assert response.status_code == 200
+    assert response.json()[-1]["createdAt"] is None

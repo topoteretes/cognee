@@ -179,3 +179,22 @@ async def test_cloud_client_stops_when_server_ignores_paging(monkeypatch, size):
     )
     with pytest.raises(RuntimeError, match="pagination"):
         await client.list_data(uuid4())
+
+
+@pytest.mark.asyncio
+async def test_local_list_data_uses_the_same_order_as_the_http_route(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    dataset_id = uuid4()
+    methods = importlib.import_module("cognee.modules.data.methods")
+    listing = AsyncMock(return_value=[])
+    monkeypatch.setattr(methods, "get_dataset_data", listing)
+    monkeypatch.setattr(state_mod, "_remote_client", None)
+    monkeypatch.setattr(
+        datasets_mod,
+        "get_authorized_dataset",
+        AsyncMock(return_value=SimpleNamespace(id=dataset_id)),
+    )
+    await datasets_mod.datasets.list_data(dataset_id, user=SimpleNamespace(id=uuid4()))
+    listing.assert_awaited_once_with(dataset_id, order_by="created_at")

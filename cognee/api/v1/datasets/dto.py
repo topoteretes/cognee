@@ -15,7 +15,8 @@ from cognee.api.DTO import OutDTO
 class DataDTO(OutDTO):
     id: UUID
     name: str
-    created_at: datetime
+    # Legacy/external writers may omit the ORM timestamp default.
+    created_at: datetime | None = None
     updated_at: datetime | None = None
     extension: str
     mime_type: str
