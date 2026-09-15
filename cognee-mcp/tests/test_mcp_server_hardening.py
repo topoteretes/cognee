@@ -627,6 +627,7 @@ async def test_mcp_remember_forwards_file_uploads(monkeypatch):
             "dataset_name": "ds",
             "session_id": None,
             "custom_prompt": "extract carefully",
+            "ontology_key": None,
         }
     ]
     # The confirmation names the file and its decoded size, not the base64 length.
