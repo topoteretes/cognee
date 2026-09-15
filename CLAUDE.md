@@ -155,7 +155,7 @@ Improve & Memify are virtually the same, though. So no reason not to use improve
 ### Key Architectural Patterns
 
 #### 1. Pipeline-Based Processing
-All data flows through task-based pipelines (`cognee/modules/pipelines/`). Tasks are composable units that can run sequentially or in parallel. Example pipeline tasks: `classify_documents`, `extract_graph_from_data`, `add_data_points`.
+All data flows through task-based pipelines (`cognee/modules/pipelines/`). Tasks are composable units that can run sequentially or in parallel. Example pipeline tasks: `classify_documents`, `extract_graph_from_data`, `add_data_points`. The runner semantics (a task's `batch_size` batches the *previous* task's output, `enriches`, `ctx` injection, and which of the two `run_pipeline` functions to import) are in the `cognee/modules/pipelines/__init__.py` docstring; the index of all task implementations is `cognee/tasks/README.md`.
 
 #### 2. Interface-Based Database Adapters
 Multiple backends are supported through adapter interfaces:
@@ -275,6 +275,8 @@ Available search types (from `cognee/modules/search/types/SearchType.py`), passe
 
 Key files:
 - `cognee/api/v1/search/search.py`
+- `cognee/modules/retrieval/README.md` — SearchType → retriever class table (kept in sync by a unit test)
+- `cognee/modules/search/methods/get_search_type_retriever_instance.py` — the registry itself
 - `cognee/modules/retrieval/context_providers/TripletSearchContextProvider.py`
 - `cognee/modules/search/types/SearchType.py`
 
@@ -653,7 +655,7 @@ this rule applies only to internal PRs.
 
 ## Testing Strategy
 
-Tests are organized in `cognee/tests/`:
+Tests are organized in `cognee/tests/` (layout, credentials per folder, and how to run without API keys: `cognee/tests/README.md`; `pytest` with no path collects only this tree):
 - `unit/` - Unit tests for individual modules
 - `integration/` - Full pipeline integration tests
 - `e2e/` - Full-stack end-to-end suites run per backend in CI (e.g. `e2e/incremental_update/` runs on LadybugDB + LanceDB, Postgres graph + PGVector, and Neo4j + LanceDB)

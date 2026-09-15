@@ -289,6 +289,14 @@ constraint-dependencies = [
     "scipy>=1.16.1 ; python_version >= '3.14'",
 ]
 
+[tool.pytest.ini_options]
+# `pytest` with no path collects only the library test tree; cognee-mcp has its
+# own pyproject and suite. See cognee/tests/README.md for layout and credentials.
+testpaths = ["cognee/tests"]
+markers = [
+    "deployment: smoke tests against a deployed cognee instance (cognee/tests/deployment/)",
+]
+
 [tool.ruff]
 line-length = 100
 exclude = [
