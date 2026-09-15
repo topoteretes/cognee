@@ -59,6 +59,22 @@ def get_activity_router() -> APIRouter:
         - `"operation"` — a single-row operation record (`pipeline_name` and
           `status` are NULL, so these are invisible to status-based readers).
 
+        `status` for a `"pipeline"` row is one of `PipelineRunStatus`,
+        reported exactly as stored. A run whose process died without writing a
+        terminal row is closed as `DATASET_PROCESSING_ERRORED` by startup
+        recovery, with `error_class` naming it as abandoned rather than failed.
+        `"operation"` rows have no status column.
+
+        One run is several rows here, not one. The writers
+        (`log_pipeline_run_start`/`_complete`/`_error`) always INSERT a new row
+        rather than UPDATE the existing one, so a finished run still has its
+        original STARTED row sitting in the table alongside its terminal row,
+        both sharing `pipeline_run_id`, and this endpoint returns both with no
+        dedup. A client reading "is this run still going" from a single row
+        will get the wrong answer for every finished run: the STARTED row stays
+        STARTED forever. Group by `pipeline_run_id` and take the latest row.
+        See the aggregation caveats below.
+
         ## Request Parameters
         - **dataset_id** (Optional[UUID]): Restrict to one dataset (403 if not readable).
         - **pipeline_name** (Optional[str]): Exact-match filter; also excludes
@@ -117,7 +133,7 @@ def get_activity_router() -> APIRouter:
 
         from cognee.infrastructure.databases.relational import get_relational_engine
         from cognee.modules.data.models.Dataset import Dataset
-        from cognee.modules.pipelines.models import PipelineRun
+        from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
         from cognee.modules.users.models import User
 
         if dataset_id is not None:
@@ -178,7 +194,7 @@ def get_activity_router() -> APIRouter:
                 # sets it. Derived here so clients need not know that convention.
                 "kind": "pipeline" if run.pipeline_name is not None else "operation",
                 "pipeline_name": run.pipeline_name,
-                "status": run.status.value if run.status else None,
+                "status": run.status,
                 "dataset_id": str(run.dataset_id) if run.dataset_id else None,
                 # The row itself is visible via the user_id term even when its
                 # dataset_id is not in permitted_dataset_id_set (the caller has

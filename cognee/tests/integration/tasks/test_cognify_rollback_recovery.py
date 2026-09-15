@@ -26,8 +26,13 @@ from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.data.models import Data
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.graph.models import Edge, Node
+from cognee.modules.pipelines.layers.check_pipeline_run_qualification import (
+    check_pipeline_run_qualification,
+)
 from cognee.modules.pipelines.models import PipelineContext, PipelineRun, PipelineRunStatus
+from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
 from cognee.modules.pipelines.tasks.task import Task
+from cognee.modules.recall.methods.graph_warmup import get_graph_build_status
 from cognee.modules.users.methods import create_user, get_default_user
 from cognee.tasks.storage.add_data_points import add_data_points
 from cognee.tests.utils.assert_graph_nodes_not_present import assert_graph_nodes_not_present
@@ -387,8 +392,10 @@ async def test_cognify_startup_recovery_rolls_back_stale_started_runs(clean_test
                 status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
                 dataset_id=dataset.id,
                 run_info={"data": [str(data_id)]},
-                # Mark the run as old enough to be considered stale; a freshly
-                # started run is treated as live and intentionally not recovered.
+                # Recovery does not look at age: a restart is what tells it the
+                # run's process is gone. It does look at origin, and only closes
+                # what a server started, so this row is stamped as one.
+                origin="api",
                 created_at=datetime.now(timezone.utc) - timedelta(hours=2),
             )
         )
@@ -401,6 +408,86 @@ async def test_cognify_startup_recovery_rolls_back_stale_started_runs(clean_test
     nodes_after, edges_after = await _count_nodes_edges_for_run(dataset.id, stale_run_id)
     assert nodes_after == []
     assert edges_after == []
+
+    # The graph being gone is only half of it. The dataset has to stop
+    # reporting work that is not happening, which is the whole point of the
+    # ticket, and that is a row nothing above this line reads back.
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(PipelineRun).filter(PipelineRun.pipeline_run_id == stale_run_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    closing = [row for row in rows if row.status == PipelineRunStatus.DATASET_PROCESSING_ERRORED]
+    assert len(closing) == 1, "recovery must close the run, not just unwind its graph"
+    # Killed, not failed: the class is what a reader uses to tell the two
+    # apart, since both share the ERRORED status.
+    assert closing[0].error_class == "AbandonedPipelineRunError"
+    assert closing[0].outcome == "failed"
+    # Same run, not a fresh one, so the closing row stays joinable to what the
+    # dead run left behind.
+    assert closing[0].pipeline_run_id == stale_run_id
+    # The STARTED row survives: this table is an append-only log.
+    assert any(row.status == PipelineRunStatus.DATASET_PROCESSING_STARTED for row in rows)
+
+    # And the dataset now reads as closed rather than still processing.
+    status = await get_pipeline_status([dataset.id], "cognify_pipeline")
+    assert status[str(dataset.id)] == PipelineRunStatus.DATASET_PROCESSING_ERRORED
+
+    # The two readers that track pipeline state have to agree with that, which
+    # is the half a status assertion does not cover.
+    #
+    # Re-cognify must be possible again: a STARTED row made this return
+    # PipelineRunStarted and skip the run, which is the stuck-forever symptom.
+    qualification = await check_pipeline_run_qualification(
+        dataset=dataset, data=[], pipeline_name="cognify_pipeline"
+    )
+    assert qualification is None, "an abandoned run must not keep blocking a re-run"
+
+    # And recall must say the build failed rather than searching the graph the
+    # rollback just emptied and returning nothing with no explanation.
+    probe = await get_graph_build_status(user, [dataset.id])
+    assert probe.state == "build_failed"
+    assert probe.error_class == "AbandonedPipelineRunError"
+
+
+@pytest.mark.asyncio
+async def test_recovery_leaves_a_run_this_server_did_not_start(clean_test_environment):
+    """A shared relational database is normal: compose runs the API and MCP
+    against one, and the CLI without --api-url runs in its own process against
+    the same SQLite file. A booting server cannot see whether such a run is
+    alive, and rolling it back would delete a live run's graph, so it does not
+    touch a row it did not stamp."""
+    user = await get_default_user()
+    dataset = await create_authorized_dataset("foreign_origin_dataset", user)
+    stale_run_id = uuid4()
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        session.add(
+            PipelineRun(
+                pipeline_run_id=stale_run_id,
+                pipeline_name="cognify_pipeline",
+                pipeline_id=uuid4(),
+                status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+                dataset_id=dataset.id,
+                run_info={"data": []},
+                origin="sdk",
+                created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+            )
+        )
+        await session.commit()
+
+    await recover_stale_cognify_runs_on_startup()
+
+    status = await get_pipeline_status([dataset.id], "cognify_pipeline")
+    assert status[str(dataset.id)] == PipelineRunStatus.DATASET_PROCESSING_STARTED
 
 
 @pytest.mark.asyncio
@@ -526,3 +613,69 @@ async def test_cognify_rollback_preserves_legacy_rows_without_pipeline_run_id(
     # Legacy data should remain discoverable in relational metadata.
     legacy_data_record = await _get_data_record(legacy_data_id)
     assert legacy_data_record is not None
+
+
+@pytest.mark.asyncio
+async def test_a_surface_closes_its_own_runs_against_a_real_database(clean_test_environment):
+    """The MCP server sweeps origin="mcp" the way the API sweeps "api". Proving
+    that against a real database matters because the whole filter rests on a
+    column the producer has to stamp: if the two ever disagree, recovery stops
+    working everywhere and nothing else would notice."""
+    user = await get_default_user()
+    dataset = await create_authorized_dataset("mcp_owned_dataset", user)
+    stale_run_id = uuid4()
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        session.add(
+            PipelineRun(
+                pipeline_run_id=stale_run_id,
+                pipeline_name="cognify_pipeline",
+                pipeline_id=uuid4(),
+                status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+                dataset_id=dataset.id,
+                run_info={"data": []},
+                origin="mcp",
+                created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+            )
+        )
+        await session.commit()
+
+    # The API's sweep does not own it.
+    await recover_stale_cognify_runs_on_startup()
+    status = await get_pipeline_status([dataset.id], "cognify_pipeline")
+    assert status[str(dataset.id)] == PipelineRunStatus.DATASET_PROCESSING_STARTED
+
+    # The MCP server's does.
+    await recover_stale_cognify_runs_on_startup(owned_origins=frozenset({"mcp"}))
+    status = await get_pipeline_status([dataset.id], "cognify_pipeline")
+    assert status[str(dataset.id)] == PipelineRunStatus.DATASET_PROCESSING_ERRORED
+
+
+@pytest.mark.asyncio
+async def test_a_real_run_stamps_the_origin_recovery_filters_on(clean_test_environment):
+    """The filter is only as good as the stamp. Every other test writes the
+    origin by hand, so nothing would catch a producer that stopped writing it,
+    and recovery would silently never close anything again."""
+    from cognee.modules.operations import ORIGIN_API, operation_origin_scope
+    from cognee.modules.pipelines.operations.log_pipeline_run_start import (
+        log_pipeline_run_start,
+    )
+
+    user = await get_default_user()
+    dataset = await create_authorized_dataset("origin_stamp_dataset", user)
+
+    with operation_origin_scope(ORIGIN_API):
+        started = await log_pipeline_run_start(
+            uuid4(), "cognify_pipeline", dataset.id, None, user=user
+        )
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        row = (
+            await session.execute(
+                select(PipelineRun).filter(PipelineRun.pipeline_run_id == started.pipeline_run_id)
+            )
+        ).scalar_one()
+
+    assert row.origin == "api"

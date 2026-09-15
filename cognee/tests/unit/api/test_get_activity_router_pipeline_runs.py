@@ -13,7 +13,7 @@ Two things are checked, and both are needed:
 """
 
 import importlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -411,3 +411,48 @@ def test_no_pipeline_name_leaves_the_filter_out(monkeypatch):
     _client(user_id).get("/activity/pipeline-runs")
 
     assert "pipeline_name" not in _where_terms(statements[0])
+
+
+# --------------------------------------------------------------------------- #
+# status is reported exactly as stored
+# --------------------------------------------------------------------------- #
+
+
+def test_operation_row_has_no_status(monkeypatch):
+    """Operation rows (pipeline_name NULL) carry no status column at all, and
+    nothing about the row's age may synthesize one."""
+    user_id = uuid4()
+    run = _run(
+        user_id=user_id,
+        operation_name="recall",
+        created_at=datetime.now(timezone.utc) - timedelta(days=365),
+    )
+    _stub_engine(monkeypatch, [_joined(run)])
+    _stub_visibility(monkeypatch, visible_user_ids=[user_id], permitted_dataset_ids=[])
+
+    body = _client(user_id).get("/activity/pipeline-runs").json()
+
+    assert body[0]["status"] is None
+    assert body[0]["kind"] == "operation"
+
+
+def test_an_old_started_row_is_still_reported_as_started(monkeypatch):
+    """Age is not evidence, and this endpoint derives nothing. A run on a local
+    model can legitimately grind for days, so a STARTED row a year old still
+    reads STARTED; only startup recovery, which knows the process is gone,
+    closes a run."""
+    user_id = uuid4()
+    dataset_id = uuid4()
+    run = _run(
+        user_id=user_id,
+        dataset_id=dataset_id,
+        pipeline_name="cognify_pipeline",
+        status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        created_at=datetime.now(timezone.utc) - timedelta(days=365),
+    )
+    _stub_engine(monkeypatch, [_joined(run)])
+    _stub_visibility(monkeypatch, visible_user_ids=[user_id], permitted_dataset_ids=[dataset_id])
+
+    body = _client(user_id).get("/activity/pipeline-runs").json()
+
+    assert body[0]["status"] == "DATASET_PROCESSING_STARTED"

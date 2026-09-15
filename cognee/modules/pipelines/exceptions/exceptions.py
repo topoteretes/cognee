@@ -18,6 +18,30 @@ class PipelineRunFailedError(CogneeSystemError):
         super().__init__(message, name, status_code)
 
 
+class AbandonedPipelineRunError(CogneeSystemError):
+    """A run whose process did not survive, closed by startup recovery.
+
+    Not a failure of the work: nothing in the pipeline raised. The process
+    that was executing it is simply gone, which the server only learns by
+    coming back up and finding a STARTED row with no terminal row. Recorded
+    as ERRORED because that is what a terminal, unsuccessful run is, with
+    this class name as the thing that distinguishes "killed" from "failed"
+    for any reader that cares.
+    """
+
+    def __init__(
+        self,
+        message: str = "Pipeline run was abandoned: its process did not survive.",
+        name: str = "AbandonedPipelineRunError",
+        status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
+    ):
+        # This one is only ever constructed, never raised: it is a label for a
+        # stored row. The base logs at ERROR on construction, which would emit
+        # one "raised" line per abandoned dataset on every boot for something
+        # that did not raise. Recovery logs the real event itself.
+        super().__init__(message, name, status_code, log=False)
+
+
 class CognifyFailedError(CogneeSystemError):
     """A foreground cognify pipeline run ended ERRORED and raise_on_error is on.
 
