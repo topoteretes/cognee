@@ -146,6 +146,14 @@ def _source_pk(src: str, table: str) -> list[str]:
     return cols
 
 
+def _source_fk_constraints(src: str, table: str) -> int:
+    """Number of FK constraints on a source table (PRAGMA rows grouped by constraint id)."""
+    conn = sqlite3.connect(src)
+    ids = {row[0] for row in conn.execute(f"PRAGMA foreign_key_list('{table}')")}
+    conn.close()
+    return len(ids)
+
+
 # ---------------------------------------------------------------------------
 # legacy: migrate_relational_database
 # ---------------------------------------------------------------------------
@@ -327,14 +335,17 @@ async def test_dlt_source_foreign_keys_become_references_to_the_referenced_rows(
     source_schema = await _source_schema(source_db)
     manifest, _rows, _, _ = await _dlt_manifest(source_db, monkeypatch)
 
-    source_fk_count = sum(len(t["foreign_keys"]) for t in source_schema.values())
+    source_fk_count = sum(_source_fk_constraints(source_db, t) for t in source_schema)
     manifest_fk_count = sum(len(t["foreign_keys"]) for t in manifest["tables"].values())
 
-    print("\n\nforeign keys per table: source DB  vs  manifest['tables'][t]['foreign_keys']")
+    print(
+        "\n\nforeign key constraints per table: source DB  vs  manifest['tables'][t]['foreign_keys']"
+    )
     print(f"  {'table':<24}{'source':<10}manifest")
     for table in sorted(source_schema):
         print(
-            f"  {table:<24}{len(source_schema[table]['foreign_keys']):<10}{manifest['tables'][table]['foreign_keys']}"
+            f"  {table:<24}{_source_fk_constraints(source_db, table):<10}"
+            f"{manifest['tables'][table]['foreign_keys']}"
         )
 
     node_key = {
@@ -357,7 +368,7 @@ async def test_dlt_source_foreign_keys_become_references_to_the_referenced_rows(
 
     # CONTRACT: every FK constraint of the source is carried into the manifest ...
     assert manifest_fk_count == source_fk_count, (
-        f"source has {source_fk_count} FK constraints, manifest carries {manifest_fk_count}"
+        f"source has {source_fk_count} FK constraints (grouped, not per column), manifest carries {manifest_fk_count}"
     )
     # ... and each payment row references exactly the snapshot row it points at.
     for pid, expected in PAYMENT_TARGETS.items():
