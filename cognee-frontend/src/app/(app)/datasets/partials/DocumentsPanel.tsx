@@ -8,6 +8,8 @@ import EmptyDocIcon from "@/ui/elements/EmptyDocIcon";
 import type { BrainUploadStage } from "@/modules/ingestion/useBrainUpload";
 import type { UploadProgress } from "@/modules/ingestion/uploadProgress";
 import UploadProgressBar from "./UploadProgressBar";
+import ScrollLoader from "./ScrollLoader";
+import { MAX_RENDERED_ROWS } from "@/modules/datasets/maxRenderedRows";
 import DocumentList, { type DocRow } from "./DocumentList";
 
 // The Documents column of the brains finder: hidden file input, drag-and-drop,
@@ -59,6 +61,7 @@ export default function DocumentsPanel<T extends DocRow>({
   onRetryBuild: () => void;
   onRetryDocs: () => void;
 }): ReactElement {
+  const scrollRef = useRef<HTMLDivElement>(null);
   const displayedCount = total != null && total >= 0 ? total : docs.length;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
@@ -131,7 +134,7 @@ export default function DocumentsPanel<T extends DocRow>({
         )}
 
         {/* Content */}
-        <div style={{ flex: 1, overflowY: "auto" }}>
+        <div ref={scrollRef} style={{ flex: 1, overflowY: "auto" }}>
           {!selectedId ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 8 }}>
               <svg width="32" height="32" viewBox="0 0 32 32" fill="none"><path d="M4 8a2 2 0 012-2h6l2 3h12a2 2 0 012 2v13a2 2 0 01-2 2H6a2 2 0 01-2-2V8z" stroke="rgba(237,236,234,0.2)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -161,11 +164,10 @@ export default function DocumentsPanel<T extends DocRow>({
           ) : (
             <DocumentList docs={docs} onDelete={onDeleteDoc} />
           )}
-          {selectedId && hasMore && (total == null || total < 0 || docs.length < total) && (
-            <button onClick={onLoadMore} disabled={docsLoading}
-              style={{ margin: 16, padding: "8px 16px", color: "#EDECEA", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8 }}>
-              {docsLoading ? "Loading…" : docsError ? "Retry loading more documents" : "Load more documents"}
-            </button>
+          {selectedId && docs.length > 0 && onLoadMore && (
+            <ScrollLoader loaded={docs.length} total={total != null && total >= 0 ? total : null}
+              hasMore={hasMore} maxLoaded={MAX_RENDERED_ROWS} busy={docsLoading}
+              error={docsError} onLoadMore={onLoadMore} rootRef={scrollRef} compact />
           )}
         </div>
       </div>

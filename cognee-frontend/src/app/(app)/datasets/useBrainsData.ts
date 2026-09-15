@@ -7,6 +7,7 @@ import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
 import getDatasets from "@/modules/datasets/getDatasets";
 import { getDatasetDataCount } from "@/modules/datasets/getDatasetData";
+import { MAX_RENDERED_ROWS } from "@/modules/datasets/maxRenderedRows";
 import useDatasetDataPages from "@/modules/datasets/useDatasetDataPages";
 import createDataset from "@/modules/datasets/createDataset";
 import deleteDataset from "@/modules/datasets/deleteDataset";
@@ -54,8 +55,8 @@ export function useBrainsData(): UseBrainsDataResult {
   selectedIdRef.current = selectedId;
   const {
     data: selectedDocs, setData: setSelectedDocs, loading: docsLoading,
-    error: docsError, hasMore: hasMoreDocs, load: loadDocs, loadMore: loadMoreDocs, reset: resetDocs,
-  } = useDatasetDataPages<FileEntry>(cogniInstance);
+    total: docsTotal, error: docsError, hasMore: hasMoreDocs, load: loadDocs, loadMore: loadMoreDocs, reset: resetDocs,
+  } = useDatasetDataPages<FileEntry>(cogniInstance, MAX_RENDERED_ROWS);
 
   const { isUploading, stage: uploadStage, progress: uploadProgress, upload } = useBrainUpload(cogniInstance);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -181,20 +182,16 @@ export function useBrainsData(): UseBrainsDataResult {
       }),
     );
     if (completedSelectedId) {
-      // The document list is a page; the badge is a total. Two questions now,
-      // so ask them separately rather than counting whichever rows arrived.
-      Promise.all([
-        loadDocs(completedSelectedId),
-        getDatasetDataCount(completedSelectedId, cogniInstance),
-      ])
-        .then(([, count]) => {
-          setDatasets((prev) => prev.map((d) => d.id === completedSelectedId ? { ...d, documents: count } : d));
-        })
-        .catch((err) => {
-          console.error("Failed to refresh dataset document count:", err);
-        });
+      // The paged loader fetches the total along with the first page.
+      void loadDocs(completedSelectedId);
     }
   }, [statusDetails, cogniInstance, selectedId, loadDocs]);
+
+  useEffect(() => {
+    if (selectedId && docsTotal !== null) {
+      setDatasets(prev => prev.map(d => d.id === selectedId ? { ...d, documents: docsTotal } : d));
+    }
+  }, [selectedId, docsTotal]);
 
   async function refreshSelectedDocs(id: string): Promise<void> {
     await loadDocs(id);
@@ -256,10 +253,12 @@ export function useBrainsData(): UseBrainsDataResult {
 
     const refreshDocs = async (): Promise<void> => {
       // list is a page, so it cannot supply the badge's total — count separately.
-      const [, count] = await Promise.all([
-        fetchSelectedDocs(),
-        getDatasetDataCount(ds.id, cogniInstance).catch(() => null),
-      ]);
+      let count: number | null = null;
+      if (selectedIdRef.current === ds.id) {
+        await loadDocs(ds.id);
+      } else {
+        count = await getDatasetDataCount(ds.id, cogniInstance).catch(() => null);
+      }
       // "completed", NOT "running": onProcessed fires only after the status
       // poll reached COMPLETED (useBrainUpload.ts). Writing "running" here
       // left the row stuck on "Processing" forever when the shared status
@@ -457,6 +456,7 @@ export function useBrainsData(): UseBrainsDataResult {
     selectedDocs,
     docsLoading,
     docsError,
+    docsTotal,
     hasMoreDocs,
     loadMoreDocs,
     retryDocs: () => { if (selectedId) refreshSelectedDocs(selectedId); },

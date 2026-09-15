@@ -8,6 +8,8 @@ import Link from "next/link";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
 import PageLoading from "@/ui/elements/PageLoading";
+import ScrollLoader from "../partials/ScrollLoader";
+import { MAX_RENDERED_ROWS } from "@/modules/datasets/maxRenderedRows";
 import useDatasetDataPages from "@/modules/datasets/useDatasetDataPages";
 import deleteDatasetData from "@/modules/datasets/deleteDatasetData";
 import deleteDataset from "@/modules/datasets/deleteDataset";
@@ -104,14 +106,14 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     total: filesTotal, hasMore, load: loadFilePage, loadMore,
   } = useDatasetDataPages<FileEntry & {
     rawDataLocation?: string; originalExtension?: string; original_extension?: string;
-    originalMimeType?: string; original_mime_type?: string; size_bytes?: number; file_size?: number;
-  }>(cogniInstance, Infinity, true);
+    originalMimeType?: string; original_mime_type?: string; dataSize?: number; size_bytes?: number; file_size?: number;
+  }>(cogniInstance, MAX_RENDERED_ROWS);
   const files = useMemo(() => rawFiles.map(d => ({
     id: d.id,
     name: d.name || d.rawDataLocation?.split("/").pop() || d.id,
     extension: d.originalExtension || d.original_extension || d.extension,
     mimeType: d.originalMimeType || d.original_mime_type || d.mimeType,
-    size: d.size ?? d.size_bytes ?? d.file_size,
+    size: d.dataSize ?? d.size ?? d.size_bytes ?? d.file_size,
     createdAt: d.createdAt,
   })), [rawFiles]);
   // data id → session id parsed from the memory blob ("Session ID: <id>"
@@ -713,7 +715,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
             )}
           </div>
           <span style={{ fontSize: 14, color: "rgba(237,236,234,0.55)", display: "flex", alignItems: "center", gap: 6 }}>
-            {filesTotal === null ? `${files.length} loaded` : filesTotal} documents
+            {filesTotal === null ? `${files.length.toLocaleString()} loaded` : filesTotal.toLocaleString()} documents
             {datasetStatus === "processing" || processing ? (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "#6510F4", fontWeight: 500 }}>
                 · <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6510F4" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg>
@@ -1005,11 +1007,10 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
         onRetry={loadFiles}
         deletingId={deletingFileId}
       />
-      {hasMore && (filesTotal === null || files.length < filesTotal) && (
-        <button onClick={loadMore} disabled={loading}
-          style={{ padding: "8px 16px", color: "#EDECEA", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8 }}>
-          {loading ? "Loading…" : filesError ? "Retry loading more files" : "Load more files"}
-        </button>
+      {files.length > 0 && (
+        <ScrollLoader loaded={files.length} total={filesTotal} hasMore={hasMore}
+          maxLoaded={MAX_RENDERED_ROWS} busy={loading} error={filesError}
+          onLoadMore={loadMore} noun="files" autoLoad={!search} />
       )}
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>

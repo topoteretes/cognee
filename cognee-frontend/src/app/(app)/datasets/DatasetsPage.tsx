@@ -24,6 +24,7 @@ export default function DatasetsPage() {
     selectedDocs,
     docsLoading,
     docsError,
+    docsTotal,
     hasMoreDocs,
     loadMoreDocs,
     retryDocs,
@@ -172,7 +173,7 @@ export default function DatasetsPage() {
             docs={selectedDocs}
             hasMore={hasMoreDocs}
             onLoadMore={loadMoreDocs}
-            total={selectedDataset?.documents}
+            total={docsTotal ?? selectedDataset?.documents}
             processing={selectedDataset?.status === "pending" || selectedDataset?.status === "running"}
             isUploading={isUploading}
             uploadStage={uploadStage}
