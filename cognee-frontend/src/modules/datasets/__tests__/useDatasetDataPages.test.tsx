@@ -172,3 +172,12 @@ test("a failed refresh retries from the first page while preserving the visible 
   expect(fetch.mock.calls[2][0]).toContain("offset=0");
   expect(result.current.data).toEqual([{ id: "fresh" }]);
 });
+
+
+test("loadMore keeps its identity while pages arrive", async () => {
+  const { fetch, result } = setup();
+  fetch.mockResolvedValue(response(page(0, 100)));
+  const loadMore = result.current.loadMore;
+  await act(async () => { await result.current.load("a"); });
+  expect(result.current.loadMore).toBe(loadMore);
+});

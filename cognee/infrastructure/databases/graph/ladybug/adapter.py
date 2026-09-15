@@ -538,36 +538,31 @@ class LadybugAdapter(GraphDBInterface):
             self.connection = Connection(self.db)
 
             try:
-                self.connection.execute("LOAD EXTENSION JSON;")
+                # Tries the by-name load first (static builds / already
+                # installed), then the binary bundled with cognee, and only
+                # then the classic INSTALL-from-remote-repo download.
+                from cognee_db_workers._kuzu_helpers import load_json_extension
+
+                load_json_extension(self.connection.execute)
                 logger.info("Loaded JSON extension")
-            except Exception:
-                # LOAD failed — the extension is not installed for this
-                # connection's extension dir (the throwaway pre-install above can
-                # miss it when offline, or when it cached to a different path).
-                # Try installing + loading directly on the real connection before
-                # giving up. INSTALL is idempotent and a no-op when already cached.
-                logger.debug(
-                    "Ignoring exception in LadybugAdapter._initialize_connection", exc_info=True
+            except Exception as e:
+                # Surface loudly: queries that use JSON (recall, temporal
+                # search) will otherwise fail later with a cryptic Binder
+                # error. This usually means no bundled binary for this
+                # ladybug version/platform and no network access to download
+                # the extension at startup. (load_json_extension's ladder
+                # already retried the classic INSTALL + LOAD on this
+                # connection as its last rung, so no extra retry here.)
+                logger.warning(
+                    "Could not load the Kuzu/Ladybug JSON extension (%s). "
+                    "Graph queries that use JSON (e.g. recall, temporal search) will "
+                    "fail with 'Extension: json ... has not been installed'. Populate "
+                    "cognee_db_workers/ladybug_extensions/ (see its README), ensure the "
+                    "process has network access at startup, or run `INSTALL json; LOAD "
+                    "json;` once against the database.",
+                    e,
+                    exc_info=True,
                 )
-                try:
-                    self.connection.execute("INSTALL JSON;")
-                    self.connection.execute("LOAD EXTENSION JSON;")
-                    logger.info("Installed and loaded JSON extension")
-                except Exception as e:
-                    # Surface loudly: queries that use JSON (recall, temporal
-                    # search) will otherwise fail later with a cryptic Binder
-                    # error. This usually means no network access to download the
-                    # extension at startup.
-                    logger.warning(
-                        "Could not install/load the Kuzu/Ladybug JSON extension (%s). "
-                        "Graph queries that use JSON (e.g. recall, temporal search) will "
-                        "fail with 'Extension: json ... has not been installed'. Ensure the "
-                        "process has network access at startup to download the extension, "
-                        "pre-install it in your image, or run `INSTALL json; LOAD json;` "
-                        "once against the database.",
-                        e,
-                        exc_info=True,
-                    )
 
             self._ensure_schema()
             logger.debug("Ladybug database initialized successfully")

@@ -22,7 +22,7 @@ They double as the smoke-test corpus the team uses to verify behaviour across th
 |---|---|---|
 | [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 31 |
 | [`advanced_guides/`](advanced_guides/) | Deeper takes on topics a guide already covers | 8 |
-| [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 25 |
+| [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 26 |
 
 One line each: **guides teach a feature, advanced guides deepen a feature, demos combine
 features.** See [Contributing](#-contributing-a-new-example) for the precise category rules.
@@ -63,7 +63,7 @@ features.** See [Contributing](#-contributing-a-new-example) for the precise cat
 | [`custom_tasks_and_pipelines.py`](guides/custom_tasks_and_pipelines.py) | Authoring tasks and composing a pipeline |
 | [`ontology_quickstart.py`](guides/ontology_quickstart.py) | Grounding extraction in an OWL ontology |
 | [`entity_deduplication.py`](guides/entity_deduplication.py) | Merging duplicate entities (dry-run, then real) |
-| [`consolidate_entity_descriptions_example.py`](guides/consolidate_entity_descriptions_example.py) | Merging near-duplicate entity descriptions |
+| [`consolidate_entity_descriptions_example.py`](guides/consolidate_entity_descriptions_example.py) | LLM rewrite of Entity descriptions and EntityType summaries from graph neighborhood |
 | [`low_level_llm.py`](guides/low_level_llm.py) | Direct LLM-gateway structured output |
 
 ### Ingestion
@@ -107,6 +107,11 @@ Each script names the simpler guide it builds on and states what it adds.
 ## 🎯 `demos/` — features combined into use cases
 
 Every demo lives in a topic folder.
+
+### [`company_brain/`](demos/company_brain/) — the README onboarding tour
+| Script | Demonstrates |
+|---|---|
+| [`company_brain_demo.py`](demos/company_brain/company_brain_demo.py) | A text fact, a code graph, and a rule stated in a session — distilled, then answered from a fresh session |
 
 ### [`comprehensive_example/`](demos/comprehensive_example/) — everything at once
 | Script | Demonstrates |

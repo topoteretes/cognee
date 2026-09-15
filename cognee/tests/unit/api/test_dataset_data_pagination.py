@@ -107,7 +107,17 @@ def test_limit_and_offset_page_through_without_gaps_or_repeats(client):
     assert len(set(seen)) == ROW_COUNT, "paging must not repeat or skip rows"
 
 
-@pytest.mark.parametrize("query", ["limit=0", "limit=1001", "limit=-1", "offset=-1"])
+@pytest.mark.parametrize(
+    "query",
+    [
+        "limit=0",
+        "limit=1001",
+        "limit=-1",
+        "offset=-1",
+        "offset=1000001",
+        "offset=999999999999999999999",
+    ],
+)
 def test_out_of_range_paging_is_rejected(client, query):
     """Rejected loudly, not silently clamped.
 

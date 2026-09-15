@@ -1,6 +1,6 @@
 import { captureException } from "@/utils/monitoring";
 import { CogneeInstance } from "../instances/types";
-import getDatasetData, { getDatasetDataCount } from "./getDatasetData";
+import { getAllDatasetData, getDatasetDataCount } from "./getDatasetData";
 
 export class WaitForDocsTimeoutError extends Error {
   constructor(datasetId: string, minCount: number) {
@@ -32,7 +32,7 @@ export default async function waitForDatasetDocs<T = unknown>(
       // Poll the count, not the rows: /data is paged, so its length caps at
       // the page size and a minCount above it would never be reached.
       if ((await getDatasetDataCount(datasetId, instance)) >= minCount) {
-        const data = await getDatasetData(datasetId, instance);
+        const data = await getAllDatasetData(datasetId, instance);
         return Array.isArray(data) ? (data as T[]) : [];
       }
     } catch {
@@ -68,7 +68,7 @@ async function pollInBackground<T>(
     if (Date.now() >= deadline) return;
     try {
       if ((await getDatasetDataCount(datasetId, instance)) >= minCount) {
-        const data = await getDatasetData(datasetId, instance);
+        const data = await getAllDatasetData(datasetId, instance);
         onDone(Array.isArray(data) ? (data as T[]) : []);
         return;
       }

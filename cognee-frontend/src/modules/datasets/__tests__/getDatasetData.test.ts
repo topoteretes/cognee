@@ -29,3 +29,10 @@ test("explicit full traversal follows offsets past the server maximum", async ()
   expect(await getAllDatasetData("a", instance)).toHaveLength(1001);
   expect(fetch.mock.calls[1][0]).toContain("limit=1000&offset=1000");
 });
+
+
+test.each([1000, 1001])("stops traversal when an old server ignores pagination (%i rows)", async length => {
+  fetch.mockResolvedValue(response(Array.from({ length }, (_, id) => ({ id }))));
+  await expect(getAllDatasetData("a", instance)).rejects.toThrow("pagination");
+  expect(fetch.mock.calls.length).toBeLessThanOrEqual(2);
+});

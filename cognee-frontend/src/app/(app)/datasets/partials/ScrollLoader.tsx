@@ -47,11 +47,10 @@ export default function ScrollLoader({
   const sentinel = useRef<HTMLDivElement | null>(null);
 
   const atCap = loaded >= maxLoaded;
-  const more = moreAvailable ?? (total !== null && loaded < total);
+  const more = (moreAvailable ?? total !== null) && (total === null || loaded < total);
   const hasMore = more && !atCap;
 
-  // onLoadMore is typically a fresh closure each render; a ref keeps the
-  // observer from being torn down and rebuilt on every one of them.
+  // Keep callback changes independent of the observer lifecycle.
   const loadMore = useRef(onLoadMore);
   loadMore.current = onLoadMore;
 

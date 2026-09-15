@@ -130,3 +130,10 @@ test("unknown totals are reported as loaded rows", () => {
   setup({ total: null, hasMore: true });
   expect(screen.getByText("100 loaded documents")).toBeInTheDocument();
 });
+
+
+test("an exact full page at the known total does not offer an empty next page", () => {
+  const { container } = setup({ loaded: 100, total: 100, hasMore: true });
+  expect(container).toBeEmptyDOMElement();
+  expect(observed).toBeNull();
+});

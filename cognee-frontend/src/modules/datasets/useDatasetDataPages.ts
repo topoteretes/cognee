@@ -8,6 +8,7 @@ import getDatasetData, { DEFAULT_DATASET_DATA_LIMIT, getDatasetDataCount } from 
 export default function useDatasetDataPages<T extends { id: string }>(
   instance: CogneeInstance | null,
   maxRows = Infinity,
+  includeTotal = false,
 ) {
   const [data, updateData] = useState<T[]>([]);
   const [total, setTotal] = useState<number | null>(null);
@@ -85,7 +86,7 @@ export default function useDatasetDataPages<T extends { id: string }>(
     }
     // A count failure must not prevent reading documents. Paging uses the
     // response length, so a stale count can never cause an endless retry.
-    if (!append && Number.isFinite(maxRows)) {
+    if (!append && (includeTotal || Number.isFinite(maxRows))) {
       void getDatasetDataCount(id, instance, controller.current?.signal)
         .then(count => { if (generation.current === token) setTotal(count); })
         .catch(() => { if (generation.current === token) setTotal(null); });
@@ -118,10 +119,14 @@ export default function useDatasetDataPages<T extends { id: string }>(
         setLoading(false);
       }
     }
-  }, [instance, maxRows, invalidate]);
+  }, [instance, maxRows, includeTotal, invalidate]);
+
+  const loadMore = useCallback(() => {
+    if (dataset.current) void load(dataset.current, error ? failedAppend.current : true);
+  }, [load, error]);
 
   return {
     data, setData, total, loading, error, hasMore, load, reset,
-    loadMore: () => { if (dataset.current) void load(dataset.current, error ? failedAppend.current : true); },
+    loadMore,
   };
 }

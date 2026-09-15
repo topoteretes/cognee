@@ -55,8 +55,14 @@ export function getDatasetDataCount(
 /** Explicit full traversal for callers that need every document, such as schema regeneration. */
 export async function getAllDatasetData(datasetId: string, instance: CogneeInstance) {
   const rows = [];
+  const seen = new Set<string>();
   for (;;) {
     const page = await getDatasetData(datasetId, instance, { limit: 1000, offset: rows.length });
+    const ids = page.map((row: { id: string }) => String(row.id));
+    if (page.length > 1000 || (page.length > 0 && ids.every((id: string) => seen.has(id)))) {
+      throw new Error("Server did not honor dataset pagination");
+    }
+    ids.forEach((id: string) => seen.add(id));
     rows.push(...page);
     if (page.length < 1000) return rows;
   }

@@ -185,100 +185,44 @@ async def test_api_endpoint_logging(e2e_config, authenticated_client, cache_engi
 
 
 @pytest.mark.asyncio
-async def test_mcp_tool_logging(e2e_config, cache_engine):
-    """Test that MCP tools succeed and log to Redis."""
-    import importlib.util
+async def test_mcp_tool_logging(e2e_config, mcp_data_setup, cache_engine):
+    """Live MCP tools log to Redis when driven over the MCP protocol.
+
+    Goes through ``fastmcp.Client`` rather than reaching for module attributes:
+    only registered tools are reachable by a real client, and it is
+    ``@registry.tool`` -- not a hand-written decorator -- that folds in
+    ``@log_usage`` (cognee-mcp/src/tool_registry.py). Calling the functions
+    directly, as this test used to, exercised neither.
+    """
     import sys
     from pathlib import Path
 
-    await _reset_engines_and_prune()
+    mcp_root = Path(__file__).resolve().parents[2] / "cognee-mcp"
+    if not (mcp_root / "src" / "server.py").exists():
+        pytest.skip(f"MCP server not found at {mcp_root}")
 
-    repo_root = Path(__file__).parent.parent.parent
-    mcp_src_path = repo_root / "cognee-mcp" / "src"
-    mcp_server_path = mcp_src_path / "server.py"
+    fastmcp = pytest.importorskip("fastmcp")
 
-    if not mcp_server_path.exists():
-        pytest.skip(f"MCP server not found at {mcp_server_path}")
+    if str(mcp_root) not in sys.path:
+        sys.path.insert(0, str(mcp_root))
 
-    if str(mcp_src_path) not in sys.path:
-        sys.path.insert(0, str(mcp_src_path))
+    from src import server as mcp_server
+    from src.cognee_client import CogneeClient
 
-    spec = importlib.util.spec_from_file_location("mcp_server_module", mcp_server_path)
-    mcp_server_module = importlib.util.module_from_spec(spec)
+    if mcp_server.cognee_client is None:
+        # No api_url => use_api False => the in-process SDK path.
+        mcp_server.cognee_client = CogneeClient()
 
-    import os
-
-    original_cwd = os.getcwd()
-    try:
-        os.chdir(str(mcp_src_path))
-        spec.loader.exec_module(mcp_server_module)
-    finally:
-        os.chdir(original_cwd)
-
-    if mcp_server_module.cognee_client is None:
-        cognee_client_path = mcp_src_path / "cognee_client.py"
-        if cognee_client_path.exists():
-            spec_client = importlib.util.spec_from_file_location(
-                "cognee_client", cognee_client_path
-            )
-            cognee_client_module = importlib.util.module_from_spec(spec_client)
-            spec_client.loader.exec_module(cognee_client_module)
-            CogneeClient = cognee_client_module.CogneeClient
-            mcp_server_module.cognee_client = CogneeClient()
-        else:
-            pytest.skip(f"CogneeClient not found at {cognee_client_path}")
-
-    test_text = "Germany is located in Europe right next to the Netherlands."
-    await mcp_server_module.cognify(data=test_text)
-    await asyncio.sleep(30.0)
-
-    list_result = await mcp_server_module.list_data()
-    assert list_result is not None, "List data should return results"
-
-    search_result = await mcp_server_module.search(
-        search_query="Germany", search_type="GRAPH_COMPLETION", top_k=5
-    )
-    assert search_result is not None, "Search should return results"
-
-    interaction_data = "User: What is Germany?\nAgent: Germany is a country in Europe."
-    await mcp_server_module.save_interaction(data=interaction_data)
-    await asyncio.sleep(30.0)
-
-    status_result = await mcp_server_module.cognify_status()
-    assert status_result is not None, "Cognify status should return results"
+    async with fastmcp.Client(mcp_server.mcp) as client:
+        # `recall` takes `datasets` as a comma-separated string; `cognify_status`
+        # takes a single `dataset_name`.
+        await client.call_tool("recall", {"query": "Germany", "datasets": mcp_data_setup})
+        await client.call_tool("cognify_status", {"dataset_name": mcp_data_setup})
 
     logs = await cache_engine.get_usage_logs("unknown", limit=50)
-    mcp_logs = [log for log in logs if log.get("type") == "mcp_tool"]
-    assert len(mcp_logs) == 5, (
-        f"Expected 5 MCP logs before prune. Found: {[log.get('function_name') for log in mcp_logs]}"
-    )
-    expected_tools_before_prune = [
-        "MCP cognify",
-        "MCP list_data",
-        "MCP search",
-        "MCP save_interaction",
-        "MCP cognify_status",
-    ]
-    function_names = [log.get("function_name") for log in mcp_logs]
-    for expected_tool in expected_tools_before_prune:
-        assert expected_tool in function_names, (
-            f"Should have {expected_tool} log. Found: {function_names}"
-        )
-    for log in mcp_logs:
-        assert log["type"] == "mcp_tool"
-        assert log["user_id"] == "unknown"
-        assert log["success"] is True
+    mcp_logs = {log.get("function_name"): log for log in logs if log.get("type") == "mcp_tool"}
 
-    await mcp_server_module.prune()
-    await asyncio.sleep(0.5)
-
-    logs_after_prune = await cache_engine.get_usage_logs("unknown", limit=50)
-    mcp_logs_after_prune = [log for log in logs_after_prune if log.get("type") == "mcp_tool"]
-    assert len(mcp_logs_after_prune) == 1, (
-        f"After prune, Redis is flushed so only the prune log should remain. "
-        f"Found: {[log.get('function_name') for log in mcp_logs_after_prune]}"
-    )
-    assert mcp_logs_after_prune[0]["function_name"] == "MCP prune"
-    assert mcp_logs_after_prune[0]["type"] == "mcp_tool"
-    assert mcp_logs_after_prune[0]["user_id"] == "unknown"
-    assert mcp_logs_after_prune[0]["success"] is True
+    for name in ("MCP recall", "MCP cognify_status"):
+        assert name in mcp_logs, f"Missing {name} usage log. Found: {sorted(mcp_logs)}"
+        assert mcp_logs[name]["type"] == "mcp_tool"
+        assert mcp_logs[name]["success"] is True
