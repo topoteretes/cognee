@@ -20,7 +20,7 @@ serves end to end.
 from collections.abc import Sequence
 
 from alembic import op
-from sqlalchemy.engine.reflection import Inspector
+from sqlalchemy import inspect, text
 
 revision: str = "e7f9a1c3d5b8"
 down_revision: str | None = "a7c2e9f4b8d1"
@@ -32,35 +32,34 @@ INDEX_NAME = "ix_data_dataset_created"
 
 def upgrade() -> None:
     conn = op.get_bind()
-    inspector = Inspector.from_engine(conn)
-
-    existing_indexes = [idx["name"] for idx in inspector.get_indexes("data")]
-    if INDEX_NAME not in existing_indexes:
-        if conn.dialect.name == "postgresql":
-            # CREATE INDEX (without CONCURRENTLY) holds a table-wide lock for
-            # the whole build. `data` is one row per ingested document, so on a
-            # real deployment that lock is measured in minutes -- this is the
-            # migration in this repo most likely to meet a large table.
-            # CONCURRENTLY cannot run inside a transaction, hence
-            # autocommit_block().
-            #
-            # IF NOT EXISTS matters here specifically: a CONCURRENTLY build that
-            # dies mid-way (deadlock/timeout/crash) leaves an INVALID index
-            # under this name, and the `existing_indexes` guard above only sees
-            # valid ones -- so a retry would hit "relation already exists"
-            # instead of cleanly no-op'ing.
-            with op.get_context().autocommit_block():
-                op.execute(
-                    f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {INDEX_NAME} ON data "
-                    f"(dataset_id, created_at DESC, id)"
-                )
-        else:
-            op.execute(f"CREATE INDEX {INDEX_NAME} ON data (dataset_id, created_at DESC, id)")
+    if conn.dialect.name == "postgresql":
+        # Reflection and IF NOT EXISTS only establish existence, not validity.
+        # A failed concurrent build leaves an index that the planner cannot use.
+        valid = conn.execute(
+            text(
+                "SELECT i.indisvalid FROM pg_index i "
+                "JOIN pg_class c ON c.oid = i.indexrelid "
+                "WHERE i.indrelid = 'data'::regclass AND c.relname = :name"
+            ),
+            {"name": INDEX_NAME},
+        ).scalar_one_or_none()
+        if valid is True:
+            return
+        # Concurrent DDL cannot run inside a transaction. Drop an interrupted
+        # build before retrying, so success always leaves a usable index.
+        with op.get_context().autocommit_block():
+            if valid is False:
+                op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {INDEX_NAME}")
+            op.execute(
+                f"CREATE INDEX CONCURRENTLY {INDEX_NAME} ON data (dataset_id, created_at DESC, id)"
+            )
+    elif INDEX_NAME not in {idx["name"] for idx in inspect(conn).get_indexes("data")}:
+        op.execute(f"CREATE INDEX {INDEX_NAME} ON data (dataset_id, created_at DESC, id)")
 
 
 def downgrade() -> None:
     conn = op.get_bind()
-    inspector = Inspector.from_engine(conn)
+    inspector = inspect(conn)
 
     existing_indexes = [idx["name"] for idx in inspector.get_indexes("data")]
     if INDEX_NAME in existing_indexes:

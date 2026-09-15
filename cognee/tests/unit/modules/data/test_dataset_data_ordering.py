@@ -11,7 +11,7 @@ end to end.
 import re
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.schema import CreateIndex
 
@@ -87,20 +87,138 @@ async def test_method_issues_the_indexed_ordering(monkeypatch):
     assert order_by.endswith("data.id"), "id tiebreak keeps paging stable"
 
 
-def test_migration_and_model_agree_on_the_index():
-    """The alembic revision and the model must create the same index."""
+def _migration():
+    import importlib.util
     from pathlib import Path
 
-    revision = (
+    path = (
         Path(__file__).resolve().parents[4]
-        / "alembic"
-        / "versions"
-        / "e7f9a1c3d5b8_add_data_dataset_created_index.py"
+        / "alembic/versions/e7f9a1c3d5b8_add_data_dataset_created_index.py"
     )
-    body = revision.read_text()
+    spec = importlib.util.spec_from_file_location("listing_index_migration", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
-    assert f'INDEX_NAME = "{INDEX_NAME}"' in body
-    assert body.count("(dataset_id, created_at DESC, id)") == 2, (
-        "both the postgres and non-postgres branches must build the same index"
+
+def test_sqlite_migration_upgrade_retry_and_downgrade():
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    engine = create_engine("sqlite://")
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("CREATE TABLE data (id TEXT, dataset_id TEXT, created_at DATETIME)"))
+            with Operations.context(MigrationContext.configure(conn)):
+                migration = _migration()
+                migration.upgrade()
+                migration.upgrade()
+                ddl = conn.execute(
+                    text("SELECT sql FROM sqlite_master WHERE name = :name"), {"name": INDEX_NAME}
+                ).scalar_one()
+                assert "(dataset_id, created_at DESC, id)" in ddl
+                migration.downgrade()
+                migration.downgrade()
+                assert not inspect(conn).get_indexes("data")
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("valid", [None, False, True])
+def test_postgres_migration_recovers_invalid_index(monkeypatch, valid):
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    migration = _migration()
+    connection = Mock()
+    connection.dialect.name = "postgresql"
+    connection.execute.return_value.scalar_one_or_none.return_value = valid
+    statements = []
+    in_autocommit = False
+
+    @contextmanager
+    def autocommit_block():
+        nonlocal in_autocommit
+        in_autocommit = True
+        yield
+        in_autocommit = False
+
+    def execute(statement):
+        assert in_autocommit, "concurrent DDL must be outside a transaction"
+        statements.append(statement)
+
+    monkeypatch.setattr(
+        migration,
+        "op",
+        SimpleNamespace(
+            get_bind=lambda: connection,
+            get_context=lambda: SimpleNamespace(autocommit_block=autocommit_block),
+            execute=execute,
+        ),
     )
-    assert "CONCURRENTLY" in body, "this table is large on real deployments"
+    migration.upgrade()
+    if valid is True:
+        assert statements == []
+    else:
+        expected = [
+            f"CREATE INDEX CONCURRENTLY {INDEX_NAME} ON data (dataset_id, created_at DESC, id)"
+        ]
+        if valid is False:
+            expected.insert(0, f"DROP INDEX CONCURRENTLY IF EXISTS {INDEX_NAME}")
+        assert statements == expected
+
+
+@pytest.mark.asyncio
+async def test_pages_preserve_timestamp_ties_and_dataset_isolation(monkeypatch):
+    import importlib
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+    from uuid import UUID
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    module = importlib.import_module("cognee.modules.data.methods.get_dataset_data")
+    engine = create_async_engine("sqlite+aiosqlite://")
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr(
+        module, "get_relational_engine", lambda: SimpleNamespace(get_async_session=sessions)
+    )
+    base = UUID("aaaaaaaa-0000-0000-0000-000000000000").int
+    dataset_id = UUID(int=base + 100)
+    now = datetime.now(timezone.utc)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Data.__table__.create)
+        async with sessions() as session:
+            session.add_all(
+                [
+                    Data(
+                        id=UUID(int=base + i),
+                        dataset_id=dataset_id,
+                        created_at=created,
+                        data_size=size,
+                    )
+                    for i, created, size in [
+                        (3, now, 900),
+                        (1, now, 1),
+                        (4, now - timedelta(days=1), 5000),
+                        (2, now, 20),
+                    ]
+                ]
+            )
+            session.add(
+                Data(id=UUID(int=base + 5), dataset_id=UUID(int=base + 101), created_at=now)
+            )
+            await session.commit()
+        pages = [await module.get_dataset_data(dataset_id, limit=2, offset=o) for o in (0, 2, 4)]
+        assert [len(page) for page in pages] == [2, 2, 0]
+        assert [row.id.int - base for page in pages for row in page] == [1, 2, 3, 4]
+        assert [row.id.int - base for row in await module.get_dataset_data(dataset_id)] == [
+            1,
+            2,
+            3,
+            4,
+        ]
+    finally:
+        await engine.dispose()
