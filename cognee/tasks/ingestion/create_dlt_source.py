@@ -71,13 +71,16 @@ def create_dlt_source_from_connection_string(
             "credentials": connection_string,
             "table_names": [bare_table_name],
             "query_adapter_callback": query_adapter_callback,
+            # FK constraints become table `references` hints in dlt's schema;
+            # ingest_dlt_source reads them from there (staging tables carry none).
+            "resolve_foreign_keys": True,
         }
         if schema_name:
             source_kwargs["schema"] = schema_name
 
         source = sql_database(**source_kwargs)
     else:
-        source = sql_database(credentials=connection_string)
+        source = sql_database(credentials=connection_string, resolve_foreign_keys=True)
 
     return source
 
