@@ -294,6 +294,26 @@ class CloudClient:
             payload["build_truth_subspace"] = True
         if kwargs.get("feedback_alpha") is not None:
             payload["feedback_alpha"] = kwargs["feedback_alpha"]
+        # Memify passthrough: the improve DTO takes registry task names and a
+        # data string; Task objects and the db-config overrides cannot cross
+        # the wire, so they fail loudly instead of silently running defaults.
+        for key in ("extraction_tasks", "enrichment_tasks"):
+            tasks = kwargs.get(key)
+            if tasks:
+                if not all(isinstance(task, str) for task in tasks):
+                    raise ValueError(
+                        f"improve({key}=...) on a remote instance takes registry "
+                        "task names (strings); Task objects cannot be serialized."
+                    )
+                payload[key] = list(tasks)
+        if kwargs.get("data") is not None:
+            payload["data"] = kwargs["data"]
+        for key in ("node_type", "vector_db_config", "graph_db_config"):
+            if kwargs.get(key) is not None:
+                raise ValueError(
+                    f"improve({key}=...) is not supported on a remote instance; "
+                    "run it locally or extend the /improve payload."
+                )
 
         async with session.post(
             f"{self.service_url}/api/v1/improve",
