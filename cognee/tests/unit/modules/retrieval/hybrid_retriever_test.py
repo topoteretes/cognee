@@ -1277,3 +1277,69 @@ async def test_facts_section_renders_after_entities():
         "## Relevant entities\n### Alice\n- Alice works at Acme.\n\n"
         "## Related facts\n- Acme acquired Initech."
     )
+
+
+@pytest.mark.asyncio
+async def test_context_evidence_describes_what_the_retriever_actually_rendered():
+    """The evidence hook reads the real result shape: chunk hits, entity blocks with edge
+    bullets built by the entity lane, and facts, which are text-only and never cited."""
+    fact = "Acme acquired Initech."
+    vector = MagicMock()
+    vector.search = _vector_search(
+        chunks=[
+            _result(
+                "chunk-1",
+                {
+                    "id": "chunk-1",
+                    "text": "Alice joined Acme.",
+                    "document_id": "doc-1",
+                    "document_name": "notes.txt",
+                    "chunk_index": 2,
+                },
+            )
+        ],
+        entities=[_result("entity-1", {"id": "entity-1", "name": "Alice"})],
+        edge_types=[_edge_hit(fact)],
+    )
+    graph = _graph(
+        nodes=[("entity-1", {"name": "Alice"}), ("acme-id", {"name": "Acme"})],
+        edges=[
+            (
+                "entity-1",
+                "acme-id",
+                "works_at",
+                {"edge_text": "Alice works at Acme.", "edge_object_id": "edge-1"},
+            )
+        ],
+    )
+    retriever = HybridRetriever(text_summaries_top_k=0)
+    dataset_id = uuid4()
+
+    with patch(
+        "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+        new_callable=AsyncMock,
+        return_value=_unified(vector=vector, graph=graph),
+    ):
+        retrieved = await retriever.get_retrieved_objects(query="q")
+
+    assert retrieved["facts"] == [{"id": str(EdgeType.id_for(fact)), "text": fact}]  # rendered...
+    evidence = retriever.get_context_evidence(retrieved, dataset_id=dataset_id)
+
+    assert [(reference.kind, reference.artifact_id) for reference in evidence] == [
+        ("segment", "chunk-1"),
+        ("graph_node", "entity-1"),
+        ("graph_node", "acme-id"),
+        ("graph_edge", "edge-1"),
+    ]  # ...but the fact is not cited: an EdgeType row is a relationship type, not an edge
+    assert evidence[0].document_name == "notes.txt"
+    assert evidence[0].chunk_index == 2
+    assert evidence[0].data_id == "doc-1"
+    assert evidence[1].label == "Alice"
+    assert evidence[2].label == "Acme"
+    assert (evidence[3].source_node_id, evidence[3].target_node_id) == ("entity-1", "acme-id")
+    assert evidence[3].relationship_name == "works_at"
+    assert all(reference.dataset_id == str(dataset_id) for reference in evidence)
+    # The same artifacts the session layer records as used, plus the chunk as a segment.
+    used = retriever.extract_context_object_ids(retrieved)
+    assert set(used["node_ids"]) >= {"entity-1", "acme-id"}
+    assert used["edge_ids"] == ["edge-1"]
