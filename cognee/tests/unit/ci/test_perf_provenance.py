@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -59,7 +60,7 @@ def test_stamp_uses_checked_out_commit_and_preserves_results(tmp_path, filename,
     report.write_text(json.dumps(original))
     env = {
         **os.environ,
-        "JSON_PATH": str(report),
+        "JSON_PATH": report.as_posix(),
         "BRANCH": "dev",
         "REPOSITORY": "topoteretes/cognee",
         "RUN_ID": "123",
@@ -69,7 +70,27 @@ def test_stamp_uses_checked_out_commit_and_preserves_results(tmp_path, filename,
         "SHA": "0" * 40,
         "GITHUB_SHA": "0" * 40,
     }
-    subprocess.run(["bash", "-c", step["run"]], cwd=tmp_path, env=env, check=True)
+    bash = shutil.which("bash")
+    if os.name == "nt":
+        # PATH may resolve bash to the WSL launcher, which cannot execute
+        # these GitHub-hosted Windows tests without an installed distro.
+        git_executable = Path(shutil.which("git"))
+        bash = next(
+            (
+                parent / "bin" / "bash.exe"
+                for parent in git_executable.parents
+                if (parent / "bin" / "bash.exe").is_file()
+            ),
+            None,
+        )
+        assert bash is not None, "Git for Windows Bash is required for workflow tests"
+        # The unit runner intentionally removes coreutils from PATH. Restore
+        # them only for this child process, which executes a Bash workflow.
+        env["PATH"] = os.pathsep.join(
+            [str(bash.parent), str(bash.parent.parent / "usr" / "bin"), env["PATH"]]
+        )
+    assert bash is not None, "Bash is required for workflow tests"
+    subprocess.run([str(bash), "-c", step["run"]], cwd=tmp_path, env=env, check=True)
     result = json.loads(report.read_text())
     rust = filename == "performance_report_rust.yml"
     assert result["git_sha"] == (rust_sha if rust else workflow_sha)
