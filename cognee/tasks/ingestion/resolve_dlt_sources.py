@@ -41,6 +41,57 @@ logger = get_logger("resolve_dlt_sources")
 # free text, not categorical data, and would produce useless one-off nodes.
 
 
+def dlt_manifest_identifier(dataset_name: str, source_name: str) -> str:
+    """The identity a DLT source's manifest is seeded from: (dataset, source name)."""
+    return f"dlt_source:{dataset_name}:{source_name}"
+
+
+def is_dlt_input(item: Any) -> bool:
+    """Whether ``item`` is a dlt resource, source, or source factory."""
+    try:
+        from dlt.extract import DltResource, SourceFactory
+        from dlt.extract.source import DltSource
+    except ImportError:
+        return False
+    return isinstance(item, (DltResource, DltSource, SourceFactory))
+
+
+async def check_dlt_replacement(
+    dlt_item: Any, pinned_id: UUID, dataset_name: str, user: User
+) -> None:
+    """Refuse a dlt source that cannot replace the document ``pinned_id``.
+
+    update()'s full rebuild deletes the document and re-adds the replacement
+    pinned to its id, so this runs BEFORE that delete: a replacement that
+    would not resolve to the same manifest must be refused while the
+    document still exists. A document-tagged source yields one document per
+    row and has no single identity; a relational source under another name
+    resolves to a different manifest, and rebuilding it under the old id
+    would leave the next plain add() of that source minting a second one.
+    """
+    from cognee.exceptions import CogneeValidationError
+
+    if document_source_tag(dlt_item):
+        raise CogneeValidationError(
+            message=(
+                "A document-tagged DLT source yields one document per row, so it cannot "
+                "replace a single document; update() cannot take it. Re-add the source."
+            ),
+            name="DltDocumentSourceNotUpdatable",
+        )
+    source_name = getattr(dlt_item, "name", None) or dataset_name
+    manifest_id = await get_unique_data_id(dlt_manifest_identifier(dataset_name, source_name), user)
+    if manifest_id != pinned_id:
+        raise CogneeValidationError(
+            message=(
+                f"DLT source {source_name!r} resolves to manifest {manifest_id}, not the "
+                f"document {pinned_id} being updated. update() replaces a DLT source under "
+                "the same source name."
+            ),
+            name="DltSourceIdentityMismatch",
+        )
+
+
 async def resolve_dlt_sources(
     data: Any,
     dataset_name: str,
@@ -108,8 +159,19 @@ async def resolve_dlt_sources(
 
     dlt_items = []
     non_dlt_items = []
+    # update()'s full rebuild re-adds the replacement wrapped in a DataItem
+    # pinned to the manifest's id. Unwrap it here so the source is ingested
+    # like a bare one, and remember the pin to check it against the manifest
+    # identity the source resolves to.
+    pinned_ids: dict[int, UUID] = {}
 
     for item in data_list:
+        if isinstance(item, DataItem) and isinstance(
+            item.data, (DltResource, DltSource, SourceFactory)
+        ):
+            if item.data_id is not None:
+                pinned_ids[id(item.data)] = item.data_id
+            item = item.data
         if isinstance(item, (DltResource, DltSource, SourceFactory)):
             dlt_items.append(item)
         else:
@@ -118,6 +180,13 @@ async def resolve_dlt_sources(
     if not dlt_items:
         # Nothing to expand — return original data unchanged
         return data, None
+
+    # A pinned item must resolve to the manifest it is pinned to; update()
+    # checks this before deleting the document, and it is re-checked here so
+    # a pinned wrapper from any caller is held to the same rule.
+    for dlt_item in dlt_items:
+        if id(dlt_item) in pinned_ids:
+            await check_dlt_replacement(dlt_item, pinned_ids[id(dlt_item)], dataset_name, user)
 
     # A dlt source may opt into the document path (each row → a text document
     # that goes through normal cognify) by declaring a document-source tag;
@@ -402,7 +471,7 @@ async def _build_source_manifest_item(
     # add(..., incremental_loading=False, data_cache=False). Renaming a source (or dataset)
     # changes this identity and is remove + add — a one-time full rebuild,
     # by design.
-    data_id = await get_unique_data_id(f"dlt_source:{dataset_name}:{source_name}", user)
+    data_id = await get_unique_data_id(dlt_manifest_identifier(dataset_name, source_name), user)
 
     return DataItem(
         data=manifest_text,

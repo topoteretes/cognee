@@ -190,7 +190,7 @@ async def _scenario():
     # region must delete its legacy chunk completely.
     insert_at = sum(len(p) for p in paragraphs[:3])
     text_v2 = text_v1[:insert_at] + _para("x", "ENTX") + text_v1[insert_at:]
-    result = await cognee.update(data_id, text_v2, dataset.id, user=user)
+    result = await cognee.update(data_id=data_id, data=text_v2, dataset_id=dataset.id, user=user)
     assert isinstance(result, dict) and result.get("status") == "incremental", result
 
     data_id = (await get_dataset_data(dataset.id))[0].id
