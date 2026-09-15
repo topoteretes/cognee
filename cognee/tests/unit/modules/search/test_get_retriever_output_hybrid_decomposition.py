@@ -122,3 +122,57 @@ async def test_hybrid_decomposition_llm_failure_never_reaches_the_caller():
 
     assert result.context == "## Relevant passages\nAcme ordered 40 units."
     assert [chunk.id for chunk in result.result_object["chunks"]] == ["c1"]
+
+
+@pytest.mark.asyncio
+async def test_decomposed_context_contains_every_chunk_plain_hybrid_returns():
+    """AC1, literally: the same question through HYBRID_COMPLETION and through the
+    decomposition type on the same engines; every plain chunk id is in the merged result."""
+    decompose = AsyncMock(return_value=QueryDecomposition(subqueries=[LEG_A, LEG_B]))
+    config = {"text_summaries_top_k": 0}
+    graph_engine = SimpleNamespace(is_empty=AsyncMock(return_value=False))
+
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=graph_engine,
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "hybrid_deferral_reason",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+            return_value=_unified(),
+        ),
+        patch(
+            f"{RETRIEVER_MODULE}.get_unified_engine",
+            new_callable=AsyncMock,
+            return_value=_unified(),
+        ),
+        patch(f"{RETRIEVER_MODULE}.LLMGateway.acreate_structured_output", decompose),
+    ):
+        plain = await get_retriever_output(
+            SearchType.HYBRID_COMPLETION,
+            QUESTION,
+            only_context=True,
+            retriever_specific_config=config,
+        )
+        decomposed = await get_retriever_output(
+            SearchType.HYBRID_COMPLETION_DECOMPOSITION,
+            QUESTION,
+            only_context=True,
+            retriever_specific_config=config,
+        )
+
+    plain_ids = {chunk.id for chunk in plain.result_object["chunks"]}
+    decomposed_ids = {chunk.id for chunk in decomposed.result_object["chunks"]}
+    assert plain_ids == {"c1"}
+    assert plain_ids <= decomposed_ids
+    assert decomposed_ids == {"c1", "c2", "c3"}
+    assert plain.context in decomposed.context or plain.context.split("\n")[1] in decomposed.context

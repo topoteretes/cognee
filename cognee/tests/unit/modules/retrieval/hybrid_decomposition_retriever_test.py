@@ -113,11 +113,14 @@ async def test_decomposition_failure_falls_back_to_the_plain_hybrid_result():
         unified, decompose=AsyncMock(side_effect=RuntimeError("LLM unavailable"))
     )
 
-    with engine, prompt, decompose:
+    with engine, prompt, decompose, patch(f"{MODULE}.logger") as log:
         merged = await retriever.get_retrieved_objects(query=QUESTION)
 
     assert _ids(merged["chunks"]) == ["c1"]
     assert retriever._decomposition_state.subqueries == [QUESTION]
+    # The failure is logged as a warning, never raised.
+    assert log.warning.call_count == 1
+    assert "falling back to original query" in log.warning.call_args.args[0]
 
 
 @pytest.mark.asyncio
@@ -126,12 +129,14 @@ async def test_missing_prompt_file_skips_the_llm_and_falls_back():
     retriever = HybridDecompositionRetriever(text_summaries_top_k=0)
     engine, prompt, decompose = _run(unified, prompt=None)
 
-    with engine, prompt, decompose as llm:
+    with engine, prompt, decompose as llm, patch(f"{MODULE}.logger") as log:
         merged = await retriever.get_retrieved_objects(query=QUESTION)
 
     llm.assert_not_awaited()
     assert _ids(merged["chunks"]) == ["c1"]
     assert retriever._decomposition_state.subqueries == [QUESTION]
+    assert log.warning.call_count == 1
+    assert "prompt not found" in log.warning.call_args.args[0]
 
 
 @pytest.mark.asyncio
