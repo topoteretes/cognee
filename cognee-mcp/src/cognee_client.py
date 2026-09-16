@@ -354,7 +354,7 @@ class CogneeClient:
                 # list datasets (e.g. the cloud is unreachable) is left to
                 # propagate: it means the search would fail anyway, and surfacing
                 # it beats silently retrying the same query unscoped.
-                datasets = [d["name"] for d in await self.list_datasets() if d.get("name")]
+                payload.update(await self._visible_dataset_scope())
             if datasets:
                 payload["datasets"] = datasets
             if system_prompt:
@@ -507,6 +507,22 @@ class CogneeClient:
             with redirect_stdout(sys.stderr):
                 status = await get_pipeline_status(dataset_ids, pipeline_name)
                 return status
+
+    async def _visible_dataset_scope(self) -> dict[str, list[str]]:
+        """Payload fields scoping an unscoped query to every dataset the caller can see.
+
+        The listing includes datasets shared with the caller, but the server
+        resolves names only against datasets the caller owns, so a name-only
+        scope silently drops shared datasets and 404s for a caller who owns none.
+        Ids are what the server ACL-checks, so they carry the real scope; names
+        ride along for servers that predate ``dataset_ids``.
+        """
+        listed = await self.list_datasets()
+        scope = {
+            "datasets": [d["name"] for d in listed if d.get("name")],
+            "dataset_ids": [str(d["id"]) for d in listed if d.get("id")],
+        }
+        return {field: values for field, values in scope.items() if values}
 
     async def list_datasets(self) -> list[dict[str, Any]]:
         """
@@ -719,7 +735,7 @@ class CogneeClient:
                 # recall is left untouched so it can search the session cache. A
                 # failure to list datasets (e.g. the cloud is unreachable) is left
                 # to propagate rather than silently retrying the same query unscoped.
-                datasets = [d["name"] for d in await self.list_datasets() if d.get("name")]
+                payload.update(await self._visible_dataset_scope())
             if datasets:
                 payload["datasets"] = datasets
             if session_id:
