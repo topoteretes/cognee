@@ -3,7 +3,7 @@
 import asyncio
 import importlib
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 from uuid import uuid4
 
 import httpx
@@ -117,7 +117,8 @@ async def test_marker_is_not_a_hit_and_indexing_state_is_checked(monkeypatch):
     result = await server.recall("query", datasets="project")
     assert result[0].text.startswith("still indexing — 12/40 items processed")
     assert result[0].text.endswith("[system] Graph warming up")
-    fake.get_recall_state.assert_awaited_once_with(["project"])
+    # The caller shares its remaining budget so every hop inside is bounded by it.
+    fake.get_recall_state.assert_awaited_once_with(["project"], deadline=ANY)
 
 
 @pytest.mark.asyncio
@@ -238,7 +239,7 @@ async def test_direct_diagnostics_authorize_before_reading(monkeypatch):
 async def test_diagnostic_deadline_cancels_probe(monkeypatch):
     cancelled = asyncio.Event()
 
-    async def probe(_datasets):
+    async def probe(_datasets, *, deadline=None):
         try:
             await asyncio.Event().wait()
         finally:

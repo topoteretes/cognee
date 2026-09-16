@@ -6,6 +6,7 @@ This module provides a unified interface for interacting with Cognee, supporting
 - API mode: Makes HTTP requests to a running Cognee FastAPI server
 """
 
+import asyncio
 import base64
 import hashlib
 import json
@@ -508,9 +509,16 @@ class CogneeClient:
                 status = await get_pipeline_status(dataset_ids, pipeline_name)
                 return status
 
-    async def list_datasets(self) -> list[dict[str, Any]]:
+    async def list_datasets(self, *, timeout: float | None = None) -> list[dict[str, Any]]:
         """
         List all datasets.
+
+        Parameters
+        ----------
+        timeout : float, optional
+            Read timeout for the API call. Defaults to READ_TIMEOUT_SECONDS.
+            Callers working to a deadline pass what is left of their budget --
+            the default is far longer than a diagnostic caller can afford.
 
         Returns
         -------
@@ -524,7 +532,9 @@ class CogneeClient:
             # used to black-hole this call — see CLO-320).
             endpoint = f"{self.api_url}/api/v1/datasets/"
             response = await self.client.get(
-                endpoint, headers=self._get_headers(), timeout=READ_TIMEOUT_SECONDS
+                endpoint,
+                headers=self._get_headers(),
+                timeout=READ_TIMEOUT_SECONDS if timeout is None else timeout,
             )
             response.raise_for_status()
             return response.json()
@@ -700,15 +710,32 @@ class CogneeClient:
                     "session_id": session_id,
                 }
 
-    async def get_recall_state(self, datasets: list[str] | None = None) -> RecallState:
+    async def get_recall_state(
+        self, datasets: list[str] | None = None, *, deadline: float | None = None
+    ) -> RecallState:
         """Best-effort empty-result diagnostics; never fetch documents or run an LLM.
 
-        The caller bounds the total duration. Only datasets the caller can read
-        are resolved, and these reads are skipped entirely for successful hits.
+        Only datasets the caller can read are resolved, and these reads are
+        skipped entirely for successful hits.
+
+        `deadline` is an ``asyncio`` event-loop timestamp. Every hop is bounded
+        by what is left of it, so the sum of the inner timeouts can never exceed
+        the caller's budget: three sequential calls each defaulting to their own
+        timeout (the first to READ_TIMEOUT_SECONDS) meant an outer wait_for was
+        cancelling work rather than bounding it, and in local mode that
+        cancellation also aborted the graph-count cache write, so every later
+        empty recall re-paid the same abandoned traversal.
         """
+
+        def remaining(minimum: float = 0.2) -> float | None:
+            if deadline is None:
+                return None
+            return max(minimum, deadline - asyncio.get_running_loop().time())
+
         pipelines = ["add_pipeline", "cognify_pipeline", "code_graph_pipeline"]
         if self.use_api:
-            visible = await self.list_datasets()
+            hop = remaining()
+            visible = await self.list_datasets(timeout=hop if hop is not None else 2.0)
             selected = (
                 visible
                 if not datasets
@@ -724,7 +751,7 @@ class CogneeClient:
                 f"{self.api_url}/api/v1/datasets/status/progress",
                 params=params,
                 headers=self._get_headers(),
-                timeout=2.0,
+                timeout=remaining() or 2.0,
             )
             response.raise_for_status()
             progress = response.json()
@@ -735,7 +762,7 @@ class CogneeClient:
                 f"{self.api_url}/api/v1/datasets/graph-summary",
                 params=[("dataset_ids", str(d["id"])) for d in selected],
                 headers=self._get_headers(),
-                timeout=2.0,
+                timeout=remaining() or 2.0,
             )
             response.raise_for_status()
             graphs = response.json()

@@ -103,7 +103,9 @@ def _tool_error_text(prefix: str, error: Exception) -> str:
 _TASK_ERROR_HISTORY = 50
 _task_errors: dict[str, deque[tuple[str, str]]] = {}
 _MAX_UPLOAD_BYTES = 10 * 1024 * 1024
-_RECALL_STATE_TIMEOUT_SECONDS = 2.0
+# Total budget for empty-recall diagnostics. get_recall_state derives every hop's
+# timeout from this, so it bounds the work rather than cancelling it mid-flight.
+_RECALL_STATE_TIMEOUT_SECONDS = 5.0
 
 # Strong references to in-flight background tasks. asyncio's event loop only keeps
 # weak references to tasks, so a fire-and-forget task can be GC'd mid-execution if
@@ -582,8 +584,9 @@ async def recall(
                 empty_state = RecallState("indexing")
             elif not items and empty_state is None:
                 try:
+                    deadline = asyncio.get_running_loop().time() + _RECALL_STATE_TIMEOUT_SECONDS
                     empty_state = await asyncio.wait_for(
-                        cognee_client.get_recall_state(dataset_list),
+                        cognee_client.get_recall_state(dataset_list, deadline=deadline),
                         timeout=_RECALL_STATE_TIMEOUT_SECONDS,
                     )
                 except Exception:
