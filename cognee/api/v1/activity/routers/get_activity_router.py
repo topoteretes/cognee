@@ -68,9 +68,15 @@ def get_activity_router() -> APIRouter:
         only once the row is older than `COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS`.
         A STARTED row from `add_pipeline`, `memify_pipeline`,
         `code_graph_pipeline`, a skills pipeline, `migration_import_pipeline`,
-        or a cognify run started by the SDK, `cognee-cli`, the session bridge,
-        or before this recovery shipped, is never touched by it and stays
-        `STARTED` here indefinitely. `"operation"` rows have no status column.
+        or a cognify run started by the SDK, `cognee-cli`, or before this
+        recovery shipped, is never touched by it and stays `STARTED` here
+        indefinitely. The session bridge is NOT in that list even though it
+        looks like it should be: `remember(session_id=...)` keeps the real
+        origin of whichever surface called it rather than stamping its own,
+        so a bridge-spawned cognify run is swept by that surface exactly like
+        any other run it owns — only a bridge invoked from the SDK or
+        `cognee-cli` stays unreachable, for the same reason those two always
+        are. `"operation"` rows have no status column.
 
         One run is several rows here, not one. The writers
         (`log_pipeline_run_start`/`_complete`/`_error`) always INSERT a new row

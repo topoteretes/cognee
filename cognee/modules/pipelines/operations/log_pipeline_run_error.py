@@ -43,10 +43,17 @@ async def log_pipeline_run_error(
         # second terminal row would not correct the first one, it would just
         # leave two contradictory events for the same run; keep the one that
         # is already there.
+        # The alternative framing ("two contradictory events") undersells
+        # what is lost here: if this run genuinely failed on its own after
+        # recovery pre-closed it, the real cause never reaches the row.
+        # Logging it is the only trace that survives.
         logger.warning(
-            "Skipping duplicate terminal write for pipeline run %s: already %s.",
+            "Skipping duplicate terminal write for pipeline run %s: already %s. "
+            "Discarded error: %s: %s",
             pipeline_run_id,
             existing_terminal_run.status,
+            type(e).__name__,
+            scrub_error_message(e),
         )
         return existing_terminal_run
 

@@ -174,3 +174,58 @@ async def test_api_lifespan_drains_background_tasks_on_shutdown(monkeypatch):
     assert drained["called"] is True
     assert drained["timeout"] == client_module.BACKGROUND_DRAIN_TIMEOUT_SECONDS
     assert finished == ["done"]
+
+
+@pytest.mark.asyncio
+async def test_api_lifespan_starts_and_stops_the_periodic_recovery_sweep(monkeypatch):
+    """The one-shot recovery call at startup only ever gets one attempt: a
+    STARTED row younger than the age floor on this exact boot is skipped and
+    then never revisited until some future restart (SDK-591 review). The
+    lifespan must also start the periodic sweep, and must actually stop it on
+    shutdown rather than leaking a task that outlives the app."""
+    client_module = importlib.import_module("cognee.api.client")
+    recovery_module = importlib.import_module("cognee.modules.cognify.recovery")
+
+    async def _noop(*args, **kwargs):
+        return None
+
+    for module_name, attr in (
+        ("cognee.run_migrations", "run_migrations"),
+        ("cognee.modules.users.methods", "get_default_user"),
+        ("cognee.shared.utils", "close_telemetry_session"),
+    ):
+        monkeypatch.setattr(importlib.import_module(module_name), attr, _noop)
+
+    sweep_calls = []
+
+    async def _fake_recover(owned_origins=None):
+        sweep_calls.append(owned_origins)
+
+    monkeypatch.setattr(recovery_module, "recover_stale_cognify_runs_on_startup", _fake_recover)
+
+    started_task = {}
+    real_start = recovery_module.start_periodic_recovery_sweep
+
+    def spy_start(owned_origins=recovery_module._DEFAULT_OWNED_ORIGINS, interval_seconds=None):
+        # A short interval so the loop actually ticks within the test instead
+        # of only proving a task object was created.
+        task = real_start(owned_origins=owned_origins, interval_seconds=0.01)
+        started_task["task"] = task
+        return task
+
+    # lifespan() does a fresh `from cognee.modules.cognify.recovery import
+    # start_periodic_recovery_sweep` on every call, which resolves against
+    # the recovery module's own namespace, not client_module's — patching
+    # client_module here would silently do nothing.
+    monkeypatch.setattr(recovery_module, "start_periodic_recovery_sweep", spy_start)
+
+    async with client_module.lifespan(client_module.app):
+        # One call from the one-shot startup sweep, then let the periodic
+        # loop tick at least once before the context exits.
+        await asyncio.sleep(0.03)
+
+    assert started_task["task"] is not None
+    # 1 (the one-shot call) + at least 1 periodic tick.
+    assert len(sweep_calls) >= 2
+    # Cancelled by stop_periodic_recovery_sweep on shutdown, not left running.
+    assert started_task["task"].done()

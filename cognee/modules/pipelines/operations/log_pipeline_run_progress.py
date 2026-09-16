@@ -3,6 +3,7 @@ from uuid import UUID
 from sqlalchemy import select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.pipelines.methods import get_terminal_pipeline_run
 from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
 
 
@@ -60,22 +61,11 @@ async def log_pipeline_run_progress(
             # every item's progress tick, and log_pipeline_run_complete/error
             # only run after all ticks are done — but a future caller could
             # break that ordering, so don't assume it here too.
-            terminal_run = (
-                await session.execute(
-                    select(PipelineRun)
-                    .filter(PipelineRun.pipeline_run_id == pipeline_run_id)
-                    .filter(
-                        PipelineRun.status.in_(
-                            [
-                                PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
-                                PipelineRunStatus.DATASET_PROCESSING_ERRORED,
-                            ]
-                        )
-                    )
-                    .order_by(PipelineRun.created_at.desc())
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
+            # Same query get_terminal_pipeline_run runs for the terminal
+            # writers' own idempotency guard — reused here rather than
+            # duplicated, on its own session (this one hasn't written
+            # anything yet on this path, so a second read is harmless).
+            terminal_run = await get_terminal_pipeline_run(pipeline_run_id)
 
             if terminal_run is not None:
                 # The run already finished — inserting a STARTED row now would

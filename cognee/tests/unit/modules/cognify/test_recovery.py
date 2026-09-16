@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -516,6 +517,20 @@ async def test_a_run_just_inside_the_age_floor_is_left_alone(monkeypatch):
     assert close_calls == []
 
 
+def test_is_older_than_threshold_at_exactly_the_floor_is_true():
+    """The one case the "just younger" test above cannot pin: a run exactly
+    as old as the floor. _is_older_than_threshold uses >=, so this must be
+    True — a test that used `threshold - 1` for "left alone" would still
+    pass if the implementation used `>` instead of `>=`, since neither value
+    tells the two apart. This one does."""
+    run = SimpleNamespace(
+        started_at=datetime.now(timezone.utc)
+        - timedelta(seconds=recovery_module._STALE_RUN_MIN_AGE_SECONDS),
+        created_at=None,
+    )
+    assert recovery_module._is_older_than_threshold(run) is True
+
+
 @pytest.mark.asyncio
 async def test_a_run_with_no_timestamp_is_left_alone(monkeypatch):
     """Neither started_at nor created_at present is not evidence of age
@@ -594,3 +609,129 @@ async def test_a_stdio_sessions_run_past_the_age_floor_is_recovered(monkeypatch)
 
     assert len(rollback_calls) == 1
     assert len(close_calls) == 1
+
+
+def test_parse_non_negative_int_falls_back_on_garbage(monkeypatch, caplog):
+    """A typo in an env var this module's own docs tell operators to set
+    must degrade to the default, not crash the process that imports this
+    module at boot (my-python-reviewer finding, SDK-591)."""
+    monkeypatch.setenv("TEST_COGNEE_INT_VAR", "not-a-number")
+    with caplog.at_level("WARNING"):
+        result = recovery_module._parse_non_negative_int("TEST_COGNEE_INT_VAR", 42)
+    assert result == 42
+    assert "not-a-number" in caplog.text
+
+
+def test_parse_non_negative_int_falls_back_on_negative(monkeypatch, caplog):
+    """A negative value would silently disable the floor by making every run
+    look old enough; treat it the same as garbage."""
+    monkeypatch.setenv("TEST_COGNEE_INT_VAR", "-5")
+    with caplog.at_level("WARNING"):
+        result = recovery_module._parse_non_negative_int("TEST_COGNEE_INT_VAR", 42)
+    assert result == 42
+    assert "-5" in caplog.text
+
+
+def test_parse_non_negative_int_accepts_zero(monkeypatch):
+    """Zero is a legitimate value (disables the periodic sweep entirely) and
+    must not be treated as falsy-garbage."""
+    monkeypatch.setenv("TEST_COGNEE_INT_VAR", "0")
+    assert recovery_module._parse_non_negative_int("TEST_COGNEE_INT_VAR", 42) == 0
+
+
+def test_parse_non_negative_int_uses_default_when_unset(monkeypatch):
+    monkeypatch.delenv("TEST_COGNEE_INT_VAR", raising=False)
+    assert recovery_module._parse_non_negative_int("TEST_COGNEE_INT_VAR", 42) == 42
+
+
+@pytest.mark.asyncio
+async def test_periodic_sweep_calls_recovery_on_each_tick(monkeypatch):
+    """The loop must actually re-invoke the sweep on the timer, not just sleep
+    forever — the whole point is to give a row a second chance once it clears
+    the age floor."""
+    calls = []
+
+    async def _fake_recover(owned_origins=None):
+        calls.append(owned_origins)
+
+    monkeypatch.setattr(recovery_module, "recover_stale_cognify_runs_on_startup", _fake_recover)
+
+    sleep_calls = []
+
+    async def _fake_sleep(_seconds):
+        sleep_calls.append(_seconds)
+        if len(sleep_calls) >= 3:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(recovery_module.asyncio, "sleep", _fake_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await recovery_module._periodic_recovery_loop(frozenset({"api"}), 5)
+
+    # sleep, recover, sleep, recover, sleep (raises here) — the 3rd sleep
+    # ends the loop before a 3rd recover call happens.
+    assert calls == [frozenset({"api"})] * 2
+    assert sleep_calls == [5, 5, 5]
+
+
+@pytest.mark.asyncio
+async def test_periodic_sweep_survives_a_failing_iteration(monkeypatch):
+    """One failed sweep must not kill the loop — the next interval should
+    still get its turn."""
+    calls = []
+
+    async def _flaky_recover(owned_origins=None):
+        calls.append(owned_origins)
+        if len(calls) == 1:
+            raise RuntimeError("relational database unreachable")
+
+    monkeypatch.setattr(recovery_module, "recover_stale_cognify_runs_on_startup", _flaky_recover)
+
+    async def _fake_sleep(_seconds):
+        if len(calls) >= 2:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(recovery_module.asyncio, "sleep", _fake_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await recovery_module._periodic_recovery_loop(frozenset({"api"}), 5)
+
+    assert len(calls) == 2
+
+
+def test_start_periodic_recovery_sweep_disabled_returns_none(monkeypatch):
+    """interval_seconds=0 must not schedule a task at all — a caller that
+    checks ``is None`` should never see a task it then has to clean up."""
+    task = recovery_module.start_periodic_recovery_sweep(interval_seconds=0)
+    assert task is None
+
+
+@pytest.mark.asyncio
+async def test_start_and_stop_periodic_recovery_sweep_round_trip(monkeypatch):
+    """The task actually runs on the event loop and stop_ actually ends it —
+    not two functions that merely look like they cooperate."""
+    calls = []
+
+    async def _fake_recover(owned_origins=None):
+        calls.append(owned_origins)
+
+    monkeypatch.setattr(recovery_module, "recover_stale_cognify_runs_on_startup", _fake_recover)
+
+    task = recovery_module.start_periodic_recovery_sweep(
+        owned_origins=frozenset({"api"}), interval_seconds=0.01
+    )
+    assert task is not None
+
+    # Let it tick at least once before stopping.
+    await asyncio.sleep(0.03)
+    await recovery_module.stop_periodic_recovery_sweep(task)
+
+    assert task.cancelled() or task.done()
+    assert len(calls) >= 1
+
+
+@pytest.mark.asyncio
+async def test_stop_periodic_recovery_sweep_is_a_no_op_for_none():
+    """The disabled case from start_ (returns None) must be safe to pass
+    straight into stop_ without a None-check at every call site."""
+    await recovery_module.stop_periodic_recovery_sweep(None)

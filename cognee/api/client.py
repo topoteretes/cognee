@@ -107,9 +107,18 @@ async def lifespan(app: FastAPI):
     from cognee.modules.users.methods import get_default_user
 
     await get_default_user()
-    from cognee.modules.cognify.recovery import recover_stale_cognify_runs_on_startup
+    from cognee.modules.cognify.recovery import (
+        recover_stale_cognify_runs_on_startup,
+        start_periodic_recovery_sweep,
+    )
 
     await recover_stale_cognify_runs_on_startup()
+    # The one-shot call above only gets one attempt per process lifetime: a
+    # row younger than the age floor at this exact boot is skipped and then
+    # never revisited until some future restart. This re-runs the same sweep
+    # on a timer so that row is caught once it clears the floor instead of
+    # staying STARTED for as long as this server happens to stay up.
+    periodic_recovery_task = start_periodic_recovery_sweep()
 
     # Fail the boot, not every later request: a bad IMPROVE_* value (an
     # IMPROVE_STAGES_DISABLED typo, an out-of-range alpha) raises here with the
@@ -122,6 +131,14 @@ async def lifespan(app: FastAPI):
     logger.info("Backend server has started")
 
     yield
+
+    # Stop the periodic sweep before anything it depends on (the relational
+    # engine, below) is torn down under it. Unlike the background tasks
+    # drained next, this loop never finishes on its own — cancelling it is
+    # the only way to end it, not just wait it out.
+    from cognee.modules.cognify.recovery import stop_periodic_recovery_sweep
+
+    await stop_periodic_recovery_sweep(periodic_recovery_task)
 
     # Let in-flight background work (background remember runs, the session
     # improve bridge) finish before the engines below are torn down under it.

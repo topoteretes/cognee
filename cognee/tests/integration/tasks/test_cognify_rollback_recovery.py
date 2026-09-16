@@ -392,11 +392,18 @@ async def test_cognify_startup_recovery_rolls_back_stale_started_runs(clean_test
                 status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
                 dataset_id=dataset.id,
                 run_info={"data": [str(data_id)]},
-                # Recovery does not look at age: a restart is what tells it the
-                # run's process is gone. It does look at origin, and only closes
-                # what a server started, so this row is stamped as one.
+                # Recovery requires both origin and age (see recovery.py): it
+                # only closes what a server started, so this row is stamped
+                # as one, and it only closes a row old enough that a live
+                # sibling process is no longer a likely explanation — hence
+                # backdating both timestamps a recovery could read the age
+                # from. Backdating only created_at would still pass today
+                # (started_at falls back to it), but would silently start
+                # failing if that fallback order ever changed; set both so
+                # this row stays "old" under either.
                 origin="api",
                 created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+                started_at=datetime.now(timezone.utc) - timedelta(hours=2),
             )
         )
         await session.commit()

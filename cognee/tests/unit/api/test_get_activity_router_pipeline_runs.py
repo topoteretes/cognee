@@ -437,10 +437,11 @@ def test_operation_row_has_no_status(monkeypatch):
 
 
 def test_an_old_started_row_is_still_reported_as_started(monkeypatch):
-    """Age is not evidence, and this endpoint derives nothing. A run on a local
-    model can legitimately grind for days, so a STARTED row a year old still
-    reads STARTED; only startup recovery, which knows the process is gone,
-    closes a run."""
+    """This endpoint derives nothing from age — it reports the stored status
+    exactly, a run on a local model can legitimately grind for days, so a
+    STARTED row a year old still reads STARTED here. Only startup recovery
+    closes a run, and even that is a guess (origin + an age floor), never a
+    certainty that the process is actually gone."""
     user_id = uuid4()
     dataset_id = uuid4()
     run = _run(

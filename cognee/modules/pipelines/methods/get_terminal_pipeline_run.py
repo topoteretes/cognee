@@ -39,5 +39,6 @@ async def get_terminal_pipeline_run(pipeline_run_id: UUID) -> PipelineRun | None
                 PipelineRun.status.in_(_TERMINAL_STATUSES),
             )
             .order_by(PipelineRun.created_at.desc())
+            .limit(1)
         )
         return (await session.execute(query)).scalars().first()

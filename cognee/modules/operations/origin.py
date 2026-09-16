@@ -7,8 +7,15 @@ at each surface's entry point:
 - ``"api"`` — per request, by FastAPI middleware in ``cognee/api/client.py``
 - ``"cli"`` — at cognee-cli startup
 - ``"mcp"`` — at MCP server startup
-- ``"background"`` — around system-initiated background work (e.g. the
-  session-bridge improve), via ``operation_origin_scope``
+- ``"background"`` — around a system-initiated write that has no traceable
+  surface of its own to inherit, via ``operation_origin_scope``. The
+  session-bridge improve used to be the example here; it no longer is —
+  ``remember(session_id=...)``'s bridge keeps the real origin of whichever
+  surface called it instead, precisely so a cognify run it starts is
+  attributable and sweepable like any other (see
+  ``cognee.modules.cognify.recovery``). Today's actual user is that
+  recovery sweep's own closing write, marking the row it writes as a system
+  continuation rather than the surface that started the run it is closing.
 - ``"sdk"`` — the default when nothing set it (plain Python SDK usage)
 
 This module must stay import-light (stdlib only) so writers deep in the

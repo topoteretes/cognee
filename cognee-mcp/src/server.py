@@ -1056,6 +1056,7 @@ async def main():
     elif not is_remote:
         logger.info("Skipping DB migrations")
 
+    periodic_recovery_task = None
     if not is_remote:
         # A run this server was executing when it died leaves a STARTED row
         # that nothing else will ever close: the API server sweeps only its
@@ -1069,10 +1070,23 @@ async def main():
         # Guarded like the origin stamp above, since cognee comes from PyPI and
         # may predate either piece.
         try:
-            from cognee.modules.cognify.recovery import recover_stale_cognify_runs_on_startup
+            from cognee.modules.cognify.recovery import (
+                recover_stale_cognify_runs_on_startup,
+                start_periodic_recovery_sweep,
+            )
             from cognee.modules.operations import ORIGIN_MCP
 
-            await recover_stale_cognify_runs_on_startup(owned_origins=frozenset({ORIGIN_MCP}))
+            owned_origins = frozenset({ORIGIN_MCP})
+            await recover_stale_cognify_runs_on_startup(owned_origins=owned_origins)
+            # Only for a persistent server: sse/http keep one process up for
+            # a long time, the same shape as the API, so the one-shot call
+            # above can just as easily miss a row that clears the age floor
+            # hours into that process's life. stdio is one short-lived
+            # process per client — there is no "later" for a timer to catch,
+            # so skip the extra task rather than have it outlive a process
+            # that is about to exit anyway.
+            if args.transport.lower() in ("sse", "http"):
+                periodic_recovery_task = start_periodic_recovery_sweep(owned_origins=owned_origins)
         except ImportError:
             logger.warning(
                 "Installed cognee has no startup recovery that accepts owned "
@@ -1102,6 +1116,14 @@ async def main():
                 # makes a network call on every startup.
                 await mcp.run_stdio_async(show_banner=False)
     finally:
+        if periodic_recovery_task is not None:
+            try:
+                from cognee.modules.cognify.recovery import stop_periodic_recovery_sweep
+
+                await stop_periodic_recovery_sweep(periodic_recovery_task)
+            except ImportError:
+                periodic_recovery_task.cancel()
+
         # Drain background tasks with a bounded timeout so a hung cognify can't
         # block shutdown indefinitely. Then close the HTTP client pool.
         if _background_tasks:

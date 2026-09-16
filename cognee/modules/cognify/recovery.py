@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import os
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -26,16 +28,20 @@ logger = get_logger("cognify.recovery")
 # would say a continuation spawned this work, not which process did, and that
 # is not precise enough to sweep safely: two different surfaces' bridges would
 # collide under one shared origin the same way two API replicas collide under
-# "api", except with no way to even ask "how old is this" separate the cases
-# it actually needs it (github.com/topoteretes/cognee/pull/4983#discussion_r4004955302
-# is what this reasoning replaces — its premise, that the session bridge never
-# reaches cognify_pipeline, was wrong: cognify_session calls cognee.cognify()
-# directly). remember()'s session bridge no longer stamps ORIGIN_BACKGROUND
-# for exactly that reason: the bridged run keeps the real origin of whichever
-# surface started the outer remember() call, so that surface's own sweep
-# closes it like any other run it owns. Nothing in this codebase stamps
-# ORIGIN_BACKGROUND on a pipeline_runs row today; it stays defined for a
-# future continuation that truly has no traceable surface of its own.
+# "api", except with no way for the age floor to separate the cases either,
+# since both bridges could be genuinely young at once
+# (github.com/topoteretes/cognee/pull/4983#discussion_r4004955302 is what this
+# reasoning replaces — its premise, that the session bridge never reaches
+# cognify_pipeline, was wrong: cognify_session calls cognee.cognify()
+# directly). remember()'s session bridge no longer stamps ORIGIN_BACKGROUND on
+# the run it starts, for exactly that reason: the bridged run keeps the real
+# origin of whichever surface started the outer remember() call, so that
+# surface's own sweep closes it like any other run it owns. This module's own
+# closing write is the one place ORIGIN_BACKGROUND is still stamped today (see
+# the `operation_origin_scope` call below): it marks the ERRORED row recovery
+# itself writes as a system continuation, not the STARTED row of a run this
+# sweep would then need to own. It stays defined for a future writer that
+# truly has no traceable surface of its own.
 _DEFAULT_OWNED_ORIGINS = frozenset({ORIGIN_API})
 
 _RECOVER_UNATTRIBUTED = os.getenv("COGNEE_RECOVER_UNATTRIBUTED_RUNS", "false").lower() in (
@@ -43,6 +49,38 @@ _RECOVER_UNATTRIBUTED = os.getenv("COGNEE_RECOVER_UNATTRIBUTED_RUNS", "false").l
     "1",
     "yes",
 )
+
+
+def _parse_non_negative_int(env_var: str, default: int) -> int:
+    """A malformed or negative value falls back to ``default`` with a logged
+    warning instead of crashing the whole process at import time. This module
+    is imported from the API's lifespan and the MCP server's startup; a typo
+    an operator makes in a var this module itself tells them to set (see
+    .env.template) should degrade, not take the boot down with a bare
+    ``ValueError``."""
+    raw = os.getenv(env_var)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning(
+            "%s=%r is not an integer; using the default of %d seconds.",
+            env_var,
+            raw,
+            default,
+        )
+        return default
+    if value < 0:
+        logger.warning(
+            "%s=%d is negative; using the default of %d seconds.",
+            env_var,
+            value,
+            default,
+        )
+        return default
+    return value
+
 
 # Origin alone cannot tell a dead process's row from a live sibling's: a
 # rolling deploy, or the Helm chart's default update strategy, boots a new
@@ -55,7 +93,22 @@ _RECOVER_UNATTRIBUTED = os.getenv("COGNEE_RECOVER_UNATTRIBUTED_RUNS", "false").l
 # never mistaken for an abandoned run. The two conditions are independent:
 # origin says whose row this could be, age says enough time has passed that
 # "still running" is no longer the likely explanation.
-_STALE_RUN_MIN_AGE_SECONDS = int(os.getenv("COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS", "3600"))
+_STALE_RUN_MIN_AGE_SECONDS = _parse_non_negative_int(
+    "COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS", 3600
+)
+
+# The age floor above protects against a live sibling, but paired with a
+# sweep that only ever runs once at startup it recreates the bug this file
+# exists to fix: a process that dies and is restarted within the floor (the
+# common case — a supervisor restarting a crashed container in seconds) has
+# its STARTED row skipped on that boot, and nothing sweeps again until some
+# future restart, which for a long-running server may be weeks away. This
+# periodic re-sweep is what actually bounds "stuck": a row skipped for being
+# too young at T is caught at the next interval once it clears the floor,
+# instead of waiting for a restart that may not come.
+_PERIODIC_SWEEP_INTERVAL_SECONDS = _parse_non_negative_int(
+    "COGNEE_RECOVER_SWEEP_INTERVAL_SECONDS", 900
+)
 
 
 def _is_older_than_threshold(pipeline_run) -> bool:
@@ -112,7 +165,10 @@ async def recover_stale_cognify_runs_on_startup(
     process identity that can be checked rather than guessed), but it turns
     "certain to eventually roll back a live sibling" into "practically never
     does", which is the honest bar a restart-triggered sweep can clear without
-    one.
+    one. It does mean a single call to this function can miss a row that is
+    genuinely dead but younger than the floor — ``start_periodic_recovery_sweep``
+    exists so that miss is bounded to one interval instead of however long
+    this process happens to stay up before its next restart.
 
     Rows predating the origin stamp carry NULL, so they cannot be attributed
     either way and are skipped regardless of age. That leaves a deployment
@@ -126,11 +182,14 @@ async def recover_stale_cognify_runs_on_startup(
     that one.
 
     Every long-lived surface calls this for itself: the API from its lifespan,
-    the MCP server from its own startup. What stays unreachable is a run a
-    user's own process started, an SDK script or a `cognee-cli` invocation, and
-    that is deliberate. Those processes come and go without anyone observing
-    them, so a booting server cannot tell a dead one from a live one, and the
-    wrong guess deletes a running job's graph. Closing those needs a liveness
+    the MCP server from its own startup, both also starting
+    ``start_periodic_recovery_sweep`` so a row too young to close on this
+    boot still gets closed once it clears the age floor rather than waiting
+    for the next restart. What stays unreachable is a run a user's own
+    process started, an SDK script or a `cognee-cli` invocation, and that is
+    deliberate. Those processes come and go without anyone observing them, so
+    a booting server cannot tell a dead one from a live one, and the wrong
+    guess deletes a running job's graph. Closing those needs a liveness
     signal on the row, not a wider filter here.
 
     Only runs whose latest status is ``DATASET_PROCESSING_STARTED`` are
@@ -166,6 +225,58 @@ async def recover_stale_cognify_runs_on_startup(
 
     with operation_origin_scope(ORIGIN_BACKGROUND):
         await _close_abandoned_runs(recovery_candidates, db_engine)
+
+
+async def _periodic_recovery_loop(owned_origins: frozenset[str], interval_seconds: int) -> None:
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            await recover_stale_cognify_runs_on_startup(owned_origins)
+        except Exception:
+            # The startup call already catches and logs internally; this is
+            # the outer guard against a bug in this loop itself (e.g. a
+            # future edit that lets an exception past that internal catch)
+            # taking the whole periodic task down silently.
+            logger.exception("Periodic cognify recovery sweep failed; retrying next interval.")
+
+
+def start_periodic_recovery_sweep(
+    owned_origins: frozenset[str] = _DEFAULT_OWNED_ORIGINS,
+    interval_seconds: int | None = None,
+) -> asyncio.Task | None:
+    """Re-run the startup sweep on a timer for as long as this process lives.
+
+    The startup call alone only ever gets one attempt per process lifetime.
+    Paired with the age floor, that one attempt can lose: a row younger than
+    the floor at boot is skipped and then never looked at again until some
+    future restart, which is exactly the "stuck forever" bug this file exists
+    to fix. This closes that gap without adding a new liveness mechanism —
+    it is the same origin+age sweep, just given more than one chance to
+    outlive the floor.
+
+    Callers own the returned task's lifecycle: cancel and await it (see
+    ``stop_periodic_recovery_sweep``) during shutdown, the same way the
+    startup call is already the caller's to await. Returns ``None`` when
+    ``COGNEE_RECOVER_SWEEP_INTERVAL_SECONDS`` (or ``interval_seconds``) is 0,
+    which disables the loop entirely — useful for short-lived processes and
+    tests that do not want a timer outliving them.
+    """
+    interval = _PERIODIC_SWEEP_INTERVAL_SECONDS if interval_seconds is None else interval_seconds
+    if interval <= 0:
+        return None
+    return asyncio.create_task(_periodic_recovery_loop(owned_origins, interval))
+
+
+async def stop_periodic_recovery_sweep(task: asyncio.Task | None) -> None:
+    """Cancel and await the task ``start_periodic_recovery_sweep`` returned.
+
+    A no-op when ``task`` is None (the loop was disabled) or already done.
+    """
+    if task is None or task.done():
+        return
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
 
 
 async def _close_abandoned_runs(recovery_candidates, db_engine) -> None:
