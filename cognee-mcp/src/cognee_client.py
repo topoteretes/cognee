@@ -39,6 +39,10 @@ logger = get_logger()
 # GET would otherwise freeze the caller for a full 5 minutes.
 READ_TIMEOUT_SECONDS = 30.0
 
+# Authentication schemes accepted for API mode, by --api-auth-scheme or
+# COGNEE_API_AUTH_SCHEME.
+SUPPORTED_AUTH_SCHEMES = frozenset({"bearer", "x-api-key"})
+
 
 def _default_recall_system_prompt() -> str | None:
     """Return the server-side default synthesis prompt for recall, if configured.
@@ -94,6 +98,15 @@ class CogneeClient:
         self.api_token = api_token
         resolved_scheme = api_auth_scheme or os.environ.get("COGNEE_API_AUTH_SCHEME")
         self.api_auth_scheme = resolved_scheme.lower().strip() if resolved_scheme else None
+        # argparse validates --api-auth-scheme, but COGNEE_API_AUTH_SCHEME reaches
+        # here unchecked: a typo would otherwise fall through to Bearer and surface
+        # as a 401 from the API instead of naming the misconfigured variable.
+        if self.api_auth_scheme is not None and self.api_auth_scheme not in SUPPORTED_AUTH_SCHEMES:
+            raise ValueError(
+                f"Unsupported API auth scheme: {resolved_scheme!r}. "
+                f"Expected one of {', '.join(sorted(SUPPORTED_AUTH_SCHEMES))} "
+                "(set --api-auth-scheme or COGNEE_API_AUTH_SCHEME)."
+            )
         self.use_api = bool(api_url)
 
         # Extract tenant ID from tenant URL pattern: tenant-<uuid>.*.cognee.ai
