@@ -702,6 +702,60 @@ class PostgresDemoAdapter(GraphDBInterface):
             for row in result.mappings().all()
         ]
 
+    # Bound the aggregate to twice this many endpoint rows from one edge sample.
+    _SEED_SAMPLE_ROWS = 200_000
+
+    async def get_top_degree_node_ids(self, top_k: int) -> list[str]:
+        """Approximate degree seeds from one bounded, materialized edge sample.
+
+        An exact aggregate on the reported 5.59M-node / 35.6M-edge graph took
+        57 seconds and spilled about 8.5 GB to temporary storage. Sampling
+        bounds the aggregate without materializing the full graph in Python.
+
+        The physical-prefix sample is not random: ingestion appends edges, so
+        it can systematically miss recent hubs and stay anchored to early data
+        as the graph grows. Both endpoints come from the SAME materialized
+        sample. This is bounded approximate degree, not a freshness guarantee.
+        A limited ID-only query fills sparse samples, including isolated nodes.
+        """
+        if top_k < 1:
+            raise ValueError("top_k must be >= 1")
+
+        async with self.sessionmaker() as session:
+            result = await session.execute(
+                text(
+                    """
+                    WITH sampled_edges AS MATERIALIZED (
+                        SELECT source_id, target_id FROM graph_edge LIMIT :sample
+                    )
+                    SELECT node_id
+                      FROM (
+                            SELECT target_id AS node_id FROM sampled_edges
+                             UNION ALL
+                            SELECT source_id AS node_id FROM sampled_edges
+                           ) endpoints
+                     GROUP BY node_id
+                     ORDER BY count(*) DESC, node_id
+                     LIMIT :top_k
+                    """
+                ),
+                {"sample": self._SEED_SAMPLE_ROWS, "top_k": top_k},
+            )
+            seed_ids = [str(row[0]) for row in result.all()]
+            if len(seed_ids) < top_k:
+                # Include isolated nodes when the edge sample cannot fill the
+                # view. Fetch only missing ids, never full nodes or degrees.
+                # ANY([]) intentionally matches nothing, so NOT includes every
+                # node on an edgeless graph; asyncpg infers the array from id.
+                result = await session.execute(
+                    text(
+                        "SELECT id FROM graph_node WHERE NOT (id = ANY(:seed_ids)) LIMIT :remaining"
+                    ),
+                    {"seed_ids": seed_ids, "remaining": top_k - len(seed_ids)},
+                )
+                return seed_ids + [str(row[0]) for row in result.all()]
+            return seed_ids
+
     async def get_graph_data(
         self,
     ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]:
