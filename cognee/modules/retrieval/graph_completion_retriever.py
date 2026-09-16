@@ -143,7 +143,7 @@ class GraphCompletionRetriever(BaseRetriever):
             # nothing. A populated graph with no matching triplets still
             # yields an empty result below — that is a normal miss.
             raise NoDataError(
-                "The knowledge graph is empty. Add data and run cognify before searching."
+                "The knowledge graph is empty. Ingest data through Cognee before searching."
             )
 
         triplets = await self.get_triplets(query, query_batch)
