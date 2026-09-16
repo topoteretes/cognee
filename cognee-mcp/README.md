@@ -596,6 +596,32 @@ forget(dataset="main_dataset")
 ```
 
 
+### Select an uploaded ontology for a write
+
+Pass `ontology_key` to `remember` to ground permanent-memory extraction with one
+or more previously uploaded OWL ontologies:
+
+```python
+remember(data="Alice works at Acme.", dataset_name="workspace_a", ontology_key="workspace_a_v2")
+remember(
+    data="Acme develops software.",
+    ontology_key=["organizations", "software"],
+    background=True,
+)
+```
+
+In API mode, upload the ontologies first through `POST /api/v1/ontologies` using
+the same authenticated user as the MCP server. Keys are sent as repeated
+`ontology_key` form fields. In local mode, keys resolve through `OntologyService`
+in the default user's local ontology store; remote uploads are not copied locally.
+Unknown or inaccessible keys fail the write. Background failures are reported by
+`cognify_status`.
+
+Omitting `ontology_key` (or passing an empty list) preserves the configured
+server ontology, including `ONTOLOGY_FILE_PATH`. Ontology selection is only for
+permanent writes: combining a nonempty key with `session_id` returns an error
+because session-cache writes do not perform extraction.
+
 ## Development and Debugging
 
 ### Debugging
@@ -671,24 +697,3 @@ We are committed to making open source an enjoyable and respectful experience fo
 
 [![Star History Chart](https://api.star-history.com/svg?repos=topoteretes/cognee&type=Date)](https://star-history.com/#topoteretes/cognee&Date)
 
-### Select an uploaded ontology for a write
-
-Pass `ontology_key` to `remember` to ground permanent-memory extraction with one
-or more previously uploaded OWL ontologies:
-
-```python
-remember(data="Alice works at Acme.", dataset_name="workspace_a", ontology_key="workspace_a_v2")
-remember(data="Acme develops software.", ontology_key=["organizations", "software"], background=True)
-```
-
-In API mode, upload the ontologies first through `POST /api/v1/ontologies` using
-the same authenticated user as the MCP server. Keys are sent as repeated
-`ontology_key` form fields. In local mode, keys resolve through `OntologyService`
-in the default user's local ontology store; remote uploads are not copied locally.
-Unknown or inaccessible keys fail the write. Background failures are reported by
-`cognify_status`.
-
-Omitting `ontology_key` (or passing an empty list) preserves the configured
-server ontology, including `ONTOLOGY_FILE_PATH`. Ontology selection is only for
-permanent writes: combining a nonempty key with `session_id` returns an error
-because session-cache writes do not perform extraction.

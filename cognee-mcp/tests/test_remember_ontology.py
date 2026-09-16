@@ -96,7 +96,11 @@ async def test_local_resolves_for_default_user(monkeypatch, missing):
         assert [s.read() for s in streams] == ["first OWL", "second OWL"]
         kwargs = client.cognee.remember.call_args.kwargs
         assert kwargs["config"]["ontology_config"]["ontology_resolver"] is resolver.return_value
-        assert kwargs["user"] is user
+        # The user is deliberately NOT pinned on the call: remember() resolves it to
+        # get_default_user() itself, so passing it only when an ontology was requested
+        # would give the same tool call two user-resolution paths. The lookup below is
+        # what has to agree with the write, and it does.
+        assert "user" not in kwargs
     lookup.assert_called_once_with(["one", "two"], user)
 
 

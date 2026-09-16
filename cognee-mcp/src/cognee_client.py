@@ -673,11 +673,20 @@ class CogneeClient:
                     from io import StringIO
 
                     from cognee.api.v1.ontologies.ontologies import OntologyService
+                    from cognee.modules.engine.operations.setup import setup
                     from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import (
                         RDFLibOntologyResolver,
                     )
                     from cognee.modules.users.methods import get_default_user
 
+                    # Look the ontology up under the same user the write will use.
+                    # remember() resolves `user` to get_default_user() when it is not
+                    # passed, so resolving it here and NOT pinning it on the call keeps
+                    # one user-resolution path; pinning it only on this branch gave the
+                    # same tool call two, differing on an unrelated argument.
+                    # setup() first -- get_default_user() queries the database, and
+                    # remember() is careful to initialise before resolving a user.
+                    await setup()
                     user = await get_default_user()
                     contents = OntologyService().get_ontology_contents(ontology_keys, user)
                     ontology_config = {
@@ -702,7 +711,6 @@ class CogneeClient:
                 }
                 if ontology_config is not None:
                     kwargs["config"] = {"ontology_config": ontology_config}
-                    kwargs["user"] = user
                 if session_id:
                     kwargs["session_id"] = session_id
                 if custom_prompt:
