@@ -119,3 +119,26 @@ async def extract_user_sessions(
     except Exception as e:
         logger.exception("Error extracting user sessions")
         raise CogneeSystemError(message=f"Failed to extract user sessions: {e!s}", log=False)
+
+
+async def has_new_session_qa(session_manager, user_id: str, session_ids: list[str]) -> bool:
+    """Whether any session holds Q&A entries the persist watermark hasn't covered.
+
+    The improve stage's pre-check: when False, the stage reports
+    ``already_completed`` without running the memify pipeline at all — an
+    unconditional pipeline run logs a completed ``memify_pipeline`` row even
+    with nothing new, which the enrichment change-check would count as a graph
+    write. Mirrors the extraction loop above, including its stale-watermark
+    rule (a watermark above the entry count means the session was rebuilt:
+    everything is pending).
+    """
+    for session_id in session_ids:
+        qa_data = await session_manager.get_session(
+            user_id=user_id, session_id=session_id, formatted=False
+        )
+        if not qa_data:
+            continue
+        persisted_count = await get_persisted_qa_count(session_manager, user_id, session_id)
+        if persisted_count != len(qa_data):
+            return True
+    return False
