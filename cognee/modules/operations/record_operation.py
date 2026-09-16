@@ -126,17 +126,19 @@ class OperationContext:
         """Override the outcome recorded for a body that exits cleanly."""
         self.outcome = outcome
 
-    def merge_run_info(self, run_info: dict) -> None:
+    def merge_run_info(self, run_info: dict, *, allow_overwrite: bool = False) -> None:
         """Merge a payload into the row's ``run_info`` column, append-style.
 
         Writers namespace their entries by key (improve stages stamp under
         their stage name), so a merge never drops an earlier writer's entry.
         Overwriting an existing key is legal (last writer wins) but logged:
-        it means two writers chose the same namespace.
+        it means two writers chose the same namespace — unless the caller
+        says the overwrite is intended (``allow_overwrite``: an improve rerun
+        pass refreshing its own stage's stamp).
         """
         existing = self.run_info or {}
         clobbered = [key for key in run_info if key in existing and existing[key] != run_info[key]]
-        if clobbered:
+        if clobbered and not allow_overwrite:
             logger.warning(
                 "record_operation: run_info keys overwritten on %s record: %s",
                 self.operation_name,

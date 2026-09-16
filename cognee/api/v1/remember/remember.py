@@ -1827,6 +1827,15 @@ async def _remember_inner(
                                 "remember: session improve reported errors (non-fatal): %s",
                                 result.improve_error,
                             )
+                        elif result.improve.lock_held and result.improve.rerun_requested:
+                            # The holder of this session runs one more pass
+                            # before releasing, so this entry is bridged by it;
+                            # the debounce window stands.
+                            logger.info(
+                                "remember: session '%s' bridge deferred to the in-flight "
+                                "improve, which runs one more pass",
+                                session_id,
+                            )
                         elif result.improve.lock_held:
                             # Nothing was persisted — never log this as bridged.
                             # Refund the debounce window so the next remember()
