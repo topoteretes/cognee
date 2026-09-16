@@ -110,7 +110,11 @@ async def _import_cogx_archives(
 def get_remember_router() -> APIRouter:
     router = APIRouter()
 
-    @router.post("", response_model=dict)
+    @router.post(
+        "",
+        summary="Remember: ingest data and build the knowledge graph (add + cognify + improve)",
+        response_model=dict,
+    )
     @log_usage(function_name="POST /v1/remember", log_type="api_endpoint")
     async def remember(
         data: list[OptionalUploadFile] = File(default=None),
@@ -649,7 +653,11 @@ def get_remember_router() -> APIRouter:
         )
         skill_improvement: dict | None = None
 
-    @router.post("/entry", response_model=dict)
+    @router.post(
+        "/entry",
+        summary="Remember a session entry (QA, trace, feedback) into the session cache",
+        response_model=dict,
+    )
     @log_usage(function_name="POST /v1/remember/entry", log_type="api_endpoint")
     async def remember_entry(
         payload: RememberEntryRequest,

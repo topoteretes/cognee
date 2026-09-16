@@ -155,7 +155,7 @@ Improve & Memify are virtually the same, though. So no reason not to use improve
 ### Key Architectural Patterns
 
 #### 1. Pipeline-Based Processing
-All data flows through task-based pipelines (`cognee/modules/pipelines/`). Tasks are composable units that can run sequentially or in parallel. Example pipeline tasks: `classify_documents`, `extract_graph_from_data`, `add_data_points`.
+All data flows through task-based pipelines (`cognee/modules/pipelines/`). Tasks are composable units that can run sequentially or in parallel. Example pipeline tasks: `classify_documents`, `extract_graph_from_data`, `add_data_points`. The runner semantics (a task's `batch_size` batches the *previous* task's output, `enriches`, `ctx` injection, and which of the two `run_pipeline` functions to import) are in the `cognee/modules/pipelines/__init__.py` docstring; the index of all task implementations is `cognee/tasks/README.md`.
 
 #### 2. Interface-Based Database Adapters
 Multiple backends are supported through adapter interfaces:
@@ -277,11 +277,17 @@ Available search types (from `cognee/modules/search/types/SearchType.py`), passe
 - **FEELING_LUCKY** - Automatic search type selection
 - **CODING_RULES** - Code-specific search rules
 - **SKILLS** - Semantic discovery of skill playbooks (metadata-only, no LLM; requires exactly one dataset)
+- **GRAPH_COMPLETION_DECOMPOSITION** - Splits the question into focused sub-queries, then runs graph completion over the merged context
+- **AGENTIC_COMPLETION** - Multi-step LLM loop that can load `skills` and call `tools`; bounded by `max_iter`
+- **CODE** - Deterministic operations over the code graph via `code_query` (no LLM); see "Code Files" below
+- **GRAPH_REPORT** - Graph insight report: hub nodes, cross-node-set connections, edge provenance, suggested questions
 
 `recall()` picks one of these automatically when `query_type` is omitted. The CLI is narrower: `cognee-cli recall --query-type` accepts only the choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES` and defaults to `HYBRID_COMPLETION`; the rest are SDK-only.
 
 Key files:
 - `cognee/api/v1/search/search.py`
+- `cognee/modules/retrieval/README.md` — SearchType → retriever class table (kept in sync by a unit test)
+- `cognee/modules/search/methods/get_search_type_retriever_instance.py` — the registry itself
 - `cognee/modules/retrieval/context_providers/TripletSearchContextProvider.py`
 - `cognee/modules/search/types/SearchType.py`
 
@@ -601,7 +607,7 @@ SYSTEM_ROOT_DIRECTORY="s3://your-bucket/cognee/system"
 1. **New Task Type**: Create task function in `cognee/tasks/`, return Task object, register in pipeline
 2. **New Database Backend**: Implement `GraphDBInterface` or `VectorDBInterface` in `cognee/infrastructure/databases/`
 3. **New LLM Provider**: Add configuration in LLM config (uses litellm)
-4. **New Document Processor**: Extend loaders in `cognee/modules/data/processing/`
+4. **New Document Processor**: Implement `LoaderInterface` in `cognee/infrastructure/loaders/` and register it in `supported_loaders.py` there
 5. **New Search Type**: Add to `SearchType` enum and implement retriever in `cognee/modules/retrieval/`
 6. **Custom Graph Models**: Define Pydantic models extending `DataPoint` in your code
 
@@ -660,7 +666,7 @@ this rule applies only to internal PRs.
 
 ## Testing Strategy
 
-Tests are organized in `cognee/tests/`:
+Tests are organized in `cognee/tests/` (layout, credentials per folder, and how to run without API keys: `cognee/tests/README.md`; `pytest` with no path collects only this tree):
 - `unit/` - Unit tests for individual modules
 - `integration/` - Full pipeline integration tests
 - `e2e/` - Full-stack end-to-end suites run per backend in CI (e.g. `e2e/incremental_update/` runs on LadybugDB + LanceDB, Postgres graph + PGVector, and Neo4j + LanceDB)
@@ -723,7 +729,7 @@ For production deployments, review and tighten these settings.
 
 ### Creating a Custom Pipeline Task
 ```python
-from cognee.modules.pipelines.tasks.Task import Task
+from cognee.modules.pipelines.tasks.task import Task
 
 
 async def my_custom_task(data):
@@ -747,10 +753,9 @@ vector_engine = await get_vector_engine_async()
 
 ### Using LLM Gateway
 ```python
-from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
-llm_client = get_llm_client()
-response = await llm_client.acreate_structured_output(
+response = await LLMGateway.acreate_structured_output(
     text_input="Your prompt", system_prompt="System instructions", response_model=YourPydanticModel
 )
 ```
