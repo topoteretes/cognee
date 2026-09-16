@@ -227,7 +227,7 @@ class ImproveResult(BaseModel):
             return "running"
         if self.error or any(stage.status == "errored" for stage in self.all_stage_results()):
             return "errored"
-        if self.stages and all(stage.status == "skipped" for stage in self.stages):
+        if self.stages and all(stage.status == "skipped" for stage in self.all_stage_results()):
             return "skipped"
         return "completed"
 

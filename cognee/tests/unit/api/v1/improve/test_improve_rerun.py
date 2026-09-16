@@ -196,3 +196,31 @@ async def test_lock_held_result_serializes_the_rerun_fields(harness):
     assert holder_body["rerun_requested"] is False
     assert len(holder_body["rerun_passes"]) == 1
     assert [s["stage"] for s in holder_body["rerun_passes"][0]] == ["slow", "after"]
+
+
+@pytest.mark.asyncio
+async def test_work_done_only_in_a_rerun_pass_makes_the_run_completed_not_skipped(harness):
+    """First pass gated everything, the rerun pass did real work: the run is completed
+    and its row is not a noop (so the stage-8 watermark scan does not ignore it)."""
+    calls = []
+    session_key = f"session:{harness.user.id}:chat_1"
+
+    async def late_worker(_inputs):
+        calls.append("late")
+        if len(calls) == 1:
+            await session_lock.request_improve_rerun_many([session_key])
+            return StageResult.skipped("late", "no_pending_work_yet")
+        return StageResult.completed("late", items=1)
+
+    harness.use_stages([FakeStage("late", run=late_worker)])
+
+    result = await harness.improve(session_ids=["chat_1"])
+
+    assert calls == ["late", "late"]
+    assert result.stages[0].status == "skipped"
+    assert result.rerun_passes[0][0].status == "completed"
+    assert result.status == "completed"
+    assert not result.lock_held
+    from cognee.modules.pipelines.models import OperationOutcome
+
+    assert harness.operations[-1].outcome is not OperationOutcome.NOOP
