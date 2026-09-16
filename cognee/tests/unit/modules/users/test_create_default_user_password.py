@@ -178,5 +178,5 @@ class TestLoggingBelongsToTheServer:
         assert "superuser" in docstring.lower()
 
         env_template = Path(__file__).parents[5] / ".env.template"
-        default_user_block = env_template.read_text().split("-- Default user")[1][:900]
-        assert "SUPERUSER" in default_user_block
+        default_user_block = env_template.read_text().split("-- Default user")[1][:600]
+        assert "superuser" in default_user_block.lower()

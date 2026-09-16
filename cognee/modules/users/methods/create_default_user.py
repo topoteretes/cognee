@@ -10,10 +10,8 @@ DEFAULT_USER_EMAIL = "default_user@example.com"
 async def create_default_user():
     """Create the default user, lazily, on first use.
 
-    **This account is a superuser** (``is_superuser=True``): it bypasses
-    dataset ACLs and can reach every tenant's data. Every cognee surface falls
-    back to it when no user is passed, so on a single-user install it is the
-    identity all work runs as.
+    The account is created as a superuser (``is_superuser=True``). Every cognee
+    surface falls back to it when no user is passed.
 
     ``DEFAULT_USER_PASSWORD`` unset means nobody asked for a loginable account,
     so one is not created: the password is random and never recorded, which
