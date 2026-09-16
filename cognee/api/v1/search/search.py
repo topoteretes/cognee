@@ -71,31 +71,6 @@ async def search(
     embedding_config: EmbeddingConfig | None = None,
     code_query: dict[str, Any] | None = None,
 ) -> list[SearchResult]:
-    context_format = ContextFormat.parse(context_format)
-    if neighborhood_depth is not None and (
-        not isinstance(neighborhood_depth, int) or neighborhood_depth < 1
-    ):
-        raise CogneeValidationError(
-            message="neighborhood_depth must be a positive integer.",
-            name="InvalidNeighborhoodDepth",
-        )
-    if neighborhood_seed_top_k is not None and (
-        not isinstance(neighborhood_seed_top_k, int) or neighborhood_seed_top_k < 1
-    ):
-        raise CogneeValidationError(
-            message="neighborhood_seed_top_k must be a positive integer.",
-            name="InvalidNeighborhoodSeedTopK",
-        )
-    if max_iter is not None and (not isinstance(max_iter, int) or max_iter < 1):
-        raise CogneeValidationError(
-            message="max_iter must be a positive integer.",
-            name="InvalidMaxIter",
-        )
-    if code_query is not None and query_type is not SearchType.CODE:
-        raise CogneeValidationError(
-            message="code_query requires query_type=SearchType.CODE.",
-            name="InvalidCodeSearchConfig",
-        )
     """
     Search and query the knowledge graph for insights, information, and connections.
 
@@ -251,6 +226,31 @@ async def search(
         - GRAPH_DATABASE_PROVIDER: Must match what was used during cognify
 
     """
+    context_format = ContextFormat.parse(context_format)
+    if neighborhood_depth is not None and (
+        not isinstance(neighborhood_depth, int) or neighborhood_depth < 1
+    ):
+        raise CogneeValidationError(
+            message="neighborhood_depth must be a positive integer.",
+            name="InvalidNeighborhoodDepth",
+        )
+    if neighborhood_seed_top_k is not None and (
+        not isinstance(neighborhood_seed_top_k, int) or neighborhood_seed_top_k < 1
+    ):
+        raise CogneeValidationError(
+            message="neighborhood_seed_top_k must be a positive integer.",
+            name="InvalidNeighborhoodSeedTopK",
+        )
+    if max_iter is not None and (not isinstance(max_iter, int) or max_iter < 1):
+        raise CogneeValidationError(
+            message="max_iter must be a positive integer.",
+            name="InvalidMaxIter",
+        )
+    if code_query is not None and query_type is not SearchType.CODE:
+        raise CogneeValidationError(
+            message="code_query requires query_type=SearchType.CODE.",
+            name="InvalidCodeSearchConfig",
+        )
     agentic_overrides = {
         "skills": skills,
         "tools": tools,

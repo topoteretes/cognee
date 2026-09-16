@@ -24,6 +24,11 @@ class OperationOutcome(str, enum.Enum):
 
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    # A terminal row for a call that ran nothing: improve records it when a
+    # lost lock claim (or an all-skipped run) means no stage executed, so
+    # readers that gate on "succeeded" — the stage-8 improve watermark —
+    # never treat the no-op as work that happened.
+    NOOP = "noop"
 
 
 class PipelineRun(Base):
@@ -69,7 +74,7 @@ class PipelineRun(Base):
     operation_name = Column(String, index=True)
     started_at = Column(DateTime(timezone=True))
     ended_at = Column(DateTime(timezone=True))
-    outcome = Column(String, index=True)  # OperationOutcome values: "succeeded" / "failed"
+    outcome = Column(String, index=True)  # OperationOutcome values: "succeeded" / "failed" / "noop"
     error_class = Column(String)  # exception class name, e.g. "DatasetNotFoundError"
     tokens_in = Column(Integer)  # NULL = not measured; 0 = measured zero
     tokens_out = Column(Integer)
