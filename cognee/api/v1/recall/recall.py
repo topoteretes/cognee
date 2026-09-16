@@ -925,7 +925,9 @@ async def recall(
                 tagged: list[RecallResponse] = []
                 for payload in code_results:
                     completion = getattr(payload, "completion", None)
-                    if isinstance(completion, dict) and completion.get("seed_not_found"):
+                    if getattr(payload, "error", None) or (
+                        isinstance(completion, dict) and completion.get("seed_not_found")
+                    ):
                         # Multi-dataset searches soften per-dataset seed misses
                         # into marker payloads; they carry no facts, so drop
                         # them here for the same reason as the except above.

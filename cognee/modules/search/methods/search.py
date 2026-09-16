@@ -400,10 +400,14 @@ async def search_in_datasets_context(
         try:
             return await dataset_search
         except CodeSeedNotFoundError as error:
+            # ``error`` is the one place a caller reads a dataset's failure; the
+            # completion marker is the shape this case shipped with and stays
+            # for callers that already parse it.
             return SearchResultPayload(
                 result_object=None,
                 context=None,
                 completion={"seed_not_found": True, "error": str(error)},
+                error=str(error),
                 search_type=query_type,
                 only_context=False,
                 dataset_name=dataset.name,
@@ -497,7 +501,13 @@ async def search_in_datasets_context(
 
         tasks.append(_search_without_context())
 
-    return _collect_dataset_results(await asyncio.gather(*tasks, return_exceptions=True))
+    return _collect_dataset_results(
+        await asyncio.gather(*tasks, return_exceptions=True),
+        query_type=query_type,
+        query_text=query_text,
+        only_context=only_context,
+        context_format=context_format,
+    )
 
 
 def _prompt_preview_fields(search_result) -> dict:
@@ -554,27 +564,31 @@ def _no_data_reason(error: NoDataError, graph_is_empty: bool, data_item_count: i
     return error.message
 
 
-def _collect_dataset_results(outcomes: list) -> list[SearchResultPayload]:
-    """Turn the fan-out's per-dataset outcomes into results or one informative error.
+def _collect_dataset_results(
+    outcomes: list,
+    *,
+    query_type: SearchType,
+    query_text: str,
+    only_context: bool,
+    context_format: str | ContextFormat,
+) -> list[SearchResultPayload]:
+    """Turn the fan-out's per-dataset outcomes into one entry per dataset, or one error.
 
-    A dataset without searchable memory only fails the search when *every* searched
+    A dataset without searchable memory fails the search only when *every* searched
     dataset is in that state; then one NoDataError (404) names each of them and what
-    it is missing. If any dataset answered, its results are returned and the empty
-    siblings are logged: ``datasets=None`` means "every dataset the user can read",
-    so a single freshly created dataset must not take down unscoped search. Any
-    other exception propagates unchanged.
+    it is missing. Otherwise the list keeps one entry per dataset, in request order:
+    a dataset that could not be searched comes back with empty results and its reason
+    on ``error``, so the caller is told what happened without losing the siblings'
+    answers (``datasets=None`` means "every dataset the user can read", so a single
+    freshly created dataset must not take down unscoped search). Any other exception
+    propagates unchanged and fails the whole search.
     """
-    payloads: list[SearchResultPayload] = []
-    no_data: list[DatasetNoDataError] = []
     for outcome in outcomes:
-        if isinstance(outcome, DatasetNoDataError):
-            no_data.append(outcome)
-        elif isinstance(outcome, BaseException):
+        if isinstance(outcome, BaseException) and not isinstance(outcome, DatasetNoDataError):
             raise outcome
-        else:
-            payloads.append(outcome)
 
-    if no_data and not payloads:
+    no_data = [outcome for outcome in outcomes if isinstance(outcome, DatasetNoDataError)]
+    if no_data and len(no_data) == len(outcomes):
         if len(no_data) == 1:
             only = no_data[0]
             raise NoDataError(
@@ -595,9 +609,50 @@ def _collect_dataset_results(outcomes: list) -> list[SearchResultPayload]:
             status_code=no_data[0].status_code,
         )
 
-    for error in no_data:
-        logger.warning("Skipping dataset without searchable memory: %s", error.message)
+    payloads: list[SearchResultPayload] = []
+    for outcome in outcomes:
+        if isinstance(outcome, DatasetNoDataError):
+            logger.warning("Dataset without searchable memory: %s", outcome.message)
+            payloads.append(
+                _no_data_payload(
+                    outcome,
+                    query_type=query_type,
+                    query_text=query_text,
+                    only_context=only_context,
+                    context_format=context_format,
+                )
+            )
+        else:
+            payloads.append(outcome)
     return payloads
+
+
+def _no_data_payload(
+    error: DatasetNoDataError,
+    *,
+    query_type: SearchType,
+    query_text: str,
+    only_context: bool,
+    context_format: str | ContextFormat,
+) -> SearchResultPayload:
+    """The entry a dataset without searchable memory gets: empty results plus the reason.
+
+    Shaped like a query miss for the same request (``[]`` under ``search_result``,
+    an empty context for ``only_context``) so existing callers see what they always
+    saw; only ``error`` is new.
+    """
+    return SearchResultPayload(
+        result_object=[],
+        context=[] if only_context else None,
+        search_type=query_type,
+        only_context=only_context,
+        question=query_text,
+        context_format=ContextFormat.parse(context_format),
+        dataset_name=error.dataset.name,
+        dataset_id=error.dataset.id,
+        dataset_tenant_id=error.dataset.tenant_id,
+        error=error.reason,
+    )
 
 
 def _backwards_compatible_search_results(search_results, verbose: bool):
@@ -630,6 +685,11 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
             else:
                 # Result attribute handles returning appropriate result based on set flags and outputs
                 search_result_dict["search_result"] = search_result.result
+
+            if search_result.error is not None:
+                # Only on entries that carry one: the dict stays byte-identical for
+                # every dataset that was searched normally.
+                search_result_dict["error"] = search_result.error
 
             return_value.append(search_result_dict)
         return return_value
