@@ -10,7 +10,9 @@ AsyncCallFactory = Callable[[], Awaitable[T]]
 async def gather_with_concurrency_limit(
     call_factories: Iterable[AsyncCallFactory[T]],
     limit: int,
-) -> list[T]:
+    *,
+    return_exceptions: bool = False,
+) -> list[T | BaseException]:
     """Run async call factories with at most ``limit`` calls in flight.
 
     Results preserve the input order, matching ``asyncio.gather``.
@@ -24,4 +26,10 @@ async def gather_with_concurrency_limit(
         async with semaphore:
             return await call_factory()
 
-    return list(await asyncio.gather(*(run(call_factory) for call_factory in call_factories)))
+    return list(
+        await asyncio.gather(
+            *(run(call_factory) for call_factory in call_factories),
+            return_exceptions=return_exceptions,
+        )
+    )
+
