@@ -22,6 +22,9 @@ _mod_sm = importlib.import_module("cognee.infrastructure.session.get_session_man
 _pkg_improve = importlib.import_module("cognee.api.v1.improve")
 _mod_query_router = importlib.import_module("cognee.api.v1.recall.query_router")
 _mod_search_methods = importlib.import_module("cognee.modules.search.methods.search")
+_mod_authorized_dataset = importlib.import_module(
+    "cognee.modules.data.methods.get_authorized_dataset"
+)
 
 
 @contextmanager
@@ -1049,9 +1052,8 @@ async def test_typed_api_session_entry_never_runs_automatic_improvement(flag):
         _patch_remember_startup(),
         patch.object(_mod_sm, "get_session_manager", return_value=manager),
         patch.object(_pkg_improve, "improve", improve),
-        patch(
-            "cognee.modules.data.methods.get_authorized_dataset.get_authorized_dataset",
-            AsyncMock(return_value=None),
+        patch.object(
+            _mod_authorized_dataset, "get_authorized_dataset", AsyncMock(return_value=None)
         ),
         patch("cognee.modules.session_lifecycle.metrics.ensure_and_touch_session", AsyncMock()),
     ):
