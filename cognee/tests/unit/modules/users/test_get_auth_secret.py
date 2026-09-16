@@ -69,10 +69,19 @@ def test_setting_the_variable_later_wins_over_the_generated_secret(monkeypatch):
     assert generated != "configured-secret"
 
 
-def test_generated_secret_warns_once_and_names_the_variable(caplog):
+def test_generating_a_secret_logs_nothing(caplog):
+    # ``import cognee`` resolves the reset/verification secrets on the UserManager
+    # class body, so SDK, CLI and MCP users must not see a server warning there.
     with caplog.at_level("WARNING"):
         get_auth_secret(JWT)
         get_auth_secret(JWT)
+
+    assert _warnings_for(caplog, JWT) == []
+
+
+def test_startup_resolution_warns_once_per_generated_secret_and_names_the_variable(caplog):
+    with caplog.at_level("WARNING"):
+        resolve_auth_secrets()
 
     warnings = _warnings_for(caplog, JWT)
     assert len(warnings) == 1
@@ -80,6 +89,14 @@ def test_generated_secret_warns_once_and_names_the_variable(caplog):
     assert "random secret was generated" in message
     assert "more than one process" in message
     assert ".env" in message
+
+
+def test_startup_resolution_reports_the_secret_in_use():
+    generated = get_auth_secret(JWT)
+
+    resolve_auth_secrets()
+
+    assert get_auth_secret(JWT) == generated
 
 
 def test_startup_resolution_warns_only_for_generated_secrets(monkeypatch, caplog):
