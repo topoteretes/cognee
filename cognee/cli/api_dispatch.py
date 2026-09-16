@@ -13,8 +13,8 @@ import os
 
 import cognee.cli.echo as fmt
 from cognee.cli.api_client import CogneeApiClient, is_connection_error
-from cognee.cli.commands.recall_command import AUTO_QUERY_TYPE, resolved_search_type
-from cognee.cli.config import COMPLETION_SEARCH_TYPES
+from cognee.cli.config import AUTO_QUERY_TYPE
+from cognee.cli.recall_output import print_recall_results
 
 SUPPORTED_COMMANDS = {
     "add",
@@ -325,38 +325,7 @@ def _dispatch_recall(client: CogneeApiClient, args: argparse.Namespace) -> None:
         fmt.warning("No results found for your query.")
         return
 
-    is_session = isinstance(results[0], dict) and results[0].get("_source") == "session"
-    if is_session:
-        fmt.echo(f"\nFound {len(results)} session entry(ies):")
-        fmt.echo("=" * 60)
-        for i, entry in enumerate(results, 1):
-            q = entry.get("question", "")
-            a = entry.get("answer", "")
-            t = entry.get("time", "")
-            header = f"[{t}] " if t else ""
-            if q:
-                fmt.echo(f"{fmt.bold(f'{header}Q:')} {q}")
-            if a:
-                fmt.echo(f"{fmt.bold('A:')} {a}")
-            if i < len(results):
-                fmt.echo("-" * 40)
-    else:
-        resolved_type = resolved_search_type(results, effective_query_type)
-        fmt.echo(f"\nFound {len(results)} result(s) using {resolved_type}:")
-        fmt.echo("=" * 60)
-        if resolved_type in COMPLETION_SEARCH_TYPES:
-            for i, result in enumerate(results, 1):
-                fmt.echo(f"{fmt.bold('Response:')} {result}")
-                if i < len(results):
-                    fmt.echo("-" * 40)
-        elif args.query_type == "CHUNKS":
-            for i, result in enumerate(results, 1):
-                fmt.echo(f"{fmt.bold(f'Chunk {i}:')} {result}")
-                fmt.echo()
-        else:
-            for i, result in enumerate(results, 1):
-                fmt.echo(f"{fmt.bold(f'Result {i}:')} {result}")
-                fmt.echo()
+    print_recall_results(results, effective_query_type)
 
 
 def _dispatch_improve(client: CogneeApiClient, args: argparse.Namespace) -> None:
