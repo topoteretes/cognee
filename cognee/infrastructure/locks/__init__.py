@@ -1,25 +1,17 @@
 from .dataset_lock import dataset_lock, get_dataset_lock, held_datasets
 from .session_lock import (
-    ImproveLockRelease,
-    ImproveLockStatus,
-    improve_lock_ttl_seconds,
-    release_improve_lock,
-    request_improve_rerun,
+    release_improve_lock_many,
     session_lock,
     session_turn_lock,
-    try_acquire_improve_lock,
+    try_acquire_improve_lock_many,
 )
 
 __all__ = [
-    "ImproveLockRelease",
-    "ImproveLockStatus",
     "dataset_lock",
     "get_dataset_lock",
     "held_datasets",
-    "improve_lock_ttl_seconds",
-    "release_improve_lock",
-    "request_improve_rerun",
+    "release_improve_lock_many",
     "session_lock",
     "session_turn_lock",
-    "try_acquire_improve_lock",
+    "try_acquire_improve_lock_many",
 ]

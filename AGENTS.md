@@ -5,7 +5,7 @@ This document summarizes how to work with the cognee repository: how it’s orga
 ## Project Structure & Module Organization
 
 - `cognee/`: Core Python library and API.
-  - `api/`: FastAPI application and versioned routers (add, cognify, memify, search, delete, users, datasets, responses, visualize, settings, sync, update, checks).
+  - `api/`: FastAPI application and versioned routers under `api/v1/` — memory API (`remember`, `recall`, `improve`, `forget`), low-level operations (`add`, `cognify`, `memify`, `search`, `delete`, `update`), and supporting routers (`datasets`, `users`, `permissions`, `settings`, `sync`, `visualize`, `health`, `skills`, `sessions`, …). Each router package has a `routers/` folder; `api/client.py` registers them.
   - `cli/`: CLI entry points and subcommands invoked via `cognee` / `cognee-cli`.
   - `infrastructure/`: Databases, LLM providers, embeddings, loaders, and storage adapters.
   - `modules/`: Domain logic (graph, retrieval, ontology, users, processing, observability, etc.).
@@ -27,18 +27,20 @@ Notes:
 
 ## Build, Test, and Development Commands
 
-Python (root) – requires Python >= 3.10 and < 3.14. We recommend `uv` for speed and reproducibility.
+Python (root) – requires Python >= 3.10 and < 3.15 (i.e. 3.10–3.14, see `pyproject.toml`). We recommend `uv` for speed and reproducibility.
 
 - Create/refresh env and install dev deps:
 ```bash
 uv sync --dev --all-extras --reinstall
 ```
 
-- Run the CLI (examples):
+- Run the CLI (examples). The memory commands are the primary surface; `add`/`cognify`/`search` are the low-level stages they call underneath:
 ```bash
-uv run cognee-cli add "Cognee turns documents into AI memory."
-uv run cognee-cli cognify
-uv run cognee-cli search "What does cognee do?"
+uv run cognee-cli remember "Cognee turns documents into AI memory."   # add + cognify (+ improve)
+uv run cognee-cli recall "What does cognee do?"
+uv run cognee-cli improve -d main_dataset   # enrich / index the graph
+uv run cognee-cli forget --all              # NOTE: no confirmation prompt
+uv run cognee-cli add "..." && uv run cognee-cli cognify && uv run cognee-cli search "..."   # low level
 uv run cognee-cli -ui   # Launches UI, backend API, and MCP server together
 ```
 
@@ -149,7 +151,7 @@ MCP server and Frontend:
   - CLI tests: `cognee/tests/cli_tests/`
 - Name test files `test_*.py`. Use `pytest.mark.asyncio` for async tests.
 - Avoid external state; rely on test fixtures and the CI-provided env vars when LLM/embedding providers are required. See CI workflows under `.github/workflows/` for expected environment variables.
-- When adding public APIs, provide/update targeted examples under `examples/python/`.
+- When adding public APIs, provide/update a targeted example under `examples/guides/` and list it in `examples/README.md` (see its "Contributing a new example" section).
 
 ## Commit & Pull Request Guidelines
 

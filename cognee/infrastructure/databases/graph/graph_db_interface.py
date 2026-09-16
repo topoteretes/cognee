@@ -23,27 +23,33 @@ Node = tuple[str, NodeData]  # (node_id, properties)
 
 class GraphDBInterface(ABC):
     """
-    Define an interface for graph database operations to be implemented by concrete classes.
+    Interface every graph backend implements (Ladybug/Kuzu, Neo4j, Neptune, Turso, Postgres demo).
 
-    Public methods include:
-    - query
-    - add_node
-    - add_nodes
-    - delete_node
-    - delete_nodes
-    - get_node
-    - get_nodes
-    - add_edge
-    - add_edges
-    - delete_graph
-    - get_graph_data
-    - get_graph_metrics
-    - has_edge
-    - has_edges
-    - get_edges
-    - get_neighbors
-    - get_nodeset_subgraph
-    - get_connections
+    Get an instance with ``get_graph_engine()``; never construct adapters directly.
+
+    Contract shared by all adapters:
+
+    * **Ids are strings.** Node ids are ``str(DataPoint.id)``; an edge is identified by
+      ``(source_id, target_id, relationship_name)``.
+    * **Writes are idempotent upserts.** ``add_node``/``add_nodes`` merge on node id and
+      overwrite the stored properties on match; ``add_edge``/``add_edges`` merge on the
+      edge identity and overwrite properties. Re-running a pipeline over the same data
+      therefore never duplicates nodes or edges -- this is what ``DataPoint``'s
+      ``identity_fields`` relies on. Edges whose endpoints do not exist are skipped.
+    * **Deletes are tolerant.** Deleting an id that is not present is a no-op; deleting a
+      node removes its edges (detach delete).
+    * **Writes return ``None``.** Reads return plain tuples/dicts (``Node = (id,
+      properties)``, ``EdgeData = (source_id, target_id, relationship_name,
+      properties)``), never adapter-native objects.
+    * Optional provenance: ``source_ref_key``/``pipeline_run_id`` on the bulk writers stamp
+      graph source-refs in the same statement so ``forget()`` can delete or roll back by
+      document; see ``cognee.infrastructure.databases.provenance``.
+
+    Capability flags (class attributes, checked by callers on the engine instance):
+    ``supports_cypher_queries``, ``supports_per_row_source_refs``,
+    ``supports_incremental_chunk_updates``. A new backend also needs a
+    ``DatasetDatabaseHandlerInterface`` registration to work with
+    ``ENABLE_BACKEND_ACCESS_CONTROL`` (see ``dataset_database_handler/``).
     """
 
     # Whether this backend executes raw Cypher through ``query()``. Declared on
@@ -91,6 +97,9 @@ class GraphDBInterface(ABC):
         """
         Add a single node with specified properties to the graph.
 
+        Idempotent upsert keyed on the node id: an existing node's properties are
+        overwritten, a missing one is created. Returns ``None``.
+
         Parameters:
         -----------
 
@@ -110,6 +119,9 @@ class GraphDBInterface(ABC):
         """
         Add multiple nodes to the graph in a single operation.
 
+        Idempotent upsert keyed on each node id (see ``add_node``); duplicates within
+        ``nodes`` collapse to one row. Returns ``None``.
+
         Parameters:
         -----------
 
@@ -127,6 +139,9 @@ class GraphDBInterface(ABC):
         """
         Delete a specified node from the graph by its ID.
 
+        Removes the node and every edge attached to it. A missing id is a no-op, not an
+        error. Returns ``None``.
+
         Parameters:
         -----------
 
@@ -138,6 +153,8 @@ class GraphDBInterface(ABC):
     async def delete_nodes(self, node_ids: list[str]) -> None:
         """
         Delete multiple nodes from the graph by their identifiers.
+
+        Same semantics as ``delete_node`` for each id, in one statement. Returns ``None``.
 
         Parameters:
         -----------
@@ -495,6 +512,10 @@ class GraphDBInterface(ABC):
         """
         Create a new edge between two nodes in the graph.
 
+        Idempotent upsert keyed on ``(source_id, target_id, relationship_name)``: an
+        existing edge has its properties overwritten. If either endpoint node does not
+        exist the edge is silently not created. Returns ``None``.
+
         Parameters:
         -----------
 
@@ -516,6 +537,9 @@ class GraphDBInterface(ABC):
     ) -> None:
         """
         Add multiple edges to the graph in a single operation.
+
+        Same upsert semantics as ``add_edge`` for each tuple; edges whose endpoints are
+        missing are skipped. Returns ``None``.
 
         Parameters:
         -----------
@@ -758,35 +782,3 @@ class GraphDBInterface(ABC):
             - limit: Maximum number of triplets to return.
         """
         raise NotImplementedError("get_triplets_batch is not implemented for this adapter")
-
-    async def get_node_frequency_weights(self, node_ids: list[str]) -> dict[str, float]:
-        """
-        Retrieve node frequency weights for multiple node ids.
-        Returns only found node ids.
-        """
-        raise NotImplementedError("get_node_frequency_weights is not implemented for this adapter")
-
-    async def set_node_frequency_weights(
-        self, node_frequency_weights: dict[str, float]
-    ) -> dict[str, bool]:
-        """
-        Persist node frequency weights for multiple node ids.
-        Returns per-id update success.
-        """
-        raise NotImplementedError("set_node_frequency_weights is not implemented for this adapter")
-
-    async def get_edge_frequency_weights(self, edge_object_ids: list[str]) -> dict[str, float]:
-        """
-        Retrieve edge frequency weights for multiple edge_object_ids.
-        Returns only found edge ids.
-        """
-        raise NotImplementedError("get_edge_frequency_weights is not implemented for this adapter")
-
-    async def set_edge_frequency_weights(
-        self, edge_frequency_weights: dict[str, float]
-    ) -> dict[str, bool]:
-        """
-        Persist edge frequency weights for multiple edge_object_ids.
-        Returns per-id update success.
-        """
-        raise NotImplementedError("set_edge_frequency_weights is not implemented for this adapter")

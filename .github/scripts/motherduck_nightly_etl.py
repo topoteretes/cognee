@@ -118,6 +118,11 @@ VIEWS = {
             (report ->> '$.failed')::INT                     AS failed,
             (report ->> '$.succeeded')::INT = (report ->> '$.num_runs')::INT AS all_passed,
             report ->> '$.git_sha'                           AS git_sha,
+            -- Historical reports lack these fields; leave them NULL rather
+            -- than guessing (older Rust git_sha values identify the harness).
+            TRY_CAST(report ->> '$.commit_timestamp' AS TIMESTAMPTZ) AS commit_timestamp,
+            report ->> '$.git_repository'                    AS git_repository,
+            report ->> '$.workflow_git_sha'                  AS workflow_git_sha,
             report ->> '$.run_id'                            AS run_id,
             report ->> '$.run_attempt'                       AS run_attempt,
             report ->> '$.event'                             AS event,
@@ -134,7 +139,8 @@ VIEWS = {
     "v_perf_metrics": """
         WITH per_metric AS (
             SELECT r.s3_key, r.run_ts, r.branch, r.series, r.suite, r.sdk, r.store,
-                   r.label, r.mode, r.git_sha, r.all_passed,
+                   r.label, r.mode, r.git_sha, r.commit_timestamp,
+                   r.git_repository, r.workflow_git_sha, r.all_passed,
                    m.metric                            AS metric,
                    raw.report -> '$.stats' -> m.metric AS mstats
             FROM {t}.v_perf_runs r
@@ -142,6 +148,7 @@ VIEWS = {
                  UNNEST(json_keys(raw.report, '$.stats')) AS m(metric)
         )
         SELECT s3_key, run_ts, branch, series, suite, sdk, store, label, mode, git_sha,
+               commit_timestamp, git_repository, workflow_git_sha,
                all_passed, metric, st.stat AS stat, (mstats ->> st.stat)::DOUBLE AS value_s
         FROM per_metric, UNNEST(json_keys(mstats)) AS st(stat)
     """,

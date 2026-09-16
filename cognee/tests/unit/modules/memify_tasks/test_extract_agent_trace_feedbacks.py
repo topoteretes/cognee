@@ -1,506 +1,398 @@
+"""Watermark-bounded extraction of agent trace steps (improve stage 3).
+
+The extractor yields one ``TracePersistWindow`` per session holding only the
+trace steps above the session's trace persist watermark; ``last_n_steps=None``
+means "everything above the watermark", never "everything stored".
+"""
+
 import sys
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from cognee.exceptions import CogneeSystemError
 from cognee.infrastructure.databases.cache.models import SessionAgentTraceEntry
-from cognee.infrastructure.session.session_trace_persist_watermark import (
+from cognee.infrastructure.session.session_persist_watermark import (
     TRACE_PERSIST_STATE_ID,
     TRACE_PERSIST_STATE_KIND,
+    TRACE_PERSIST_WATERMARK,
     TracePersistWindow,
 )
 from cognee.modules.users.models import User
-from cognee.tasks.memify.extract_agent_trace_feedbacks import extract_agent_trace_feedbacks
+from cognee.tasks.memify.extract_agent_trace_feedbacks import (
+    extract_agent_trace_feedbacks,
+    resolve_trace_window,
+)
 
 extract_agent_trace_feedbacks_module = sys.modules[
     "cognee.tasks.memify.extract_agent_trace_feedbacks"
 ]
 
+USER_ID = "test-user-123"
 
-def _trace_entry(method_return_value):
-    """Build a SessionAgentTraceEntry as get_agent_trace_session returns in production.
 
-    Only method_return_value matters for raw-content extraction; the required
-    identity fields are filled with placeholders.
-    """
+def _trace_entry(method_return_value, session_feedback=""):
+    """Build a SessionAgentTraceEntry as get_agent_trace_session returns in production."""
     return SessionAgentTraceEntry(
         trace_id="t1",
         origin_function="traced_agent",
         status="success",
         method_return_value=method_return_value,
+        session_feedback=session_feedback,
     )
+
+
+class FakeSessionManager:
+    """In-memory stand-in exposing the trace-read + watermark surface the task uses.
+
+    ``last_n`` follows the adapters: the most recent N steps, oldest first.
+    """
+
+    def __init__(self, is_available: bool = True):
+        self.is_available = is_available
+        self.traces: dict[str, list[SessionAgentTraceEntry]] = {}
+        self.context: dict[str, list[dict]] = {}
+        self.feedback_last_n_calls: list = []
+        self.session_last_n_calls: list = []
+        self.failing_sessions: set[str] = set()
+
+    def add_step(self, session_id: str, feedback: str = "", return_value=None):
+        self.traces.setdefault(session_id, []).append(
+            _trace_entry(return_value, session_feedback=feedback)
+        )
+
+    async def get_agent_trace_count(self, *, user_id, session_id=None):
+        if session_id in self.failing_sessions:
+            raise RuntimeError("SessionManager error")
+        return len(self.traces.get(session_id, []))
+
+    async def get_agent_trace_session(self, *, user_id, session_id=None, last_n=None):
+        self.session_last_n_calls.append(last_n)
+        entries = list(self.traces.get(session_id, []))
+        return entries[-last_n:] if last_n is not None else entries
+
+    async def get_agent_trace_feedback(self, *, user_id, session_id=None, last_n=None):
+        self.feedback_last_n_calls.append(last_n)
+        entries = await self.get_agent_trace_session(
+            user_id=user_id, session_id=session_id, last_n=last_n
+        )
+        self.session_last_n_calls.pop()
+        return [entry.session_feedback for entry in entries]
+
+    async def get_session_context_entries(self, *, user_id, session_id=None):
+        return list(self.context.get(session_id, []))
+
+    async def update_session_context_entry(self, *, user_id, entry_id, merge, session_id=None):
+        for row in self.context.get(session_id, []):
+            if row.get("id") == entry_id:
+                row.update(merge)
+                return True
+        return False
+
+    async def create_session_context_entry(self, *, user_id, entry_dump, session_id=None):
+        self.context.setdefault(session_id, []).append(dict(entry_dump))
+        return True
 
 
 @pytest.fixture
 def mock_user():
     user = MagicMock(spec=User)
-    user.id = "test-user-123"
+    user.id = USER_ID
     return user
 
 
-def _make_mock_session_manager(
-    feedback_entries, is_available: bool = True, persisted_trace_count: int | None = None
-):
-    mock_session_manager = MagicMock()
-    mock_session_manager.is_available = is_available
-
-    async def _get_agent_trace_feedback(*, user_id, session_id, last_n=None):
-        del user_id, session_id
-        if last_n is None:
-            return feedback_entries
-        return feedback_entries[-last_n:]
-
-    mock_session_manager.get_agent_trace_feedback = AsyncMock(side_effect=_get_agent_trace_feedback)
-    mock_session_manager.get_agent_trace_session = AsyncMock(return_value=[])
-    # The trace persist watermark lives in the session-context rows.
-    context_rows = []
-    if persisted_trace_count is not None:
-        context_rows.append(
-            {
-                "id": TRACE_PERSIST_STATE_ID,
-                "kind": TRACE_PERSIST_STATE_KIND,
-                "persisted_trace_count": persisted_trace_count,
-            }
-        )
-    mock_session_manager.get_session_context_entries = AsyncMock(return_value=context_rows)
-    return mock_session_manager
+@pytest.fixture
+def manager(mock_user, monkeypatch):
+    fake = FakeSessionManager()
+    session_user = MagicMock()
+    session_user.get.return_value = mock_user
+    monkeypatch.setattr(extract_agent_trace_feedbacks_module, "session_user", session_user)
+    monkeypatch.setattr(extract_agent_trace_feedbacks_module, "get_session_manager", lambda: fake)
+    return fake
 
 
-def _texts(items):
-    """The watermarked path yields TracePersistWindow; compare on the rendered text."""
-    return [item.text if isinstance(item, TracePersistWindow) else item for item in items]
-
-
-@pytest.mark.asyncio
-async def test_extract_agent_trace_feedbacks_success(mock_user):
-    mock_session_manager = _make_mock_session_manager(
-        ["draft plan succeeded.", "   ", "write_summary failed."]
-    )
-
-    with (
-        patch.object(extract_agent_trace_feedbacks_module, "session_user") as mock_session_user,
-        patch.object(
-            extract_agent_trace_feedbacks_module,
-            "get_session_manager",
-            return_value=mock_session_manager,
-        ),
-    ):
-        mock_session_user.get.return_value = mock_user
-
-        feedback_sessions = []
-        async for feedback in extract_agent_trace_feedbacks([{}], session_ids=["trace_session"]):
-            feedback_sessions.append(feedback)
-
-    assert _texts(feedback_sessions) == [
-        "Session ID: trace_session\n\ndraft plan succeeded.\nwrite_summary failed."
+async def _extract(session_ids, **kwargs) -> list[TracePersistWindow]:
+    return [
+        window
+        async for window in extract_agent_trace_feedbacks([{}], session_ids=session_ids, **kwargs)
     ]
-    assert isinstance(feedback_sessions[0], TracePersistWindow)
-    assert feedback_sessions[0].persisted_trace_count == 3
-    assert feedback_sessions[0].session_id == "trace_session"
-    mock_session_manager.get_agent_trace_feedback.assert_called_once_with(
-        user_id="test-user-123",
-        session_id="trace_session",
-        last_n=None,
+
+
+# ------------------------------------------------------------------ window arithmetic
+
+
+@pytest.mark.parametrize(
+    ("total", "persisted", "last_n_steps", "expected"),
+    [
+        (3, 0, None, (0, 3)),  # fresh session: everything
+        (5, 3, None, (3, 2)),  # above the watermark only
+        (5, 5, None, (5, 0)),  # fully persisted
+        (0, 0, None, (0, 0)),  # nothing stored
+        (2, 10, None, (0, 2)),  # stale watermark (session rebuilt): start over
+        (5, 1, 2, (1, 2)),  # explicit cap bounds the window to the OLDEST pending
+        (5, 4, 2, (4, 1)),  # cap larger than pending: pending wins
+        (5, 0, 0, (0, 0)),  # zero cap: nothing
+    ],
+)
+def test_resolve_trace_window(total, persisted, last_n_steps, expected):
+    assert resolve_trace_window(total, persisted, last_n_steps) == expected
+
+
+# ------------------------------------------------------------------ extraction contract
+
+
+@pytest.mark.asyncio
+async def test_fresh_session_yields_all_feedback_above_watermark(manager):
+    manager.add_step("trace_session", feedback="draft plan succeeded.")
+    manager.add_step("trace_session", feedback="   ")
+    manager.add_step("trace_session", feedback="write_summary failed.")
+
+    windows = await _extract(["trace_session"])
+
+    assert len(windows) == 1
+    window = windows[0]
+    assert (
+        window.text == "Session ID: trace_session\n\ndraft plan succeeded.\nwrite_summary failed."
     )
+    assert window.user_id == USER_ID
+    assert window.session_id == "trace_session"
+    assert window.persisted_trace_count == 3
+    # One full snapshot: the pending slice and the watermark target come from
+    # the same read, so a step written mid-run can never fall below the advance.
+    assert manager.session_last_n_calls == [None]
+    # The extractor never advances the watermark itself for a non-empty window.
+    assert await TRACE_PERSIST_WATERMARK.read_count(manager, USER_ID, "trace_session") == 0
 
 
 @pytest.mark.asyncio
-async def test_extract_agent_trace_feedbacks_multiple_sessions(mock_user):
-    mock_session_manager = _make_mock_session_manager(["step completed."])
+async def test_watermark_skips_already_persisted_steps(manager):
+    for index in range(5):
+        manager.add_step("s", feedback=f"step {index}")
+    await TRACE_PERSIST_WATERMARK.write_count(manager, USER_ID, "s", 3)
 
-    with (
-        patch.object(extract_agent_trace_feedbacks_module, "session_user") as mock_session_user,
-        patch.object(
-            extract_agent_trace_feedbacks_module,
-            "get_session_manager",
-            return_value=mock_session_manager,
-        ),
-    ):
-        mock_session_user.get.return_value = mock_user
+    windows = await _extract(["s"])
 
-        feedback_sessions = []
-        async for feedback in extract_agent_trace_feedbacks(
-            [{}], session_ids=["session1", "session2"]
-        ):
-            feedback_sessions.append(feedback)
-
-    assert len(feedback_sessions) == 2
-    assert mock_session_manager.get_agent_trace_feedback.await_count == 2
-    mock_session_manager.get_agent_trace_session.assert_not_called()
+    assert len(windows) == 1
+    assert manager.session_last_n_calls == [None]
+    assert "step 2" not in windows[0].text
+    assert "step 3" in windows[0].text and "step 4" in windows[0].text
+    assert windows[0].persisted_trace_count == 5
 
 
 @pytest.mark.asyncio
-async def test_extract_agent_trace_feedbacks_skips_empty_feedback(mock_user):
-    mock_session_manager = _make_mock_session_manager(["   ", ""])
+async def test_fully_persisted_session_yields_nothing_and_reads_no_steps(manager):
+    manager.add_step("s", feedback="done")
+    await TRACE_PERSIST_WATERMARK.write_count(manager, USER_ID, "s", 1)
 
-    with (
-        patch.object(extract_agent_trace_feedbacks_module, "session_user") as mock_session_user,
-        patch.object(
-            extract_agent_trace_feedbacks_module,
-            "get_session_manager",
-            return_value=mock_session_manager,
-        ),
-    ):
-        mock_session_user.get.return_value = mock_user
-
-        feedback_sessions = []
-        async for feedback in extract_agent_trace_feedbacks([{}], session_ids=["empty_session"]):
-            feedback_sessions.append(feedback)
-
-    # Nothing to cognify, but the window still advances the watermark past the
-    # empty steps so they are not re-read on every later improve().
-    assert len(feedback_sessions) == 1
-    assert feedback_sessions[0].text == ""
-    assert feedback_sessions[0].persisted_trace_count == 2
+    assert await _extract(["s"]) == []
+    assert manager.feedback_last_n_calls == []
+    assert manager.session_last_n_calls == []
 
 
 @pytest.mark.asyncio
-async def test_extract_agent_trace_feedbacks_no_session_ids(mock_user):
-    mock_session_manager = _make_mock_session_manager(["step completed."])
-
-    with (
-        patch.object(extract_agent_trace_feedbacks_module, "session_user") as mock_session_user,
-        patch.object(
-            extract_agent_trace_feedbacks_module,
-            "get_session_manager",
-            return_value=mock_session_manager,
-        ),
-    ):
-        mock_session_user.get.return_value = mock_user
-
-        feedback_sessions = []
-        async for feedback in extract_agent_trace_feedbacks([{}], session_ids=None):
-            feedback_sessions.append(feedback)
-
-    assert feedback_sessions == []
-    mock_session_manager.get_agent_trace_feedback.assert_not_called()
+async def test_session_without_steps_yields_nothing(manager):
+    assert await _extract(["empty"]) == []
+    assert manager.feedback_last_n_calls == []
 
 
 @pytest.mark.asyncio
-async def test_extract_agent_trace_feedbacks_session_manager_unavailable(mock_user):
-    mock_session_manager = _make_mock_session_manager([], is_available=False)
+async def test_stale_watermark_restarts_from_the_beginning(manager):
+    manager.add_step("s", feedback="rebuilt step")
+    await TRACE_PERSIST_WATERMARK.write_count(manager, USER_ID, "s", 10)
 
-    with (
-        patch.object(extract_agent_trace_feedbacks_module, "session_user") as mock_session_user,
-        patch.object(
-            extract_agent_trace_feedbacks_module,
-            "get_session_manager",
-            return_value=mock_session_manager,
-        ),
-    ):
-        mock_session_user.get.return_value = mock_user
+    windows = await _extract(["s"])
 
-        with pytest.raises(CogneeSystemError) as exc_info:
-            async for _ in extract_agent_trace_feedbacks([{}], session_ids=["trace_session"]):
-                pass
+    assert len(windows) == 1
+    assert "rebuilt step" in windows[0].text
+    assert manager.session_last_n_calls == [None]
+    assert windows[0].persisted_trace_count == 1
+
+
+@pytest.mark.asyncio
+async def test_last_n_steps_caps_the_pending_window_at_the_oldest(manager):
+    """A bounded persist drains the backlog oldest-first and advances the
+    watermark only past what it read — capping at the newest N would seal the
+    older pending steps below an advanced watermark, unreachable even for
+    improve()."""
+    for index in range(5):
+        manager.add_step("s", feedback=f"step {index}")
+    await TRACE_PERSIST_WATERMARK.write_count(manager, USER_ID, "s", 1)
+
+    windows = await _extract(["s"], last_n_steps=2)
+
+    assert manager.session_last_n_calls == [None]
+    assert windows[0].text == "Session ID: s\n\nstep 1\nstep 2"
+    assert windows[0].persisted_trace_count == 3
+
+
+@pytest.mark.asyncio
+async def test_bounded_persists_drain_a_backlog_across_triggers(manager):
+    for index in range(5):
+        manager.add_step("s", feedback=f"step {index}")
+
+    first = await _extract(["s"], last_n_steps=2)
+    await TRACE_PERSIST_WATERMARK.write_count(manager, USER_ID, "s", first[0].persisted_trace_count)
+    second = await _extract(["s"], last_n_steps=2)
+    await TRACE_PERSIST_WATERMARK.write_count(
+        manager, USER_ID, "s", second[0].persisted_trace_count
+    )
+    third = await _extract(["s"], last_n_steps=2)
+
+    assert first[0].text.endswith("step 0\nstep 1")
+    assert second[0].text.endswith("step 2\nstep 3")
+    assert third[0].text.endswith("step 4")
+    assert third[0].persisted_trace_count == 5
+
+
+class LiveWriterSessionManager(FakeSessionManager):
+    """Writes one step between the count read and the trace fetch — a live agent."""
+
+    async def get_agent_trace_count(self, *, user_id, session_id=None):
+        count = await super().get_agent_trace_count(user_id=user_id, session_id=session_id)
+        if count:
+            self.add_step(session_id, feedback=f"raced step {count}")
+        return count
+
+
+@pytest.mark.asyncio
+async def test_live_writer_between_count_and_fetch_loses_no_steps(mock_user, monkeypatch):
+    """The regression behind the one-snapshot shape: when the count and the fetch
+    were two reads, a step written between them shifted the newest-first window
+    past the oldest pending step, and the watermark then sealed that step below
+    itself forever. With one snapshot, the raced step is either in the window or
+    above the advanced watermark — never lost."""
+    racing = LiveWriterSessionManager()
+    session_user = MagicMock()
+    session_user.get.return_value = mock_user
+    monkeypatch.setattr(extract_agent_trace_feedbacks_module, "session_user", session_user)
+    monkeypatch.setattr(extract_agent_trace_feedbacks_module, "get_session_manager", lambda: racing)
+    racing.add_step("s", feedback="step 0")
+    racing.add_step("s", feedback="step 1")
+
+    windows = await _extract(["s"])
+
+    assert len(windows) == 1
+    window = windows[0]
+    # Every step below the count the cognify will advance the watermark to is in
+    # the window — the oldest pending step included, which the two-read shape lost.
+    assert "step 0" in window.text and "step 1" in window.text
+    assert "raced step 2" in window.text
+    assert window.persisted_trace_count == 3
+
+
+@pytest.mark.asyncio
+async def test_multiple_sessions_yield_one_window_each(manager):
+    manager.add_step("session1", feedback="step completed.")
+    manager.add_step("session2", feedback="step completed.")
+
+    windows = await _extract(["session1", "session2"])
+
+    assert [window.session_id for window in windows] == ["session1", "session2"]
+    assert manager.session_last_n_calls == [None, None]  # one full snapshot per session
+
+
+@pytest.mark.asyncio
+async def test_window_without_persistable_content_advances_watermark_without_yield(manager):
+    manager.add_step("empty_session", feedback="   ")
+    manager.add_step("empty_session", feedback="")
+
+    assert await _extract(["empty_session"]) == []
+    # Nothing to cognify, so there is no success to wait on: mark the window done
+    # instead of re-reading it on every run.
+    assert await TRACE_PERSIST_WATERMARK.read_count(manager, USER_ID, "empty_session") == 2
+    state = manager.context["empty_session"][0]
+    assert state["id"] == TRACE_PERSIST_STATE_ID
+    assert state["kind"] == TRACE_PERSIST_STATE_KIND
+
+
+@pytest.mark.asyncio
+async def test_no_session_ids_yields_nothing(manager):
+    manager.add_step("s", feedback="step completed.")
+
+    assert await _extract(None) == []
+    assert manager.feedback_last_n_calls == []
+
+
+@pytest.mark.asyncio
+async def test_session_manager_unavailable_raises(manager):
+    manager.is_available = False
+
+    with pytest.raises(CogneeSystemError) as exc_info:
+        await _extract(["trace_session"])
 
     assert "SessionManager not available" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
-async def test_extract_agent_trace_feedbacks_continues_when_one_session_fails(mock_user):
-    mock_session_manager = _make_mock_session_manager(["ignored"])
-    mock_session_manager.get_agent_trace_feedback.side_effect = [
-        ["first feedback"],
-        Exception("SessionManager error"),
-        ["third feedback"],
-    ]
+async def test_continues_when_one_session_fails(manager):
+    manager.add_step("session1", feedback="first feedback")
+    manager.add_step("session2", feedback="ignored")
+    manager.add_step("session3", feedback="third feedback")
+    manager.failing_sessions.add("session2")
 
-    with (
-        patch.object(extract_agent_trace_feedbacks_module, "session_user") as mock_session_user,
-        patch.object(
-            extract_agent_trace_feedbacks_module,
-            "get_session_manager",
-            return_value=mock_session_manager,
-        ),
-    ):
-        mock_session_user.get.return_value = mock_user
+    windows = await _extract(["session1", "session2", "session3"])
 
-        feedback_sessions = []
-        async for feedback in extract_agent_trace_feedbacks(
-            [{}], session_ids=["session1", "session2", "session3"]
-        ):
-            feedback_sessions.append(feedback)
-
-    assert _texts(feedback_sessions) == [
+    assert [window.text for window in windows] == [
         "Session ID: session1\n\nfirst feedback",
         "Session ID: session3\n\nthird feedback",
     ]
 
 
 @pytest.mark.asyncio
-async def test_extract_agent_trace_feedbacks_can_extract_raw_return_values(mock_user):
-    mock_session_manager = _make_mock_session_manager([])
-    mock_session_manager.get_agent_trace_session.return_value = [
-        _trace_entry("draft ready"),
-        _trace_entry({"summary": "done", "steps": 2}),
-        _trace_entry("   "),
-        _trace_entry(None),
-    ]
+async def test_raw_return_values_are_extracted_above_the_watermark(manager):
+    manager.add_step("trace_session", return_value="already persisted")
+    manager.add_step("trace_session", return_value="draft ready")
+    manager.add_step("trace_session", return_value={"summary": "done", "steps": 2})
+    manager.add_step("trace_session", return_value="   ")
+    manager.add_step("trace_session", return_value=None)
+    await TRACE_PERSIST_WATERMARK.write_count(manager, USER_ID, "trace_session", 1)
 
-    with (
-        patch.object(extract_agent_trace_feedbacks_module, "session_user") as mock_session_user,
-        patch.object(
-            extract_agent_trace_feedbacks_module,
-            "get_session_manager",
-            return_value=mock_session_manager,
-        ),
-    ):
-        mock_session_user.get.return_value = mock_user
+    windows = await _extract(["trace_session"], raw_trace_content=True)
 
-        extracted_values = []
-        async for value in extract_agent_trace_feedbacks(
-            [{}],
-            session_ids=["trace_session"],
-            raw_trace_content=True,
-        ):
-            extracted_values.append(value)
-
-    assert _texts(extracted_values) == [
+    assert [window.text for window in windows] == [
         'Session ID: trace_session\n\ndraft ready\n{"steps": 2, "summary": "done"}'
     ]
-    assert extracted_values[0].persisted_trace_count == 4
-    mock_session_manager.get_agent_trace_session.assert_awaited_once_with(
-        user_id="test-user-123",
-        session_id="trace_session",
-        last_n=None,
-    )
-    mock_session_manager.get_agent_trace_feedback.assert_not_called()
+    assert windows[0].persisted_trace_count == 5
+    assert manager.session_last_n_calls == [None]
+    assert manager.feedback_last_n_calls == []
 
 
 @pytest.mark.asyncio
-async def test_extract_agent_trace_feedbacks_skips_empty_raw_return_values(mock_user):
-    mock_session_manager = _make_mock_session_manager([])
-    mock_session_manager.get_agent_trace_session.return_value = [
-        _trace_entry("   "),
-        _trace_entry(None),
+async def test_raw_return_values_respect_last_n_steps_cap(manager):
+    for value in ("first return", "second return", "third return"):
+        manager.add_step("trace_session", return_value=value)
+
+    windows = await _extract(["trace_session"], raw_trace_content=True, last_n_steps=2)
+
+    # Oldest pending first: bounded persists drain the backlog instead of
+    # sealing the older steps below an advanced watermark.
+    assert [window.text for window in windows] == [
+        "Session ID: trace_session\n\nfirst return\nsecond return"
     ]
-
-    with (
-        patch.object(extract_agent_trace_feedbacks_module, "session_user") as mock_session_user,
-        patch.object(
-            extract_agent_trace_feedbacks_module,
-            "get_session_manager",
-            return_value=mock_session_manager,
-        ),
-    ):
-        mock_session_user.get.return_value = mock_user
-
-        extracted_values = []
-        async for value in extract_agent_trace_feedbacks(
-            [{}],
-            session_ids=["trace_session"],
-            raw_trace_content=True,
-        ):
-            extracted_values.append(value)
-
-    assert _texts(extracted_values) == [""]
-    assert extracted_values[0].persisted_trace_count == 2
-    mock_session_manager.get_agent_trace_session.assert_awaited_once_with(
-        user_id="test-user-123",
-        session_id="trace_session",
-        last_n=None,
-    )
-    mock_session_manager.get_agent_trace_feedback.assert_not_called()
+    assert manager.session_last_n_calls == [None]
 
 
 @pytest.mark.asyncio
-async def test_extract_agent_trace_feedbacks_rejects_non_boolean_raw_trace_content(mock_user):
-    mock_session_manager = _make_mock_session_manager(["draft plan succeeded."])
+async def test_rejects_non_boolean_raw_trace_content(manager):
+    manager.add_step("trace_session", feedback="draft plan succeeded.")
 
-    with (
-        patch.object(extract_agent_trace_feedbacks_module, "session_user") as mock_session_user,
-        patch.object(
-            extract_agent_trace_feedbacks_module,
-            "get_session_manager",
-            return_value=mock_session_manager,
-        ),
-    ):
-        mock_session_user.get.return_value = mock_user
-
-        with pytest.raises(CogneeSystemError, match="raw_trace_content must be a boolean"):
-            async for _ in extract_agent_trace_feedbacks(
-                [{}],
-                session_ids=["trace_session"],
-                raw_trace_content="yes",
-            ):
-                pass
+    with pytest.raises(CogneeSystemError, match="raw_trace_content must be a boolean"):
+        await _extract(["trace_session"], raw_trace_content="yes")
 
 
 @pytest.mark.asyncio
-async def test_extract_agent_trace_feedbacks_limits_to_last_n_steps(mock_user):
-    mock_session_manager = _make_mock_session_manager(
-        ["first step", "second step", "third step", "fourth step"]
-    )
+async def test_fallback_only_steps_carry_their_return_values(manager):
+    """With trace summaries off (the default), every stored feedback is the
+    deterministic "<fn> succeeded." line — cognifying those alone would strip
+    the agent_trace_feedbacks node set of all content. Fallback-equal steps get
+    their return value appended; real summaries pass through untouched."""
+    manager.add_step("s", feedback="traced_agent succeeded.", return_value={"answer": 42})
+    manager.add_step("s", feedback="Looked up the Q3 revenue figures.", return_value="ignored")
+    manager.add_step("s", feedback="traced_agent succeeded.", return_value=None)
 
-    with (
-        patch.object(extract_agent_trace_feedbacks_module, "session_user") as mock_session_user,
-        patch.object(
-            extract_agent_trace_feedbacks_module,
-            "get_session_manager",
-            return_value=mock_session_manager,
-        ),
-    ):
-        mock_session_user.get.return_value = mock_user
+    windows = await _extract(["s"])
 
-        feedback_sessions = []
-        async for feedback in extract_agent_trace_feedbacks(
-            [{}],
-            session_ids=["trace_session"],
-            last_n_steps=2,
-        ):
-            feedback_sessions.append(feedback)
-
-    assert feedback_sessions == ["Session ID: trace_session\n\nthird step\nfourth step"]
-    mock_session_manager.get_agent_trace_feedback.assert_called_once_with(
-        user_id="test-user-123",
-        session_id="trace_session",
-        last_n=2,
-    )
-
-
-@pytest.mark.asyncio
-async def test_extract_agent_trace_feedbacks_limits_raw_return_values_to_last_n_steps(mock_user):
-    mock_session_manager = _make_mock_session_manager([])
-    trace_entries = [
-        _trace_entry("first return"),
-        _trace_entry("second return"),
-        _trace_entry("third return"),
-    ]
-
-    async def _get_agent_trace_session(*, user_id, session_id, last_n=None):
-        del user_id, session_id
-        if last_n is None:
-            return trace_entries
-        return trace_entries[-last_n:]
-
-    mock_session_manager.get_agent_trace_session = AsyncMock(side_effect=_get_agent_trace_session)
-
-    with (
-        patch.object(extract_agent_trace_feedbacks_module, "session_user") as mock_session_user,
-        patch.object(
-            extract_agent_trace_feedbacks_module,
-            "get_session_manager",
-            return_value=mock_session_manager,
-        ),
-    ):
-        mock_session_user.get.return_value = mock_user
-
-        extracted_values = []
-        async for value in extract_agent_trace_feedbacks(
-            [{}],
-            session_ids=["trace_session"],
-            raw_trace_content=True,
-            last_n_steps=2,
-        ):
-            extracted_values.append(value)
-
-    assert extracted_values == ["Session ID: trace_session\n\nsecond return\nthird return"]
-
-
-@pytest.mark.asyncio
-async def test_extract_agent_trace_feedbacks_passes_last_n_to_raw_trace_lookup(mock_user):
-    mock_session_manager = _make_mock_session_manager([])
-    mock_session_manager.get_agent_trace_session.return_value = [
-        _trace_entry("second return"),
-        _trace_entry("third return"),
-    ]
-
-    with (
-        patch.object(extract_agent_trace_feedbacks_module, "session_user") as mock_session_user,
-        patch.object(
-            extract_agent_trace_feedbacks_module,
-            "get_session_manager",
-            return_value=mock_session_manager,
-        ),
-    ):
-        mock_session_user.get.return_value = mock_user
-
-        extracted_values = []
-        async for value in extract_agent_trace_feedbacks(
-            [{}],
-            session_ids=["trace_session"],
-            raw_trace_content=True,
-            last_n_steps=2,
-        ):
-            extracted_values.append(value)
-
-    assert extracted_values == ["Session ID: trace_session\n\nsecond return\nthird return"]
-    mock_session_manager.get_agent_trace_session.assert_awaited_once_with(
-        user_id="test-user-123",
-        session_id="trace_session",
-        last_n=2,
-    )
-
-
-@pytest.mark.asyncio
-async def test_extract_agent_trace_feedbacks_yields_only_steps_above_watermark(mock_user):
-    """The watermark cuts the window: already-persisted steps are never re-yielded."""
-    mock_session_manager = _make_mock_session_manager(
-        ["first step", "second step", "third step", "fourth step"], persisted_trace_count=2
-    )
-
-    with (
-        patch.object(extract_agent_trace_feedbacks_module, "session_user") as mock_session_user,
-        patch.object(
-            extract_agent_trace_feedbacks_module,
-            "get_session_manager",
-            return_value=mock_session_manager,
-        ),
-    ):
-        mock_session_user.get.return_value = mock_user
-
-        windows = []
-        async for window in extract_agent_trace_feedbacks([{}], session_ids=["trace_session"]):
-            windows.append(window)
-
-    assert _texts(windows) == ["Session ID: trace_session\n\nthird step\nfourth step"]
-    assert windows[0].persisted_trace_count == 4
-
-
-@pytest.mark.asyncio
-async def test_extract_agent_trace_feedbacks_yields_nothing_when_watermark_is_current(mock_user):
-    """An unchanged session costs no ingestion work at all."""
-    mock_session_manager = _make_mock_session_manager(
-        ["first step", "second step"], persisted_trace_count=2
-    )
-
-    with (
-        patch.object(extract_agent_trace_feedbacks_module, "session_user") as mock_session_user,
-        patch.object(
-            extract_agent_trace_feedbacks_module,
-            "get_session_manager",
-            return_value=mock_session_manager,
-        ),
-    ):
-        mock_session_user.get.return_value = mock_user
-
-        windows = []
-        async for window in extract_agent_trace_feedbacks([{}], session_ids=["trace_session"]):
-            windows.append(window)
-
-    assert windows == []
-
-
-@pytest.mark.asyncio
-async def test_extract_agent_trace_feedbacks_stale_watermark_restarts_from_beginning(mock_user):
-    """A watermark above the current step count means the session was rebuilt."""
-    mock_session_manager = _make_mock_session_manager(["only step"], persisted_trace_count=7)
-
-    with (
-        patch.object(extract_agent_trace_feedbacks_module, "session_user") as mock_session_user,
-        patch.object(
-            extract_agent_trace_feedbacks_module,
-            "get_session_manager",
-            return_value=mock_session_manager,
-        ),
-    ):
-        mock_session_user.get.return_value = mock_user
-
-        windows = []
-        async for window in extract_agent_trace_feedbacks([{}], session_ids=["trace_session"]):
-            windows.append(window)
-
-    assert _texts(windows) == ["Session ID: trace_session\n\nonly step"]
-    assert windows[0].persisted_trace_count == 1
+    lines = windows[0].text.split("\n")
+    assert 'traced_agent succeeded. Output: {"answer": 42}' in lines
+    assert "Looked up the Q3 revenue figures." in lines  # real summary untouched
+    assert "traced_agent succeeded." in lines  # no return value: fallback stands

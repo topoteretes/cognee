@@ -77,20 +77,73 @@ async def search(
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
 ) -> list[SearchResult]:
-    """
+    """Run one search type over the datasets a user may read and return per-dataset results.
+
+    This is the internal entry point behind ``cognee.search()`` (which resolves
+    dataset names to ids and validates argument combinations first) and, through
+    it, ``cognee.recall()``. It:
+
+    1. resolves ``dataset_ids`` to the datasets ``user`` has ``read`` permission on
+       (``None`` means every readable dataset);
+    2. fans the query out to each dataset concurrently, each under that dataset's
+       database context when ``ENABLE_BACKEND_ACCESS_CONTROL`` is on (with it off,
+       all datasets share one context and the search runs once);
+    3. picks the retriever for ``query_type`` (see
+       ``get_search_type_retriever_instance``), resolving ``FEELING_LUCKY`` to a
+       concrete type and letting ``HYBRID_COMPLETION`` defer to
+       ``GRAPH_COMPLETION`` when the request needs graph-only features or the
+       chunk collection is missing;
+    4. logs the query and completion text to search history (never the raw
+       retrieved objects).
 
     Args:
-        query_text:
-        query_type:
-        datasets:
-        user:
-        system_prompt_path:
-        top_k:
+        query_text: The user's question or search string.
+        query_type: Which retriever to run. ``FEELING_LUCKY`` selects one via an
+            LLM; ``HYBRID_COMPLETION`` may be deferred as described above.
+        dataset_ids: Datasets to search, or ``None`` for all readable datasets.
+        user: The requesting user; drives permission filtering and history.
+        system_prompt_path: Prompt template file for completion-style types.
+        system_prompt: Inline system prompt; overrides ``system_prompt_path``.
+        top_k: Maximum retrieved objects per dataset (default 15). Hybrid caps
+            its per-lane ``top_k`` unless overridden via ``retriever_specific_config``.
+        node_type: ``DataPoint`` subclass used to filter nodes (default ``NodeSet``).
+            A custom type forces hybrid to defer to graph completion.
+        node_name: Restrict retrieval to these node names (e.g. node-set tags),
+            combined with ``node_name_filter_operator`` (``"OR"``/``"AND"``).
+        only_context: Return the retrieval context instead of an LLM answer.
+        context_format: With ``only_context``, ``"context"`` (bare string, default)
+            or ``"prompt"`` (question, context, session_context, user/system prompt).
+        session_id: Session whose history is added to the completion context and
+            that receives the QA entry. Does not search the session cache; that is
+            ``recall()``-only.
+        wide_search_top_k, triplet_distance_penalty: Graph-completion tuning knobs;
+            rejected when the type is hybrid.
+        feedback_influence: Weight of learned feedback in graph ranking (default
+            from ``BaseConfig.default_feedback_influence``).
+        verbose: Return the raw per-dataset payload shape instead of the
+            backwards-compatible result list.
+        retriever_specific_config: Extra constructor kwargs for the chosen
+            retriever (e.g. ``response_model``, hybrid lane ``top_k`` values,
+            ``skills``/``tools``/``max_iter`` for ``AGENTIC_COMPLETION``,
+            ``code_query`` for ``CODE``).
+        neighborhood_depth, neighborhood_seed_top_k: Graph neighbourhood
+            expansion controls; validated as positive integers by the caller.
+        include_references: Attach structured ``EvidenceReference`` objects
+            (edge evidence, source chunks) to completions that support them.
+        llm_config, embedding_config: Per-call provider overrides applied inside
+            each dataset context.
 
     Returns:
+        One ``SearchResult`` per dataset that produced output. ``search_result``
+        holds the retriever's completion (a string or dict for completion types,
+        the context list for retrieval-only types, or a ``{"seed_not_found":
+        True, ...}`` marker for a per-dataset ``CODE`` seed miss);
+        ``dataset_id``/``dataset_name`` identify the dataset. With
+        ``verbose=True`` the list carries the full ``SearchResultPayload`` shape.
 
     Notes:
-        Searching by dataset is only available in ENABLE_BACKEND_ACCESS_CONTROL mode
+        Scoping to specific datasets requires ``ENABLE_BACKEND_ACCESS_CONTROL``
+        (the default). Permission failures yield an empty list, not an error.
     """
     send_telemetry(
         "cognee.search EXECUTION STARTED",
