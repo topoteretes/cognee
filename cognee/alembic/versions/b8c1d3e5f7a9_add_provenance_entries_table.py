@@ -15,6 +15,7 @@ taken by add_label_column_to_data, so a fresh id is used.
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 # revision identifiers, used by Alembic.

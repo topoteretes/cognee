@@ -124,7 +124,12 @@ async def run_procurement_example():
         for q in questions:
             print(f"Question: \n{q}")
             results = await procurement_system.search_memory(q, search_categories=[category])
-            top_answer = results[category][0]
+            category_results = results[category]
+            # recall() returns [] when memory holds no context for the question,
+            # instead of an LLM non-answer, so an empty result is a real outcome.
+            top_answer = (
+                category_results[0] if category_results else "No relevant context found in memory."
+            )
             print(f"Answer: \n{top_answer}\n")
             research_notes[category].append({"question": q, "answer": top_answer})
 

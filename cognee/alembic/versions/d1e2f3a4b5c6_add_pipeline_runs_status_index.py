@@ -15,8 +15,9 @@ just at start/complete/error, making that gap matter sooner than it used to.
 
 from collections.abc import Sequence
 
-from alembic import op
 from sqlalchemy.engine.reflection import Inspector
+
+from alembic import op
 
 revision: str = "d1e2f3a4b5c6"
 down_revision: str | None = "b3d5f7a9c1e2"

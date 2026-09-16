@@ -2,7 +2,6 @@ import asyncio
 import logging
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
@@ -11,6 +10,7 @@ import cognee.modules.migrations.models
 import cognee.modules.provenance.edge_evidence.models
 import cognee.modules.provenance.models
 import cognee.modules.session_lifecycle.models
+from alembic import context
 from cognee.infrastructure.databases.relational import Base, get_relational_engine
 
 # this is the Alembic Config object, which provides
