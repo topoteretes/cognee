@@ -5,7 +5,8 @@ from fastapi.responses import JSONResponse
 from pydantic import ConfigDict, Field
 
 from cognee import __version__ as cognee_version
-from cognee.api.DTO import InDTO
+from cognee.api.DTO import ErrorResponse, InDTO
+from cognee.exceptions import CogneeApiError
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -53,7 +54,17 @@ class ForgetPayloadDTO(InDTO):
 def get_forget_router() -> APIRouter:
     router = APIRouter()
 
-    @router.post("")
+    @router.post(
+        "",
+        summary="Forget data: one item, a dataset, its memory only, or everything",
+        response_model=dict,
+        responses={
+            403: {"model": ErrorResponse},
+            404: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
+            500: {"model": ErrorResponse},
+        },
+    )
     @log_usage(function_name="POST /v1/forget", log_type="api_endpoint")
     async def forget_endpoint(
         payload: ForgetPayloadDTO, user: User = Depends(get_authenticated_user)
@@ -83,6 +94,8 @@ def get_forget_router() -> APIRouter:
         accepted.
 
         ## Error Codes
+        - **404 Not Found**: Dataset name does not exist or is not accessible
+        - **403 Forbidden**: Caller lacks delete permission on the dataset
         - **422 Unprocessable Entity**: Invalid parameter combination (e.g. both `dataset`
           and `datasetId`, `dataId` without a dataset, or `memoryOnly` without a dataset)
         - **500 Internal Server Error**: Error during deletion
@@ -115,6 +128,11 @@ def get_forget_router() -> APIRouter:
                     "error": "Invalid request parameters. Specify dataset or dataset_id, data_id+dataset, or everything=True."
                 },
             )
+        except CogneeApiError:
+            # Typed errors carry their own status code (DatasetNotFoundError -> 404,
+            # PermissionDeniedError -> 403) and are rendered by the global
+            # CogneeApiError handler; swallowing them here used to turn both into 500s.
+            raise
         except Exception:
             logger = get_logger()
             logger.exception("Forget endpoint error")

@@ -118,7 +118,19 @@ class TestConditionalAuthenticationEnvironmentVariables:
             del sys.modules[module_name]
         import importlib
 
-        return importlib.import_module(module_name)
+        module = importlib.import_module(module_name)
+
+        # Dropping the module from sys.modules makes this a *fresh* import, and a
+        # fresh import rebinds the attribute on the parent package to the module --
+        # clobbering the function that methods/__init__.py re-exports under the same
+        # name. Every later `from cognee.modules.users.methods import
+        # get_authenticated_user` in the same process would then bind a module, and
+        # the routers that pass it to Depends() raise "is not a callable object".
+        # This test owns the mutation, so it restores the re-export.
+        import cognee.modules.users.methods as methods_package
+
+        methods_package.get_authenticated_user = module.get_authenticated_user
+        return module
 
     def _reimport_flag(self):
         return self._reimport().REQUIRE_AUTHENTICATION

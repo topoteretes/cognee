@@ -4,6 +4,7 @@ Tests for the push CLI command with proper mocking and coroutine handling.
 
 import argparse
 import asyncio
+import importlib
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -13,6 +14,8 @@ from cognee.api.v1.push.push import PushResult
 from cognee.cli.commands.push_command import PushCommand
 from cognee.cli.exceptions import CliCommandException
 from cognee.modules.migration.sources.base import IMPORT_MODES
+
+push_module = importlib.import_module("cognee.api.v1.push.push")
 
 
 # Mock asyncio.run to properly handle coroutines
@@ -99,7 +102,7 @@ class TestPushCommand:
             parser.parse_args(["my_dataset", "--mode", "bogus"])
 
     @patch("cognee.cli.user_resolution.resolve_cli_user", new_callable=AsyncMock)
-    @patch("cognee.api.v1.push.push._resolve_client")
+    @patch.object(push_module, "_resolve_client")
     @patch("cognee.push", new_callable=AsyncMock, create=True)
     @patch("cognee.cli.commands.push_command.asyncio.run", side_effect=_mock_run)
     def test_execute_resolves_user_and_passes_it(
@@ -135,7 +138,7 @@ class TestPushCommand:
         )
 
     @patch("cognee.cli.user_resolution.resolve_cli_user", new_callable=AsyncMock)
-    @patch("cognee.api.v1.push.push._resolve_client")
+    @patch.object(push_module, "_resolve_client")
     @patch("cognee.push", new_callable=AsyncMock, create=True)
     @patch("cognee.cli.commands.push_command.asyncio.run", side_effect=_mock_run)
     def test_execute_defaults_user_id_to_none(
@@ -163,7 +166,7 @@ class TestPushCommand:
 
     @patch("cognee.cli.commands.push_command.fmt")
     @patch("cognee.cli.user_resolution.resolve_cli_user", new_callable=AsyncMock)
-    @patch("cognee.api.v1.push.push._resolve_client")
+    @patch.object(push_module, "_resolve_client")
     @patch("cognee.push", new_callable=AsyncMock, create=True)
     @patch("cognee.cli.commands.push_command.asyncio.run", side_effect=_mock_run)
     def test_execute_echoes_resolved_url_and_result(
@@ -201,7 +204,7 @@ class TestPushCommand:
         assert "remote_name" in success_message
 
     @patch("cognee.cli.user_resolution.resolve_cli_user", new_callable=AsyncMock)
-    @patch("cognee.api.v1.push.push._resolve_client")
+    @patch.object(push_module, "_resolve_client")
     @patch("cognee.push", new_callable=AsyncMock, create=True)
     @patch("cognee.cli.commands.push_command.asyncio.run", side_effect=_mock_run)
     def test_execute_forwards_url_and_api_key(

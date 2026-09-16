@@ -359,6 +359,9 @@ class CogneeApiClient:
         node_name: list[str] | None = None,
         session_ids: list[str] | None = None,
         run_in_background: bool = False,
+        build_global_context_index: bool = False,
+        build_truth_subspace: bool = False,
+        feedback_alpha: float | None = None,
     ) -> dict:
         payload: dict[str, Any] = {"run_in_background": run_in_background}
         if dataset_name:
@@ -369,6 +372,12 @@ class CogneeApiClient:
             payload["node_name"] = node_name
         if session_ids:
             payload["session_ids"] = session_ids
+        if build_global_context_index:
+            payload["build_global_context_index"] = True
+        if build_truth_subspace:
+            payload["build_truth_subspace"] = True
+        if feedback_alpha is not None:
+            payload["feedback_alpha"] = feedback_alpha
         r = self._get_client().post(self._url("/api/v1/improve"), json=payload)
         self._raise_for_status(r)
         return r.json()

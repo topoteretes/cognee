@@ -574,6 +574,28 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 for result in unique_results
             ]
 
+    async def score_by_ids(
+        self, collection_name: str, data_point_ids: list[str], query_vector: list[float]
+    ) -> list[ScoredResult]:
+        ids = list(dict.fromkeys(str(point_id) for point_id in data_point_ids))
+        if not ids:
+            return []
+        table = await self.get_table(collection_name)
+        scores = []
+        async with self.get_async_session() as session:
+            for start in range(0, len(ids), QUERY_BATCH_SIZE):
+                batch = ids[start : start + QUERY_BATCH_SIZE]
+                rows = await session.execute(
+                    select(
+                        table.c.id, table.c.vector.cosine_distance(query_vector).label("distance")
+                    ).where(table.c.id.in_(batch))
+                )
+                scores.extend(
+                    ScoredResult(id=parse_id(str(row.id)), score=float(row.distance), payload=None)
+                    for row in rows.all()
+                )
+        return scores
+
     async def search(
         self,
         collection_name: str,

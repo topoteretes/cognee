@@ -114,10 +114,11 @@ class CogneeGraph(CogneeAbstractGraph):
             node_name=node_name,
             node_name_filter_operator=node_name_filter_operator,
         )
-        if not nodes_data or not edges_data:
+        if not nodes_data:
             raise EntityNotFoundError(
                 message="Nodeset does not exist, or empty nodeset projected from the database."
             )
+        edges_data = edges_data or []
         return nodes_data, edges_data
 
     async def _get_full_or_id_filtered_graph(
@@ -129,9 +130,16 @@ class CogneeGraph(CogneeAbstractGraph):
         if relevant_ids_to_filter is None:
             logger.info("Retrieving full graph.")
             nodes_data, edges_data = await adapter.get_graph_data()
-            if not nodes_data or not edges_data:
+            # Nodes decide emptiness, edges do not: a graph can legitimately
+            # have nodes and no relationships (a fresh dataset, or extraction
+            # that produced entities but no links between them). Treating that
+            # as "empty" is what forced the Ladybug adapter to fabricate
+            # (id, id, "SELF") self-loops just to keep this guard quiet -- and
+            # those fakes then flowed into retrieval as real triplets. Same
+            # rule get_neighborhood already applies below.
+            if not nodes_data:
                 raise EntityNotFoundError(message="Empty graph projected from the database.")
-            return nodes_data, edges_data
+            return nodes_data, edges_data or []
 
         get_graph_data_fn = getattr(adapter, "get_id_filtered_graph_data", adapter.get_graph_data)
         if getattr(adapter.__class__, "get_id_filtered_graph_data", None):
@@ -140,16 +148,16 @@ class CogneeGraph(CogneeAbstractGraph):
         else:
             logger.info("Retrieving full graph from database.")
             nodes_data, edges_data = await get_graph_data_fn()
-        if hasattr(adapter, "get_id_filtered_graph_data") and (not nodes_data or not edges_data):
+        if hasattr(adapter, "get_id_filtered_graph_data") and not nodes_data:
             logger.warning(
                 "Id filtered graph returned empty, falling back to full graph retrieval."
             )
             logger.info("Retrieving full graph")
             nodes_data, edges_data = await adapter.get_graph_data()
 
-        if not nodes_data or not edges_data:
+        if not nodes_data:
             raise EntityNotFoundError("Empty graph projected from the database.")
-        return nodes_data, edges_data
+        return nodes_data, edges_data or []
 
     async def _get_filtered_graph(
         self,
@@ -161,9 +169,9 @@ class CogneeGraph(CogneeAbstractGraph):
         nodes_data, edges_data = await adapter.get_filtered_graph_data(
             attribute_filters=memory_fragment_filter
         )
-        if not nodes_data or not edges_data:
+        if not nodes_data:
             raise EntityNotFoundError(message="Empty filtered graph projected from the database.")
-        return nodes_data, edges_data
+        return nodes_data, edges_data or []
 
     def _process_nodes_and_edges(
         self,

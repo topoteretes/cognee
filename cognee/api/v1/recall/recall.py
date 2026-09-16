@@ -26,6 +26,7 @@ from cognee.modules.observability import (
     new_span,
 )
 from cognee.modules.operations import get_current_operation, record_operation
+from cognee.modules.preflight import llm_available
 from cognee.modules.recall.types.RecallResponse import (
     RecallResponse,
     ResponseAgentTraceEntry,
@@ -395,7 +396,7 @@ async def recall(
         dataset_ids: Dataset UUIDs to search within. Takes precedence over datasets.
         top_k: Maximum results to return (default *15*).
         auto_route: If True and query_type is None, classify the query
-            automatically. If False, fall back to GRAPH_COMPLETION.
+            automatically. If False, fall back to HYBRID_COMPLETION.
         response_model: Pydantic model class for structured completion output.
             Forwarded to the retriever, which validates the LLM answer against
             it; each result then carries the validated payload as a dict in its
@@ -636,6 +637,14 @@ async def recall(
                         result = route_query(query_text)
                         routed_type = result.search_type
                         record_override(routed_type, local_query_type)
+                elif not llm_available(llm_config):
+                    # No usable LLM is configured, so nothing can write a
+                    # completion answer; the default lookup is the vector
+                    # search over chunks. Keyed on LLM availability, not on the
+                    # extractor that built the graph — a gliner-built graph
+                    # with a key present answers completions fine. An explicit
+                    # query_type still selects any search type.
+                    local_query_type = SearchType.CHUNKS
                 elif auto_route:
                     from cognee.api.v1.recall.query_router import route_query
 
