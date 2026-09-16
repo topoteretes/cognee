@@ -80,20 +80,24 @@ def check_provider_config(
 
     from cognee.infrastructure.databases.vector.embeddings.config import (
         DEFAULT_EMBEDDING_MODEL,
-        embeddings_untouched,
+        embedding_settings_configured,
     )
 
     problems: list[str] = []
 
     llm_provider = (llm_config.llm_provider or "").lower()
     llm_key = (llm_config.llm_api_key or "").strip()
-    untouched = embeddings_untouched(embedding_config)
+    embeddings_configured = embedding_settings_configured(embedding_config)
 
-    # With embeddings untouched and no usable LLM key, embeddings run on the
-    # local fastembed default (``resolve_embedding_defaults``), so no key of
-    # any provider reaches the OpenAI endpoint — the trap only exists once a
-    # non-OpenAI key would be reused.
-    if untouched and llm_provider not in ("", "openai") and llm_available(llm_config):
+    # With no embedding setting configured and no usable LLM key, embeddings
+    # run on the local fastembed default (``resolve_embedding_defaults``), so
+    # no key of any provider reaches the OpenAI endpoint — the trap only
+    # exists once a non-OpenAI key would be reused.
+    if (
+        not embeddings_configured
+        and llm_provider not in ("", "openai")
+        and llm_available(llm_config)
+    ):
         if llm_provider == "custom":
             key_consequence = (
                 "with LLM_PROVIDER='custom' no API key at all would be sent to the "
@@ -114,7 +118,7 @@ def check_provider_config(
             "OpenAI EMBEDDING_API_KEY to keep the default embedder."
         )
 
-    if not untouched and _llm_requires_api_key(llm_config) and not llm_key and needs_llm:
+    if embeddings_configured and _llm_requires_api_key(llm_config) and not llm_key and needs_llm:
         problems.append(
             "Embedding settings are configured but LLM_API_KEY is not set "
             f"(LLM_PROVIDER='{llm_provider or 'openai'}' requires one). Entity "

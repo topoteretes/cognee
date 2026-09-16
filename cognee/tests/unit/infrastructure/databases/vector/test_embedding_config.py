@@ -95,7 +95,7 @@ def test_config_falls_back_when_unresolvable(monkeypatch):
     assert cfg.embedding_dimensions == 3072
 
 
-# ---- Keyless default: untouched embeddings + no usable LLM key -> fastembed ----
+# ---- Keyless default: no embedding setting + no usable LLM key -> fastembed ----
 
 
 def _llm(api_key):
@@ -113,7 +113,7 @@ def _default_embeddings(monkeypatch, **overrides):
     return EmbeddingConfig(_env_file=None, **overrides)
 
 
-def test_untouched_embeddings_without_llm_key_resolve_to_local_fastembed(monkeypatch):
+def test_unconfigured_embeddings_without_llm_key_resolve_to_local_fastembed(monkeypatch):
     """The vector size comes from fastembed's registry for the default model, not a constant."""
     from cognee.infrastructure.databases.vector.embeddings import config as config_module
     from cognee.infrastructure.databases.vector.embeddings.config import (
@@ -146,7 +146,7 @@ def test_keyless_embeddings_without_fastembed_installed_fail_with_install_hint(m
         resolve_embedding_defaults(config, _llm(api_key=None))
 
 
-def test_untouched_embeddings_with_llm_key_keep_the_openai_default(monkeypatch):
+def test_unconfigured_embeddings_with_llm_key_keep_the_openai_default(monkeypatch):
     from cognee.infrastructure.databases.vector.embeddings.config import (
         resolve_embedding_defaults,
     )
@@ -171,13 +171,13 @@ def test_untouched_embeddings_with_llm_key_keep_the_openai_default(monkeypatch):
 )
 def test_any_configured_embedding_setting_is_honoured_without_llm_key(monkeypatch, overrides):
     from cognee.infrastructure.databases.vector.embeddings.config import (
-        embeddings_untouched,
+        embedding_settings_configured,
         resolve_embedding_defaults,
     )
 
     config = _default_embeddings(monkeypatch, **overrides)
 
-    assert embeddings_untouched(config) is False
+    assert embedding_settings_configured(config) is True
     assert resolve_embedding_defaults(config, _llm(api_key=None)) == (
         config.embedding_provider,
         config.embedding_model,

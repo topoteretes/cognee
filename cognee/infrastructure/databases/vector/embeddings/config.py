@@ -184,14 +184,15 @@ class EmbeddingConfig(BaseSettings):
         }
 
 
-def embeddings_untouched(config) -> bool:
-    """True when every embedding setting still has its OpenAI default.
+def embedding_settings_configured(config) -> bool:
+    """True when any embedding setting was configured: provider, model, key or
+    endpoint differs from the stock OpenAI default.
 
     Value-based on purpose: settings arrive from env vars, kwargs and
     ``cognee.config.set_embedding_*`` alike, and only the values tell the
     cases apart. The preflight and the engine factory share this predicate.
     """
-    return (
+    return not (
         (config.embedding_provider or "").lower() == DEFAULT_EMBEDDING_PROVIDER
         and (config.embedding_model or "") == DEFAULT_EMBEDDING_MODEL
         and not (config.embedding_api_key or "").strip()
@@ -203,15 +204,15 @@ def resolve_embedding_defaults(config, llm_config) -> tuple[str | None, str | No
     """Return the ``(provider, model, dimensions)`` the embedding engine runs with.
 
     The OpenAI default embedder only works because ``LLM_API_KEY`` is reused
-    for it. With embeddings untouched and no usable LLM key, that default
-    cannot run, so embeddings go to the local fastembed model instead — the
+    for it. With no embedding setting configured and no usable LLM key, that
+    default cannot run, so embeddings go to the local fastembed model instead — the
     embedding half of keyless ingestion (``resolve_extractor`` is the graph
     half). Any configured embedding setting, or a usable LLM key, keeps the
     config exactly as given.
     """
     from cognee.modules.preflight import llm_available
 
-    if embeddings_untouched(config) and not llm_available(llm_config):
+    if not embedding_settings_configured(config) and not llm_available(llm_config):
         dimensions = _resolve_embedding_dimensions(
             DEFAULT_LOCAL_EMBEDDING_PROVIDER, DEFAULT_LOCAL_EMBEDDING_MODEL
         )
