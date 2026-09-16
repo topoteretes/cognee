@@ -1,3 +1,4 @@
+import re
 from typing import Any, Optional
 
 from cognee.modules.retrieval.hybrid.chunks import search_collection
@@ -177,13 +178,36 @@ def _entity_from_result(result: Any) -> dict:
     }
 
 
+def _sanitize_heading_text(value: Any) -> str:
+    """Flatten stored metadata before it is rendered as prompt structure.
+
+    Entity names and is_a types originate from extraction over ingested
+    documents. A stored value carrying newlines or heading markers would
+    otherwise forge new sections inside the assembled completion context, so
+    only its flattened single-line form may be rendered into a heading.
+    """
+    text = display_value(value)
+    if not text:
+        return ""
+    return _WHITESPACE_RUN.sub(" ", text).strip()
+
+
+_WHITESPACE_RUN = re.compile(r"\s+")
+
+
 def _format_entity(entity: dict) -> str:
     name = display_value(entity.get("name"))
     if not name:
         return ""
 
     entity_type = _entity_type(entity)
-    header = f"### {name} ({entity_type})" if entity_type else f"### {name}"
+    safe_name = _sanitize_heading_text(name)
+    if not safe_name:
+        return ""
+    if entity_type:
+        header = f"### {safe_name} ({_sanitize_heading_text(entity_type)})"
+    else:
+        header = f"### {safe_name}"
 
     lines = [header]
     description = display_value(entity.get("description"))
