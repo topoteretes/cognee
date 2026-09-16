@@ -34,6 +34,7 @@ from cognee.modules.observability import (
     COGNEE_SEARCH_TYPE,
     new_span,
 )
+from cognee.modules.retrieval.base_retriever import should_skip_completion
 from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.modules.search.types import SearchType
 from cognee.modules.user_preferences import warm_preference_cache
@@ -265,10 +266,11 @@ async def _retrieve_and_answer(
         elif isinstance(context, list):
             span.set_attribute("cognee.retrieval.context_items", len(context))
 
-    if getattr(retriever, "skip_completion_on_empty_context", False) and not context:
-        # Same contract as get_completion_from_context (SDK-270 / gh #3728):
-        # an empty retrieval context must not reach the LLM. None tells the
-        # caller no answer was generated, so no QA turn gets recorded.
+    if should_skip_completion(retriever, context):
+        # The concurrent lane calls complete_turn directly and so bypasses the
+        # retriever's own get_completion_from_context guard; apply the same rule
+        # here (SDK-270 / gh #3728). None tells the caller no answer was
+        # generated, so no QA turn gets recorded.
         logger.warning("Empty context: skipping LLM completion, returning no results")
         return retrieved_objects, context, None
 

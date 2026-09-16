@@ -40,7 +40,7 @@ from cognee.modules.recall.types.RecallResponse import (
 )
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
-from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
+from cognee.modules.search.types import ContextFormat, SearchResult, SearchStatus, SearchType
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -335,6 +335,37 @@ def _scope_should_forward_resolved(scope: str | list[str] | None) -> bool:
     if isinstance(scope, str):
         return scope in {"all", "graph_context"}
     return bool(scope and {"all", "graph_context"}.intersection(scope))
+
+
+def _empty_completion_marker(payloads: list) -> ResponseMarkerEntry | None:
+    """One system marker for a graph-only recall whose every dataset skipped its LLM.
+
+    ``graph_empty`` when every searched dataset has an empty knowledge graph,
+    ``no_context`` when at least one is populated but retrieval matched nothing.
+    None when no payload carries a skip status (a plain empty result stays []).
+    """
+    statuses = {getattr(payload, "status", SearchStatus.OK) for payload in payloads}
+    statuses.discard(SearchStatus.OK)
+    if not statuses:
+        return None
+    if statuses == {SearchStatus.GRAPH_EMPTY}:
+        return ResponseMarkerEntry(
+            source="system",
+            status=SearchStatus.GRAPH_EMPTY.value,
+            text=(
+                "The knowledge graph is empty for the requested datasets: nothing has "
+                "been cognified yet, so no answer was generated. Run remember() or "
+                "cognify() first."
+            ),
+        )
+    return ResponseMarkerEntry(
+        source="system",
+        status=SearchStatus.NO_CONTEXT.value,
+        text=(
+            "No relevant memory found: retrieval returned no context for this query, "
+            "so no answer was generated."
+        ),
+    )
 
 
 async def recall(
@@ -809,6 +840,16 @@ async def recall(
                     tagged.extend(
                         [ResponseGraphEntry(**item.model_dump(), source="graph") for item in items]
                     )
+                if not tagged and sources == ["graph"]:
+                    # Every dataset skipped its completion for lack of context
+                    # (SDK-270): say so with the same system marker the warm-up
+                    # guard uses, instead of a bare []. Graph-only recalls only,
+                    # mirroring the warm-up guard: in a multi-source recall the
+                    # graph contributes nothing so the other lanes and the tools
+                    # "on_empty" fallback behave as if it returned no results.
+                    marker = _empty_completion_marker(graph_results)
+                    if marker is not None:
+                        return [marker]
                 return tagged
 
             async def _run_tools() -> list[RecallResponse]:

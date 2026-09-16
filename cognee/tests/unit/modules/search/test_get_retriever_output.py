@@ -1,4 +1,5 @@
 import importlib
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -751,3 +752,182 @@ async def test_graph_completion_accepts_graph_only_knobs():
     assert result.search_type is SearchType.GRAPH_COMPLETION
     assert factory_mock.await_args.kwargs["wide_search_top_k"] == 200
     assert factory_mock.await_args.kwargs["triplet_distance_penalty"] == 2.5
+
+
+# --- SDK-270: empty context / empty graph never reach the LLM, and say why ---
+
+
+class _EmptyGraphEngine:
+    async def is_empty(self):
+        return True
+
+
+class _SkippingRetriever:
+    """Completion retriever whose context comes back empty."""
+
+    skip_completion_on_empty_context = True
+    supports_session_turn_preparation = False
+    calls: list
+
+    def __init__(self, context=""):
+        self._context = context
+        self.calls = []
+
+    async def get_retrieved_objects(self, query):
+        self.calls.append("retrieve")
+        return []
+
+    async def get_context_from_objects(self, query, retrieved_objects):
+        self.calls.append("context")
+        return self._context
+
+    async def get_completion_from_context(self, query, retrieved_objects, context):
+        self.calls.append("complete")
+        # Mirrors BaseRetriever.should_skip_completion: nothing to ground → no LLM.
+        return [] if not context else ["answer"]
+
+
+@contextmanager
+def _patched(retriever, graph_engine):
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=graph_engine,
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            new_callable=AsyncMock,
+            return_value=retriever,
+        ),
+    ):
+        yield
+
+
+@pytest.mark.asyncio
+async def test_empty_graph_short_circuits_before_retrieval_with_graph_empty_status():
+    from cognee.modules.search.types import SearchStatus
+
+    retriever = _SkippingRetriever()
+    with (
+        _patched(retriever, _EmptyGraphEngine()),
+        patch.object(
+            get_retriever_output_module, "run_session_aware_completion", new_callable=AsyncMock
+        ) as door,
+    ):
+        result = await get_retriever_output(SearchType.GRAPH_COMPLETION, "question")
+
+    assert result.status is SearchStatus.GRAPH_EMPTY
+    assert result.completion == []
+    assert result.search_type is SearchType.GRAPH_COMPLETION
+    assert result.question == "question"
+    # Neither retrieval nor the session-aware door (and so no LLM) ran.
+    assert retriever.calls == []
+    door.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_empty_graph_is_not_an_exception_across_completion_types():
+    """The policy is uniform: every completion type that opts in gets the same
+    typed status on an empty graph, never a NoDataError."""
+    from cognee.modules.search.types import SearchStatus
+
+    for query_type in (
+        SearchType.GRAPH_COMPLETION,
+        SearchType.RAG_COMPLETION,
+        SearchType.TRIPLET_COMPLETION,
+        SearchType.GRAPH_COMPLETION_COT,
+    ):
+        retriever = _SkippingRetriever()
+        with _patched(retriever, _EmptyGraphEngine()):
+            result = await get_retriever_output(query_type, "question")
+        assert result.status is SearchStatus.GRAPH_EMPTY, query_type
+        assert result.completion == []
+
+
+@pytest.mark.asyncio
+async def test_empty_graph_does_not_short_circuit_opted_out_retrievers():
+    """Agentic-style retrievers answer from tools, not memory: they still run."""
+    from cognee.modules.search.types import SearchStatus
+
+    retriever = _SkippingRetriever(context="tool context")
+    retriever.skip_completion_on_empty_context = False
+    with _patched(retriever, _EmptyGraphEngine()):
+        result = await get_retriever_output(SearchType.AGENTIC_COMPLETION, "question")
+
+    assert retriever.calls == ["retrieve", "context", "complete"]
+    assert result.completion == ["answer"]
+    assert result.status is SearchStatus.OK
+
+
+@pytest.mark.asyncio
+async def test_empty_graph_only_context_still_runs_retrieval():
+    """only_context asks for the context, not a completion: nothing to skip."""
+    from cognee.modules.search.types import SearchStatus
+
+    retriever = _SkippingRetriever()
+    with _patched(retriever, _EmptyGraphEngine()):
+        result = await get_retriever_output(
+            SearchType.GRAPH_COMPLETION, "question", only_context=True
+        )
+
+    assert retriever.calls == ["retrieve", "context"]
+    assert result.only_context is True
+    assert result.status is SearchStatus.OK
+
+
+@pytest.mark.asyncio
+async def test_populated_graph_with_no_matching_context_reports_no_context():
+    from cognee.modules.search.types import SearchStatus
+
+    retriever = _SkippingRetriever(context="")
+    with _patched(retriever, _FakeGraphEngine()):
+        result = await get_retriever_output(SearchType.GRAPH_COMPLETION, "question")
+
+    assert result.status is SearchStatus.NO_CONTEXT
+    assert result.completion == []
+    assert result.context == ""
+
+
+@pytest.mark.asyncio
+async def test_populated_graph_with_context_reports_ok():
+    from cognee.modules.search.types import SearchStatus
+
+    retriever = _SkippingRetriever(context="node1 -- rel -- node2")
+    with _patched(retriever, _FakeGraphEngine()):
+        result = await get_retriever_output(SearchType.GRAPH_COMPLETION, "question")
+
+    assert result.status is SearchStatus.OK
+    assert result.completion == ["answer"]
+
+
+@pytest.mark.asyncio
+async def test_acknowledgement_turn_without_context_stays_ok():
+    """A 'Got it.' turn has no retrieval context but does carry a completion:
+    it is an answered turn, not a skipped one."""
+    from cognee.modules.search.types import SearchStatus
+
+    retriever = _NoAnswerRetriever()
+    retriever.skip_completion_on_empty_context = True
+    with _patched(retriever, _FakeGraphEngine()):
+        result = await get_retriever_output(SearchType.GRAPH_COMPLETION, "noted, thanks")
+
+    assert result.completion == ["Thanks, I noted that."]
+    assert result.status is SearchStatus.OK
+
+
+@pytest.mark.asyncio
+async def test_non_opting_retriever_never_gets_a_skip_status():
+    """Non-generative types (CHUNKS, ...) legitimately return empty results; the
+    skip statuses are reserved for completion retrievers that opted in."""
+    from cognee.modules.search.types import SearchStatus
+
+    retriever = _SkippingRetriever(context="")
+    retriever.skip_completion_on_empty_context = False
+    with _patched(retriever, _FakeGraphEngine()):
+        result = await get_retriever_output(SearchType.CHUNKS, "question")
+
+    assert result.completion == []
+    assert result.status is SearchStatus.OK

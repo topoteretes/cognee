@@ -85,6 +85,7 @@ async def test_search_access_control_returns_dataset_shaped_dicts(monkeypatch, s
             "dataset_id": ds.id,
             "dataset_name": "ds1",
             "dataset_tenant_id": uuid5(NAMESPACE_OID, "t1"),
+            "status": "ok",
         }
     ]
 
@@ -126,6 +127,7 @@ async def test_search_access_control_only_context_returns_dataset_shaped_dicts(
             "dataset_id": ds.id,
             "dataset_name": "ds1",
             "dataset_tenant_id": uuid5(NAMESPACE_OID, "t1"),
+            "status": "ok",
         }
     ]
 
@@ -435,3 +437,92 @@ def test_prompt_preview_fields_follow_the_requested_format_not_session_state(sea
         search_type=SearchType.GRAPH_COMPLETION,
     )
     assert search_mod._prompt_preview_fields(filled)["user_prompt_result"] == "The question is: `q`"
+
+
+@pytest.mark.asyncio
+async def test_search_empty_dataset_does_not_hide_sibling_answers(monkeypatch, search_mod):
+    """SDK-270: an empty knowledge graph in one dataset is a per-dataset status, not
+    an exception, so a multi-dataset search still returns the populated dataset's
+    answer — and says why the other one is empty."""
+    from cognee.modules.search.types import SearchStatus
+
+    user = _make_user()
+    fresh = _make_dataset(name="fresh", tenant_id="t1")
+    populated = _make_dataset(name="populated", tenant_id="t1")
+
+    async def dummy_authorized_search(**_kwargs):
+        return [
+            SearchResultPayload(
+                result_object=[],
+                context="",
+                completion=[],
+                search_type=SearchType.GRAPH_COMPLETION,
+                status=SearchStatus.GRAPH_EMPTY,
+                dataset_name=fresh.name,
+                dataset_id=fresh.id,
+                dataset_tenant_id=fresh.tenant_id,
+            ),
+            SearchResultPayload(
+                result_object=["edge"],
+                context="node1 -- rel -- node2",
+                completion=["Jane proposed SQLite."],
+                search_type=SearchType.GRAPH_COMPLETION,
+                dataset_name=populated.name,
+                dataset_id=populated.id,
+                dataset_tenant_id=populated.tenant_id,
+            ),
+        ]
+
+    monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: True)
+    monkeypatch.setattr(search_mod, "authorized_search", dummy_authorized_search)
+
+    out = await search_mod.search(
+        query_text="What did Jane propose?",
+        query_type=SearchType.GRAPH_COMPLETION,
+        dataset_ids=[fresh.id, populated.id],
+        user=user,
+    )
+
+    by_name = {row["dataset_name"]: row for row in out}
+    assert by_name["populated"]["search_result"] == ["Jane proposed SQLite."]
+    assert by_name["populated"]["status"] == "ok"
+    # The empty dataset is still a falsy result for `if row["search_result"]:` callers,
+    # with the reason beside it.
+    assert by_name["fresh"]["search_result"] == []
+    assert by_name["fresh"]["status"] == "graph_empty"
+
+
+@pytest.mark.asyncio
+async def test_search_verbose_carries_status(monkeypatch, search_mod):
+    from cognee.modules.search.types import SearchStatus
+
+    user = _make_user()
+    ds = _make_dataset(name="ds1", tenant_id="t1")
+
+    async def dummy_authorized_search(**_kwargs):
+        return [
+            SearchResultPayload(
+                result_object=[],
+                context="",
+                completion=[],
+                search_type=SearchType.RAG_COMPLETION,
+                status=SearchStatus.NO_CONTEXT,
+                dataset_name=ds.name,
+                dataset_id=ds.id,
+                dataset_tenant_id=ds.tenant_id,
+            )
+        ]
+
+    monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: True)
+    monkeypatch.setattr(search_mod, "authorized_search", dummy_authorized_search)
+
+    out = await search_mod.search(
+        query_text="q",
+        query_type=SearchType.RAG_COMPLETION,
+        dataset_ids=[ds.id],
+        user=user,
+        verbose=True,
+    )
+
+    assert out[0]["text_result"] == []
+    assert out[0]["status"] == "no_context"

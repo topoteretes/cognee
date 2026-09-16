@@ -1,4 +1,5 @@
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.modules.retrieval.base_retriever import is_empty_context
 from cognee.modules.retrieval.context_preview import ContextPreview, build_context_preview
 from cognee.modules.retrieval.session_aware_completion import run_session_aware_completion
 from cognee.modules.retrieval.utils.evidence import (
@@ -14,7 +15,7 @@ from cognee.modules.search.methods.hybrid_deferral import (
 )
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.operations.select_search_type import select_search_type
-from cognee.modules.search.types import ContextFormat, SearchType
+from cognee.modules.search.types import ContextFormat, SearchStatus, SearchType
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -87,6 +88,30 @@ async def get_retriever_output(
     )
 
     only_context = kwargs.get("only_context", False)
+    skips_on_empty = getattr(retriever_instance, "skip_completion_on_empty_context", False)
+
+    if graph_is_empty and skips_on_empty and not only_context:
+        # Nothing was cognified into this dataset, so there is nothing to retrieve
+        # and nothing to ground a completion in. Decide that here, once and for
+        # every completion type, instead of letting each retriever discover it:
+        # no retrieval, no LLM call, and a typed reason on the payload rather
+        # than an exception — search() fans out over datasets with a plain
+        # gather, so an exception here would hide the sibling datasets' answers
+        # (SDK-270 / gh #3728). Retrievers that answer without memory context
+        # (agentic tools) do not opt in and run as usual.
+        logger.warning("Empty knowledge graph: skipping retrieval and LLM completion")
+        return SearchResultPayload(
+            result_object=[],
+            context="",
+            completion=[],
+            search_type=effective_query_type,
+            only_context=False,
+            question=query_text,
+            context_format=context_format,
+            status=SearchStatus.GRAPH_EMPTY,
+            **_dataset_fields(kwargs),
+        )
+
     retrieved_objects, context, completion = await run_session_aware_completion(
         retriever_instance,
         raw_query=query_text,
@@ -122,6 +147,14 @@ async def get_retriever_output(
             except Exception as error:
                 logger.warning("Unable to resolve graph source evidence: %s", error, exc_info=True)
 
+    status = SearchStatus.OK
+    if skips_on_empty and not only_context and not completion and is_empty_context(context):
+        # The retriever's guard fired: empty context, no LLM call, empty
+        # completion. Same predicate as the guard, so the two cannot drift. A
+        # "Got it." acknowledgement turn has no context either but does carry a
+        # completion, so it stays OK.
+        status = SearchStatus.NO_CONTEXT
+
     return SearchResultPayload(
         result_object=retrieved_objects,
         context=context,
@@ -129,6 +162,7 @@ async def get_retriever_output(
         evidence=evidence,
         search_type=effective_query_type,
         only_context=only_context,
+        status=status,
         question=query_text,
         context_format=context_format,
         session_context=preview.session_context or None,

@@ -6,6 +6,7 @@ from pydantic.alias_generators import to_camel
 
 from cognee.modules.search.models.EvidenceReference import EvidenceReference
 from cognee.modules.search.types.ContextFormat import ContextFormat
+from cognee.modules.search.types.SearchStatus import SearchStatus
 from cognee.modules.search.types.SearchType import SearchType
 
 
@@ -28,6 +29,13 @@ class SearchResultPayload(BaseModel):
     # TODO: Add return_type info
     search_type: SearchType
     only_context: bool = False
+
+    # Why ``completion`` is empty when it is. OK for every generated completion (and
+    # for search types with no completion step); NO_CONTEXT / GRAPH_EMPTY when a
+    # completion retriever skipped the LLM because it had nothing to ground an answer
+    # in. ``completion`` stays empty in those cases, so truthiness checks on the
+    # result keep working; this field is the explicit, typed reason beside it.
+    status: SearchStatus = SearchStatus.OK
 
     # The query this payload answers. Carried so the prompt envelope can report how the
     # question was framed around the context instead of leaving the caller to guess.

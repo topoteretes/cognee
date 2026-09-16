@@ -11,7 +11,6 @@ from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.base_retriever import BaseRetriever
-from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.retrieval.utils.completion import (
     generate_completion,
@@ -137,14 +136,11 @@ class GraphCompletionRetriever(BaseRetriever):
         is_empty = await self._unified_engine.graph.is_empty()
 
         if is_empty:
-            # An empty graph is a state problem, not a query miss: surface it
-            # loudly (404 over the API) the same way the RAG retriever raises
-            # on a missing vector collection, instead of quietly returning
-            # nothing. A populated graph with no matching triplets still
-            # yields an empty result below — that is a normal miss.
-            raise NoDataError(
-                "The knowledge graph is empty. Add data and run cognify before searching."
-            )
+            # A quiet miss, not an exception: search() fans out over datasets with
+            # a plain gather, so one empty dataset must not abort its siblings.
+            # get_retriever_output reports the state as SearchStatus.GRAPH_EMPTY.
+            logger.warning("Search attempt on an empty knowledge graph")
+            return []
 
         triplets = await self.get_triplets(query, query_batch)
 
@@ -402,12 +398,7 @@ class GraphCompletionRetriever(BaseRetriever):
         Note: To avoid duplicate retrievals, ensure that retrieved_objects and context
               are provided from previous method calls.
         """
-        if self.skip_completion_on_empty_context and not query_batch and not context:
-            # Empty context must not reach the LLM: the only possible output is
-            # a phantom "no context provided" deflection that callers cannot
-            # distinguish from a real answer (SDK-270 / gh #3728). An empty
-            # result also lets recall()'s on_empty fallback actually fire.
-            logger.warning("Empty context: skipping LLM completion, returning no results")
+        if self.should_skip_completion(context, query_batch):
             return []
 
         use_session = self._use_session_cache() and not query_batch
