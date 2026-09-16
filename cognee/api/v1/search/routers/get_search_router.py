@@ -11,7 +11,7 @@ from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse, InDTO, OutDTO
 from cognee.exceptions import CogneeApiError
 from cognee.modules.search.operations import get_history
-from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
+from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -66,16 +66,16 @@ class SearchPayloadDTO(InDTO):
         ),
     )
     top_k: int | None = Field(default=15)
-    only_context: bool = Field(default=False)
-    context_format: ContextFormat = Field(
-        default=ContextFormat.CONTEXT,
-        examples=[ContextFormat.CONTEXT.value],
+    only_context: bool = Field(
+        default=False,
         description=(
-            "Shape of an only_context result. 'context' returns the bare retrieval"
-            " context; 'prompt' returns the full envelope a completion would have"
-            " received — session guidance, conversation history, and the rendered"
-            " user and system prompts. The session layer comes from session_id"
-            " (the default session when omitted). Ignored unless only_context is true."
+            "Return what the LLM would have received instead of its answer. For"
+            " completion search types that is one string: the system prompt (session"
+            " guidance, conversation history, task template) and the rendered user"
+            " prompt (question plus retrieval context). The session layer comes from"
+            " session_id (the default session when omitted). Retrieval-only types"
+            " return their context. No LLM call is made and nothing is written to the"
+            " session."
         ),
     )
     session_id: str | None = Field(
@@ -83,7 +83,7 @@ class SearchPayloadDTO(InDTO):
         examples=[None],
         description=(
             "Session whose history and guidance feed the completion (or the"
-            " only_context prompt preview). Omit to use the default session."
+            " only_context prompt). Omit to use the default session."
         ),
     )
     verbose: bool = Field(
@@ -217,9 +217,8 @@ def get_search_router() -> APIRouter:
         - **system_prompt** Optional[str]: System prompt to be used for Completion type searches in Cognee
         - **node_name** Optional[list[str]]: Filter results to specific node_sets defined in the add pipeline (for targeted search).
         - **top_k** (Optional[int]): Maximum number of results to return (default: 15)
-        - **only_context** bool: Set to true to only return context Cognee will be sending to LLM in Completion type searches. This will be returned instead of LLM calls for completion type searches.
-        - **context_format** str: Shape of an only_context result — "context" (default, the bare retrieval context) or "prompt" (the full envelope a completion would receive: session guidance, conversation history, and the rendered user and system prompts).
-        - **session_id** (Optional[str]): Session whose history and guidance feed the completion or the prompt preview; the default session when omitted.
+        - **only_context** bool: Return what the LLM would have received instead of its answer. For completion type searches that is one string: the system prompt (session guidance, conversation history, task template) and the rendered user prompt (question plus retrieval context). Retrieval-only types return their context. No LLM call is made.
+        - **session_id** (Optional[str]): Session whose history and guidance feed the completion or the only_context prompt; the default session when omitted.
         - **verbose** (bool): Return detailed result information including the graph representation when available (default: false)
         - **skills** (Optional[List[str]]): Skill names to load into the agentic retriever (AGENTIC_COMPLETION only)
         - **tools** (Optional[List[str]]): Tool whitelist for AGENTIC_COMPLETION searches
@@ -256,7 +255,6 @@ def get_search_router() -> APIRouter:
                 "node_name": len(payload.node_name or []),
                 "top_k": payload.top_k,
                 "only_context": payload.only_context,
-                "context_format": payload.context_format,
                 "session_id": payload.session_id,
                 "verbose": payload.verbose,
                 "skills": payload.skills,
@@ -284,7 +282,6 @@ def get_search_router() -> APIRouter:
                 top_k=payload.top_k,
                 verbose=payload.verbose,
                 only_context=payload.only_context,
-                context_format=payload.context_format,
                 session_id=payload.session_id,
                 skills=payload.skills,
                 tools=payload.tools,

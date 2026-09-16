@@ -2,8 +2,8 @@
 
 data/companies.json and data/people.json become Company, Department and Person nodes that are
 deduplicated through identity_fields. The pipeline status is printed as it runs, the graph is
-written to .artifacts/, and a GRAPH_COMPLETION search with only_context=True prints the retrieval
-context for "Who works for GreenFuture Solutions?".
+written to .artifacts/, and a GRAPH_COMPLETION search with only_context=True prints the full prompt
+the LLM would receive (retrieval context included) for "Who works for GreenFuture Solutions?".
 
 Requires: an embedding provider (no LLM call is made).
 Run: uv run python examples/demos/custom_pipelines/organizational_hierarchy/organizational_hierarchy_pipeline_example.py
@@ -147,8 +147,9 @@ async def main():
     await visualize_graph(graph_file_path)
 
     # Ask a question against the graph that was just built. only_context=True
-    # returns the retrieval context instead of an LLM answer, so this example
-    # needs only an embedding provider configured - no LLM.
+    # returns the prompt the LLM would receive (retrieval context included)
+    # instead of an answer, so this example needs only an embedding provider
+    # configured - no LLM.
     results = await search(
         query_text="Who works for GreenFuture Solutions?",
         query_type=SearchType.GRAPH_COMPLETION,

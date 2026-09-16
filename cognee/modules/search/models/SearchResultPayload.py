@@ -5,7 +5,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer
 from pydantic.alias_generators import to_camel
 
 from cognee.modules.search.models.EvidenceReference import EvidenceReference
-from cognee.modules.search.types.ContextFormat import ContextFormat
 from cognee.modules.search.types.SearchType import SearchType
 
 
@@ -29,17 +28,11 @@ class SearchResultPayload(BaseModel):
     search_type: SearchType
     only_context: bool = False
 
-    # The query this payload answers. Carried so the prompt envelope can report how the
-    # question was framed around the context instead of leaving the caller to guess.
-    question: str | None = None
-
-    # Shape of the only_context result. CONTEXT (default) returns the bare context, as
-    # it always has; PROMPT returns the whole envelope a completion would have received.
-    # Typed as the enum so an invalid value cannot be stored and echoed back.
-    context_format: ContextFormat = ContextFormat.CONTEXT
-    session_context: str | None = None
-    user_prompt: str | None = None
-    system_prompt: str | None = None
+    # The full LLM input an only_context call stands in for: the system prompt (session
+    # guidance, conversation history, task template) and the rendered user prompt, as one
+    # string. Set only when only_context is on, the retriever sends one templated prompt,
+    # and retrieval found something; otherwise None and `result` falls back to `context`.
+    prompt: str | None = None
 
     dataset_name: str | None = None
     dataset_id: UUID | None = None
@@ -84,29 +77,14 @@ class SearchResultPayload(BaseModel):
         return v
 
     @property
-    def prompt_envelope(self) -> dict:
-        """Everything a completion would have been sent, as one dict.
-
-        The question is included because that is the discrepancy this shape exists to
-        close: a bare context leaves the caller guessing how cognee framed the question
-        around it.
-        """
-        return {
-            "question": self.question,
-            "context": self.context,
-            "session_context": self.session_context or "",
-            "user_prompt": self.user_prompt,
-            "system_prompt": self.system_prompt,
-        }
-
-    @property
     def result(self) -> Any:
         """Function used to determine search_result for users request.
-        Return context if only_context is True, else return completion if it exists, else return result_object."""
+
+        With only_context, return the full LLM input when one was built, else the bare
+        context; otherwise return the completion if it exists, else the result_object.
+        """
         if self.only_context:
-            if self.context_format == ContextFormat.PROMPT:
-                return self.prompt_envelope
-            return self.context
+            return self.prompt if self.prompt is not None else self.context
         elif self.completion:
             return self.completion
         elif self.context:

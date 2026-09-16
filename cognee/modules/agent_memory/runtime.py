@@ -407,6 +407,7 @@ async def retrieve_cognee_memory_context(context: AgentMemoryContext) -> str:
         try:
             from cognee.api.v1.search import SearchType, search
 
+            only_context = context.config.memory_only_context
             results = await search(
                 query_text=query_text,
                 query_type=SearchType.GRAPH_SUMMARY_COMPLETION,
@@ -414,8 +415,17 @@ async def retrieve_cognee_memory_context(context: AgentMemoryContext) -> str:
                 dataset_ids=[context.scope.dataset_id],
                 system_prompt=context.config.memory_system_prompt,
                 top_k=context.config.memory_top_k,
-                only_context=context.config.memory_only_context,
+                only_context=only_context,
+                # An only_context search returns the full LLM input — cognee's own answer
+                # instructions included — which must not be pasted into the agent's
+                # prompt as "memory". The verbose payload keeps the bare retrieval
+                # context under context_result, so read that instead.
+                verbose=only_context,
             )
+            if only_context:
+                results = [
+                    entry.get("context_result") for entry in results if isinstance(entry, dict)
+                ]
         except Exception as error:
             logger.warning(
                 "Agent memory retrieval failed for %s: %s",

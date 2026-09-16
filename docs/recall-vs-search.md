@@ -45,7 +45,7 @@ Source of truth: `cognee/api/v1/recall/recall.py` and `cognee/api/v1/search/sear
 | `session_id` | Makes the session cache a *source* (and may short-circuit the graph) | Only adds session history to the retrieval *context*; never searches the cache as a source |
 | omitted `query_type` | Router picks one; `HYBRID_COMPLETION` if routing is off | Always `HYBRID_COMPLETION` |
 | `top_k` | default 15 | default 15 (the CLI's `recall --top-k` defaults to 10) |
-| `only_context=True` | Same as `search()`; pin `query_type` so the hybrid retriever cannot defer to `GRAPH_COMPLETION` behind your back | Returns the retrieval context instead of a completion; `context_format="prompt"` returns the full prompt envelope |
+| `only_context=True` | Same as `search()`; pin `query_type` so the hybrid retriever cannot defer to `GRAPH_COMPLETION` behind your back | Returns what the LLM would have received instead of its answer: for completion types one string with the system prompt (session guidance, history, task template) and the rendered user prompt; retrieval-only types return their context |
 
 ## Quick reference
 

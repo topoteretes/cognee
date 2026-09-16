@@ -390,6 +390,7 @@ async def test_retrieve_memory_context_passes_explicit_scope(monkeypatch):
     assert search_mock.await_args.kwargs["system_prompt"] is None
     assert search_mock.await_args.kwargs["top_k"] == 7
     assert search_mock.await_args.kwargs["only_context"] is False
+    assert search_mock.await_args.kwargs["verbose"] is False
 
 
 @pytest.mark.asyncio
@@ -410,7 +411,20 @@ async def test_retrieve_memory_context_passes_custom_memory_system_prompt(monkey
 
 @pytest.mark.asyncio
 async def test_retrieve_memory_context_can_request_context_only_search(monkeypatch):
-    search_mock = AsyncMock(return_value=["Relevant memory"])
+    """memory_only_context reads the bare context from the verbose payload: an only_context
+    search result is the full LLM input, cognee's answer instructions included, and that
+    must never be pasted into the agent's prompt as memory."""
+    search_mock = AsyncMock(
+        return_value=[
+            {
+                "text_result": None,
+                "context_result": "Relevant memory",
+                "objects_result": [],
+                "prompt_result": "SYSTEM:\nTASK:You are cognee\n\nUSER:\nRelevant memory",
+                "evidence": [],
+            }
+        ]
+    )
     monkeypatch.setattr("cognee.api.v1.search.search", search_mock)
 
     context = _make_context(
@@ -422,6 +436,7 @@ async def test_retrieve_memory_context_can_request_context_only_search(monkeypat
 
     assert await retrieve_memory_context(context) == "Relevant Cognee Memory:\nRelevant memory"
     assert search_mock.await_args.kwargs["only_context"] is True
+    assert search_mock.await_args.kwargs["verbose"] is True
     assert search_mock.await_args.kwargs["system_prompt"] == "Return only product codenames."
 
 
@@ -1291,3 +1306,45 @@ class TestValidateSessionBackedOptions:
         with pytest.raises(CogneeValidationError, match="Caching must be enabled"):
             self._call(monkeypatch, caching=False, **kwargs)
         assert self._call(monkeypatch, caching=True, **kwargs) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("access_control", [True, False])
+async def test_context_only_memory_never_carries_the_prompt_from_a_real_verbose_payload(
+    monkeypatch, access_control
+):
+    """End to end through the real verbose result shaping, in both access-control modes:
+    the memory block is the bare context, never the full LLM input."""
+    import importlib
+    from uuid import uuid4
+
+    from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
+    from cognee.modules.search.types import SearchType
+
+    search_methods = importlib.import_module("cognee.modules.search.methods.search")
+    monkeypatch.setattr(search_methods, "backend_access_control_enabled", lambda: access_control)
+    payload = SearchResultPayload(
+        context="Relevant memory",
+        only_context=True,
+        prompt="=== SYSTEM PROMPT ===\nTASK:You are cognee\n\n=== USER PROMPT ===\nRelevant memory",
+        search_type=SearchType.GRAPH_SUMMARY_COMPLETION,
+        dataset_name="demo",
+        dataset_id=uuid4(),
+        dataset_tenant_id=None,
+    )
+    search_mock = AsyncMock(
+        return_value=search_methods._backwards_compatible_search_results([payload], verbose=True)
+    )
+    monkeypatch.setattr("cognee.api.v1.search.search", search_mock)
+
+    context = _make_context(
+        method_params={"question": "ignored"},
+        memory_query_fixed="Find memory",
+        memory_only_context=True,
+    )
+
+    result = await retrieve_memory_context(context)
+
+    assert result == "Relevant Cognee Memory:\nRelevant memory"
+    assert "SYSTEM PROMPT" not in result and "TASK:" not in result
+    assert search_mock.await_args.kwargs["verbose"] is True

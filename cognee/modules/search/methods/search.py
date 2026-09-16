@@ -22,12 +22,11 @@ from cognee.modules.observability import (
     COGNEE_SEARCH_TYPE,
     new_span,
 )
-from cognee.modules.retrieval.context_preview import SharedSessionHistory
+from cognee.modules.retrieval.only_context_prompt import SharedSessionHistory
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.operations import log_search_history
 from cognee.modules.search.types import (
-    ContextFormat,
     SearchResult,
     SearchType,
 )
@@ -64,7 +63,6 @@ async def search(
     node_name: list[str] | None = None,
     node_name_filter_operator: str = "OR",
     only_context: bool = False,
-    context_format: ContextFormat | str = ContextFormat.CONTEXT,
     session_id: str | None = None,
     wide_search_top_k: int | None = None,
     triplet_distance_penalty: float | None = None,
@@ -110,9 +108,12 @@ async def search(
             A custom type forces hybrid to defer to graph completion.
         node_name: Restrict retrieval to these node names (e.g. node-set tags),
             combined with ``node_name_filter_operator`` (``"OR"``/``"AND"``).
-        only_context: Return the retrieval context instead of an LLM answer.
-        context_format: With ``only_context``, ``"context"`` (bare string, default)
-            or ``"prompt"`` (question, context, session_context, user/system prompt).
+        only_context: Return what the LLM would have received instead of its answer.
+            For completion types that is one string: the system prompt (session
+            guidance, conversation history, task template) and the rendered user
+            prompt (question plus retrieval context). Retrieval-only types return
+            their context as always, and an empty retrieval returns the bare
+            (empty) context so "nothing found" stays detectable.
         session_id: Session whose history is added to the completion context and
             that receives the QA entry. Does not search the session cache; that is
             ``recall()``-only.
@@ -176,7 +177,6 @@ async def search(
             node_name=node_name,
             node_name_filter_operator=node_name_filter_operator,
             only_context=only_context,
-            context_format=context_format,
             session_id=session_id,
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
@@ -221,7 +221,6 @@ async def authorized_search(
     node_name: list[str] | None = None,
     node_name_filter_operator: str = "OR",
     only_context: bool = False,
-    context_format: ContextFormat | str = ContextFormat.CONTEXT,
     session_id: str | None = None,
     wide_search_top_k: int | None = None,
     triplet_distance_penalty: float | None = None,
@@ -255,7 +254,6 @@ async def authorized_search(
         node_name=node_name,
         node_name_filter_operator=node_name_filter_operator,
         only_context=only_context,
-        context_format=context_format,
         session_id=session_id,
         wide_search_top_k=wide_search_top_k,
         triplet_distance_penalty=triplet_distance_penalty,
@@ -283,7 +281,6 @@ async def search_in_datasets_context(
     node_name: list[str] | None = None,
     node_name_filter_operator: str = "OR",
     only_context: bool = False,
-    context_format: ContextFormat | str = ContextFormat.CONTEXT,
     session_id: str | None = None,
     wide_search_top_k: int | None = None,
     triplet_distance_penalty: float | None = None,
@@ -311,7 +308,6 @@ async def search_in_datasets_context(
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
         only_context: bool = False,
-        context_format: ContextFormat | str = ContextFormat.CONTEXT,
         session_id: str | None = None,
         wide_search_top_k: int | None = None,
         triplet_distance_penalty: float | None = None,
@@ -365,7 +361,6 @@ async def search_in_datasets_context(
                     node_name=node_name,
                     node_name_filter_operator=node_name_filter_operator,
                     only_context=only_context,
-                    context_format=context_format,
                     shared_history=shared_history,
                     session_id=session_id,
                     wide_search_top_k=wide_search_top_k,
@@ -401,9 +396,10 @@ async def search_in_datasets_context(
 
     # One conversation-history read — the only billed step of the session layer (it
     # embeds the query for vector recall) — for the whole fan-out. The guidance block
-    # still renders per dataset because preferences are dataset-scoped.
+    # still renders per dataset because preferences are dataset-scoped. Lazy: nothing is
+    # read unless a dataset actually builds a prompt.
     shared_history = None
-    if only_context and ContextFormat.parse(context_format) is ContextFormat.PROMPT:
+    if only_context:
         shared_history = SharedSessionHistory(query=query_text, session_id=session_id)
 
     # Search every dataset async based on query and appropriate database configuration
@@ -423,7 +419,6 @@ async def search_in_datasets_context(
                     node_name=node_name,
                     node_name_filter_operator=node_name_filter_operator,
                     only_context=only_context,
-                    context_format=context_format,
                     session_id=session_id,
                     wide_search_top_k=wide_search_top_k,
                     triplet_distance_penalty=triplet_distance_penalty,
@@ -452,7 +447,6 @@ async def search_in_datasets_context(
             "node_name": node_name,
             "node_name_filter_operator": node_name_filter_operator,
             "only_context": only_context,
-            "context_format": context_format,
             "shared_history": shared_history,
             "session_id": session_id,
             "wide_search_top_k": wide_search_top_k,
@@ -482,23 +476,6 @@ async def search_in_datasets_context(
     return await asyncio.gather(*tasks)
 
 
-def _prompt_preview_fields(search_result) -> dict:
-    """Prompt-preview keys for verbose output, present exactly when the prompt shape was asked for.
-
-    Gated on ``context_format``, not on whether the values happen to be set: a verbose
-    caller that requested the prompt always gets the three keys (possibly ``None``), and an
-    ordinary search never sees them — the key set depends on the request, not on session
-    state.
-    """
-    if search_result.context_format != ContextFormat.PROMPT:
-        return {}
-    return {
-        "session_context_result": search_result.session_context,
-        "user_prompt_result": search_result.user_prompt,
-        "system_prompt_result": search_result.system_prompt,
-    }
-
-
 def _backwards_compatible_search_results(search_results, verbose: bool):
     """
     Prepares search results in a format compatible with previous versions of the API.
@@ -522,7 +499,8 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                 search_result_dict["text_result"] = search_result.completion
                 search_result_dict["context_result"] = search_result.context
                 search_result_dict["objects_result"] = search_result.result_object
-                search_result_dict.update(_prompt_preview_fields(search_result))
+                # The full LLM input an only_context call built; None otherwise.
+                search_result_dict["prompt_result"] = search_result.prompt
                 search_result_dict["evidence"] = [
                     reference.model_dump(mode="json") for reference in search_result.evidence
                 ]
@@ -541,7 +519,7 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                     "text_result": search_result.completion,
                     "context_result": search_result.context,
                     "objects_result": search_result.result_object,
-                    **_prompt_preview_fields(search_result),
+                    "prompt_result": search_result.prompt,
                     "evidence": [
                         reference.model_dump(mode="json") for reference in search_result.evidence
                     ],

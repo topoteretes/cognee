@@ -15,9 +15,8 @@ from cognee.modules.recall.types.SearchResultItem import (
     SearchResultItem,
     SearchResultKind,
 )
-from cognee.modules.retrieval.context_preview import render_context_for_prompt
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
-from cognee.modules.search.types import ContextFormat, SearchType
+from cognee.modules.search.types import SearchType
 
 _KIND_BY_SEARCH_TYPE: dict[SearchType, SearchResultKind] = {
     SearchType.GRAPH_COMPLETION: SearchResultKind.GRAPH_COMPLETION,
@@ -105,13 +104,8 @@ def _build_item(
     entry: Any,
     payload: SearchResultPayload,
     kind: SearchResultKind,
-    text_override: str | None = None,
 ) -> SearchResultItem:
-    """Build a single SearchResultItem from one retriever output element.
-
-    ``text_override`` replaces the derived display text, for shapes whose readable form
-    is not what ``entry`` would flatten to.
-    """
+    """Build a single SearchResultItem from one retriever output element."""
     structured: Any | None = None
 
     if isinstance(entry, str):
@@ -139,7 +133,7 @@ def _build_item(
     return SearchResultItem(
         kind=kind,
         search_type=payload.search_type,
-        text=text if text_override is None else text_override,
+        text=text,
         score=_score_from(entry),
         dataset_id=str(payload.dataset_id) if payload.dataset_id else None,
         dataset_name=payload.dataset_name,
@@ -162,31 +156,17 @@ def normalize_search_payload(payload: SearchResultPayload) -> list[SearchResultI
     """Normalize one dataset's retriever payload into SearchResultItems."""
     kind = _KIND_BY_SEARCH_TYPE.get(payload.search_type, SearchResultKind.UNKNOWN)
 
-    if payload.only_context and payload.context_format == ContextFormat.PROMPT:
-        # Retrievers report a miss as None, "" or [] — all of them mean "nothing found".
-        context_entries = [entry for entry in _flatten(payload.context) if entry]
-        if not context_entries:
-            # The item count must keep meaning "did retrieval find anything": recall's
-            # on_empty tools fallback and the session short-circuit both read it, and a
-            # wrapper around an empty context would read as a hit.
-            return []
-        # One item, not one per context entry: the caller asked for the prompt a
-        # completion would receive, and that is a single artifact. The parts stay on
-        # `raw` so a consumer can still take just the context or just the history.
-        # `text` stays readable for retrievers with no prompt template: the context
-        # itself, never a JSON dump of the envelope.
-        envelope = payload.prompt_envelope
-        return [
-            _build_item(
-                envelope,
-                payload,
-                kind,
-                text_override=payload.user_prompt or render_context_for_prompt(context_entries),
-            )
-        ]
+    if payload.only_context and payload.prompt:
+        # One item, not one per context entry: the full LLM input is a single artifact.
+        # It is only ever set when retrieval found something, so the item count keeps
+        # meaning "did retrieval find anything" — recall's on_empty tools fallback and
+        # the session short-circuit both read it.
+        return [_build_item(payload.prompt, payload, kind)]
 
     if payload.only_context:
-        entries = _flatten(payload.context)
+        # Retrievers report a miss as None, "" or []; a bare "" must not become an item,
+        # or "nothing found" reads as a hit to recall's on_empty tools fallback.
+        entries = [entry for entry in _flatten(payload.context) if entry]
     elif payload.completion is not None:
         entries = _flatten(payload.completion)
     elif payload.context is not None:
