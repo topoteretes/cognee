@@ -47,20 +47,15 @@ async def main():
         user=user,
         session_id=session_id,
     )
-    # A recall with no retrieval context generates no answer and records no QA
-    # turn, so there may be nothing to rate.
-    cars_history = await cognee.session.get_session(session_id=session_id, user=user, last_n=1)
-    if cars_history:
-        await cognee.session.add_feedback(
-            session_id=session_id,
-            qa_id=cars_history[0].qa_id,
-            feedback_score=5,
-            feedback_text="Cars-focused context is exactly what I want.",
-            user=user,
-        )
-        print("  Added feedback score=5 for cars context.\n")
-    else:
-        print("  No answer was generated (empty context), nothing to rate.\n")
+    qa_cars = (await cognee.session.get_session(session_id=session_id, user=user, last_n=1))[0]
+    await cognee.session.add_feedback(
+        session_id=session_id,
+        qa_id=qa_cars.qa_id,
+        feedback_score=5,
+        feedback_text="Cars-focused context is exactly what I want.",
+        user=user,
+    )
+    print("  Added feedback score=5 for cars context.\n")
 
     print("Step 2: Ask companies-specific question and give negative feedback (1).")
     await cognee.recall(
@@ -69,18 +64,15 @@ async def main():
         user=user,
         session_id=session_id,
     )
-    companies_history = await cognee.session.get_session(session_id=session_id, user=user, last_n=1)
-    if companies_history:
-        await cognee.session.add_feedback(
-            session_id=session_id,
-            qa_id=companies_history[0].qa_id,
-            feedback_score=1,
-            feedback_text="Companies-focused context is less useful for this goal.",
-            user=user,
-        )
-        print("  Added feedback score=1 for companies context.\n")
-    else:
-        print("  No answer was generated (empty context), nothing to rate.\n")
+    qa_companies = (await cognee.session.get_session(session_id=session_id, user=user, last_n=1))[0]
+    await cognee.session.add_feedback(
+        session_id=session_id,
+        qa_id=qa_companies.qa_id,
+        feedback_score=1,
+        feedback_text="Companies-focused context is less useful for this goal.",
+        user=user,
+    )
+    print("  Added feedback score=1 for companies context.\n")
 
     print("Step 3: Apply feedback into graph feedback_weight values (memify).")
     await apply_feedback_weights_pipeline(user=user, session_ids=[session_id], alpha=0.9)
