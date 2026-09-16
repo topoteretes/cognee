@@ -160,6 +160,9 @@ docs = [
     "nltk>=3.9.3,<4", # TODO: Remove when unstructured is above v0.21.0 as it won't use nltk anymore
 ]
 codegraph = [
+    # The enola binary as a platform wheel; keep in step with ENOLA_PINNED_VERSION
+    # in cognee/tasks/code_graph/install_enola.py.
+    "enola-cli==0.4.19",
     "fastembed<=0.8.0 ; python_version < '3.14'",
     "transformers>=4.46.3,<6",
 ]

@@ -130,6 +130,10 @@ def test_http_disabled_refuses_download(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_run_enola_generate_auto_installs_missing_binary(monkeypatch, tmp_path):
     monkeypatch.delenv("ENOLA_PATH", raising=False)
+    # The enola-cli wheel may be installed in the test environment; hide it.
+    monkeypatch.setattr(
+        enola_module.sysconfig, "get_path", lambda name: str(tmp_path / "no-scripts")
+    )
     empty_dir = tmp_path / "empty"
     empty_dir.mkdir()
     monkeypatch.setenv("PATH", str(empty_dir))
@@ -168,6 +172,10 @@ async def test_run_enola_generate_auto_installs_missing_binary(monkeypatch, tmp_
 @pytest.mark.asyncio
 async def test_run_enola_generate_respects_auto_install_opt_out(monkeypatch, tmp_path):
     monkeypatch.delenv("ENOLA_PATH", raising=False)
+    # The enola-cli wheel may be installed in the test environment; hide it.
+    monkeypatch.setattr(
+        enola_module.sysconfig, "get_path", lambda name: str(tmp_path / "no-scripts")
+    )
     empty_dir = tmp_path / "empty"
     empty_dir.mkdir()
     monkeypatch.setenv("PATH", str(empty_dir))

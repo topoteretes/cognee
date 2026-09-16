@@ -13,7 +13,9 @@ import asyncio
 import hashlib
 import json
 import os
+import platform
 import shutil
+import sysconfig
 from pathlib import Path
 from typing import Any
 
@@ -76,8 +78,27 @@ class EnolaSnapshotError(CogneeSystemError):
         super().__init__(message, name, status_code)
 
 
+def _environment_scripts_binary() -> str | None:
+    """The enola binary the ``enola-cli`` wheel installs next to this interpreter.
+
+    The wheel puts the binary in the environment's scripts directory. That
+    directory is on PATH when the environment is activated, but not when the
+    interpreter is run by path (a container entrypoint, a service unit, a
+    scheduler), so look there directly before consulting PATH.
+    """
+    scripts_dir = sysconfig.get_path("scripts")
+    if not scripts_dir:
+        return None
+    suffix = ".exe" if platform.system().lower() == "windows" else ""
+    candidate = Path(scripts_dir) / f"enola{suffix}"
+    if candidate.is_file() and os.access(candidate, os.X_OK):
+        return str(candidate)
+    return None
+
+
 def find_enola_binary() -> str:
-    """Locate the enola binary via ENOLA_PATH, falling back to PATH lookup."""
+    """Locate the enola binary: ENOLA_PATH, then this environment's scripts
+    directory (where the ``enola-cli`` wheel installs it), then PATH."""
     env_path = os.environ.get("ENOLA_PATH")
     if env_path:
         if os.path.isfile(env_path):
@@ -89,7 +110,7 @@ def find_enola_binary() -> str:
             )
         )
 
-    binary = shutil.which("enola")
+    binary = _environment_scripts_binary() or shutil.which("enola")
     if binary:
         return binary
 

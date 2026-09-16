@@ -1,5 +1,10 @@
 """Download and install a pinned enola release on first use.
 
+The preferred way to get enola is the ``enola-cli`` wheel, installed with the
+``codegraph`` extra: it ships the same binary on the environment's PATH, so
+``find_enola_binary`` finds it and nothing below runs. This module is the
+fallback for installs without that extra.
+
 The enola binary (https://github.com/enola-labs/enola, Apache-2.0 by Enola
 Labs) is a compiled Go CLI that cannot be installed from PyPI. When it is not
 already available, cognee downloads the pinned release for the current
@@ -30,7 +35,7 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("enola")
 
-ENOLA_PINNED_VERSION = "0.4.12"
+ENOLA_PINNED_VERSION = "0.4.19"
 
 _RELEASE_URL_TEMPLATE = "https://github.com/enola-labs/enola/releases/download/v{version}/{asset}"
 
@@ -39,11 +44,11 @@ _RELEASE_URL_TEMPLATE = "https://github.com/enola-labs/enola/releases/download/v
 # ENOLA_PINNED_VERSION requires re-pinning these; the e2e known answers in
 # tests/test_code_graph_e2e.py are pinned to the same version.
 ENOLA_RELEASE_CHECKSUMS = {
-    "darwin-arm64": "b6da39f34cb869368e98f33a2ddcf7caffa16269de1d31d57cfc08eee4b1fd6b",
-    "darwin-amd64": "db105ae8235b482c776a280bde54afe43f0ecad3c992316ea445a29ec0e0bd7e",
-    "linux-amd64": "108767f9053b7d01651eef819d08301ae3b4e4e5cd06bfc6c36dcce1648f8cbf",
-    "linux-arm64": "2f3e1cb8d172977da873c16b6fccca9baadb8fdd0211c801d1064c2802872a8f",
-    "windows-amd64": "5f9dfc5914dd0dec5452d272f0f1413dc33ba58b73519d3a6c8cfbd4d92f473a",
+    "darwin-arm64": "8893bf0277b87261ebdf76c952cfc1556295846d408c7c3d035ace80a64e56ce",
+    "darwin-amd64": "20b35dd15aa407d2885c025ba7407598c007ef767a44f202057c234b54ea7637",
+    "linux-amd64": "189125c37ae1e66a498b0bafe79a5a6a5612b45c975ab4431e13f58cbef31397",
+    "linux-arm64": "eaecc987cf4b4f9aedb641cad161304370f86ced8f975c271f76b1b7b01d4840",
+    "windows-amd64": "44f9ce544963b550e3f950f12a4e3d09288455007c5e6f6da6f4986d8f1d4e82",
 }
 
 _FALSEY = {"false", "0", "no", "off"}
