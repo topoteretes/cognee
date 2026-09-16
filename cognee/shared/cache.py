@@ -258,18 +258,18 @@ class StorageAwareCache:
                 return full_paths
             else:
                 # For local storage, return absolute paths
-                storage_path = self.storage_manager.storage.storage_path
-                if not storage_path.startswith("/"):
-                    import os
+                import os
 
+                storage_path = self.storage_manager.storage.storage_path
+                if not os.path.isabs(storage_path):
                     storage_path = os.path.abspath(storage_path)
 
                 full_paths = []
                 for file_path in file_list:
-                    if file_path.startswith("/"):
+                    if os.path.isabs(file_path):
                         full_paths.append(file_path)  # Already absolute
                     else:
-                        full_paths.append(f"{storage_path}/{file_path}")
+                        full_paths.append(os.path.join(storage_path, file_path))
                 return full_paths
 
         except Exception as e:
