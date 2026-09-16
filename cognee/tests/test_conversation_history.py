@@ -462,9 +462,27 @@ async def main():
     assert stored_answer_autofeedback, (
         "Feedback-only turn must store an acknowledgement as the QA entry's answer"
     )
-    # An acknowledgement may mention the subject or exceed an arbitrary length.
-    # Compare against the actual analysis output: storing the independently
-    # generated answer instead must still fail this regression check.
+    # Two different contracts, and a regression could satisfy either one alone,
+    # so both are pinned.
+    #
+    # Shape (from dev): a no-answer turn claims no retrieval and no served
+    # guidance -- its used_* fields stay None -- while the answered first turn
+    # recorded its graph ids. Text bounds proved flaky here: a valid
+    # acknowledgement can run long and echo the subject.
+    assert first_entry_autofeedback.used_graph_element_ids, (
+        "Answered turn must record the graph elements its answer used"
+    )
+    assert second_entry_autofeedback.used_graph_element_ids is None, (
+        "Feedback-only turn must not claim retrieval: storing the generated answer "
+        "would carry its used_graph_element_ids; "
+        f"got {second_entry_autofeedback.used_graph_element_ids}"
+    )
+    assert not second_entry_autofeedback.used_session_context_ids, (
+        "Feedback-only turn must not claim served guidance"
+    )
+    # Text: the stored answer IS the analysis output, not the independently
+    # generated answer that was discarded. Truthiness alone would not catch that
+    # -- the generated answer is truthy too.
     expected_ack = acknowledgement_for_turn(feedback_analysis.response_to_user)
     assert stored_answer_autofeedback == expected_ack, (
         "Feedback-only turn must store the analysis acknowledgement, not the generated answer"

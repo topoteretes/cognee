@@ -1,3 +1,14 @@
+"""Build an org chart from typed DataPoints with the low-level run_tasks pipeline, no LLM.
+
+data/companies.json and data/people.json become Company, Department and Person nodes that are
+deduplicated through identity_fields. The pipeline status is printed as it runs, the graph is
+written to .artifacts/, and a GRAPH_COMPLETION search with only_context=True prints the retrieval
+context for "Who works for GreenFuture Solutions?".
+
+Requires: an embedding provider (no LLM call is made).
+Run: uv run python examples/demos/custom_pipelines/organizational_hierarchy/organizational_hierarchy_pipeline_example.py
+"""
+
 import asyncio
 import json
 import os

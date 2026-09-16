@@ -155,20 +155,9 @@ git push origin feature/your-feature-name
 
 ### Changelog Entries
 
-If maintainers ask for a changelog entry, add it under the `Unreleased` section of `CHANGELOG.md`.
-
-- Use `Added` for new capabilities
-- Use `Changed` for behavior or documentation updates
-- Use `Fixed` for bug fixes
-
-Example entry:
-
-```markdown
-## Unreleased
-
-### Fixed
-- Clarify the minimal Docker Compose setup for first-time contributors.
-```
+This repository has no `CHANGELOG.md`. Release notes are compiled from merged PR titles when a
+release is cut (see `.github/docs/release.md`), so your PR title *is* the changelog entry: use the
+conventional `type: Summary` form described above and make it understandable on its own.
 
 > **Reviewers are auto-routed.** Cognee uses a [`CODEOWNERS`](.github/CODEOWNERS)
 > file to request reviews automatically based on the directories your PR touches.
