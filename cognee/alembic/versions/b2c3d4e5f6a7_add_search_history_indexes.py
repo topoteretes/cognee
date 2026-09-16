@@ -5,9 +5,8 @@ Revises:
 Create Date: 2026-04-04
 """
 
-from sqlalchemy.engine.reflection import Inspector
-
 from alembic import op
+from sqlalchemy.engine.reflection import Inspector
 
 revision = "b2c3d4e5f6a7"
 down_revision = "6ee94db7381f"

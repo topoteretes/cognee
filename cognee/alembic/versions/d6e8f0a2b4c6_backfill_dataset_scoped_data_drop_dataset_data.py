@@ -49,7 +49,6 @@ from collections.abc import Sequence
 from contextlib import nullcontext
 
 import sqlalchemy as sa
-
 from alembic import op
 
 logger = logging.getLogger(__name__)

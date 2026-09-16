@@ -9,9 +9,8 @@ Create Date: 2025-08-12 13:14:12.515935
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from sqlalchemy.ext.mutable import MutableDict
-
 from alembic import op
+from sqlalchemy.ext.mutable import MutableDict
 
 # revision identifiers, used by Alembic.
 revision: str = "1daae0df1866"

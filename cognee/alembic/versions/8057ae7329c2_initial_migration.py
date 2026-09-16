@@ -29,6 +29,7 @@ already recorded (it never runs there — Alembic considers it applied).
 from collections.abc import Sequence
 
 from alembic import op
+
 from cognee.alembic.frozen_schema import (
     create_enum_types_if_missing,
     create_missing_tables,

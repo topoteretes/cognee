@@ -41,6 +41,7 @@ table only when such a default is involved.
 from collections.abc import Sequence
 
 from alembic import op
+
 from cognee.alembic.frozen_schema import frozen_metadata, reconcile
 
 # revision identifiers, used by Alembic.
