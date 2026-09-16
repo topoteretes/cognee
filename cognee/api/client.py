@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 # are explicit here.
 import cognee.modules.integrations.github
 import cognee.modules.integrations.linear
+from cognee.api.startup_checks import report_default_user_login_posture
 from cognee.api.v1.activity.routers import get_activity_router
 from cognee.api.v1.add.routers import get_add_router
 from cognee.api.v1.agents.routers import get_agents_router
@@ -99,6 +100,7 @@ async def lifespan(app: FastAPI):
     from cognee.modules.users.methods import get_default_user
 
     await get_default_user()
+    report_default_user_login_posture()
     from cognee.modules.cognify.recovery import recover_stale_cognify_runs_on_startup
 
     await recover_stale_cognify_runs_on_startup()

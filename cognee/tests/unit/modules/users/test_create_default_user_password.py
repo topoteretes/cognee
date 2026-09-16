@@ -120,3 +120,63 @@ class TestExistingDeploymentsAreUnaffected:
         get_base_config.cache_clear()
         assert returned is existing_user
         create_mock.assert_not_awaited()
+
+
+class TestLoggingBelongsToTheServer:
+    """The login warning is a server concern, not a library one (SDK-549).
+
+    ``create_default_user`` runs under plain SDK and CLI use too, where nobody
+    is going to log into this account, so it must stay silent. The API server
+    reports the posture at startup instead. Superuser status is documented, not
+    logged.
+    """
+
+    @pytest.mark.asyncio
+    async def test_create_default_user_logs_nothing(self, created_user_password, caplog):
+        import logging
+
+        with caplog.at_level(logging.DEBUG):
+            await created_user_password(None)
+
+        assert caplog.records == [], (
+            "library-level creation must not log: plain SDK scripts would see it on "
+            "every fresh install"
+        )
+
+    def test_server_warns_only_when_login_is_impossible(self, monkeypatch):
+        # startup_checks, not client: importing the FastAPI app here is
+        # order-dependent (a sibling test shadows
+        # cognee.modules.users.methods.get_authenticated_user with its module).
+        from cognee.api.startup_checks import report_default_user_login_posture
+
+        warnings = []
+        monkeypatch.setattr(
+            "cognee.api.startup_checks.logger",
+            type("L", (), {"warning": lambda _self, msg, *a: warnings.append(msg)})(),
+        )
+
+        monkeypatch.delenv("DEFAULT_USER_PASSWORD", raising=False)
+        get_base_config.cache_clear()
+        report_default_user_login_posture()
+        assert len(warnings) == 1
+        assert "cannot be logged into" in warnings[0]
+        # Privilege level is documented in the docstring and .env.template only.
+        assert "superuser" not in warnings[0].lower()
+
+        monkeypatch.setenv("DEFAULT_USER_PASSWORD", "operator-chosen-password")
+        get_base_config.cache_clear()
+        report_default_user_login_posture()
+        assert len(warnings) == 1, "a configured password is the normal case: stay quiet"
+
+        get_base_config.cache_clear()
+
+    def test_superuser_status_is_documented(self):
+        """Removing it from the log must not remove it from the docs."""
+        from pathlib import Path
+
+        docstring = create_default_user.__doc__ or ""
+        assert "superuser" in docstring.lower()
+
+        env_template = Path(__file__).parents[5] / ".env.template"
+        default_user_block = env_template.read_text().split("-- Default user")[1][:900]
+        assert "SUPERUSER" in default_user_block
