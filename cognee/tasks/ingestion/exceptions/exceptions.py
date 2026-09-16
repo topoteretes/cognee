@@ -10,7 +10,16 @@ class S3FileSystemNotFoundError(CogneeSystemError):
         status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
     ):
         message = "Could not find S3FileSystem."
-        super().__init__(message, name, status_code)
+        super().__init__(
+            message,
+            name,
+            status_code,
+            remediation=(
+                'Install the aws extra (pip install "cognee[aws]") so s3fs is available, and '
+                "set AWS_REGION plus AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY (or a profile) "
+                "when reading s3:// paths or using STORAGE_BACKEND=s3."
+            ),
+        )
 
 
 class InvalidDLTArgumentError(CogneeValidationError):
@@ -30,7 +39,16 @@ class UnsupportedDBProviderError(CogneeConfigurationError):
         message: str = "Unsupported database provider.",
         status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
     ):
-        super().__init__(message, name, status_code)
+        super().__init__(
+            message,
+            name,
+            status_code,
+            remediation=(
+                "Set DB_PROVIDER to 'sqlite' (default) or 'postgres' (needs the postgres "
+                'extra: pip install "cognee[postgres]"); dlt ingestion writes to the same '
+                "relational database cognee uses."
+            ),
+        )
 
 
 class DLTIngestionError(CogneeSystemError):

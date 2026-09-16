@@ -4,6 +4,12 @@ A trace step records one agent method call. Its ``session_feedback`` is a one-li
 summary of what the step did — generated from the step's return value via an LLM, or
 falling back to a deterministic success/failure line. Storage of trace steps stays in
 ``SessionManager``; only this summary logic lives here.
+
+The LLM summary is a per-tool-call cost. ``SessionManager.add_agent_trace_step`` requests
+it only when the caller asked for it (``@agent_memory(session_trace_summary=True)``, off by
+default) *and* automatic feedback analysis is enabled (``AUTO_FEEDBACK``); every other
+step takes ``fallback_agent_trace_feedback``. The batch extraction in ``improve()`` reads
+the stored return value itself, so the summary is a convenience, never the record.
 """
 
 import json

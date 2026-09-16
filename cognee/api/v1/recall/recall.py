@@ -427,7 +427,7 @@ async def recall(
         dataset_ids: Dataset UUIDs to search within. Takes precedence over datasets.
         top_k: Maximum results to return (default *15*).
         auto_route: If True and query_type is None, classify the query
-            automatically. If False, fall back to GRAPH_COMPLETION.
+            automatically. If False, fall back to HYBRID_COMPLETION.
         response_model: Pydantic model class for structured completion output.
             Forwarded to the retriever, which validates the LLM answer against
             it; each result then carries the validated payload as a dict in its

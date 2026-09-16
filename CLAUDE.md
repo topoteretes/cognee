@@ -125,7 +125,7 @@ As of cognee 1.x the memory API is the primary surface. All functions are async.
 
 1. **remember()** - Store data in memory. Without `session_id` it runs `add()` + `cognify()` and then `improve()` (`self_improvement=True` by default); with `session_id` it writes to the fast session cache and bridges into the graph in the background.
 2. **recall()** - Query memory. Auto-routes to a search strategy unless `query_type` is passed (`auto_route=False` falls back to `HYBRID_COMPLETION`). A `session_id` reads the session cache first and falls through to the graph.
-3. **improve()** - Enrich/index the graph: triplet embeddings, feedback weights, and (with `session_ids`) bridging session Q&A and distilled learnings into the permanent graph.
+3. **improve()** - Run the self-improvement stages over a dataset: with `session_ids`, bridge session Q&A, agent traces, distilled learnings and user preferences into the permanent graph and apply feedback weights; always, triplet enrichment (when `triplet_embedding` is on) and the opt-in global context index. Returns an `ImproveResult` with one `StageResult` per stage (see "IMPROVE: the orchestrator" below).
 4. **forget()** - Unified deletion (`data_id` / `dataset` / `dataset_id` / `everything=True`, plus `memory_only=True` to drop graph+vectors but keep raw files).
 
 #### Low level operations: add → cognify → search/memify
@@ -155,7 +155,7 @@ Improve & Memify are virtually the same, though. So no reason not to use improve
 ### Key Architectural Patterns
 
 #### 1. Pipeline-Based Processing
-All data flows through task-based pipelines (`cognee/modules/pipelines/`). Tasks are composable units that can run sequentially or in parallel. Example pipeline tasks: `classify_documents`, `extract_graph_from_data`, `add_data_points`.
+All data flows through task-based pipelines (`cognee/modules/pipelines/`). Tasks are composable units that can run sequentially or in parallel. Example pipeline tasks: `classify_documents`, `extract_graph_from_data`, `add_data_points`. The runner semantics (a task's `batch_size` batches the *previous* task's output, `enriches`, `ctx` injection, and which of the two `run_pipeline` functions to import) are in the `cognee/modules/pipelines/__init__.py` docstring; the index of all task implementations is `cognee/tasks/README.md`.
 
 #### 2. Interface-Based Database Adapters
 Multiple backends are supported through adapter interfaces:
@@ -221,6 +221,17 @@ NOTE: This is how the memory API flow works under the hood; it's read as a flow 
 
 Key files: `cognee/api/v1/remember/remember.py`, `cognee/api/v1/recall/recall.py`, `cognee/api/v1/improve/improve.py`, `cognee/api/v1/forget/forget.py`
 
+#### IMPROVE: the orchestrator
+`improve()` is an explicit orchestrator over an ordered registry of nine stages (`cognee/modules/improve/registry.py:DEFAULT_STAGES`): `feedback_weights`, `persist_session_qa`, `persist_agent_traces`, `extract_agent_context`, `distill_sessions`, `update_user_preferences`, `build_truth_subspace`, `triplet_enrichment`, `global_context_index`. The first seven need `session_ids`; the last two work on the graph alone. Order is load-bearing (4 feeds 5, 5 feeds 7, 7 runs before 8) and a test pins it.
+
+Each stage is a gate plus a call into existing code plus a result mapping — it never owns retries or ordering. `gate()` runs before any LLM or embedding cost and returns a skip reason (`no_session_ids`, `backend_unsupported`, `triplet_embedding_disabled`, `opt_in_disabled`, `personalization_disabled`, `disabled_by_config`, …). `run()` returns a `StageResult` whose `status` reuses `PipelineRunInfo`'s vocabulary — `completed`, `already_completed` (nothing new since the stage's watermark), `errored` — plus `skipped`. Only `persist_session_qa` is `fatal=True`; every other failure is recorded as `errored` and the run continues.
+
+The run resolves the dataset once and hands every stage a frozen `ImproveRunInputs` (user, resolved dataset id, session ids, `ImproveConfig`, adapter `GraphCapabilities`). It claims one improve lock keyed to the run — every session id given (scoped by user id) plus `dataset:<id>`, so improves for one dataset serialize — and holds it until the last stage finishes, background included; a lost claim returns an `ImproveResult` whose stages are all `skipped: lock_held` (never `{}`). `run_in_background=True` runs all stages in one anchored task; await it with `await result.wait()`. `ImproveResult` is what every surface returns: SDK, `POST /api/v1/improve` (`response_model`), the CLI (one line per stage), and `RememberResult.improve` / `.improve_error` (MCP reaches improve only through `remember`'s `self_improvement` — `improve` is deliberately not an advertised MCP tool; the tool set is pinned to remember/recall/forget/cognify_status) (an improve failure after a successful cognify no longer marks the remember as errored). Triplet enrichment reports `already_completed` when `pipeline_runs` shows no write pipeline for the dataset since the last completed enrichment — the watermark is the improve row's stage-8 stamp, so a run whose stage 8 was skipped never gates a later one (a `node_name`-scoped run bypasses the check); the improve operation row that carries the stamp is written when the run finishes — deferred to the background task in background mode — with a failed outcome when any stage errored (so a retry is never gated off) and a `noop` outcome when nothing ran — a lost lock claim or an all-skipped run — so a no-op call never advances the watermark. Feedback-weight application records applied element ids per QA row so a deleted node no longer causes the same feedback to be re-applied on every run; trace persistence and distillation carry watermarks like Q&A persistence already did.
+
+Settings the loop owns live in `ImproveConfig` (env prefix `IMPROVE_`): `IMPROVE_AUTO_ENABLED` (default true; false turns off the automatic improve after `remember()`), `IMPROVE_DEBOUNCE_ENTRIES` / `IMPROVE_DEBOUNCE_SECONDS` (session-path auto-improve fires only after that many new entries or that much time; seconds alone is time-only — the entries default of 1 steps aside — and there is no timer, so the check runs on each `remember()`), `IMPROVE_STAGES_DISABLED` (csv of stage names), `IMPROVE_FEEDBACK_ALPHA` (learning rate, default 0.1). Shared knobs stay with their owners: `triplet_embedding` (cognify), `CACHING` / `AUTO_FEEDBACK` (cache layer), `PERSONALIZATION_ENABLED`, `DEFAULT_FEEDBACK_INFLUENCE`. `cognee.wait_for_background_tasks()` drains background improves before a script exits; the API server drains them on shutdown. Frequency weights were removed (no adapter implemented them and nothing read them).
+
+Key files: `cognee/modules/improve/` (`stage.py`, `stages.py`, `registry.py`, `result.py`, `inputs.py`, `capabilities.py`, `config.py`, `graph_changes.py`), `cognee/api/v1/improve/improve.py`, `cognee/infrastructure/background_tasks.py`, `cognee/api/v1/remember/auto_improve_debounce.py`
+
 The stages below are the Low level operations these call underneath.
 
 #### ADD: Data Ingestion
@@ -266,11 +277,17 @@ Available search types (from `cognee/modules/search/types/SearchType.py`), passe
 - **FEELING_LUCKY** - Automatic search type selection
 - **CODING_RULES** - Code-specific search rules
 - **SKILLS** - Semantic discovery of skill playbooks (metadata-only, no LLM; requires exactly one dataset)
+- **GRAPH_COMPLETION_DECOMPOSITION** - Splits the question into focused sub-queries, then runs graph completion over the merged context
+- **AGENTIC_COMPLETION** - Multi-step LLM loop that can load `skills` and call `tools`; bounded by `max_iter`
+- **CODE** - Deterministic operations over the code graph via `code_query` (no LLM); see "Code Files" below
+- **GRAPH_REPORT** - Graph insight report: hub nodes, cross-node-set connections, edge provenance, suggested questions
 
 `recall()` picks one of these automatically when `query_type` is omitted. The CLI is narrower: `cognee-cli recall --query-type` accepts only the choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES` and defaults to `HYBRID_COMPLETION`; the rest are SDK-only.
 
 Key files:
 - `cognee/api/v1/search/search.py`
+- `cognee/modules/retrieval/README.md` — SearchType → retriever class table (kept in sync by a unit test)
+- `cognee/modules/search/methods/get_search_type_retriever_instance.py` — the registry itself
 - `cognee/modules/retrieval/context_providers/TripletSearchContextProvider.py`
 - `cognee/modules/search/types/SearchType.py`
 
@@ -305,7 +322,7 @@ Copy `.env.template` to `.env` and configure:
 ```bash
 # Minimal setup (defaults to OpenAI + local file-based databases)
 LLM_API_KEY="your_openai_api_key"
-LLM_MODEL="openai/gpt-5-mini"  # Default model
+LLM_MODEL="openai/gpt-5.6-luna"  # Default model
 ```
 
 **Important**: If you configure only LLM or only embeddings, the other defaults to OpenAI. Ensure you have a working OpenAI API key, or configure both to avoid unexpected defaults.
@@ -461,7 +478,7 @@ Four flags trade memory features for speed. Know what each turns off before flip
 
 | Flag (default) | Turns off when disabled | Cost of disabling |
 |---|---|---|
-| `PERSONALIZATION_ENABLED=false` | Per-user preference personalization: one `UserPreference` node per user+dataset with weighted `prefers` edges, retrieval ranking multiplied by those weights, stated-preference text injected into LLM prompts, the per-turn 1-5 rating question, and the `improve()` stage that folds ratings into weights | Off by default, so nothing is lost until you opt in. When on, ranking strength comes from `PERSONALIZATION_INFLUENCE` (default 0.3, valid range [0, 1] — out-of-range values are rejected at startup); personalization also needs a user and a single resolved dataset in context, so multi-dataset searches never personalize |
+| `PERSONALIZATION_ENABLED=false` | Per-user preference personalization: one `UserPreference` node per user+dataset with weighted `prefers` edges, retrieval ranking multiplied by those weights, stated-preference text injected into LLM prompts, and the `improve()` stage that folds ratings into weights (the per-turn 1-5 rating question itself is part of automatic feedback analysis — gated by `AUTO_FEEDBACK`, not this flag — so the rating is produced and stored even before personalization is switched on) | Off by default, so nothing is lost until you opt in. When on, ranking strength comes from `PERSONALIZATION_INFLUENCE` (default 0.3, valid range [0, 1] — out-of-range values are rejected at startup); personalization also needs a user and a single resolved dataset in context, so multi-dataset searches never personalize |
 | `CACHING=true` | The entire session-memory layer: `remember(session_id=...)` raises, `recall()` loses session history and the session-cache short-circuit, `agent_memory` session options error, and `AUTO_FEEDBACK` becomes moot | You lose the fast session write path and self-improving memory — only the slower add+cognify path remains. Do not benchmark cognee with this off; that measures cognee with its memory layer removed |
 | `AUTO_FEEDBACK=true` | The automatic per-turn analysis: one structured-output LLM call after each answered query that detects implicit feedback, guides later retrievals, and feeds `improve()`'s agent-context lessons | Memory stops self-tuning from conversation signals. Session store/recall itself keeps working — this is the flag to disable for low-latency reads, since the per-turn LLM call dominates default read latency |
 | `DATASET_QUEUE_ENABLED=true` | The per-process cap on concurrent datasets (`DATASET_QUEUE_MAX_CONCURRENT`, default 6), subprocess-engine teardown on scope exit, and pinning of in-use engines against cache eviction. Only engages when `ENABLE_BACKEND_ACCESS_CONTROL` is on (its default) — with access control off the flag is a no-op either way | Saves minor per-operation overhead, but embedded engines become unbounded: file-lock leaks and mid-use engine eviction under parallel multi-dataset load. Safe only for single-dataset scripts |
@@ -475,7 +492,7 @@ Supported providers: OpenAI (default), Azure OpenAI, Google Gemini, Anthropic, A
 #### OpenAI (Recommended - Minimal Setup)
 ```bash
 LLM_API_KEY="your_openai_api_key"
-LLM_MODEL="openai/gpt-5-mini"  # default; or gpt-5, gpt-4o, gpt-4o-mini, etc.
+LLM_MODEL="openai/gpt-5.6-luna"  # default; or gpt-5.6-terra, gpt-5-mini, gpt-4o, etc.
 LLM_PROVIDER="openai"
 ```
 
@@ -590,7 +607,7 @@ SYSTEM_ROOT_DIRECTORY="s3://your-bucket/cognee/system"
 1. **New Task Type**: Create task function in `cognee/tasks/`, return Task object, register in pipeline
 2. **New Database Backend**: Implement `GraphDBInterface` or `VectorDBInterface` in `cognee/infrastructure/databases/`
 3. **New LLM Provider**: Add configuration in LLM config (uses litellm)
-4. **New Document Processor**: Extend loaders in `cognee/modules/data/processing/`
+4. **New Document Processor**: Implement `LoaderInterface` in `cognee/infrastructure/loaders/` and register it in `supported_loaders.py` there
 5. **New Search Type**: Add to `SearchType` enum and implement retriever in `cognee/modules/retrieval/`
 6. **Custom Graph Models**: Define Pydantic models extending `DataPoint` in your code
 
@@ -649,7 +666,7 @@ this rule applies only to internal PRs.
 
 ## Testing Strategy
 
-Tests are organized in `cognee/tests/`:
+Tests are organized in `cognee/tests/` (layout, credentials per folder, and how to run without API keys: `cognee/tests/README.md`; `pytest` with no path collects only this tree):
 - `unit/` - Unit tests for individual modules
 - `integration/` - Full pipeline integration tests
 - `e2e/` - Full-stack end-to-end suites run per backend in CI (e.g. `e2e/incremental_update/` runs on LadybugDB + LanceDB, Postgres graph + PGVector, and Neo4j + LanceDB)
@@ -712,7 +729,7 @@ For production deployments, review and tighten these settings.
 
 ### Creating a Custom Pipeline Task
 ```python
-from cognee.modules.pipelines.tasks.Task import Task
+from cognee.modules.pipelines.tasks.task import Task
 
 
 async def my_custom_task(data):
@@ -736,10 +753,9 @@ vector_engine = await get_vector_engine_async()
 
 ### Using LLM Gateway
 ```python
-from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
-llm_client = get_llm_client()
-response = await llm_client.acreate_structured_output(
+response = await LLMGateway.acreate_structured_output(
     text_input="Your prompt", system_prompt="System instructions", response_model=YourPydanticModel
 )
 ```
