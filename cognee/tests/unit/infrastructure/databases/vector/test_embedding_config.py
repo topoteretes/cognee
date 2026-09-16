@@ -114,22 +114,36 @@ def _default_embeddings(monkeypatch, **overrides):
 
 
 def test_untouched_embeddings_without_llm_key_resolve_to_local_fastembed(monkeypatch):
+    """The vector size comes from fastembed's registry for the default model, not a constant."""
+    from cognee.infrastructure.databases.vector.embeddings import config as config_module
     from cognee.infrastructure.databases.vector.embeddings.config import (
-        DEFAULT_LOCAL_EMBEDDING_DIMENSIONS,
         DEFAULT_LOCAL_EMBEDDING_MODEL,
         resolve_embedding_defaults,
     )
 
     config = _default_embeddings(monkeypatch)
-    resolved = resolve_embedding_defaults(config, _llm(api_key=None))
+    with patch.object(config_module, "_resolve_embedding_dimensions", return_value=384) as lookup:
+        resolved = resolve_embedding_defaults(config, _llm(api_key=None))
 
-    assert resolved == (
-        "fastembed",
-        DEFAULT_LOCAL_EMBEDDING_MODEL,
-        DEFAULT_LOCAL_EMBEDDING_DIMENSIONS,
-    )
+    lookup.assert_called_once_with("fastembed", DEFAULT_LOCAL_EMBEDDING_MODEL)
+    assert resolved == ("fastembed", DEFAULT_LOCAL_EMBEDDING_MODEL, 384)
     # The config object itself is left as configured.
     assert config.embedding_provider == "openai"
+
+
+def test_keyless_embeddings_without_fastembed_installed_fail_with_install_hint(monkeypatch):
+    from cognee.infrastructure.databases.vector.embeddings import config as config_module
+    from cognee.infrastructure.databases.vector.embeddings.config import (
+        KeylessEmbedderNotInstalledError,
+        resolve_embedding_defaults,
+    )
+
+    config = _default_embeddings(monkeypatch)
+    with (
+        patch.object(config_module, "_resolve_embedding_dimensions", return_value=None),
+        pytest.raises(KeylessEmbedderNotInstalledError, match="cognee\\[fastembed\\]"),
+    ):
+        resolve_embedding_defaults(config, _llm(api_key=None))
 
 
 def test_untouched_embeddings_with_llm_key_keep_the_openai_default(monkeypatch):

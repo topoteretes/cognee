@@ -3,6 +3,7 @@ from functools import lru_cache
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from cognee.exceptions import CogneeConfigurationError
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("embedding_config")
@@ -21,9 +22,24 @@ DEFAULT_EMBEDDING_MODEL = "openai/text-embedding-3-large"
 # What embeddings run on when nothing is configured and no usable LLM key
 # exists to reuse for the OpenAI default: a local CPU model (`fastembed`
 # extra), matching the local GLiNER extractor cognify picks in that state.
+# bge-small is the smallest download in the fastembed registry (67 MB) that
+# is a real retrieval model; its vector size is read from the registry so
+# the model is the only thing to change here.
 DEFAULT_LOCAL_EMBEDDING_PROVIDER = "fastembed"
 DEFAULT_LOCAL_EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
-DEFAULT_LOCAL_EMBEDDING_DIMENSIONS = 384
+
+
+class KeylessEmbedderNotInstalledError(CogneeConfigurationError):
+    """No LLM key is configured and the local embedder's package is missing."""
+
+    def __init__(self):
+        super().__init__(
+            "No LLM API key is configured, so embeddings would run on the local fastembed "
+            f"model {DEFAULT_LOCAL_EMBEDDING_MODEL}, but the `fastembed` package is not "
+            'installed. Either install it with: pip install "cognee[fastembed]" or set '
+            "LLM_API_KEY to embed with the OpenAI default.",
+            "KeylessEmbedderNotInstalledError",
+        )
 
 
 def _resolve_embedding_dimensions(provider: str | None, model: str | None) -> int | None:
@@ -196,11 +212,13 @@ def resolve_embedding_defaults(config, llm_config) -> tuple[str | None, str | No
     from cognee.modules.preflight import llm_available
 
     if embeddings_untouched(config) and not llm_available(llm_config):
-        return (
-            DEFAULT_LOCAL_EMBEDDING_PROVIDER,
-            DEFAULT_LOCAL_EMBEDDING_MODEL,
-            DEFAULT_LOCAL_EMBEDDING_DIMENSIONS,
+        dimensions = _resolve_embedding_dimensions(
+            DEFAULT_LOCAL_EMBEDDING_PROVIDER, DEFAULT_LOCAL_EMBEDDING_MODEL
         )
+        if dimensions is None:
+            # The registry lookup only fails when fastembed itself is absent.
+            raise KeylessEmbedderNotInstalledError()
+        return DEFAULT_LOCAL_EMBEDDING_PROVIDER, DEFAULT_LOCAL_EMBEDDING_MODEL, dimensions
     return config.embedding_provider, config.embedding_model, config.embedding_dimensions
 
 
