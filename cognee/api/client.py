@@ -97,9 +97,25 @@ async def lifespan(app: FastAPI):
 
         await run_migrations()
 
+    from cognee.base_config import get_base_config
     from cognee.modules.users.methods import get_default_user
 
-    await get_default_user()
+    # Submodule import on purpose: the package re-exports these names, and a
+    # test that imports a sibling SUBMODULE (get_authenticated_user) shadows the
+    # re-export with the module object, breaking later `Depends()` lookups.
+    from cognee.modules.users.methods.set_default_user_password_if_unset import (
+        set_default_user_password_if_unset,
+    )
+
+    # The server creates the default user only when asked to make it loginable.
+    # Unset, it creates nothing: a server nobody configured has no default
+    # account to attack. (The SDK and CLI still create it lazily, in-process,
+    # with no password -- see create_default_user.) When set, the password is
+    # applied ONCE to a password-less account and never to one that already
+    # has a password.
+    if get_base_config().default_user_password:
+        await get_default_user()
+        await set_default_user_password_if_unset()
     report_default_user_login_posture()
     from cognee.modules.cognify.recovery import recover_stale_cognify_runs_on_startup
 

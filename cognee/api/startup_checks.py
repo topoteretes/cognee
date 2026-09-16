@@ -25,9 +25,8 @@ def report_default_user_login_posture() -> None:
         return
 
     logger.warning(
-        "The default user cannot be logged into: DEFAULT_USER_PASSWORD is unset, so the "
-        "account was created with a random password that is not recorded. Set "
-        "DEFAULT_USER_PASSWORD and restart to enable password login (needed for the UI "
-        "and any HTTP client). Existing deployments keep the password their account was "
-        "created with."
+        "DEFAULT_USER_PASSWORD is unset: no default-user password login is configured. "
+        "A default user created by the SDK or CLI has no password and cannot be logged "
+        "into; set DEFAULT_USER_PASSWORD and restart to give it one (needed for the UI "
+        "and any HTTP client). An account that already has a password keeps it."
     )

@@ -51,18 +51,15 @@ def created_user_password(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_unset_password_is_random_and_not_the_known_literal(created_user_password):
-    """No DEFAULT_USER_PASSWORD: the account exists but no known value opens it."""
-    first = await created_user_password(None)
-    second = await created_user_password(None)
+async def test_unset_password_creates_a_password_less_account(created_user_password):
+    """No DEFAULT_USER_PASSWORD: the account exists but has no password at all."""
+    kwargs = await created_user_password(None)
 
-    assert first["email"] == DEFAULT_USER_EMAIL
-    assert first["is_superuser"] is True
-    # The specific defect: the old fallback was this exact string.
-    assert first["password"] != "default_password"
-    # Random, not merely different: two creations must not agree.
-    assert first["password"] != second["password"]
-    assert len(first["password"]) >= 32
+    assert kwargs["email"] == DEFAULT_USER_EMAIL
+    assert kwargs["is_superuser"] is True
+    # No password, not a random one: nothing to log in with and no secret to
+    # lose. (The old fallback was the literal "default_password".)
+    assert kwargs["password"] is None
 
 
 @pytest.mark.asyncio

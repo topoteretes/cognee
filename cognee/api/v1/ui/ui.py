@@ -593,6 +593,20 @@ def start_ui(
         try:
             import sys
 
+            # This backend binds localhost only, so the well-known dev password
+            # is reachable solely from this machine. Supplying it keeps
+            # `cognee-cli -ui` a one-click login on a fresh install (the login
+            # form prefills it) without weakening the default anywhere else: a
+            # server bound to a network interface has no default-user login
+            # unless the operator sets DEFAULT_USER_PASSWORD. The server sets
+            # this once on a default user that has no password yet (the SDK
+            # and CLI create it that way), and never changes an existing
+            # password. An operator's own value always wins here.
+            backend_env = {
+                **os.environ,
+                "DEFAULT_USER_PASSWORD": os.environ.get("DEFAULT_USER_PASSWORD")
+                or "default_password",
+            }
             backend_process = subprocess.Popen(
                 [
                     sys.executable,
@@ -604,6 +618,7 @@ def start_ui(
                     "--port",
                     str(backend_port),
                 ],
+                env=backend_env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 start_new_session=True,
