@@ -292,7 +292,7 @@ Before exposing Cognee publicly, review these defaults:
 - **Authentication.** `ENABLE_BACKEND_ACCESS_CONTROL=True` (default) **requires auth** on the API
   — a `REQUIRE_AUTHENTICATION=False` is ignored while access control is on. Create a user, or for
   a single-user setup behind a token set `ENABLE_BACKEND_ACCESS_CONTROL=False`.
-- **JWT secret.** Set `FASTAPI_USERS_JWT_SECRET` to a long random string, identical across
+- **JWT secret.** Set `FASTAPI_USERS_JWT_SECRET` to a securely generated secret, identical across
   replicas. When unset, each server process generates its own secret at startup, so tokens
   stop working after a restart and are not accepted by other replicas.
 - **CORS.** Replace the default `*` in `CORS_ALLOWED_ORIGINS` with your real front-end origin(s).
