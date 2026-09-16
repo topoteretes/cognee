@@ -35,8 +35,8 @@ def _generated_secret(env_var: str) -> str:
     logger.warning(
         "%s is not set. A random secret was generated for this server process. %s "
         "If you run more than one process (uvicorn workers, several replicas, or "
-        "separate API and worker processes), set %s in your .env to the same long "
-        "random string for every process.",
+        "separate API and worker processes), set %s in your .env to the same "
+        "securely generated secret for every process.",
         env_var,
         AUTH_SECRETS[env_var],
         env_var,
