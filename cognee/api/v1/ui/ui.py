@@ -428,26 +428,40 @@ def prompt_user_for_download() -> bool:
         return False
 
 
-def _stop_ui_process(process: subprocess.Popen) -> None:
-    """Stop a process created by this launch and its child processes."""
+def stop_ui_pid(pid: int, *, running: bool = True) -> None:
+    """Signal a process group created by this launch, by PID.
+
+    The PID-level half of :func:`stop_ui_process`, so callers that only kept a
+    PID (the CLI's signal handler) share one implementation with the callers
+    that kept the Popen. Deliberately uses ``pid`` as the group id rather than
+    resolving ``os.getpgid(pid)`` first: every Unix Popen in start_ui creates
+    its own session, and the original group id stays valid even once npm's
+    parent has exited -- which is exactly the case where getpgid() fails.
+    """
     try:
         if platform.system() == "Windows":
-            if process.poll() is None:
+            if running:
                 # npm is launched through a shell on Windows. Stopping only
                 # that shell would leave the Node.js child running.
                 subprocess.run(
-                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
                     capture_output=True,
                     timeout=5,
                     check=True,
                 )
         else:
-            # Every Unix Popen in start_ui creates its own session. Use the
-            # original group ID even if npm's parent has already exited.
-            os.killpg(process.pid, signal.SIGTERM)
-        process.wait(timeout=5)
+            os.killpg(pid, signal.SIGTERM)
     except ProcessLookupError:
         pass
+    except (OSError, subprocess.SubprocessError):
+        logger.warning("UI process %s did not stop gracefully", pid, exc_info=True)
+
+
+def stop_ui_process(process: subprocess.Popen) -> None:
+    """Stop a process created by this launch and its child processes."""
+    stop_ui_pid(process.pid, running=process.poll() is None)
+    try:
+        process.wait(timeout=5)
     except (OSError, subprocess.SubprocessError):
         logger.warning("UI process %s did not stop gracefully", process.pid, exc_info=True)
 
@@ -468,8 +482,18 @@ def _stop_ui_process(process: subprocess.Popen) -> None:
         logger.warning("Could not reap UI process %s", process.pid, exc_info=True)
 
 
-def _remove_ui_container(container_name: str) -> None:
-    """Remove only the uniquely named container created by this launch."""
+def remove_ui_container(container_name: str) -> None:
+    """Stop and remove only the uniquely named container created by this launch."""
+    try:
+        # Ask for a graceful stop first. `docker rm --force` alone is a SIGKILL,
+        # and this is also the shutdown path for a container that has been
+        # serving traffic, not just for cleaning up a failed startup.
+        subprocess.run(
+            ["docker", "stop", container_name], capture_output=True, timeout=10, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        # Fall through: the forced removal below is what actually has to happen.
+        logger.debug("docker stop %s failed; forcing removal", container_name, exc_info=True)
     try:
         result = subprocess.run(
             ["docker", "rm", "--force", container_name],
@@ -673,8 +697,8 @@ def _start_ui(
 
             # LIFO: stop the Docker CLI before removing its container, so it
             # cannot keep creating the container while cleanup is running.
-            mcp_resources.callback(_remove_ui_container, container_name)
-            mcp_resources.callback(_stop_ui_process, mcp_process)
+            mcp_resources.callback(remove_ui_container, container_name)
+            mcp_resources.callback(stop_ui_process, mcp_process)
 
             _stream_process_output(mcp_process, "stdout", "[MCP]", "\033[34m")  # Blue
             _stream_process_output(mcp_process, "stderr", "[MCP]", "\033[34m")  # Blue
@@ -711,7 +735,7 @@ def _start_ui(
                 start_new_session=True,
             )
 
-            resources.callback(_stop_ui_process, backend_process)
+            resources.callback(stop_ui_process, backend_process)
 
             # Start threads to stream backend output with prefix
             _stream_process_output(backend_process, "stdout", "[BACKEND]", "\033[32m")  # Green
@@ -830,7 +854,7 @@ def _start_ui(
                     start_new_session=True,
                 )
 
-        resources.callback(_stop_ui_process, process)
+        resources.callback(stop_ui_process, process)
 
         # Start threads to stream frontend output with prefix
         _stream_process_output(process, "stdout", "[FRONTEND]", "\033[33m")  # Yellow

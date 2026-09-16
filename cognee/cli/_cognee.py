@@ -271,60 +271,25 @@ def main() -> int:
             except (BrokenPipeError, OSError):
                 pass
 
-            # First, stop Docker container if running
-            if docker_container:
-                try:
-                    result = subprocess.run(
-                        ["docker", "stop", docker_container],
-                        capture_output=True,
-                        timeout=10,
-                        check=False,
-                    )
-                    try:
-                        if result.returncode == 0:
-                            fmt.success(f"✓ Docker container {docker_container} stopped.")
-                        else:
-                            fmt.warning(
-                                f"Could not stop container {docker_container}: {result.stderr.decode()}"
-                            )
-                    except (BrokenPipeError, OSError):
-                        pass
-                except subprocess.TimeoutExpired:
-                    try:
-                        fmt.warning(
-                            f"Timeout stopping container {docker_container}, forcing removal..."
-                        )
-                    except (BrokenPipeError, OSError):
-                        pass
-                    subprocess.run(
-                        ["docker", "rm", "-f", docker_container], capture_output=True, check=False
-                    )
-                except Exception:
-                    logger.debug("Ignoring exception in main.signal_handler", exc_info=True)
+            # Teardown lives in cognee.api.v1.ui.ui, which owns the processes and
+            # the container. Reimplementing it here is how the two drifted: this
+            # handler used to resolve os.getpgid(pid) first, which fails in exactly
+            # the case start_ui cares about -- npm's parent exiting before its
+            # Node child -- while start_ui signals the original group id.
+            from cognee.api.v1.ui.ui import remove_ui_container, stop_ui_pid
 
-            # Then, stop regular processes
-            for pid in spawned_pids:
+            if docker_container:
+                remove_ui_container(docker_container)
                 try:
-                    if hasattr(os, "killpg"):
-                        # Unix-like systems: Use process groups
-                        pgid = os.getpgid(pid)
-                        os.killpg(pgid, signal.SIGTERM)
-                        try:
-                            fmt.success(f"✓ Process group {pgid} (PID {pid}) terminated.")
-                        except (BrokenPipeError, OSError):
-                            pass
-                    else:
-                        # Windows: Use taskkill to terminate process and its children
-                        subprocess.run(
-                            ["taskkill", "/F", "/T", "/PID", str(pid)],
-                            capture_output=True,
-                            check=False,
-                        )
-                        try:
-                            fmt.success(f"✓ Process {pid} and its children terminated.")
-                        except (BrokenPipeError, OSError):
-                            pass
-                except (OSError, ProcessLookupError, subprocess.SubprocessError):
+                    fmt.success(f"✓ Docker container {docker_container} stopped.")
+                except (BrokenPipeError, OSError):
+                    pass
+
+            for pid in spawned_pids:
+                stop_ui_pid(pid)
+                try:
+                    fmt.success(f"✓ Process {pid} and its children terminated.")
+                except (BrokenPipeError, OSError):
                     pass
 
             sys.exit(0)
@@ -385,8 +350,11 @@ def main() -> int:
 
                 return 0
             else:
+                # No teardown here: start_ui cleans up everything it started before
+                # returning None. Calling signal_handler again would be a second
+                # teardown against PIDs that are already gone -- and if the OS had
+                # recycled one, it would signal an unrelated process group.
                 fmt.error("Failed to start UI server. Check the logs above for details.")
-                signal_handler(signal.SIGTERM, None)
                 return 1
 
         except Exception as ex:

@@ -153,7 +153,7 @@ def test_disabled_services_are_not_cleaned_up(launch):
 def test_process_shutdown_escalates_and_bounds_both_waits(launch):
     process = launch.processes[0]
     process.wait.side_effect = subprocess.TimeoutExpired("process", 5)
-    ui._stop_ui_process(process)
+    ui.stop_ui_process(process)
     assert launch.killpg.call_args_list == [call(101, signal.SIGTERM), call(101, signal.SIGKILL)]
     assert process.wait.call_args_list == [call(timeout=5), call(timeout=5)]
 
@@ -162,15 +162,24 @@ def test_already_exited_process_is_safe_to_clean_twice(launch):
     launch.killpg.side_effect = ProcessLookupError
     process = launch.processes[0]
     process.poll.return_value = 0
-    ui._stop_ui_process(process)
-    ui._stop_ui_process(process)
+    ui.stop_ui_process(process)
+    ui.stop_ui_process(process)
     process.wait.assert_called_with(timeout=5)
 
 
 @pytest.mark.parametrize("error", [OSError("docker gone"), subprocess.TimeoutExpired("docker", 10)])
 def test_container_cleanup_failure_does_not_prevent_other_cleanup(launch, error):
     launch.mocks["check_node_npm"].return_value = (False, "missing")
-    launch.run.side_effect = [subprocess.CompletedProcess([], 0, "", ""), error]
+
+    def fail_the_removal(cmd, *args, **kwargs):
+        # Keyed on the command rather than call order: remove_ui_container asks
+        # for a graceful `docker stop` before forcing removal, so the forced call
+        # is no longer simply the second subprocess.run of the teardown.
+        if cmd[:2] == ["docker", "rm"]:
+            raise error
+        return subprocess.CompletedProcess([], 0, "", "")
+
+    launch.run.side_effect = fail_the_removal
     assert start(launch) is None
     assert_cleaned(launch, 2)
 
@@ -179,7 +188,7 @@ def test_windows_shutdown_stops_tree_and_bounds_fallback_waits(launch, monkeypat
     monkeypatch.setattr(ui.platform, "system", lambda: "Windows")
     process = launch.processes[0]
     process.wait.side_effect = [subprocess.TimeoutExpired("process", 5), 0]
-    ui._stop_ui_process(process)
+    ui.stop_ui_process(process)
     launch.run.assert_called_once_with(
         ["taskkill", "/PID", "101", "/T", "/F"],
         capture_output=True,
@@ -193,8 +202,15 @@ def test_windows_shutdown_stops_tree_and_bounds_fallback_waits(launch, monkeypat
 
 def test_already_removed_container_is_safe_to_clean_twice(launch):
     launch.run.return_value = subprocess.CompletedProcess([], 1, "", "No such container: owned")
-    ui._remove_ui_container("owned")
-    ui._remove_ui_container("owned")
+    ui.remove_ui_container("owned")
+    ui.remove_ui_container("owned")
     for cleanup_call in launch.run.call_args_list:
         assert cleanup_call.kwargs["timeout"] == 10
-        assert cleanup_call.args[0] == ["docker", "rm", "--force", "owned"]
+    # Each removal asks for a graceful stop first, then forces it. A container
+    # that is already gone reports "No such container" on both and is ignored.
+    assert [c.args[0] for c in launch.run.call_args_list] == [
+        ["docker", "stop", "owned"],
+        ["docker", "rm", "--force", "owned"],
+        ["docker", "stop", "owned"],
+        ["docker", "rm", "--force", "owned"],
+    ]
