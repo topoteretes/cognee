@@ -387,8 +387,6 @@ async def test_cognify_startup_recovery_rolls_back_stale_started_runs(clean_test
                 status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
                 dataset_id=dataset.id,
                 run_info={"data": [str(data_id)]},
-                # Mark the run as old enough to be considered stale; a freshly
-                # started run is treated as live and intentionally not recovered.
                 created_at=datetime.now(timezone.utc) - timedelta(hours=2),
             )
         )
