@@ -141,7 +141,7 @@ def get_activity_router() -> APIRouter:
 
         from cognee.infrastructure.databases.relational import get_relational_engine
         from cognee.modules.data.models.Dataset import Dataset
-        from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
+        from cognee.modules.pipelines.models import PipelineRun
         from cognee.modules.users.models import User
 
         if dataset_id is not None:
