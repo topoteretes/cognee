@@ -165,7 +165,7 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
             # Same contract as GraphCompletionRetriever.get_retrieved_objects:
             # an empty graph is a loud state error, not a quiet miss.
             raise NoDataError(
-                "The knowledge graph is empty. Add data and run cognify before searching."
+                "The knowledge graph is empty. Ingest data through Cognee before searching."
             )
 
         subqueries = await self._decompose_query(query)
