@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from typing import Any
 
@@ -11,7 +10,6 @@ from pydantic import BaseModel
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_not_exception_type,
     stop_after_attempt,
     wait_exponential_jitter,
 )
@@ -19,8 +17,7 @@ from tenacity import (
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
-    LLMPaymentRequiredError,
-    is_budget_exhausted_error,
+    raise_if_budget_exhausted,
 )
 from cognee.infrastructure.llm.retry_config import (
     llm_retry_condition,
@@ -179,8 +176,16 @@ class OpenAIAdapter(GenericAPIAdapter):
             ContentFilterFinishReasonError,
             ContentPolicyViolationError,
             InstructorRetryException,
-        ):
+        ) as error:
             if not (self.fallback_model and self.fallback_api_key):
+                # Nothing left to try, so classify here: the handler further down
+                # is unreachable once this clause matches. A budget rejection with
+                # a configured fallback is deliberately NOT classified at this
+                # point — the fallback carries a different key, so a per-key spend
+                # cap is precisely the case the fallback exists for. Classifying
+                # earlier would silently remove that failover. A fallback that
+                # caps out in turn is classified by the nested handler below.
+                raise_if_budget_exhausted(error)
                 raise
             try:
                 async with llm_rate_limiter_context_manager():
@@ -207,6 +212,12 @@ class OpenAIAdapter(GenericAPIAdapter):
                 ContentPolicyViolationError,
                 InstructorRetryException,
             ) as error:
+                # The fallback capped out too. Checked before the content-policy
+                # branch because the model's partial completion is rendered into
+                # str(error), so a budget rejection whose completion happens to
+                # mention a content policy would otherwise be misclassified.
+                raise_if_budget_exhausted(error)
+
                 if (
                     isinstance(error, InstructorRetryException)
                     and "content management policy" not in str(error).lower()
@@ -217,21 +228,15 @@ class OpenAIAdapter(GenericAPIAdapter):
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"
                     ) from error
         except Exception as e:
-            if is_budget_exhausted_error(e):
-                raise LLMPaymentRequiredError() from e
+            # Same detail-carrying message as the wrapped-error paths above.
+            raise_if_budget_exhausted(e)
             raise
 
     @observe(as_type="transcription")
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type(
-            (
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                asyncio.CancelledError,
-            )
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )

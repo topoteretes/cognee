@@ -442,7 +442,9 @@ class GraphCompletionRetriever(BaseRetriever):
         if query is not None and not query_batch:
             turn_preparation = await self.prepare_session_turn_for_retrieval(query)
             if not turn_preparation.should_answer:
-                return [turn_preparation.response_to_user or "Got it."]
+                from cognee.infrastructure.session.session_turn import acknowledgement_for_turn
+
+                return [acknowledgement_for_turn(turn_preparation.response_to_user)]
             effective_query = turn_preparation.effective_query or query
 
         retrieved_objects = await self.get_retrieved_objects(

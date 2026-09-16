@@ -34,7 +34,7 @@ async def get_max_chunk_tokens() -> int:
     embedding_engine = (await get_vector_engine_async()).embedding_engine
 
     # Resolve the LLM token ceiling from configuration alone — building an LLM
-    # client here would eagerly instantiate the (legacy) instructor adapter
+    # client here would eagerly instantiate the legacy framework's adapter
     # even when the litellm_native framework is active. Mirrors the resolution
     # in get_llm_client()/get_native_client(): the lower of the model's hard
     # limit and the user's configured ceiling, with the Ollama context-size
