@@ -60,10 +60,17 @@ def get_activity_router() -> APIRouter:
           `status` are NULL, so these are invisible to status-based readers).
 
         `status` for a `"pipeline"` row is one of `PipelineRunStatus`,
-        reported exactly as stored. A run whose process died without writing a
-        terminal row is closed as `DATASET_PROCESSING_ERRORED` by startup
-        recovery, with `error_class` naming it as abandoned rather than failed.
-        `"operation"` rows have no status column.
+        reported exactly as stored. Startup recovery closes some abandoned
+        runs as `DATASET_PROCESSING_ERRORED` (`error_class` names them as
+        abandoned rather than failed), but narrowly: only `cognify_pipeline`,
+        only a row whose origin the booting surface owns (the API closes its
+        own, the MCP server closes its own, neither reaches the other's), and
+        only once the row is older than `COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS`.
+        A STARTED row from `add_pipeline`, `memify_pipeline`,
+        `code_graph_pipeline`, a skills pipeline, `migration_import_pipeline`,
+        or a cognify run started by the SDK, `cognee-cli`, the session bridge,
+        or before this recovery shipped, is never touched by it and stays
+        `STARTED` here indefinitely. `"operation"` rows have no status column.
 
         One run is several rows here, not one. The writers
         (`log_pipeline_run_start`/`_complete`/`_error`) always INSERT a new row
