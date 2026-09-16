@@ -554,3 +554,43 @@ def test_is_older_than_threshold_handles_naive_datetimes():
         created_at=None,
     )
     assert recovery_module._is_older_than_threshold(run) is True
+
+
+@pytest.mark.asyncio
+async def test_a_second_stdio_sessions_fresh_run_is_left_alone(monkeypatch):
+    """The exact scenario from the MCP review comment
+    (github.com/topoteretes/cognee/pull/4983#discussion_r4004955294): stdio is
+    one process per client, so every IDE window or agent session against the
+    same local database stamps "mcp" too. A second session booting while the
+    first is still mid-ingest must not roll that ingest back just because the
+    origin matches — the age floor is what stops it, the same mechanism that
+    protects a rolling API deploy, with no MCP-specific carve-out needed."""
+    dataset_id = uuid4()
+    dataset = SimpleNamespace(id=dataset_id, owner_id=uuid4())
+    run = _started_run(dataset_id, origin="mcp")
+    run.created_at = datetime.now(timezone.utc)
+    run.started_at = run.created_at
+
+    rollback_calls, close_calls = _drive(monkeypatch, run, dataset)
+
+    await recovery_module.recover_stale_cognify_runs_on_startup(owned_origins=frozenset({"mcp"}))
+
+    assert rollback_calls == []
+    assert close_calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_stdio_sessions_run_past_the_age_floor_is_recovered(monkeypatch):
+    """The other half: once that same "mcp"-origin row is old enough that a
+    sibling session no longer explains it, it is closed exactly as any other
+    surface's stale run would be."""
+    dataset_id = uuid4()
+    dataset = SimpleNamespace(id=dataset_id, owner_id=uuid4())
+    run = _started_run(dataset_id, origin="mcp")
+
+    rollback_calls, close_calls = _drive(monkeypatch, run, dataset)
+
+    await recovery_module.recover_stale_cognify_runs_on_startup(owned_origins=frozenset({"mcp"}))
+
+    assert len(rollback_calls) == 1
+    assert len(close_calls) == 1

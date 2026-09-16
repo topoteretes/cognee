@@ -10,6 +10,18 @@ The call is destructive (it rolls back that run's graph), so where it sits in
 main() is part of the contract and is asserted here: after the arguments are
 parsed, after migrations, and never when --api-url or --serve-url says this
 process does not own the database.
+
+Origin does not mean one process, and stdio is the case that proves it:
+stdio is the default transport and it is one process per client, so every
+IDE window or agent session against the same local database stamps "mcp"
+too. A second session booting while the first is still mid-ingest is not
+hypothetical, it is the normal way people use this. Recovery survives that
+because the age floor next to the origin check
+(COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS, see recovery.py) applies no
+matter which owned_origins a caller passes: a STARTED row has to be both
+"mcp" and old enough that a session that only just started stopped being
+the likely explanation. Nothing about this call site is special-cased for
+it, which is the point (github.com/topoteretes/cognee/pull/4983#discussion_r4004955294).
 """
 
 import importlib
@@ -61,7 +73,11 @@ def run_main(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_startup_closes_runs_this_server_abandoned(run_main):
-    """Local mode owns its database, so it sweeps the origin it stamps."""
+    """Local mode sweeps the origin it stamps. It does not own the database
+    exclusively — stdio is one process per client, so a sibling session can
+    stamp "mcp" too — which is why the sweep it calls into also needs the age
+    floor covered in cognee/tests/unit/modules/cognify/test_recovery.py rather
+    than relying on origin alone."""
     calls = []
 
     async def _recovery(**kwargs):
