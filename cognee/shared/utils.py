@@ -122,6 +122,13 @@ def get_persistent_id() -> str:
         return get_anonymous_id()
 
 
+# Property keys hashed (uuid5 fingerprint) in every telemetry event's
+# additional_properties before they leave the process. session_id/session_ids
+# are user-chosen names and may carry meaning; only a fingerprint may leave —
+# the one place enforcing what remember/improve previously hashed by hand.
+TELEMETRY_SANITIZED_PROPERTIES = ["url", "session_id", "session_ids"]
+
+
 def _sanitize_nested_properties(obj: Any, property_names: list[str]) -> Any:
     """
     Recursively replaces any property whose key matches one of `property_names`
@@ -371,7 +378,7 @@ def send_telemetry(
     if env in ["test", "dev"]:
         return
     additional_properties = _sanitize_nested_properties(
-        obj=additional_properties, property_names=["url"]
+        obj=additional_properties, property_names=TELEMETRY_SANITIZED_PROPERTIES
     )
     resolved_user_id, tenant_id = _resolve_identity(user if user is not None else user_id)
     anonymous_id = str(get_anonymous_id())

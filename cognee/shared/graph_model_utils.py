@@ -15,12 +15,39 @@ from pydantic import BaseModel
 from pydantic._internal._core_utils import CoreSchemaOrField, is_core_schema
 from pydantic.json_schema import GenerateJsonSchema
 
+from cognee.shared.exceptions import ExternalSchemaReferenceError
 from cognee.shared.llm_graph_model import datapoint_model_to_basemodel
 
 
+def _reject_external_refs(node) -> None:
+    """Raise if any ``$ref`` in the schema points outside the document.
+
+    The schema arrives over the HTTP API from the caller. ``datamodel-code-generator``
+    resolves ``$ref`` values natively: an ``http(s)://`` URL is fetched from the server
+    and a path is read from the server's disk. Only pointers into the same document
+    (``#/$defs/Node``), which is what Pydantic emits for nested models, are legitimate.
+    """
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        if isinstance(ref, str) and not ref.startswith("#"):
+            raise ExternalSchemaReferenceError(
+                f"graph_model contains an external $ref ({ref!r}). Only in-document "
+                "references starting with '#' are allowed; URLs and file paths are not fetched."
+            )
+        for value in node.values():
+            _reject_external_refs(value)
+    elif isinstance(node, list):
+        for value in node:
+            _reject_external_refs(value)
+
+
 def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
+    _reject_external_refs(pydantic_json_schema)
     # If a custom graph model is provided, convert it from dict to a Pydantic model class
     config = GenerateConfig(
+        # Second layer behind _reject_external_refs: the generator must never fetch
+        # URLs or read files outside the schema it was given.
+        allow_remote_refs=False,
         input_file_type=InputFileType.JsonSchema,
         input_filename="dynamic.json",
         output_model_type=DataModelType.PydanticV2BaseModel,

@@ -110,7 +110,11 @@ async def _import_cogx_archives(
 def get_remember_router() -> APIRouter:
     router = APIRouter()
 
-    @router.post("", response_model=dict)
+    @router.post(
+        "",
+        summary="Remember: ingest data and build the knowledge graph (add + cognify + improve)",
+        response_model=dict,
+    )
     @log_usage(function_name="POST /v1/remember", log_type="api_endpoint")
     async def remember(
         data: list[OptionalUploadFile] = File(default=None),
@@ -197,6 +201,14 @@ def get_remember_router() -> APIRouter:
                 "poll GET /v1/datasets/status to track completion. If false, the request "
                 "blocks until the knowledge graph is fully built, which can take minutes "
                 "for large files."
+            ),
+        ),
+        self_improvement: bool | None = Form(
+            default=True,
+            description=(
+                "Run the self-improvement loop (improve) after the knowledge graph is built: "
+                "triplet enrichment and, for session-backed data, the session bridge. Set to "
+                "false for a plain add + cognify ingestion. Ignored with session_id."
             ),
         ),
         custom_prompt: str | None = Form(
@@ -323,6 +335,8 @@ def get_remember_router() -> APIRouter:
           data is ingested directly via add + cognify.
         - **node_set** (Optional[List[str]]): Node identifiers for graph organisation.
         - **run_in_background** (Optional[bool]): Run the cognify step asynchronously (default: False).
+        - **self_improvement** (Optional[bool]): Run the improve loop after cognify
+          (default: True). False gives a plain add + cognify ingestion.
         - **custom_prompt** (Optional[str]): Custom prompt for entity extraction.
         - **chunk_size** (Optional[int]): Maximum tokens per chunk (default: 4096).
         - **chunks_per_batch** (Optional[int]): Chunks per cognify batch.
@@ -567,6 +581,7 @@ def get_remember_router() -> APIRouter:
                 dataset_id=datasetId if datasetId else None,
                 node_set=[tag for tag in (node_set or []) if tag] or None,
                 run_in_background=run_in_background or False,
+                self_improvement=self_improvement if self_improvement is not None else True,
                 custom_prompt=custom_prompt or None,
                 chunk_size=chunk_size,
                 chunks_per_batch=chunks_per_batch,
@@ -638,7 +653,11 @@ def get_remember_router() -> APIRouter:
         )
         skill_improvement: dict | None = None
 
-    @router.post("/entry", response_model=dict)
+    @router.post(
+        "/entry",
+        summary="Remember a session entry (QA, trace, feedback) into the session cache",
+        response_model=dict,
+    )
     @log_usage(function_name="POST /v1/remember/entry", log_type="api_endpoint")
     async def remember_entry(
         payload: RememberEntryRequest,
