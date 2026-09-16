@@ -8,7 +8,7 @@ things:
 2. **Session memory as a source.** `scope` selects `graph`, `session`,
    `trace`, `session_context`, or a list of them. With a bare `session_id`, a
    session hit short-circuits the graph search.
-3. **Normalized results.** Every entry carries `_source` (`"graph"`,
+3. **Normalized results.** Every entry carries `source` (`"graph"`,
    `"session"`, `"trace"`, ...) and, for graph results, the `search_type` that
    actually ran.
 
@@ -23,22 +23,30 @@ session cache as a source; that is `recall()`-only.
 
 Source: `cognee/api/v1/recall/query_router.py`.
 
-Rules are checked in order and the first match wins. Anything unmatched goes
-to `HYBRID_COMPLETION`. Matching is case-insensitive except for Cypher.
+Rules are checked in order and the first match wins, but no two rules may match
+the same query, so the order is cosmetic (a test enforces this). Anything
+unmatched goes to `HYBRID_COMPLETION`. Matching is case-insensitive except for
+Cypher.
 
 | # | Rule | Signal in the query | Routes to |
 |---|---|---|---|
-| 1 | `cypher_syntax` | Starts with an upper-case Cypher clause: `MATCH`, `OPTIONAL MATCH`, `RETURN`, `CREATE`, `MERGE`, or `UNWIND` | `CYPHER` |
+| 1 | `cypher_syntax` | An upper-case Cypher clause that opens a node pattern (`MATCH (n ...`, `CREATE (a:Person {...})`, `UNWIND [...]`), or any clause plus relationship syntax (`-[`, `]->`, `)-`, `-(`) | `CYPHER` |
 | 2 | `quoted_phrase` | The whole query is one `"quoted phrase"` | `CHUNKS_LEXICAL` |
-| 3 | `exact_match_intent` | `exact`, `verbatim`, `literal`, `word for word` | `CHUNKS_LEXICAL` |
-| 4 | `summary_intent` | `summarize`, `summary`, `overview`, `outline`, `tl;dr`, `gist`, `main points`, `key takeaways` | `GRAPH_SUMMARY_COMPLETION` |
-| 5 | `explicit_time_range` | A year range (`between 1910 and 1920`, `2019 to 2021`), a preposition plus a year (`in 1915`, `since 2020`), a decade (`the 1990s`), an ISO date, `timeline`, `chronology` | `TEMPORAL` |
-| 6 | `coding_rules_intent` | `coding rules` / `coding standards` / `coding conventions`, or `code review guidelines` (and the `rules`, `standards`, `checklist`, `conventions` variants) | `CODING_RULES` |
+| 3 | `coding_rules_intent` | `coding rules` / `coding standards` / `coding conventions`, or `code review guidelines` (and the `rules`, `standards`, `checklist`, `conventions` variants) | `CODING_RULES` |
 | — | `default` | Anything else | `HYBRID_COMPLETION` |
 
 The rule for what belongs in the table: **auto-routing may only pick a
 strategy that is at least as good as HYBRID on a default-built graph and does
 not add LLM calls without an unambiguous signal.**
+
+`HYBRID_COMPLETION` searches document chunks, pre-computed summaries, and the
+entity neighbourhood in a single LLM call. Almost every alternative strategy
+sees a *subset* of that context, sometimes with an extra round trip attached.
+So each rule above fires on an input that is not a natural-language question at
+all — pasted Cypher, a fully quoted literal, a request for the rule list — and
+for which HYBRID is the wrong operation rather than a worse one. A rule that
+fires on an ordinary question is a regression even when its target sounds
+better suited.
 
 That is why these are *not* auto-routed, even though they are valid
 `query_type` values:
@@ -49,14 +57,30 @@ That is why these are *not* auto-routed, even though they are valid
 - `GRAPH_COMPLETION_CONTEXT_EXTENSION` adds traversal rounds. HYBRID already
   includes entity neighbourhoods, so "related to" questions stay on the
   default.
-- Bare temporal words (`when`, `before`, `after`, `since`, `during`) do not
-  select `TEMPORAL`. Default graphs are built with `temporal_cognify=False`
-  and have no event nodes, so `TEMPORAL` would pay an extra LLM call for
-  interval extraction and then fall back to graph-only triplets. A year,
-  date, decade, or the word `timeline` is required.
+- `GRAPH_SUMMARY_COMPLETION` does not read pre-computed summaries: it runs
+  `GRAPH_COMPLETION` and then makes a second LLM call to summarize the answer.
+  Routing "summarize the report" there would drop HYBRID's document and
+  summary lanes *and* add a round trip.
+- `TEMPORAL` needs `Timestamp` nodes that only `temporal_cognify=True` creates.
+  On a default graph it pays an interval-extraction LLM call and then degrades
+  to triplet search, so no date token — a year, a range, a decade, an ISO date,
+  or the word `timeline` — routes there.
+- "Exact"/"verbatim" phrasing does not select `CHUNKS_LEXICAL`. BM25 tokenizes
+  the raw query, so the trigger word itself becomes a rare, high-IDF search
+  term and skews the ranking it was meant to sharpen. `quoted_phrase` has no
+  such problem: its trigger is punctuation, which tokenization drops.
 - Incidental code tokens (`def`, `import`, `class Foo(`, `.py`, `refactor`,
   `lint`) do not select `CODING_RULES`. That retriever reads only the
   `coding_agent_rules` nodeset and returns nothing on an ordinary graph.
+
+### When a routed strategy comes up empty
+
+A routed type is a guess, so `recall()` never lets one do worse than the
+default. If the router picked a type and the search returns nothing — or the
+backend rejects it, as `CYPHER` does under `ALLOW_CYPHER_QUERY=false` — the
+query is retried once as `HYBRID_COMPLETION`, and the search history records
+the type that actually answered. A type you pinned yourself is never
+second-guessed: it returns empty, or raises, as before.
 
 ### Bypassing the router
 
@@ -66,23 +90,29 @@ That is why these are *not* auto-routed, even though they are valid
 | REST `POST /api/v1/recall` | omit `searchType` or pass `null` (default) | pass a value |
 | CLI `cognee-cli recall` | omit `--query-type` | `--query-type X` (choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES`) |
 
-All three surfaces auto-route by default. On every surface, an omitted type
-together with a `session_id` and no datasets also lets a session hit
-short-circuit the graph search; pinning a type disables that. REST clients that
-relied on the old `HYBRID_COMPLETION` default should pass
+All three surfaces auto-route by default. On every surface, omitting the type
+also makes the session a search source whenever a `session_id` is given: alone
+it short-circuits the graph on a hit, alongside datasets both contribute.
+Pinning a type leaves the graph as the only source. REST clients that relied on
+the old `HYBRID_COMPLETION` default should pass
 `"searchType": "HYBRID_COMPLETION"` explicitly.
 
 ### Seeing what ran
 
 Graph results carry the resolved type as `search_type`. The CLI prints it in
-the `Found N result(s) using ...` line. The router itself logs the rule name
-at DEBUG level and never logs the query text.
+the `Found N result(s) using ...` line. The recall span carries the type as
+`cognee.search.type` and, when the router chose it, the rule name as
+`cognee.recall.route_rule` — so which rule fires on real traffic is answerable
+without reproducing the query. The router also logs the rule name at DEBUG
+level, and never logs the query text.
 
 ### Adding a rule
 
 Add a `(name, compiled pattern, SearchType)` tuple to `_RULES` in
-`query_router.py` at the right precedence, then add cases to the golden table
-and the negative invariants in
-`cognee/tests/unit/api/v1/recall/test_query_router.py`. Keep the size
-principle above in mind: a rule that sends ordinary questions to a slower or
-narrower retriever is a regression, not an improvement.
+`query_router.py`, then add cases to the golden table and the negative
+invariants in `cognee/tests/unit/api/v1/recall/test_query_router.py`. Two
+structural tests constrain what you can add: the new target must be in
+`ROUTABLE_TYPES`, and the new pattern must not match any query an existing
+rule already matches. Keep the size principle above in mind: a rule that sends
+ordinary questions to a slower or narrower retriever is a regression, not an
+improvement.
