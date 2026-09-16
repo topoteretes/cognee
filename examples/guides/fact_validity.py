@@ -1,3 +1,13 @@
+"""Remember two facts, close the superseded one with close_node, and check it with is_valid.
+
+Alice's employer is remembered, closed when she changes jobs, then replaced by a new fact. Expect
+``closed: True`` and ``is_valid: False``: the old Entity node stays in the graph, marked stale
+rather than deleted.
+
+Requires: LLM_API_KEY.
+Run: uv run python examples/guides/fact_validity.py
+"""
+
 import asyncio
 
 import cognee

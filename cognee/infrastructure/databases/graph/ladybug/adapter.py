@@ -2844,6 +2844,12 @@ class LadybugAdapter(GraphDBInterface):
 
     # Graph-wide Operations
 
+    async def get_top_degree_node_ids(self, top_k: int) -> list[str]:
+        """Rank a bounded edge sample in the store; include isolated nodes."""
+        from cognee.infrastructure.databases.graph.degree_seeds import cypher_degree_seeds
+
+        return await cypher_degree_seeds(self, top_k, typed=True)
+
     async def get_graph_data(
         self,
     ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]:

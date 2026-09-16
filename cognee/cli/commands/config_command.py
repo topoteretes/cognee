@@ -159,7 +159,7 @@ Configuration changes will affect how cognee processes and stores data.
             config_key_defaults = {
                 # LLM configuration
                 "llm_provider": "openai",
-                "llm_model": "gpt-5-mini",
+                "llm_model": "gpt-5.6-luna",
                 "llm_api_key": "",
                 "llm_endpoint": "",
                 # Database configuration

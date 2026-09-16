@@ -99,6 +99,10 @@ def get_settings() -> SettingsDict:
                 "models": {
                     "openai": [
                         {
+                            "value": "gpt-5.6-luna",
+                            "label": "gpt-5.6-luna",
+                        },
+                        {
                             "value": "gpt-5-mini",
                             "label": "gpt-5-mini",
                         },

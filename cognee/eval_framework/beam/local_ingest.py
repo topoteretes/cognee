@@ -35,6 +35,7 @@ from cognee.eval_framework.beam.session_io import (
     session_id_for,
     write_json,
 )
+from cognee.modules.session_distillation.distill import DistillationCallsFailedError
 
 # Keep Cognee's normal logging quiet; this script prints its own progress.
 os.environ["LOG_LEVEL"] = "ERROR"
@@ -328,11 +329,18 @@ async def distill_session(
 ) -> dict[str, Any]:
     started = time.monotonic()
     print_step(f"Session memory {session_id}: distilling into dataset {dataset_name}")
-    result = await cognee.session.distill_session(
-        session_id,
-        dataset=dataset_name,
-        user=user,
-    )
+    try:
+        result = await cognee.session.distill_session(
+            session_id,
+            dataset=dataset_name,
+            user=user,
+        )
+    except DistillationCallsFailedError as exc:
+        # Surviving lessons were already published and the watermark stayed
+        # put, so a later distill retries the window; one flaky LLM batch
+        # should not kill a long eval run.
+        print_step(f"Session memory {session_id}: distillation partially failed: {exc}")
+        return {"status": "errored", "error": str(exc)}
     seconds = time.monotonic() - started
     payload = distillation_report_payload(result, seconds)
     print_step(

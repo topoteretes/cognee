@@ -10,8 +10,28 @@ from .models.PayloadSchema import PayloadSchema
 
 class VectorDBInterface(Protocol):
     """
-    Defines an interface for interacting with a vector database, including operations for
-    managing collections and data points.
+    Interface every vector backend implements (LanceDB, PGVector, Neptune Analytics, Turso).
+
+    Get an instance with ``get_vector_engine_async()``; never construct adapters directly.
+
+    Contract shared by all adapters:
+
+    * **One collection per embedded field.** ``add_data_points`` writes each ``DataPoint``
+      type's ``index_fields`` to a collection named ``<TypeName>_<field>``
+      (``DocumentChunk_text``, ``Entity_name``, ``TextSummary_text``, ...). Rows are keyed
+      by the data point's id.
+    * **Writes are idempotent upserts.** ``create_data_points`` replaces an existing row
+      with the same id (LanceDB additionally merges the ``belongs_to_set`` tags of the
+      old and new row). Embedding is done by the adapter through the configured
+      embedding engine.
+    * **Search returns ``list[ScoredResult]``** (``id``, ``score``, ``payload``), ordered by
+      ``score`` ascending. ``score`` is the backend's raw distance -- cosine distance for
+      the built-in adapters -- so **lower is better**; it is not a similarity.
+    * Ids are passed and returned as ``UUID``/``str`` of the ``DataPoint.id``; missing ids
+      in ``retrieve``/``score_by_ids`` are omitted from the result, not an error.
+
+    Multi-tenant isolation requires a ``DatasetDatabaseHandlerInterface`` registration
+    for the backend (see ``dataset_database_handler/``).
     """
 
     @abstractmethod
@@ -54,7 +74,12 @@ class VectorDBInterface(Protocol):
     @abstractmethod
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """
-        Insert new data points into the specified collection.
+        Upsert data points into the specified collection.
+
+        Keyed on ``DataPoint.id``: an existing row is replaced (LanceDB merges its
+        ``belongs_to_set`` with the new row's), a new id is inserted. The adapter embeds
+        each point's ``get_embeddable_data()`` with the configured embedding engine and
+        creates the collection if it does not exist. Returns ``None``.
 
         Parameters:
         -----------
@@ -123,6 +148,11 @@ class VectorDBInterface(Protocol):
         """
         Perform a search in the specified collection using either a text query or a vector
         query.
+
+        Exactly one of ``query_text`` / ``query_vector`` is required; text is embedded
+        first. Returns ``list[ScoredResult]`` ordered by ``score`` ascending, where
+        ``score`` is the raw backend distance (cosine for built-in adapters; lower is
+        better). ``limit=None`` returns every row; ``limit<=0`` returns ``[]``.
 
         Parameters:
         -----------

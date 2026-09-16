@@ -1598,7 +1598,7 @@ requires-dist = [
     { name = "psycopg2", marker = "extra == 'postgres'", specifier = ">=2.9.10,<3" },
     { name = "psycopg2-binary", marker = "extra == 'postgres-binary'", specifier = ">=2.9.10,<3.0.0" },
     { name = "pydantic", specifier = ">=2.10.5" },
-    { name = "pydantic-settings", specifier = ">=2.2.1,!=2.12.*,!=2.13.*,!=2.14.0,!=2.14.1,<3" },
+    { name = "pydantic-settings", specifier = ">=2.7.0,!=2.12.*,!=2.13.*,!=2.14.0,!=2.14.1,<3" },
     { name = "pylance", specifier = ">=0.22.0,<=0.36.0" },
     { name = "pympler", specifier = ">=1.1,<2.0.0" },
     { name = "pypdf", specifier = ">=6.6.2,<7.0.0" },
