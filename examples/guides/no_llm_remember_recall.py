@@ -1,7 +1,8 @@
 """remember → recall with no LLM API key at all.
 
-Graph and chunk summaries come from the local GLiNER2 model
-(GRAPH_EXTRACTOR=gliner), embeddings from fastembed running on CPU.
+Nothing to configure: with no LLM key and no embedding settings, cognee
+extracts the graph and chunk summaries with the local GLiNER2 model
+(GRAPH_EXTRACTOR=auto resolves to gliner) and embeds with fastembed on CPU.
 With no usable LLM key, recall() defaults to CHUNKS (vector search, no LLM),
 and a pipeline with no LLM task skips the first-run LLM connection probe.
 Anything ending in *_COMPLETION still needs an LLM to write the answer.
@@ -22,17 +23,8 @@ import os
 for var in ("LLM_API_KEY", "OPENAI_API_KEY"):
     os.environ.pop(var, None)
 
-os.environ.update(
-    {
-        "GRAPH_EXTRACTOR": "gliner",
-        "EMBEDDING_PROVIDER": "fastembed",
-        "EMBEDDING_MODEL": "BAAI/bge-small-en-v1.5",
-        "EMBEDDING_DIMENSIONS": "384",
-        "EMBEDDING_MAX_COMPLETION_TOKENS": "512",
-        # Per-turn feedback analysis is an LLM call; without it recall is LLM-free.
-        "AUTO_FEEDBACK": "false",
-    }
-)
+# Per-turn feedback analysis is an LLM call; without it recall is LLM-free.
+os.environ["AUTO_FEEDBACK"] = "false"
 
 import cognee  # noqa: E402  (environment must be set before the import)
 from cognee import SearchType  # noqa: E402

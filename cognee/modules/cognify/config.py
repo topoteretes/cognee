@@ -1,8 +1,10 @@
+import importlib.util
 import os
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from cognee.exceptions import CogneeConfigurationError
 from cognee.shared.data_models import DefaultContentPrediction, SummarizedContent
 
 
@@ -20,10 +22,12 @@ class CognifyConfig(BaseSettings):
     # OFF so the standard cognify pipeline is unchanged.
     provenance_tracking: bool = False
     # Which implementation fills the extract-and-summarize step of the default
-    # cognify pipeline (env: GRAPH_EXTRACTOR). "llm" (default) keeps the LLM
-    # path unchanged; "gliner" runs the local GLiNER2 model instead (requires
-    # the `gliner` extra) — no LLM call for extraction or summaries.
-    graph_extractor: str = "llm"
+    # cognify pipeline (env: GRAPH_EXTRACTOR). "auto" (default) runs the LLM
+    # path when a usable LLM key is configured and the local GLiNER2 model
+    # otherwise; "llm" / "gliner" pin one regardless of credentials. GLiNER
+    # requires the `gliner` extra and makes no LLM call for extraction or
+    # summaries.
+    graph_extractor: str = "auto"
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def to_dict(self) -> dict:
@@ -46,20 +50,50 @@ def get_cognify_config():
 
 
 EXTRACTORS = ("llm", "gliner")
+AUTO_EXTRACTOR = "auto"
 
 
-def resolve_extractor(value: str | None, config: CognifyConfig) -> str:
-    """Resolve the extractor for a cognify run; the explicit argument wins over
-    ``GRAPH_EXTRACTOR`` and ``llm`` is the default.
+class KeylessExtractorNotInstalledError(CogneeConfigurationError):
+    """No LLM key is configured and the local extractor's package is missing."""
+
+    def __init__(self):
+        super().__init__(
+            "No LLM API key is configured, so cognify would extract the graph with the "
+            "local GLiNER model, but the `gliner2` package is not installed. Either "
+            'install it with: pip install "cognee[gliner]" or set LLM_API_KEY to extract '
+            "with an LLM.",
+            "KeylessExtractorNotInstalledError",
+        )
+
+
+def resolve_extractor(
+    value: str | None, config: CognifyConfig, llm_configured: bool | None = None
+) -> str:
+    """Resolve the extractor for a cognify run to ``llm`` or ``gliner``.
+
+    The explicit argument wins over ``GRAPH_EXTRACTOR``; the default ``auto``
+    picks ``llm`` when a usable LLM key is configured and ``gliner`` otherwise,
+    so cognee ingests with local models when no credentials are set at all.
+    ``llm_configured`` overrides the key check (tests); by default it is
+    ``llm_available()`` on the current LLM config.
 
     This is the ONLY place the extractor setting is read. Callers resolve once,
     up front, and pass the resolved value (or values derived from it) onward —
     no downstream code re-reads the config.
     """
-    extractor = (value or config.graph_extractor or "llm").strip().lower()
+    extractor = (value or config.graph_extractor or AUTO_EXTRACTOR).strip().lower()
+    if extractor == AUTO_EXTRACTOR:
+        if llm_configured is None:
+            from cognee.modules.preflight import llm_available
+
+            llm_configured = llm_available()
+        extractor = "llm" if llm_configured else "gliner"
+        if extractor == "gliner" and importlib.util.find_spec("gliner2") is None:
+            raise KeylessExtractorNotInstalledError()
     if extractor not in EXTRACTORS:
         raise ValueError(
-            f"Unknown extractor {extractor!r}; expected one of {', '.join(EXTRACTORS)}"
+            f"Unknown extractor {extractor!r}; expected one of "
+            f"{', '.join((AUTO_EXTRACTOR, *EXTRACTORS))}"
         )
     return extractor
 

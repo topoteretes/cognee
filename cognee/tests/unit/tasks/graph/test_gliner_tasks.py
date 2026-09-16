@@ -855,11 +855,12 @@ async def test_cognify_extractor_env_setting_is_honoured_and_argument_wins():
     assert "extract_graph_and_summarize" in _task_names(overridden)
 
 
-def test_cognify_config_defaults_to_llm_extractor():
+def test_cognify_config_defaults_to_auto_extractor(monkeypatch):
     from cognee.modules.cognify.config import CognifyConfig
 
-    assert CognifyConfig().graph_extractor == "llm"
-    assert "graph_extractor" in CognifyConfig().to_dict()
+    monkeypatch.delenv("GRAPH_EXTRACTOR", raising=False)
+    assert CognifyConfig(_env_file=None).graph_extractor == "auto"
+    assert "graph_extractor" in CognifyConfig(_env_file=None).to_dict()
 
 
 @pytest.mark.asyncio
@@ -966,6 +967,51 @@ def test_resolve_extractor_argument_wins_over_config():
     assert resolve_extractor(" GLiNER ", _config_with_extractor("llm")) == "gliner"
     with pytest.raises(ValueError, match="Unknown extractor"):
         resolve_extractor("spacy", _config_with_extractor("llm"))
+
+
+def test_resolve_extractor_auto_follows_the_llm_key():
+    """``auto`` (the default) is the LLM path with a usable key and GLiNER without."""
+    from cognee.modules.cognify.config import resolve_extractor
+
+    auto = _config_with_extractor("auto")
+    with patch("importlib.util.find_spec", return_value=object()):
+        assert resolve_extractor(None, auto, llm_configured=True) == "llm"
+        assert resolve_extractor(None, auto, llm_configured=False) == "gliner"
+        assert resolve_extractor("auto", _config_with_extractor("llm"), llm_configured=False) == (
+            "gliner"
+        )
+    # A pinned extractor ignores the key entirely.
+    assert resolve_extractor(None, _config_with_extractor("llm"), llm_configured=False) == "llm"
+    assert resolve_extractor("gliner", auto, llm_configured=True) == "gliner"
+
+
+def test_resolve_extractor_auto_reads_llm_availability_by_default():
+    from cognee.modules.cognify import config as cognify_config_module
+    from cognee.modules.cognify.config import resolve_extractor
+
+    with (
+        patch("cognee.modules.preflight.llm_available", return_value=True) as available,
+        patch.object(cognify_config_module.importlib.util, "find_spec", return_value=object()),
+    ):
+        assert resolve_extractor(None, _config_with_extractor("auto")) == "llm"
+    available.assert_called_once_with()
+
+
+def test_resolve_extractor_auto_without_key_needs_gliner2_installed():
+    """Keyless ingestion fails fast with the install hint when gliner2 is missing."""
+    from cognee.modules.cognify.config import (
+        KeylessExtractorNotInstalledError,
+        resolve_extractor,
+    )
+
+    with (
+        patch("importlib.util.find_spec", return_value=None),
+        pytest.raises(KeylessExtractorNotInstalledError, match="cognee\\[gliner\\]"),
+    ):
+        resolve_extractor(None, _config_with_extractor("auto"), llm_configured=False)
+    # The explicit setting is left to the gliner task list's own guard.
+    with patch("importlib.util.find_spec", return_value=None):
+        assert resolve_extractor("gliner", _config_with_extractor("auto")) == "gliner"
 
 
 def test_default_pipeline_needs_llm_formula():
