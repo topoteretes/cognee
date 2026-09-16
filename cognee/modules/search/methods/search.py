@@ -516,6 +516,9 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                 "dataset_id": search_result.dataset_id,
                 "dataset_name": search_result.dataset_name,
                 "dataset_tenant_id": search_result.dataset_tenant_id,
+                # Why search_result / text_result is empty when it is (SDK-270):
+                # "no_context" or "graph_empty" mean the LLM was never called.
+                "status": search_result.status.value,
             }
             if verbose:
                 # Include all different types of results only in verbose mode
@@ -541,6 +544,7 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                     "text_result": search_result.completion,
                     "context_result": search_result.context,
                     "objects_result": search_result.result_object,
+                    "status": search_result.status.value,
                     **_prompt_preview_fields(search_result),
                     "evidence": [
                         reference.model_dump(mode="json") for reference in search_result.evidence

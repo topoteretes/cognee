@@ -168,11 +168,7 @@ class TripletRetriever(BaseRetriever):
 
             - Any: The generated completion based on the provided query and context.
         """
-        if self.skip_completion_on_empty_context and not context:
-            # Empty context must not reach the LLM: search is not an LLM
-            # gateway, and the only possible output is a phantom "no context
-            # provided" deflection (SDK-270 / gh #3728).
-            logger.warning("Empty context: skipping LLM completion, returning no results")
+        if self.should_skip_completion(context):
             return []
 
         cache_config = CacheConfig()
