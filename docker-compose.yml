@@ -2,6 +2,10 @@ services:
   cognee:
     container_name: cognee
     restart: always
+    # Must exceed the shutdown hook's background-task drain (default 8s,
+    # BACKGROUND_DRAIN_TIMEOUT_SECONDS) plus the engine close/WAL checkpoint —
+    # raise BOTH together, or the worker is SIGKILLed mid-checkpoint.
+    stop_grace_period: 15s
     networks:
       - cognee-network
     build:
