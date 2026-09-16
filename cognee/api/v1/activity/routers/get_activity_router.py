@@ -202,7 +202,7 @@ def get_activity_router() -> APIRouter:
                 # sets it. Derived here so clients need not know that convention.
                 "kind": "pipeline" if run.pipeline_name is not None else "operation",
                 "pipeline_name": run.pipeline_name,
-                "status": run.status,
+                "status": run.status.value if run.status else None,
                 "dataset_id": str(run.dataset_id) if run.dataset_id else None,
                 # The row itself is visible via the user_id term even when its
                 # dataset_id is not in permitted_dataset_id_set (the caller has
