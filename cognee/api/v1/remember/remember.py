@@ -1810,17 +1810,24 @@ async def _remember_inner(
                 from cognee.api.v1.improve import improve
 
                 async def _session_improve():
-                    from cognee.modules.operations import ORIGIN_BACKGROUND, operation_origin_scope
-
                     try:
-                        # System-initiated continuation, not a direct user call:
-                        # its records carry origin="background".
-                        with operation_origin_scope(ORIGIN_BACKGROUND):
-                            result.improve = await improve(
-                                dataset=dataset_id,
-                                session_ids=[session_id],
-                                user=user,
-                            )
+                        # Deliberately NOT stamped origin="background" here.
+                        # asyncio.create_task copies the current context, so
+                        # this task already carries whatever surface started
+                        # the outer remember() call ("api"/"mcp"/"sdk"/"cli").
+                        # Overriding it used to erase that: improve()'s
+                        # session-persist stage runs cognify_session, which
+                        # calls cognee.cognify() directly and writes a real
+                        # cognify_pipeline STARTED row, so a "background"
+                        # stamp meant no surface's startup sweep ever owned
+                        # it and a process that died mid-bridge left that row
+                        # stuck forever (SDK-591 review,
+                        # github.com/topoteretes/cognee/pull/4983#discussion_r4004955302).
+                        result.improve = await improve(
+                            dataset=dataset_id,
+                            session_ids=[session_id],
+                            user=user,
+                        )
                         result.improve_error = _improve_error_text(result.improve)
                         if result.improve_error:
                             logger.warning(

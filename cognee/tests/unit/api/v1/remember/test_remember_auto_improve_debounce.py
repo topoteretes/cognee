@@ -357,3 +357,33 @@ def test_env_typo_in_stages_disabled_fails_the_first_config_read(monkeypatch):
             get_improve_config()
     finally:
         get_improve_config.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_the_session_bridge_keeps_the_callers_origin(monkeypatch, fake_sm):
+    """SDK-591 review (github.com/topoteretes/cognee/pull/4983#discussion_r4004955302):
+    the bridge used to stamp origin="background" around improve(), which meant
+    a cognify run improve() started via cognify_session carried an origin no
+    startup sweep ever owns, and stayed stuck across every restart. The bridge
+    task must keep whatever origin the caller already set instead."""
+    from cognee.modules.operations import ORIGIN_API, set_operation_origin
+
+    _config(monkeypatch, debounce_entries=1)
+    observed_origins = []
+
+    async def fake_improve(**kwargs):
+        from cognee.modules.operations import get_operation_origin
+
+        observed_origins.append(get_operation_origin())
+        return ImproveResult(stages=[], memify_run={})
+
+    monkeypatch.setattr(improve_pkg, "improve", fake_improve)
+
+    set_operation_origin(ORIGIN_API)
+    user = SimpleNamespace(id=uuid4())
+    result = await remember_module.remember(
+        "turn", dataset_id=uuid4(), session_id="s-origin", user=user
+    )
+    await result
+
+    assert observed_origins == ["api"]

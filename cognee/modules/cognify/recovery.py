@@ -22,13 +22,20 @@ logger = get_logger("cognify.recovery")
 # rows stamped "api", MCP sweeps "mcp", and neither reaches for the other's or
 # for a user's own script.
 #
-# ORIGIN_BACKGROUND is deliberately not a default for anyone. "background" says
-# a continuation spawned this work, not which process did: remember()'s session
-# bridge stamps it around the whole of improve(), so an SDK script's bridge
-# carries it just as a server's does. It costs nothing to exclude today, since
-# that bridge runs improve() as memify_pipeline and this sweep only looks at
-# cognify. If a background path ever starts a cognify run, it needs a stamp
-# that names the process rather than the reason.
+# ORIGIN_BACKGROUND is deliberately not a default for anyone. "background"
+# would say a continuation spawned this work, not which process did, and that
+# is not precise enough to sweep safely: two different surfaces' bridges would
+# collide under one shared origin the same way two API replicas collide under
+# "api", except with no way to even ask "how old is this" separate the cases
+# it actually needs it (github.com/topoteretes/cognee/pull/4983#discussion_r4004955302
+# is what this reasoning replaces — its premise, that the session bridge never
+# reaches cognify_pipeline, was wrong: cognify_session calls cognee.cognify()
+# directly). remember()'s session bridge no longer stamps ORIGIN_BACKGROUND
+# for exactly that reason: the bridged run keeps the real origin of whichever
+# surface started the outer remember() call, so that surface's own sweep
+# closes it like any other run it owns. Nothing in this codebase stamps
+# ORIGIN_BACKGROUND on a pipeline_runs row today; it stays defined for a
+# future continuation that truly has no traceable surface of its own.
 _DEFAULT_OWNED_ORIGINS = frozenset({ORIGIN_API})
 
 _RECOVER_UNATTRIBUTED = os.getenv("COGNEE_RECOVER_UNATTRIBUTED_RUNS", "false").lower() in (
