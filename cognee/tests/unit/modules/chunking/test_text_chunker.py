@@ -3,13 +3,13 @@
 import importlib
 from types import SimpleNamespace
 from unittest.mock import patch
-
-import pytest
 from uuid import uuid4
 
+import pytest
+
 from cognee.infrastructure.llm.tokenizer.TikToken.adapter import TikTokenTokenizer
-from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.chunking.text_chunker_with_overlap import TextChunkerWithOverlap
+from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types import Document
 
 # importlib rather than `import ... as`: tasks/chunks/__init__.py re-exports

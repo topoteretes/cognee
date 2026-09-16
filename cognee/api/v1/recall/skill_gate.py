@@ -15,7 +15,6 @@ import os
 import re
 from dataclasses import dataclass, field
 
-from cognee.api.v1.recall.query_router import _is_negated
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("skill_gate")
@@ -46,6 +45,18 @@ _GATE_RULES: list[tuple[re.Pattern, float]] = [
 
 _GATE_THRESHOLD = 3.0
 
+# Suppress a match if a negation word appears within this many characters
+# before the match start.
+_NEGATION = re.compile(r"\b(not|n't|no|never|without|lack)\b", re.IGNORECASE)
+_NEGATION_WINDOW = 20
+
+
+def _is_negated(query: str, match: re.Match) -> bool:
+    """True if a negation word sits just before this regex match."""
+    start = max(0, match.start() - _NEGATION_WINDOW)
+    prefix = query[start : match.start()]
+    return bool(_NEGATION.search(prefix))
+
 
 @dataclass
 class GateResult:
@@ -64,9 +75,8 @@ def skill_gate_enabled() -> bool:
 def should_search_skills(query: str) -> GateResult:
     """Decide whether ``query`` warrants a skill lookup. Pure function, no I/O.
 
-    Every rule whose pattern matches (and is not negated, same suppression as
-    the recall query router) adds its weight; the gate fires when the total
-    reaches the threshold.
+    Every rule whose pattern matches (and is not negated) adds its weight;
+    the gate fires when the total reaches the threshold.
     """
     q = (query or "").strip()
     if not q:

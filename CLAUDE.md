@@ -45,12 +45,12 @@ pre-commit install
 - **huggingface** - HuggingFace transformers
 - **aws** - S3 storage backend
 - **redis** - Redis caching
-- **graphiti** - Graphiti-core integration
 - **baml** - BAML structured output
 - **dlt** - Data load tool (dlt) integration
 - **docling** - Docling document processing, slim profile without torch (office/HTML/email/markdown/LaTeX formats)
 - **docling-full** - Full docling install with torch-based ML models (adds PDF/image conversion through docling; conflicts with **codegraph** due to tree-sitter pins)
 - **codegraph** - Code graph extraction
+- **gliner** - LLM-free graph extraction + summaries via GLiNER2 (`cognee.tasks.graph.gliner.get_gliner_tasks`)
 - **evals** - Evaluation tools
 - **deepeval** - DeepEval testing framework
 - **posthog** - PostHog analytics
@@ -360,7 +360,7 @@ GRAPH_DATABASE_PASSWORD=your_password
 
 # Postgres (requires postgres extra: pip install cognee[postgres])
 # DEMO, not production-ready — see the warning below.
-# Does not support raw Cypher queries, natural language search, or Graphiti.
+# Does not support raw Cypher queries or natural language search.
 # The legacy value `postgres` still resolves to this same adapter.
 GRAPH_DATABASE_PROVIDER=postgres_demo
 GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
@@ -422,9 +422,9 @@ receives. Pass `context_format="prompt"` to get the full envelope instead:
 result = await cognee.recall(
     "why did the migration stall?",
     query_type=SearchType.GRAPH_COMPLETION,  # pin the graph lane — with a bare
-    session_id="s1",                         # session_id a session hit would
-    only_context=True,                       # short-circuit it (see recall vs search)
-    context_format="prompt",                 # default: "context"
+    session_id="s1",  # session_id a session hit would
+    only_context=True,  # short-circuit it (see recall vs search)
+    context_format="prompt",  # default: "context"
 )
 ```
 
@@ -464,7 +464,7 @@ Four flags trade memory features for speed. Know what each turns off before flip
 | `PERSONALIZATION_ENABLED=false` | Per-user preference personalization: one `UserPreference` node per user+dataset with weighted `prefers` edges, retrieval ranking multiplied by those weights, stated-preference text injected into LLM prompts, the per-turn 1-5 rating question, and the `improve()` stage that folds ratings into weights | Off by default, so nothing is lost until you opt in. When on, ranking strength comes from `PERSONALIZATION_INFLUENCE` (default 0.3, valid range [0, 1] — out-of-range values are rejected at startup); personalization also needs a user and a single resolved dataset in context, so multi-dataset searches never personalize |
 | `CACHING=true` | The entire session-memory layer: `remember(session_id=...)` raises, `recall()` loses session history and the session-cache short-circuit, `agent_memory` session options error, and `AUTO_FEEDBACK` becomes moot | You lose the fast session write path and self-improving memory — only the slower add+cognify path remains. Do not benchmark cognee with this off; that measures cognee with its memory layer removed |
 | `AUTO_FEEDBACK=true` | The automatic per-turn analysis: one structured-output LLM call after each answered query that detects implicit feedback, guides later retrievals, and feeds `improve()`'s agent-context lessons | Memory stops self-tuning from conversation signals. Session store/recall itself keeps working — this is the flag to disable for low-latency reads, since the per-turn LLM call dominates default read latency |
-| `DATASET_QUEUE_ENABLED=true` | The per-process cap on concurrent datasets (`DATASET_QUEUE_MAX_CONCURRENT`, default 6), subprocess-engine teardown on scope exit, and pinning of in-use engines against cache eviction | Saves minor per-operation overhead, but embedded engines become unbounded: file-lock leaks and mid-use engine eviction under parallel multi-dataset load. Safe only for single-dataset scripts |
+| `DATASET_QUEUE_ENABLED=true` | The per-process cap on concurrent datasets (`DATASET_QUEUE_MAX_CONCURRENT`, default 6), subprocess-engine teardown on scope exit, and pinning of in-use engines against cache eviction. Only engages when `ENABLE_BACKEND_ACCESS_CONTROL` is on (its default) — with access control off the flag is a no-op either way | Saves minor per-operation overhead, but embedded engines become unbounded: file-lock leaks and mid-use engine eviction under parallel multi-dataset load. Safe only for single-dataset scripts |
 
 `AUTO_FEEDBACK` is only consulted when `CACHING=true`. If reads feel slow on defaults, set `AUTO_FEEDBACK=false` and keep `CACHING=true` — that keeps session memory while removing the per-turn LLM call.
 
@@ -714,10 +714,12 @@ For production deployments, review and tighten these settings.
 ```python
 from cognee.modules.pipelines.tasks.Task import Task
 
+
 async def my_custom_task(data):
     # Your logic here
     processed_data = process(data)
     return processed_data
+
 
 # Use in pipeline
 task = Task(my_custom_task)
@@ -738,9 +740,7 @@ from cognee.infrastructure.llm.get_llm_client import get_llm_client
 
 llm_client = get_llm_client()
 response = await llm_client.acreate_structured_output(
-    text_input="Your prompt",
-    system_prompt="System instructions",
-    response_model=YourPydanticModel
+    text_input="Your prompt", system_prompt="System instructions", response_model=YourPydanticModel
 )
 ```
 
@@ -760,6 +760,16 @@ await cognee.recall("my question", datasets=["my_project"])
 ### DataPoints
 Atomic knowledge units that form the foundation of graph structures. All graph nodes extend the `DataPoint` base class with versioning and metadata support.
 
+### Custom Graph Models with Typed Edges
+Pass a DataPoint-derived Pydantic model as `graph_model` to `remember()`/`cognify()` and the LLM fills it instead of the generic `KnowledgeGraph`. A field holding a DataPoint (or a list of them) becomes an edge named after the field. Two declarations go further:
+
+- **Typed edge fields** — `list[Edge[Source, Target]]`: the LLM answers flat rows (source/target as identity strings) that cognee resolves against the extracted nodes. The third generic controls naming: omitted = the field name; `Literal["a", "b"]` = the LLM picks one; `str` = free-form (normalized). Declare the edge on the root graph model for relationships with no obvious owner, or on the owning node — endpoints of the owner's own type must then be spelled as strings (`Edge["Person", "Person"]`), which resolve against the owning model and its module. A hand-built `Edge` value that omits `source` falls back to the node declaring it; on a parametrized field the declaring node must match the declared `Source`, or the walk raises.
+- **Identity references** — `Annotated[Role, FromIdentity()]`: the LLM answers the identity string of an existing node instead of a nested object. Supported spellings: `Target`, `Target | None`, `list[Target]`, `list[Target] | None` (Annotated anywhere); anything else raises `InvalidReferenceTypeError` at model-build time.
+
+Constraints: every edge endpoint and `FromIdentity` target needs exactly one entry in `metadata["identity_fields"]`; endpoints resolve by **exact type**, so a subclass instance does not resolve where its base is declared; a row that cannot be resolved is dropped with a warning — it never fails the chunk.
+
+Key files: `cognee/shared/llm_graph_model.py` (the LLM boundary, both directions), `cognee/infrastructure/engine/models/Edge.py`. Example: `examples/guides/custom_graph_model.py`.
+
 ### Contradiction Detection
 Opt-in LLM check that runs as the last `cognify()` task (default **off**). After the graph is stored, it gathers the facts one hop from the entities this ingestion touched — new and pre-existing alike — asks an LLM which pairs cannot both be true, and records each confident conflict as a `contradicts` edge carrying both fact texts, the reason, and the confidence. It only adds edges (never rewrites or deletes) and swallows its own errors, so it can never break ingestion.
 
@@ -767,6 +777,15 @@ Opt-in LLM check that runs as the last `cognify()` task (default **off**). After
 - **Tuning** (env): `CONTRADICTION_CONFIDENCE_THRESHOLD` (default 0.5, minimum confidence to flag), `CONTRADICTION_MAX_FACTS` (default 500, cap on facts per LLM call).
 - **Applies to `remember()` too** — and to session memory bridged back by `improve()` — since those build their graphs through `cognify()`. The exception is `remember(content_type="code")`, which runs the separate code-graph pipeline.
 - **Scope / limitations**: only the 1-hop neighbourhood of the touched entities is compared; structural edges (`contains`, `is_part_of`, `made_from`, `exists_in`, `contradicts`) and edges with an unnamed endpoint are skipped; the temporal cognify path is not covered.
+
+### LLM-free Graph Extraction (GLiNER)
+Opt-in replacement for the default `cognify()` task list (default **llm**, unchanged). `GRAPH_EXTRACTOR=gliner` or `cognify(extractor="gliner")` / `remember(extractor="gliner")` (explicit argument wins over the env setting) selects the dedicated GLiNER2 pipeline in `cognee/tasks/graph/gliner/`: one batched local-model pass per chunk batch builds the `KnowledgeGraph` **and** a deterministic two-line `TextSummary` (kept edges as `head rel tail`, then `type: names`). No `extract_content_graph` / `extract_summary` calls; embeddings in `add_data_points` still run.
+
+- **Install**: `pip install "cognee[gliner]"` (pulls torch; `fastino/gliner2.5-base-v1`, ~800 MB, downloads on first use). Missing package → `GlinerNotInstalledError` with the install hint.
+- **Schema** (closed, resolved per document before chunk extraction): caller `entity_types`/`relation_types` → else OWL classes / object properties of `ONTOLOGY_FILE_PATH` (snake_case of `rdfs:label` or local name, `rdfs:comment` as description) → else the frozen `LABEL_BANK`/`RELATION_BANK`, filtered by one GLiNER pass over a bounded document sketch. Capped at 20 per kind. Explicit labels are only reachable through `get_gliner_tasks(...)` + `run_custom_pipeline(pipeline_name="cognify_pipeline")`.
+- **LLM-free mode side effects**: a pipeline with no LLM task (the gliner extractor with contradiction detection off) skips the first-run LLM connection probe but still probes embeddings, per capability — an LLM-free run never marks the LLM check done for later LLM runs. Separately, `recall()` with no `query_type` defaults to `CHUNKS` when no usable LLM key is configured (keyed on LLM availability, not on the extractor; explicit `query_type` is always honoured). `COGNEE_SKIP_CONNECTION_TEST` stays `false` by default.
+- **Constraints**: generic `KnowledgeGraph` only (custom `graph_model` raises), `custom_prompt` ignored, no CLI/HTTP flag (set the env var); `extractor="gliner"` raises with `temporal_cognify=True`, with `dry_run=True`, and while connected to a remote instance. Long chunks are scanned with overlapping 384-word windows (`batch_extract_long`); schema discovery instead uses one plain pass over a sketch capped at 12,000 characters and 3,000 whitespace tokens. Relation endpoints are matched to entity spans by exact normalized name, then unambiguous containment; unresolved pairs are dropped and counted (`GlinerRunStats`).
+- **Demo**: `examples/guides/gliner_llm_free_cognify.py`. Unit tests: `cognee/tests/unit/tasks/graph/test_gliner_tasks.py`.
 
 ### Skills (Procedural Memory)
 Dataset-scoped `SKILL.md` playbooks agents can discover, load on demand, execute, and improve from run history.
@@ -862,5 +881,5 @@ shutdown = visualization_server(port=8080)  # synchronous; returns a shutdown ca
 - [Documentation](https://docs.cognee.ai/)
 - [Discord Community](https://discord.gg/NQPKmU5CCg)
 - [GitHub Issues](https://github.com/topoteretes/cognee/issues)
-- [Example Notebooks](examples/python/)
+- [Example Notebooks](examples/)
 - [Research Paper](https://arxiv.org/abs/2505.24478) - Optimizing knowledge graphs for LLM reasoning

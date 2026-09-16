@@ -6,7 +6,11 @@ an adapter silently dropping ``document_id`` / ``document_name`` / ``chunk_index
 from its payload — which would make chunk Evidence render empty on that backend.
 """
 
+import logging
+
 import pytest
+
+logger = logging.getLogger(__name__)
 
 REFERENCE_FIELDS = ("document_id", "document_name", "chunk_index", "source_chunk_id")
 
@@ -30,7 +34,7 @@ def _index_schema_classes():
 
         classes.append(("pgvector", PGVectorIndexSchema))
     except Exception:  # pragma: no cover - depends on optional extras
-        pass
+        logger.debug("Ignoring exception in _index_schema_classes", exc_info=True)
 
     try:
         from cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter import (
@@ -39,7 +43,7 @@ def _index_schema_classes():
 
         classes.append(("neptune", NeptuneIndexSchema))
     except Exception:  # pragma: no cover - depends on optional extras
-        pass
+        logger.debug("Ignoring exception in _index_schema_classes", exc_info=True)
 
     return classes
 

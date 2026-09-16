@@ -37,12 +37,14 @@ import cognee
 from cognee import config
 from cognee_community_vector_adapter_qdrant import register  # noqa: F401
 
-config.set_vector_db_config({
-    "vector_db_provider": "qdrant",
-    "vector_db_url": "http://localhost:6333",
-    "vector_db_key": "...",
-    "vector_dataset_database_handler": "qdrant",  # only if the adapter ships one
-})
+config.set_vector_db_config(
+    {
+        "vector_db_provider": "qdrant",
+        "vector_db_url": "http://localhost:6333",
+        "vector_db_key": "...",
+        "vector_dataset_database_handler": "qdrant",  # only if the adapter ships one
+    }
+)
 ```
 
 The `register.py` calls `use_vector_adapter(name, AdapterClass)` /

@@ -11,6 +11,7 @@ from cognee.context_global_variables import (
     set_database_global_context_variables,
     vector_db_config,
 )
+from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.files.storage.config import file_storage_config
 from cognee.infrastructure.llm.config import LLMConfig
@@ -389,3 +390,122 @@ async def test_uuid_string_dataset_is_rejected(monkeypatch):
     with pytest.raises(CogneeValidationError, match="must be a dataset id"):
         async with set_database_global_context_variables(str(uuid4()), uuid4()):
             pass
+
+
+class _RecordingDatasetQueue:
+    """Dataset queue that records slot traffic, so a leak is visible to a test."""
+
+    acquired: list = []
+    released: list = []
+
+    @classmethod
+    def reset(cls):
+        cls.acquired = []
+        cls.released = []
+
+    async def ensure_slot(self, dataset):
+        type(self).acquired.append(dataset)
+
+    async def release_slot_for(self, dataset):
+        type(self).released.append(dataset)
+
+
+def _arrange_access_control(monkeypatch):
+    """Multi-tenant path with a recording queue; that is the path taking slots."""
+    _RecordingDatasetQueue.reset()
+    monkeypatch.setattr(
+        "cognee.context_global_variables.backend_access_control_enabled", lambda: True
+    )
+    monkeypatch.setattr(
+        "cognee.infrastructure.databases.dataset_queue.dataset_queue", _RecordingDatasetQueue
+    )
+
+
+@pytest.mark.asyncio
+async def test_failed_enter_releases_the_queue_slot(monkeypatch):
+    """A raise after ensure_slot must not leave the slot held.
+
+    __aexit__ never runs when __aenter__ raises, so without this the slot is
+    held until the task ends -- for the API lifespan task, until the process
+    does, and enough of those wedge the queue.
+    """
+    _arrange_access_control(monkeypatch)
+
+    async def boom(_dataset_id):
+        raise RuntimeError("dataset owner was deleted")
+
+    monkeypatch.setattr("cognee.context_global_variables._get_dataset_owner_id", boom)
+    dataset_id = uuid4()
+
+    with pytest.raises(RuntimeError, match="dataset owner was deleted"):
+        async with set_database_global_context_variables(dataset_id, uuid4()):
+            pass
+
+    assert _RecordingDatasetQueue.acquired == [dataset_id]
+    assert _RecordingDatasetQueue.released == [dataset_id], "queue slot leaked on failed enter"
+
+
+@pytest.mark.asyncio
+async def test_failure_before_slot_acquisition_releases_nothing(monkeypatch):
+    """Only an acquired slot is released.
+
+    A cleanup that ran regardless would decrement the counter for a slot this
+    apply never took -- dropping the permit an outer, still-live scope holds
+    for the same dataset.
+    """
+    _arrange_access_control(monkeypatch)
+
+    # dataset=None under access control raises before ensure_slot is reached.
+    with pytest.raises(CogneeValidationError):
+        async with set_database_global_context_variables(None, uuid4()):
+            pass
+
+    assert _RecordingDatasetQueue.acquired == []
+    assert _RecordingDatasetQueue.released == [], "released a slot that was never acquired"
+
+
+@pytest.mark.asyncio
+async def test_successful_enter_keeps_the_slot_until_exit(monkeypatch):
+    """The release must not fire on the happy path, only on exit."""
+    _arrange_access_control(monkeypatch)
+    dataset_id = uuid4()
+    user_id = uuid4()
+
+    async def fake_get_user(_user_id):
+        return SimpleNamespace(id=user_id, tenant_id=None)
+
+    async def fake_owner(_dataset_id):
+        return user_id
+
+    async def fake_get_or_create(_dataset, _user):
+        return SimpleNamespace(
+            vector_database_provider="lancedb",
+            vector_database_url="",
+            vector_database_key="",
+            vector_database_name="test_vector_db",
+            vector_database_connection_info={},
+            graph_database_provider="ladybug",
+            graph_database_url="",
+            graph_database_key="",
+            graph_database_name="test_graph_db",
+            graph_database_connection_info={},
+            graph_dataset_database_handler="ladybug",
+        )
+
+    async def fake_resolve(dataset_database):
+        return dataset_database
+
+    monkeypatch.setattr("cognee.context_global_variables.get_user", fake_get_user)
+    monkeypatch.setattr("cognee.context_global_variables._get_dataset_owner_id", fake_owner)
+    monkeypatch.setattr(
+        "cognee.context_global_variables.get_or_create_dataset_database", fake_get_or_create
+    )
+    monkeypatch.setattr(
+        "cognee.context_global_variables.resolve_dataset_database_connection_info", fake_resolve
+    )
+
+    async with set_database_global_context_variables(dataset_id, user_id):
+        assert _RecordingDatasetQueue.released == [], "slot released while the block was running"
+
+    assert _RecordingDatasetQueue.acquired == [dataset_id]
+    assert _RecordingDatasetQueue.released == [dataset_id]

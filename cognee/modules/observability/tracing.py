@@ -8,19 +8,20 @@ import os
 import re
 import threading
 from collections import defaultdict
-from typing import Optional, Sequence
+from collections.abc import Sequence
+from typing import Optional
 
 try:
     from opentelemetry import trace
-    from opentelemetry.sdk.trace import TracerProvider, ReadableSpan
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
     from opentelemetry.sdk.trace.export import (
-        SpanExporter,
-        SpanExportResult,
-        SimpleSpanProcessor,
         BatchSpanProcessor,
         ConsoleSpanExporter,
+        SimpleSpanProcessor,
+        SpanExporter,
+        SpanExportResult,
     )
-    from opentelemetry.sdk.resources import Resource
     from opentelemetry.trace import StatusCode
 
     _OTEL_AVAILABLE = True
@@ -161,7 +162,7 @@ class CogneeSpanExporter(_ExporterBase):
 
     # -- Public helpers for reading collected traces --
 
-    def get_last_trace_spans(self) -> Optional[list[dict]]:
+    def get_last_trace_spans(self) -> list[dict] | None:
         with self._lock:
             if not self._trace_order:
                 return None
@@ -261,7 +262,7 @@ def _is_auto_instrumented() -> bool:
     return current is not None and type(current).__name__ != "ProxyTracerProvider"
 
 
-def _parse_otlp_headers(raw: Optional[str]) -> Optional[dict]:
+def _parse_otlp_headers(raw: str | None) -> dict | None:
     """Parse an ``OTEL_EXPORTER_OTLP_HEADERS``-style ``key=value,key2=value2``
     string into a dict. Splitting on the first ``=`` preserves base64 padding in
     values (e.g. ``Authorization=Basic abc==``). Returns None when empty."""

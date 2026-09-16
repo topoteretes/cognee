@@ -9,7 +9,6 @@ correct.
 """
 
 import json
-from typing import List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -60,7 +59,7 @@ class StagedContent(BaseModel):
     data_size: int
 
 
-def merged_external_metadata(data: Data, node_set: Optional[List[str]]) -> dict:
+def merged_external_metadata(data: Data, node_set: list[str] | None) -> dict:
     """The row's external metadata with an explicitly supplied node_set applied.
 
     Mirrors ``ingest_data``'s ``ext_metadata["node_set"] = node_set`` so an
@@ -78,7 +77,7 @@ async def publish_updated_data(
     dataset_id: UUID,
     staged: StagedContent,
     token_count: int,
-    node_set: Optional[List[str]],
+    node_set: list[str] | None,
 ) -> None:
     """The one-transaction publish: content, metadata, and status flip together.
 
@@ -144,5 +143,8 @@ async def is_data_processed(data_id: UUID, dataset_id: UUID) -> bool:
         ).scalar_one_or_none()
         if data_point is None:
             return False
-        status = (data_point.pipeline_status or {}).get(COGNIFY_PIPELINE_NAME, {})
-        return status.get(str(dataset_id)) == _completed_status()
+        # Same deferred import as _completed_status, same cycle reason.
+        from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed
+
+        status = (data_point.pipeline_status or {}).get(COGNIFY_PIPELINE_NAME) or {}
+        return is_data_item_completed(status.get(str(dataset_id)))

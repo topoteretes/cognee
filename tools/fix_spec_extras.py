@@ -39,9 +39,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -172,11 +175,12 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    from sync_release_docs import EXTRAS_PATH, load_extras  # noqa: E402
+    from sync_release_docs import EXTRAS_PATH, load_extras
 
     try:
         spec = load_app_schema()
     except Exception as exc:
+        logger.debug("Exiting with status 2 after error in main", exc_info=True)
         print(f"Failed to import cognee API app: {exc}", file=sys.stderr)
         return 2
 

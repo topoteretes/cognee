@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Sequence, Union
+from collections.abc import Sequence
 from uuid import UUID
 
 from cognee.modules.engine.models import Skill
 from cognee.shared.logging_utils import get_logger
-
 
 logger = get_logger("cognee.tools.resolve_skills")
 
@@ -17,10 +16,10 @@ def _skill_in_dataset_scope(skill: Skill, dataset_id: UUID) -> bool:
 
 
 async def resolve_skills(
-    skills: Optional[Sequence[Union[str, Skill]]] = None,
+    skills: Sequence[str | Skill] | None = None,
     *,
-    dataset_id: Optional[UUID] = None,
-) -> List[Skill]:
+    dataset_id: UUID | None = None,
+) -> list[Skill]:
     """Resolve explicit skills inside one dataset.
 
     v1 intentionally rejects unscoped skill lookup and multi-dataset lookup.
@@ -28,7 +27,7 @@ async def resolve_skills(
     if dataset_id is None:
         raise ValueError("Skill lookup requires one explicit dataset.")
 
-    resolved: List[Skill] = []
+    resolved: list[Skill] = []
     seen_ids = set()
 
     for item in skills or []:
@@ -51,7 +50,7 @@ async def resolve_skills(
     return resolved
 
 
-async def find_skill_by_id(skill_id: str, *, dataset_id: UUID) -> Optional[Skill]:
+async def find_skill_by_id(skill_id: str, *, dataset_id: UUID) -> Skill | None:
     raw_nodes = await _load_skill_nodes()
     for raw in raw_nodes:
         skill = _coerce_skill(raw)
@@ -62,7 +61,7 @@ async def find_skill_by_id(skill_id: str, *, dataset_id: UUID) -> Optional[Skill
     return None
 
 
-async def find_skill_by_name(name: str, *, dataset_id: UUID) -> Optional[Skill]:
+async def find_skill_by_name(name: str, *, dataset_id: UUID) -> Skill | None:
     raw_nodes = await _load_skill_nodes(name=name)
     for raw in raw_nodes:
         skill = _coerce_skill(raw)
@@ -73,15 +72,17 @@ async def find_skill_by_name(name: str, *, dataset_id: UUID) -> Optional[Skill]:
     return None
 
 
-async def _load_skill_nodes(name: Optional[str] = None):
+async def _load_skill_nodes(name: str | None = None):
     try:
         from cognee.infrastructure.databases.graph import get_graph_engine
     except Exception:
+        logger.debug("Optional import unavailable, continuing without it", exc_info=True)
         return []
 
     try:
         graph_engine = await get_graph_engine()
     except Exception:
+        logger.debug("Falling back to [] after error in _load_skill_nodes", exc_info=True)
         return []
 
     get_by_type = getattr(graph_engine, "get_nodes_by_type", None)
@@ -89,7 +90,7 @@ async def _load_skill_nodes(name: Optional[str] = None):
         try:
             return await get_by_type(node_type=Skill)
         except Exception as exc:
-            logger.warning("Skill lookup by type failed: %s", exc)
+            logger.warning("Skill lookup by type failed: %s", exc, exc_info=True)
             return []
 
     get_nodeset = getattr(graph_engine, "get_nodeset_subgraph", None)
@@ -99,7 +100,7 @@ async def _load_skill_nodes(name: Optional[str] = None):
             if nodes:
                 return nodes
         except Exception as exc:
-            logger.warning("Skill lookup by nodeset failed: %s", exc)
+            logger.warning("Skill lookup by nodeset failed: %s", exc, exc_info=True)
 
     get_graph_data = getattr(graph_engine, "get_graph_data", None)
     if get_graph_data is None:
@@ -108,11 +109,11 @@ async def _load_skill_nodes(name: Optional[str] = None):
         nodes, _ = await get_graph_data()
         return nodes
     except Exception as exc:
-        logger.warning("Skill lookup by full graph scan failed: %s", exc)
+        logger.warning("Skill lookup by full graph scan failed: %s", exc, exc_info=True)
         return []
 
 
-def _coerce_skill(raw) -> Optional[Skill]:
+def _coerce_skill(raw) -> Skill | None:
     if isinstance(raw, Skill):
         return raw
     node_id = None
@@ -128,4 +129,5 @@ def _coerce_skill(raw) -> Optional[Skill]:
     try:
         return Skill.model_validate(data)
     except Exception:
+        logger.debug("Falling back to None after error in _coerce_skill", exc_info=True)
         return None

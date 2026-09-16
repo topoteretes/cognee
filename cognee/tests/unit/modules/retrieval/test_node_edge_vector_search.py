@@ -1,8 +1,9 @@
-import pytest
 from unittest.mock import AsyncMock
 
-from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
+import pytest
+
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
 
 
 class MockScoredResult:
