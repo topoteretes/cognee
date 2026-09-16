@@ -2920,22 +2920,6 @@ class LadybugAdapter(GraphDBInterface):
                             )
                     formatted_edges.append((source_id, target_id, rel_type, props))
 
-            if formatted_nodes and not formatted_edges:
-                logger.debug("No edges found, creating self-referential edges for nodes")
-                for node_id, _ in formatted_nodes:
-                    formatted_edges.append(
-                        (
-                            node_id,
-                            node_id,
-                            "SELF",
-                            {
-                                "relationship_name": "SELF",
-                                "relationship_type": "SELF",
-                                "vector_distance": 0.0,
-                            },
-                        )
-                    )
-
             retrieval_time = time.time() - start_time
             logger.info(
                 f"Retrieved {len(nodes)} nodes and {len(edges)} edges in {retrieval_time:.2f} seconds"
