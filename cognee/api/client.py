@@ -107,9 +107,9 @@ async def lifespan(app: FastAPI):
     from cognee.modules.users.methods import get_default_user
 
     await get_default_user()
-    from cognee.modules.cognify.recovery import recover_stale_cognify_runs_on_startup
+    from cognee.modules.cognify.recovery import recover_stale_pipeline_runs_on_startup
 
-    await recover_stale_cognify_runs_on_startup()
+    await recover_stale_pipeline_runs_on_startup()
 
     # Fail the boot, not every later request: a bad IMPROVE_* value (an
     # IMPROVE_STAGES_DISABLED typo, an out-of-range alpha) raises here with the

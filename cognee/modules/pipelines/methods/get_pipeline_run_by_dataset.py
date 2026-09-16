@@ -8,20 +8,28 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from ..models import PipelineRun
 
 
-def _latest_run_per_dataset_query(dataset_ids: list[UUID] | None, pipeline_name: str):
+def _latest_run_per_dataset_query(dataset_ids: list[UUID] | None, pipeline_name: str | None):
     """The newest PipelineRun row per dataset, ranked by created_at desc.
 
-    dataset_ids=None means every dataset, not none of them.
+    dataset_ids=None means every dataset, not none of them. pipeline_name=None
+    means every pipeline, one newest row per (dataset, pipeline) pair; rows with
+    no pipeline_name (operation records) are never included.
     """
+    if pipeline_name is None:
+        partition_by = (PipelineRun.dataset_id, PipelineRun.pipeline_name)
+        name_filter = PipelineRun.pipeline_name.isnot(None)
+    else:
+        partition_by = PipelineRun.dataset_id
+        name_filter = PipelineRun.pipeline_name == pipeline_name
     query = select(
         PipelineRun,
         func.row_number()
         .over(
-            partition_by=PipelineRun.dataset_id,
+            partition_by=partition_by,
             order_by=PipelineRun.created_at.desc(),
         )
         .label("rn"),
-    ).filter(PipelineRun.pipeline_name == pipeline_name)
+    ).filter(name_filter)
     if dataset_ids is not None:
         query = query.filter(PipelineRun.dataset_id.in_(dataset_ids))
     ranked_runs = query.subquery()
@@ -58,3 +66,16 @@ async def get_latest_pipeline_runs_by_datasets(
         runs = (await session.execute(query)).scalars().all()
 
     return {run.dataset_id: run for run in runs}
+
+
+async def get_latest_pipeline_runs_for_all_pipelines() -> list[PipelineRun]:
+    """The newest run of every (dataset, pipeline) pair, in one query.
+
+    Startup recovery's view: one row per pair, whichever pipeline it belongs to,
+    so a run left STARTED by any pipeline is found, not only cognify's.
+    """
+    db_engine = get_relational_engine()
+
+    async with db_engine.get_async_session() as session:
+        query = _latest_run_per_dataset_query(None, None)
+        return list((await session.execute(query)).scalars().all())

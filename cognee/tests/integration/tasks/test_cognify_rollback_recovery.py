@@ -20,7 +20,7 @@ from cognee.context_global_variables import (
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm import LLMGateway
-from cognee.modules.cognify.recovery import recover_stale_cognify_runs_on_startup
+from cognee.modules.cognify.recovery import recover_stale_pipeline_runs_on_startup
 from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.data.models import Data
@@ -395,7 +395,7 @@ async def test_cognify_startup_recovery_rolls_back_stale_started_runs(clean_test
         await session.commit()
 
     await assert_graph_nodes_present(recovery_nodes)
-    await recover_stale_cognify_runs_on_startup()
+    await recover_stale_pipeline_runs_on_startup()
     await assert_graph_nodes_not_present(recovery_nodes)
 
     nodes_after, edges_after = await _count_nodes_edges_for_run(dataset.id, stale_run_id)
@@ -418,6 +418,72 @@ async def test_cognify_startup_recovery_rolls_back_stale_started_runs(clean_test
     assert newest.pipeline_run_id == stale_run_id
     assert newest.status == PipelineRunStatus.DATASET_PROCESSING_ERRORED
     assert newest.error_class == "AbandonedPipelineRunError"
+
+
+@pytest.mark.asyncio
+async def test_startup_recovery_closes_stale_runs_of_every_pipeline(clean_test_environment):
+    """A non-cognify run left STARTED is closed as ERRORED too, carrying its own user."""
+    user = await get_default_user()
+    dataset = await create_authorized_dataset("recovery_all_pipelines_dataset", user)
+
+    stale_add_run_id = uuid4()
+    started_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        session.add(
+            PipelineRun(
+                pipeline_run_id=stale_add_run_id,
+                pipeline_name="add_pipeline",
+                pipeline_id=uuid4(),
+                status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+                dataset_id=dataset.id,
+                run_info={"data": ["some-data-id"]},
+                user_id=user.id,
+                created_at=started_at,
+                started_at=started_at,
+            )
+        )
+        await session.commit()
+
+    await recover_stale_pipeline_runs_on_startup()
+
+    async with db_engine.get_async_session() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(PipelineRun)
+                    .filter(PipelineRun.pipeline_run_id == stale_add_run_id)
+                    .order_by(PipelineRun.created_at.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert [row.status for row in rows] == [
+        PipelineRunStatus.DATASET_PROCESSING_ERRORED,
+        PipelineRunStatus.DATASET_PROCESSING_STARTED,
+    ]
+    closed = rows[0]
+    assert closed.error_class == "AbandonedPipelineRunError"
+    assert closed.user_id == user.id
+    assert closed.started_at is not None and closed.started_at.replace(
+        tzinfo=None
+    ) == started_at.replace(tzinfo=None)
+    assert closed.run_info["data"] == ["some-data-id"]
+
+    # Running recovery again leaves the ERRORED run alone.
+    await recover_stale_pipeline_runs_on_startup()
+    async with db_engine.get_async_session() as session:
+        count = len(
+            (
+                await session.execute(
+                    select(PipelineRun).filter(PipelineRun.pipeline_run_id == stale_add_run_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert count == 2
 
 
 @pytest.mark.asyncio
