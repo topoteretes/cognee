@@ -74,8 +74,9 @@ def resolve_extractor(
     The explicit argument wins over ``GRAPH_EXTRACTOR``; the default ``auto``
     picks ``llm`` when a usable LLM key is configured and ``gliner`` otherwise,
     so cognee ingests with local models when no credentials are set at all.
-    ``llm_configured`` overrides the key check (tests); by default it is
-    ``llm_available()`` on the current LLM config.
+    ``llm_configured`` overrides that check (tests); by default it is the
+    inverse of ``keyless_local_defaults_apply()``, which also keeps ``llm``
+    when the preflight is disabled (mocked or deliberately partial config).
 
     This is the ONLY place the extractor setting is read. Callers resolve once,
     up front, and pass the resolved value (or values derived from it) onward —
@@ -84,9 +85,9 @@ def resolve_extractor(
     extractor = (value or config.graph_extractor or AUTO_EXTRACTOR).strip().lower()
     if extractor == AUTO_EXTRACTOR:
         if llm_configured is None:
-            from cognee.modules.preflight import llm_available
+            from cognee.modules.preflight import keyless_local_defaults_apply
 
-            llm_configured = llm_available()
+            llm_configured = not keyless_local_defaults_apply()
         extractor = "llm" if llm_configured else "gliner"
         if extractor == "gliner" and importlib.util.find_spec("gliner2") is None:
             raise KeylessExtractorNotInstalledError()

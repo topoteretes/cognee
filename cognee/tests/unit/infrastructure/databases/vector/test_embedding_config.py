@@ -110,7 +110,27 @@ def _default_embeddings(monkeypatch, **overrides):
     _clear_embedding_env(monkeypatch)
     for var in ("EMBEDDING_API_KEY", "EMBEDDING_ENDPOINT", "EMBEDDING_API_BASE"):
         monkeypatch.delenv(var, raising=False)
+    # CI disables the preflight (COGNEE_SKIP_CONNECTION_TEST), which also
+    # disables the keyless rerouting under test here.
+    for var in ("COGNEE_SKIP_PREFLIGHT", "COGNEE_SKIP_CONNECTION_TEST", "MOCK_EMBEDDING"):
+        monkeypatch.delenv(var, raising=False)
     return EmbeddingConfig(_env_file=None, **overrides)
+
+
+def test_disabled_preflight_keeps_the_configured_embedder_without_llm_key(monkeypatch):
+    """Mocked / deliberately partial config (CI) is honoured, never rerouted."""
+    from cognee.infrastructure.databases.vector.embeddings.config import (
+        resolve_embedding_defaults,
+    )
+
+    config = _default_embeddings(monkeypatch)
+    monkeypatch.setenv("MOCK_EMBEDDING", "true")
+
+    assert resolve_embedding_defaults(config, _llm(api_key=None)) == (
+        "openai",
+        "openai/text-embedding-3-large",
+        3072,
+    )
 
 
 def test_unconfigured_embeddings_without_llm_key_resolve_to_local_fastembed(monkeypatch):

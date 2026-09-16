@@ -985,16 +985,21 @@ def test_resolve_extractor_auto_follows_the_llm_key():
     assert resolve_extractor("gliner", auto, llm_configured=True) == "gliner"
 
 
-def test_resolve_extractor_auto_reads_llm_availability_by_default():
+def test_resolve_extractor_auto_reads_the_keyless_rule_by_default():
     from cognee.modules.cognify import config as cognify_config_module
     from cognee.modules.cognify.config import resolve_extractor
 
     with (
-        patch("cognee.modules.preflight.llm_available", return_value=True) as available,
+        patch("cognee.modules.preflight.keyless_local_defaults_apply", return_value=False) as rule,
         patch.object(cognify_config_module.importlib.util, "find_spec", return_value=object()),
     ):
         assert resolve_extractor(None, _config_with_extractor("auto")) == "llm"
-    available.assert_called_once_with()
+    rule.assert_called_once_with()
+    with (
+        patch("cognee.modules.preflight.keyless_local_defaults_apply", return_value=True),
+        patch.object(cognify_config_module.importlib.util, "find_spec", return_value=object()),
+    ):
+        assert resolve_extractor(None, _config_with_extractor("auto")) == "gliner"
 
 
 def test_resolve_extractor_auto_without_key_needs_gliner2_installed():

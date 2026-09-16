@@ -164,6 +164,20 @@ def _skip_preflight() -> bool:
     return any(os.getenv(var, "").lower() in ("true", "1", "yes") for var in _SKIP_ENV_VARS)
 
 
+def keyless_local_defaults_apply(llm_config=None) -> bool:
+    """True when ingestion should run on local models: no usable LLM key, and
+    the preflight is not disabled.
+
+    The same env vars that disable the preflight (``COGNEE_SKIP_PREFLIGHT``,
+    ``COGNEE_SKIP_CONNECTION_TEST``, ``MOCK_EMBEDDING``) also disable this
+    rerouting: they mean the caller runs with deliberately partial or fake
+    provider config (CI with a mocked LLM, offline runs), and that config must
+    be honoured, not replaced. ``resolve_extractor`` and
+    ``resolve_embedding_defaults`` both key off this one rule.
+    """
+    return not _skip_preflight() and not llm_available(llm_config)
+
+
 def _already_validated(needs_llm: bool) -> bool:
     return True in _validated or (not needs_llm and False in _validated)
 

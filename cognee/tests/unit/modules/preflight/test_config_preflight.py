@@ -185,6 +185,31 @@ class TestLlmAvailable:
         assert llm_available(llm(provider="mcp-sampling", api_key=None)) is expected
 
 
+class TestKeylessLocalDefaultsApply:
+    @pytest.fixture(autouse=True)
+    def preflight_enabled(self, monkeypatch):
+        for var in ("COGNEE_SKIP_PREFLIGHT", "COGNEE_SKIP_CONNECTION_TEST", "MOCK_EMBEDDING"):
+            monkeypatch.delenv(var, raising=False)
+
+    def test_no_key_means_local_models(self):
+        from cognee.modules.preflight import keyless_local_defaults_apply
+
+        assert keyless_local_defaults_apply(llm(api_key=None)) is True
+        assert keyless_local_defaults_apply(llm(api_key="sk-test")) is False
+        assert keyless_local_defaults_apply(llm(provider="bedrock", api_key=None)) is False
+
+    @pytest.mark.parametrize(
+        "var", ["COGNEE_SKIP_PREFLIGHT", "COGNEE_SKIP_CONNECTION_TEST", "MOCK_EMBEDDING"]
+    )
+    def test_disabled_preflight_never_reroutes(self, monkeypatch, var):
+        # The e2e suites run a mocked LLM with no key and MOCK_EMBEDDING=true;
+        # they must keep the LLM task list and the configured embedder.
+        from cognee.modules.preflight import keyless_local_defaults_apply
+
+        monkeypatch.setenv(var, "true")
+        assert keyless_local_defaults_apply(llm(api_key=None)) is False
+
+
 class TestValidateProviderConfig:
     @pytest.fixture(autouse=True)
     def fresh_state(self):

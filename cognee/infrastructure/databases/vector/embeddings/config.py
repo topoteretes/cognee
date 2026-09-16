@@ -207,12 +207,13 @@ def resolve_embedding_defaults(config, llm_config) -> tuple[str | None, str | No
     for it. With no embedding setting configured and no usable LLM key, that
     default cannot run, so embeddings go to the local fastembed model instead — the
     embedding half of keyless ingestion (``resolve_extractor`` is the graph
-    half). Any configured embedding setting, or a usable LLM key, keeps the
-    config exactly as given.
+    half). Any configured embedding setting, a usable LLM key, or a disabled
+    preflight (``keyless_local_defaults_apply``) keeps the config exactly as
+    given.
     """
-    from cognee.modules.preflight import llm_available
+    from cognee.modules.preflight import keyless_local_defaults_apply
 
-    if not embedding_settings_configured(config) and not llm_available(llm_config):
+    if not embedding_settings_configured(config) and keyless_local_defaults_apply(llm_config):
         dimensions = _resolve_embedding_dimensions(
             DEFAULT_LOCAL_EMBEDDING_PROVIDER, DEFAULT_LOCAL_EMBEDDING_MODEL
         )
