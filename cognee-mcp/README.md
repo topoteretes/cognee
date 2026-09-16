@@ -696,4 +696,3 @@ We are committed to making open source an enjoyable and respectful experience fo
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=topoteretes/cognee&type=Date)](https://star-history.com/#topoteretes/cognee&Date)
-
