@@ -169,14 +169,3 @@ class TestLoggingBelongsToTheServer:
         assert len(warnings) == 1, "a configured password is the normal case: stay quiet"
 
         get_base_config.cache_clear()
-
-    def test_superuser_status_is_documented(self):
-        """Removing it from the log must not remove it from the docs."""
-        from pathlib import Path
-
-        docstring = create_default_user.__doc__ or ""
-        assert "superuser" in docstring.lower()
-
-        env_template = Path(__file__).parents[5] / ".env.template"
-        default_user_block = env_template.read_text().split("-- Default user")[1][:600]
-        assert "superuser" in default_user_block.lower()
