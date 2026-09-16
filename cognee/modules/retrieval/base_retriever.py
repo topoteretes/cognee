@@ -9,34 +9,6 @@ if TYPE_CHECKING:
     from cognee.modules.search.models.EvidenceReference import EvidenceReference
 
 
-def is_empty_context(context: Any) -> bool:
-    """True when ``context`` carries nothing an LLM could ground an answer in.
-
-    Retrievers report a miss as ``None``, ``""`` (or whitespace) or ``[]``; a batch
-    context is empty when every entry is. Anything else counts as grounding.
-    """
-    if context is None:
-        return True
-    if isinstance(context, str):
-        return not context.strip()
-    if isinstance(context, (list, tuple)):
-        return all(is_empty_context(entry) for entry in context)
-    return not context
-
-
-def should_skip_completion(retriever: Any, context: Any, query_batch: Any = None) -> bool:
-    """Single definition of the empty-context guard (SDK-270 / gh #3728).
-
-    True when ``retriever`` opted in via ``skip_completion_on_empty_context`` and the
-    retrieval context is empty. Batch completions are never skipped: they owe the
-    caller one completion per query. Duck-typed on purpose so the session-aware door
-    can apply the same rule to any retriever-shaped object.
-    """
-    if query_batch or not getattr(retriever, "skip_completion_on_empty_context", False):
-        return False
-    return is_empty_context(context)
-
-
 class BaseRetriever(ABC):
     """
     Base class for all retrieval operations.
@@ -66,15 +38,6 @@ class BaseRetriever(ABC):
     # legitimately answer without retrieval context (e.g. tool-driven agentic
     # flows) must leave this False.
     skip_completion_on_empty_context = False
-
-    def should_skip_completion(self, context: Any, query_batch: Any = None) -> bool:
-        """Whether ``get_completion_from_context`` must return ``[]`` instead of
-        calling the LLM. One rule for every retriever; see ``should_skip_completion``.
-        """
-        skip = should_skip_completion(self, context, query_batch)
-        if skip:
-            logger.warning("Empty context: skipping LLM completion, returning no results")
-        return skip
 
     @abstractmethod
     async def get_retrieved_objects(self, query: str | None, query_batch: str | None) -> Any:

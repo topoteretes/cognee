@@ -884,10 +884,6 @@ shutdown = visualization_server(port=8080)  # synchronous; returns a shutdown ca
 - Behavior: Returns empty list rather than error (prevents information leakage)
 - Solution: Check dataset permissions and user access rights
 
-**Empty completion from search/recall (empty graph or no matching context)**
-- Behavior: Completion retrievers (`HYBRID_COMPLETION`, `GRAPH_COMPLETION*`, `RAG_COMPLETION`, `TRIPLET_COMPLETION`) never send an empty retrieval context to the LLM, so there is no phantom "no context provided" answer. The completion stays empty and each per-dataset result carries a typed `status`: `ok`, `no_context` (graph populated, retrieval matched nothing) or `graph_empty` (nothing cognified yet; retrieval is skipped too). Set in `get_retriever_output`, surfaced as `status` on `search()` result dicts and `SearchResultPayload.status`. Never an exception: `search()` fans out over datasets, so one empty dataset must not hide its siblings' answers. A graph-only `recall()` whose every dataset skipped returns one `ResponseMarkerEntry(source="system", status=...)`, like the warm-up guard; multi-source recalls contribute nothing from the graph lane instead. `AGENTIC_COMPLETION` opts out (its tools answer without memory context). Guard: `BaseRetriever.should_skip_completion` / `skip_completion_on_empty_context`.
-- Solution: `graph_empty` → run `cognify()`/`remember()`; `no_context` → broaden the query, drop `node_name`/`node_type` filters, or fall back to `CHUNKS`
-
 **Database Connection Issues**
 - Check: Verify database URLs, credentials, and that services are running
 - Docker users: Use `DB_HOST=host.docker.internal` for local databases

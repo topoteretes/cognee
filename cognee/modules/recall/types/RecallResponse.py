@@ -74,19 +74,13 @@ class ResponseMarkerEntry(BaseModel):
 
     ``text`` carries a human-readable message so generic consumers that fall
     back to text rendering display something sensible.
-
-    Statuses: ``memory_warming_up`` / ``build_failed`` from the graph warm-up
-    probe (``datapoint_count`` and ``threshold`` describe the probe), and
-    ``graph_empty`` / ``no_context`` when every searched dataset skipped its LLM
-    completion for lack of retrieval context (SDK-270), where the probe fields
-    are absent.
     """
 
     source: Literal["system"]
     status: str
     text: str
-    datapoint_count: int | None = None
-    threshold: int | None = None
+    datapoint_count: int
+    threshold: int
     # Populated when status == "build_failed": the root cause of the last
     # errored build, so clients can show WHY memory has no answers instead
     # of an unexplained empty result.

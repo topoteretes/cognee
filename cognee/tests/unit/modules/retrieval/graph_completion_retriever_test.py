@@ -575,46 +575,23 @@ async def test_empty_context_skips_llm_across_completion_retrievers(
 
 
 @pytest.mark.asyncio
-async def test_empty_graph_is_a_quiet_miss_not_an_exception():
-    """An empty graph returns [] from the retriever. It must not raise: search()
-    fans out over datasets with a plain gather, so an exception from one empty
-    dataset would hide every sibling's answer. The state is reported once, as
-    SearchStatus.GRAPH_EMPTY, by get_retriever_output (SDK-270 / gh #3728)."""
+async def test_empty_graph_raises_no_data_error():
+    """An empty graph is a loud state error (NoDataError -> 404 over the API),
+    not a quiet miss: symmetric with the RAG retriever's missing-collection
+    behavior (SDK-270 / gh #3728)."""
+    from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+
     mock_graph_engine = AsyncMock()
     mock_graph_engine.is_empty = AsyncMock(return_value=True)
 
     retriever = GraphCompletionRetriever()
 
-    with patch(
-        "cognee.modules.retrieval.graph_completion_retriever.get_unified_engine",
-        new_callable=AsyncMock,
-        return_value=_make_unified_mock(mock_graph_engine),
+    with (
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+            return_value=_make_unified_mock(mock_graph_engine),
+        ),
+        pytest.raises(NoDataError, match="knowledge graph is empty"),
     ):
-        objects = await retriever.get_retrieved_objects(query="test query")
-
-    assert objects == []
-
-
-def test_should_skip_completion_is_one_rule_for_every_retriever():
-    """The guard lives in one place (BaseRetriever.should_skip_completion) so the
-    retrievers' conditions cannot drift apart."""
-    from cognee.modules.retrieval.base_retriever import is_empty_context
-
-    retriever = GraphCompletionRetriever()
-
-    assert is_empty_context(None)
-    assert is_empty_context("")
-    assert is_empty_context("   \n")
-    assert is_empty_context([])
-    assert is_empty_context(["", None])
-    assert not is_empty_context("node1 -- rel -- node2")
-    assert not is_empty_context(["", "some context"])
-
-    assert retriever.should_skip_completion("")
-    assert retriever.should_skip_completion(None)
-    assert not retriever.should_skip_completion("context")
-    # Batch completions owe one answer per query and are never skipped.
-    assert not retriever.should_skip_completion(["", ""], query_batch=["q1", "q2"])
-
-    retriever.skip_completion_on_empty_context = False
-    assert not retriever.should_skip_completion("")
+        await retriever.get_retrieved_objects(query="test query")

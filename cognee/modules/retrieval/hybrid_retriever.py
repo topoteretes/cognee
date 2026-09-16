@@ -238,9 +238,13 @@ class HybridRetriever(BaseRetriever):
         effective_query: str | None = None,
         turn_preparation=None,
     ) -> list[Any]:
-        if self.should_skip_completion(context, query_batch):
-            # A global-context prelude counts as real grounding, so this only
-            # fires when every section came back empty.
+        if self.skip_completion_on_empty_context and not query_batch and not context:
+            # Empty context must not reach the LLM: search is not an LLM
+            # gateway, and the only possible output is a phantom "no context
+            # provided" deflection (SDK-270 / gh #3728). A global-context
+            # prelude counts as real grounding, so this only fires when every
+            # section came back empty.
+            logger.warning("Empty context: skipping LLM completion, returning no results")
             return []
 
         prompts = {
