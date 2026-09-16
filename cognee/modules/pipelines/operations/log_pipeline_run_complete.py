@@ -5,9 +5,13 @@ from uuid import UUID
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.operations import get_operation_origin
 from cognee.modules.operations.usage_accumulator import get_parent_run_id
+from cognee.modules.pipelines.methods import get_terminal_pipeline_run
 from cognee.modules.pipelines.models import OperationOutcome, PipelineRun, PipelineRunStatus
 from cognee.modules.pipelines.utils import summarize_run_info_data
 from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("pipelines.log_pipeline_run_complete")
 
 
 async def log_pipeline_run_complete(
@@ -23,6 +27,21 @@ async def log_pipeline_run_complete(
     tokens_out: int | None = None,
 ):
     data_info = summarize_run_info_data(data)
+
+    existing_terminal_run = await get_terminal_pipeline_run(pipeline_run_id)
+    if existing_terminal_run is not None:
+        # A terminal row for this run already exists — most often startup
+        # recovery rolled the run back and closed it as ERRORED while the
+        # process that started it was still running and has now reached its
+        # own completion path. Writing COMPLETED on top would claim success
+        # over a graph the rollback already deleted; keep the row that is
+        # already there.
+        logger.warning(
+            "Skipping duplicate terminal write for pipeline run %s: already %s.",
+            pipeline_run_id,
+            existing_terminal_run.status,
+        )
+        return existing_terminal_run
 
     pipeline_run = PipelineRun(
         pipeline_run_id=pipeline_run_id,

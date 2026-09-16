@@ -132,12 +132,13 @@ async def test_recover_stale_cognify_runs_skips_missing_dataset(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_recent_run_is_recovered_too(monkeypatch):
-    """Age is not the signal. A pipeline executes inside the API process, so a
-    STARTED row found while that process is starting belonged to a process that
-    is gone, however recently it began. The old threshold skipped these, which
-    left a run that died moments before a restart reported as processing until
-    some later boot."""
+async def test_a_recent_run_is_left_alone(monkeypatch):
+    """Origin alone cannot tell a dead process's row from a live sibling's: a
+    rolling deploy boots a new instance of the same surface while the old one
+    is still finishing, and both stamp the same origin. A run that only just
+    started is far more likely to be that live sibling than a genuinely dead
+    process, so the age floor holds it back until enough time has passed that
+    "still running" stops being the likely explanation."""
     dataset_id = uuid4()
     owner_id = uuid4()
     recent_run = SimpleNamespace(
@@ -167,6 +168,54 @@ async def test_a_recent_run_is_recovered_too(monkeypatch):
 
     async def _fake_latest_runs(_dataset_ids, _pipeline_name):
         return {dataset_id: recent_run}
+
+    monkeypatch.setattr(recovery_module, "get_relational_engine", lambda: engine)
+    monkeypatch.setattr(recovery_module, "get_latest_pipeline_runs_by_datasets", _fake_latest_runs)
+    monkeypatch.setattr(recovery_module, "set_database_global_context_variables", _no_op_context)
+
+    monkeypatch.setattr(recovery_module, "cognify_rollback_handler", _rollback_handler)
+    monkeypatch.setattr(recovery_module, "log_pipeline_run_error", _log_error)
+
+    await recovery_module.recover_stale_cognify_runs_on_startup()
+
+    assert rollback_calls == []
+    assert close_calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_run_past_the_age_floor_is_recovered(monkeypatch):
+    """The other half of the same coin: once a STARTED row is old enough that
+    a boot overlap no longer explains it, origin match is sufficient and the
+    run is closed exactly as it always was."""
+    dataset_id = uuid4()
+    owner_id = uuid4()
+    old_run = SimpleNamespace(
+        pipeline_name="cognify_pipeline",
+        dataset_id=dataset_id,
+        pipeline_run_id=uuid4(),
+        pipeline_id=uuid4(),
+        status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        origin="api",
+        user_id=None,
+        created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        started_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        run_info={},
+    )
+    dataset = SimpleNamespace(id=dataset_id, owner_id=owner_id)
+
+    engine = _FakeEngine([_FakeSession(dataset=dataset)])
+
+    rollback_calls = []
+    close_calls = []
+
+    async def _rollback_handler(**kwargs):
+        rollback_calls.append(kwargs)
+
+    async def _log_error(**kwargs):
+        close_calls.append(kwargs)
+
+    async def _fake_latest_runs(_dataset_ids, _pipeline_name):
+        return {dataset_id: old_run}
 
     monkeypatch.setattr(recovery_module, "get_relational_engine", lambda: engine)
     monkeypatch.setattr(recovery_module, "get_latest_pipeline_runs_by_datasets", _fake_latest_runs)
@@ -445,3 +494,63 @@ async def test_a_surface_does_not_close_another_surfaces_runs(monkeypatch):
 
     assert rollback_calls == []
     assert close_calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_run_just_inside_the_age_floor_is_left_alone(monkeypatch):
+    """One second younger than the threshold must not be recovered — the
+    filter is a strict "at least this old", not "roughly this old"."""
+    dataset_id = uuid4()
+    dataset = SimpleNamespace(id=dataset_id, owner_id=uuid4())
+    run = _started_run(dataset_id, origin="api")
+    run.created_at = datetime.now(timezone.utc) - timedelta(
+        seconds=recovery_module._STALE_RUN_MIN_AGE_SECONDS - 1
+    )
+    run.started_at = run.created_at
+
+    rollback_calls, close_calls = _drive(monkeypatch, run, dataset)
+
+    await recovery_module.recover_stale_cognify_runs_on_startup()
+
+    assert rollback_calls == []
+    assert close_calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_run_with_no_timestamp_is_left_alone(monkeypatch):
+    """Neither started_at nor created_at present is not evidence of age
+    either way, so it is skipped rather than treated as old enough."""
+    dataset_id = uuid4()
+    dataset = SimpleNamespace(id=dataset_id, owner_id=uuid4())
+    run = _started_run(dataset_id, origin="api")
+    run.created_at = None
+    run.started_at = None
+
+    rollback_calls, close_calls = _drive(monkeypatch, run, dataset)
+
+    await recovery_module.recover_stale_cognify_runs_on_startup()
+
+    assert rollback_calls == []
+    assert close_calls == []
+
+
+def test_is_older_than_threshold_falls_back_to_created_at():
+    """started_at can be NULL (an INITIATED row that never ticked past it in
+    some path); created_at is the fallback rather than treating that as
+    ageless."""
+    run = SimpleNamespace(
+        started_at=None,
+        created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+    )
+    assert recovery_module._is_older_than_threshold(run) is True
+
+
+def test_is_older_than_threshold_handles_naive_datetimes():
+    """A row written by a backend that stores naive UTC must not raise or be
+    silently misjudged when compared against an aware `now()`."""
+    naive_two_hours_ago = (datetime.now(timezone.utc) - timedelta(hours=2)).replace(tzinfo=None)
+    run = SimpleNamespace(
+        started_at=naive_two_hours_ago,
+        created_at=None,
+    )
+    assert recovery_module._is_older_than_threshold(run) is True

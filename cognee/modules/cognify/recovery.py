@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from cognee.context_global_variables import set_database_global_context_variables
@@ -36,6 +37,33 @@ _RECOVER_UNATTRIBUTED = os.getenv("COGNEE_RECOVER_UNATTRIBUTED_RUNS", "false").l
     "yes",
 )
 
+# Origin alone cannot tell a dead process's row from a live sibling's: a
+# rolling deploy, or the Helm chart's default update strategy, boots a new
+# instance of a surface while the old one is still finishing a run, and both
+# stamp the same origin. Age is the second, independent signal that closes
+# that gap. It runs backwards from how it would for a status label: a status
+# guesses low so a long-running local-LLM job doesn't get mislabeled, but a
+# guess here deletes a graph, so it has to be conservative in the other
+# direction, old enough that a boot overlap (seconds to a few minutes) is
+# never mistaken for an abandoned run. The two conditions are independent:
+# origin says whose row this could be, age says enough time has passed that
+# "still running" is no longer the likely explanation.
+_STALE_RUN_MIN_AGE_SECONDS = int(os.getenv("COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS", "3600"))
+
+
+def _is_older_than_threshold(pipeline_run) -> bool:
+    reference = pipeline_run.started_at or pipeline_run.created_at
+    if reference is None:
+        # No timestamp at all is not evidence of age either way. Skipping
+        # here (rather than treating it as old enough) means a row this
+        # broken is left for an operator to look at instead of silently
+        # rolled back.
+        return False
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=timezone.utc)
+    age_seconds = (datetime.now(timezone.utc) - reference).total_seconds()
+    return age_seconds >= _STALE_RUN_MIN_AGE_SECONDS
+
 
 async def recover_stale_cognify_runs_on_startup(
     owned_origins: frozenset[str] = _DEFAULT_OWNED_ORIGINS,
@@ -43,12 +71,17 @@ async def recover_stale_cognify_runs_on_startup(
     """Close cognify runs whose process did not survive, during API startup.
 
     A pipeline executes inside the API process. So a STARTED row with no
-    terminal row, found while that process is coming back up, belonged to a
-    process that is gone: the restart is the evidence. Nothing about the run's
-    age is consulted, which is the point. A run on a local model can
-    legitimately take days, and an age threshold would either roll that run
-    back or, set high enough not to, leave a genuinely dead run reported as
-    processing until some later boot.
+    terminal row, found while that process is coming back up, usually belonged
+    to a process that is gone: the restart is evidence. It is not proof by
+    itself, which is why a second, independent signal has to agree before this
+    touches anything: the row's origin (whose surface could this be) and its
+    age (has enough time passed that "still running" stopped being the likely
+    explanation). Neither alone is enough. Origin without age rolls back a
+    live sibling's run in a rolling deploy, since both instances stamp the
+    same origin. Age without origin, sized for a run that can legitimately
+    take days on a local model, would either roll back real work or, set high
+    enough not to, leave a genuinely dead run reported as processing for a
+    long time. Together they cover each other's blind spot.
 
     Only runs this surface started are touched, which is what ``owned_origins``
     names. A relational database is shared more often than it looks:
@@ -60,16 +93,26 @@ async def recover_stale_cognify_runs_on_startup(
     own: the API sweeps "api", the MCP server sweeps "mcp", and a user's script
     is never anyone's to close.
 
-    What this does not solve is two instances of the SAME surface sharing a
-    database, a rolling deploy being the obvious case: both stamp "api", so a
-    booting instance still cannot tell its own dead run from its sibling's live
-    one. `origin` names a surface, not a process. Closing that needs a liveness
-    signal on the row, which is SDK-578, not a narrower origin.
-    Rows predating the stamp carry NULL, so they cannot be attributed either
-    way and are skipped. That leaves a deployment upgrading with already-stuck
-    runs still stuck, which is why COGNEE_RECOVER_UNATTRIBUTED_RUNS exists: an
-    operator who knows only one process reaches this database can opt in and
-    have them closed on the next boot. Note what that asks of them: the shipped
+    What origin alone does not solve, and age is here for: two instances of
+    the SAME surface sharing a database, a rolling deploy being the obvious
+    case, or the Helm chart's default rolling update once #5001 lands multiple
+    workers. Both instances stamp "api", so origin cannot tell a booting
+    instance's own dead run from its sibling's live one. A boot overlap is
+    seconds to a few minutes; `COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS`
+    (default one hour) is sized to stay well clear of that window while still
+    catching a run that has actually been dead for a long time. This still
+    is not a real liveness signal (that is SDK-578's job, a heartbeat or a
+    process identity that can be checked rather than guessed), but it turns
+    "certain to eventually roll back a live sibling" into "practically never
+    does", which is the honest bar a restart-triggered sweep can clear without
+    one.
+
+    Rows predating the origin stamp carry NULL, so they cannot be attributed
+    either way and are skipped regardless of age. That leaves a deployment
+    upgrading with already-stuck runs still stuck, which is why
+    COGNEE_RECOVER_UNATTRIBUTED_RUNS exists: an operator who knows only one
+    process reaches this database can opt in and have them closed, still
+    subject to the same age floor. Note what that asks of them: the shipped
     docker-compose `mcp` profile puts the API and the MCP server on one
     database on purpose, and with the flag on both of them sweep the same
     NULL-origin rows. It is an opt-in for a single-process deployment, not for
@@ -99,12 +142,16 @@ async def recover_stale_cognify_runs_on_startup(
         recovery_candidates = [
             run
             for run in latest_per_dataset.values()
-            # Both conditions are load-bearing. Without the status filter an
-            # already-closed run is re-selected and its rollback repeats on
-            # every boot; without the origin filter this deletes the graph of
-            # a run another process is still executing.
+            # All three conditions are load-bearing. Without the status
+            # filter an already-closed run is re-selected and its rollback
+            # repeats on every boot; without the origin filter this deletes
+            # the graph of a run another surface is still executing; without
+            # the age filter it deletes the graph of a run a live sibling of
+            # this same surface is still executing (see the age-floor
+            # paragraph in the docstring above).
             if run.status == PipelineRunStatus.DATASET_PROCESSING_STARTED
             and (run.origin in owned_origins or (run.origin is None and _RECOVER_UNATTRIBUTED))
+            and _is_older_than_threshold(run)
         ]
     except Exception:
         logger.exception("Failed to recover latest cognify run which did not successfully finish.")

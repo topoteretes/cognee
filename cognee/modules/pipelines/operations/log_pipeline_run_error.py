@@ -5,9 +5,13 @@ from uuid import UUID
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.operations import get_operation_origin, scrub_error_message
 from cognee.modules.operations.usage_accumulator import get_parent_run_id
+from cognee.modules.pipelines.methods import get_terminal_pipeline_run
 from cognee.modules.pipelines.models import OperationOutcome, PipelineRun, PipelineRunStatus
 from cognee.modules.pipelines.utils import summarize_run_info_data
 from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("pipelines.log_pipeline_run_error")
 
 
 async def log_pipeline_run_error(
@@ -30,6 +34,21 @@ async def log_pipeline_run_error(
     # preview against the wrong character count.
     if data_info is None:
         data_info = summarize_run_info_data(data)
+
+    existing_terminal_run = await get_terminal_pipeline_run(pipeline_run_id)
+    if existing_terminal_run is not None:
+        # A terminal row for this run already exists — most often startup
+        # recovery closed it as ERRORED while the process that started it was
+        # still running and has now reached its own error path. Writing a
+        # second terminal row would not correct the first one, it would just
+        # leave two contradictory events for the same run; keep the one that
+        # is already there.
+        logger.warning(
+            "Skipping duplicate terminal write for pipeline run %s: already %s.",
+            pipeline_run_id,
+            existing_terminal_run.status,
+        )
+        return existing_terminal_run
 
     pipeline_run = PipelineRun(
         pipeline_run_id=pipeline_run_id,
