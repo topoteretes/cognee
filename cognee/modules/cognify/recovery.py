@@ -1,10 +1,13 @@
 """Close pipeline runs that were left STARTED by a process that is gone.
 
 Runs at API startup only. A booting process has no runs of its own in flight,
-so a STARTED row it finds cannot be one it is executing; when the run died is
-irrelevant, only that nothing closed it.
+so a STARTED row it finds cannot be one it is executing. Rows younger than
+``COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS`` are still left alone, in case a
+sibling process (a rolling deploy) is running them.
 """
 
+import os
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from cognee.context_global_variables import set_database_global_context_variables
@@ -19,12 +22,28 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("cognify.recovery")
 
+STALE_RUN_MIN_AGE_SECONDS = int(os.getenv("COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS", "3600"))
+
 # The rollback each pipeline supplies for its own failed runs (the same policy
 # run_tasks applies when a run errors inline). A pipeline without an entry has
 # nothing to roll back at error time either, so at startup it is only closed.
 ROLLBACK_HANDLERS = {
     "cognify_pipeline": cognify_rollback_handler,
 }
+
+
+def _is_older_than_threshold(created_at) -> bool:
+    """Return True if the run started long enough ago to be considered stale.
+
+    When ``created_at`` is missing (e.g. legacy rows) we cannot prove the run is
+    young, so we conservatively allow recovery to proceed.
+    """
+    if created_at is None:
+        return True
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=STALE_RUN_MIN_AGE_SECONDS)
+    return created_at <= cutoff
 
 
 async def recover_stale_pipeline_runs_on_startup() -> None:
@@ -58,6 +77,16 @@ async def recover_stale_pipeline_runs_on_startup() -> None:
         return
 
     for pipeline_run in recovery_candidates:
+        if not _is_older_than_threshold(getattr(pipeline_run, "created_at", None)):
+            logger.info(
+                "Skipping startup recovery for %s run %s: started less than %ds ago, "
+                "treating it as a live run rather than a stale one.",
+                pipeline_run.pipeline_name,
+                pipeline_run.pipeline_run_id,
+                STALE_RUN_MIN_AGE_SECONDS,
+            )
+            continue
+
         async with db_engine.get_async_session() as session:
             dataset = await session.get(Dataset, pipeline_run.dataset_id)
         if dataset is None:

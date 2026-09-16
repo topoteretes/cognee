@@ -81,6 +81,7 @@ def _wire(monkeypatch, runs, datasets, *, rollback_fails=False):
     monkeypatch.setattr(recovery_module, "set_database_global_context_variables", _no_op_context)
     monkeypatch.setattr(recovery_module, "ROLLBACK_HANDLERS", {"cognify_pipeline": _rollback})
     monkeypatch.setattr(recovery_module, "log_pipeline_run_error", _log_error)
+    monkeypatch.setattr(recovery_module, "STALE_RUN_MIN_AGE_SECONDS", 3600)
     return calls
 
 
@@ -197,14 +198,14 @@ async def test_missing_dataset_is_skipped(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_age_is_irrelevant_at_startup(monkeypatch):
-    """A booting process has no runs of its own, so even a minutes-old STARTED row is dead."""
+async def test_recent_run_is_treated_as_live(monkeypatch):
+    """A STARTED row younger than the floor may belong to a sibling process mid-deploy."""
     run = _run("cognify_pipeline", created_at=datetime.now(timezone.utc) - timedelta(minutes=5))
     calls = _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)})
 
     await recovery_module.recover_stale_pipeline_runs_on_startup()
 
-    assert [name for name, _ in calls] == ["rollback", "error"]
+    assert calls == []
 
 
 @pytest.mark.asyncio
