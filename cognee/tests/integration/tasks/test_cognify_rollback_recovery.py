@@ -402,6 +402,23 @@ async def test_cognify_startup_recovery_rolls_back_stale_started_runs(clean_test
     assert nodes_after == []
     assert edges_after == []
 
+    # The run is closed as ERRORED and marked abandoned, and the dataset's newest
+    # cognify row is no longer STARTED, so a re-run is not refused as "already
+    # being processed".
+    async with db_engine.get_async_session() as session:
+        newest = (
+            await session.execute(
+                select(PipelineRun)
+                .filter(PipelineRun.dataset_id == dataset.id)
+                .filter(PipelineRun.pipeline_name == "cognify_pipeline")
+                .order_by(PipelineRun.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one()
+    assert newest.pipeline_run_id == stale_run_id
+    assert newest.status == PipelineRunStatus.DATASET_PROCESSING_ERRORED
+    assert newest.error_class == "AbandonedPipelineRunError"
+
 
 @pytest.mark.asyncio
 async def test_cognify_rollback_is_idempotent(clean_test_environment):
