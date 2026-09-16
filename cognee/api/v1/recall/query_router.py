@@ -7,9 +7,11 @@ HYBRID_COMPLETION.
 
 Auto-routing may only pick a strategy that is at least as good as the HYBRID
 default on a default-built graph and does not add LLM calls without an
-unambiguous signal. That is why chain-of-thought, context extension, and
-"when/after/since"-style temporal routing are not in the table: they stay
-reachable through an explicit ``query_type``.
+unambiguous signal. HYBRID already searches document chunks, summaries, and the
+entity neighbourhood in one LLM call, so every rule here fires on an input that
+is not a natural-language question and for which HYBRID is the wrong operation
+rather than a worse one. Question-shaped intent (summary, temporal, reasoning,
+context extension) stays reachable only through an explicit ``query_type``.
 """
 
 import re
@@ -20,7 +22,7 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("query_router")
 
-DEFAULT_SEARCH_TYPE = SearchType.HYBRID_COMPLETION
+ROUTER_FALLBACK_TYPE = SearchType.HYBRID_COMPLETION
 
 
 @dataclass(frozen=True)
@@ -31,53 +33,31 @@ class RouteDecision:
     rule: str
 
 
-# Years 1500-2099. Excludes ticket numbers, ports, and counts like "1000 users".
-_YEAR = r"(?:1[5-9]|20)\d{2}"
-
-_TEMPORAL_PATTERNS = "|".join(
-    [
-        rf"\bbetween\s+{_YEAR}\s+and\s+{_YEAR}\b",
-        rf"\bfrom\s+{_YEAR}\s+(?:to|until|through)\s+{_YEAR}\b",
-        rf"\b{_YEAR}\s*(?:-|–|to)\s*{_YEAR}\b",
-        rf"\b(?:in|since|before|after|until|during|by|around|circa)\s+(?:the\s+)?{_YEAR}s?\b",
-        r"\b(?:1[5-9]|20)\d0s\b",
-        r"\b\d{4}-\d{2}-\d{2}\b",
-        r"\b(?:timeline|chronolog\w*)\b",
-    ]
-)
-
-# (rule name, pattern, search type). First match wins.
+# (rule name, pattern, search type). Shape rules (what the input looks
+# like) come first, intent rules (what it says) after. No two rules may match the same query
+# (test_no_query_matches_two_rules), so the order is cosmetic, not a tiebreak.
 _RULES: tuple[tuple[str, re.Pattern, SearchType], ...] = (
-    # Anchored to a leading Cypher clause keyword, case-sensitive. Relationship
-    # syntax such as ``)--(`` is not matched on its own: real Cypher always opens
-    # with a clause, and an unanchored alternative would fire mid-sentence.
+    # Case-sensitive, and the clause keyword must open a node pattern or the body
+    # must carry relationship syntax. A leading clause word on its own is not
+    # enough: "RETURN POLICY FOR DAMAGED GOODS" is a heading, not a query.
     (
         "cypher_syntax",
-        re.compile(r"^(?:OPTIONAL\s+MATCH|MATCH|RETURN|CREATE|MERGE|UNWIND)\s"),
+        re.compile(
+            r"^(?:"
+            # A clause that opens a node pattern: MATCH (n ..., MATCH p=(a ...
+            r"(?:OPTIONAL\s+MATCH|MATCH|CREATE|MERGE)\s+(?:\w+\s*=\s*)?\("
+            # UNWIND over a list literal or a parameter.
+            r"|UNWIND\s+[\[$]"
+            # Any clause plus relationship syntax somewhere in the body.
+            r"|(?:OPTIONAL\s+MATCH|MATCH|RETURN|CREATE|MERGE|UNWIND)\s.*(?:-\[|\]->|\)-|-\()"
+            r")"
+        ),
         SearchType.CYPHER,
     ),
     (
         "quoted_phrase",
         re.compile(r'^"[^"]+"$'),
         SearchType.CHUNKS_LEXICAL,
-    ),
-    (
-        "exact_match_intent",
-        re.compile(r"\b(?:exact|verbatim|literal|word.for.word)\b", re.IGNORECASE),
-        SearchType.CHUNKS_LEXICAL,
-    ),
-    (
-        "summary_intent",
-        re.compile(
-            r"\b(?:summari[sz]e|summary|overview|outline|tl;?dr|gist|main points?|key takeaways?)\b",
-            re.IGNORECASE,
-        ),
-        SearchType.GRAPH_SUMMARY_COMPLETION,
-    ),
-    (
-        "explicit_time_range",
-        re.compile(_TEMPORAL_PATTERNS, re.IGNORECASE),
-        SearchType.TEMPORAL,
     ),
     (
         "coding_rules_intent",
@@ -108,5 +88,5 @@ def route_query(query: str) -> RouteDecision:
             logger.debug("query_router: rule=%s routed=%s", rule, search_type.value)
             return RouteDecision(search_type=search_type, rule=rule)
 
-    logger.debug("query_router: rule=default routed=%s", DEFAULT_SEARCH_TYPE.value)
-    return RouteDecision(search_type=DEFAULT_SEARCH_TYPE, rule="default")
+    logger.debug("query_router: rule=default routed=%s", ROUTER_FALLBACK_TYPE.value)
+    return RouteDecision(search_type=ROUTER_FALLBACK_TYPE, rule="default")

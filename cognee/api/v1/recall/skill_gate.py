@@ -47,7 +47,9 @@ _GATE_THRESHOLD = 3.0
 
 # Suppress a match if a negation word appears within this many characters
 # before the match start.
-_NEGATION = re.compile(r"\b(not|n't|no|never|without|lack)\b", re.IGNORECASE)
+# ``n't`` is a suffix, not a word: there is no boundary between the "o" and
+# the "n" of "don't", so it needs its own alternative outside the group.
+_NEGATION = re.compile(r"\b(?:not|no|never|without|lack)\b|n't\b", re.IGNORECASE)
 _NEGATION_WINDOW = 20
 
 

@@ -2,47 +2,32 @@
 
 import pytest
 
-from cognee.api.v1.recall.query_router import DEFAULT_SEARCH_TYPE, RouteDecision, route_query
+from cognee.api.v1.recall.query_router import (
+    _RULES,
+    ROUTER_FALLBACK_TYPE,
+    RouteDecision,
+    route_query,
+)
 from cognee.modules.search.types import SearchType
 
 # Every type the router is allowed to pick. Anything else must come from an
-# explicit query_type, never from auto-routing.
+# explicit query_type, never from auto-routing. Each entry is non-generative or
+# a different operation from HYBRID, never a narrower completion.
 ROUTABLE_TYPES = {
     SearchType.HYBRID_COMPLETION,
     SearchType.CYPHER,
     SearchType.CHUNKS_LEXICAL,
-    SearchType.GRAPH_SUMMARY_COMPLETION,
-    SearchType.TEMPORAL,
     SearchType.CODING_RULES,
 }
 
 GOLDEN = [
     # cypher_syntax
     ("MATCH (n:Person) RETURN n.name", SearchType.CYPHER),
-    ("RETURN 1", SearchType.CYPHER),
     ("MATCH (a)--(b) RETURN a", SearchType.CYPHER),
     ("OPTIONAL MATCH (n:Person) RETURN n", SearchType.CYPHER),
     ("UNWIND [1, 2, 3] AS x RETURN x", SearchType.CYPHER),
-    # quoted_phrase / exact_match_intent
+    # quoted_phrase
     ('"polonium and radium"', SearchType.CHUNKS_LEXICAL),
-    ("Find the exact phrase in the documents", SearchType.CHUNKS_LEXICAL),
-    ("Find the exact error message from the logs", SearchType.CHUNKS_LEXICAL),
-    ("Quote the paragraph verbatim", SearchType.CHUNKS_LEXICAL),
-    # summary_intent
-    ("Summarize everything about Marie Curie", SearchType.GRAPH_SUMMARY_COMPLETION),
-    ("Give me an overview of the project", SearchType.GRAPH_SUMMARY_COMPLETION),
-    ("tldr of the report", SearchType.GRAPH_SUMMARY_COMPLETION),
-    ("Give me the main points of the meeting", SearchType.GRAPH_SUMMARY_COMPLETION),
-    ("Summarize the timeline of Einstein's work", SearchType.GRAPH_SUMMARY_COMPLETION),
-    ("Summarize why the migration stalled", SearchType.GRAPH_SUMMARY_COMPLETION),
-    # explicit_time_range
-    ("What happened between 1910 and 1920?", SearchType.TEMPORAL),
-    ("Show the timeline of discoveries", SearchType.TEMPORAL),
-    ("What was discovered in 1915?", SearchType.TEMPORAL),
-    ("What did we decide in 2024?", SearchType.TEMPORAL),
-    ("What was the 1990s policy on remote work?", SearchType.TEMPORAL),
-    ("Incidents from 2019 to 2021", SearchType.TEMPORAL),
-    ("What shipped on 2024-03-01?", SearchType.TEMPORAL),
     # coding_rules_intent
     ("What coding rules apply to error handling?", SearchType.CODING_RULES),
     ("Show me the code review guidelines", SearchType.CODING_RULES),
@@ -54,7 +39,34 @@ GOLDEN = [
     ("Tell me something interesting", SearchType.HYBRID_COMPLETION),
     ("What is the return policy?", SearchType.HYBRID_COMPLETION),
     ("How do I reset my password?", SearchType.HYBRID_COMPLETION),
-    # bare temporal prepositions no longer route to TEMPORAL
+    # A bare Cypher expression carries no Cypher-specific punctuation, so it is
+    # indistinguishable from an all-caps heading. Not worth a rule.
+    ("RETURN 1", SearchType.HYBRID_COMPLETION),
+    # "exact"/"verbatim" phrasing is not a lexical-search signal: BM25 tokenizes
+    # the raw query, and the trigger word is a rare, high-IDF term that would
+    # dominate the ranking it was meant to improve.
+    ("Find the exact phrase in the documents", SearchType.HYBRID_COMPLETION),
+    ("Find the exact error message from the logs", SearchType.HYBRID_COMPLETION),
+    ("Quote the paragraph verbatim", SearchType.HYBRID_COMPLETION),
+    # Summary intent stays on HYBRID: it already searches TextSummary_text
+    # alongside chunks and the entity neighbourhood, in one LLM call.
+    ("Summarize everything about Marie Curie", SearchType.HYBRID_COMPLETION),
+    ("Give me an overview of the project", SearchType.HYBRID_COMPLETION),
+    ("tldr of the report", SearchType.HYBRID_COMPLETION),
+    ("Give me the main points of the meeting", SearchType.HYBRID_COMPLETION),
+    ("Summarize the timeline of Einstein's work", SearchType.HYBRID_COMPLETION),
+    ("Summarize why the migration stalled", SearchType.HYBRID_COMPLETION),
+    # Dates and timelines stay on HYBRID: TEMPORAL needs Timestamp nodes that
+    # only temporal_cognify=True creates, so on a default graph it pays an
+    # interval-extraction LLM call and then degrades to triplet search.
+    ("What happened between 1910 and 1920?", SearchType.HYBRID_COMPLETION),
+    ("Show the timeline of discoveries", SearchType.HYBRID_COMPLETION),
+    ("What was discovered in 1915?", SearchType.HYBRID_COMPLETION),
+    ("What did we decide in 2024?", SearchType.HYBRID_COMPLETION),
+    ("What was the 1990s policy on remote work?", SearchType.HYBRID_COMPLETION),
+    ("Incidents from 2019 to 2021", SearchType.HYBRID_COMPLETION),
+    ("What shipped on 2024-03-01?", SearchType.HYBRID_COMPLETION),
+    # bare temporal prepositions likewise stay on the default
     ("When was the company founded?", SearchType.HYBRID_COMPLETION),
     ("What happened after the merger?", SearchType.HYBRID_COMPLETION),
     ("Since when has Alice been on the team?", SearchType.HYBRID_COMPLETION),
@@ -79,38 +91,36 @@ def test_golden_routes(query, expected):
     assert route_query(query).search_type == expected
 
 
-@pytest.mark.parametrize(("query", "_"), GOLDEN, ids=[q for q, _ in GOLDEN])
-def test_router_only_picks_routable_types(query, _):
-    assert route_query(query).search_type in ROUTABLE_TYPES
+def test_rules_only_target_routable_types():
+    """The constraint the router exists to honour, asserted over the table itself.
+
+    Pointing a rule at a narrower or costlier type fails here with no golden row
+    required.
+    """
+    assert {st for _, _, st in _RULES} | {ROUTER_FALLBACK_TYPE} <= ROUTABLE_TYPES
+
+
+def test_no_query_matches_two_rules():
+    """Table order must not decide any routing outcome."""
+    for query, _ in GOLDEN:
+        matched = [name for name, pattern, _ in _RULES if pattern.search(query.strip())]
+        assert len(matched) <= 1, f"{query!r} matches {matched}; table order decides it"
 
 
 class TestRouteDecision:
     def test_default_rule_name(self):
         decision = route_query("Tell me something")
-        assert decision == RouteDecision(search_type=DEFAULT_SEARCH_TYPE, rule="default")
+        assert decision == RouteDecision(search_type=ROUTER_FALLBACK_TYPE, rule="default")
 
     def test_matching_rule_name(self):
         assert route_query("MATCH (n) RETURN n").rule == "cypher_syntax"
-        assert route_query("Summarize the report").rule == "summary_intent"
+        assert route_query("Show me the coding rules").rule == "coding_rules_intent"
 
     def test_whitespace_is_ignored(self):
         assert route_query("   MATCH (n) RETURN n  ").search_type == SearchType.CYPHER
 
 
 class TestNegativeInvariants:
-    @pytest.mark.parametrize(
-        "query",
-        [
-            "When did it happen?",
-            "What happened before the launch?",
-            "Show me tickets since yesterday",
-            "Port 8080 is open on ticket 1234",
-            "We have 1000 users and 2500 sessions",
-        ],
-    )
-    def test_no_temporal_without_date_token(self, query):
-        assert route_query(query).search_type != SearchType.TEMPORAL
-
     @pytest.mark.parametrize(
         "query",
         [
@@ -134,6 +144,17 @@ class TestNegativeInvariants:
     @pytest.mark.parametrize(
         "query",
         [
+            # All-caps headings. The rule is case-sensitive, so only these can
+            # reach it at all: a leading clause word is not enough, the keyword
+            # has to open a node pattern.
+            "RETURN POLICY FOR DAMAGED GOODS",
+            "RETURN TO SENDER (urgent)",
+            "CREATE TABLE users (id int)",
+            "MERGE CONFLICT in the deploy branch",
+            "MERGE REQUEST for the api-client (draft)",
+            "MATCH REPORT (Q3) summary",
+            "UNWIND the cable carefully",
+            # Sentence case never matches.
             "Which teams match the description?",
             "Does the return value matter?",
             "create a summary of the merge",
@@ -145,17 +166,3 @@ class TestNegativeInvariants:
     )
     def test_no_cypher_without_leading_keyword(self, query):
         assert route_query(query).search_type != SearchType.CYPHER
-
-    @pytest.mark.parametrize(
-        "query",
-        [
-            "Why is this related to that, step by step?",
-            "Explain the connection between A and B",
-            "What is the path between Alice and Bob?",
-        ],
-    )
-    def test_router_never_picks_cot_or_context_extension(self, query):
-        assert route_query(query).search_type not in {
-            SearchType.GRAPH_COMPLETION_COT,
-            SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION,
-        }
