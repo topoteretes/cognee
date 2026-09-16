@@ -267,15 +267,18 @@ async def test_batch_noop_without_traces(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_batch_fail_open_on_llm_error(monkeypatch):
+async def test_batch_llm_error_propagates(monkeypatch):
+    """An LLM outage is not "no lessons found": it must reach the caller so the
+    watermark never advances over traces that were never extracted, and so the
+    improve stage's errored branch is reachable."""
     sm = FakeSessionManager(traces=[_trace("run_tests", status="error", error_message="exit 1")])
 
     async def boom(text_input, system_prompt, response_model):
         raise RuntimeError("llm down")
 
     monkeypatch.setattr(agent_context_extraction.LLMGateway, "acreate_structured_output", boom)
-    touched = await extract_batch_agent_context(session_manager=sm, user_id="u", session_id="s")
-    assert touched == []
+    with pytest.raises(RuntimeError, match="llm down"):
+        await extract_batch_agent_context(session_manager=sm, user_id="u", session_id="s")
     assert sm.store == []
 
 
@@ -425,9 +428,42 @@ async def test_pending_extraction_does_not_advance_watermark_on_llm_error(monkey
 
     monkeypatch.setattr(agent_context_extraction.LLMGateway, "acreate_structured_output", boom)
 
-    touched = await extract_pending_agent_context(
-        session_manager=sm, user_id="u", session_id="s", min_new_traces=3, overlap=1
+    with pytest.raises(RuntimeError, match="llm down"):
+        await extract_pending_agent_context(
+            session_manager=sm, user_id="u", session_id="s", min_new_traces=3, overlap=1
+        )
+
+    assert not any(row.get("kind") == TRACE_EXTRACTION_STATE_KIND for row in sm.store)
+
+
+# ------------------------------------------------------- shared watermark implementation
+
+
+def test_stage4_watermark_is_the_shared_state_row_helper():
+    from cognee.infrastructure.session.agent_context_extraction import TRACE_EXTRACTION_WATERMARK
+    from cognee.infrastructure.session.session_persist_watermark import StateRowWatermark
+
+    assert isinstance(TRACE_EXTRACTION_WATERMARK, StateRowWatermark)
+    assert TRACE_EXTRACTION_WATERMARK.state_id == TRACE_EXTRACTION_STATE_ID
+    assert TRACE_EXTRACTION_WATERMARK.state_kind == TRACE_EXTRACTION_STATE_KIND
+    # Rows written before the shared helper existed keep being read.
+    assert TRACE_EXTRACTION_WATERMARK.count_from_rows([_state_row(10)]) == 10
+
+
+@pytest.mark.asyncio
+async def test_pending_extraction_reads_and_writes_through_the_shared_helper(monkeypatch):
+    from cognee.infrastructure.session.agent_context_extraction import TRACE_EXTRACTION_WATERMARK
+
+    sm = FakeSessionManager(traces=[_trace(f"step-{index}") for index in range(5)])
+    sm.store.append(_state_row(3))
+    _patch_llm(monkeypatch, lessons=[])
+
+    await extract_pending_agent_context(
+        session_manager=sm, user_id="u", session_id="s", min_new_traces=1, overlap=0
     )
 
-    assert touched == []
-    assert not any(row.get("kind") == TRACE_EXTRACTION_STATE_KIND for row in sm.store)
+    # 5 total - 3 processed = 2 pending, read with no overlap.
+    assert sm.trace_session_last_n_calls == [2]
+    assert await TRACE_EXTRACTION_WATERMARK.read_count(sm, "u", "s") == 5
+    # Still exactly one state row, updated in place.
+    assert len([row for row in sm.store if row.get("kind") == TRACE_EXTRACTION_STATE_KIND]) == 1
