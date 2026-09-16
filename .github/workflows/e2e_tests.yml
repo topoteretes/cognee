@@ -407,22 +407,21 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
+      # The codegraph extra installs enola as the enola-cli wheel, the same way
+      # the Docker image and `pip install cognee[codegraph]` get it; the test
+      # must run from that binary, never from the runtime download.
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
-
-      - name: Cache the pinned enola binary
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
-        with:
-          path: ~/.cognee/bin
-          key: enola-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cognee/tasks/code_graph/install_enola.py') }}
+          extra-dependencies: codegraph
 
       # Deliberately NO LLM/embedding secrets: the enola code-graph route must
       # ingest, store and answer SearchType.CODE queries without an API key.
       - name: Run code graph e2e test
         env:
           ENV: 'dev'
+          ENOLA_AUTO_INSTALL: 'false'
         run: uv run python ./cognee/tests/test_code_graph_e2e.py
 
   run-s3-bucket-test:
