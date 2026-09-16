@@ -349,7 +349,7 @@ async def run_concurrent_session_turn(
             else acknowledgement_for_turn(analysis.response_to_user)
         )
 
-        if answer is None:
+        if generated_answer is None:
             # Empty-context skip in the answer lane: no answer was generated,
             # so there is no QA turn to record — mirroring the sequential
             # path, where the guard fires before the session completion runs.
