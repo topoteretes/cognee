@@ -327,7 +327,7 @@ LLM_MODEL="openai/gpt-5.6-luna"  # Default model
 
 **Important**: If you configure only LLM or only embeddings, the other defaults to OpenAI. Ensure you have a working OpenAI API key, or configure both to avoid unexpected defaults.
 
-**No key at all** is also a working setup: with no LLM and no embedding credentials configured, cognify extracts the graph with the local GLiNER2 model and embeds with the local fastembed model (`pip install "cognee[gliner,fastembed]"`; models download on first use), and `recall()` without a `query_type` answers with `CHUNKS`. The switch is per half — `GRAPH_EXTRACTOR=auto` (default) resolves on the LLM key, embeddings resolve on "nothing configured and no LLM key" — so setting any credential or any embedding setting takes that half back to the configured provider. See "LLM-free Graph Extraction (GLiNER)" below.
+**No key at all** is also a working setup: with no LLM and no embedding credentials configured, cognify extracts the graph with the local GLiNER2 model (`pip install "cognee[gliner]"`) and embeds with the local fastembed model (a core dependency); models download on first use, and `recall()` without a `query_type` answers with `CHUNKS`. The switch is per half — `GRAPH_EXTRACTOR=auto` (default) resolves on the LLM key, embeddings resolve on "nothing configured and no LLM key" — so setting any credential or any embedding setting takes that half back to the configured provider. See "LLM-free Graph Extraction (GLiNER)" below.
 
 Default databases (no extra setup needed):
 - **Relational**: SQLite (metadata and state storage)

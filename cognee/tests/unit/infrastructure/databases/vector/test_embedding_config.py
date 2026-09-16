@@ -141,7 +141,7 @@ def test_keyless_embeddings_without_fastembed_installed_fail_with_install_hint(m
     config = _default_embeddings(monkeypatch)
     with (
         patch.object(config_module, "_resolve_embedding_dimensions", return_value=None),
-        pytest.raises(KeylessEmbedderNotInstalledError, match="cognee\\[fastembed\\]"),
+        pytest.raises(KeylessEmbedderNotInstalledError, match="pip install fastembed"),
     ):
         resolve_embedding_defaults(config, _llm(api_key=None))
 

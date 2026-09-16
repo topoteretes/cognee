@@ -35,8 +35,8 @@ class KeylessEmbedderNotInstalledError(CogneeConfigurationError):
     def __init__(self):
         super().__init__(
             "No LLM API key is configured, so embeddings would run on the local fastembed "
-            f"model {DEFAULT_LOCAL_EMBEDDING_MODEL}, but the `fastembed` package is not "
-            'installed. Either install it with: pip install "cognee[fastembed]" or set '
+            f"model {DEFAULT_LOCAL_EMBEDDING_MODEL}, but the `fastembed` package (a cognee "
+            "dependency) is not importable. Reinstall it with: pip install fastembed, or set "
             "LLM_API_KEY to embed with the OpenAI default.",
             "KeylessEmbedderNotInstalledError",
         )

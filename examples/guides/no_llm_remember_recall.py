@@ -9,10 +9,10 @@ Anything ending in *_COMPLETION still needs an LLM to write the answer.
 
 Requirements::
 
-    pip install "cognee[gliner,fastembed]"
+    pip install "cognee[gliner]"
 
-First run downloads the GLiNER model (~800 MB) and the bge-small embedding
-model (~130 MB).
+fastembed is a core dependency. First run downloads the GLiNER model
+(~750 MB) and the bge-small embedding model (~67 MB).
 """
 
 import asyncio

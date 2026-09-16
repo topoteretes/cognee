@@ -59,6 +59,9 @@ dependencies = [
     "starlette>=0.48",
     "python-multipart>=0.0.22,<1.0.0",
     "fastapi-users[sqlalchemy]>=15.0.2",
+    # Local CPU embeddings (onnxruntime, ~65 MB): the embedder cognee runs on when no
+    # LLM key and no EMBEDDING_* settings are configured, so a bare install can ingest.
+    "fastembed<=0.8.0",
     "structlog>=25.2.0,<26",
     "pympler>=1.1,<2.0.0",
     "pylance>=0.22.0,<=0.36.0",
@@ -112,6 +115,7 @@ scraping = [
     "APScheduler>=3.10.0,<=3.11.0"
 ]
 
+# fastembed is a core dependency; the extra stays so `cognee[fastembed]` keeps installing.
 fastembed = [
     "fastembed<=0.8.0",
     # onnxruntime 1.23.2 only ships wheels through cp313; cp314 wheels start
