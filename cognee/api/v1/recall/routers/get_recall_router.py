@@ -89,8 +89,9 @@ class RecallPayloadDTO(InDTO):
         examples=[None],
         description=(
             "Session whose cached QA and trace entries should be searched. With "
-            "search_type omitted and no datasets, session hits short-circuit the "
-            "graph search."
+            "search_type omitted the session becomes a search source: alone it "
+            "short-circuits the graph on a hit, alongside datasets both contribute. "
+            "Pinning search_type leaves the graph as the only source."
         ),
     )
     scope: str | list[str] | None = Field(
