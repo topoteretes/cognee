@@ -7,11 +7,22 @@ from uuid import UUID
 
 import aiohttp
 
+from cognee.modules.improve import MEMIFY_PASSTHROUGH_KEYS
 from cognee.modules.ingestion.data_types.TextData import create_text_data
 from cognee.modules.search.types import ContextFormat
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("serve.cloud_client")
+
+# The memify passthrough surface, partitioned by what the /improve DTO can
+# carry: registry task names (list[str]) and a data string cross the wire.
+# The refused set is derived by subtraction, so a key added to
+# MEMIFY_PASSTHROUGH_KEYS is refused loudly here until the DTO learns it —
+# never silently dropped.
+_SERIALIZABLE_MEMIFY_TASK_KEYS = ("extraction_tasks", "enrichment_tasks")
+_UNSERIALIZABLE_MEMIFY_KEYS = tuple(
+    key for key in MEMIFY_PASSTHROUGH_KEYS if key not in (*_SERIALIZABLE_MEMIFY_TASK_KEYS, "data")
+)
 
 
 def _text_upload_filename(text: str) -> str:
@@ -105,6 +116,8 @@ class CloudClient:
             form.add_field("session_id", kwargs["session_id"])
         if kwargs.get("run_in_background"):
             form.add_field("run_in_background", "true")
+        if kwargs.get("self_improvement") is not None:
+            form.add_field("self_improvement", "true" if kwargs["self_improvement"] else "false")
         if kwargs.get("custom_prompt"):
             form.add_field("custom_prompt", kwargs["custom_prompt"])
         if kwargs.get("chunk_size") is not None:
@@ -284,6 +297,34 @@ class CloudClient:
             payload["run_in_background"] = True
         if kwargs.get("node_name"):
             payload["node_name"] = kwargs["node_name"]
+        if kwargs.get("session_ids"):
+            payload["session_ids"] = list(kwargs["session_ids"])
+        if kwargs.get("build_global_context_index"):
+            payload["build_global_context_index"] = True
+        if kwargs.get("build_truth_subspace"):
+            payload["build_truth_subspace"] = True
+        if kwargs.get("feedback_alpha") is not None:
+            payload["feedback_alpha"] = kwargs["feedback_alpha"]
+        # Memify passthrough: the improve DTO takes registry task names and a
+        # data string; Task objects and the db-config overrides cannot cross
+        # the wire, so they fail loudly instead of silently running defaults.
+        for key in _SERIALIZABLE_MEMIFY_TASK_KEYS:
+            tasks = kwargs.get(key)
+            if tasks:
+                if not all(isinstance(task, str) for task in tasks):
+                    raise ValueError(
+                        f"improve({key}=...) on a remote instance takes registry "
+                        "task names (strings); Task objects cannot be serialized."
+                    )
+                payload[key] = list(tasks)
+        if kwargs.get("data") is not None:
+            payload["data"] = kwargs["data"]
+        for key in _UNSERIALIZABLE_MEMIFY_KEYS:
+            if kwargs.get(key) is not None:
+                raise ValueError(
+                    f"improve({key}=...) is not supported on a remote instance; "
+                    "run it locally or extend the /improve payload."
+                )
 
         async with session.post(
             f"{self.service_url}/api/v1/improve",
