@@ -1,4 +1,5 @@
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID
 
 import pytest
 
@@ -1263,3 +1264,56 @@ async def test_cognee_graph_mapping_batch_shapes():
     assert node1.attributes.get("vector_distance") == [0.95, 6.5]
     assert node2.attributes.get("vector_distance") == [6.5, 0.87]
     assert edge.attributes.get("vector_distance") == [0.92, 0.88]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unsupported", [False, True])
+async def test_neighborhood_scores_only_expansion_ids(unsupported):
+    from cognee.modules.retrieval.utils.brute_force_triplet_search import (
+        _get_top_triplet_importances,
+    )
+    from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
+
+    seed_id = UUID("00000000-0000-0000-0000-000000000001")
+    neighbor_id = UUID("00000000-0000-0000-0000-000000000002")
+    seed = MockScoredResult(seed_id, 0.1)
+    neighbor = MockScoredResult(neighbor_id, 0.8)
+    engine = AsyncMock()
+    engine.search.return_value = []
+    engine.score_by_ids.return_value = [neighbor]
+    if unsupported:
+        engine.score_by_ids.side_effect = NotImplementedError
+    search = NodeEdgeVectorSearch(vector_engine=engine)
+    search.query_vector = [1.0, 0.0]
+    search.node_distances = {"Entity_name": [seed]}
+    graph = AsyncMock()
+    # Graph IDs may be UUIDs while vector search exposes string IDs.
+    graph.nodes = {seed_id: object(), neighbor_id: object()}
+    with patch(
+        "cognee.modules.retrieval.utils.brute_force_triplet_search.get_memory_fragment",
+        return_value=graph,
+    ):
+        await _get_top_triplet_importances(
+            memory_fragment=None,
+            vector_search=search,
+            properties_to_project=None,
+            node_type=None,
+            node_name=None,
+            node_name_filter_operator="OR",
+            triplet_distance_penalty=6.5,
+            feedback_influence=0.0,
+            wide_search_limit=1,
+            top_k=5,
+            neighborhood_depth=1,
+        )
+    expected = [seed] if unsupported else [seed, neighbor]
+    assert search.node_distances["Entity_name"] == expected
+    engine.score_by_ids.assert_awaited_once_with(
+        collection_name="Entity_name",
+        data_point_ids=[str(neighbor_id)],
+        query_vector=[1.0, 0.0],
+    )
+    engine.search.assert_not_awaited()
+    graph.map_vector_distances_to_graph_nodes.assert_awaited_once_with(
+        node_distances={"Entity_name": expected}, query_list_length=None
+    )

@@ -59,7 +59,7 @@ from cognee.api.v1.users.routers import (
 )
 from cognee.api.v1.validate.routers import get_validate_router
 from cognee.api.v1.visualize.routers import get_schema_router
-from cognee.exceptions import CogneeApiError
+from cognee.exceptions import CogneeApiError, remediation_for
 from cognee.modules.users.authentication.redact_websocket_query_secrets import (
     install_websocket_query_param_redaction,
 )
@@ -77,6 +77,14 @@ logger = get_logger()
 install_websocket_query_param_redaction()
 
 app_environment = os.getenv("ENV", "prod")
+
+# How long the shutdown hook waits for background tasks (B6). The default must
+# fit inside the smallest shipped kill window WITH room left for the engine
+# close below it: compose ships stop_grace_period: 15s (bare docker stops at
+# 10s), so a longer drain gets the worker SIGKILLed mid-WAL-checkpoint — the
+# exact failure the close exists to prevent. Raise this together with the
+# stop timeout (K8s/gunicorn default 30s).
+BACKGROUND_DRAIN_TIMEOUT_SECONDS = float(os.getenv("BACKGROUND_DRAIN_TIMEOUT_SECONDS", "8"))
 
 
 def _report_recovery_outcome(task: "asyncio.Task") -> None:
@@ -132,19 +140,42 @@ async def lifespan(app: FastAPI):
     recovery_task = asyncio.create_task(recover_abandoned_pipeline_runs())
     recovery_task.add_done_callback(_report_recovery_outcome)
 
+    # Fail the boot, not every later request: a bad IMPROVE_* value (an
+    # IMPROVE_STAGES_DISABLED typo, an out-of-range alpha) raises here with the
+    # full message instead of surfacing as a generic 409 per improve call.
+    from cognee.modules.improve import get_improve_config
+
+    get_improve_config()
+
     # Emit a clear startup message for docker logs
     logger.info("Backend server has started")
 
     yield
 
-    # The sweep is resumable by design (it only closes runs that still have no
-    # terminal row), so cancelling an unfinished one costs nothing but the
-    # work already done. Leaving it running into the engine teardown below
-    # does cost something.
+    # Recovery first, and cancelled rather than drained: the sweep is resumable
+    # by design (it only closes runs that still have no terminal row), so
+    # losing the work in flight costs nothing, while waiting for it would hold
+    # shutdown for a sweep nobody needs to finish. It is also cancelled before
+    # the drain below because it holds a per-dataset lock while it works, and a
+    # draining task on that dataset would otherwise sit behind it for the whole
+    # timeout.
     if not recovery_task.done():
         recovery_task.cancel()
         with suppress(asyncio.CancelledError):
             await recovery_task
+
+    # Let in-flight background work (background remember runs, the session
+    # improve bridge) finish before the engines below are torn down under it.
+    # Bounded so a stuck task cannot hold the process hostage; nothing is
+    # cancelled on timeout, it is only reported.
+    from cognee.infrastructure.background_tasks import wait_for_background_tasks
+
+    logger.info("Shutting down: draining background tasks")
+    if not await wait_for_background_tasks(timeout=BACKGROUND_DRAIN_TIMEOUT_SECONDS):
+        logger.warning(
+            "Shutting down with background tasks still running after %.0fs",
+            BACKGROUND_DRAIN_TIMEOUT_SECONDS,
+        )
 
     # Flush and close all cached database adapters so Ladybug can
     # CHECKPOINT its WAL before the process exits.  Without this,
@@ -270,7 +301,14 @@ async def exception_handler(_: Request, exc: CogneeApiError) -> JSONResponse:
 
     # log the stack trace for easier serverside debugging
     logger.error(format_exc())
-    return JSONResponse(status_code=status_code, content={"detail": detail["message"]})
+    content = {"detail": detail["message"]}
+    # A hint the caller can act on: the exception's own remediation first, else the
+    # shared first-run table. Only present when a fix is known, so existing clients
+    # that read only `detail` are unaffected.
+    remediation = remediation_for(exc)
+    if remediation:
+        content["remediation"] = remediation
+    return JSONResponse(status_code=status_code, content=content)
 
 
 app.include_router(get_auth_router(), prefix="/api/v1/auth", tags=["auth"])

@@ -98,15 +98,17 @@ def get_sessions_router() -> APIRouter:
           tokens_in, or tokens_out (default: last_activity_at).
         - **descending** (bool): Sort newest/largest first (default: true).
 
-        Response envelope::
+        Response envelope:
 
-            {
-              "sessions": [...],
-              "total": <int>,      # rows matching filters before pagination
-              "limit":  <int>,
-              "offset": <int>,
-              "has_more": <bool>,
-            }
+        ```
+        {
+          "sessions": [...],
+          "total": <int>,      # rows matching filters before pagination
+          "limit":  <int>,
+          "offset": <int>,
+          "has_more": <bool>,
+        }
+        ```
         """
         since = _range_since(range)
         try:
