@@ -39,6 +39,7 @@ from cognee.modules.recall.types.RecallResponse import (
     ResponseToolEntry,
 )
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
+from cognee.modules.retrieval.utils.stop_words import DEFAULT_STOP_WORDS
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
@@ -49,6 +50,50 @@ logger = get_logger("recall")
 
 # Minimum word length to avoid matching noise words like "a", "I"
 _MIN_WORD_LEN = 2
+
+# Session/trace keyword matching ignores stopwords so an entry only matches when it shares a
+# content word with the query. The shared list is extended locally with question/filler words
+# it lacks (it is also used by BM25 and edge-text rendering, so it is not changed here).
+# Hand-picked English list; swap for a real stopword corpus if false hits persist.
+_STOP_WORDS = DEFAULT_STOP_WORDS | {
+    "what",
+    "tell",
+    "me",
+    "my",
+    "us",
+    "am",
+    "if",
+    "so",
+    "then",
+    "than",
+    "there",
+    "here",
+    "any",
+    "some",
+    "all",
+    "each",
+    "every",
+    "both",
+    "other",
+    "just",
+    "also",
+    "please",
+    "explain",
+    "describe",
+    "something",
+    "anything",
+    "everything",
+    "nothing",
+    "yes",
+    "no",
+    "ok",
+    "okay",
+    "thanks",
+    "thank",
+    "hi",
+    "hello",
+    "hey",
+}
 
 
 class RecallKwargs(TypedDict, total=False):
@@ -71,8 +116,12 @@ class RecallKwargs(TypedDict, total=False):
 
 
 def _tokenize(text: str) -> set[str]:
-    """Split text into lowercase word tokens using word boundaries."""
-    return {w for w in re.findall(r"\b\w+\b", text.lower()) if len(w) >= _MIN_WORD_LEN}
+    """Split text into lowercase content-word tokens (stopwords and short words dropped)."""
+    return {
+        w
+        for w in re.findall(r"\b\w+\b", text.lower())
+        if len(w) >= _MIN_WORD_LEN and w not in _STOP_WORDS
+    }
 
 
 async def _resolve_user_id(user: str | None) -> str | None:
