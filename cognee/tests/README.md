@@ -51,7 +51,7 @@ enough locally. CI supplies the same variables from secrets; the workflows under
   key or extra skips, it does not fail.
 - `MOCK_EMBEDDING=true` and `MOCK_CODE_SUMMARY=true` replace the embedding and code
   summary calls with deterministic stand-ins in the tests that support them.
-- `extractor="gliner"` pipelines and `SearchType.CHUNKS` recall run with no LLM key
+- `extractor="gliner_demo"` pipelines and `SearchType.CHUNKS` recall run with no LLM key
   at all; see `examples/guides/no_llm_remember_recall.py`.
 
 ## Conventions
