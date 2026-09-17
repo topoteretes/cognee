@@ -1,8 +1,8 @@
 """remember → recall with no LLM API key at all.
 
 Nothing to configure: with no LLM key and no embedding settings, cognee
-extracts the graph and chunk summaries with the local GLiNER2 model
-(GRAPH_EXTRACTOR=auto resolves to gliner) and embeds with fastembed on CPU.
+extracts the graph and chunk summaries with the local GLiNER demo model
+(GRAPH_EXTRACTOR=auto resolves to gliner_demo) and embeds with fastembed on CPU.
 With no usable LLM key, recall() defaults to CHUNKS (vector search, no LLM),
 and a pipeline with no LLM task skips the first-run LLM connection probe.
 Anything ending in *_COMPLETION still needs an LLM to write the answer.

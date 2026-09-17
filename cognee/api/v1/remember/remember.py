@@ -91,7 +91,7 @@ class RememberKwargs(TypedDict, total=False):
     """Power-user overrides for remember(). Most users never need these."""
 
     graph_model: Any
-    extractor: Literal["llm", "gliner"]
+    extractor: Literal["llm", "gliner_demo", "gliner"]
     node_set: list[str]
     preferred_loaders: list
     incremental_loading: bool
@@ -1216,12 +1216,19 @@ async def remember(
         if kwargs.get("content_type"):
             raise ValueError("dry_run is supported for standard add+cognify remember inputs only.")
 
-        from cognee.modules.cognify.config import get_cognify_config, resolve_extractor
+        from cognee.modules.cognify.config import (
+            GLINER_DEMO_EXTRACTOR,
+            get_cognify_config,
+            resolve_extractor,
+        )
 
-        if resolve_extractor(kwargs.get("extractor"), get_cognify_config()) == "gliner":
+        if (
+            resolve_extractor(kwargs.get("extractor"), get_cognify_config())
+            == GLINER_DEMO_EXTRACTOR
+        ):
             raise ValueError(
                 "dry_run estimates the LLM extraction pipeline only; it has no cost model "
-                "for the gliner extractor."
+                "for the gliner_demo extractor."
             )
 
         from cognee.api.v1.serve.state import get_remote_client
