@@ -56,11 +56,11 @@ await cognee.remember(
 # Query: recall picks a search strategy automatically (rule-based, no LLM call)
 results = await cognee.recall("What are the key insights?", datasets=["main"])
 for r in results:
-    print(r["_source"], r)  # each result is tagged "graph" / "session" / ...
+    print(r.source, r)  # each result is tagged "graph" / "session" / ...
 ```
 
 `remember()` runs `add()` + `cognify()` and then `improve()` underneath. `recall()` wraps
-`search()` and adds routing, session memory as a source, and `_source`-tagged results.
+`search()` and adds routing, session memory as a source, and `source`-tagged results.
 
 ## Default guidance
 
