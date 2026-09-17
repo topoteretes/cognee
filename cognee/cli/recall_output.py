@@ -28,32 +28,28 @@ def resolved_search_type(results, fallback: str) -> str:
     return getattr(resolved, "value", resolved)
 
 
-def print_recall_results(results, fallback_type: str) -> None:
-    """Pretty-print a non-empty recall result list.
+def _print_session_entries(entries) -> None:
+    """Render session-cache Q&A entries."""
+    fmt.echo(f"\nFound {len(entries)} session entry(ies):")
+    fmt.echo("=" * 60)
+    for i, entry in enumerate(entries, 1):
+        q = _field(entry, "question") or ""
+        a = _field(entry, "answer") or ""
+        t = _field(entry, "time") or ""
+        header = f"[{t}] " if t else ""
+        if q:
+            fmt.echo(f"{fmt.bold(f'{header}Q:')} {q}")
+        if a:
+            fmt.echo(f"{fmt.bold('A:')} {a}")
+        if i < len(entries):
+            fmt.echo("-" * 40)
 
-    Each lane keeps its own empty-result handling; only the rendering is shared.
-    """
-    # The tag is "source" in both lanes. This branch read "_source", and only
-    # on dicts, so it fired in neither: in-process results are models.
-    if _field(results[0], "source") == "session":
-        fmt.echo(f"\nFound {len(results)} session entry(ies):")
-        fmt.echo("=" * 60)
-        for i, entry in enumerate(results, 1):
-            q = _field(entry, "question") or ""
-            a = _field(entry, "answer") or ""
-            t = _field(entry, "time") or ""
-            header = f"[{t}] " if t else ""
-            if q:
-                fmt.echo(f"{fmt.bold(f'{header}Q:')} {q}")
-            if a:
-                fmt.echo(f"{fmt.bold('A:')} {a}")
-            if i < len(results):
-                fmt.echo("-" * 40)
-        return
 
-    # Every branch keys off the type that actually ran, not the one requested:
-    # an auto-routed call passes no type at all, and the SDK picks CHUNKS on its
-    # own whenever no LLM is configured.
+def _print_graph_results(results, fallback_type: str) -> None:
+    """Render everything that is not a session entry, keyed by search type."""
+    # Keys off the type that actually ran, not the one requested: an auto-routed
+    # call passes no type at all, and the SDK picks CHUNKS on its own whenever
+    # no LLM is configured.
     resolved_type = resolved_search_type(results, fallback_type)
     fmt.echo(f"\nFound {len(results)} result(s) using {resolved_type}:")
     fmt.echo("=" * 60)
@@ -73,3 +69,24 @@ def print_recall_results(results, fallback_type: str) -> None:
         for i, result in enumerate(results, 1):
             fmt.echo(f"{fmt.bold(f'Result {i}:')} {result}")
             fmt.echo()
+
+
+def print_recall_results(results, fallback_type: str) -> None:
+    """Pretty-print a non-empty recall result list.
+
+    Each lane keeps its own empty-result handling; only the rendering is shared.
+
+    The list can mix sources: `recall()` with a session_id *and* datasets and no
+    pinned type lets session and graph both contribute. Partition rather than
+    branch on the first entry -- the tag is "source" in both lanes, and this
+    branch used to read "_source", so it fired in neither. Fixing the name made
+    it fire, and a single leading session entry would then have rendered the
+    graph results as blank Q&A rows, dropping the answer the caller asked for.
+    """
+    session_entries = [entry for entry in results if _field(entry, "source") == "session"]
+    other_results = [entry for entry in results if _field(entry, "source") != "session"]
+
+    if session_entries:
+        _print_session_entries(session_entries)
+    if other_results:
+        _print_graph_results(other_results, fallback_type)

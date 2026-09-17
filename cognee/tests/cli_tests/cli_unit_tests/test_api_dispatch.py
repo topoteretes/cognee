@@ -212,6 +212,34 @@ class TestRecallDispatch:
         assert "to ship on Friday" in out
         assert "Result 1:" not in out
 
+    @patch("cognee.cli.api_dispatch.CogneeApiClient")
+    def test_mixed_sources_print_both_blocks(self, MockClient, capsys):
+        """session_id + datasets + no -t lets session and graph both contribute.
+
+        The printer used to branch on results[0], so one leading session entry
+        rendered the graph results as blank Q&A rows and the answer vanished.
+        """
+        self._client(
+            MockClient,
+            [
+                {"source": "session", "question": "refund policy?", "answer": "30 days"},
+                {
+                    "source": "graph",
+                    "search_type": "HYBRID_COMPLETION",
+                    "text": "Shipping takes 5 days.",
+                },
+            ],
+        )
+
+        dispatch(self._args(session_id="s1", datasets=["proj"]))
+
+        out = capsys.readouterr().out
+        assert "Found 1 session entry(ies)" in out
+        assert "refund policy?" in out
+        # The graph half must survive, under its own accurate header.
+        assert "Found 1 result(s) using HYBRID_COMPLETION" in out
+        assert "Shipping takes 5 days." in out
+
 
 class TestUserIdHeader:
     @patch("cognee.cli.api_dispatch.CogneeApiClient")
