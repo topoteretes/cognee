@@ -457,7 +457,13 @@ async def ingest_data(
                 data_point.raw_content_hash = storage_file_metadata["content_hash"]
                 data_point.data_size = original_file_metadata["file_size"]
                 data_point.external_metadata = ext_metadata
-                if item_system_metadata is not None:
+                # System metadata is the route stamp of the CONTENT (a DLT
+                # manifest, a code file), so it follows the content: new content
+                # gets the stamp its own item carries, including none. Keeping
+                # the old stamp on a replacement of another kind would route the
+                # new content down the old route — text read as a DLT manifest —
+                # and break every later cognify of the dataset.
+                if item_system_metadata is not None or content_changed:
                     data_point.system_metadata = item_system_metadata
                 data_point.node_set = json.dumps(node_set) if node_set else None
                 data_point.tenant_id = user.tenant_id if user.tenant_id else None
