@@ -660,13 +660,14 @@ async def recall(
                 )
 
                 # Dataset UUIDs take precedence over names, matching /api/v1/search.
-                # String dataset names can only resolve for the current user.
+                # String dataset names can only resolve for the current user, and a
+                # name that resolves to nothing fails the request (strict).
                 search_dataset_ids = dataset_ids or None
                 if search_dataset_ids is None and datasets is not None:
                     search_dataset_ids = [
                         dataset.id
                         for dataset in await get_authorized_existing_datasets(
-                            datasets, "read", user
+                            datasets, "read", user, strict=True
                         )
                     ]
                     if not search_dataset_ids:
@@ -901,7 +902,7 @@ async def recall(
                     search_dataset_ids = [
                         dataset.id
                         for dataset in await get_authorized_existing_datasets(
-                            datasets, "read", user
+                            datasets, "read", user, strict=True
                         )
                     ]
                     if not search_dataset_ids:
