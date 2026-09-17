@@ -9,14 +9,20 @@ from cognee.cli.code_search import print_code_results
 from cognee.cli.config import COMPLETION_SEARCH_TYPES
 
 
+def _field(entry, name: str):
+    """Read one field off a recall entry.
+
+    The in-process command gets RecallResponse models; the ``--api-url`` lane
+    gets the dicts they were encoded to.
+    """
+    return entry.get(name) if isinstance(entry, dict) else getattr(entry, name, None)
+
+
 def resolved_search_type(results, fallback: str) -> str:
     """Read the search type the SDK actually ran from the first result."""
     if not results:
         return fallback
-    first = results[0]
-    resolved = (
-        first.get("search_type") if isinstance(first, dict) else getattr(first, "search_type", None)
-    )
+    resolved = _field(results[0], "search_type")
     if resolved is None:
         return fallback
     return getattr(resolved, "value", resolved)
@@ -27,14 +33,15 @@ def print_recall_results(results, fallback_type: str) -> None:
 
     Each lane keeps its own empty-result handling; only the rendering is shared.
     """
-    # Detect session results by _source tag
-    if isinstance(results[0], dict) and results[0].get("_source") == "session":
+    # The tag is "source" in both lanes. This branch read "_source", and only
+    # on dicts, so it fired in neither: in-process results are models.
+    if _field(results[0], "source") == "session":
         fmt.echo(f"\nFound {len(results)} session entry(ies):")
         fmt.echo("=" * 60)
         for i, entry in enumerate(results, 1):
-            q = entry.get("question", "")
-            a = entry.get("answer", "")
-            t = entry.get("time", "")
+            q = _field(entry, "question") or ""
+            a = _field(entry, "answer") or ""
+            t = _field(entry, "time") or ""
             header = f"[{t}] " if t else ""
             if q:
                 fmt.echo(f"{fmt.bold(f'{header}Q:')} {q}")

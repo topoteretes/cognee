@@ -179,6 +179,29 @@ class TestRecallDispatch:
 
         assert mock_instance.recall.call_args.kwargs["search_type"] == "CHUNKS"
 
+    @patch("cognee.cli.api_dispatch.CogneeApiClient")
+    def test_session_entries_print_as_question_and_answer(self, MockClient, capsys):
+        """The wire tag is "source"; the branch used to look for "_source"."""
+        self._client(
+            MockClient,
+            [
+                {
+                    "source": "session",
+                    "time": "2026-01-01T00:00:00+00:00",
+                    "question": "what did we decide?",
+                    "answer": "to ship on Friday",
+                }
+            ],
+        )
+
+        dispatch(self._args(session_id="s1"))
+
+        out = capsys.readouterr().out
+        assert "session entry(ies)" in out
+        assert "what did we decide?" in out
+        assert "to ship on Friday" in out
+        assert "Result 1:" not in out
+
 
 class TestUserIdHeader:
     @patch("cognee.cli.api_dispatch.CogneeApiClient")
