@@ -27,8 +27,8 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("enola")
 
 INSTALL_HINT = (
-    "The enola binary was not found. It ships with cognee as the `enola-cli` package: "
-    "run `pip install --force-reinstall enola-cli`, or set ENOLA_PATH to an enola binary."
+    "The code graph feature needs the `enola-cli` package. "
+    'Install it with: pip install "cognee[codegraph]"'
 )
 
 # Snapshot artifact format generations this reader understands (receipt.json
@@ -120,7 +120,7 @@ async def run_enola_generate(
     """Run `enola --generate` in repo_path and return the snapshot directory.
 
     Raises EnolaNotInstalledError when no binary is found; nothing is
-    downloaded at runtime (the binary ships with cognee as ``enola-cli``).
+    downloaded at runtime (the binary ships with the ``codegraph`` extra).
     """
     binary = find_enola_binary()
     repo_path = Path(repo_path)

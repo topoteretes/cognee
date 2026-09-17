@@ -407,12 +407,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
-      # enola ships with cognee itself as the enola-cli wheel, so the base
-      # install is all this job needs.
+      # The codegraph extra installs enola as the enola-cli wheel, the same way
+      # the Docker image and `pip install cognee[codegraph]` get it.
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
+          extra-dependencies: codegraph
 
       # Deliberately NO LLM/embedding secrets: the enola code-graph route must
       # ingest, store and answer SearchType.CODE queries without an API key.

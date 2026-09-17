@@ -1291,7 +1291,6 @@ dependencies = [
     { name = "cryptography" },
     { name = "datamodel-code-generator" },
     { name = "diskcache" },
-    { name = "enola-cli" },
     { name = "fakeredis", extra = ["lua"] },
     { name = "fastapi" },
     { name = "fastapi-users", extra = ["sqlalchemy"] },
@@ -1345,6 +1344,11 @@ azure = [
 ]
 baml = [
     { name = "baml-py" },
+]
+codegraph = [
+    { name = "enola-cli" },
+    { name = "fastembed", marker = "python_full_version < '3.14'" },
+    { name = "transformers" },
 ]
 debug = [
     { name = "debugpy" },
@@ -1524,10 +1528,11 @@ requires-dist = [
     { name = "dlt", extras = ["sqlalchemy"], marker = "extra == 'gmail'", specifier = ">=1.9.0,<2" },
     { name = "docling", marker = "extra == 'docling-full'", specifier = ">=2.115,<3" },
     { name = "docling-slim", extras = ["convert-core", "format-pdf", "format-office", "format-html", "format-email", "format-markdown", "format-latex"], marker = "extra == 'docling'", specifier = ">=2.115,<3" },
-    { name = "enola-cli", specifier = "==0.4.19" },
+    { name = "enola-cli", marker = "extra == 'codegraph'", specifier = "==0.4.19" },
     { name = "fakeredis", extras = ["lua"], specifier = ">=2.32.0" },
     { name = "fastapi", specifier = ">=0.116.2,<1.0.0" },
     { name = "fastapi-users", extras = ["sqlalchemy"], specifier = ">=15.0.2" },
+    { name = "fastembed", marker = "python_full_version < '3.14' and extra == 'codegraph'", specifier = "<=0.8.0" },
     { name = "fastembed", marker = "extra == 'fastembed'", specifier = "<=0.8.0" },
     { name = "filelock", specifier = ">=3.12.0,<4.0.0" },
     { name = "filetype", specifier = ">=1.2.0,<2.0.0" },
@@ -1620,6 +1625,7 @@ requires-dist = [
     { name = "tavily-python", marker = "extra == 'scraping'", specifier = ">=0.7.12" },
     { name = "tenacity", specifier = ">=9.0.0" },
     { name = "tiktoken", specifier = ">=0.8.0,<1.0.0" },
+    { name = "transformers", marker = "extra == 'codegraph'", specifier = ">=4.46.3,<6" },
     { name = "transformers", marker = "extra == 'docling-full'", specifier = ">=4.55" },
     { name = "transformers", marker = "extra == 'huggingface'", specifier = ">=4.46.3,<6" },
     { name = "transformers", marker = "extra == 'ollama'", specifier = ">=4.46.3,<6" },

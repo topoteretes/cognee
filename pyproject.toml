@@ -34,11 +34,6 @@ dependencies = [
     "aiosqlite>=0.20.0,<1.0.0",
     "filelock>=3.12.0,<4.0.0",  # cross-process migration lock for SQLite (Linux/macOS/Windows)
     "tiktoken>=0.8.0,<1.0.0",
-    # The enola code-graph extractor as a platform wheel (macOS arm64/x86_64, Linux
-    # x86_64/aarch64 glibc, Windows amd64; no sdist). This is the only enola version
-    # pin; bumping it means re-checking the known answers in
-    # cognee/tests/test_code_graph_e2e.py.
-    "enola-cli==0.4.19",
     # <1.97.0: 1.97.0 fails to build litellm.types.utils.Message on Python 3.10 (unresolved
     # forward ref) and 1.98.0+ import typing.NotRequired (3.11+). See BerriAI/litellm#38202.
     "litellm>=1.83.7,<1.97.0",
@@ -164,9 +159,13 @@ docs = [
     "unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.18.1,<19",
     "nltk>=3.9.3,<4", # TODO: Remove when unstructured is above v0.21.0 as it won't use nltk anymore
 ]
-# enola ships with cognee itself now (see `enola-cli` under [project.dependencies]).
-# The extra stays so `pip install cognee[codegraph]` keeps working.
-codegraph = []
+codegraph = [
+    # The enola binary as a platform wheel. This is the only enola version pin;
+    # bumping it means re-checking the known answers in cognee/tests/test_code_graph_e2e.py.
+    "enola-cli==0.4.19",
+    "fastembed<=0.8.0 ; python_version < '3.14'",
+    "transformers>=4.46.3,<6",
+]
 evals = [
     "plotly>=6.0.0,<7",
     "gdown>=5.2.0,<6",

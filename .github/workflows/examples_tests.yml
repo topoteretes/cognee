@@ -284,7 +284,8 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
-          # Skip the default base set so this job installs only what the test needs.
+          # codegraph (in the default base set) is declared conflicting with
+          # docling-full, so this job installs only what the test needs.
           base-extras: ''
           extra-dependencies: 'docling-full'
 

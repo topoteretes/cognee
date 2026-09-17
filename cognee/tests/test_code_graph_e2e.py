@@ -1,6 +1,6 @@
 """E2E test: code ingestion -> enola code graph -> SearchType.CODE (SDK-395).
 
-Runs the REAL enola binary (the enola-cli wheel cognee depends on) over
+Runs the REAL enola binary (the enola-cli wheel from the codegraph extra) over
 a small pinned repository that ships with the test suite, against the default
 embedded databases (Ladybug graph + SQLite), with NO LLM or embedding
 configuration. It covers what the unit tests in tests/unit/tasks/code_graph
@@ -42,8 +42,8 @@ from cognee.modules.retrieval.code_retriever import CODE_NODE_TYPES
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 
-# The enola version cognee runs is the enola-cli wheel pinned in pyproject.toml;
-# the known answers below are pinned to it.
+# The enola version cognee runs is the enola-cli wheel pinned by the codegraph
+# extra in pyproject.toml; the known answers below are pinned to it.
 ENOLA_PINNED_VERSION = importlib.metadata.version("enola-cli")
 
 logger = get_logger()
