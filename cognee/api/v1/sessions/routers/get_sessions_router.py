@@ -133,6 +133,8 @@ def get_sessions_router() -> APIRouter:
                     "has_more": page.has_more,
                 }
             )
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("list_sessions failed")
             return JSONResponse(status_code=500, content={"error": "list failed"})

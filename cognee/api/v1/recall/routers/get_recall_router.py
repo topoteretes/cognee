@@ -183,6 +183,8 @@ def get_recall_router() -> APIRouter:
         try:
             history = await get_history(user.id, limit=0)
             return history
+        except CogneeApiError:
+            raise
         except Exception:
             logger = get_logger()
             logger.exception("Recall history error")

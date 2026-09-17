@@ -179,6 +179,8 @@ def get_search_router() -> APIRouter:
             history = await get_history(user.id, limit=0)
 
             return history
+        except CogneeApiError:
+            raise
         except Exception as error:
             logger.exception("get_search_router.get_search_history failed, returning HTTP 500")
             return JSONResponse(

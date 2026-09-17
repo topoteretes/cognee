@@ -12,6 +12,7 @@ from starlette.status import (
 
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse, InDTO
+from cognee.exceptions import CogneeApiError
 from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.modules.data.exceptions.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_dataset
@@ -293,6 +294,8 @@ def get_cognify_router() -> APIRouter:
                 ).model_dump(),
             )
 
+        except CogneeApiError:
+            raise
         except Exception as error:
             logger.exception("Cognify failed")
             return JSONResponse(

@@ -8,6 +8,7 @@ from pydantic import WithJsonSchema
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse
 from cognee.api.upload_fields import OptionalUploadFile, drop_blank_uploads
+from cognee.exceptions import CogneeApiError
 from cognee.modules.pipelines.models import PipelineRunErrored
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunInfo
 from cognee.modules.users.methods import get_authenticated_user
@@ -223,6 +224,8 @@ def get_add_router() -> APIRouter:
                     ).model_dump(),
                 )
             return add_run
+        except CogneeApiError:
+            raise
         except Exception as error:
             logger.exception("Add failed")
             return JSONResponse(
