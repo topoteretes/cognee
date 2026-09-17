@@ -416,13 +416,10 @@ async def retrieve_cognee_memory_context(context: AgentMemoryContext) -> str:
                 system_prompt=context.config.memory_system_prompt,
                 top_k=context.config.memory_top_k,
                 only_context=only_context,
-                # An only_context search returns the full LLM input — cognee's own answer
-                # instructions included — which must not be pasted into the agent's
-                # prompt as "memory". The verbose payload keeps the bare retrieval
-                # context under context_result, so read that instead. (An HTTP caller of
-                # /api/v1/recall has the same need and no verbose shape; it reads the
-                # recall item's raw["context"] — see the Claude Code plugin in
-                # cognee-integrations, which injects recalled memory into every prompt.)
+                # An only_context search returns the user prompt cognee would send —
+                # its own question framing included — which must not be pasted into the
+                # agent's prompt as "memory". The verbose payload keeps the bare
+                # retrieval context under context_result, so read that instead.
                 verbose=only_context,
             )
             if only_context:

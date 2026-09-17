@@ -17,10 +17,6 @@ import cognee
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.low_level import DataPoint, setup
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.modules.retrieval.only_context_prompt import (
-    SYSTEM_PROMPT_HEADER,
-    USER_PROMPT_HEADER,
-)
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
 from cognee.modules.search.types import SearchType
 from cognee.tasks.storage import add_data_points
@@ -105,17 +101,15 @@ async def test_only_context_returns_the_full_llm_input_over_the_real_graph(small
     assert isinstance(payload.context, str)
     assert "Steve Rodger --[works_for]--> Figma" in payload.context
 
-    # The result is one string: system prompt first, then the user prompt carrying the
-    # question and the retrieved context verbatim.
+    # The result is the user prompt: the question and the retrieved context verbatim.
+    # The system prompt (task instructions, session layer) travels separately.
     result = payload.result
     assert isinstance(result, str)
-    assert result is payload.prompt
-    assert result.startswith(SYSTEM_PROMPT_HEADER + "\n")
-    assert USER_PROMPT_HEADER in result
+    assert result is payload.user_prompt
     assert QUESTION in result
     assert payload.context in result
-    assert result.index(SYSTEM_PROMPT_HEADER) < result.index(USER_PROMPT_HEADER)
-    assert result.index(USER_PROMPT_HEADER) < result.index("Steve Rodger --[works_for]--> Figma")
+    assert isinstance(payload.system_prompt, str) and payload.system_prompt
+    assert "Steve Rodger --[works_for]--> Figma" not in payload.system_prompt
 
 
 @pytest.mark.asyncio

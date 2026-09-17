@@ -1,4 +1,4 @@
-"""The full LLM input for ``only_context`` searches.
+"""The LLM input for ``only_context`` searches: the user prompt and the system prompt.
 
 ``only_context=True`` promises the caller what cognee's completion would have worked
 from, so it can hand that to its own LLM instead. A real completion sends more than the
@@ -10,8 +10,9 @@ uses.
 This module assembles the missing layers through the *same* code the real completion
 uses — ``build_session_prompt`` (``session_turn.py``) for the session layer, in its
 read-only mode, and ``build_completion_prompts`` (``utils/completion.py``) for the
-prompt pair — and renders them as one string. Neither layer is re-implemented here, so
-the string cannot drift from the real call as either evolves.
+prompt pair — and hands the pair back as two strings, the way the LLM receives them.
+Neither layer is re-implemented here, so the prompts cannot drift from the real call as
+either evolves.
 
 What ``only_context`` callers can rely on:
 
@@ -33,13 +34,13 @@ Retrievers whose *retrieval* stage itself calls an LLM — chain-of-thought vali
 and follow-ups, decomposition sub-answers, context-extension rounds, the temporal
 retriever's time extraction, graph-summary's summaries — still make those calls under
 ``only_context``, exactly as they always have; nothing here adds to them. For those types
-the string is the final prompt pair over the final context.
+the pair is the final prompts over the final context.
 
 Knowingly unfaithful in one place: a real sequential turn rewrites the question first
 (``turn_preparation.effective_query``), and that rewrite fills the ``{{ question }}``
 slot, drives history selection, and ranks the guidance block; concurrent mode also
 merges a second retrieval lane. Producing that rewrite is an LLM call, which this path
-must not make, so the raw query is used for all of them. The string is the prompt for
+must not make, so the raw query is used for all of them. The pair is the prompts for
 the context actually retrieved, not a replay of a full turn.
 """
 
@@ -63,15 +64,6 @@ logger = get_logger("OnlyContextPrompt")
 
 # The separator the graph prompt template documents for stacked context entries.
 CONTEXT_LIST_SEPARATOR = "\n---\n"
-
-# Role markers for the rendered string. The LLM receives the two prompts as separate
-# messages; one string needs a visible seam so a caller can still split them. Fenced
-# lines rather than bare "SYSTEM:"/"USER:" so ordinary prose in retrieved text or a
-# stored answer is unlikely to forge a boundary. Content is passed through verbatim, so
-# the string is a rendering, not a parseable protocol: a marker line inside the content
-# is not escaped.
-SYSTEM_PROMPT_HEADER = "=== SYSTEM PROMPT ==="
-USER_PROMPT_HEADER = "=== USER PROMPT ==="
 
 
 def render_context_for_prompt(context: Any) -> Any:
@@ -98,19 +90,6 @@ def has_context(context: Any) -> bool:
     if isinstance(context, (list, tuple)):
         return any(has_context(entry) for entry in context)
     return True
-
-
-def render_llm_input(system_prompt: str, user_prompt: str) -> str:
-    """Render the ``(system_prompt, user_prompt)`` pair a completion sends as one string.
-
-    System first, because that is the order the two messages are sent in. Consequence for
-    a consumer that truncates the string to a budget: the front is cognee's guidance and
-    task instructions, and the retrieved content at the end is what gets cut. A caller
-    that wants only the context should take it from the bare-context channel instead —
-    ``verbose=True`` / ``context_result`` on ``search()``, ``raw["context"]`` on a
-    ``recall()`` item — rather than truncate this string.
-    """
-    return f"{SYSTEM_PROMPT_HEADER}\n{system_prompt}\n\n{USER_PROMPT_HEADER}\n{user_prompt}"
 
 
 class SharedSessionHistory:
@@ -212,8 +191,14 @@ async def build_only_context_prompt(
     context: Any,
     session_id: str | None = None,
     shared_history: SharedSessionHistory | None = None,
-) -> str | None:
-    """The full LLM input for one ``only_context`` call, or ``None`` when there is none.
+) -> tuple[str, str] | None:
+    """The ``(user_prompt, system_prompt)`` pair one ``only_context`` call stands in for,
+    or ``None`` when there is none.
+
+    The two are kept apart because the LLM receives them as two messages: the user
+    prompt is the question and the retrieved context rendered through the retriever's
+    template, the system prompt is the session layer plus the retriever's task
+    instructions. Callers surface them as separate fields, never as one string.
 
     ``None`` means "return the bare context instead": the retriever never sends a single
     templated prompt, or retrieval found nothing. Only when a prompt will be built is
@@ -243,4 +228,4 @@ async def build_only_context_prompt(
         system_prompt=getattr(retriever, "system_prompt", None),
         conversation_history=session_context or None,
     )
-    return render_llm_input(system_prompt, user_prompt)
+    return user_prompt, system_prompt
