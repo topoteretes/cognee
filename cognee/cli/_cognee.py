@@ -22,7 +22,7 @@ import cognee.cli.echo as fmt
 from cognee.cli import DEFAULT_DOCS_URL, SupportsCliCommand, debug
 from cognee.cli.config import CLI_DESCRIPTION
 from cognee.cli.exceptions import CliCommandException
-from cognee.cli.remediation import find_remediation
+from cognee.cli.remediation import REMEDIATION_MARKER, find_remediation
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -400,7 +400,8 @@ def main() -> int:
             # Surface a prescriptive next step for known first-run failure
             # modes between the error line and the generic docs pointer, so
             # the actionable fix sits directly under the error it addresses.
-            hint = find_remediation(str(ex))
+            error_text = str(ex)
+            hint = None if REMEDIATION_MARKER in error_text else find_remediation(error_text)
             if hint:
                 fmt.note(hint)
 

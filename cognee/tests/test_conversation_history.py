@@ -445,15 +445,21 @@ async def main():
         "Feedback-only turn must store an acknowledgement as the QA entry's answer"
     )
     # Truthiness alone is not enough: before this fix the concurrent path stored the
-    # generated answer here, which is also truthy. Pin the shape instead — short, and
-    # not about the retrieved subject.
-    assert len(stored_answer_autofeedback) < 120, (
-        "Feedback-only turn must store the short acknowledgement, not the generated "
-        f"answer; got {len(stored_answer_autofeedback)} chars: "
-        f"{stored_answer_autofeedback[:200]}"
+    # generated answer here, which is also truthy. Pin the row's SHAPE instead of the
+    # text: a no-answer turn claims no retrieval and no served guidance (its used_*
+    # fields stay None), while the answered first turn recorded its graph ids. Text
+    # bounds proved flaky — a valid acknowledgement can run long and echo the subject
+    # ("glad the TechCorp details helped").
+    assert first_entry_autofeedback.used_graph_element_ids, (
+        "Answered turn must record the graph elements its answer used"
     )
-    assert "TechCorp" not in stored_answer_autofeedback, (
-        "Feedback-only turn stored a generated answer about the retrieved subject"
+    assert second_entry_autofeedback.used_graph_element_ids is None, (
+        "Feedback-only turn must not claim retrieval: storing the generated answer "
+        "would carry its used_graph_element_ids; "
+        f"got {second_entry_autofeedback.used_graph_element_ids}"
+    )
+    assert not second_entry_autofeedback.used_session_context_ids, (
+        "Feedback-only turn must not claim served guidance"
     )
     assert getattr(second_entry_autofeedback, "feedback_text", None) is None
     assert getattr(second_entry_autofeedback, "feedback_score", None) is None

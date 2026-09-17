@@ -1829,6 +1829,12 @@ class Neo4jAdapter(GraphDBInterface):
 
         return (nodes, edges)
 
+    async def get_top_degree_node_ids(self, top_k: int) -> list[str]:
+        """Rank a bounded edge sample in the store; include isolated nodes."""
+        from cognee.infrastructure.databases.graph.degree_seeds import cypher_degree_seeds
+
+        return await cypher_degree_seeds(self, top_k, typed=False)
+
     async def get_graph_data(self):
         """
         Retrieve comprehensive data about nodes and relationships within the graph.
