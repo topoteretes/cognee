@@ -156,6 +156,11 @@ class LLMConfig(BaseSettings):
     baml_llm_api_version: str = ""
 
     transcription_model: str = "whisper-1"
+    # Vision model for image transcription. Empty means "use llm_model", which is
+    # the right default: the chat model is often already multimodal, and unlike
+    # audio there is no separate-model-by-necessity the way whisper-1 is for
+    # speech. Set it when the base model has no vision capability.
+    image_transcribe_model: str = ""
     graph_prompt_path: str = "generate_graph_prompt.txt"
     temporal_graph_prompt_path: str = "generate_event_graph_prompt.txt"
     event_entity_prompt_path: str = "generate_event_entity_prompt.txt"
@@ -413,6 +418,7 @@ class LLMConfig(BaseSettings):
             "answer_streaming": self.llm_answer_streaming,
             "max_completion_tokens": self.llm_max_completion_tokens,
             "transcription_model": self.transcription_model,
+            "image_transcribe_model": self.image_transcribe_model,
             "graph_prompt_path": self.graph_prompt_path,
             "rate_limit_enabled": self.llm_rate_limit_enabled,
             "rate_limit_requests": self.llm_rate_limit_requests,
