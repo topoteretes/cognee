@@ -22,7 +22,6 @@ from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.session.session_context_builder import build_active_context_block
 from cognee.infrastructure.session.session_context_models import ContextSection
 from cognee.infrastructure.session.session_manager import SessionManager
-from cognee.infrastructure.session.session_turn import SessionPrompt
 from cognee.modules.retrieval import only_context_prompt as only_context_prompt_module
 from cognee.modules.retrieval.only_context_prompt import (
     SharedSessionHistory,
@@ -31,7 +30,7 @@ from cognee.modules.retrieval.only_context_prompt import (
     load_read_only_session_prompt,
     render_context_for_prompt,
 )
-from cognee.modules.retrieval.utils.completion import build_completion_prompts
+from cognee.modules.retrieval.utils.completion import SessionPrompt, build_completion_prompts
 
 # Resolve module objects explicitly and patch with patch.object: package __init__ files
 # re-export same-named functions/classes that shadow these submodules, so dotted-string
@@ -41,7 +40,6 @@ llm_gateway_module = importlib.import_module("cognee.infrastructure.llm.LLMGatew
 
 GUIDANCE_LINE = "Answer in one short sentence"
 PREVIOUS_QUESTION = "What is the capital of Germany?"
-EMPTY_SESSION = SessionPrompt(history="", guidance="")
 
 
 class _PromptRetriever:
@@ -264,7 +262,7 @@ async def test_sessionless_caller_gets_the_preference_block(as_user):
     with patched_session(manager, caching=False, preference_text="PREFERENCES:\n- Portuguese") as m:
         prompt = await load_read_only_session_prompt("why?", session_id="s1")
 
-    assert prompt == SessionPrompt(history="", guidance="PREFERENCES:\n- Portuguese")
+    assert prompt == SessionPrompt(guidance="PREFERENCES:\n- Portuguese")
     m.preference_text.assert_awaited_once()
     m.vector_recall.assert_not_awaited()
 
@@ -273,7 +271,7 @@ async def test_sessionless_caller_gets_the_preference_block(as_user):
 async def test_no_user_takes_the_sessionless_branch():
     manager = _FakeSessionManager()
     with patched_session(manager, preference_text="") as m:
-        assert await load_read_only_session_prompt("why?", session_id="s1") == EMPTY_SESSION
+        assert await load_read_only_session_prompt("why?", session_id="s1") == SessionPrompt()
     m.preference_text.assert_awaited_once()
 
 
@@ -282,7 +280,7 @@ async def test_cache_unavailable_means_bare_prompt(as_user):
     """Caching on but the backend down: _run_session_turn sends no session layer at all."""
     manager = _FakeSessionManager(available=False)
     with patched_session(manager, preference_text="PREFERENCES:\n- x") as m:
-        assert await load_read_only_session_prompt("why?", session_id="s1") == EMPTY_SESSION
+        assert await load_read_only_session_prompt("why?", session_id="s1") == SessionPrompt()
     m.preference_text.assert_not_awaited()
 
 
@@ -298,7 +296,7 @@ async def test_session_prompt_fails_open(as_user):
             side_effect=RuntimeError("cache down"),
         ),
     ):
-        assert await load_read_only_session_prompt("why?", session_id="s1") == EMPTY_SESSION
+        assert await load_read_only_session_prompt("why?", session_id="s1") == SessionPrompt()
 
 
 @pytest.mark.asyncio
@@ -351,7 +349,7 @@ async def test_prompt_is_the_real_assembly_as_a_user_system_pair(as_user):
         prompts = await build_only_context_prompt(
             _PromptRetriever(), query="why?", context=context, session_id="s1"
         )
-        session_prompt = await load_read_only_session_prompt("why?", session_id="s1")
+        session = await load_read_only_session_prompt("why?", session_id="s1")
 
     expected_user, expected_system = build_completion_prompts(
         query="why?",
@@ -359,8 +357,7 @@ async def test_prompt_is_the_real_assembly_as_a_user_system_pair(as_user):
         user_prompt_path=_PromptRetriever.user_prompt_path,
         system_prompt_path=_PromptRetriever.system_prompt_path,
         system_prompt=None,
-        conversation_history=session_prompt.history,
-        guidance=session_prompt.guidance,
+        session=session,
     )
     assert prompts == (expected_user, expected_system)
 

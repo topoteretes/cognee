@@ -21,7 +21,7 @@ import pytest
 
 import cognee.modules.user_preferences.lookup as lookup_module
 from cognee.context_global_variables import current_dataset_id, session_user
-from cognee.infrastructure.session.session_turn import SessionPrompt
+from cognee.modules.retrieval.utils.completion import SessionPrompt
 from cognee.modules.user_preferences.constants import PREFERENCE_RENDER_HEADER
 from cognee.modules.user_preferences.lookup import (
     load_active_preference_lines,

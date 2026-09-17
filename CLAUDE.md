@@ -438,9 +438,9 @@ task template and nothing else: cognee-authored, static per retriever, so it nev
 changes between turns. Everything derived from the user goes into the **user prompt**, in
 this order: the conversation history, the rendered question-and-context template, and
 the guidance block last (the `## Active session guidance` block with a session, the
-durable preference block sessionless). Session code hands the two session parts over as
-`SessionPrompt(history, guidance)` (`build_session_prompt` in
-`cognee/infrastructure/session/session_turn.py`).
+durable preference block sessionless). The session layer travels as one
+`SessionPrompt(history, guidance)` value, defined next to the builder; `SessionPrompt()`
+is the empty layer and sessionless callers pass `SessionPrompt(guidance=preference_text)`.
 
 The placement was measured across every combination, not chosen by taste. Soft
 preferences ("the user prefers German") are ignored from the system prompt by the

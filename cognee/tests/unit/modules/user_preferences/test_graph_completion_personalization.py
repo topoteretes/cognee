@@ -18,6 +18,7 @@ import pytest
 
 import cognee.modules.retrieval.graph_completion_retriever as retriever_module
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.utils.completion import SessionPrompt
 
 
 def _patch_lookup(monkeypatch, result: tuple[str, dict[str, float]]):
@@ -86,7 +87,7 @@ class TestSessionlessGuidance:
         result = await retriever._generate_completion_without_session("q", None, "ctx")
 
         assert result == ["answer"]
-        assert captured["guidance"] == "PREFS"
+        assert captured["session"] == SessionPrompt(guidance="PREFS")
         assert captured["context"] == "ctx"
 
     async def test_preference_text_reaches_batch_arm(self, monkeypatch):
@@ -105,7 +106,7 @@ class TestSessionlessGuidance:
         result = await retriever._generate_completion_without_session(None, ["q1", "q2"], "ctx")
 
         assert result == ["a1", "a2"]
-        assert captured["guidance"] == "PREFS"
+        assert captured["session"] == SessionPrompt(guidance="PREFS")
         assert captured["query_batch"] == ["q1", "q2"]
 
     async def test_empty_preference_text_passes_falsy_guidance(self, monkeypatch):
@@ -123,4 +124,4 @@ class TestSessionlessGuidance:
 
         # generate_completion treats a falsy history as "no layer", so the
         # system prompt stays byte-identical to the un-personalized path.
-        assert captured["guidance"] == ""
+        assert captured["session"] == SessionPrompt()

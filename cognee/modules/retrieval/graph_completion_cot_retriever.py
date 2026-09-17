@@ -11,6 +11,7 @@ from cognee.infrastructure.session.get_session_manager import get_session_manage
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import (
+    SessionPrompt,
     batch_llm_completion,
     generate_completion_batch,
 )
@@ -114,8 +115,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         session_save = self._use_session_cache()
         validate_retriever_input(query, query_batch, session_save)
 
-        conversation_history = ""
-        guidance = ""
+        session = SessionPrompt()
         if session_save:
             user = session_user.get()
             user_id = getattr(user, "id", None)
@@ -128,16 +128,17 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                     last_n=sm.session_history_last_n,
                     include_context=False,
                 )
-                conversation_history = history if isinstance(history, str) else ""
-                # The active session-context guidance block for the CoT rounds. Gated +
-                # fail-open: never blocks CoT reasoning.
-                guidance = await self._maybe_active_context_block(sm, str(user_id), query)
+                # The guidance block is gated + fail-open: never blocks CoT reasoning.
+                session = SessionPrompt(
+                    history=history if isinstance(history, str) else "",
+                    guidance=await self._maybe_active_context_block(sm, str(user_id), query),
+                )
 
         # Normalize single query to batch for uniform processing
         effective_batch = [query] if query else query_batch
 
         _completion, context_text, triplets = await self._run_cot_completion(
-            effective_batch, conversation_history, guidance, skip_final_completion=True
+            effective_batch, session, skip_final_completion=True
         )
 
         self._cot_final_context = context_text
@@ -176,8 +177,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
     async def _run_cot_completion(
         self,
         query_batch: list[str],
-        conversation_history: str = "",
-        guidance: str = "",
+        session: SessionPrompt | None = None,
         skip_final_completion: bool = False,
     ) -> tuple[list[Any], list[str], list[list[Edge]]]:
         """
@@ -186,8 +186,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         Parameters:
         -----------
             - query_batch: Batch of user queries
-            - conversation_history: Optional conversation history string
-            - guidance: Optional session guidance block
+            - session: Optional session layer (history and guidance block)
             - skip_final_completion: If True, do not run _generate_completions on the last
               iteration; return [] for completions (final completion done in get_completion_from_context).
 
@@ -199,13 +198,13 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         """
         states = {q: QueryState() for q in query_batch}
         await self._fetch_initial_triplets_and_context(states)
-        await self._generate_completions(states, conversation_history, guidance)
+        await self._generate_completions(states, session)
 
         for reasoning_iteration in range(self.max_iter):
             followup_queries = await self._run_cot_round(states)
             await self._merge_followup_triplets(states, followup_queries)
             if not (skip_final_completion and reasoning_iteration == self.max_iter - 1):
-                await self._generate_completions(states, conversation_history, guidance)
+                await self._generate_completions(states, session)
 
         return self._collect_results(states, query_batch, skip_final_completion)
 
@@ -222,7 +221,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             states[q].triplets = triplets
             states[q].context_text = context
 
-    async def _generate_completions(self, states: dict, conversation_history: str, guidance: str):
+    async def _generate_completions(self, states: dict, session: SessionPrompt | None):
         """Generate completions for all queries in parallel."""
         queries = list(states.keys())
         contexts = [states[q].context_text for q in queries]
@@ -233,8 +232,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             system_prompt_path=self.system_prompt_path,
             system_prompt=self.system_prompt,
             response_model=self.response_model,
-            conversation_history=conversation_history or None,
-            guidance=guidance or None,
+            session=session,
         )
         for q, comp in zip(queries, completions):
             states[q].completion = comp

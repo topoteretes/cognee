@@ -14,6 +14,7 @@ from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.retrieval.utils.completion import (
+    SessionPrompt,
     generate_completion,
     generate_completion_batch,
 )
@@ -342,8 +343,8 @@ class GraphCompletionRetriever(BaseRetriever):
     ) -> list[Any]:
         """Generate completion(s) without session; returns list of completions."""
         kwargs = self._completion_kwargs(context)
-        # Sessionless guidance site: preference text rides the guidance channel
-        # (guidance), never context. The lookup is memoized per
+        # Sessionless guidance site: preference text is the guidance layer of the
+        # session prompt, never context. The lookup is memoized per
         # context; this sessionless path runs retrieval and completion in one
         # context, so this reuses the get_triplets read. (Across a task
         # fan-out that sharing needs warm_preference_cache in the parent — the
@@ -354,9 +355,11 @@ class GraphCompletionRetriever(BaseRetriever):
         preference_text = await load_preference_text()
         if query_batch:
             return await generate_completion_batch(
-                query_batch=query_batch, guidance=preference_text, **kwargs
+                query_batch=query_batch, session=SessionPrompt(guidance=preference_text), **kwargs
             )
-        completion = await generate_completion(query=query, guidance=preference_text, **kwargs)
+        completion = await generate_completion(
+            query=query, session=SessionPrompt(guidance=preference_text), **kwargs
+        )
         return [completion]
 
     async def _append_graph_evidence(self, completions: list[Any]) -> list[Any]:

@@ -1,11 +1,21 @@
 import asyncio
-from typing import Any
+from typing import Any, NamedTuple
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.infrastructure.llm.streaming.token_sink import answer_scope
 from cognee.modules.observability import COGNEE_RESULT_SUMMARY, new_span
+
+
+class SessionPrompt(NamedTuple):
+    """The session layer of a completion: the conversation history and the guidance
+    block (session guidance, or the durable preference block when sessionless). Either
+    may be empty; ``SessionPrompt()`` is the sessionless, preference-free layer.
+    """
+
+    history: str = ""
+    guidance: str = ""
 
 
 def build_completion_prompts(
@@ -15,21 +25,14 @@ def build_completion_prompts(
     user_prompt_path: str,
     system_prompt_path: str,
     system_prompt: str | None = None,
-    conversation_history: str | None = None,
-    guidance: str | None = None,
+    session: SessionPrompt | None = None,
 ) -> tuple[str, str]:
     """Assemble the exact ``(user_prompt, system_prompt)`` pair a completion sends.
 
-    The system prompt is the retriever's task template and nothing else: cognee-authored,
-    static per retriever. Everything derived from the user goes into the user prompt, in
-    this order: the conversation history, the rendered question-and-context template, and
-    the guidance block last (session guidance or, sessionless, the durable preference
-    block). Placement was measured, not guessed: soft preferences are followed far more
-    reliably from the user turn than from the system prompt, history is only used when
-    it sits next to the context the template points at, and guidance placed last wins
-    over older turns that asked for something else. Instructions planted in a past
-    answer or a retrieved chunk also lose the operator authority the system prompt
-    would have lent them.
+    The system prompt is the retriever's task template, nothing else. The user prompt is
+    the session history, then the rendered question and context, then the guidance block
+    last; empty layers are skipped. The order is measured, not chosen by taste: see
+    "Completion prompt layout" in CLAUDE.md before moving anything.
 
     Pure and side-effect free. ``generate_completion`` builds its prompts here, and so
     does the ``only_context`` preview, so a caller asking what the LLM *would* receive
@@ -45,7 +48,8 @@ def build_completion_prompts(
         # from masquerading as "this retriever has no prompt template" downstream.
         raise FileNotFoundError(f"System prompt template {system_prompt_path!r} could not be read.")
 
-    user_prompt = "\n\n".join(part for part in (conversation_history, rendered, guidance) if part)
+    session = session or SessionPrompt()
+    user_prompt = "\n\n".join(filter(None, (session.history, rendered, session.guidance)))
     return user_prompt, resolved_system_prompt
 
 
@@ -55,8 +59,7 @@ async def generate_completion(
     user_prompt_path: str,
     system_prompt_path: str,
     system_prompt: str | None = None,
-    conversation_history: str | None = None,
-    guidance: str | None = None,
+    session: SessionPrompt | None = None,
     response_model: type = str,
 ) -> Any:
     """Generates a completion using LLM with given context and prompts."""
@@ -66,8 +69,7 @@ async def generate_completion(
         user_prompt_path=user_prompt_path,
         system_prompt_path=system_prompt_path,
         system_prompt=system_prompt,
-        conversation_history=conversation_history,
-        guidance=guidance,
+        session=session,
     )
 
     with pipeline_stage("query"), new_span("cognee.llm.completion") as span:
@@ -91,8 +93,7 @@ async def generate_answer(
     user_prompt_path: str,
     system_prompt_path: str,
     system_prompt: str | None = None,
-    conversation_history: str | None = None,
-    guidance: str | None = None,
+    session: SessionPrompt | None = None,
     response_model: type = str,
 ) -> Any:
     """The one completion a listening client may watch.
@@ -118,8 +119,7 @@ async def generate_answer(
             user_prompt_path=user_prompt_path,
             system_prompt_path=system_prompt_path,
             system_prompt=system_prompt,
-            conversation_history=conversation_history,
-            guidance=guidance,
+            session=session,
             response_model=response_model,
         )
 
@@ -130,8 +130,7 @@ async def generate_completion_batch(
     user_prompt_path: str,
     system_prompt_path: str,
     system_prompt: str | None = None,
-    conversation_history: str | None = None,
-    guidance: str | None = None,
+    session: SessionPrompt | None = None,
     response_model: type = str,
 ) -> list[Any]:
     """Generates completions for a batch of queries in parallel."""
@@ -143,8 +142,7 @@ async def generate_completion_batch(
                 user_prompt_path=user_prompt_path,
                 system_prompt_path=system_prompt_path,
                 system_prompt=system_prompt,
-                conversation_history=conversation_history,
-                guidance=guidance,
+                session=session,
                 response_model=response_model,
             )
             for q, c in zip(query_batch, context)
@@ -156,8 +154,7 @@ async def generate_session_completion_with_optional_summary(
     *,
     query: str,
     context: str,
-    conversation_history: str | None,
-    guidance: str | None,
+    session: SessionPrompt | None,
     user_prompt_path: str,
     system_prompt_path: str,
     system_prompt: str | None = None,
@@ -179,8 +176,7 @@ async def generate_session_completion_with_optional_summary(
                 user_prompt_path=user_prompt_path,
                 system_prompt_path=system_prompt_path,
                 system_prompt=system_prompt,
-                conversation_history=conversation_history,
-                guidance=guidance,
+                session=session,
                 response_model=response_model,
             ),
         )
@@ -192,8 +188,7 @@ async def generate_session_completion_with_optional_summary(
         user_prompt_path=user_prompt_path,
         system_prompt_path=system_prompt_path,
         system_prompt=system_prompt,
-        conversation_history=conversation_history,
-        guidance=guidance,
+        session=session,
         response_model=response_model,
     )
     return (completion, "", None)

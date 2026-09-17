@@ -26,6 +26,7 @@ from cognee.modules.retrieval.completion_retriever import (
     CompletionRetriever,
     _stable_sort_by_personal_distance,
 )
+from cognee.modules.retrieval.utils.completion import SessionPrompt
 from cognee.modules.user_preferences import personal_factor
 
 INFLUENCE = 0.3
@@ -255,7 +256,7 @@ class TestSessionlessGuidance:
         result = await retriever._generate_completion_without_session("q", "ctx")
 
         assert result == ["answer"]
-        assert captured["guidance"] == "PREFS"
+        assert captured["session"] == SessionPrompt(guidance="PREFS")
         assert captured["context"] == "ctx"
 
     async def test_empty_preference_text_passes_falsy_guidance(self, monkeypatch):
@@ -273,4 +274,4 @@ class TestSessionlessGuidance:
 
         # generate_completion treats a falsy history as "no layer", so the
         # system prompt stays byte-identical to the un-personalized path.
-        assert captured["guidance"] == ""
+        assert captured["session"] == SessionPrompt()

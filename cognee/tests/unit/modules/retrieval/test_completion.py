@@ -2,6 +2,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from cognee.modules.retrieval.utils.completion import SessionPrompt
+
 
 class TestGenerateCompletion:
     @pytest.mark.asyncio
@@ -101,7 +103,9 @@ class TestGenerateCompletion:
                 context="AI is artificial intelligence",
                 user_prompt_path="user_prompt.txt",
                 system_prompt_path="system_prompt.txt",
-                conversation_history="Previous conversation:\nQ: What is ML?\nA: ML is machine learning",
+                session=SessionPrompt(
+                    history="Previous conversation:\nQ: What is ML?\nA: ML is machine learning"
+                ),
             )
 
             assert result == mock_llm_response
@@ -139,8 +143,10 @@ class TestGenerateCompletion:
                 user_prompt_path="user_prompt.txt",
                 system_prompt_path="system_prompt.txt",
                 system_prompt="Custom system prompt",
-                conversation_history="Previous conversation:\nQ: What is ML?\nA: ML is machine learning",
-                guidance="## Active session guidance\n### Rules\n- Be brief.",
+                session=SessionPrompt(
+                    history="Previous conversation:\nQ: What is ML?\nA: ML is machine learning",
+                    guidance="## Active session guidance\n### Rules\n- Be brief.",
+                ),
             )
 
             assert result == mock_llm_response
@@ -375,8 +381,7 @@ class TestGenerateSessionCompletionWithOptionalSummary:
             ) = await generate_session_completion_with_optional_summary(
                 query="Q?",
                 context="ctx",
-                conversation_history="",
-                guidance="",
+                session=SessionPrompt(),
                 user_prompt_path="user.txt",
                 system_prompt_path="sys.txt",
                 summarize_context=False,
@@ -421,8 +426,7 @@ class TestGenerateSessionCompletionWithOptionalSummary:
             ) = await generate_session_completion_with_optional_summary(
                 query="Q?",
                 context="long context",
-                conversation_history="",
-                guidance="",
+                session=SessionPrompt(),
                 user_prompt_path="user.txt",
                 system_prompt_path="sys.txt",
                 summarize_context=True,

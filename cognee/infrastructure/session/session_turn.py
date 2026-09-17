@@ -9,7 +9,7 @@ All public coroutines are fail-open so they never block answer generation.
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, NamedTuple
+from typing import Any
 from uuid import uuid4
 
 from cognee.context_global_variables import session_user
@@ -26,6 +26,7 @@ from cognee.infrastructure.session.session_embeddings import (
     search_session_qa_ids,
 )
 from cognee.modules.retrieval.utils.completion import (
+    SessionPrompt,
     generate_session_completion_with_optional_summary,
 )
 from cognee.modules.user_preferences import load_active_preference_lines
@@ -44,17 +45,6 @@ class SessionTurnPreparation:
     analysis: SessionTurnAnalysis | None = None
     accepted_context_ids: list[str] = field(default_factory=list)
     previous_qa_id: str | None = None
-
-
-class SessionPrompt(NamedTuple):
-    """The session layer of a completion prompt, as the two parts the prompt builder
-    places separately: the conversation history and the guidance block. Either may be
-    empty. ``build_completion_prompts`` puts the history before the rendered question
-    and context and the guidance block after them.
-    """
-
-    history: str
-    guidance: str
 
 
 async def load_preference_lines_safe() -> list[str]:
@@ -177,7 +167,7 @@ async def generate_session_answer(
 
     Returns ``(answer, context_to_store, served_context_ids)``.
     """
-    session_prompt, served_ids = await build_session_prompt(
+    session, served_ids = await build_session_prompt(
         session_manager,
         user_id=user_id,
         session_id=session_id,
@@ -191,8 +181,7 @@ async def generate_session_answer(
     ) = await generate_session_completion_with_optional_summary(
         query=answer_query,
         context=context,
-        conversation_history=session_prompt.history,
-        guidance=session_prompt.guidance,
+        session=session,
         user_prompt_path=user_prompt_path,
         system_prompt_path=system_prompt_path,
         system_prompt=system_prompt,

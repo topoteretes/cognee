@@ -53,11 +53,10 @@ from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.infrastructure.session.session_turn import (
-    SessionPrompt,
     build_session_prompt,
     select_session_history,
 )
-from cognee.modules.retrieval.utils.completion import build_completion_prompts
+from cognee.modules.retrieval.utils.completion import SessionPrompt, build_completion_prompts
 from cognee.modules.user_preferences import load_preference_text
 from cognee.shared.logging_utils import get_logger
 
@@ -143,11 +142,11 @@ async def load_read_only_session_prompt(
     try:
         user_uuid = getattr(session_user.get(), "id", None)
         if not (user_uuid and CacheConfig().caching):
-            return SessionPrompt(history="", guidance=await load_preference_text())
+            return SessionPrompt(guidance=await load_preference_text())
 
         session_manager = get_session_manager()
         if not session_manager.is_session_available_for_completion(user_uuid):
-            return SessionPrompt(history="", guidance="")
+            return SessionPrompt()
 
         user_id = str(user_uuid)
         resolved_session_id = session_manager.resolve_session_id(session_id)
@@ -157,7 +156,7 @@ async def load_read_only_session_prompt(
                 session_manager, user_id=user_id, resolved_session_id=resolved_session_id
             )
 
-        session_prompt, _served_ids = await build_session_prompt(
+        session, _served_ids = await build_session_prompt(
             session_manager,
             user_id=user_id,
             session_id=resolved_session_id,
@@ -165,10 +164,10 @@ async def load_read_only_session_prompt(
             history=history,
             stamp_served=False,
         )
-        return session_prompt
+        return session
     except Exception as error:
         logger.warning("Only-context session prompt failed open: %s", error, exc_info=True)
-        return SessionPrompt(history="", guidance="")
+        return SessionPrompt()
 
 
 def retriever_sends_one_prompt(retriever) -> bool:
@@ -218,7 +217,7 @@ async def build_only_context_prompt(
     requested_session_id = (
         session_id if session_id is not None else getattr(retriever, "session_id", None)
     )
-    session_prompt = await load_read_only_session_prompt(
+    session = await load_read_only_session_prompt(
         query, session_id=requested_session_id, shared_history=shared_history
     )
 
@@ -228,7 +227,6 @@ async def build_only_context_prompt(
         user_prompt_path=retriever.user_prompt_path,
         system_prompt_path=retriever.system_prompt_path,
         system_prompt=getattr(retriever, "system_prompt", None),
-        conversation_history=session_prompt.history or None,
-        guidance=session_prompt.guidance or None,
+        session=session,
     )
     return user_prompt, system_prompt
