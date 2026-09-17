@@ -27,9 +27,13 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("enola")
 
 INSTALL_HINT = (
-    "The code graph route needs the enola binary. "
-    'Install it with: pip install "cognee[codegraph]", '
-    "or point the ENOLA_PATH environment variable at an enola binary."
+    "Missing optional dependency: the enola binary (PyPI package `enola-cli`) is not "
+    "installed, so cognee cannot build a code graph. It ships with cognee's `codegraph` "
+    "extra. To fix this, install cognee with that extra and run again:\n"
+    '    pip install "cognee[codegraph]"\n'
+    '(or the equivalent for your installer, e.g. uv pip install "cognee[codegraph]"). '
+    "If you built enola yourself instead, set the ENOLA_PATH environment variable to "
+    "the binary."
 )
 
 # Snapshot artifact format generations this reader understands (receipt.json
@@ -104,7 +108,11 @@ def find_enola_binary() -> str:
         if os.path.isfile(env_path):
             return env_path
         raise EnolaNotInstalledError(
-            message=f"ENOLA_PATH is set to '{env_path}' but no file exists there. {INSTALL_HINT}"
+            message=(
+                f"ENOLA_PATH is set to '{env_path}' but no file exists there, so cognee "
+                "cannot build a code graph. Point ENOLA_PATH at an enola binary, or unset "
+                'it and install cognee with the codegraph extra: pip install "cognee[codegraph]"'
+            )
         )
 
     binary = _environment_scripts_binary() or shutil.which("enola")
