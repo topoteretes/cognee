@@ -266,3 +266,35 @@ def test_a_failure_of_the_default_type_is_not_swallowed(retry_client):
         )
 
     assert retry_client.calls == [SearchType.HYBRID_COMPLETION]
+
+
+def test_session_first_scope_short_circuits_without_omitting_the_type(live_recall_client):
+    """The short-circuit is reachable explicitly, so query_type need not carry it."""
+    response = live_recall_client.post(
+        "/api/v1/recall",
+        json={
+            "query": "what did we decide?",
+            "sessionId": "s1",
+            "scope": "session_first",
+            "searchType": "HYBRID_COMPLETION",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert [entry["source"] for entry in response.json()] == ["session"]
+
+
+def test_plain_session_scope_lets_both_sources_contribute(live_recall_client):
+    """Without session_first, an explicit scope never short-circuits."""
+    response = live_recall_client.post(
+        "/api/v1/recall",
+        json={
+            "query": "what did we decide?",
+            "sessionId": "s1",
+            "scope": ["session", "graph"],
+            "searchType": "HYBRID_COMPLETION",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert [entry["source"] for entry in response.json()] == ["session", "graph"]

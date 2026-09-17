@@ -176,7 +176,7 @@ async def _search_session(
 
     Tokenizes the query and each QA entry (question + context + answer),
     ranks by token overlap, returns the top_k tagged with
-    ``_source: "session"``.
+    ``source="session"``.
     """
     from cognee.infrastructure.session.get_session_manager import get_session_manager
 
@@ -233,7 +233,7 @@ async def _search_trace(
 
     Tokenizes over origin_function, serialized method_params,
     method_return_value, memory_query, memory_context, and
-    session_feedback. Returns top_k tagged with ``_source: "trace"``.
+    session_feedback. Returns top_k tagged with ``source="trace"``.
     """
     import json
 
@@ -389,7 +389,7 @@ async def recall(
     hitting the permanent graph. If no session entries match, falls
     through to the permanent graph search.
 
-    Each result dict includes a ``_source`` key (``"session"`` or
+    Each result includes a ``source`` field (``"session"`` or
     ``"graph"``) so callers can tell where the result came from.
 
     When ``query_type`` is omitted and ``auto_route`` is True (default),
@@ -430,12 +430,12 @@ async def recall(
             ``None`` runs the default ``explore`` operation with the query
             text as seed. Only valid when ``scope`` includes ``"code"``
             (which is never implied by ``"auto"`` or ``"all"``); results are
-            tagged ``_source="code"``. A seed the code graph cannot resolve
+            tagged ``source="code"``. A seed the code graph cannot resolve
             contributes nothing rather than failing the recall.
 
     Returns:
         Search results. When searching session-only, returns a list of
-        matching QA entry dicts with ``_source="session"``.
+        matching QA entries with ``source="session"``.
     """
     from cognee import __version__ as cognee_version
     from cognee.shared.utils import send_telemetry
@@ -469,7 +469,9 @@ async def recall(
     # * no session_id:
     #     graph only.
     #
-    # Explicit ``scope`` values bypass this entirely.
+    # Explicit ``scope`` values bypass this entirely, and each branch above has
+    # one: "session_first" for the short-circuit, ["session", "graph"] for both
+    # contributing, "graph" for graph only. query_type need not be how you ask.
     resolved_scope = normalize_scope(scope)
     if resolved_scope == ["auto"]:
         has_dataset_scope = bool(dataset_ids) or bool(datasets)
@@ -483,8 +485,14 @@ async def recall(
             sources = ["graph"]
             auto_fallthrough = False
     else:
+        # The short-circuit as an explicit request. Without it, omitting
+        # query_type is the only way to ask for that behaviour.
+        auto_fallthrough = "session_first" in resolved_scope
+        if auto_fallthrough:
+            resolved_scope = ["session", "graph"] + [
+                s for s in resolved_scope if s not in ("session_first", "session", "graph")
+            ]
         sources = resolved_scope
-        auto_fallthrough = False
 
     if tools_trigger not in ("always", "on_empty"):
         raise CogneeValidationError(

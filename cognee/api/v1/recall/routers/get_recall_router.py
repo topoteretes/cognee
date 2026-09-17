@@ -98,9 +98,11 @@ class RecallPayloadDTO(InDTO):
         default=None,
         examples=[None],
         description=(
-            "Which memory sources to include: 'graph', 'session', 'trace', "
-            "'session_context', 'tools', 'code', 'all', 'auto', or a list of these. "
-            "Defaults to 'auto' (session first when session_id is set, else graph). "
+            "Which memory sources to include: 'graph', 'session', 'session_first', "
+            "'trace', 'session_context', 'tools', 'code', 'all', 'auto', or a list of "
+            "these. Defaults to 'auto' (session first when session_id is set, else "
+            "graph). 'session_first' asks for that short-circuit explicitly — a session "
+            "hit answers alone — instead of getting it by omitting search_type. "
             "'tools' and 'code' are explicit opt-in only — never implied by 'auto' or "
             "'all'. 'tools' requires TOOL_CALLS_ENABLED on the server; 'code' runs a "
             "deterministic code-graph query (see code_query) and tags results "
@@ -236,10 +238,12 @@ def get_recall_router() -> APIRouter:
         - **session_id** (Optional[str]): Session whose cached QA and trace entries
           should be searched
         - **scope** (Optional[str | List[str]]): Memory sources to include: "graph",
-          "session", "trace", "session_context", "tools", "code", "all", "auto", or a
-          list of these (default: "auto" — session first when session_id is set, else
-          graph). "code" is explicit opt-in only and returns deterministic code-graph
-          facts tagged _source="code" (e.g. scope=["graph", "code"])
+          "session", "session_first", "trace", "session_context", "tools", "code",
+          "all", "auto", or a list of these (default: "auto" — session first when
+          session_id is set, else graph). "session_first" requests that short-circuit
+          explicitly rather than by omitting searchType. "code" is explicit opt-in only
+          and returns deterministic code-graph facts tagged _source="code"
+          (e.g. scope=["graph", "code"])
         - **code_query** (Optional[dict]): "code" scope only — operation and arguments
           for the code-graph query (same format as /v1/search code_query); omit for
           the default "explore" with the query text as seed

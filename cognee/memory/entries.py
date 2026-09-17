@@ -151,6 +151,7 @@ _VALID_SCOPES = {
     "auto",
     "graph",
     "session",
+    "session_first",
     "trace",
     "graph_context",
     "session_context",
@@ -198,6 +199,10 @@ def normalize_scope(scope: str | list[str] | None) -> list[str]:
         expanded = ["graph", "session", "trace", "session_context"]
         if "tools" in scopes:
             expanded.append("tools")
+        # "session_first" is a strategy over sources rather than a source, so
+        # "all" neither implies nor replaces it; carry it through when asked.
+        if "session_first" in scopes:
+            expanded.append("session_first")
         return expanded
 
     # Dedupe while preserving order
