@@ -19,8 +19,8 @@ from fastapi.responses import JSONResponse
 # are explicit here.
 import cognee.modules.integrations.github
 import cognee.modules.integrations.linear
-from cognee.api.startup_checks import report_default_user_login_posture
 from cognee.api.exception_telemetry import send_api_exception_telemetry
+from cognee.api.startup_checks import report_default_user_login_posture
 from cognee.api.v1.activity.routers import get_activity_router
 from cognee.api.v1.add.routers import get_add_router
 from cognee.api.v1.agents.routers import get_agents_router
