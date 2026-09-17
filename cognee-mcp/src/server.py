@@ -591,7 +591,7 @@ async def recall(
                     )
                 except Exception:
                     logger.debug("Recall empty-state diagnostics unavailable", exc_info=True)
-                    empty_state = RecallState("unknown")
+                    empty_state = RecallState("none")
             return [
                 types.TextContent(
                     type="text",
@@ -606,7 +606,7 @@ async def recall(
                             "count": len(items),
                             "state": "found"
                             if items
-                            else (empty_state or RecallState("unknown")).state,
+                            else (empty_state or RecallState("none")).state,
                         }
                     },
                 )

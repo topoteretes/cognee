@@ -239,17 +239,27 @@ def recall_marker_state(results: Any) -> RecallState | None:
     return None
 
 
-def classify_recall_state(progress: dict, graphs: list[dict]) -> RecallState:
-    """Classify authorized datasets from existing status and graph-summary responses."""
+def classify_recall_state(progress: dict) -> RecallState:
+    """Classify authorized datasets from an existing pipeline-status response.
+
+    Three outcomes, because a consumer has three actions: retry shortly
+    (``indexing``), go look at why ingestion failed (``build_failed``), or
+    accept that there is nothing (``none``).
+
+    Earlier this also separated ``empty`` / ``not_indexed`` / ``no_match`` /
+    ``unknown``. Those four produced near-identical sentences, and telling them
+    apart was the entire reason for a ``/datasets/graph-summary`` round trip per
+    empty recall -- plus, locally, a full per-dataset graph traversal. The
+    distinction was unreliable anyway: a zero count from an unavailable graph
+    store is not proof of emptiness, so several branches fell back to
+    ``unknown`` regardless.
+    """
     runs = []
-    graph_runs = []
     for value in progress.values():
         if "status" in value:
             runs.append(value)
-            graph_runs.append(value)
         else:
             runs.extend(value.values())
-            graph_runs.extend(run for pipeline, run in value.items() if pipeline != "add_pipeline")
     active = [
         run
         for run in runs
@@ -267,24 +277,7 @@ def classify_recall_state(progress: dict, graphs: list[dict]) -> RecallState:
         return RecallState("indexing")
     if any(run.get("status") == "DATASET_PROCESSING_ERRORED" for run in runs):
         return RecallState("build_failed")
-    if not graphs:
-        return RecallState("unknown")
-    if any(graph.get("num_nodes", graph.get("numNodes", 0)) > 0 for graph in graphs):
-        return RecallState("no_match")
-    # A zero from an unavailable graph store is not proof that memory is empty.
-    if any(
-        graph.get("pipeline_run_id", graph.get("pipelineRunId")) is not None
-        and graph.get("computed_at", graph.get("computedAt")) is None
-        for graph in graphs
-    ):
-        return RecallState("unknown")
-    if all(graph.get("computed_at", graph.get("computedAt")) is not None for graph in graphs):
-        return RecallState("empty")
-    # Graph summaries cover cognify, not arbitrary/custom or code pipelines.
-    # A completed run with no corresponding graph count must not look empty.
-    if any(run.get("status") == "DATASET_PROCESSING_COMPLETED" for run in graph_runs):
-        return RecallState("no_match")
-    return RecallState("not_indexed")
+    return RecallState("none")
 
 
 def format_recall_results(
@@ -317,15 +310,12 @@ def format_recall_results(
             hints = [f"{n} from {hint}" for hint, n in list(sources.items())[:3]]
             summary += " (" + ", ".join(hints) + ")"
     else:
-        state = empty_state or recall_marker_state(results) or RecallState("unknown")
+        state = empty_state or recall_marker_state(results) or RecallState("none")
         summary = {
-            "empty": "memory graph is empty — no indexed memories available",
-            "not_indexed": "memory has not been indexed yet — add data and run indexing",
-            "no_match": "no matching memories",
             "indexing": "still indexing — retry shortly",
             "build_failed": "memory indexing failed — check cognify_status",
-            "unknown": "no matching memories returned — memory status unavailable",
-        }.get(state.state, "no matching memories returned — memory status unavailable")
+            "none": "no matching memories",
+        }.get(state.state, "no matching memories")
         if state.state == "indexing" and state.total is not None:
             summary = (
                 f"still indexing — {state.completed}/{state.total} items processed, retry shortly"

@@ -546,9 +546,19 @@ not trigger status checks.
 
 The MCP content remains a single `TextContent` block. Text consumers can separate
 line one from the unchanged body with `text.partition("\n")`. Machine consumers
-can read `content[0]._meta["cognee/memory"]`, containing `count` and `state`
-(`found`, `empty`, `indexing`, `not_indexed`, `build_failed`, `no_match`, or
-`unknown`). Tool errors retain their existing `Error:` response.
+can read `content[0]._meta["cognee/memory"]`, containing `count` and `state`.
+
+`state` is one of four values, one per action a caller can take:
+
+| state | meaning |
+| --- | --- |
+| `found` | memory contributed; `count` is how many entries |
+| `indexing` | ingestion is still running — retry shortly |
+| `build_failed` | ingestion failed — check `cognify_status` |
+| `none` | nothing to return |
+
+`indexing` additionally carries `completed`/`total` when the pipeline reports
+them. Tool errors retain their existing `Error:` response.
 
 ### Tool surface (`COGNEE_MCP_TOOL_MODE`)
 

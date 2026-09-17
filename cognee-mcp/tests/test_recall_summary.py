@@ -64,20 +64,24 @@ def test_pydantic_results_and_markers():
 @pytest.mark.parametrize(
     "state,prefix",
     [
-        (RecallState("empty"), "memory graph is empty"),
         (RecallState("indexing", 12, 40), "still indexing — 12/40 items processed"),
         (RecallState("indexing"), "still indexing — retry shortly"),
-        (RecallState("no_match"), "no matching memories"),
-        (RecallState("unknown"), "no matching memories returned — memory status unavailable"),
+        (RecallState("build_failed"), "memory indexing failed — check cognify_status"),
+        (RecallState("none"), "no matching memories"),
     ],
 )
 def test_explicit_empty_states(state, prefix):
     assert format_recall_results([], empty_state=state).startswith(prefix)
 
 
-def test_unknown_graph_counts_cannot_be_reported_as_empty():
-    state = classify_recall_state({}, [{"numNodes": 0, "pipelineRunId": "run", "computedAt": None}])
-    assert state.state == "unknown"
+def test_no_pipeline_activity_is_simply_none():
+    """No run to report on is "nothing", not a separate diagnosis.
+
+    This used to assert "unknown" for an unavailable graph store, which only
+    existed to stop a zero node count being read as "empty". Both states, and
+    the graph read that produced them, are gone.
+    """
+    assert classify_recall_state({}) == RecallState("none")
 
 
 @pytest.mark.parametrize("completed,total", [(1, None), (None, 40), (-1, 40), (41, 40), (True, 40)])
@@ -88,8 +92,7 @@ def test_invalid_progress_does_not_invent_a_fraction(completed, total):
                 "status": "DATASET_PROCESSING_STARTED",
                 "progress": {"completed_items": completed, "total_items": total},
             }
-        },
-        [],
+        }
     )
     assert state == RecallState("indexing")
 
@@ -129,7 +132,7 @@ async def test_diagnostic_failure_does_not_turn_no_results_into_tool_error(monke
     )
     monkeypatch.setattr(server, "cognee_client", fake)
     result = await server.recall("query")
-    assert result[0].text == "no matching memories returned — memory status unavailable"
+    assert result[0].text == "no matching memories"
 
 
 @pytest.mark.asyncio
@@ -145,8 +148,13 @@ async def test_mcp_wire_content_stays_text_with_old_body(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("state", ["indexing", "empty", "no_match", "unknown"])
+@pytest.mark.parametrize("state", ["indexing", "none"])
 async def test_api_diagnostics_are_scoped_and_bounded(state):
+    """One status call, scoped to the named dataset, and no graph read.
+
+    The graph-summary leg existed only to split "nothing" four ways; dropping it
+    takes a whole round trip out of every empty recall.
+    """
     client = CogneeClient(api_url="http://cognee.test", api_token="token")
     await client.client.aclose()
     seen = []
@@ -154,52 +162,38 @@ async def test_api_diagnostics_are_scoped_and_bounded(state):
     def handle(request):
         seen.append(request)
         assert request.headers["Authorization"] == "Bearer token"
+        assert not request.url.path.endswith("/graph-summary")
         if request.url.path == "/api/v1/datasets/":
             return httpx.Response(
                 200, json=[{"id": "target", "name": "project"}, {"id": "other", "name": "other"}]
             )
-        if request.url.path.endswith("/status/progress"):
-            assert request.url.params.get_list("dataset") == ["target"]
-            assert set(request.url.params.get_list("pipeline")) == {
-                "add_pipeline",
-                "cognify_pipeline",
-                "code_graph_pipeline",
-            }
-            status = (
-                "DATASET_PROCESSING_STARTED"
-                if state == "indexing"
-                else "DATASET_PROCESSING_COMPLETED"
-            )
-            return httpx.Response(
-                200,
-                json={
-                    "target": {
-                        "cognify_pipeline": {
-                            "status": status,
-                            "progress": {"completed_items": 12, "total_items": 40},
-                        }
-                    }
-                },
-            )
-        assert request.url.path.endswith("/graph-summary")
-        assert request.url.params.get_list("dataset_ids") == ["target"]
+        assert request.url.path.endswith("/status/progress")
+        assert request.url.params.get_list("dataset") == ["target"]
+        assert set(request.url.params.get_list("pipeline")) == {
+            "add_pipeline",
+            "cognify_pipeline",
+            "code_graph_pipeline",
+        }
+        status = (
+            "DATASET_PROCESSING_STARTED" if state == "indexing" else "DATASET_PROCESSING_COMPLETED"
+        )
         return httpx.Response(
             200,
-            json=[
-                {
-                    "datasetId": "target",
-                    "pipelineRunId": "run",
-                    "numNodes": 2 if state == "no_match" else 0,
-                    "computedAt": None if state == "unknown" else "now",
+            json={
+                "target": {
+                    "cognify_pipeline": {
+                        "status": status,
+                        "progress": {"completed_items": 12, "total_items": 40},
+                    }
                 }
-            ],
+            },
         )
 
     client.client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
     try:
         result = await client.get_recall_state(["project"])
         assert result.state == state
-        assert len(seen) == (2 if state == "indexing" else 3)
+        assert len(seen) == 2
     finally:
         await client.close()
 
@@ -209,30 +203,22 @@ async def test_direct_diagnostics_authorize_before_reading(monkeypatch):
     methods = importlib.import_module("cognee.modules.data.methods")
     users = importlib.import_module("cognee.modules.users.methods")
     pipelines = importlib.import_module("cognee.modules.pipelines.operations.get_pipeline_status")
-    from datetime import datetime, timezone
-
-    from cognee.modules.data.methods.get_datasets_graph_counts import DatasetGraphCounts
-
     user = SimpleNamespace(id=uuid4())
     dataset = SimpleNamespace(id=uuid4())
     authorize = AsyncMock(return_value=[dataset])
     progress = AsyncMock(return_value={})
-    counts = AsyncMock(
-        return_value={
-            dataset.id: DatasetGraphCounts(
-                pipeline_run_id=uuid4(), num_nodes=0, computed_at=datetime.now(timezone.utc)
-            )
-        }
-    )
+    graph_counts = AsyncMock()
     monkeypatch.setattr(users, "get_default_user", AsyncMock(return_value=user))
     monkeypatch.setattr(methods, "get_authorized_existing_datasets", authorize)
-    monkeypatch.setattr(methods, "get_datasets_graph_counts", counts)
+    monkeypatch.setattr(methods, "get_datasets_graph_counts", graph_counts)
     monkeypatch.setattr(pipelines, "get_pipeline_progress", progress)
     client = CogneeClient()
-    assert (await client.get_recall_state(["project"])).state == "empty"
+    assert (await client.get_recall_state(["project"])).state == "none"
     authorize.assert_awaited_once_with(["project"], "read", user)
-    counts.assert_awaited_once_with([dataset])
     assert all(call.args[0] == [dataset.id] for call in progress.await_args_list)
+    # The graph traversal is gone: locally it was a full per-dataset walk on the
+    # first empty recall after a cognify, and it only served the four-way split.
+    graph_counts.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -250,7 +236,9 @@ async def test_diagnostic_deadline_cancels_probe(monkeypatch):
     monkeypatch.setattr(server, "_RECALL_STATE_TIMEOUT_SECONDS", 0.01)
     result = await server.recall("query")
     assert cancelled.is_set()
-    assert "status unavailable" in result[0].text
+    # A probe that overran is still just "nothing" to the caller; the separate
+    # "status unavailable" wording went with the unknown state.
+    assert result[0].text == "no matching memories"
 
 
 @pytest.mark.asyncio
@@ -281,12 +269,24 @@ async def test_queued_ingestion_is_indexing_before_pipeline_record_exists(monkey
     assert not server._background_task_datasets
 
 
-def test_staged_documents_are_not_a_genuine_no_match():
+def test_completed_run_with_nothing_to_show_is_none():
+    """A finished pipeline and an empty result are the same outcome for a caller.
+
+    Previously split into not_indexed vs no_match, which cost a graph-summary
+    round trip to tell apart and produced near-identical sentences.
+    """
     state = classify_recall_state(
-        {"ds": {"add_pipeline": {"status": "DATASET_PROCESSING_COMPLETED", "progress": None}}},
-        [{"pipelineRunId": None, "numNodes": 0, "computedAt": None}],
+        {"ds": {"add_pipeline": {"status": "DATASET_PROCESSING_COMPLETED", "progress": None}}}
     )
-    assert state.state == "not_indexed"
+    assert state == RecallState("none")
+
+
+def test_errored_run_is_still_distinguished_from_none():
+    """build_failed survives the collapse: it is the one "no results" case with
+    a different action attached (go and look at cognify_status)."""
+    assert classify_recall_state(
+        {"ds": {"cognify_pipeline": {"status": "DATASET_PROCESSING_ERRORED"}}}
+    ) == RecallState("build_failed")
 
 
 def test_multiple_active_pipelines_do_not_double_count_progress():
@@ -294,6 +294,6 @@ def test_multiple_active_pipelines_do_not_double_count_progress():
         "status": "DATASET_PROCESSING_STARTED",
         "progress": {"completed_items": 12, "total_items": 40},
     }
-    assert classify_recall_state(
-        {"ds": {"add_pipeline": run, "cognify_pipeline": run}}, []
-    ) == RecallState("indexing")
+    assert classify_recall_state({"ds": {"add_pipeline": run, "cognify_pipeline": run}}) == (
+        RecallState("indexing")
+    )

@@ -744,7 +744,7 @@ class CogneeClient:
                 ]
             )
             if not selected:
-                return RecallState("unknown" if datasets else "empty")
+                return RecallState("none")
             params = [("dataset", str(d["id"])) for d in selected]
             params.extend(("pipeline", pipeline) for pipeline in pipelines)
             response = await self.client.get(
@@ -754,45 +754,22 @@ class CogneeClient:
                 timeout=remaining() or 2.0,
             )
             response.raise_for_status()
-            progress = response.json()
-            state = classify_recall_state(progress, [])
-            if state.state in ("indexing", "build_failed"):
-                return state
-            response = await self.client.get(
-                f"{self.api_url}/api/v1/datasets/graph-summary",
-                params=[("dataset_ids", str(d["id"])) for d in selected],
-                headers=self._get_headers(),
-                timeout=remaining() or 2.0,
-            )
-            response.raise_for_status()
-            graphs = response.json()
-            if len(graphs) != len(selected):
-                return RecallState("unknown")
-            return classify_recall_state(progress, graphs)
+            return classify_recall_state(response.json())
 
-        from dataclasses import asdict
-
-        from cognee.modules.data.methods import (
-            get_authorized_existing_datasets,
-            get_datasets_graph_counts,
-        )
+        from cognee.modules.data.methods import get_authorized_existing_datasets
         from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_progress
         from cognee.modules.users.methods import get_default_user
 
         user = await get_default_user()
         selected = await get_authorized_existing_datasets(datasets, "read", user)
         if not selected:
-            return RecallState("unknown" if datasets else "empty")
+            return RecallState("none")
         ids = [dataset.id for dataset in selected]
         progress = {str(dataset.id): {} for dataset in selected}
         for pipeline in pipelines:
             for dataset_id, run in (await get_pipeline_progress(ids, pipeline)).items():
                 progress[str(dataset_id)][pipeline] = run
-        state = classify_recall_state(progress, [])
-        if state.state in ("indexing", "build_failed"):
-            return state
-        counts = await get_datasets_graph_counts(selected)
-        return classify_recall_state(progress, [asdict(counts[dataset.id]) for dataset in selected])
+        return classify_recall_state(progress)
 
     async def recall(
         self,
