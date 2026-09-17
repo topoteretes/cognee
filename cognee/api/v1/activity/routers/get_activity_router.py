@@ -10,6 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
+from cognee.exceptions import CogneeApiError
 from cognee.modules.users.methods.get_authenticated_user import get_authenticated_user
 from cognee.modules.users.methods.get_visible_user_ids import get_visible_user_ids
 from cognee.modules.users.models import User
@@ -251,6 +252,8 @@ def get_activity_router() -> APIRouter:
                 )
 
             return result
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Failed to retrieve activity traces")
             return JSONResponse(
