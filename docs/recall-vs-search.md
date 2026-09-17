@@ -158,11 +158,16 @@ there is nothing left to fall back to, so the error is real.
 | REST `POST /api/v1/recall` | omit `searchType` or pass `null` (default) | pass a value |
 | CLI `cognee-cli recall` | omit `--query-type` | `--query-type X` (choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES`) |
 
-All three surfaces auto-route by default. On every surface, omitting the type
-also makes the session a search source whenever a `session_id` is given: alone
-it short-circuits the graph on a hit, alongside datasets both contribute.
-Pinning a type leaves the graph as the only source unless you ask for the
-session by name with `scope`. REST clients that relied on the old
+All three surfaces auto-route by default — with one exception. When no usable
+LLM key is configured, recall picks `CHUNKS` before the router is consulted,
+because nothing can write a completion answer; the router never runs and an
+explicit `query_type` is the only way to select a strategy. That branch keys
+off LLM availability, not off the extractor that built the graph.
+
+On every surface, omitting the type also makes the session a search source
+whenever a `session_id` is given: alone it short-circuits the graph on a hit,
+alongside datasets both contribute. Pinning a type leaves the graph as the only
+source unless you ask for the session by name with `scope`. REST clients that relied on the old
 `HYBRID_COMPLETION` default should pass `"searchType": "HYBRID_COMPLETION"`
 explicitly.
 
