@@ -32,7 +32,30 @@ logger = get_logger()
 
 
 def _add_pipeline_needs_llm(data: Any, preferred_loaders: list | None) -> bool:
-    """Only known plain-text inputs can safely skip the LLM check."""
+    """Does this add call need a working LLM before it starts?
+
+    Two rules, in order:
+
+    *No LLM configured at all — no.* The checks this drives have nothing to add
+    then: the first-run connection probe would only restate the absent key, and
+    the provider-config warning would claim extraction needs an LLM when a
+    keyless run extracts with the local GLiNER model and embeds with the local
+    embedder. Keyless ingestion is a supported mode, so a conservative guess
+    about a file whose loader is not known yet must not block it. Media is the
+    one ingestion step that genuinely needs a key, and each media loader raises
+    its own actionable error if it is actually reached
+    (``require_llm_for_media``) — a moment later than the probe, naming the
+    file kind and what still works without a key.
+
+    *Otherwise, only known plain-text inputs can safely skip the check*: a file
+    whose loader is not resolved yet could still be an image or a recording,
+    whose loaders transcribe through the LLM.
+    """
+    from cognee.modules.preflight import llm_available
+
+    if not llm_available():
+        return False
+
     if preferred_loaders:
         return True
 
