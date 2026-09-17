@@ -126,9 +126,9 @@ async def lifespan(app: FastAPI):
         await get_default_user()
         await set_default_user_password_if_unset()
     report_default_user_login_posture()
-    from cognee.modules.cognify.recovery import recover_stale_cognify_runs_on_startup
+    from cognee.modules.cognify.recovery import recover_stale_pipeline_runs_on_startup
 
-    await recover_stale_cognify_runs_on_startup()
+    await recover_stale_pipeline_runs_on_startup()
 
     from cognee.modules.users.authentication.get_auth_secret import resolve_auth_secrets
 
