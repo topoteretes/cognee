@@ -530,7 +530,7 @@ LLM_API_KEY="your_anthropic_api_key"
 ```bash
 LLM_PROVIDER="ollama"
 LLM_MODEL="llama3.1:8b"
-LLM_ENDPOINT="http://localhost:11434/v1"
+LLM_ENDPOINT="http://localhost:11434"  # bare host; /v1 only with the instructor framework
 LLM_API_KEY="ollama"
 EMBEDDING_PROVIDER="ollama"
 EMBEDDING_MODEL="nomic-embed-text:latest"
