@@ -97,7 +97,7 @@ With no `LLM_API_KEY` set at all, `remember` and `cognify` build the graph with 
 GLiNER demo extractor and embed with a local model (`pip install "cognee[gliner]"`), and
 `recall` answers with the matching chunks.
 
-> **⚠️ Demo:** The GLiNER extractor shipped in open source is a demo of cognee's enterprise
+> **Demo:** The GLiNER extractor shipped in open source is a demo of cognee's enterprise
 > GLiNER extraction. It is free to use, but the production-grade version — higher accuracy
 > and broader label coverage — is available as a licensed product. Write to us at
 > social@cognee.ai to explore the options.

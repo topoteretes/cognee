@@ -798,7 +798,7 @@ Opt-in LLM check that runs as the last `cognify()` task (default **off**). After
 
 ### LLM-free Graph Extraction (GLiNER demo)
 
-> **⚠️ Demo:** The open-source GLiNER extractor (`gliner_demo`) is a demo of cognee's
+> **Demo:** The open-source GLiNER extractor (`gliner_demo`) is a demo of cognee's
 > enterprise GLiNER extraction, like `postgres_demo` is the demo graph backend. It is free
 > to use and needs no LLM key; the production-grade version (higher accuracy, broader label
 > coverage) is available with a cognee enterprise licence. The first run with it logs that
