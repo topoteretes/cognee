@@ -194,8 +194,16 @@ async def _recover_one_run(pipeline_run, dataset, run_user, rollback_handler) ->
     # The row reuses the abandoned run's own ids, so its history reads as one
     # run (STARTED then ERRORED) instead of inventing a run that never
     # executed. pipeline_runs lives in the shared relational database, so this
-    # needs no dataset database context. origin is stamped "background":
-    # nothing about this row came from a caller.
+    # needs no dataset database context.
+    #
+    # origin and parent_operation_id below are the dead run's own, passed
+    # through rather than left to log_pipeline_run_error's own default (the
+    # current context, which the operation_origin_scope just below would make
+    # "background"): the closing row should say "mcp" or "api" — whichever
+    # surface actually abandoned the run — not "background" for every run
+    # this sweep ever closes, regardless of who started it. A legacy row with
+    # no origin of its own (getattr returns None) still falls through to that
+    # same "background" default, since there is nothing truer to say about it.
     try:
         with operation_origin_scope(ORIGIN_BACKGROUND):
             await log_pipeline_run_error(
@@ -217,6 +225,8 @@ async def _recover_one_run(pipeline_run, dataset, run_user, rollback_handler) ->
                 ),
                 user=run_user,
                 started_at=getattr(pipeline_run, "started_at", None),
+                origin=getattr(pipeline_run, "origin", None),
+                parent_operation_id=getattr(pipeline_run, "parent_operation_id", None),
             )
     except Exception as error:
         # Same scope as above: this one dataset's closing row.

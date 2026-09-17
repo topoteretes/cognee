@@ -662,3 +662,18 @@ async def test_a_legacy_run_with_no_origin_is_still_recovered(recovery_db):
 
     closed = await _rows(recovery_db.engine, status=ERRORED)
     assert [row.pipeline_run_id for row in closed] == [legacy_run.pipeline_run_id]
+
+
+@pytest.mark.asyncio
+async def test_the_closing_row_keeps_the_dead_runs_own_origin(recovery_db):
+    """The closing write runs inside operation_origin_scope(ORIGIN_BACKGROUND),
+    but the row should describe the run that died, not the sweep that closed
+    it: an "mcp" run stays "mcp" on its ERRORED row, not "background"."""
+    dataset = _dataset()
+    mcp_run = _started_run(dataset.id, "cognify_pipeline", origin="mcp")
+    await _insert(recovery_db.engine, dataset, mcp_run)
+
+    await recovery_module.recover_abandoned_pipeline_runs(owned_origins=frozenset({"mcp"}))
+
+    closed = await _rows(recovery_db.engine, run_id=mcp_run.pipeline_run_id, status=ERRORED)
+    assert closed[0].origin == "mcp"
