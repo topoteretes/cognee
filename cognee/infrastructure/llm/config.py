@@ -86,6 +86,7 @@ class LLMConfig(BaseSettings):
     - llm_answer_streaming
     - llm_max_completion_tokens
     - transcription_model
+    - image_transcribe_model
     - graph_prompt_path
     - llm_rate_limit_enabled
     - llm_rate_limit_requests
