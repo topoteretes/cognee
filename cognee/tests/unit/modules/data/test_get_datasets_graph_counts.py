@@ -24,6 +24,7 @@ from sqlalchemy.exc import IntegrityError
 # API tests) for patch.object to reach its globals.
 from cognee.modules.data.methods import get_datasets_graph_counts
 from cognee.modules.data.methods.get_datasets_graph_counts import DatasetGraphCounts
+from cognee.modules.pipelines.exceptions import AbandonedPipelineRunError
 from cognee.modules.pipelines.models import PipelineRunStatus
 
 counts_module = sys.modules["cognee.modules.data.methods.get_datasets_graph_counts"]
@@ -157,6 +158,100 @@ async def test_a_cache_miss_counts_the_graph_and_caches_it_against_the_run():
     # Flagged partial, so caching counts here cannot make get_pipeline_run_metrics
     # believe that run's token count and connectivity metrics were computed too.
     assert added[0].has_full_metrics is False
+
+
+@pytest.mark.asyncio
+async def test_an_abandoned_and_rolled_back_run_recounts_instead_of_serving_its_cache():
+    """A cache entry only describes a finished run.
+
+    Startup recovery closes an abandoned run by writing an ERRORED row that
+    reuses the dead run's pipeline_run_id, so its cached counts were computed
+    before that run's rollback deleted the nodes they describe. Serving them
+    would report the pre-rollback graph size forever, since nothing recomputes
+    until the dataset is cognified again (SDK-577). Same for a run still in
+    flight: recounting keeps the numbers live.
+
+    Narrower than a blanket "ERRORED never trusts its cache" on purpose: a
+    run that fails on its own input, rather than one recovery closed, is
+    covered separately by
+    test_a_run_that_failed_on_its_own_still_serves_its_cache.
+    """
+    dataset = _dataset()
+    run_id = uuid4()
+    stale_cached = SimpleNamespace(
+        id=run_id,
+        num_nodes=137,
+        num_edges=421,
+        created_at=datetime(2026, 8, 3, 9, 0, tzinfo=timezone.utc),
+    )
+    errored_run = SimpleNamespace(
+        dataset_id=dataset.id,
+        pipeline_run_id=run_id,
+        status=PipelineRunStatus.DATASET_PROCESSING_ERRORED,
+        error_class=AbandonedPipelineRunError.__name__,
+    )
+    added = []
+
+    with (
+        patch.object(
+            counts_module,
+            "_get_latest_cognify_runs",
+            AsyncMock(return_value={dataset.id: errored_run}),
+        ),
+        patch.object(
+            counts_module, "_get_cached_metrics", AsyncMock(return_value={run_id: stale_cached})
+        ),
+        patch.object(counts_module, "set_database_global_context_variables", _no_op_context),
+        patch.object(counts_module, "get_graph_engine", _graph_engine()),
+        patch.object(counts_module, "get_relational_engine", lambda: _fake_engine(added)),
+    ):
+        counts = await get_datasets_graph_counts([dataset])
+
+    assert counts[dataset.id].num_nodes == 12
+    assert counts[dataset.id].num_edges == 34
+
+
+@pytest.mark.asyncio
+async def test_a_run_that_failed_on_its_own_still_serves_its_cache():
+    """A run that fails on its own input (not one recovery closed) does not
+    write to the graph again after it fails, so a count cached for it while
+    it was still running still describes what is there. Distrusting every
+    ERRORED run's cache, not just an abandoned one, forces a full graph
+    traversal plus a doomed re-insert (the row already exists) on every poll
+    of a dataset that failed normally, or is simply still mid-cognify — the
+    UI polls both."""
+    dataset = _dataset()
+    run_id = uuid4()
+    cached = SimpleNamespace(
+        id=run_id,
+        num_nodes=8,
+        num_edges=10,
+        created_at=datetime(2026, 8, 3, 9, 0, tzinfo=timezone.utc),
+    )
+    failed_run = SimpleNamespace(
+        dataset_id=dataset.id,
+        pipeline_run_id=run_id,
+        status=PipelineRunStatus.DATASET_PROCESSING_ERRORED,
+        error_class="SomeExtractionError",
+    )
+
+    with (
+        patch.object(
+            counts_module,
+            "_get_latest_cognify_runs",
+            AsyncMock(return_value={dataset.id: failed_run}),
+        ),
+        patch.object(
+            counts_module, "_get_cached_metrics", AsyncMock(return_value={run_id: cached})
+        ),
+        patch.object(counts_module, "get_graph_engine", AsyncMock()) as graph_engine,
+    ):
+        counts = await get_datasets_graph_counts([dataset])
+
+    graph_engine.assert_not_called()
+    assert counts[dataset.id] == DatasetGraphCounts(
+        pipeline_run_id=run_id, num_nodes=8, num_edges=10, computed_at=cached.created_at
+    )
 
 
 @pytest.mark.asyncio

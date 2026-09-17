@@ -22,8 +22,24 @@ async def log_pipeline_run_error(
     started_at: datetime | None = None,
     tokens_in: int | None = None,
     tokens_out: int | None = None,
+    data_info: Any | None = None,
+    origin: str | None = None,
 ):
-    data_info = summarize_run_info_data(data)
+    """Append the ERRORED row for a run.
+
+    ``data_info`` and ``origin`` default to what this call's own context
+    provides (a summary of ``data``, the calling process's origin). A writer
+    closing a run on behalf of a process that is gone — startup recovery —
+    passes the STARTED row's own origin instead, so the ERRORED row describes
+    the run that died, not the process closing it: a dataset abandoned by an
+    "mcp" run still reads "mcp" on its closing row, not "background".
+    """
+    # ``data_info`` is for a caller that already holds a summarized value: the
+    # startup recovery closes a run whose STARTED row carries one, and
+    # summarizing a summary stringifies the list of data ids and re-truncates
+    # an already-truncated preview with a wrong character count.
+    if data_info is None:
+        data_info = summarize_run_info_data(data)
 
     pipeline_run = PipelineRun(
         pipeline_run_id=pipeline_run_id,
@@ -47,7 +63,7 @@ async def log_pipeline_run_error(
         error_message=scrub_error_message(e),
         tokens_in=tokens_in,
         tokens_out=tokens_out,
-        origin=get_operation_origin(),
+        origin=origin if origin is not None else get_operation_origin(),
         # This writer runs inside the pipeline's own parent_run_scope —
         # exclude it so the row parents to the next enclosing run.
         parent_operation_id=get_parent_run_id(excluding=pipeline_run_id),

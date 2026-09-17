@@ -4,4 +4,6 @@ from .get_pipeline_run_by_dataset import (
     get_latest_pipeline_runs_by_datasets,
 )
 from .get_pipeline_runs_by_dataset import get_pipeline_runs_by_dataset
+from .get_unclosed_pipeline_runs import get_unclosed_pipeline_runs
+from .pipeline_run_has_terminal_row import pipeline_run_has_terminal_row
 from .reset_pipeline_run_status import reset_pipeline_run_status

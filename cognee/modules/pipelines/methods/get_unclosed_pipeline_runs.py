@@ -1,0 +1,111 @@
+from uuid import UUID
+
+from sqlalchemy import or_, select
+from sqlalchemy.orm import aliased
+
+from cognee.infrastructure.databases.relational import get_relational_engine
+
+from ..models import PipelineRun, PipelineRunStatus
+
+# Public: also used by pipeline_run_has_terminal_row, which recovery
+# consults again right before acting on a candidate this query already
+# selected — a single source of truth for what "closed" means.
+TERMINAL_STATUSES = (
+    PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+    PipelineRunStatus.DATASET_PROCESSING_ERRORED,
+)
+
+
+async def get_unclosed_pipeline_runs(
+    owned_origins: frozenset[str],
+    dataset_ids: list[UUID] | None = None,
+) -> list[PipelineRun]:
+    """Every STARTED pipeline run that never got a terminal row of its own,
+    restricted to the origins the caller owns.
+
+    Deliberately not built on the latest-run-per-dataset lookups next door.
+    Those answer "what is this dataset's current status", where only the
+    newest row matters; startup recovery has to find *every* run a crash left
+    unclosed. One crash can abandon several runs of the same dataset and
+    pipeline (a background batch writes all its STARTED rows up front), and
+    ranking by recency would hide all but the newest of them.
+
+    A run is unclosed when a ``DATASET_PROCESSING_STARTED`` row exists for its
+    ``pipeline_run_id`` and no ``COMPLETED`` or ``ERRORED`` row does. Runs are
+    returned oldest first, one row per run: ``log_pipeline_run_progress`` can
+    insert a second STARTED row for the same run, and a caller closing a run
+    wants to see it once.
+
+    ``owned_origins`` is required, not defaulted, on purpose: this function
+    exists to be destructive (its only caller rolls back and closes what it
+    returns), so a caller that forgets to scope it should get a loud missing
+    argument, not a silent sweep of every surface's rows. A relational
+    database is shared more often than it looks — docker-compose runs the API
+    and the MCP server against one — and a process has no way to tell a dead
+    run of another surface, or of a live sibling of its own surface, from one
+    it may safely close.
+
+    Rows with no origin at all are included regardless of ``owned_origins``,
+    for two different reasons that both land on the same answer. Genuinely
+    legacy rows (written before this column existed) are safe: by the time
+    any of them could still be unclosed, whatever wrote it is long gone.
+    Rows written by an *old* build of this same surface, mid-rollout, during
+    the one rolling deploy that ships origin stamping, are not necessarily
+    safe by origin alone — an old-code sibling replica does not stamp
+    origin, so its live run looks identical to a genuinely legacy row. That
+    window is covered by ``pipeline_run_has_terminal_row`` instead: recovery
+    re-checks every candidate under the dataset's lock immediately before
+    acting, and a live sibling releases that lock only after writing its own
+    terminal row (see ``recovery.py:_recover_one_run``) — but only within
+    *this* process; a live sibling running as a genuinely separate OS
+    process is the one case that check cannot see, and is SDK-578's job, not
+    this function's.
+
+    Operation records (``record_operation``) carry no ``pipeline_name`` and no
+    status, so they are excluded rather than mistaken for runs.
+
+    dataset_ids=None covers every dataset; pass a list (possibly empty) to
+    scope it.
+    """
+    if dataset_ids is not None and not dataset_ids:
+        return []
+
+    # Aliased so the NOT IN subquery keeps its own FROM: sharing the outer
+    # table would let SQLAlchemy correlate it and silently change the test to
+    # "this row is not itself terminal".
+    #
+    # The IS NOT NULL is insurance, not a live fix: one NULL in a NOT IN
+    # subquery makes the whole predicate unknown, so recovery would quietly
+    # find nothing at all. No writer produces a terminal row without a run id
+    # today, and this keeps that from being load-bearing. It also lets the
+    # planner treat the subquery as a plain anti-join.
+    closed = aliased(PipelineRun)
+    closed_run_ids = (
+        select(closed.pipeline_run_id)
+        .filter(closed.status.in_(TERMINAL_STATUSES))
+        .filter(closed.pipeline_run_id.isnot(None))
+    )
+
+    query = select(PipelineRun).filter(
+        PipelineRun.status == PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        PipelineRun.pipeline_name.isnot(None),
+        PipelineRun.pipeline_run_id.notin_(closed_run_ids),
+        or_(PipelineRun.origin.in_(owned_origins), PipelineRun.origin.is_(None)),
+    )
+    if dataset_ids is not None:
+        query = query.filter(PipelineRun.dataset_id.in_(dataset_ids))
+
+    db_engine = get_relational_engine()
+
+    async with db_engine.get_async_session() as session:
+        rows = (
+            (await session.execute(query.order_by(PipelineRun.created_at, PipelineRun.id)))
+            .scalars()
+            .all()
+        )
+
+    unclosed: dict[UUID, PipelineRun] = {}
+    for row in rows:
+        unclosed.setdefault(row.pipeline_run_id, row)
+
+    return list(unclosed.values())

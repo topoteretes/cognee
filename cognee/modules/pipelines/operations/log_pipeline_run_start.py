@@ -3,6 +3,7 @@ from typing import Any
 from uuid import UUID
 
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.operations import get_operation_origin
 from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
 from cognee.modules.pipelines.utils import generate_pipeline_run_id, summarize_run_info_data
 from cognee.modules.users.models import User
@@ -33,6 +34,11 @@ async def log_pipeline_run_start(
         tenant_id=getattr(user, "tenant_id", None) if user else None,
         operation_name=pipeline_name,
         started_at=datetime.now(timezone.utc),
+        # log_pipeline_run_complete/_error already stamp this; the STARTED row
+        # needs it too, because startup recovery is the one reader that has to
+        # tell its own process's dead runs from another process's live ones,
+        # and this row is all it has to go on.
+        origin=get_operation_origin(),
     )
 
     db_engine = get_relational_engine()

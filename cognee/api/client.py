@@ -1,7 +1,8 @@
 """FastAPI server for the Cognee API."""
 
+import asyncio
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from traceback import format_exc
 
 import uvicorn
@@ -86,6 +87,28 @@ app_environment = os.getenv("ENV", "prod")
 BACKGROUND_DRAIN_TIMEOUT_SECONDS = float(os.getenv("BACKGROUND_DRAIN_TIMEOUT_SECONDS", "8"))
 
 
+def _report_recovery_outcome(task: "asyncio.Task") -> None:
+    """Report how the background recovery ended.
+
+    A background task's exception is otherwise only surfaced by asyncio's
+    "Task exception was never retrieved" warning at garbage-collection time.
+    This is the task boundary, not error handling: nothing is recovered from
+    here, the failure is reported as the failure it is.
+    """
+    if task.cancelled():
+        logger.info("Recovery of abandoned pipeline runs was cancelled by shutdown")
+        return
+
+    error = task.exception()
+    if error is not None:
+        logger.error(
+            "Recovery of abandoned pipeline runs failed (%s: %s)",
+            type(error).__name__,
+            error,
+            exc_info=error,
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # from cognee.modules.data.deletion import prune_system, prune_data
@@ -107,9 +130,6 @@ async def lifespan(app: FastAPI):
     from cognee.modules.users.methods import get_default_user
 
     await get_default_user()
-    from cognee.modules.cognify.recovery import recover_stale_cognify_runs_on_startup
-
-    await recover_stale_cognify_runs_on_startup()
 
     from cognee.modules.users.authentication.get_auth_secret import resolve_auth_secrets
 
@@ -122,10 +142,39 @@ async def lifespan(app: FastAPI):
 
     get_improve_config()
 
+    from cognee.modules.pipelines.recovery import recover_abandoned_pipeline_runs
+
+    # Recovery of runs a previous process abandoned runs in the background, so
+    # a boot that finds work to do does not hold the port closed while it does
+    # it. Each dataset is recovered under that dataset's lock, so operations
+    # arriving for a dataset queue behind its recovery instead of racing it
+    # (in this process: the lock is asyncio, see infrastructure/locks).
+    #
+    # Created last, right before yield: everything above can still fail the
+    # boot (a bad secret, a bad IMPROVE_* value), and a task created before
+    # that point would dangle on a failed boot — the generator frame holding
+    # its only strong reference tears down without ever reaching the shutdown
+    # code that cancels it, leaving the task to the event loop's own weak
+    # reference (#4312).
+    recovery_task = asyncio.create_task(recover_abandoned_pipeline_runs())
+    recovery_task.add_done_callback(_report_recovery_outcome)
+
     # Emit a clear startup message for docker logs
     logger.info("Backend server has started")
 
     yield
+
+    # Recovery first, and cancelled rather than drained: the sweep is resumable
+    # by design (it only closes runs that still have no terminal row), so
+    # losing the work in flight costs nothing, while waiting for it would hold
+    # shutdown for a sweep nobody needs to finish. It is also cancelled before
+    # the drain below because it holds a per-dataset lock while it works, and a
+    # draining task on that dataset would otherwise sit behind it for the whole
+    # timeout.
+    if not recovery_task.done():
+        recovery_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await recovery_task
 
     # Let in-flight background work (background remember runs, the session
     # improve bridge) finish before the engines below are torn down under it.

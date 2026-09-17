@@ -170,6 +170,15 @@ async def get_datasets_graph_counts(
         [run.pipeline_run_id for run in latest_runs.values() if run.pipeline_run_id]
     )
 
+    # Not at module scope, and not inside the loop either: importing
+    # cognee.modules.pipelines from this package's own module body re-enters
+    # data.methods mid-initialisation and leaves its re-exports bound to
+    # submodules instead of functions, which is what
+    # test_methods_package_has_no_import_cycle pins (the same reason
+    # _get_latest_cognify_runs imports the way it does).
+    from cognee.modules.pipelines.exceptions import AbandonedPipelineRunError
+    from cognee.modules.pipelines.models import PipelineRunStatus
+
     counts: dict[UUID, DatasetGraphCounts] = {}
     misses: list[UUID] = []
     miss_calls = []
@@ -179,7 +188,25 @@ async def get_datasets_graph_counts(
             counts[dataset.id] = DatasetGraphCounts()
             continue
 
-        cached = cached_metrics.get(latest_run.pipeline_run_id)
+        # A COMPLETED run's counts are always trustworthy. So are a plainly
+        # ERRORED run's: nothing writes to that dataset's graph after a run
+        # fails on its own, so whatever was cached for it (from a poll while
+        # it was still running) still describes what is there. The one run
+        # whose cache is NOT trustworthy is one startup recovery closed as
+        # ERRORED with an AbandonedPipelineRunError: recovery reuses the dead
+        # run's pipeline_run_id, and its rollback deletes the very nodes that
+        # id's cached counts describe (SDK-577). A STARTED run's cache is
+        # never trusted either, so a mid-run dataset keeps reporting real
+        # counts instead of a stale snapshot. This is narrower than the other
+        # latest-run readers' COMPLETED-only guard (live_updates, edge-evidence
+        # lookup) on purpose: unlike those, this cache is keyed by run id and
+        # never rewritten once written, so a genuine (non-abandoned) failure
+        # has nothing further to invalidate it.
+        is_trustworthy = latest_run.status == PipelineRunStatus.DATASET_PROCESSING_COMPLETED or (
+            latest_run.status == PipelineRunStatus.DATASET_PROCESSING_ERRORED
+            and latest_run.error_class != AbandonedPipelineRunError.__name__
+        )
+        cached = cached_metrics.get(latest_run.pipeline_run_id) if is_trustworthy else None
         if cached is not None:
             counts[dataset.id] = DatasetGraphCounts(
                 pipeline_run_id=latest_run.pipeline_run_id,

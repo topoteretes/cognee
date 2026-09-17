@@ -888,6 +888,50 @@ def _agent_scoped_default_dataset() -> str:
     return "main_dataset"
 
 
+async def _run_startup_recovery() -> None:
+    """Close pipeline runs this same MCP server started and never finished
+    (SDK-577): killed mid-run, not one still legitimately executing, such a
+    run never gets a terminal status on its own, so a dataset nobody re-adds
+    to reads "processing" forever.
+
+    Not called at all in remote/cloud mode (see the ``is_remote`` guard at
+    the call site) — a remote API or tenant owns that database's recovery,
+    not this thin client. One awaited call, not backgrounded, unlike the
+    API's own background task: a multi-tenant API worries about container
+    start time under many datasets; this is one MCP server's own boot.
+
+    No periodic re-sweep for the persistent sse/http transports, on purpose,
+    even though it once looked useful: recovery no longer has an age floor
+    to "clear" later, so nothing about this process's own candidates changes
+    between now and later — restart is the only evidence a run is dead, and
+    this process has not restarted. A timer that re-ran this on an interval
+    would close a same-origin sibling process's still-running row on
+    nothing but elapsed time, which is exactly the duration-based signal
+    this design forbids (see ``recovery.py``'s own module docstring) —
+    reintroduced through a sweep interval instead of an age threshold.
+
+    Guarded by ``ImportError``, not left to fail the boot: cognee-mcp pins a
+    released cognee from PyPI (see pyproject.toml), which may predate
+    ``cognee.modules.pipelines.recovery`` — recovery is optional, booting is
+    not. Loud, not silent: the warning names exactly what is skipped and
+    when the guard can be deleted.
+    """
+    try:
+        from cognee.modules.operations import ORIGIN_MCP
+        from cognee.modules.pipelines.recovery import recover_abandoned_pipeline_runs
+    except ImportError:
+        logger.warning(
+            "Installed cognee has no startup recovery (SDK-577) — a pipeline "
+            "run this server started and never finished stays reported as "
+            "processing until the same dataset is added to again. Remove "
+            "this guard once cognee-mcp requires a cognee release that ships "
+            "cognee.modules.pipelines.recovery."
+        )
+        return
+
+    await recover_abandoned_pipeline_runs(owned_origins=frozenset({ORIGIN_MCP}))
+
+
 async def main():
     global cognee_client
 
@@ -1055,6 +1099,9 @@ async def main():
         logger.info("Database migrations done.")
     elif not is_remote:
         logger.info("Skipping DB migrations")
+
+    if not is_remote:
+        await _run_startup_recovery()
 
     try:
         match args.transport.lower():
