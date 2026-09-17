@@ -126,6 +126,9 @@ class RemoteQuery(_BuilderChain):
 class RemoteVectorSearch(_BuilderChain):
     """Proxy for ``Table.vector_search(vector)``."""
 
+    def bypass_vector_index(self) -> RemoteVectorSearch:
+        return self._add("bypass_vector_index")
+
     def distance_type(self, metric: str) -> RemoteVectorSearch:
         return self._add("distance_type", metric)
 

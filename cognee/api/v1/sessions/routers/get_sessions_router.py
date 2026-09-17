@@ -98,15 +98,17 @@ def get_sessions_router() -> APIRouter:
           tokens_in, or tokens_out (default: last_activity_at).
         - **descending** (bool): Sort newest/largest first (default: true).
 
-        Response envelope::
+        Response envelope:
 
-            {
-              "sessions": [...],
-              "total": <int>,      # rows matching filters before pagination
-              "limit":  <int>,
-              "offset": <int>,
-              "has_more": <bool>,
-            }
+        ```
+        {
+          "sessions": [...],
+          "total": <int>,      # rows matching filters before pagination
+          "limit":  <int>,
+          "offset": <int>,
+          "has_more": <bool>,
+        }
+        ```
         """
         since = _range_since(range)
         try:
@@ -131,6 +133,8 @@ def get_sessions_router() -> APIRouter:
                     "has_more": page.has_more,
                 }
             )
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("list_sessions failed")
             return JSONResponse(status_code=500, content={"error": "list failed"})

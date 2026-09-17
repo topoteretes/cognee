@@ -9,6 +9,7 @@ from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse
 from cognee.api.upload_fields import OptionalUploadFile, drop_blank_uploads
 from cognee.api.v1.exceptions import DocumentUpdateRequiredError
+from cognee.exceptions import CogneeApiError
 from cognee.modules.pipelines.models import PipelineRunErrored
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunInfo
 from cognee.modules.users.methods import get_authenticated_user
@@ -35,6 +36,7 @@ def get_add_router() -> APIRouter:
 
     @router.post(
         "",
+        summary="Add (low level): ingest files, text or URLs into a dataset without building the graph",
         response_model=PipelineRunInfo,
         responses={
             400: {"model": ErrorResponse},
@@ -230,6 +232,8 @@ def get_add_router() -> APIRouter:
         except DocumentUpdateRequiredError as error:
             # An existing file with new content is an update, which has its own
             # endpoint; say so with the endpoint rather than failing as a 500.
+            # Before the CogneeApiError re-raise: this one carries an HTTP
+            # wording of its own that the generic handler would not use.
             return JSONResponse(
                 status_code=status.HTTP_409_CONFLICT,
                 content=ErrorResponse(
@@ -237,6 +241,8 @@ def get_add_router() -> APIRouter:
                     detail=error.api_message,
                 ).model_dump(),
             )
+        except CogneeApiError:
+            raise
         except Exception as error:
             logger.exception("Add failed")
             return JSONResponse(

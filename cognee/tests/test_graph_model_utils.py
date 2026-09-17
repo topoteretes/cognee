@@ -1,13 +1,19 @@
-from typing import get_args
+from typing import Annotated, Literal, get_args
 
 import pytest
 from pydantic import BaseModel
 
-from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine import DataPoint, Edge, Embeddable, FromIdentity
 from cognee.shared.graph_model_utils import (
-    datapoint_model_to_basemodel,
     graph_model_to_graph_schema,
+    graph_schema_to_graph_model,
 )
+from cognee.shared.llm_graph_model import (
+    _edge_field_types,
+    _identity_field_types,
+    datapoint_model_to_basemodel,
+)
+from cognee.tasks.graph.exceptions import InvalidReferenceTypeError
 
 DATAPOINT_INFRA_FIELDS = {
     "id",
@@ -25,6 +31,9 @@ DATAPOINT_INFRA_FIELDS = {
     "source_content_hash",
     "feedback_weight",
     "importance_weight",
+    "ontology_uri",
+    "valid_to",
+    "metadata",
 }
 
 
@@ -270,3 +279,396 @@ def test_preserves_inherited_fields_in_cyclic_models():
     assert "label" in nested_b_model.model_fields
     assert DATAPOINT_INFRA_FIELDS.isdisjoint(simplified_a.model_fields)
     assert DATAPOINT_INFRA_FIELDS.isdisjoint(nested_b_model.model_fields)
+
+
+def test_from_identity_field_renders_as_string():
+    class Role(DataPoint):
+        name: str
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    class Person(DataPoint):
+        name: str
+        is_a: Annotated[Role, FromIdentity()]
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    simplified = datapoint_model_to_basemodel(Person, strip_metadata=True)
+    schema = simplified.model_json_schema()
+    assert schema["properties"]["is_a"]["type"] == "string"
+    assert "$ref" not in schema["properties"]["is_a"]
+    assert DATAPOINT_INFRA_FIELDS.isdisjoint(simplified.model_fields)
+    assert_dump_has_no_infra(simplified(name="Alice", is_a="Student").model_dump())
+
+
+def test_model_without_from_identity_is_unchanged(programming_language_models):
+    ProgrammingLanguage = programming_language_models["ProgrammingLanguage"]
+    simplified = datapoint_model_to_basemodel(ProgrammingLanguage, strip_metadata=True)
+    assert set(simplified.model_fields) == {"name", "used_in", "is_type"}
+    assert simplified.model_fields["is_type"].annotation is not str
+
+
+def test_from_identity_target_without_identity_raises():
+    class Role(DataPoint):
+        name: str
+
+    class Person(DataPoint):
+        name: str
+        is_a: Annotated[Role, FromIdentity()]
+
+    with pytest.raises(InvalidReferenceTypeError, match="Role"):
+        datapoint_model_to_basemodel(Person)
+
+
+def test_from_identity_target_with_extra_required_field_raises():
+    class Role(DataPoint):
+        name: str
+        level: int
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    class Person(DataPoint):
+        name: str
+        is_a: Annotated[Role, FromIdentity()]
+
+    with pytest.raises(InvalidReferenceTypeError, match="level"):
+        datapoint_model_to_basemodel(Person)
+
+
+def test_from_identity_schema_round_trip_drops_the_marker():
+    class Role(DataPoint):
+        name: str
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    class Person(DataPoint):
+        name: str
+        is_a: Annotated[Role, FromIdentity()]
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    schema = graph_model_to_graph_schema(Person)
+    regenerated = graph_schema_to_graph_model(schema)
+    assert _identity_field_types(regenerated) == {}
+
+
+def _named_person():
+    class Person(DataPoint):
+        name: str
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    return Person
+
+
+def _row_schema(simplified: type[BaseModel], field_name: str) -> dict:
+    schema = simplified.model_json_schema()
+    items = schema["properties"][field_name]["items"]
+    if "$ref" in items:
+        return schema["$defs"][items["$ref"].rsplit("/", 1)[-1]]
+    return items
+
+
+def test_fixed_edge_row_has_source_and_target_only():
+    Person = _named_person()
+
+    class PeopleGraph(DataPoint):
+        people: list[Person]
+        friends_with: list[Edge[Person, Person]]
+
+    simplified = datapoint_model_to_basemodel(PeopleGraph, strip_metadata=True)
+    row = _row_schema(simplified, "friends_with")
+    assert set(row["properties"]) == {"source", "target"}
+    assert row["properties"]["source"]["type"] == "string"
+    assert row["properties"]["target"]["type"] == "string"
+    assert "relationship_type" not in row["properties"]
+    source, target, _ = _edge_field_types(PeopleGraph)["friends_with"]
+    assert source is Person and target is Person
+
+
+def test_enumerated_edge_row_has_required_enum():
+    Person = _named_person()
+
+    class PeopleGraph(DataPoint):
+        people: list[Person]
+        ties: list[Edge[Person, Person, Literal["friends_with", "married_to"]]]
+
+    row = _row_schema(datapoint_model_to_basemodel(PeopleGraph, strip_metadata=True), "ties")
+    assert row["properties"]["relationship_type"]["enum"] == ["friends_with", "married_to"]
+    assert "relationship_type" in row["required"]
+
+
+def test_free_form_edge_row_has_required_string():
+    Person = _named_person()
+
+    class PeopleGraph(DataPoint):
+        people: list[Person]
+        ties: list[Edge[Person, Person, str]]
+
+    row = _row_schema(datapoint_model_to_basemodel(PeopleGraph, strip_metadata=True), "ties")
+    assert row["properties"]["relationship_type"]["type"] == "string"
+    assert "enum" not in row["properties"]["relationship_type"]
+    assert "relationship_type" in row["required"]
+
+
+def test_edge_row_schema_has_no_infra():
+    Person = _named_person()
+
+    class PeopleGraph(DataPoint):
+        people: list[Person]
+        friends_with: list[Edge[Person, Person]]
+
+    simplified = datapoint_model_to_basemodel(PeopleGraph, strip_metadata=True)
+    assert DATAPOINT_INFRA_FIELDS.isdisjoint(_row_schema(simplified, "friends_with")["properties"])
+    dump = simplified(
+        people=[{"name": "Alice"}, {"name": "Bob"}],
+        friends_with=[{"source": "Alice", "target": "Bob"}],
+    ).model_dump()
+    assert_dump_has_no_infra(dump)
+
+
+def test_two_edge_fields_get_distinct_row_names():
+    Person = _named_person()
+
+    class PeopleGraph(DataPoint):
+        people: list[Person]
+        friends_with: list[Edge[Person, Person]]
+        married_to: list[Edge[Person, Person]]
+
+    defs = datapoint_model_to_basemodel(PeopleGraph, strip_metadata=True).model_json_schema()[
+        "$defs"
+    ]
+    assert "FriendsWithEdge" in defs
+    assert "MarriedToEdge" in defs
+
+
+def test_edge_endpoint_without_identity_raises():
+    class Token(DataPoint):
+        name: str
+
+    class Graph(DataPoint):
+        tokens: list[Token]
+        linked: list[Edge[Token, Token]]
+
+    with pytest.raises(InvalidReferenceTypeError, match="Token"):
+        datapoint_model_to_basemodel(Graph)
+
+
+def test_edge_endpoint_with_composite_identity_raises():
+    class Player(DataPoint):
+        name: str
+        team: str
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name", "team"]}
+
+    class Graph(DataPoint):
+        players: list[Player]
+        teammates: list[Edge[Player, Player]]
+
+    with pytest.raises(InvalidReferenceTypeError, match="Player"):
+        datapoint_model_to_basemodel(Graph)
+
+
+def test_edge_endpoint_may_have_extra_required_fields():
+    class Person(DataPoint):
+        name: str
+        age: int
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    class Graph(DataPoint):
+        people: list[Person]
+        friends_with: list[Edge[Person, Person]]
+
+    simplified = datapoint_model_to_basemodel(Graph, strip_metadata=True)
+    assert "friends_with" in simplified.model_fields
+
+
+def test_edge_schema_round_trip_drops_edge_fields():
+    Person = _named_person()
+
+    class PeopleGraph(DataPoint):
+        people: list[Person]
+        friends_with: list[Edge[Person, Person]]
+
+    regenerated = graph_schema_to_graph_model(graph_model_to_graph_schema(PeopleGraph))
+    assert _edge_field_types(regenerated) == {}
+
+
+class ModuleLevelPerson(DataPoint):
+    """Module level on purpose: a forward reference by name resolves from here."""
+
+    name: str
+    metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+
+def test_self_referential_edge_endpoint_resolves_to_the_owning_model():
+    """Edge[...] keeps the strings it was subscripted with, so they need resolving.
+
+    Declaring the relationship on the node that owns it is the first thing a user
+    reaches for, and it forces string endpoints: the class is not bound inside its own
+    body yet.
+    """
+
+    class Colleague(DataPoint):
+        name: str
+        works_with: list[Edge["Colleague", "Colleague"]] = []
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    source, target, _ = _edge_field_types(Colleague)["works_with"]
+    assert source is Colleague
+    assert target is Colleague
+
+
+def test_edge_endpoint_named_by_string_resolves_from_the_models_module():
+    class Graph(DataPoint):
+        people: list[ModuleLevelPerson] = []
+        friends_with: list[Edge["ModuleLevelPerson", "ModuleLevelPerson"]] = []
+
+    source, target, _ = _edge_field_types(Graph)["friends_with"]
+    assert source is ModuleLevelPerson
+    assert target is ModuleLevelPerson
+
+
+def test_edge_endpoint_named_by_unresolvable_string_raises_naming_the_field():
+    class Graph(DataPoint):
+        # The undefined name is the point: this is the typo a user makes.
+        friends_with: list[Edge["NotADeclaredModel", "NotADeclaredModel"]] = []  # noqa: F821
+
+    with pytest.raises(InvalidReferenceTypeError, match="friends_with"):
+        _edge_field_types(Graph)
+
+
+def test_edge_endpoint_that_is_not_a_datapoint_raises_naming_the_field():
+    class Graph(DataPoint):
+        friends_with: list[Edge[int, int]] = []
+
+    with pytest.raises(InvalidReferenceTypeError, match="friends_with"):
+        _edge_field_types(Graph)
+
+
+def test_bare_edge_field_raises_naming_the_field():
+    class Graph(DataPoint):
+        friends_with: list[Edge] = []
+
+    with pytest.raises(InvalidReferenceTypeError, match="friends_with"):
+        _edge_field_types(Graph)
+
+
+def test_from_identity_is_found_inside_an_optional_annotation():
+    """``Annotated[Role, FromIdentity()] | None`` is the natural optional spelling.
+
+    Pydantic keeps only an outermost Annotated's markers in ``field_info.metadata``, so
+    this spelling leaves it empty. Missing the marker silently asked the LLM for a whole
+    nested Role, DataPoint infrastructure fields included, instead of an identity string.
+    """
+
+    class Role(DataPoint):
+        name: str
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    class Person(DataPoint):
+        name: str
+        is_a: Annotated[Role, FromIdentity()] | None = None
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    assert Person.model_fields["is_a"].metadata == []
+    assert _identity_field_types(Person) == {"is_a": Role}
+
+    simplified = datapoint_model_to_basemodel(Person, strip_metadata=True)
+    assert simplified.model_fields["is_a"].annotation == (str | None)
+    assert "Role" not in simplified.model_json_schema().get("$defs", {})
+
+
+def test_annotated_datapoint_field_is_still_stripped_for_the_llm():
+    class Role(DataPoint):
+        name: str
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    class Person(DataPoint):
+        name: str
+        is_a: Annotated[Role, Embeddable()] | None = None
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    role_schema = datapoint_model_to_basemodel(Person, strip_metadata=True).model_json_schema()[
+        "$defs"
+    ]["Role"]
+    assert set(role_schema["properties"]) == {"name"}
+
+
+def test_from_identity_supports_every_natural_spelling():
+    """Target, Target | None, list[Target] and list[Target] | None, Annotated anywhere."""
+
+    class Role(DataPoint):
+        name: str
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    class Person(DataPoint):
+        name: str
+        bare: Annotated[Role, FromIdentity()]
+        optional: Annotated[Role, FromIdentity()] | None = None
+        many: list[Annotated[Role, FromIdentity()]] = []
+        many_wrapped: Annotated[list[Role], FromIdentity()] = []
+        optional_many: Annotated[list[Role], FromIdentity()] | None = None
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    simplified = datapoint_model_to_basemodel(Person, strip_metadata=True)
+    fields = simplified.model_fields
+    assert fields["bare"].annotation is str
+    assert fields["optional"].annotation == (str | None)
+    assert fields["many"].annotation == list[str]
+    assert fields["many_wrapped"].annotation == list[str]
+    assert fields["optional_many"].annotation == (list[str] | None)
+    assert "Role" not in simplified.model_json_schema().get("$defs", {})
+
+
+def test_from_identity_under_an_unsupported_shape_raises_naming_the_field():
+    """A shape the round trip cannot narrow must fail at build time, before any LLM call.
+
+    Passing it through would hand the LLM the whole nested class and mint a duplicate
+    node instead of a reference — silently.
+    """
+
+    class Role(DataPoint):
+        name: str
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    class Person(DataPoint):
+        name: str
+        roles_by_team: dict[str, Annotated[Role, FromIdentity()]] = {}
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    with pytest.raises(InvalidReferenceTypeError, match="roles_by_team"):
+        datapoint_model_to_basemodel(Person, strip_metadata=True)
+
+
+def test_optional_edge_list_field_is_a_typed_edge_field():
+    """Adding `| None` to the default must not turn off row extraction."""
+
+    class Person(DataPoint):
+        name: str
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    class Graph(DataPoint):
+        people: list[Person] = []
+        friends_with: list[Edge[Person, Person]] | None = None
+
+    assert "friends_with" in _edge_field_types(Graph)
+
+    simplified = datapoint_model_to_basemodel(Graph, strip_metadata=True)
+    defs = simplified.model_json_schema().get("$defs", {})
+    assert "FriendsWithEdge" in defs
+    assert "Edge" not in defs
+
+
+def test_edge_in_an_unsupported_shape_raises_naming_the_field():
+    """A raw Edge class must never leak into the LLM schema."""
+
+    class Person(DataPoint):
+        name: str
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    class Graph(DataPoint):
+        best_friend: Edge[Person, Person] | None = None
+
+    with pytest.raises(InvalidReferenceTypeError, match="best_friend"):
+        datapoint_model_to_basemodel(Graph, strip_metadata=True)
+
+
+def test_row_class_names_do_not_collapse_case():
+    from cognee.shared.llm_graph_model import _row_class_name
+
+    assert _row_class_name("HTTP_link") == "HTTPLinkEdge"
+    assert _row_class_name("http_link") == "HttpLinkEdge"

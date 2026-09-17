@@ -217,23 +217,15 @@ async def test_get_context_forwards_nodeset_filter_to_vector_search(mock_vector_
 
 @pytest.mark.asyncio
 async def test_get_completion_without_context(mock_vector_engine):
-    """Test get_completion retrieves context when not provided."""
-    mock_result = MagicMock()
-    mock_result.payload = {"text": "Test triplet"}
-    mock_vector_engine.has_collection.return_value = True
-    mock_vector_engine.search.return_value = [mock_result]
-
+    """No context means no LLM call and no results (SDK-270 / gh #3728):
+    get_completion_from_context never re-derives a missing context."""
     retriever = TripletRetriever()
 
     with (
         patch(
-            "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
-            return_value=mock_vector_engine,
-        ),
-        patch(
             "cognee.modules.retrieval.triplet_retriever.generate_completion",
-            return_value="Generated answer",
-        ),
+            new_callable=AsyncMock,
+        ) as mock_generate,
         patch("cognee.modules.retrieval.triplet_retriever.CacheConfig") as mock_cache_config,
     ):
         mock_config = MagicMock()
@@ -242,9 +234,8 @@ async def test_get_completion_without_context(mock_vector_engine):
 
         completion = await retriever.get_completion_from_context("test query", None, None)
 
-    assert isinstance(completion, list)
-    assert len(completion) == 1
-    assert completion[0] == "Generated answer"
+    assert completion == []
+    mock_generate.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -86,6 +86,7 @@ class LLMConfig(BaseSettings):
     - llm_answer_streaming
     - llm_max_completion_tokens
     - transcription_model
+    - image_transcribe_model
     - graph_prompt_path
     - llm_rate_limit_enabled
     - llm_rate_limit_requests
@@ -106,7 +107,7 @@ class LLMConfig(BaseSettings):
     structured_output_framework: str = "litellm_native"
     llm_instructor_mode: str = ""
     llm_provider: str = "openai"
-    llm_model: str = "openai/gpt-5-mini"
+    llm_model: str = "openai/gpt-5.6-luna"
     llm_endpoint: str = ""
     llm_api_key: str | None = None
     llm_api_version: str | None = None
@@ -149,13 +150,18 @@ class LLMConfig(BaseSettings):
     llm_max_completion_tokens: int = 16384
 
     baml_llm_provider: str = "openai"
-    baml_llm_model: str = "gpt-5-mini"
+    baml_llm_model: str = "gpt-5.6-luna"
     baml_llm_endpoint: str = ""
     baml_llm_api_key: str | None = None
     baml_llm_temperature: float = 0.0
     baml_llm_api_version: str = ""
 
     transcription_model: str = "whisper-1"
+    # Vision model for image transcription. Empty means "use llm_model", which is
+    # the right default: the chat model is often already multimodal, and unlike
+    # audio there is no separate-model-by-necessity the way whisper-1 is for
+    # speech. Set it when the base model has no vision capability.
+    image_transcribe_model: str = ""
     graph_prompt_path: str = "generate_graph_prompt.txt"
     temporal_graph_prompt_path: str = "generate_event_graph_prompt.txt"
     event_entity_prompt_path: str = "generate_event_entity_prompt.txt"
@@ -362,7 +368,7 @@ class LLMConfig(BaseSettings):
         #
         # llm_endpoint/llm_api_key default to blank ("" / None), so "has a
         # non-blank value" alone tells us whether they were configured.
-        # llm_model defaults to a real model id ("openai/gpt-5-mini"), so the
+        # llm_model defaults to a real model id ("openai/gpt-5.6-luna"), so the
         # same non-blank check can't tell "configured, happens to match the
         # default" from "left unset" - that also needs `model_fields_set`
         # (populated by pydantic-settings whether the value came from a kwarg
@@ -413,6 +419,7 @@ class LLMConfig(BaseSettings):
             "answer_streaming": self.llm_answer_streaming,
             "max_completion_tokens": self.llm_max_completion_tokens,
             "transcription_model": self.transcription_model,
+            "image_transcribe_model": self.image_transcribe_model,
             "graph_prompt_path": self.graph_prompt_path,
             "rate_limit_enabled": self.llm_rate_limit_enabled,
             "rate_limit_requests": self.llm_rate_limit_requests,

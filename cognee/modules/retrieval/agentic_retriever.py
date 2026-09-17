@@ -84,6 +84,11 @@ class AgenticRetriever(GraphCompletionRetriever):
     # so a single rendered prompt would misrepresent what this retriever sends.
     supports_prompt_preview = False
 
+    # Skills and tools can answer without any memory context (the formatted
+    # context here is never empty anyway — empty memory renders as "(empty)"),
+    # so the graph-completion family's empty-context skip must not apply.
+    skip_completion_on_empty_context = False
+
     def __init__(
         self,
         skills: Sequence[str | Skill] | None = None,
@@ -410,18 +415,13 @@ class AgenticRetriever(GraphCompletionRetriever):
             return "", []
 
         try:
-            from cognee.infrastructure.databases.cache.config import CacheConfig
             from cognee.infrastructure.session.get_session_manager import get_session_manager
             from cognee.infrastructure.session.session_context_builder import (
                 build_active_context_block,
             )
 
-            cache_config = CacheConfig()
-            if not (cache_config.caching and cache_config.auto_feedback):
-                return "", []
-
             session_manager = get_session_manager()
-            if not session_manager.is_available:
+            if not session_manager.is_available or not session_manager.is_auto_feedback_enabled():
                 return "", []
 
             return await build_active_context_block(
