@@ -14,6 +14,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchType
@@ -266,6 +267,52 @@ def test_a_failure_of_the_default_type_is_not_swallowed(retry_client):
         )
 
     assert retry_client.calls == [SearchType.HYBRID_COMPLETION]
+
+
+def test_an_empty_graph_surfaces_through_the_fallback(retry_client):
+    """SDK-270 made an empty graph raise instead of returning []; the retry
+    must surface that rather than swallow it into an empty 200.
+
+    CODING_RULES returns [] on an empty graph, so the retry fires and lands on
+    HYBRID_COMPLETION, which is one of the types that raises NoDataError. The
+    error is not in the retry's except tuple, so it propagates — the caller is
+    told the graph is empty instead of getting a silent miss.
+    """
+    retry_client.script[SearchType.HYBRID_COMPLETION] = NoDataError(
+        "The knowledge graph is empty. Ingest data through Cognee before searching."
+    )
+
+    with pytest.raises(NoDataError):
+        retry_client.client.post(
+            "/api/v1/recall", json={"query": "what are our coding rules?", "scope": "graph"}
+        )
+
+    assert retry_client.calls == [SearchType.CODING_RULES, SearchType.HYBRID_COMPLETION]
+    assert retry_client.logged == []
+
+
+def test_a_pinned_type_never_reaches_the_empty_graph_error(retry_client):
+    """The mirror of the above: pinning keeps the fallback out of the path.
+
+    Same query, same empty graph, but CODING_RULES answers alone — so the caller
+    gets a quiet empty result and never learns the graph is empty. That is the
+    "a pinned type is never second-guessed" invariant costing information, not a
+    bug, and it is worth having pinned so the asymmetry is a decision.
+    """
+    retry_client.script[SearchType.HYBRID_COMPLETION] = NoDataError("empty")
+
+    response = retry_client.client.post(
+        "/api/v1/recall",
+        json={
+            "query": "what are our coding rules?",
+            "scope": "graph",
+            "searchType": "CODING_RULES",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == []
+    assert retry_client.calls == [SearchType.CODING_RULES]
 
 
 def test_session_first_scope_short_circuits_without_omitting_the_type(live_recall_client):
