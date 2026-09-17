@@ -31,7 +31,7 @@ task's output, `enriches`, `ctx` injection, `Drop`) are documented in
 |---|---|---|
 | `chunks/` | Split text into chunks and manage chunk relations | `chunk_by_paragraph`, `chunk_by_sentence`, `chunk_by_word`, `chunk_by_row`, `remove_disconnected_chunks`, `create_chunk_associations` |
 | `cleanup/` | Remove data that no dataset references any more | `cleanup_unused_data` |
-| `code_graph/` | Build the deterministic code graph with enola (no LLM): `CodeSymbol`/`CodeModule` nodes, `calls`/`imports` edges; needs the `codegraph` extra for the enola binary | `extract_code_graph`, `extract_code_files_graph` |
+| `code_graph/` | Build the deterministic code graph with enola (no LLM): `CodeSymbol`/`CodeModule` nodes, `calls`/`imports` edges; the enola binary ships with cognee as `enola-cli` | `extract_code_graph`, `extract_code_files_graph` |
 | `codingagents/` | Distil coding-agent traces into reusable coding rules (`CODING_RULES` search) | see its `README.md` |
 | `completion/` | Exceptions shared by completion-style tasks | — |
 | `documents/` | Classify `Data` rows into `Document` types and chunk them | `classify_documents`, `extract_chunks_from_documents` |
