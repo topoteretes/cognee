@@ -212,18 +212,16 @@ class CompletionRetriever(BaseRetriever):
         """Generate completion without session; returns list of one completion."""
         kwargs = self._completion_kwargs(context)
         # Sessionless guidance site: preference text rides the guidance channel
-        # (conversation_history), never context. The lookup is memoized per
+        # (guidance), never context. The lookup is memoized per
         # context; this sessionless path runs retrieval and completion in one
         # context, so this reuses the get_retrieved_objects read. (Across a
         # task fan-out that sharing needs warm_preference_cache in the parent
         # — the ContextVar does not propagate out of gather lanes.) Empty text
-        # is falsy and leaves the system prompt untouched. The session path
+        # is falsy and adds nothing to the prompt. The session path
         # never reaches this method, so it cannot collide with the session
         # guidance block, which owns preference rendering on that path.
         preference_text = await load_preference_text()
-        completion = await generate_completion(
-            query=query, conversation_history=preference_text, **kwargs
-        )
+        completion = await generate_completion(query=query, guidance=preference_text, **kwargs)
         return [completion]
 
     async def append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:

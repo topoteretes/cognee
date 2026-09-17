@@ -110,10 +110,11 @@ async def search(
         node_name: Restrict retrieval to these node names (e.g. node-set tags),
             combined with ``node_name_filter_operator`` (``"OR"``/``"AND"``).
         only_context: Return what the LLM would have received instead of its answer.
-            For completion types the result is the user prompt (question plus
-            retrieval context through the retriever's template); the matching
-            system prompt (session guidance, conversation history, task template)
-            is ``system_prompt_result`` under ``verbose=True``. Retrieval-only types
+            For completion types the result is the user prompt (conversation
+            history, then question plus retrieval context through the retriever's
+            template, then the session guidance block); the system prompt (the
+            retriever's task template) is ``system_prompt_result`` under
+            ``verbose=True``. Retrieval-only types
             return their context as always, and an empty retrieval returns the bare
             (empty) context so "nothing found" stays detectable.
         session_id: Session whose history is added to the completion context and

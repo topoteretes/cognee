@@ -16,14 +16,26 @@ def build_completion_prompts(
     system_prompt_path: str,
     system_prompt: str | None = None,
     conversation_history: str | None = None,
+    guidance: str | None = None,
 ) -> tuple[str, str]:
     """Assemble the exact ``(user_prompt, system_prompt)`` pair a completion sends.
+
+    The system prompt is the retriever's task template and nothing else: cognee-authored,
+    static per retriever. Everything derived from the user goes into the user prompt, in
+    this order: the conversation history, the rendered question-and-context template, and
+    the guidance block last (session guidance or, sessionless, the durable preference
+    block). Placement was measured, not guessed: soft preferences are followed far more
+    reliably from the user turn than from the system prompt, history is only used when
+    it sits next to the context the template points at, and guidance placed last wins
+    over older turns that asked for something else. Instructions planted in a past
+    answer or a retrieved chunk also lose the operator authority the system prompt
+    would have lent them.
 
     Pure and side-effect free. ``generate_completion`` builds its prompts here, and so
     does the ``only_context`` preview, so a caller asking what the LLM *would* receive
     gets the real strings instead of a reconstruction that drifts as templates change.
     """
-    user_prompt = render_prompt(user_prompt_path, {"question": query, "context": context})
+    rendered = render_prompt(user_prompt_path, {"question": query, "context": context})
     resolved_system_prompt = (
         system_prompt if system_prompt else read_query_prompt(system_prompt_path)
     )
@@ -33,9 +45,7 @@ def build_completion_prompts(
         # from masquerading as "this retriever has no prompt template" downstream.
         raise FileNotFoundError(f"System prompt template {system_prompt_path!r} could not be read.")
 
-    if conversation_history:
-        resolved_system_prompt = conversation_history + "\nTASK:" + resolved_system_prompt
-
+    user_prompt = "\n\n".join(part for part in (conversation_history, rendered, guidance) if part)
     return user_prompt, resolved_system_prompt
 
 
@@ -46,6 +56,7 @@ async def generate_completion(
     system_prompt_path: str,
     system_prompt: str | None = None,
     conversation_history: str | None = None,
+    guidance: str | None = None,
     response_model: type = str,
 ) -> Any:
     """Generates a completion using LLM with given context and prompts."""
@@ -56,6 +67,7 @@ async def generate_completion(
         system_prompt_path=system_prompt_path,
         system_prompt=system_prompt,
         conversation_history=conversation_history,
+        guidance=guidance,
     )
 
     with pipeline_stage("query"), new_span("cognee.llm.completion") as span:
@@ -80,6 +92,7 @@ async def generate_answer(
     system_prompt_path: str,
     system_prompt: str | None = None,
     conversation_history: str | None = None,
+    guidance: str | None = None,
     response_model: type = str,
 ) -> Any:
     """The one completion a listening client may watch.
@@ -106,6 +119,7 @@ async def generate_answer(
             system_prompt_path=system_prompt_path,
             system_prompt=system_prompt,
             conversation_history=conversation_history,
+            guidance=guidance,
             response_model=response_model,
         )
 
@@ -116,7 +130,8 @@ async def generate_completion_batch(
     user_prompt_path: str,
     system_prompt_path: str,
     system_prompt: str | None = None,
-    conversation_history: str | None = "",
+    conversation_history: str | None = None,
+    guidance: str | None = None,
     response_model: type = str,
 ) -> list[Any]:
     """Generates completions for a batch of queries in parallel."""
@@ -129,6 +144,7 @@ async def generate_completion_batch(
                 system_prompt_path=system_prompt_path,
                 system_prompt=system_prompt,
                 conversation_history=conversation_history,
+                guidance=guidance,
                 response_model=response_model,
             )
             for q, c in zip(query_batch, context)
@@ -140,7 +156,8 @@ async def generate_session_completion_with_optional_summary(
     *,
     query: str,
     context: str,
-    conversation_history: str,
+    conversation_history: str | None,
+    guidance: str | None,
     user_prompt_path: str,
     system_prompt_path: str,
     system_prompt: str | None = None,
@@ -163,6 +180,7 @@ async def generate_session_completion_with_optional_summary(
                 system_prompt_path=system_prompt_path,
                 system_prompt=system_prompt,
                 conversation_history=conversation_history,
+                guidance=guidance,
                 response_model=response_model,
             ),
         )
@@ -175,6 +193,7 @@ async def generate_session_completion_with_optional_summary(
         system_prompt_path=system_prompt_path,
         system_prompt=system_prompt,
         conversation_history=conversation_history,
+        guidance=guidance,
         response_model=response_model,
     )
     return (completion, "", None)

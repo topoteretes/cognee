@@ -13,7 +13,7 @@ lookup, no graph database, no LLM:
 - Weights that only point at graph entities (no key in the chunk collection)
   do not widen the fetch: the extra work could never change membership.
 - The sessionless completion passes the preference text as
-  ``conversation_history``.
+  ``guidance``.
 """
 
 from types import SimpleNamespace
@@ -241,7 +241,7 @@ class TestStableSort:
 
 @pytest.mark.asyncio
 class TestSessionlessGuidance:
-    async def test_preference_text_passed_as_conversation_history(self, monkeypatch):
+    async def test_preference_text_passed_as_guidance(self, monkeypatch):
         _patch_lookup(monkeypatch, ("PREFS", {}))
         captured = {}
 
@@ -255,10 +255,10 @@ class TestSessionlessGuidance:
         result = await retriever._generate_completion_without_session("q", "ctx")
 
         assert result == ["answer"]
-        assert captured["conversation_history"] == "PREFS"
+        assert captured["guidance"] == "PREFS"
         assert captured["context"] == "ctx"
 
-    async def test_empty_preference_text_passes_falsy_history(self, monkeypatch):
+    async def test_empty_preference_text_passes_falsy_guidance(self, monkeypatch):
         _patch_lookup(monkeypatch, ("", {}))
         captured = {}
 
@@ -273,4 +273,4 @@ class TestSessionlessGuidance:
 
         # generate_completion treats a falsy history as "no layer", so the
         # system prompt stays byte-identical to the un-personalized path.
-        assert captured["conversation_history"] == ""
+        assert captured["guidance"] == ""

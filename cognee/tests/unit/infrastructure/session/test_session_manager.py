@@ -9,7 +9,6 @@ from cognee.infrastructure.session.feedback_models import (
     FeedbackDetectionResult,
 )
 from cognee.infrastructure.session.session_manager import SessionManager
-from cognee.infrastructure.session.session_turn import compose_session_prompt
 
 
 @pytest.fixture(autouse=True)
@@ -24,27 +23,6 @@ def _deterministic_cache_env(monkeypatch):
     """
     monkeypatch.setenv("CACHING", "true")
     monkeypatch.setenv("AUTO_FEEDBACK", "true")
-
-
-class TestComposeSessionPrompt:
-    """Characterization tests pinning the exact prompt assembly extracted from the
-    inner completion method. These must stay byte-identical to the pre-extraction
-    behavior, so changing them means deliberately changing every session prompt."""
-
-    def test_block_precedes_history(self):
-        result = compose_session_prompt("BLOCK", "HISTORY")
-        assert result == "BLOCK\n\nHISTORY"
-
-    def test_history_only(self):
-        assert compose_session_prompt("", "HISTORY") == "HISTORY"
-
-    def test_empty_history_keeps_trailing_separators(self):
-        # Pre-extraction behavior prepended onto a possibly-empty history, leaving a
-        # trailing "\n\n" when history is empty. Preserved exactly.
-        assert compose_session_prompt("BLOCK", "") == "BLOCK\n\n"
-
-    def test_all_empty(self):
-        assert compose_session_prompt("", "") == ""
 
 
 class TestValidateSessionParams:

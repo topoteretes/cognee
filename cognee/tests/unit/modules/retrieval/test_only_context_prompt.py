@@ -18,9 +18,11 @@ from uuid import uuid4
 import pytest
 from jinja2 import TemplateNotFound
 
+from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.session.session_context_builder import build_active_context_block
 from cognee.infrastructure.session.session_context_models import ContextSection
 from cognee.infrastructure.session.session_manager import SessionManager
+from cognee.infrastructure.session.session_turn import SessionPrompt
 from cognee.modules.retrieval import only_context_prompt as only_context_prompt_module
 from cognee.modules.retrieval.only_context_prompt import (
     SharedSessionHistory,
@@ -39,6 +41,7 @@ llm_gateway_module = importlib.import_module("cognee.infrastructure.llm.LLMGatew
 
 GUIDANCE_LINE = "Answer in one short sentence"
 PREVIOUS_QUESTION = "What is the capital of Germany?"
+EMPTY_SESSION = SessionPrompt(history="", guidance="")
 
 
 class _PromptRetriever:
@@ -204,15 +207,16 @@ def test_has_context_treats_every_retriever_miss_shape_as_empty():
 
 
 @pytest.mark.asyncio
-async def test_session_prompt_puts_guidance_ahead_of_history(as_user):
+async def test_session_prompt_keeps_guidance_and_history_apart(as_user):
     manager = _FakeSessionManager()
     with patched_session(manager):
         prompt = await load_read_only_session_prompt("why?", session_id="s1")
 
-    assert prompt.startswith("## Active session guidance")
-    assert GUIDANCE_LINE in prompt
-    assert f"QUESTION: {PREVIOUS_QUESTION}" in prompt
-    assert prompt.index(GUIDANCE_LINE) < prompt.index("QUESTION:")
+    assert prompt.guidance.startswith("## Active session guidance")
+    assert GUIDANCE_LINE in prompt.guidance
+    assert f"QUESTION: {PREVIOUS_QUESTION}" in prompt.history
+    assert GUIDANCE_LINE not in prompt.history
+    assert "QUESTION:" not in prompt.guidance
 
 
 @pytest.mark.asyncio
@@ -223,7 +227,7 @@ async def test_session_prompt_performs_no_session_writes(as_user):
         prompt = await load_read_only_session_prompt("why?", session_id="s1")
 
     # The entry was rendered, so the stamping code path was reachable — and skipped.
-    assert GUIDANCE_LINE in prompt
+    assert GUIDANCE_LINE in prompt.guidance
     assert manager.updated_entries == []
     assert manager.added_qas == []
 
@@ -249,8 +253,8 @@ async def test_session_prompt_renders_preferences_when_auto_feedback_is_off(as_u
     with patched_session(manager, preference_lines=["Answer in Portuguese"]):
         prompt = await load_read_only_session_prompt("why?", session_id="s1")
 
-    assert "Answer in Portuguese" in prompt
-    assert GUIDANCE_LINE not in prompt  # the stored-entry layer is off
+    assert "Answer in Portuguese" in prompt.guidance
+    assert GUIDANCE_LINE not in prompt.guidance  # the stored-entry layer is off
 
 
 @pytest.mark.asyncio
@@ -260,7 +264,7 @@ async def test_sessionless_caller_gets_the_preference_block(as_user):
     with patched_session(manager, caching=False, preference_text="PREFERENCES:\n- Portuguese") as m:
         prompt = await load_read_only_session_prompt("why?", session_id="s1")
 
-    assert prompt == "PREFERENCES:\n- Portuguese"
+    assert prompt == SessionPrompt(history="", guidance="PREFERENCES:\n- Portuguese")
     m.preference_text.assert_awaited_once()
     m.vector_recall.assert_not_awaited()
 
@@ -269,7 +273,7 @@ async def test_sessionless_caller_gets_the_preference_block(as_user):
 async def test_no_user_takes_the_sessionless_branch():
     manager = _FakeSessionManager()
     with patched_session(manager, preference_text="") as m:
-        assert await load_read_only_session_prompt("why?", session_id="s1") == ""
+        assert await load_read_only_session_prompt("why?", session_id="s1") == EMPTY_SESSION
     m.preference_text.assert_awaited_once()
 
 
@@ -278,7 +282,7 @@ async def test_cache_unavailable_means_bare_prompt(as_user):
     """Caching on but the backend down: _run_session_turn sends no session layer at all."""
     manager = _FakeSessionManager(available=False)
     with patched_session(manager, preference_text="PREFERENCES:\n- x") as m:
-        assert await load_read_only_session_prompt("why?", session_id="s1") == ""
+        assert await load_read_only_session_prompt("why?", session_id="s1") == EMPTY_SESSION
     m.preference_text.assert_not_awaited()
 
 
@@ -294,7 +298,7 @@ async def test_session_prompt_fails_open(as_user):
             side_effect=RuntimeError("cache down"),
         ),
     ):
-        assert await load_read_only_session_prompt("why?", session_id="s1") == ""
+        assert await load_read_only_session_prompt("why?", session_id="s1") == EMPTY_SESSION
 
 
 @pytest.mark.asyncio
@@ -332,7 +336,7 @@ async def test_shared_history_reads_the_conversation_once_across_a_fan_out(as_us
 
     assert m.vector_recall.await_count == 1
     assert len(set(prompts)) == 1
-    assert f"QUESTION: {PREVIOUS_QUESTION}" in prompts[0]
+    assert f"QUESTION: {PREVIOUS_QUESTION}" in prompts[0].history
 
 
 # --- the prompt pair -----------------------------------------------------------------
@@ -347,7 +351,7 @@ async def test_prompt_is_the_real_assembly_as_a_user_system_pair(as_user):
         prompts = await build_only_context_prompt(
             _PromptRetriever(), query="why?", context=context, session_id="s1"
         )
-        session_context = await load_read_only_session_prompt("why?", session_id="s1")
+        session_prompt = await load_read_only_session_prompt("why?", session_id="s1")
 
     expected_user, expected_system = build_completion_prompts(
         query="why?",
@@ -355,23 +359,26 @@ async def test_prompt_is_the_real_assembly_as_a_user_system_pair(as_user):
         user_prompt_path=_PromptRetriever.user_prompt_path,
         system_prompt_path=_PromptRetriever.system_prompt_path,
         system_prompt=None,
-        conversation_history=session_context,
+        conversation_history=session_prompt.history,
+        guidance=session_prompt.guidance,
     )
     assert prompts == (expected_user, expected_system)
 
-    # Each message carries what the completion sends in it: the session guidance and
-    # history on the system prompt ahead of the TASK: join; the question and the joined
-    # context on the user prompt, and nothing of the session layer.
+    # Each message carries what the completion sends in it: the system prompt is the
+    # bare task template; the user prompt is the history, then the question and the
+    # joined context, then the guidance block last.
     user_prompt, system_prompt = prompts
-    assert GUIDANCE_LINE in system_prompt
-    assert f"QUESTION: {PREVIOUS_QUESTION}" in system_prompt
-    assert "\nTASK:" in system_prompt
-    assert system_prompt.index(GUIDANCE_LINE) < system_prompt.index("\nTASK:")
+    assert system_prompt == read_query_prompt(_PromptRetriever.system_prompt_path)
+    assert f"QUESTION: {PREVIOUS_QUESTION}" in user_prompt
     assert "why?" in user_prompt
     assert "node1 -- rel -- node2\n---\nnode2 -- rel -- node3" in user_prompt
     assert "['node1" not in user_prompt  # never a Python repr of the list
-    assert GUIDANCE_LINE not in user_prompt
-    assert "node1 -- rel -- node2" not in system_prompt
+    assert GUIDANCE_LINE in user_prompt
+    assert (
+        user_prompt.index("QUESTION:")
+        < user_prompt.index("node1 -- rel -- node2")
+        < user_prompt.index(GUIDANCE_LINE)
+    )
 
 
 @pytest.mark.asyncio
@@ -505,8 +512,8 @@ async def test_string_equals_what_the_sequential_completion_sends(as_user):
 
     assert prompt == (sent["text_input"], sent["system_prompt"])
     # The comparison ran over a populated session layer, not two empty strings.
-    assert GUIDANCE_LINE in prompt[1]
-    assert f"QUESTION: {PREVIOUS_QUESTION}" in prompt[1]
+    assert GUIDANCE_LINE in prompt[0]
+    assert f"QUESTION: {PREVIOUS_QUESTION}" in prompt[0]
 
 
 @pytest.mark.asyncio
@@ -550,7 +557,7 @@ async def test_pair_equals_what_the_concurrent_completion_sends(as_user):
         )
 
     assert prompt == (sent["text_input"], sent["system_prompt"])
-    assert GUIDANCE_LINE in prompt[1]
+    assert GUIDANCE_LINE in prompt[0]
 
 
 # --- content isolation ---------------------------------------------------------------

@@ -9,7 +9,7 @@ All public coroutines are fail-open so they never block answer generation.
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, NamedTuple
 from uuid import uuid4
 
 from cognee.context_global_variables import session_user
@@ -46,21 +46,15 @@ class SessionTurnPreparation:
     previous_qa_id: str | None = None
 
 
-def compose_session_prompt(
-    active_context_block: str,
-    conversation_history: str,
-) -> str:
-    """Assemble the session prompt from the guidance block and history.
-
-    Empty layers are skipped. The guidance block is the single owner of every
-    guidance line — durable preference lines are merged into its ``Preferences``
-    section by the session-context builder, never layered as a second block —
-    and it sits ahead of the conversation history.
+class SessionPrompt(NamedTuple):
+    """The session layer of a completion prompt, as the two parts the prompt builder
+    places separately: the conversation history and the guidance block. Either may be
+    empty. ``build_completion_prompts`` puts the history before the rendered question
+    and context and the guidance block after them.
     """
-    prompt = conversation_history
-    if active_context_block:
-        prompt = active_context_block + "\n\n" + prompt
-    return prompt
+
+    history: str
+    guidance: str
 
 
 async def load_preference_lines_safe() -> list[str]:
@@ -183,7 +177,7 @@ async def generate_session_answer(
 
     Returns ``(answer, context_to_store, served_context_ids)``.
     """
-    conversation_history, served_ids = await build_session_prompt(
+    session_prompt, served_ids = await build_session_prompt(
         session_manager,
         user_id=user_id,
         session_id=session_id,
@@ -197,7 +191,8 @@ async def generate_session_answer(
     ) = await generate_session_completion_with_optional_summary(
         query=answer_query,
         context=context,
-        conversation_history=conversation_history,
+        conversation_history=session_prompt.history,
+        guidance=session_prompt.guidance,
         user_prompt_path=user_prompt_path,
         system_prompt_path=system_prompt_path,
         system_prompt=system_prompt,
@@ -215,8 +210,8 @@ async def build_session_prompt(
     query: str,
     history: str | None = None,
     stamp_served: bool = True,
-) -> tuple[str, list[str]]:
-    """Assemble the session layer of a completion prompt: guidance block, then history.
+) -> tuple[SessionPrompt, list[str]]:
+    """Assemble the session layer of a completion prompt: history and guidance block.
 
     The single owner of this assembly. The sequential answer path calls it as-is; an
     ``only_context`` preview calls it with ``stamp_served=False`` so it reads the same
@@ -225,7 +220,9 @@ async def build_session_prompt(
 
     ``history`` lets a caller that has already loaded the conversation (once across a
     dataset fan-out) skip the second read; ``None`` loads it here. Returns
-    ``(prompt, served_ids)``.
+    ``(SessionPrompt, served_ids)``. The guidance block is the single owner of every
+    guidance line: durable preference lines are merged into its ``Preferences`` section
+    by the session-context builder, never layered as a second block.
     """
     conversation_history = (
         history
@@ -255,7 +252,7 @@ async def build_session_prompt(
         # through the same owner, budgets, and block shape.
         active_context_block = render_preference_block(preference_lines)
 
-    return compose_session_prompt(active_context_block, conversation_history), served_ids
+    return SessionPrompt(history=conversation_history, guidance=active_context_block), served_ids
 
 
 async def build_active_context_block_safe(

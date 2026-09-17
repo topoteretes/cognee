@@ -75,7 +75,8 @@ class TestGenerateCompletion:
 
     @pytest.mark.asyncio
     async def test_generate_completion_with_conversation_history(self):
-        """Test generate_completion includes conversation_history in system_prompt."""
+        """History goes before the rendered template in the user prompt; the system prompt
+        stays the bare template."""
         mock_llm_response = "Generated answer"
 
         with (
@@ -104,20 +105,19 @@ class TestGenerateCompletion:
             )
 
             assert result == mock_llm_response
-            expected_system_prompt = (
-                "Previous conversation:\nQ: What is ML?\nA: ML is machine learning"
-                + "\nTASK:"
-                + "System prompt from file"
-            )
             mock_llm.assert_awaited_once_with(
-                text_input="User prompt text",
-                system_prompt=expected_system_prompt,
+                text_input=(
+                    "Previous conversation:\nQ: What is ML?\nA: ML is machine learning"
+                    "\n\nUser prompt text"
+                ),
+                system_prompt="System prompt from file",
                 response_model=str,
             )
 
     @pytest.mark.asyncio
-    async def test_generate_completion_with_conversation_history_and_custom_system_prompt(self):
-        """Test generate_completion includes conversation_history with custom system_prompt."""
+    async def test_generate_completion_with_history_guidance_and_custom_system_prompt(self):
+        """User prompt order is history, rendered template, guidance; a custom system
+        prompt is sent as is."""
         mock_llm_response = "Generated answer"
 
         with (
@@ -140,17 +140,17 @@ class TestGenerateCompletion:
                 system_prompt_path="system_prompt.txt",
                 system_prompt="Custom system prompt",
                 conversation_history="Previous conversation:\nQ: What is ML?\nA: ML is machine learning",
+                guidance="## Active session guidance\n### Rules\n- Be brief.",
             )
 
             assert result == mock_llm_response
-            expected_system_prompt = (
-                "Previous conversation:\nQ: What is ML?\nA: ML is machine learning"
-                + "\nTASK:"
-                + "Custom system prompt"
-            )
             mock_llm.assert_awaited_once_with(
-                text_input="User prompt text",
-                system_prompt=expected_system_prompt,
+                text_input=(
+                    "Previous conversation:\nQ: What is ML?\nA: ML is machine learning"
+                    "\n\nUser prompt text"
+                    "\n\n## Active session guidance\n### Rules\n- Be brief."
+                ),
+                system_prompt="Custom system prompt",
                 response_model=str,
             )
 
@@ -376,6 +376,7 @@ class TestGenerateSessionCompletionWithOptionalSummary:
                 query="Q?",
                 context="ctx",
                 conversation_history="",
+                guidance="",
                 user_prompt_path="user.txt",
                 system_prompt_path="sys.txt",
                 summarize_context=False,
@@ -421,6 +422,7 @@ class TestGenerateSessionCompletionWithOptionalSummary:
                 query="Q?",
                 context="long context",
                 conversation_history="",
+                guidance="",
                 user_prompt_path="user.txt",
                 system_prompt_path="sys.txt",
                 summarize_context=True,

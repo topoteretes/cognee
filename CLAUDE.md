@@ -430,13 +430,34 @@ Concurrent mode applies only to `GraphCompletionRetriever`,
 automatically. With `AUTO_FEEDBACK=false`
 neither mode analyzes the turn.
 
+#### Completion prompt layout
+
+Every completion is assembled by one function, `build_completion_prompts` in
+`cognee/modules/retrieval/utils/completion.py`. The **system prompt** is the retriever's
+task template and nothing else: cognee-authored, static per retriever, so it never
+changes between turns. Everything derived from the user goes into the **user prompt**, in
+this order: the conversation history, the rendered question-and-context template, and
+the guidance block last (the `## Active session guidance` block with a session, the
+durable preference block sessionless). Session code hands the two session parts over as
+`SessionPrompt(history, guidance)` (`build_session_prompt` in
+`cognee/infrastructure/session/session_turn.py`).
+
+The placement was measured across every combination, not chosen by taste. Soft
+preferences ("the user prefers German") are ignored from the system prompt by the
+default model and followed from the user turn; history is only used when it sits next
+to the context the template points at (the user template says "do not use information
+outside the context", so history delivered as system text or as chat turns is refused);
+guidance placed last wins over older turns that asked for something else; and an
+instruction planted in a past answer is obeyed only from the system prompt. Keep those
+four properties when touching the templates.
+
 #### only_context
 
 `only_context=True` returns what the LLM would have received instead of its answer. For
 completion search types that is the two messages a completion sends, kept apart: the
-**user prompt** (the question and the retrieval context rendered through the retriever's
-user template) and the **system prompt** (session guidance block, conversation history,
-then `TASK:` and the system template). `search()` returns the user prompt as the result
+**user prompt** (conversation history, then the question and the retrieval context
+rendered through the retriever's user template, then the session guidance block) and the
+**system prompt** (the retriever's task template). `search()` returns the user prompt as the result
 and, with `verbose=True`, carries both as `user_prompt_result` / `system_prompt_result`; a
 `recall()` item has the user prompt in `text` and the system prompt in `system_prompt`.
 Both are built by the same code the real completion uses (`build_session_prompt` in

@@ -217,7 +217,8 @@ async def test_answer_uses_the_callers_own_prompts_and_response_model():
     # No wrapper model: the caller's own response contract, unchanged.
     assert call["response_model"] is Answer
     assert call["system_prompt"] == "caller system prompt"
-    assert call["conversation_history"] == "active guidance\n\nhistory"
+    assert call["conversation_history"] == "history"
+    assert call["guidance"] == "active guidance"
 
 
 @pytest.mark.asyncio

@@ -480,14 +480,10 @@ class AgenticRetriever(GraphCompletionRetriever):
         loop_context = initial_context
         conversation_history = await self._get_session_history()
 
-        # Prepend the active session-context guidance block above history (gated + fail-open).
-        # served_ids are captured on the instance so _store_session_qa can record them on the QA.
-        block, served_ids = await self._maybe_active_context_block(query)
+        # The active session-context guidance block (gated + fail-open). served_ids are
+        # captured on the instance so _store_session_qa can record them on the QA.
+        guidance, served_ids = await self._maybe_active_context_block(query)
         self._active_context_served_ids = served_ids
-        if block:
-            conversation_history = (
-                block + "\n\n" + conversation_history if conversation_history else block
-            )
 
         for iteration in range(self.max_iter):
             step: AgentStep = await generate_completion(
@@ -496,6 +492,7 @@ class AgenticRetriever(GraphCompletionRetriever):
                 user_prompt_path=self.agentic_user_prompt_path,
                 system_prompt_path=self.agentic_system_prompt_path,
                 conversation_history=conversation_history,
+                guidance=guidance,
                 response_model=AgentStep,
             )
 
@@ -536,6 +533,7 @@ class AgenticRetriever(GraphCompletionRetriever):
             user_prompt_path=self.user_prompt_path,
             system_prompt_path=self.system_prompt_path,
             conversation_history=conversation_history,
+            guidance=guidance,
             response_model=str,
         )
         return forced

@@ -274,7 +274,7 @@ class HybridRetriever(BaseRetriever):
             completions = await generate_completion_batch(
                 query_batch=query_batch,
                 context=context,
-                conversation_history=preference_text,
+                guidance=preference_text,
                 **prompts,
             )
         else:
@@ -283,7 +283,7 @@ class HybridRetriever(BaseRetriever):
                 await generate_completion(
                     query=query,
                     context=context,
-                    conversation_history=preference_text,
+                    guidance=preference_text,
                     **prompts,
                 )
             ]
