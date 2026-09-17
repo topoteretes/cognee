@@ -23,6 +23,7 @@ from cognee.modules.observability import (
     new_span,
 )
 from cognee.modules.retrieval.only_context_prompt import SharedSessionHistory
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.operations import log_search_history
@@ -330,11 +331,13 @@ async def search_in_datasets_context(
                 # Check if graph for dataset is empty and log warnings if necessary
                 graph_engine = await get_graph_engine()
                 is_empty = await graph_engine.is_empty()
+                data_item_count = None
                 if is_empty:
                     # TODO: we can log here, but not all search types use graph. Still keeping this here for reviewer input
                     from cognee.modules.data.methods import get_dataset_data
 
                     dataset_data = await get_dataset_data(dataset.id)
+                    data_item_count = len(dataset_data)
 
                     if len(dataset_data) > 0:
                         logger.warning(
@@ -349,28 +352,37 @@ async def search_in_datasets_context(
                     span.set_attribute("cognee.search.graph_empty", True)
 
                 # Get retriever output in the context of the current dataset
-                return await get_retriever_output(
-                    query_type=query_type,
-                    query_text=query_text,
-                    user=user,
-                    dataset=dataset,
-                    system_prompt_path=system_prompt_path,
-                    system_prompt=system_prompt,
-                    top_k=top_k,
-                    node_type=node_type,
-                    node_name=node_name,
-                    node_name_filter_operator=node_name_filter_operator,
-                    only_context=only_context,
-                    shared_history=shared_history,
-                    session_id=session_id,
-                    wide_search_top_k=wide_search_top_k,
-                    triplet_distance_penalty=triplet_distance_penalty,
-                    feedback_influence=feedback_influence,
-                    retriever_specific_config=retriever_specific_config,
-                    neighborhood_depth=neighborhood_depth,
-                    neighborhood_seed_top_k=neighborhood_seed_top_k,
-                    include_references=include_references,
-                )
+                try:
+                    return await get_retriever_output(
+                        query_type=query_type,
+                        query_text=query_text,
+                        user=user,
+                        dataset=dataset,
+                        system_prompt_path=system_prompt_path,
+                        system_prompt=system_prompt,
+                        top_k=top_k,
+                        node_type=node_type,
+                        node_name=node_name,
+                        node_name_filter_operator=node_name_filter_operator,
+                        only_context=only_context,
+                        shared_history=shared_history,
+                        session_id=session_id,
+                        wide_search_top_k=wide_search_top_k,
+                        triplet_distance_penalty=triplet_distance_penalty,
+                        feedback_influence=feedback_influence,
+                        retriever_specific_config=retriever_specific_config,
+                        neighborhood_depth=neighborhood_depth,
+                        neighborhood_seed_top_k=neighborhood_seed_top_k,
+                        include_references=include_references,
+                    )
+                except NoDataError as error:
+                    # The retriever knows its graph (or collection) is empty but not
+                    # which dataset it was searching. This frame knows both, so tag
+                    # the error with the dataset and what it is missing; the fan-out
+                    # below decides whether that fails the whole search.
+                    raise DatasetNoDataError(
+                        dataset, error, graph_is_empty=is_empty, data_item_count=data_item_count
+                    ) from error
 
     async def _report_code_seed_miss(dataset_search, dataset: Dataset) -> SearchResultPayload:
         """Report a per-dataset CODE seed miss instead of failing the whole request.
@@ -383,10 +395,14 @@ async def search_in_datasets_context(
         try:
             return await dataset_search
         except CodeSeedNotFoundError as error:
+            # ``error`` is the one place a caller reads a dataset's failure; the
+            # completion marker is the shape this case shipped with and stays
+            # for callers that already parse it.
             return SearchResultPayload(
                 result_object=None,
                 context=None,
                 completion={"seed_not_found": True, "error": str(error)},
+                error=str(error),
                 search_type=query_type,
                 only_context=False,
                 dataset_name=dataset.name,
@@ -469,11 +485,145 @@ async def search_in_datasets_context(
                 llm_config=llm_config,
                 embedding_config=embedding_config,
             ):
-                return await get_retriever_output(**retriever_kwargs)
+                try:
+                    return await get_retriever_output(**retriever_kwargs)
+                except NoDataError as error:
+                    if dataset is None:
+                        # Shared single-tenant graph, no dataset to name.
+                        raise
+                    raise DatasetNoDataError(dataset, error) from error
 
         tasks.append(_search_without_context())
 
-    return await asyncio.gather(*tasks)
+    return _collect_dataset_results(
+        await asyncio.gather(*tasks, return_exceptions=True),
+        query_type=query_type,
+        query_text=query_text,
+        only_context=only_context,
+    )
+
+class DatasetNoDataError(NoDataError):
+    """A retriever's NoDataError, tagged with the dataset it was searching.
+
+    Raised only inside the per-dataset fan-out and consumed by
+    ``_collect_dataset_results``; it never leaves ``search_in_datasets_context``.
+    """
+
+    def __init__(
+        self,
+        dataset: Dataset,
+        error: NoDataError,
+        *,
+        graph_is_empty: bool = False,
+        data_item_count: int | None = None,
+    ):
+        self.dataset = dataset
+        self.reason = _no_data_reason(error, graph_is_empty, data_item_count)
+        super().__init__(
+            message=f"Dataset '{dataset.name}' (id: {dataset.id}): {self.reason}",
+            status_code=error.status_code,
+        )
+
+
+def _no_data_reason(error: NoDataError, graph_is_empty: bool, data_item_count: int | None) -> str:
+    """What a dataset is missing, phrased as the fix the caller has to apply."""
+    if graph_is_empty and data_item_count:
+        return (
+            f"holds {data_item_count} data item(s) but its knowledge graph is empty; "
+            "run cognify on this dataset before searching."
+        )
+    if graph_is_empty:
+        return "no data has been added; add data and run cognify before searching."
+    # A populated graph whose retriever still found nothing to search, e.g. RAG's
+    # missing chunk collection: keep the retriever's own reason.
+    return error.message
+
+
+def _collect_dataset_results(
+    outcomes: list,
+    *,
+    query_type: SearchType,
+    query_text: str,
+    only_context: bool,
+) -> list[SearchResultPayload]:
+    """Turn the fan-out's per-dataset outcomes into one entry per dataset, or one error.
+
+    A dataset without searchable memory fails the search only when *every* searched
+    dataset is in that state; then one NoDataError (404) names each of them and what
+    it is missing. Otherwise the list keeps one entry per dataset, in request order:
+    a dataset that could not be searched comes back with empty results and its reason
+    on ``error``, so the caller is told what happened without losing the siblings'
+    answers (``datasets=None`` means "every dataset the user can read", so a single
+    freshly created dataset must not take down unscoped search). Any other exception
+    propagates unchanged and fails the whole search.
+    """
+    for outcome in outcomes:
+        if isinstance(outcome, BaseException) and not isinstance(outcome, DatasetNoDataError):
+            raise outcome
+
+    no_data = [outcome for outcome in outcomes if isinstance(outcome, DatasetNoDataError)]
+    if no_data and len(no_data) == len(outcomes):
+        if len(no_data) == 1:
+            only = no_data[0]
+            raise NoDataError(
+                message=(
+                    f"No searchable memory in dataset '{only.dataset.name}' "
+                    f"(id: {only.dataset.id}): {only.reason}"
+                ),
+                status_code=only.status_code,
+            )
+        lines = "\n".join(
+            f"- '{error.dataset.name}' (id: {error.dataset.id}): {error.reason}"
+            for error in no_data
+        )
+        raise NoDataError(
+            message=(
+                f"No searchable memory in any of the {len(no_data)} searched datasets:\n{lines}"
+            ),
+            status_code=no_data[0].status_code,
+        )
+
+    payloads: list[SearchResultPayload] = []
+    for outcome in outcomes:
+        if isinstance(outcome, DatasetNoDataError):
+            logger.warning("Dataset without searchable memory: %s", outcome.message)
+            payloads.append(
+                _no_data_payload(
+                    outcome,
+                    query_type=query_type,
+                    query_text=query_text,
+                    only_context=only_context,
+                )
+            )
+        else:
+            payloads.append(outcome)
+    return payloads
+
+
+def _no_data_payload(
+    error: DatasetNoDataError,
+    *,
+    query_type: SearchType,
+    query_text: str,
+    only_context: bool,
+) -> SearchResultPayload:
+    """The entry a dataset without searchable memory gets: empty results plus the reason.
+
+    Shaped like a query miss for the same request (``[]`` under ``search_result``,
+    an empty context for ``only_context``) so existing callers see what they always
+    saw; only ``error`` is new.
+    """
+    return SearchResultPayload(
+        result_object=[],
+        context=[] if only_context else None,
+        search_type=query_type,
+        only_context=only_context,
+        question=query_text,
+        dataset_name=error.dataset.name,
+        dataset_id=error.dataset.id,
+        dataset_tenant_id=error.dataset.tenant_id,
+        error=error.reason,
+    )
 
 
 def _backwards_compatible_search_results(search_results, verbose: bool):
@@ -507,6 +657,11 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
             else:
                 # Result attribute handles returning appropriate result based on set flags and outputs
                 search_result_dict["search_result"] = search_result.result
+
+            if search_result.error is not None:
+                # Only on entries that carry one: the dict stays byte-identical for
+                # every dataset that was searched normally.
+                search_result_dict["error"] = search_result.error
 
             return_value.append(search_result_dict)
         return return_value

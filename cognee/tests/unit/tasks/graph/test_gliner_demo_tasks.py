@@ -16,8 +16,8 @@ from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.processing.document_types import AudioDocument, ImageDocument, TextDocument
 from cognee.modules.search.types import SearchType
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.tasks.graph import gliner as gliner_pkg
-from cognee.tasks.graph.gliner import (
+from cognee.tasks.graph import gliner_demo as gliner_pkg
+from cognee.tasks.graph.gliner_demo import (
     LABEL_BANK,
     MAX_TYPES,
     RELATION_BANK,
@@ -27,7 +27,7 @@ from cognee.tasks.graph.gliner import (
     GlinerSchema,
     extract_graph_and_summarize_with_gliner,
     format_chunk_summary,
-    get_gliner_tasks,
+    get_gliner_demo_tasks,
     knowledge_graph_from_gliner_result,
     map_gliner_result,
     resolve_schema,
@@ -35,8 +35,8 @@ from cognee.tasks.graph.gliner import (
     schema_from_ontology,
     to_snake_case,
 )
-from cognee.tasks.graph.gliner import schema as schema_module
-from cognee.tasks.graph.gliner import tasks as tasks_module
+from cognee.tasks.graph.gliner_demo import schema as schema_module
+from cognee.tasks.graph.gliner_demo import tasks as tasks_module
 from cognee.tasks.summarization.models import TextSummary
 
 # --------------------------------------------------------------------------- #
@@ -352,7 +352,7 @@ def test_ontology_relation_types_require_entity_types(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_gliner_tasks_reuse_configured_ontology_resolver():
+async def test_gliner_demo_tasks_reuse_configured_ontology_resolver():
     from rdflib import Graph
 
     graph = Graph()
@@ -360,7 +360,7 @@ async def test_gliner_tasks_reuse_configured_ontology_resolver():
     resolver = SimpleNamespace(graph=graph)
 
     with patch.object(tasks_module, "require_gliner2"):
-        tasks = await get_gliner_tasks(
+        tasks = await get_gliner_demo_tasks(
             config={"ontology_config": {"ontology_resolver": resolver}},
             chunk_size=512,
         )
@@ -710,13 +710,15 @@ async def test_task_rejects_bad_inputs():
 
 
 @pytest.mark.asyncio
-async def test_get_gliner_tasks_shape():
+async def test_get_gliner_demo_tasks_shape():
     stats = GlinerRunStats()
     with (
         patch.object(tasks_module, "require_gliner2"),
         patch.object(tasks_module, "get_max_chunk_tokens", AsyncMock(return_value=512)),
     ):
-        tasks = await get_gliner_tasks(["person"], ["works_for"], chunks_per_batch=7, stats=stats)
+        tasks = await get_gliner_demo_tasks(
+            ["person"], ["works_for"], chunks_per_batch=7, stats=stats
+        )
 
     assert [t.executable.__name__ for t in tasks] == [
         "classify_documents",
@@ -738,9 +740,9 @@ async def test_get_gliner_tasks_shape():
 
 
 @pytest.mark.asyncio
-async def test_get_gliner_tasks_appends_optional_graph_tasks_in_order():
+async def test_get_gliner_demo_tasks_appends_optional_graph_tasks_in_order():
     with patch.object(tasks_module, "require_gliner2"):
-        tasks = await get_gliner_tasks(
+        tasks = await get_gliner_demo_tasks(
             ["person"],
             track_provenance=True,
             check_contradictions=True,
@@ -756,21 +758,21 @@ async def test_get_gliner_tasks_appends_optional_graph_tasks_in_order():
 
 
 @pytest.mark.asyncio
-async def test_get_gliner_tasks_fails_fast_without_gliner2():
+async def test_get_gliner_demo_tasks_fails_fast_without_gliner2():
     with (
         patch.object(tasks_module, "require_gliner2", side_effect=GlinerNotInstalledError()),
         pytest.raises(GlinerNotInstalledError, match=r"cognee\[gliner\]"),
     ):
-        await get_gliner_tasks()
+        await get_gliner_demo_tasks()
 
 
 @pytest.mark.asyncio
-async def test_get_gliner_tasks_validates_options_and_labels():
+async def test_get_gliner_demo_tasks_validates_options_and_labels():
     with patch.object(tasks_module, "require_gliner2"):
         with pytest.raises(ValueError, match="threshold"):
-            await get_gliner_tasks(["person"], threshold=1.5)
+            await get_gliner_demo_tasks(["person"], threshold=1.5)
         with pytest.raises(ValueError, match="at most"):
-            await get_gliner_tasks([f"t{i}" for i in range(MAX_TYPES + 1)])
+            await get_gliner_demo_tasks([f"t{i}" for i in range(MAX_TYPES + 1)])
 
 
 @pytest.mark.asyncio
@@ -785,7 +787,7 @@ async def test_default_cognify_pipeline_is_unchanged():
 
 
 def test_public_surface_matches_plan():
-    assert callable(gliner_pkg.get_gliner_tasks)
+    assert callable(gliner_pkg.get_gliner_demo_tasks)
     assert callable(gliner_pkg.resolve_schema)
     assert callable(gliner_pkg.schema_from_ontology)
     assert callable(gliner_pkg.schema_from_label_bank)
@@ -829,7 +831,7 @@ async def _cognify_standard_tasks(**kwargs):
 @pytest.mark.asyncio
 async def test_cognify_extractor_argument_selects_the_gliner_task_list():
     with patch.object(tasks_module, "require_gliner2"):
-        tasks = await _cognify_standard_tasks(extractor="gliner")
+        tasks = await _cognify_standard_tasks(extractor="gliner_demo")
     names = _task_names(tasks)
     assert names[:5] == [
         "classify_documents",
@@ -844,7 +846,9 @@ async def test_cognify_extractor_argument_selects_the_gliner_task_list():
 @pytest.mark.asyncio
 async def test_cognify_extractor_env_setting_is_honoured_and_argument_wins():
     cognify_module = _cognify_module()
-    config = cognify_module.get_cognify_config().model_copy(update={"graph_extractor": "gliner"})
+    config = cognify_module.get_cognify_config().model_copy(
+        update={"graph_extractor": "gliner_demo"}
+    )
     with (
         patch.object(tasks_module, "require_gliner2"),
         patch.object(cognify_module, "get_cognify_config", return_value=config),
@@ -855,11 +859,12 @@ async def test_cognify_extractor_env_setting_is_honoured_and_argument_wins():
     assert "extract_graph_and_summarize" in _task_names(overridden)
 
 
-def test_cognify_config_defaults_to_llm_extractor():
+def test_cognify_config_defaults_to_auto_extractor(monkeypatch):
     from cognee.modules.cognify.config import CognifyConfig
 
-    assert CognifyConfig().graph_extractor == "llm"
-    assert "graph_extractor" in CognifyConfig().to_dict()
+    monkeypatch.delenv("GRAPH_EXTRACTOR", raising=False)
+    assert CognifyConfig(_env_file=None).graph_extractor == "auto"
+    assert "graph_extractor" in CognifyConfig(_env_file=None).to_dict()
 
 
 @pytest.mark.asyncio
@@ -873,7 +878,7 @@ async def test_cognify_extractor_rejects_unknown_values_and_custom_graph_models(
         patch.object(tasks_module, "require_gliner2"),
         pytest.raises(ValueError, match="custom graph_model"),
     ):
-        await _cognify_standard_tasks(graph_model=Custom, extractor="gliner")
+        await _cognify_standard_tasks(graph_model=Custom, extractor="gliner_demo")
 
 
 @pytest.mark.asyncio
@@ -882,7 +887,7 @@ async def test_cognify_extractor_gliner_without_the_extra_fails_with_install_hin
         patch.object(tasks_module, "require_gliner2", side_effect=GlinerNotInstalledError()),
         pytest.raises(GlinerNotInstalledError, match=r"cognee\[gliner\]"),
     ):
-        await _cognify_standard_tasks(extractor="gliner")
+        await _cognify_standard_tasks(extractor="gliner_demo")
 
 
 @pytest.mark.asyncio
@@ -891,7 +896,7 @@ async def test_gliner_extractor_rejects_unknown_kwargs_instead_of_swallowing():
         patch.object(tasks_module, "require_gliner2"),
         pytest.raises(ValueError, match="Unsupported arguments"),
     ):
-        await _cognify_standard_tasks(extractor="gliner", n_rounds=3)
+        await _cognify_standard_tasks(extractor="gliner_demo", n_rounds=3)
 
 
 # The branches that cannot honour the extractor must raise before doing any
@@ -906,18 +911,18 @@ async def test_cognify_extractor_conflicts_raise_before_any_work(monkeypatch):
     with pytest.raises(ValueError, match="Unknown extractor"):
         await cognify_module.cognify(extractor="spacy")
     with pytest.raises(ValueError, match="temporal"):
-        await cognify_module.cognify(temporal_cognify=True, extractor="gliner")
+        await cognify_module.cognify(temporal_cognify=True, extractor="gliner_demo")
     with (
         patch.object(
             cognify_module,
             "get_cognify_config",
-            return_value=_config_with_extractor("gliner"),
+            return_value=_config_with_extractor("gliner_demo"),
         ),
         pytest.raises(ValueError, match="temporal"),
     ):
         await cognify_module.cognify(temporal_cognify=True)
     with pytest.raises(ValueError, match="dry_run"):
-        await cognify_module.cognify(dry_run=True, extractor="gliner")
+        await cognify_module.cognify(dry_run=True, extractor="gliner_demo")
 
     serve_state = importlib.import_module("cognee.api.v1.serve.state")
     monkeypatch.setattr(serve_state, "get_remote_client", lambda: object())
@@ -936,7 +941,7 @@ async def test_remember_rejects_gliner_dry_run():
     remember_module = importlib.import_module("cognee.api.v1.remember.remember")
 
     with pytest.raises(ValueError, match="dry_run"):
-        await remember_module.remember("text", dry_run=True, extractor="gliner")
+        await remember_module.remember("text", dry_run=True, extractor="gliner_demo")
 
 
 @pytest.mark.asyncio
@@ -944,7 +949,7 @@ async def test_session_remember_rejects_an_explicit_extractor():
     remember_module = importlib.import_module("cognee.api.v1.remember.remember")
 
     with pytest.raises(ValueError, match="session_id"):
-        await remember_module.remember("text", session_id="session", extractor="gliner")
+        await remember_module.remember("text", session_id="session", extractor="gliner_demo")
 
 
 # --------------------------------------------------------------------------- #
@@ -961,23 +966,112 @@ def _config_with_extractor(extractor):
 def test_resolve_extractor_argument_wins_over_config():
     from cognee.modules.cognify.config import resolve_extractor
 
-    assert resolve_extractor(None, _config_with_extractor("gliner")) == "gliner"
-    assert resolve_extractor("llm", _config_with_extractor("gliner")) == "llm"
-    assert resolve_extractor(" GLiNER ", _config_with_extractor("llm")) == "gliner"
+    assert resolve_extractor(None, _config_with_extractor("gliner_demo")) == "gliner_demo"
+    assert resolve_extractor("llm", _config_with_extractor("gliner_demo")) == "llm"
+    assert resolve_extractor(" GLiNER_Demo ", _config_with_extractor("llm")) == "gliner_demo"
     with pytest.raises(ValueError, match="Unknown extractor"):
         resolve_extractor("spacy", _config_with_extractor("llm"))
+
+
+def test_resolve_extractor_accepts_gliner_as_an_alias_of_gliner_demo():
+    from cognee.modules.cognify.config import resolve_extractor
+
+    assert resolve_extractor("gliner", _config_with_extractor("llm")) == "gliner_demo"
+    assert resolve_extractor(None, _config_with_extractor("gliner")) == "gliner_demo"
+    assert resolve_extractor(" GLiNER ", _config_with_extractor("llm")) == "gliner_demo"
+
+
+def test_resolving_to_the_demo_extractor_logs_the_enterprise_notice_once(monkeypatch):
+    from cognee.modules.cognify import config as cognify_config_module
+    from cognee.modules.cognify.config import GLINER_DEMO_NOTICE, resolve_extractor
+
+    monkeypatch.setattr(cognify_config_module, "_gliner_demo_notice_logged", False)
+    logged = []
+    monkeypatch.setattr(
+        cognify_config_module,
+        "_log_gliner_demo_notice_once",
+        lambda: logged.append(True) if not logged else None,
+    )
+
+    resolve_extractor("gliner_demo", _config_with_extractor("llm"))
+    resolve_extractor("gliner", _config_with_extractor("llm"))
+    resolve_extractor("llm", _config_with_extractor("llm"))
+
+    assert logged == [True]
+    assert "enterprise" in GLINER_DEMO_NOTICE and "social@cognee.ai" in GLINER_DEMO_NOTICE
+
+
+def test_demo_notice_is_logged_once_per_process(monkeypatch, caplog):
+    from cognee.modules.cognify import config as cognify_config_module
+
+    monkeypatch.setattr(cognify_config_module, "_gliner_demo_notice_logged", False)
+    with caplog.at_level("WARNING"):
+        cognify_config_module._log_gliner_demo_notice_once()
+        cognify_config_module._log_gliner_demo_notice_once()
+    notices = [r for r in caplog.records if "GLiNER demo extractor" in r.getMessage()]
+    assert len(notices) == 1
+
+
+def test_resolve_extractor_auto_follows_the_llm_key():
+    """``auto`` (the default) is the LLM path with a usable key and GLiNER without."""
+    from cognee.modules.cognify.config import resolve_extractor
+
+    auto = _config_with_extractor("auto")
+    with patch("importlib.util.find_spec", return_value=object()):
+        assert resolve_extractor(None, auto, llm_configured=True) == "llm"
+        assert resolve_extractor(None, auto, llm_configured=False) == "gliner_demo"
+        assert resolve_extractor("auto", _config_with_extractor("llm"), llm_configured=False) == (
+            "gliner_demo"
+        )
+    # A pinned extractor ignores the key entirely.
+    assert resolve_extractor(None, _config_with_extractor("llm"), llm_configured=False) == "llm"
+    assert resolve_extractor("gliner_demo", auto, llm_configured=True) == "gliner_demo"
+
+
+def test_resolve_extractor_auto_reads_the_keyless_rule_by_default():
+    from cognee.modules.cognify import config as cognify_config_module
+    from cognee.modules.cognify.config import resolve_extractor
+
+    with (
+        patch("cognee.modules.preflight.keyless_local_defaults_apply", return_value=False) as rule,
+        patch.object(cognify_config_module.importlib.util, "find_spec", return_value=object()),
+    ):
+        assert resolve_extractor(None, _config_with_extractor("auto")) == "llm"
+    rule.assert_called_once_with()
+    with (
+        patch("cognee.modules.preflight.keyless_local_defaults_apply", return_value=True),
+        patch.object(cognify_config_module.importlib.util, "find_spec", return_value=object()),
+    ):
+        assert resolve_extractor(None, _config_with_extractor("auto")) == "gliner_demo"
+
+
+def test_resolve_extractor_auto_without_key_needs_gliner2_installed():
+    """Keyless ingestion fails fast with the install hint when gliner2 is missing."""
+    from cognee.modules.cognify.config import (
+        KeylessExtractorNotInstalledError,
+        resolve_extractor,
+    )
+
+    with (
+        patch("importlib.util.find_spec", return_value=None),
+        pytest.raises(KeylessExtractorNotInstalledError, match="cognee\\[gliner\\]"),
+    ):
+        resolve_extractor(None, _config_with_extractor("auto"), llm_configured=False)
+    # The explicit setting is left to the gliner task list's own guard.
+    with patch("importlib.util.find_spec", return_value=None):
+        assert resolve_extractor("gliner_demo", _config_with_extractor("auto")) == "gliner_demo"
 
 
 def test_default_pipeline_needs_llm_formula():
     from cognee.modules.cognify.config import default_pipeline_needs_llm
 
     assert default_pipeline_needs_llm("llm", _config_with_extractor("llm")) is True
-    assert default_pipeline_needs_llm("gliner", _config_with_extractor("gliner")) is False
+    assert default_pipeline_needs_llm("gliner_demo", _config_with_extractor("gliner_demo")) is False
     # The opt-in contradiction pass is an LLM task appended to the gliner list too.
-    contradiction_config = _config_with_extractor("gliner").model_copy(
+    contradiction_config = _config_with_extractor("gliner_demo").model_copy(
         update={"contradiction_detection": True}
     )
-    assert default_pipeline_needs_llm("gliner", contradiction_config) is True
+    assert default_pipeline_needs_llm("gliner_demo", contradiction_config) is True
 
 
 @pytest.mark.asyncio
@@ -990,11 +1084,11 @@ async def test_default_task_list_llm_need_is_derived_from_the_tasks():
     cognify_module = _cognify_module()
 
     with patch.object(tasks_module, "require_gliner2"):
-        gliner_tasks = await get_gliner_tasks(chunk_size=512)
+        gliner_tasks = await get_gliner_demo_tasks(chunk_size=512)
         llm_tasks = await cognify_module.get_default_tasks(
             graph_model=KnowledgeGraph, chunk_size=512
         )
-        gliner_with_contradictions = await get_gliner_tasks(
+        gliner_with_contradictions = await get_gliner_demo_tasks(
             chunk_size=512, check_contradictions=True
         )
 

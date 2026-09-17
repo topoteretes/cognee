@@ -38,6 +38,12 @@ class SearchResultPayload(BaseModel):
     dataset_id: UUID | None = None
     dataset_tenant_id: UUID | None = None
 
+    # Set when this dataset could not be searched (empty graph, missing
+    # collection, unresolvable code seed). The result fields are empty and the
+    # search's list still carries one entry per dataset, so a caller can tell
+    # "nothing matched here" from "this dataset was not searched" -- and read why.
+    error: str | None = None
+
     @field_serializer("result_object")
     def serialize_complex_types(self, v: Any):
         """

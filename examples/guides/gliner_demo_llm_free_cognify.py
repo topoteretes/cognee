@@ -1,9 +1,13 @@
-"""LLM-free knowledge graph + summaries with GLiNER (SDK-537).
+"""LLM-free knowledge graph + summaries with the GLiNER demo extractor (SDK-537).
 
 The default ``cognee.cognify()`` extracts the graph and the chunk summaries with
 an LLM. This example builds both with a local GLiNER2 model instead: no
 ``extract_content_graph`` and no ``extract_summary`` calls are made. Embeddings
 in ``add_data_points`` still run, so an embedding provider must be configured.
+
+The open-source GLiNER extractor is a demo of cognee's enterprise GLiNER
+extraction; the production-grade version needs an enterprise licence
+(social@cognee.ai).
 
 Requirements::
 
@@ -26,7 +30,7 @@ import cognee
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.users.methods import get_default_user
-from cognee.tasks.graph.gliner import GlinerRunStats, get_gliner_tasks
+from cognee.tasks.graph.gliner_demo import GlinerRunStats, get_gliner_demo_tasks
 
 TEXT = """
 Tim Cook is the chief executive officer of Apple Inc., headquartered in Cupertino,
@@ -48,7 +52,7 @@ async def main():
     user = await get_default_user()
 
     stats = GlinerRunStats()
-    tasks = await get_gliner_tasks(
+    tasks = await get_gliner_demo_tasks(
         entity_types={
             "person": "Full name of a human being",
             "organization": "Company or institution",

@@ -1,10 +1,21 @@
-"""LLM-free knowledge-graph extraction and summaries with GLiNER (SDK-537).
+"""GLiNER demo: LLM-free knowledge-graph extraction and summaries (SDK-537).
+
+Selected with ``GRAPH_EXTRACTOR=gliner_demo`` or ``cognify(extractor="gliner_demo")``,
+and by default (``GRAPH_EXTRACTOR=auto``) whenever no usable LLM key is configured.
+
+DEMO: The open-source GLiNER extractor is a demo of cognee's enterprise GLiNER
+extraction. It is free to use and needs no LLM key; the production-grade version
+(higher accuracy, broader label coverage) is available with a cognee enterprise
+licence. The first run with it logs that notice once.
+
+Interested in the production-grade GLiNER extraction? Write to us at
+social@cognee.ai to explore the options.
 
 Usage::
 
-    from cognee.tasks.graph.gliner import get_gliner_tasks
+    from cognee.tasks.graph.gliner_demo import get_gliner_demo_tasks
 
-    tasks = await get_gliner_tasks(entity_types=[...], relation_types=[...])
+    tasks = await get_gliner_demo_tasks(entity_types=[...], relation_types=[...])
     await cognee.run_custom_pipeline(
         tasks=tasks, user=user, dataset="...", pipeline_name="cognify_pipeline"
     )
@@ -38,7 +49,7 @@ from .tasks import (
     GlinerRunStats,
     build_gliner_extraction_task,
     extract_graph_and_summarize_with_gliner,
-    get_gliner_tasks,
+    get_gliner_demo_tasks,
 )
 
 __all__ = [
@@ -58,7 +69,7 @@ __all__ = [
     "extract_graph_and_summarize_with_gliner",
     "format_chunk_summary",
     "get_extractor",
-    "get_gliner_tasks",
+    "get_gliner_demo_tasks",
     "knowledge_graph_from_gliner_result",
     "load_extractor",
     "map_gliner_result",

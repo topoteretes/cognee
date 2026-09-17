@@ -37,7 +37,7 @@ features.** See [Contributing](#-contributing-a-new-example) for the precise cat
 | [`recall_core.py`](guides/recall_core.py) | `recall` semantics and parameters |
 | [`improve_quickstart.py`](guides/improve_quickstart.py) | Graph enrichment before/after `improve()` |
 | [`agent_memory_quickstart.py`](guides/agent_memory_quickstart.py) | Wrap an LLM agent with `@cognee.agent_memory` |
-| [`no_llm_remember_recall.py`](guides/no_llm_remember_recall.py) | `remember → recall` with no LLM key at all: GLiNER graph + `CHUNKS` recall (needs `cognee[gliner,fastembed]`) |
+| [`no_llm_remember_recall.py`](guides/no_llm_remember_recall.py) | `remember → recall` with no LLM key at all: GLiNER graph + `CHUNKS` recall (needs `cognee[gliner]`) |
 
 ### Sessions & self-improvement
 | Script | Demonstrates |
@@ -63,7 +63,7 @@ features.** See [Contributing](#-contributing-a-new-example) for the precise cat
 |---|---|
 | [`custom_graph_model.py`](guides/custom_graph_model.py) | `graph_model=` on `remember` |
 | [`graph_model_from_json.py`](guides/graph_model_from_json.py) | Building a `graph_model` from a JSON schema spec with `graph_model_from_spec` — no model classes |
-| [`gliner_llm_free_cognify.py`](guides/gliner_llm_free_cognify.py) | LLM-free graph + summaries with `extractor="gliner"` (needs `cognee[gliner]`) |
+| [`gliner_demo_llm_free_cognify.py`](guides/gliner_demo_llm_free_cognify.py) | LLM-free graph + summaries with `extractor="gliner_demo"` (needs `cognee[gliner]`) |
 | [`custom_data_models.py`](guides/custom_data_models.py) | Custom `DataPoint` subclasses and edges |
 | [`custom_prompts.py`](guides/custom_prompts.py) | Overriding the extraction prompt |
 | [`custom_tasks_and_pipelines.py`](guides/custom_tasks_and_pipelines.py) | Authoring tasks and composing a pipeline |
