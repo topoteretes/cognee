@@ -13,7 +13,7 @@ COPY pyproject.toml uv.lock README.md ./
 # ALL extras used across CI - no-install-project so project code isn't baked in
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project \
-    --extra api --extra docs --extra evals --extra codegraph --extra fastembed --extra ollama \
+    --extra api --extra docs --extra evals --extra codegraph --extra ollama \
     --extra dev --extra neo4j --extra redis --extra postgres --extra aws \
     --extra baml --extra deepeval --extra scraping \
     --extra notebook --extra docling --extra turso

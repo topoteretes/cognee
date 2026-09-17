@@ -247,8 +247,8 @@ class ImageLoader(LoaderInterface):
         coordinates when available, or None if the image has no EXIF data.
         """
         try:
-            from PIL import Image  # ty: ignore[unresolved-import]
-            from PIL.ExifTags import TAGS  # ty: ignore[unresolved-import]
+            from PIL import Image
+            from PIL.ExifTags import TAGS
         except ImportError:
             return None
 
@@ -317,7 +317,7 @@ class ImageLoader(LoaderInterface):
         Returns the hash as a hex string, or None on failure.
         """
         try:
-            from PIL import Image  # ty: ignore[unresolved-import]
+            from PIL import Image
         except ImportError:
             return None
 
@@ -357,7 +357,7 @@ def _dhash(image, hash_size: int = 8) -> str:
     Difference hash: resize to (hash_size+1 x hash_size), convert to
     grayscale, compare adjacent columns, and pack bits into a hex string.
     """
-    from PIL import Image  # ty: ignore[unresolved-import]
+    from PIL import Image
 
     image = image.convert("L").resize((hash_size + 1, hash_size), Image.Resampling.LANCZOS)
     pixels = list(image.getdata())
@@ -380,7 +380,7 @@ def _dhash(image, hash_size: int = 8) -> str:
 def _format_gps_info(gps_dict: dict) -> str | None:
     """Format GPSInfo dict (tag 34853) into human-readable coordinates."""
     try:
-        from PIL.ExifTags import GPSTAGS  # ty: ignore[unresolved-import]
+        from PIL.ExifTags import GPSTAGS
     except ImportError:
         return None
 

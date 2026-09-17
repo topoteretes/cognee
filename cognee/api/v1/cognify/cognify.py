@@ -297,8 +297,9 @@ async def cognify(
 
 
     Environment Variables:
-        Required:
-        - LLM_API_KEY: API key for your LLM provider
+        - LLM_API_KEY: API key for your LLM provider. When unset (and no embedding
+          settings are configured), cognify extracts with the local GLiNER model and
+          embeds with the local fastembed model instead (GRAPH_EXTRACTOR=auto).
 
         Optional (same as add function):
         - LLM_PROVIDER, LLM_MODEL, VECTOR_DB_PROVIDER, GRAPH_DATABASE_PROVIDER
