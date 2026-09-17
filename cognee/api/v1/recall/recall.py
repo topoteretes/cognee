@@ -669,10 +669,7 @@ async def recall(
                 else:
                     local_query_type = ROUTER_FALLBACK_TYPE
 
-                span.set_attribute(
-                    COGNEE_SEARCH_TYPE,
-                    str(local_query_type.value) if local_query_type else "unknown",
-                )
+                span.set_attribute(COGNEE_SEARCH_TYPE, local_query_type.value)
                 if routed_rule is not None:
                     span.set_attribute(COGNEE_RECALL_ROUTE_RULE, routed_rule)
 
