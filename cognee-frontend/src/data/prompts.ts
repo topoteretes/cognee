@@ -60,7 +60,7 @@ Before answering questions, check if relevant knowledge exists:
 POST $COGNEE_BASE_URL/api/v1/recall
 Headers: X-Api-Key: $COGNEE_API_KEY
 Content-Type: application/json
-Body: {"query": "<user question>", "session_id": "<session-id>"}
+Body: {"query": "<user question>", "datasets": ["<dataset>"], "session_id": "<session-id>"}
 \`\`\`
 
 The query is auto-routed to a search strategy by default. For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION, GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
@@ -132,7 +132,7 @@ Before answering questions, check if relevant knowledge exists:
 curl -X POST $COGNEE_BASE_URL/api/v1/recall \\
   -H "X-Api-Key: $COGNEE_API_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"query": "<user question>", "session_id": "<session-id>"}'
+  -d '{"query": "<user question>", "datasets": ["<dataset>"], "session_id": "<session-id>"}'
 \`\`\`
 
 The query is auto-routed to a search strategy by default. For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION, GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
@@ -203,7 +203,7 @@ rm -f "$TMP"
 curl -X POST $COGNEE_BASE_URL/api/v1/recall \\
   -H "X-Api-Key: $COGNEE_API_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"query": "<user question>", "session_id": "<session-id>"}'
+  -d '{"query": "<user question>", "datasets": ["<dataset>"], "session_id": "<session-id>"}'
 \`\`\`
 
 The query is auto-routed to a search strategy by default. For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION, GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
@@ -279,7 +279,7 @@ Before answering questions, check if relevant knowledge exists:
 curl -X POST $COGNEE_BASE_URL/api/v1/recall \\
   -H "X-Api-Key: $COGNEE_API_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"query": "<user question>", "session_id": "<session-id>"}'
+  -d '{"query": "<user question>", "datasets": ["<dataset>"], "session_id": "<session-id>"}'
 \`\`\`
 
 The query is auto-routed to a search strategy by default. For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION, GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
@@ -357,7 +357,7 @@ Before answering questions, check if relevant knowledge exists:
 curl -X POST $COGNEE_BASE_URL/api/v1/recall \\
   -H "X-Api-Key: $COGNEE_API_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"query": "<user question>", "session_id": "<session-id>"}'
+  -d '{"query": "<user question>", "datasets": ["<dataset>"], "session_id": "<session-id>"}'
 \`\`\`
 
 The query is auto-routed to a search strategy by default. For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION, GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
@@ -428,7 +428,7 @@ Before answering questions, check if relevant knowledge exists:
 curl -X POST $COGNEE_BASE_URL/api/v1/recall \\
   -H "X-Api-Key: $COGNEE_API_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"query": "<user question>", "session_id": "<session-id>"}'
+  -d '{"query": "<user question>", "datasets": ["<dataset>"], "session_id": "<session-id>"}'
 \`\`\`
 
 The query is auto-routed to a search strategy by default. For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION, GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
