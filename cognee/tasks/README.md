@@ -14,7 +14,7 @@ task's output, `enriches`, `ctx` injection, `Drop`) are documented in
 |---|---|---|
 | 1 | `documents.classify_documents` | `Data` rows → typed `Document`s (`TextDocument`, `PdfDocument`, …) |
 | 2 | `documents.extract_chunks_from_documents` | `Document` → `DocumentChunk`s (uses `cognee.modules.chunking`) |
-| 3 | `graph.extract_graph_from_data` | chunks → chunks with `Entity`/`EntityType` nodes and edges attached (LLM, or GLiNER with `extractor="gliner"`) |
+| 3 | `graph.extract_graph_from_data` | chunks → chunks with `Entity`/`EntityType` nodes and edges attached (LLM, or GLiNER with `extractor="gliner_demo"`) |
 | 4 | `summarization.summarize_text` | chunks → `TextSummary` nodes (LLM) |
 | 5 | `storage.add_data_points` | data points → written to graph + vector DB (+ edge evidence) |
 | 6 | `provenance.record_provenance` | audit-ledger rows, when `PROVENANCE_TRACKING=true` |
@@ -31,12 +31,12 @@ task's output, `enriches`, `ctx` injection, `Drop`) are documented in
 |---|---|---|
 | `chunks/` | Split text into chunks and manage chunk relations | `chunk_by_paragraph`, `chunk_by_sentence`, `chunk_by_word`, `chunk_by_row`, `remove_disconnected_chunks`, `create_chunk_associations` |
 | `cleanup/` | Remove data that no dataset references any more | `cleanup_unused_data` |
-| `code_graph/` | Build the deterministic code graph with enola (no LLM): `CodeSymbol`/`CodeModule` nodes, `calls`/`imports` edges; installs the pinned enola binary | `extract_code_graph`, `extract_code_files_graph`, `install_enola` |
+| `code_graph/` | Build the deterministic code graph with enola (no LLM): `CodeSymbol`/`CodeModule` nodes, `calls`/`imports` edges; needs the `codegraph` extra for the enola binary | `extract_code_graph`, `extract_code_files_graph` |
 | `codingagents/` | Distil coding-agent traces into reusable coding rules (`CODING_RULES` search) | see its `README.md` |
 | `completion/` | Exceptions shared by completion-style tasks | — |
 | `documents/` | Classify `Data` rows into `Document` types and chunk them | `classify_documents`, `extract_chunks_from_documents` |
 | `entity_completion/` | Pluggable entity extractors (`entity_extractors/`: LLM-based and regex-based) | `LLMEntityExtractor`, `RegexEntityExtractor` |
-| `graph/` | Extract entities/relations into the graph; contradiction detection; the GLiNER (`graph/gliner/`) and code (`extract_graph_from_code`) variants | `extract_graph_from_data`, `extract_graph_from_code`, `detect_contradictions`, `resolve_temporal_contradictions` |
+| `graph/` | Extract entities/relations into the graph; contradiction detection; the GLiNER (`graph/gliner_demo/`) and code (`extract_graph_from_code`) variants | `extract_graph_from_data`, `extract_graph_from_code`, `detect_contradictions`, `resolve_temporal_contradictions` |
 | `ingestion/` | Ingest and normalise inputs for `add()`: resolve paths/directories, save to storage, dedup, dlt sources, relational-DB migration | `ingest_data`, `resolve_data_directories`, `save_data_item_to_storage`, `resolve_dlt_sources`, `migrate_relational_database` |
 | `memify/` | Enrichment tasks: session and agent-trace persistence, feedback weights, entity dedup/consolidation, triplet embeddings, global context index | `extract_subgraph`, `cognify_session`, `apply_feedback_weights`, `extract_feedback_qas`, `detect_entity_duplicates`, … |
 | `presort/` | Pre-organise a folder before ingestion (`remember(dry_run="presort")`): classify, hash, dedup, version and PII detection, proposed groupings | `build_report`, `classify_files`, `detect_duplicates`, `detect_pii`, `group_files`, `apply_presort_graph` |

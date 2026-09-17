@@ -52,7 +52,12 @@ def print_improve_result(result: Any, background: bool = False) -> None:
     if status == "errored":
         fmt.warning("Knowledge graph improvement finished with errors.")
     elif status == "skipped":
-        if lock_held:
+        if lock_held and _field(result, "rerun_requested"):
+            fmt.warning(
+                "Another improve run already holds this session; nothing ran here (lock_held), "
+                "but it will run one more pass over the newer entries before it finishes."
+            )
+        elif lock_held:
             fmt.warning(
                 "Another improve run already holds this dataset/session; nothing ran (lock_held)."
             )
@@ -63,6 +68,13 @@ def print_improve_result(result: Any, background: bool = False) -> None:
 
     for stage in stages:
         fmt.echo(format_stage_line(stage))
+
+    rerun_passes = _field(result, "rerun_passes") or []
+    if rerun_passes:
+        fmt.echo(
+            f"  ran {len(rerun_passes)} extra pass(es) requested by improves that found "
+            "the session locked"
+        )
 
     error = _field(result, "error")
     if error and status == "errored" and not any(_field(s, "error") == error for s in stages):

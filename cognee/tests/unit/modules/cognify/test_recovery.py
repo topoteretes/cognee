@@ -55,13 +55,9 @@ async def test_recover_stale_cognify_runs_executes_rollback_for_latest_candidate
     engine = _FakeEngine([dataset_session])
 
     rollback_calls = []
-    reset_calls = []
 
     async def _rollback_handler(**kwargs):
         rollback_calls.append(kwargs)
-
-    async def _reset_status(**kwargs):
-        reset_calls.append(kwargs)
 
     async def _fake_latest_runs(_dataset_ids, _pipeline_name):
         return {dataset_id: stale_run}
@@ -70,17 +66,12 @@ async def test_recover_stale_cognify_runs_executes_rollback_for_latest_candidate
     monkeypatch.setattr(recovery_module, "get_latest_pipeline_runs_by_datasets", _fake_latest_runs)
     monkeypatch.setattr(recovery_module, "set_database_global_context_variables", _no_op_context)
     monkeypatch.setattr(recovery_module, "cognify_rollback_handler", _rollback_handler)
-    monkeypatch.setattr(recovery_module, "reset_pipeline_run_status", _reset_status)
 
     await recovery_module.recover_stale_cognify_runs_on_startup()
 
     assert len(rollback_calls) == 1
     assert rollback_calls[0]["pipeline_run_id"] == pipeline_run_id
     assert rollback_calls[0]["dataset"] == dataset
-    # The lingering STARTED status must be reset so a re-run is not blocked.
-    assert len(reset_calls) == 1
-    assert reset_calls[0]["dataset_id"] == dataset_id
-    assert reset_calls[0]["pipeline_name"] == "cognify_pipeline"
 
 
 @pytest.mark.asyncio

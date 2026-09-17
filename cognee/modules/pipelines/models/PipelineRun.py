@@ -8,6 +8,8 @@ from cognee.infrastructure.databases.relational import Base
 
 
 class PipelineRunStatus(enum.Enum):
+    # No longer written. Kept for rows that already carry it; dropping a value
+    # from a native Postgres enum is not worth a migration.
     DATASET_PROCESSING_INITIATED = "DATASET_PROCESSING_INITIATED"
     DATASET_PROCESSING_STARTED = "DATASET_PROCESSING_STARTED"
     DATASET_PROCESSING_COMPLETED = "DATASET_PROCESSING_COMPLETED"
