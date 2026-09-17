@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from starlette.status import WS_1008_POLICY_VIOLATION, WS_1011_INTERNAL_ERROR
 
 from cognee import __version__ as cognee_version
+from cognee.exceptions import CogneeApiError
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import (
@@ -145,6 +146,8 @@ def get_visualize_router() -> APIRouter:
             )
             return HTMLResponse(html_visualization)
 
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Visualization failed for dataset %s", dataset_id)
             return JSONResponse(
@@ -249,6 +252,8 @@ def get_visualize_router() -> APIRouter:
             )
             return JSONResponse(status_code=200, content=payload)
 
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Visualization JSON payload failed for dataset %s", dataset_id)
             return JSONResponse(
@@ -359,6 +364,8 @@ def get_visualize_router() -> APIRouter:
             )
             return JSONResponse(status_code=200, content=payload)
 
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Semantic payload failed for dataset %s", dataset_id)
             return JSONResponse(
@@ -411,6 +418,8 @@ def get_visualize_router() -> APIRouter:
             payload = await build_brains_payload(user=user, max_nodes=max_nodes)
             return JSONResponse(status_code=200, content=payload)
 
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Brains overview payload failed")
             return JSONResponse(
@@ -471,6 +480,8 @@ def get_visualize_router() -> APIRouter:
             payload = await build_brains_summary_payload(user=user)
             return JSONResponse(status_code=200, content=payload)
 
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Brains summary payload failed")
             return JSONResponse(
@@ -550,6 +561,8 @@ def get_visualize_router() -> APIRouter:
                 status_code=403,
                 content={"error": "Not authorized to read this dataset"},
             )
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Live events payload failed for dataset %s", dataset_id)
             return JSONResponse(
@@ -711,6 +724,8 @@ def get_visualize_router() -> APIRouter:
             html_visualization = await visualize_multi_user_graph(user_dataset_pairs)
             return HTMLResponse(html_visualization)
 
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Multi-user visualization request failed")
             return JSONResponse(
