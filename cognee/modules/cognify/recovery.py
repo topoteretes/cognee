@@ -56,7 +56,8 @@ async def recover_stale_pipeline_runs_on_startup() -> None:
     would repeat the rollback on every restart.
 
     A candidate is first rolled back with the pipeline's own handler from
-    ``ROLLBACK_HANDLERS``, if it has one, then closed with a
+    ``ROLLBACK_HANDLERS``, if it has one, keeping the documents the run had
+    already completed, then closed with a
     ``DATASET_PROCESSING_ERRORED`` row whose error is ``AbandonedPipelineRunError``.
     The ERRORED row carries the STARTED row's user, tenant, start time, input
     summary, origin and parent operation, so it describes the run that died,
@@ -99,9 +100,13 @@ async def recover_stale_pipeline_runs_on_startup() -> None:
         try:
             async with set_database_global_context_variables(dataset.id, dataset.owner_id):
                 if rollback_handler is not None:
+                    # Documents the run had completed stay; a later run may have
+                    # trusted them and skipped them, so removing them now would
+                    # leave holes nothing refills. Only unfinished work goes.
                     await rollback_handler(
                         pipeline_run_id=pipeline_run.pipeline_run_id,
                         dataset=dataset,
+                        keep_completed_data=True,
                     )
                 await _close_as_abandoned(pipeline_run, dataset)
             logger.info(

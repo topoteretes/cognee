@@ -102,6 +102,7 @@ async def test_cognify_run_is_rolled_back_then_closed_with_its_own_metadata(monk
     rollback = calls[0][1]
     assert rollback["pipeline_run_id"] == run.pipeline_run_id
     assert rollback["dataset"] == dataset
+    assert rollback["keep_completed_data"] is True
 
     error = calls[1][1]
     assert isinstance(error["e"], AbandonedPipelineRunError)
