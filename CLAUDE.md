@@ -467,9 +467,14 @@ template; `CYPHER` and `AGENTIC_COMPLETION` opt out via `supports_prompt_preview
 (Cypher never prompts; the agentic loop answers through other templates); and an empty
 retrieval returns the empty context, never a prompt wrapped around nothing, so "nothing
 found" stays detectable — for `recall()` it yields zero items and the `on_empty` tools
-fallback still fires. `verbose=True` carries the string as `prompt_result` next to the
-bare `context_result`. `@agent_memory(memory_only_context=True)` reads `context_result`,
-so an agent's memory block never contains cognee's own answer instructions.
+fallback still fires. The bare context stays reachable for callers that only want that:
+`search(verbose=True)` carries the string as `prompt_result` next to `context_result`, and
+a `recall()` item carries it under `raw["context"]` next to the string in `text` (there
+is no verbose shape on `/api/v1/recall`, so this is the channel for HTTP consumers such
+as the Claude Code plugin). `@agent_memory(memory_only_context=True)` reads
+`context_result`, so an agent's memory block never contains cognee's own answer
+instructions. Consumers that truncate the string to a budget cut the retrieved content
+first, since the system prompt comes first; take the bare context instead.
 
 Caveats. `POST /api/v1/search` accepts `session_id`; without one the session layer is
 the default session's. And the string is knowingly unfaithful in one place: a real

@@ -101,7 +101,15 @@ def has_context(context: Any) -> bool:
 
 
 def render_llm_input(system_prompt: str, user_prompt: str) -> str:
-    """Render the ``(system_prompt, user_prompt)`` pair a completion sends as one string."""
+    """Render the ``(system_prompt, user_prompt)`` pair a completion sends as one string.
+
+    System first, because that is the order the two messages are sent in. Consequence for
+    a consumer that truncates the string to a budget: the front is cognee's guidance and
+    task instructions, and the retrieved content at the end is what gets cut. A caller
+    that wants only the context should take it from the bare-context channel instead —
+    ``verbose=True`` / ``context_result`` on ``search()``, ``raw["context"]`` on a
+    ``recall()`` item — rather than truncate this string.
+    """
     return f"{SYSTEM_PROMPT_HEADER}\n{system_prompt}\n\n{USER_PROMPT_HEADER}\n{user_prompt}"
 
 

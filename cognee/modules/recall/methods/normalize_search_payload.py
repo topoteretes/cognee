@@ -161,7 +161,13 @@ def normalize_search_payload(payload: SearchResultPayload) -> list[SearchResultI
         # It is only ever set when retrieval found something, so the item count keeps
         # meaning "did retrieval find anything" — recall's on_empty tools fallback and
         # the session short-circuit both read it.
-        return [_build_item(payload.prompt, payload, kind)]
+        #
+        # The bare retrieval context rides along under raw["context"]. recall() has no
+        # verbose shape, so this is the only way an HTTP caller of /api/v1/recall (the
+        # Claude Code plugin, for one) can take the context without cognee's own answer
+        # instructions — the same need @agent_memory meets through search(verbose=True).
+        item = _build_item(payload.prompt, payload, kind)
+        return [item.model_copy(update={"raw": {**item.raw, "context": payload.context}})]
 
     if payload.only_context:
         # Retrievers report a miss as None, "" or []; a bare "" must not become an item,

@@ -170,7 +170,9 @@ def test_only_context_with_a_prompt_yields_one_item_carrying_the_full_llm_input(
     assert len(items) == 1
     assert items[0].kind == SearchResultKind.GRAPH_COMPLETION
     assert items[0].text == prompt
-    assert items[0].raw == {"value": prompt}
+    # The bare context rides along: /api/v1/recall has no verbose shape, so this is how
+    # an HTTP caller takes the context without cognee's answer instructions.
+    assert items[0].raw == {"value": prompt, "context": ["triplet-a", "triplet-b"]}
 
 
 def test_only_context_with_empty_context_and_no_prompt_yields_no_items():

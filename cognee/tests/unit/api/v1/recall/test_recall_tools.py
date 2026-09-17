@@ -348,6 +348,7 @@ async def test_only_context_graph_hit_is_the_prompt_and_an_empty_retrieval_still
     assert tool_calls == []
     assert [entry.source for entry in results] == ["graph"]
     assert results[0].text == prompt
+    assert results[0].raw["context"] == "node1 -- rel -- node2"
 
     monkeypatch.setattr(search_methods, "authorized_search", with_miss)
     results = await api_recall_mod.recall(
