@@ -145,6 +145,7 @@ def get_search_router() -> APIRouter:
 
     @router.get(
         "",
+        summary="List the caller's recent search history",
         response_model=list[SearchHistoryItem],
         responses={
             403: {"model": ErrorResponse},
@@ -193,6 +194,7 @@ def get_search_router() -> APIRouter:
 
     @router.post(
         "",
+        summary="Search (low level): run one SearchType over the caller's datasets",
         response_model=list[SearchResult] | list,
         responses={
             403: {"model": ErrorResponse},

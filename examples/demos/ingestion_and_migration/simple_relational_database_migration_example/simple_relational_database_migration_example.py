@@ -1,3 +1,18 @@
+"""Migrate a one-table Postgres schema to the graph, then remember its rows, ontology on and off.
+
+The script creates a documents table in Postgres seeded with two bundled texts, migrates the
+extracted schema with migrate_relational_database, then remembers the document bodies twice: once
+grounded in data/basic_ontology.owl and once without. Each pass recalls "Which companies are
+mentioned?" and writes a graph to .artifacts/ (simple_relational_db_ont.html / _no_ont.html).
+
+Requires: LLM_API_KEY and a running Postgres reachable through MIGRATION_DB_HOST/PORT/NAME/
+USERNAME/PASSWORD (defaults 127.0.0.1:5432, cognee_migration, cognee/cognee); the database must
+already exist. The script forces ENABLE_BACKEND_ACCESS_CONTROL=false. The ontology path is
+relative, so run from this example's folder.
+Run: cd examples/demos/ingestion_and_migration/simple_relational_database_migration_example &&
+     uv run python simple_relational_database_migration_example.py
+"""
+
 import asyncio
 import os
 from pathlib import Path

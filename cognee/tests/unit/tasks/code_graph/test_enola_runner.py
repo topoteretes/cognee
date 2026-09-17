@@ -18,6 +18,8 @@ def test_find_enola_binary_missing_raises(monkeypatch, tmp_path):
     empty_dir = tmp_path / "empty"
     empty_dir.mkdir()
     monkeypatch.setenv("PATH", str(empty_dir))
+    # The enola-cli wheel may be installed in the test environment; hide it too.
+    monkeypatch.setattr(enola_module.sysconfig, "get_path", lambda name: str(empty_dir))
 
     with pytest.raises(enola_module.EnolaNotInstalledError):
         enola_module.find_enola_binary()
@@ -31,6 +33,43 @@ def test_find_enola_binary_respects_enola_path_override(monkeypatch, tmp_path):
     monkeypatch.setenv("PATH", str(empty_dir))
 
     assert enola_module.find_enola_binary() == str(fake_binary)
+
+
+@pytest.mark.parametrize(
+    ("system", "binary_name"),
+    [("Linux", "enola"), ("Darwin", "enola"), ("Windows", "enola.exe")],
+)
+def test_find_enola_binary_prefers_environment_scripts_dir(
+    monkeypatch, tmp_path, system, binary_name
+):
+    """The enola-cli wheel installs the binary next to the interpreter; that wins over PATH.
+
+    The wheel's console-script shim is ``enola.exe`` on Windows and ``enola``
+    everywhere else, and the lookup builds that name from ``platform.system()``.
+    The platform is driven here rather than inherited from the host so all three
+    names are covered on every runner: a fixture that only matched the host's
+    naming passed on Linux and macOS while failing on Windows for the whole
+    lifetime of the test.
+    """
+    monkeypatch.delenv("ENOLA_PATH", raising=False)
+    monkeypatch.setattr(enola_module.platform, "system", lambda: system)
+    scripts_dir = tmp_path / "venv-bin"
+    scripts_dir.mkdir()
+    wheel_binary = scripts_dir / binary_name
+    wheel_binary.write_text("#!/bin/sh\n")
+    wheel_binary.chmod(0o755)
+    monkeypatch.setattr(enola_module.sysconfig, "get_path", lambda name: str(scripts_dir))
+    monkeypatch.setattr(enola_module.shutil, "which", lambda _name: "/usr/local/bin/enola")
+
+    assert enola_module.find_enola_binary() == str(wheel_binary)
+
+
+def test_find_enola_binary_falls_back_to_path_when_scripts_dir_has_none(monkeypatch, tmp_path):
+    monkeypatch.delenv("ENOLA_PATH", raising=False)
+    monkeypatch.setattr(enola_module.sysconfig, "get_path", lambda name: str(tmp_path))
+    monkeypatch.setattr(enola_module.shutil, "which", lambda _name: "/usr/local/bin/enola")
+
+    assert enola_module.find_enola_binary() == "/usr/local/bin/enola"
 
 
 def test_find_enola_binary_invalid_enola_path_raises(monkeypatch, tmp_path):

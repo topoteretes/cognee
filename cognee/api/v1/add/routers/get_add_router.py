@@ -35,6 +35,7 @@ def get_add_router() -> APIRouter:
 
     @router.post(
         "",
+        summary="Add (low level): ingest files, text or URLs into a dataset without building the graph",
         response_model=PipelineRunInfo,
         responses={
             400: {"model": ErrorResponse},

@@ -89,7 +89,8 @@ def get_activity_router() -> APIRouter:
         - **operation_name** (str|null): Operation name; for pipeline rows this
           mirrors `pipeline_name`, so it does *not* distinguish the two kinds.
         - **origin** (str|null): Initiating surface — `sdk`/`api`/`cli`/`mcp`/`background`.
-        - **outcome** (str|null): `"succeeded"` / `"failed"`. NULL on non-terminal rows.
+        - **outcome** (str|null): `"succeeded"` / `"failed"` / `"noop"` (the call ran
+          nothing — e.g. an improve that lost its lock claim). NULL on non-terminal rows.
           **Read together with `background`**: when `background` is true, a
           `"succeeded"` outcome means the work was *accepted and started*, not that
           it finished. Treating those rows as completions inflates any success-rate

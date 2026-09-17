@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import os
 import time
 from pathlib import Path
@@ -14,8 +15,10 @@ from typing_extensions import TypedDict
 
 if TYPE_CHECKING:
     from cognee.modules.cognify.estimator import DryRunEstimate
+    from cognee.modules.improve import ImproveResult
     from cognee.tasks.presort.models import PresortReport
 
+from cognee.infrastructure.background_tasks import register_background_task
 from cognee.memory import (
     FeedbackEntry,
     MemoryEntry,
@@ -52,11 +55,43 @@ logger = get_logger("remember")
 _BACKGROUND_REMEMBER_TASKS: set[asyncio.Task] = set()
 
 
+def _anchor_background_task(task: asyncio.Task) -> asyncio.Task:
+    """Anchor a background task here and in the process-wide registry.
+
+    The module-level set keeps the task alive (#4312); the registry in
+    ``cognee.infrastructure.background_tasks`` is what
+    ``cognee.wait_for_background_tasks()`` and the API shutdown drain await.
+    """
+    _BACKGROUND_REMEMBER_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_REMEMBER_TASKS.discard)
+    return register_background_task(task)
+
+
+def _improve_error_text(improve_result: "ImproveResult") -> str | None:
+    """Summarise what went wrong inside a finished ``ImproveResult``, if anything.
+
+    A fatal-stage error is carried on ``result.error``; a non-fatal stage
+    failure lives on that stage only. Either way the remember itself
+    succeeded, so the text goes to ``RememberResult.improve_error`` and never
+    flips the remember's status.
+    """
+    if improve_result is None:
+        return None
+    if getattr(improve_result, "error", None):
+        return str(improve_result.error)
+    errored = [
+        f"{stage.stage}: {stage.error or 'errored'}"
+        for stage in getattr(improve_result, "stages", []) or []
+        if getattr(stage, "status", None) == "errored"
+    ]
+    return "; ".join(errored) if errored else None
+
+
 class RememberKwargs(TypedDict, total=False):
     """Power-user overrides for remember(). Most users never need these."""
 
     graph_model: Any
-    extractor: Literal["llm", "gliner"]
+    extractor: Literal["llm", "gliner_demo", "gliner"]
     node_set: list[str]
     preferred_loaders: list
     incremental_loading: bool
@@ -276,6 +311,66 @@ async def _add_to_session(session_id: str, data, user):
     logger.info("remember: added entry to session '%s'", session_id)
 
 
+async def _rearm_session_improve_debounce(session_id: str, user) -> None:
+    """Refund the debounce window a lock-held bridge spent without persisting."""
+    from cognee.api.v1.remember.auto_improve_debounce import (
+        debounce_active,
+        rearm_auto_improve_debounce,
+    )
+
+    if not debounce_active():
+        return
+    user_id = str(user.id) if user is not None and hasattr(user, "id") else None
+    if not user_id:
+        return
+
+    from cognee.infrastructure.session.get_session_manager import get_session_manager
+
+    sm = get_session_manager()
+    if sm.is_available:
+        await rearm_auto_improve_debounce(sm, user_id, session_id)
+
+
+async def _session_improve_due(session_id: str, user) -> bool:
+    """Apply the auto-improve debounce (B6) and advance its watermark when firing.
+
+    Reads ``IMPROVE_DEBOUNCE_ENTRIES`` / ``IMPROVE_DEBOUNCE_SECONDS`` through
+    ``get_improve_config()``. State lives in the session cache as an internal
+    context row (``auto_improve_debounce``). Fail-open: no user, no cache, or a
+    failed read all fire the improve, which is today's behaviour.
+    """
+    from cognee.api.v1.remember.auto_improve_debounce import (
+        debounce_active,
+        mark_auto_improve_fired,
+        should_auto_improve,
+    )
+
+    if not debounce_active():
+        return True
+
+    user_id = str(user.id) if user is not None and hasattr(user, "id") else None
+    if not user_id:
+        return True
+
+    from cognee.infrastructure.session.get_session_manager import get_session_manager
+
+    sm = get_session_manager()
+    if not sm.is_available:
+        return True
+
+    decision = await should_auto_improve(sm, user_id, session_id)
+    if not decision.due:
+        logger.debug(
+            "remember: session improve debounced (%d new entries, %s s since last)",
+            decision.new_entries,
+            "n/a" if decision.elapsed_seconds is None else f"{decision.elapsed_seconds:.0f}",
+        )
+        return False
+
+    await mark_auto_improve_fired(sm, user_id, session_id, qa_count=decision.qa_count or None)
+    return True
+
+
 async def _remember_entry(
     entry,
     *,
@@ -316,6 +411,7 @@ async def _remember_entry(
         result.raw_result = payload
         if payload.get("error"):
             result.error = payload["error"]
+        result._attach_improve_payload(payload)
         return result
 
     return await _dispatch_session_entry(
@@ -522,6 +618,13 @@ class RememberResult:
             token_count) for each data item in the pipeline run.
         raw_result: The original cognify() return value (dict of
             dataset_id -> PipelineRunInfo) for advanced inspection.
+        improve: The ``ImproveResult`` of the automatic ``improve()`` that
+            followed the remember (``self_improvement=True``), one entry per
+            stage with its status. ``None`` when no improve ran — because it
+            was turned off, debounced, or is still running in the background.
+        improve_error: Why the automatic improve failed, when it did. The
+            remember itself succeeded in that case: ``status`` stays
+            ``"completed"`` / ``"session_stored"`` and only this field is set.
 
     Example::
 
@@ -566,6 +669,10 @@ class RememberResult:
         # returned by the storage backend.
         self.entry_type: str | None = None
         self.entry_id: str | None = None
+        # The automatic improve() that followed this remember, if one ran
+        # (A5). An improve failure never flips `status`; it lands here.
+        self.improve: ImproveResult | None = None
+        self.improve_error: str | None = None
         self._task: asyncio.Task | None = None
         self._started_at: float = time.monotonic()
 
@@ -595,6 +702,10 @@ class RememberResult:
             parts.append(f"elapsed={self.elapsed_seconds:.1f}s")
         if self.error:
             parts.append(f"error={self.error!r}")
+        if self.improve is not None:
+            parts.append(f"improve={getattr(self.improve, 'status', None)!r}")
+        if self.improve_error:
+            parts.append(f"improve_error={self.improve_error!r}")
         return f"RememberResult({', '.join(parts)})"
 
     def __str__(self):
@@ -622,7 +733,28 @@ class RememberResult:
             d["entry_id"] = self.entry_id
         if self.error:
             d["error"] = self.error
+        if self.improve is not None:
+            dump = getattr(self.improve, "model_dump", None)
+            d["improve"] = dump(mode="json") if callable(dump) else self.improve
+        if self.improve_error:
+            d["improve_error"] = self.improve_error
         return d
+
+    def _attach_improve_payload(self, payload: dict) -> None:
+        """Rebuild ``improve`` / ``improve_error`` from a server's JSON response."""
+        if not isinstance(payload, dict):
+            return
+        improve_payload = payload.get("improve")
+        if isinstance(improve_payload, dict) and "stages" in improve_payload:
+            try:
+                from cognee.modules.improve import ImproveResult
+
+                self.improve = ImproveResult.model_validate(improve_payload)
+            except Exception as exc:  # malformed or newer-schema payload: keep the raw dict
+                logger.debug("remember: could not parse improve payload (%s)", exc, exc_info=True)
+                self.improve = improve_payload  # type: ignore[assignment]
+        if payload.get("improve_error"):
+            self.improve_error = str(payload["improve_error"])
 
     def __bool__(self):
         """True if status is completed or session_stored."""
@@ -777,6 +909,10 @@ async def remember(
     True (default), also bridges the session data into the permanent
     graph in the background via ``improve()``. The call returns
     immediately — await the result to wait for the background sync.
+    ``IMPROVE_DEBOUNCE_ENTRIES`` / ``IMPROVE_DEBOUNCE_SECONDS`` hold that
+    bridge back until enough new entries or enough time accumulated, and
+    ``IMPROVE_AUTO_ENABLED=false`` turns automatic improves off in both
+    modes (see ``ImproveConfig``).
 
     Args:
         data: The data to store (text, file paths, binary streams, etc.).
@@ -793,11 +929,14 @@ async def remember(
         run_in_background: If *True*, run as a background task.
         self_improvement: If *True* (default), automatically runs
             ``improve()`` after cognify to enrich the graph with
-            triplet embeddings and indexing.
-        session_ids: Session IDs to sync graph knowledge back to.
-            Only used when ``self_improvement=True``. When provided,
-            ``improve()`` will also copy recent graph relationships
-            into these sessions for fast retrieval.
+            triplet embeddings and indexing. The outcome lands on
+            ``RememberResult.improve`` / ``.improve_error``; a failed
+            improve never marks the remember itself as errored.
+            ``IMPROVE_AUTO_ENABLED=false`` overrides this to off.
+        session_ids: Session IDs handed to that ``improve()`` call so
+            their Q&A, agent traces and distilled lessons are bridged
+            into the permanent graph in the same run. Only used when
+            ``self_improvement=True``.
         dry_run: If *True*, return a stage-level estimate of LLM token usage
             and rough cost without ingesting data or making LLM calls. Only
             supported for permanent add+cognify inputs in local mode. The
@@ -1077,12 +1216,19 @@ async def remember(
         if kwargs.get("content_type"):
             raise ValueError("dry_run is supported for standard add+cognify remember inputs only.")
 
-        from cognee.modules.cognify.config import get_cognify_config, resolve_extractor
+        from cognee.modules.cognify.config import (
+            GLINER_DEMO_EXTRACTOR,
+            get_cognify_config,
+            resolve_extractor,
+        )
 
-        if resolve_extractor(kwargs.get("extractor"), get_cognify_config()) == "gliner":
+        if (
+            resolve_extractor(kwargs.get("extractor"), get_cognify_config())
+            == GLINER_DEMO_EXTRACTOR
+        ):
             raise ValueError(
                 "dry_run estimates the LLM extraction pipeline only; it has no cost model "
-                "for the gliner extractor."
+                "for the gliner_demo extractor."
             )
 
         from cognee.api.v1.serve.state import get_remote_client
@@ -1130,7 +1276,12 @@ async def remember(
                 "dataset_id": str(dataset_id) if dataset_id else "",
                 "data_size_bytes": data_size,
                 "item_count": item_count,
+                # Session ids are caller-chosen and can carry user data; only a
+                # fingerprint leaves the process (A6) — hashed centrally by
+                # send_telemetry (TELEMETRY_SANITIZED_PROPERTIES), the same
+                # rule every other event's session_id goes through.
                 "session_id": session_id or "",
+                "session_ids": ",".join(session_ids or []),
                 "self_improvement": self_improvement,
                 "run_in_background": run_in_background,
                 "cognee_version": cognee_version,
@@ -1163,7 +1314,6 @@ def _skill_materialize_root(dataset_id: UUID) -> Path:
     call and duplicate the Skill node in the graph. The system temp dir is always
     an allowed skill source root (see ``_configured_skill_source_roots``).
     """
-    import hashlib
     import tempfile
     from pathlib import Path as _Path
 
@@ -1219,6 +1369,14 @@ async def _remember_inner(
                 "extractor is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose the extractor locally."
             )
+        if session_ids:
+            # Same discipline as extractor: POST /remember carries no
+            # session_ids field, so forwarding would silently drop them.
+            raise ValueError(
+                "session_ids is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect(), or call improve() with the "
+                "session ids after the remote remember finishes."
+            )
         span.set_attribute(COGNEE_OPERATION_MODE, "cloud")
         return await client.remember(
             data,
@@ -1228,6 +1386,7 @@ async def _remember_inner(
             chunk_size=chunk_size,
             custom_prompt=custom_prompt,
             run_in_background=run_in_background,
+            self_improvement=self_improvement,
             **kwargs,
         )
 
@@ -1243,12 +1402,18 @@ async def _remember_inner(
     )
     from cognee.modules.preflight import validate_provider_config
 
-    cognify_config = get_cognify_config()
-    validate_provider_config(
-        needs_llm=default_pipeline_needs_llm(
-            resolve_extractor(kwargs.get("extractor"), cognify_config), cognify_config
+    if kwargs.get("content_type") == "code":
+        # The code route runs enola only: no LLM and no graph extractor, so it
+        # must not resolve one. Keyless installs without gliner2 would otherwise
+        # fail the extractor gate for a pipeline that never uses it.
+        validate_provider_config(needs_llm=False)
+    else:
+        cognify_config = get_cognify_config()
+        validate_provider_config(
+            needs_llm=default_pipeline_needs_llm(
+                resolve_extractor(kwargs.get("extractor"), cognify_config), cognify_config
+            )
         )
-    )
 
     # Run vector migrations lazily on the first local SDK call.
     # This ensures stale LanceDB schemas are migrated before any
@@ -1426,9 +1591,7 @@ async def _remember_inner(
                     result.status = "completed"
                 result.elapsed_seconds = time.monotonic() - result._started_at
 
-            result._task = asyncio.create_task(_code_graph_background())
-            _BACKGROUND_REMEMBER_TASKS.add(result._task)
-            result._task.add_done_callback(_BACKGROUND_REMEMBER_TASKS.discard)
+            result._task = _anchor_background_task(asyncio.create_task(_code_graph_background()))
             return result
 
         for spec in repo_specs:
@@ -1613,10 +1776,31 @@ async def _remember_inner(
         if dataset_id:
             operation_context.set_dataset(dataset_id)
 
+        # IMPROVE_AUTO_ENABLED=false is the kill switch for automatic improves
+        # on both paths; an explicit self_improvement=True does not override it.
+        # Fail-open on a bad IMPROVE_* value: this reads ImproveConfig, whose
+        # validation raises on e.g. IMPROVE_FEEDBACK_ALPHA=0 — an improve-only
+        # knob must never block ingestion, so remember() logs loudly and skips
+        # the auto-improve instead of raising before the data is stored.
+        # Explicit improve() calls stay fail-loud on the same error.
+        from cognee.api.v1.remember.auto_improve_debounce import auto_improve_enabled
+
+        try:
+            auto_improve = bool(self_improvement) and auto_improve_enabled()
+        except Exception as config_error:
+            logger.warning(
+                "remember: invalid IMPROVE_* configuration, skipping automatic improve "
+                "(ingestion continues): %s",
+                config_error,
+                exc_info=True,
+            )
+            auto_improve = False
+        if self_improvement and not auto_improve:
+            logger.debug("remember: automatic improve disabled or unavailable")
+
         # Session memory: store in session cache, then optionally bridge to graph
         if session_id:
             operation_context.set_session_id(session_id)
-            operation_context.set_background(bool(self_improvement))
             await _add_to_session(session_id, data, user)
             result = RememberResult(
                 status="session_stored",
@@ -1626,8 +1810,16 @@ async def _remember_inner(
             )
             result.elapsed_seconds = time.monotonic() - result._started_at
 
+            # Debounce (B6): bridge only after enough new entries or enough time
+            # since the last automatic improve for this session. The default
+            # thresholds (1 entry, 0 seconds) fire every time and read nothing.
+            bridge = auto_improve
+            if bridge:
+                bridge = await _session_improve_due(session_id, user)
+            operation_context.set_background(bridge)
+
             # Bridge session data to permanent graph in the background
-            if self_improvement:
+            if bridge:
                 from cognee.api.v1.improve import improve
 
                 async def _session_improve():
@@ -1637,20 +1829,50 @@ async def _remember_inner(
                         # System-initiated continuation, not a direct user call:
                         # its records carry origin="background".
                         with operation_origin_scope(ORIGIN_BACKGROUND):
-                            await improve(
+                            result.improve = await improve(
                                 dataset=dataset_id,
                                 session_ids=[session_id],
                                 user=user,
                             )
-                        logger.info("remember: session '%s' bridged to permanent graph", session_id)
+                        result.improve_error = _improve_error_text(result.improve)
+                        if result.improve_error:
+                            logger.warning(
+                                "remember: session improve reported errors (non-fatal): %s",
+                                result.improve_error,
+                            )
+                        elif result.improve.lock_held and result.improve.rerun_requested:
+                            # The holder of this session runs one more pass
+                            # before releasing, so this entry is bridged by it;
+                            # the debounce window stands.
+                            logger.info(
+                                "remember: session '%s' bridge deferred to the in-flight "
+                                "improve, which runs one more pass",
+                                session_id,
+                            )
+                        elif result.improve.lock_held:
+                            # Nothing was persisted — never log this as bridged.
+                            # Refund the debounce window so the next remember()
+                            # retries instead of waiting out a window this
+                            # bridge never used.
+                            await _rearm_session_improve_debounce(session_id, user)
+                            logger.info(
+                                "remember: session '%s' bridge skipped, another improve "
+                                "holds the lock; the next remember() retries",
+                                session_id,
+                            )
+                        else:
+                            logger.info(
+                                "remember: session '%s' bridged to permanent graph", session_id
+                            )
                     except Exception as exc:
+                        # The session write already succeeded; the failed bridge is
+                        # recorded, never promoted to the remember's status.
+                        result.improve_error = str(exc)
                         logger.warning(
                             "remember: session improve failed (non-fatal): %s", exc, exc_info=True
                         )
 
-                result._task = asyncio.create_task(_session_improve())
-                _BACKGROUND_REMEMBER_TASKS.add(result._task)
-                result._task.add_done_callback(_BACKGROUND_REMEMBER_TASKS.discard)
+                result._task = _anchor_background_task(asyncio.create_task(_session_improve()))
 
             return result
 
@@ -1693,14 +1915,29 @@ async def _remember_inner(
 
             result._resolve(cognify_result)
 
-            if self_improvement:
+            if auto_improve:
                 from cognee.api.v1.improve import improve
 
                 logger.info("remember: running self-improvement on dataset '%s'", dataset_name)
                 improve_kwargs = {"dataset": dataset_id or dataset_name, "user": user}
                 if session_ids:
                     improve_kwargs["session_ids"] = session_ids
-                await improve(**improve_kwargs)
+                try:
+                    result.improve = await improve(**improve_kwargs)
+                    result.improve_error = _improve_error_text(result.improve)
+                except Exception as exc:
+                    # The data is stored and cognified; a failed improve is
+                    # reported on the result, never as a failed remember (A5).
+                    result.improve_error = str(exc)
+                    logger.warning(
+                        "remember: self-improvement raised (non-fatal): %s", exc, exc_info=True
+                    )
+                else:
+                    if result.improve_error:
+                        logger.warning(
+                            "remember: self-improvement reported errors (non-fatal): %s",
+                            result.improve_error,
+                        )
 
         if session_ids:
             operation_context.set_session_id(session_ids[0] if len(session_ids) == 1 else None)
@@ -1722,9 +1959,7 @@ async def _remember_inner(
                     result._fail(exc)
                     logger.exception("Background remember failed")
 
-            result._task = asyncio.create_task(_remember_background())
-            _BACKGROUND_REMEMBER_TASKS.add(result._task)
-            result._task.add_done_callback(_BACKGROUND_REMEMBER_TASKS.discard)
+            result._task = _anchor_background_task(asyncio.create_task(_remember_background()))
             return result
 
         # Blocking mode

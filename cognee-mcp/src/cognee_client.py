@@ -492,9 +492,14 @@ class CogneeClient:
         """
         if self.use_api:
             # API mode: query the server's dataset-status endpoint, which
-            # reports the pipeline run state keyed by dataset id.
+            # reports the pipeline run state keyed by dataset id. The endpoint
+            # defaults to cognify_pipeline when `pipeline` is omitted, so the
+            # requested name has to be sent or the caller silently receives
+            # cognify_pipeline's status under whatever name it asked for.
             endpoint = f"{self.api_url}/api/v1/datasets/status"
             params = [("dataset", str(d)) for d in dataset_ids]
+            if pipeline_name:
+                params.append(("pipeline", pipeline_name))
             response = await self.client.get(
                 endpoint, params=params, headers=self._get_headers(), timeout=READ_TIMEOUT_SECONDS
             )
@@ -595,11 +600,13 @@ class CogneeClient:
         custom_prompt: str | None = None,
         filename: str | None = None,
         content_base64: str | None = None,
+        self_improvement: bool = True,
     ) -> dict[str, Any]:
         """Store data in memory via remember().
 
         With session_id: stores in session cache only (fast).
-        Without session_id: full add + cognify pipeline (permanent).
+        Without session_id: full add + cognify pipeline (permanent), followed
+        by the improve loop unless ``self_improvement`` is False.
 
         Pass either `data` (text) or `filename` + `content_base64` (file
         upload), not both. File uploads are permanent-memory only.
@@ -646,6 +653,8 @@ class CogneeClient:
             form_data = {"datasetName": dataset_name}
             if custom_prompt:
                 form_data["custom_prompt"] = custom_prompt
+            if not self_improvement:
+                form_data["self_improvement"] = "false"
             response = await self.client.post(
                 endpoint,
                 files=files,
@@ -674,6 +683,8 @@ class CogneeClient:
                     kwargs["session_id"] = session_id
                 if custom_prompt:
                     kwargs["custom_prompt"] = custom_prompt
+                if not self_improvement:
+                    kwargs["self_improvement"] = False
 
                 try:
                     result = await self.cognee.remember(**kwargs)
@@ -782,23 +793,45 @@ class CogneeClient:
         self,
         dataset_name: str = "main_dataset",
         session_ids: list[str] | None = None,
+        node_name: list[str] | None = None,
+        build_global_context_index: bool = False,
+        build_truth_subspace: bool = False,
     ) -> dict[str, Any]:
-        """Enrich knowledge graph and bridge session data via improve()."""
+        """Run the improve loop and return the ImproveResult as a JSON-shaped dict.
+
+        Both modes return the same shape: ``status`` plus one ``stages`` entry
+        per stage (name, status, reason, counts). An older server that still
+        returns the legacy memify run mapping is passed through unchanged.
+        """
         if self.use_api:
             endpoint = f"{self.api_url}/api/v1/improve"
-            payload = {"dataset_name": dataset_name}
+            payload: dict[str, Any] = {"dataset_name": dataset_name}
             if session_ids:
                 payload["session_ids"] = session_ids
+            if node_name:
+                payload["node_name"] = node_name
+            if build_global_context_index:
+                payload["build_global_context_index"] = True
+            if build_truth_subspace:
+                payload["build_truth_subspace"] = True
             response = await self.client.post(endpoint, json=payload, headers=self._get_headers())
             response.raise_for_status()
             return response.json()
         else:
             with redirect_stdout(sys.stderr):
-                kwargs = {"dataset": dataset_name}
+                kwargs: dict[str, Any] = {"dataset": dataset_name}
                 if session_ids:
                     kwargs["session_ids"] = session_ids
+                if node_name:
+                    kwargs["node_name"] = node_name
+                if build_global_context_index:
+                    kwargs["build_global_context_index"] = True
+                if build_truth_subspace:
+                    kwargs["build_truth_subspace"] = True
                 result = await self.cognee.improve(**kwargs)
-                return {"status": "success", "result": str(result)}
+                if hasattr(result, "model_dump"):
+                    return result.model_dump(mode="json")
+                return {"status": "completed", "result": str(result)}
 
     async def close(self):
         """Close the HTTP client if in API mode."""
