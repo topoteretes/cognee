@@ -1,19 +1,17 @@
 import os
 from uuid import UUID
-from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.vector import get_vectordb_config
-from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.modules.data.methods import get_unique_dataset_id
-from cognee.modules.users.models import DatasetDatabase
-from cognee.modules.users.models import User
-from cognee.version import get_cognee_version
 from cognee.modules.migrations.migration import head_revision
 from cognee.modules.migrations.registry import MIGRATIONS
+from cognee.modules.users.models import DatasetDatabase, User
+from cognee.version import get_cognee_version
 
 
 async def _get_vector_db_info(dataset_id: UUID, owner: User) -> dict:
@@ -40,7 +38,7 @@ async def _get_graph_db_info(dataset_id: UUID, owner: User) -> dict:
 
 async def _existing_dataset_database(
     dataset_id: UUID,
-) -> Optional[DatasetDatabase]:
+) -> DatasetDatabase | None:
     """
     Check if a DatasetDatabase row already exists for the given dataset.
     Return None if it doesn't exist, return the row if it does.
@@ -72,7 +70,11 @@ async def get_or_create_dataset_database(
     Return the `DatasetDatabase` row for the given dataset; provision it on first use.
 
     • If the row already exists, it is fetched and returned.
-    • Otherwise a new one is created atomically and returned.
+    • Otherwise the physical databases are provisioned and a new row inserted.
+      Concurrent first-use callers (a query racing the first ingestion, or two
+      queries on a never-built dataset) all end up with the one row that won
+      the insert; dataset_id is the primary key, so losing the insert is not
+      an error.
 
     DatasetDatabase row contains connection and provider info for vector and graph databases.
 
@@ -118,12 +120,23 @@ async def get_or_create_dataset_database(
             **vector_config_dict,  # Unpack vector db config
         )
 
+        session.add(record)
         try:
-            session.add(record)
             await session.commit()
+        except IntegrityError as error:
+            await session.rollback()
+            insert_error = error
+        else:
             await session.refresh(record)
             return record
 
-        except IntegrityError:
-            await session.rollback()
-            raise
+    # Another caller provisioned this dataset between the existence check above
+    # and the insert. The handlers derive every name from the dataset id, so the
+    # databases both callers created are the same ones and the winner's row is
+    # the one to use. Read it outside the failed session: sessions must not nest.
+    # No row at all means the conflict was something else (an owner row gone),
+    # and that error stands.
+    existing_dataset_database = await _existing_dataset_database(dataset_id)
+    if existing_dataset_database is None:
+        raise insert_error
+    return existing_dataset_database

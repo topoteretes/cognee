@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.modules.retrieval.utils.brute_force_triplet_search import get_memory_fragment
@@ -7,7 +7,7 @@ from cognee.modules.retrieval.utils.brute_force_triplet_search import get_memory
 GLOBAL_CONTEXT_SUMMARY_COLLECTION = "GlobalContextSummary_text"
 
 
-async def load_root_text() -> Optional[str]:
+async def load_root_text() -> str | None:
     """
     Return the dataset's root GlobalContextSummary text, or None when no root
     exists in scope. Relies on backend access control to scope the query to
@@ -28,7 +28,7 @@ async def search_top_global_context_summaries(
     query: str,
     top_k: int,
     vector_engine: Any,
-    query_vector: Optional[list[float]] = None,
+    query_vector: list[float] | None = None,
 ) -> list[str]:
     """Return up to top_k non-root GlobalContextSummary texts ranked by similarity."""
     if top_k <= 0:
@@ -58,7 +58,7 @@ async def search_top_global_context_summaries(
 
 
 def format_global_context_prelude(
-    root_text: Optional[str],
+    root_text: str | None,
     top_summaries: list[str],
 ) -> str:
     """Build the prepend string. Empty when neither input has content."""

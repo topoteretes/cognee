@@ -2,10 +2,12 @@
 Tests for the main CLI entry point and command discovery.
 """
 
-import pytest
 import argparse
-from unittest.mock import patch, MagicMock
-from cognee.cli._cognee import main, _discover_commands, _create_parser
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from cognee.cli._cognee import _create_parser, _discover_commands, main
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 
 

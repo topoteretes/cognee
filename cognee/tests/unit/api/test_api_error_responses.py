@@ -8,29 +8,27 @@ Tests cover:
 
 import importlib
 from types import SimpleNamespace
-from uuid import uuid4
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
-
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from cognee.modules.users.methods import get_authenticated_user
-from cognee.modules.pipelines.models import PipelineRunErrored, PipelineRunCompleted
-from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
-from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.api.v1.add.routers.get_add_router import get_add_router
 from cognee.api.v1.cognify.routers.get_cognify_router import get_cognify_router
 from cognee.api.v1.datasets.routers.get_datasets_router import get_datasets_router
-from cognee.api.v1.memify.routers.get_memify_router import get_memify_router
 from cognee.api.v1.improve.routers.get_improve_router import get_improve_router
+from cognee.api.v1.memify.routers.get_memify_router import get_memify_router
 from cognee.api.v1.recall.routers.get_recall_router import get_recall_router
 from cognee.api.v1.remember.routers.get_remember_router import get_remember_router
 from cognee.api.v1.search.routers.get_search_router import get_search_router
 from cognee.api.v1.update.routers.get_update_router import get_update_router
 from cognee.exceptions import CogneeApiError, CogneeValidationError
-
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
+from cognee.modules.pipelines.models import PipelineRunCompleted, PipelineRunErrored
+from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
+from cognee.modules.users.methods import get_authenticated_user
 
 MOCK_USER = SimpleNamespace(id=uuid4(), email="test@example.com", is_active=True, tenant_id=uuid4())
 MOCK_DATASET_ID = uuid4()
@@ -63,24 +61,24 @@ def _restore_stubbed_api_functions():
 
 
 def _make_completed(**kwargs):
-    defaults = dict(
-        pipeline_run_id=MOCK_PIPELINE_RUN_ID,
-        dataset_id=MOCK_DATASET_ID,
-        dataset_name="test_dataset",
-        status="completed",
-    )
+    defaults = {
+        "pipeline_run_id": MOCK_PIPELINE_RUN_ID,
+        "dataset_id": MOCK_DATASET_ID,
+        "dataset_name": "test_dataset",
+        "status": "completed",
+    }
     defaults.update(kwargs)
     return PipelineRunCompleted(**defaults)
 
 
 def _make_errored(error="pipeline failed", **kwargs):
-    defaults = dict(
-        pipeline_run_id=MOCK_PIPELINE_RUN_ID,
-        dataset_id=MOCK_DATASET_ID,
-        dataset_name="test_dataset",
-        status="errored",
-        error=error,
-    )
+    defaults = {
+        "pipeline_run_id": MOCK_PIPELINE_RUN_ID,
+        "dataset_id": MOCK_DATASET_ID,
+        "dataset_name": "test_dataset",
+        "status": "errored",
+        "error": error,
+    }
     defaults.update(kwargs)
     return PipelineRunErrored(**defaults)
 
@@ -661,3 +659,30 @@ class TestRecallPermissionDenied:
         assert resp.status_code == 403
         assert "no access" in resp.text
         assert "cognify" not in resp.text.lower()
+
+
+class TestCognifyExternalSchemaRef:
+    """A ``graph_model`` whose ``$ref`` points outside the document is a 400, never fetched."""
+
+    @pytest.mark.parametrize(
+        "ref", ["http://169.254.169.254/latest/meta-data/", "/etc/passwd", "../.env"]
+    )
+    def test_external_ref_is_a_400_and_cognify_never_runs(self, client, ref):
+        cognify_pkg = importlib.import_module("cognee.api.v1.cognify")
+        cognify_pkg.cognify = AsyncMock()
+
+        resp = client.post(
+            "/cognify",
+            json={
+                "datasets": ["ds"],
+                "graph_model": {
+                    "title": "Graph",
+                    "type": "object",
+                    "properties": {"nodes": {"type": "array", "items": {"$ref": ref}}},
+                },
+            },
+        )
+
+        assert resp.status_code == 400
+        assert "ExternalSchemaReferenceError" in resp.json()["detail"]
+        cognify_pkg.cognify.assert_not_awaited()

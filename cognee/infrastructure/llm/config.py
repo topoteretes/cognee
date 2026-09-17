@@ -1,6 +1,6 @@
 import json
 from functools import lru_cache
-from typing import Any, ClassVar
+from typing import Any
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -106,7 +106,7 @@ class LLMConfig(BaseSettings):
     structured_output_framework: str = "litellm_native"
     llm_instructor_mode: str = ""
     llm_provider: str = "openai"
-    llm_model: str = "openai/gpt-5-mini"
+    llm_model: str = "openai/gpt-5.6-luna"
     llm_endpoint: str = ""
     llm_api_key: str | None = None
     llm_api_version: str | None = None
@@ -149,7 +149,7 @@ class LLMConfig(BaseSettings):
     llm_max_completion_tokens: int = 16384
 
     baml_llm_provider: str = "openai"
-    baml_llm_model: str = "gpt-5-mini"
+    baml_llm_model: str = "gpt-5.6-luna"
     baml_llm_endpoint: str = ""
     baml_llm_api_key: str | None = None
     baml_llm_temperature: float = 0.0
@@ -222,9 +222,13 @@ class LLMConfig(BaseSettings):
         """
         for field_name in self.__class__.model_fields:
             value = getattr(self, field_name, None)
-            if isinstance(value, str) and len(value) >= 2:
-                if value[0] == value[-1] and value[0] in ("'", '"'):
-                    setattr(self, field_name, value[1:-1])
+            if (
+                isinstance(value, str)
+                and len(value) >= 2
+                and value[0] == value[-1]
+                and value[0] in ("'", '"')
+            ):
+                setattr(self, field_name, value[1:-1])
 
         return self
 
@@ -303,7 +307,7 @@ class LLMConfig(BaseSettings):
         """
         return _apply_local_rate_limit_default(self)
 
-    def model_post_init(self, __context) -> None:
+    def model_post_init(self, context, /) -> None:
         """Initialize the BAML registry after the model is created."""
         # Check if BAML is selected as structured output framework but not available
         if self.structured_output_framework.lower() == "baml" and ClientRegistry is None:
@@ -358,7 +362,7 @@ class LLMConfig(BaseSettings):
         #
         # llm_endpoint/llm_api_key default to blank ("" / None), so "has a
         # non-blank value" alone tells us whether they were configured.
-        # llm_model defaults to a real model id ("openai/gpt-5-mini"), so the
+        # llm_model defaults to a real model id ("openai/gpt-5.6-luna"), so the
         # same non-blank check can't tell "configured, happens to match the
         # default" from "left unset" - that also needs `model_fields_set`
         # (populated by pydantic-settings whether the value came from a kwarg

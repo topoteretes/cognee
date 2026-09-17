@@ -7,6 +7,10 @@ operation name, triggering user/tenant, start/end timestamps, outcome
 spent inside the scope. NULL-status rows are invisible to all legacy
 latest-row status readers (they filter on ``pipeline_name``/``status``).
 
+An operation that starts background work outliving the scope can defer the
+write (``context.defer_close()``) and have that work close the record with
+``finish_operation``, so the row describes the finished work, not the launch.
+
 Guarantees:
 - The wrapped operation's exceptions always propagate unchanged.
 - The recorder's own persistence failures are logged and swallowed — it
@@ -16,11 +20,14 @@ Guarantees:
   is swallowed by design.)
 """
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, AsyncIterator, Optional
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID, uuid4
+
+from sqlalchemy.exc import OperationalError
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.shared.logging_utils import get_logger
@@ -60,13 +67,13 @@ class OperationContext:
     def __init__(
         self,
         operation_name: str,
-        user_id: Optional[UUID] = None,
-        tenant_id: Optional[UUID] = None,
-        dataset_id: Optional[UUID] = None,
-        usage: Optional[OperationUsage] = None,
-        session_id: Optional[str] = None,
-        background: Optional[bool] = None,
-        parent_operation_id: Optional[UUID] = None,
+        user_id: UUID | None = None,
+        tenant_id: UUID | None = None,
+        dataset_id: UUID | None = None,
+        usage: OperationUsage | None = None,
+        session_id: str | None = None,
+        background: bool | None = None,
+        parent_operation_id: UUID | None = None,
     ):
         self.operation_name = operation_name
         # Allocated up front (not at write time) so children — nested
@@ -81,6 +88,15 @@ class OperationContext:
         self.session_id = session_id
         self.background = background
         self.parent_operation_id = parent_operation_id
+        self.started_at = datetime.now(timezone.utc)
+        # An explicit outcome for the row, set by operations whose success is
+        # not "the body did not raise" (improve marks a run with an errored
+        # stage as failed). A raised exception still wins over it.
+        self.outcome = None
+        self.close_deferred = False
+        # Optional JSON payload for the row's run_info column (improve stamps
+        # its enrichment watermark here — see improve/graph_changes.py).
+        self.run_info = None
 
     def set_user(self, user) -> None:
         """Bind the triggering user (tolerates None and partial objects)."""
@@ -89,11 +105,11 @@ class OperationContext:
         self.user_id = getattr(user, "id", None)
         self.tenant_id = getattr(user, "tenant_id", None)
 
-    def set_dataset(self, dataset_id: Optional[UUID]) -> None:
+    def set_dataset(self, dataset_id: UUID | None) -> None:
         """Bind the target dataset, when the operation has exactly one."""
         self.dataset_id = dataset_id
 
-    def set_session_id(self, session_id: Optional[str]) -> None:
+    def set_session_id(self, session_id: str | None) -> None:
         """Bind the active session-cache id (joins SessionModelUsage)."""
         if session_id:
             self.session_id = session_id
@@ -102,17 +118,49 @@ class OperationContext:
         """Mark whether this call launched background work.
 
         True means outcome="succeeded" records "accepted and started", not
-        "background work finished" (SDK-399 background-launch semantics).
+        "background work finished" (SDK-399 background-launch semantics) —
+        unless the operation defers its close to that work (``defer_close``),
+        which improve does so its row describes the finished run.
         """
         self.background = background
+
+    def set_outcome(self, outcome) -> None:
+        """Override the outcome recorded for a body that exits cleanly."""
+        self.outcome = outcome
+
+    def merge_run_info(self, run_info: dict) -> None:
+        """Merge a payload into the row's ``run_info`` column, append-style.
+
+        Writers namespace their entries by key (improve stages stamp under
+        their stage name), so a merge never drops an earlier writer's entry.
+        Overwriting an existing key is legal (last writer wins) but logged:
+        it means two writers chose the same namespace.
+        """
+        existing = self.run_info or {}
+        clobbered = [key for key in run_info if key in existing and existing[key] != run_info[key]]
+        if clobbered:
+            logger.warning(
+                "record_operation: run_info keys overwritten on %s record: %s",
+                self.operation_name,
+                ", ".join(sorted(clobbered)),
+            )
+        self.run_info = {**existing, **run_info}
+
+    def defer_close(self) -> None:
+        """Hand the row write to background work — see ``finish_operation``.
+
+        The ``record_operation`` scope then writes nothing on exit; the work
+        that outlives it must call ``finish_operation`` exactly once.
+        """
+        self.close_deferred = True
 
 
 async def _write_operation_row(
     context: OperationContext,
     started_at: datetime,
     outcome: str,
-    error_class: Optional[str],
-    error_message: Optional[str],
+    error_class: str | None,
+    error_message: str | None,
 ) -> None:
     from cognee.modules.pipelines.models import PipelineRun
 
@@ -122,7 +170,7 @@ async def _write_operation_row(
         pipeline_name=None,
         pipeline_id=None,
         dataset_id=context.dataset_id,
-        run_info=None,
+        run_info=context.run_info,
         user_id=context.user_id,
         tenant_id=context.tenant_id,
         operation_name=context.operation_name,
@@ -150,14 +198,12 @@ async def _write_operation_row(
 async def record_operation(
     operation_name: str,
     user: Optional["User"] = None,
-    dataset_id: Optional[UUID] = None,
-    session_id: Optional[str] = None,
-    background: Optional[bool] = None,
+    dataset_id: UUID | None = None,
+    session_id: str | None = None,
+    background: bool | None = None,
 ) -> AsyncIterator[OperationContext]:
     """Record one non-pipeline operation as a single ``pipeline_runs`` row."""
     from cognee.modules.pipelines.models import OperationOutcome
-
-    started_at = datetime.now(timezone.utc)
 
     with operation_usage_scope() as usage:
         context = OperationContext(
@@ -176,8 +222,8 @@ async def record_operation(
         context_token = _current_operation.set(context)
 
         outcome = OperationOutcome.SUCCEEDED
-        error_class: Optional[str] = None
-        error_message: Optional[str] = None
+        error_class: str | None = None
+        error_message: str | None = None
         try:
             with parent_run_scope(context.operation_id):
                 yield context
@@ -188,13 +234,71 @@ async def record_operation(
             raise
         finally:
             _current_operation.reset(context_token)
-            try:
-                await _write_operation_row(
-                    context, started_at, outcome.value, error_class, error_message
-                )
-            except Exception as write_error:
-                logger.warning(
-                    "record_operation: failed to persist %s record (%s)",
-                    operation_name,
-                    write_error,
-                )
+            # A deferred close writes nothing here: the background work the
+            # operation started owns the row (``finish_operation``), so it
+            # carries the run's end time and outcome, not the launch's.
+            if not context.close_deferred:
+                if outcome is OperationOutcome.SUCCEEDED and context.outcome is not None:
+                    outcome = context.outcome
+                try:
+                    await _write_operation_row(
+                        context, context.started_at, outcome.value, error_class, error_message
+                    )
+                except OperationalError as write_error:
+                    # An unreachable relational store is an expected state
+                    # around the operations that manage the store itself:
+                    # prune deletes the database the ledger lives in, and
+                    # nothing exists before setup() — the quickstart examples
+                    # hit both. A warning with a traceback made every example
+                    # run look broken, so the skipped write logs at debug.
+                    logger.debug(
+                        "record_operation: skipping %s record, relational store unavailable (%s)",
+                        operation_name,
+                        write_error,
+                    )
+                except Exception as write_error:
+                    logger.warning(
+                        "record_operation: failed to persist %s record (%s)",
+                        operation_name,
+                        write_error,
+                        exc_info=True,
+                    )
+
+
+async def finish_operation(context: OperationContext, error: BaseException | None = None) -> None:
+    """Write the row for an operation that deferred its close (``defer_close``).
+
+    Called by the background work that outlives the ``record_operation``
+    scope, so the row's ``ended_at`` and outcome describe the finished work,
+    not the launch. Swallows its own persistence failures, like the scope.
+    """
+    from cognee.modules.pipelines.models import OperationOutcome
+
+    if error is not None:
+        outcome = OperationOutcome.FAILED
+        error_class: str | None = type(error).__name__
+        error_message: str | None = scrub_error_message(error)
+    else:
+        outcome = context.outcome or OperationOutcome.SUCCEEDED
+        error_class = None
+        error_message = None
+
+    try:
+        await _write_operation_row(
+            context, context.started_at, outcome.value, error_class, error_message
+        )
+    except OperationalError as write_error:
+        # Store unavailable: expected around prune / before setup(), see the
+        # matching handler in record_operation.
+        logger.debug(
+            "record_operation: skipping %s record, relational store unavailable (%s)",
+            context.operation_name,
+            write_error,
+        )
+    except Exception as write_error:
+        logger.warning(
+            "record_operation: failed to persist %s record (%s)",
+            context.operation_name,
+            write_error,
+            exc_info=True,
+        )

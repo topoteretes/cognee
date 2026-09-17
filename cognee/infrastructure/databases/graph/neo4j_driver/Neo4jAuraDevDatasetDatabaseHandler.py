@@ -1,17 +1,17 @@
-import os
-import aiohttp
 import asyncio
 import base64
 import hashlib
-from uuid import UUID
-from typing import Optional
+import os
 from urllib.parse import urlparse
-from cryptography.fernet import Fernet
-from aiohttp import BasicAuth
+from uuid import UUID
 
-from cognee.infrastructure.databases.graph import get_graph_config
-from cognee.modules.users.models import User, DatasetDatabase
+import aiohttp
+from aiohttp import BasicAuth
+from cryptography.fernet import Fernet
+
 from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
+from cognee.infrastructure.databases.graph import get_graph_config
+from cognee.modules.users.models import DatasetDatabase, User
 
 
 class Neo4jAuraDevDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
@@ -28,7 +28,7 @@ class Neo4jAuraDevDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     """
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: UUID | None, user: User | None) -> dict:
         """
         Create a new Neo4j Aura instance for the dataset. Return connection info that will be mapped to the dataset.
 
@@ -90,10 +90,12 @@ class Neo4jAuraDevDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         }
 
         async def _create_database_instance_request():
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=payload) as resp:
-                    resp.raise_for_status()
-                    return await resp.json()
+            async with (
+                aiohttp.ClientSession() as session,
+                session.post(url, headers=headers, json=payload) as resp,
+            ):
+                resp.raise_for_status()
+                return await resp.json()
 
         resp_create = await _create_database_instance_request()
 
@@ -108,14 +110,16 @@ class Neo4jAuraDevDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
             status_url = f"https://api.neo4j.io/v1/instances/{instance_id}"
             status = ""
             for attempt in range(30):  # Try for up to ~5 minutes
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(status_url, headers=headers) as resp:
-                        resp.raise_for_status()
-                        status_resp = await resp.json()
-                        status = status_resp["data"]["status"]
-                        if status.lower() == "running":
-                            return
-                        await asyncio.sleep(10)
+                async with (
+                    aiohttp.ClientSession() as session,
+                    session.get(status_url, headers=headers) as resp,
+                ):
+                    resp.raise_for_status()
+                    status_resp = await resp.json()
+                    status = status_resp["data"]["status"]
+                    if status.lower() == "running":
+                        return
+                    await asyncio.sleep(10)
             raise TimeoutError(
                 f"Neo4j instance '{graph_db_name}' did not become ready within 5 minutes. Status: {status}"
             )
@@ -185,19 +189,18 @@ class Neo4jAuraDevDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
             "Content-Type": "application/json",
         }
 
-        async with aiohttp.ClientSession() as session:
-            async with session.delete(url, headers=headers) as resp:
-                resp.raise_for_status()
-                return await resp.json()
+        async with aiohttp.ClientSession() as session, session.delete(url, headers=headers) as resp:
+            resp.raise_for_status()
+            return await resp.json()
 
     @classmethod
     async def _get_aura_token(cls, client_id: str, client_secret: str) -> dict:
         url = "https://api.neo4j.io/oauth/token"
         data = {"grant_type": "client_credentials"}  # sent as application/x-www-form-urlencoded
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url, data=data, auth=BasicAuth(client_id, client_secret)
-            ) as resp:
-                resp.raise_for_status()
-                return await resp.json()
+        async with (
+            aiohttp.ClientSession() as session,
+            session.post(url, data=data, auth=BasicAuth(client_id, client_secret)) as resp,
+        ):
+            resp.raise_for_status()
+            return await resp.json()

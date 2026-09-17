@@ -33,11 +33,14 @@ from __future__ import annotations
 
 import argparse
 import inspect
+import logging
 import os
 import re
 import sys
 import typing
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 # Markdown-style sections ("## Request Parameters") and Google-style ones ("Args:")
 PARAM_SECTION_RE = re.compile(
@@ -313,6 +316,7 @@ def main() -> int:
     try:
         reports = check_routes()
     except Exception as exc:
+        logger.debug("Exiting with status 2 after error in main", exc_info=True)
         print(f"Failed to import cognee API app: {exc}", file=sys.stderr)
         return 2
 

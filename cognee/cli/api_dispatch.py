@@ -230,20 +230,20 @@ def _dispatch_datasets(client: CogneeApiClient, args: argparse.Namespace) -> Non
             fmt.echo(output)
 
     elif action == "delete":
-        if not getattr(args, "force", False):
-            if not fmt.confirm(f"Delete dataset {args.dataset_id}? This cannot be undone"):
-                fmt.echo("Cancelled.")
-                return
+        if not getattr(args, "force", False) and not fmt.confirm(
+            f"Delete dataset {args.dataset_id}? This cannot be undone"
+        ):
+            fmt.echo("Cancelled.")
+            return
         client.datasets_delete(args.dataset_id)
         fmt.success(f"Dataset {args.dataset_id} deleted.")
 
 
 def _dispatch_delete(client: CogneeApiClient, args: argparse.Namespace) -> None:
     if getattr(args, "all", False):
-        if not getattr(args, "force", False):
-            if not fmt.confirm("Delete ALL data?"):
-                fmt.echo("Cancelled.")
-                return
+        if not getattr(args, "force", False) and not fmt.confirm("Delete ALL data?"):
+            fmt.echo("Cancelled.")
+            return
         client.datasets_delete_all()
         fmt.success("All data deleted.")
     elif getattr(args, "dataset_name", None):
@@ -253,10 +253,11 @@ def _dispatch_delete(client: CogneeApiClient, args: argparse.Namespace) -> None:
         if not match:
             fmt.error(f"No dataset found with name '{args.dataset_name}'.")
             return
-        if not getattr(args, "force", False):
-            if not fmt.confirm(f"Delete dataset '{args.dataset_name}'?"):
-                fmt.echo("Cancelled.")
-                return
+        if not getattr(args, "force", False) and not fmt.confirm(
+            f"Delete dataset '{args.dataset_name}'?"
+        ):
+            fmt.echo("Cancelled.")
+            return
         client.datasets_delete(match[0]["id"])
         fmt.success(f"Dataset '{args.dataset_name}' deleted.")
     else:
@@ -356,22 +357,35 @@ def _dispatch_recall(client: CogneeApiClient, args: argparse.Namespace) -> None:
 
 
 def _dispatch_improve(client: CogneeApiClient, args: argparse.Namespace) -> None:
+    from cognee.cli.commands.improve_command import print_improve_result
+
     dataset = args.dataset_id or args.dataset_name
     fmt.echo(f"Improving knowledge graph for dataset '{dataset}'...")
-    if getattr(args, "feedback_alpha", 0.1) != 0.1:
-        fmt.warning("--feedback-alpha is ignored in --api-url mode; the server uses its default.")
     result = client.improve(
         dataset_name=args.dataset_name if not args.dataset_id else None,
         dataset_id=args.dataset_id,
         node_name=getattr(args, "node_name", None),
         session_ids=getattr(args, "session_ids", None),
         run_in_background=getattr(args, "background", False),
+        build_global_context_index=getattr(args, "build_global_context_index", False),
+        build_truth_subspace=getattr(args, "build_truth_subspace", False),
+        feedback_alpha=getattr(args, "feedback_alpha", None),
     )
+    if isinstance(result, dict) and "stages" in result:
+        # The server returned an ImproveResult: same per-stage lines as
+        # in-process. "started in background" only when the run is actually
+        # running — a lost lock claim comes back finished with every stage
+        # skipped, and must print as skipped, not started (the local path
+        # makes the same status check).
+        still_running = getattr(args, "background", False) and result.get("status") == "running"
+        print_improve_result(result, background=still_running)
+        return
     if getattr(args, "background", False):
         fmt.success("Improvement started in background!")
     else:
         fmt.success("Knowledge graph improved successfully!")
     if result:
+        # An older server returns the legacy memify run mapping.
         fmt.echo(json.dumps(result, indent=2, default=str))
 
 

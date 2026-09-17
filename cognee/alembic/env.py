@@ -1,16 +1,17 @@
 import asyncio
 import logging
-from alembic import context
 from logging.config import fileConfig
+
+from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from cognee.infrastructure.databases.relational import get_relational_engine, Base
-import cognee.modules.session_lifecycle.models  # noqa: F401
-import cognee.modules.migrations.models  # noqa: F401
-import cognee.modules.provenance.models  # noqa: F401
-import cognee.modules.provenance.edge_evidence.models  # noqa: F401
+import cognee.modules.migrations.models
+import cognee.modules.provenance.edge_evidence.models
+import cognee.modules.provenance.models
+import cognee.modules.session_lifecycle.models
+from cognee.infrastructure.databases.relational import Base, get_relational_engine
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

@@ -1,12 +1,8 @@
+from typing import Any, BinaryIO
 from uuid import UUID
-from typing import Union, BinaryIO, List, Optional, Any, Dict
 
 from pydantic import BaseModel
 
-from cognee.modules.pipelines.models import PipelineRunInfo
-from cognee.shared.data_models import KnowledgeGraph
-from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_default_user
 from cognee.api.v1.add import add
 from cognee.api.v1.cognify import cognify
 from cognee.api.v1.datasets import datasets
@@ -17,13 +13,17 @@ from cognee.api.v1.update.incremental import (
 )
 from cognee.modules.chunking.chunk_policy import DEFAULT_CHUNK_POLICY, ChunkPolicy
 from cognee.modules.chunking.TextChunker import TextChunker
+from cognee.modules.pipelines.models import PipelineRunInfo
+from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
+from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("update")
 
 
 async def _restore_row_lineage(
-    data_id: UUID, legacy_id: Optional[UUID], owner_id: Optional[UUID]
+    data_id: UUID, legacy_id: UUID | None, owner_id: UUID | None
 ) -> None:
     """Carry the replaced row's identity onto the one re-ingestion just minted.
 
@@ -55,21 +55,21 @@ async def _restore_row_lineage(
 
 async def update(
     data_id: UUID,
-    data: Union[BinaryIO, list[BinaryIO], str, list[str]],
+    data: BinaryIO | list[BinaryIO] | str | list[str],
     dataset_id: UUID,
     user: User = None,
-    node_set: Optional[List[str]] = None,
-    vector_db_config: dict = None,
-    graph_db_config: dict = None,
-    preferred_loaders: dict[str, dict[str, Any]] = None,
+    node_set: list[str] | None = None,
+    vector_db_config: dict | None = None,
+    graph_db_config: dict | None = None,
+    preferred_loaders: dict[str, dict[str, Any]] | None = None,
     incremental_loading: bool = True,
     data_cache: bool = True,
     chunk_level_diff: bool = True,
     graph_model: type[BaseModel] = KnowledgeGraph,
-    custom_prompt: Optional[str] = None,
+    custom_prompt: str | None = None,
     chunker: type = TextChunker,
     policy: ChunkPolicy = DEFAULT_CHUNK_POLICY,
-) -> Union[Dict[str, PipelineRunInfo], List[PipelineRunInfo], dict]:
+) -> dict[str, PipelineRunInfo] | list[PipelineRunInfo] | dict:
     """
     Update existing data in Cognee.
 

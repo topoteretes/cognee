@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Optional
 from uuid import UUID
 
 from cognee.infrastructure.databases.provenance import EdgeIdentity
@@ -28,13 +27,13 @@ _ONTOLOGY_INDIVIDUAL_CATEGORY = "individuals"
 class OntologyMatch:
     node_category: str
     canonical_name: str
-    canonical_uri: Optional[str]
+    canonical_uri: str | None
     ontology_nodes: list[AttachedOntologyNode]
     ontology_edges: list[tuple[str, str, str]]
     first_source_chunk: DocumentChunk
 
 
-OntologyMatchLookup = dict[tuple[str, str], Optional[OntologyMatch]]
+OntologyMatchLookup = dict[tuple[str, str], OntologyMatch | None]
 
 
 @dataclass
@@ -69,7 +68,7 @@ def _find_ontology_match(
     normalized_extracted_name: str,
     node_category: str,
     first_source_chunk: DocumentChunk,
-) -> Optional[OntologyMatch]:
+) -> OntologyMatch | None:
     """Find the ontology node and subgraph matching one extracted name."""
     ontology_nodes, ontology_edges, matched_ontology_node = ontology_resolver.get_subgraph(
         node_name=normalized_extracted_name,
@@ -125,7 +124,7 @@ def _get_ontology_match(
     ontology_match_lookup: OntologyMatchLookup,
     node_category: str,
     extracted_name: str,
-) -> Optional[OntologyMatch]:
+) -> OntologyMatch | None:
     """Return the ontology match already looked up for an extracted name."""
     return ontology_match_lookup.get((node_category, generate_node_name(extracted_name)))
 
@@ -275,7 +274,7 @@ def _get_data_point_class_for_ontology_category(
 def _mark_existing_ontology_data_point(
     data_point_class: type[Entity] | type[EntityType],
     ontology_name: str,
-    ontology_uri: Optional[str],
+    ontology_uri: str | None,
     data_points_by_id: dict[str, Entity | EntityType],
 ) -> bool:
     data_point_id = data_point_class.id_for(ontology_name)
@@ -409,7 +408,7 @@ def construct_data_points_and_edges_with_ontology(
     data_chunks: list[DocumentChunk],
     extracted_graphs: list[KnowledgeGraph],
     ontology_resolver: BaseOntologyResolver,
-    ontology_mode: Optional[str] = None,
+    ontology_mode: str | None = None,
 ) -> tuple[dict[str, Entity | EntityType], dict[EdgeIdentity, Edge]]:
     """Canonicalize, construct, and enrich extracted graphs with ontology data.
 

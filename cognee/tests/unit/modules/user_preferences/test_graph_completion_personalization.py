@@ -14,15 +14,13 @@ multiplicative compose with the feedback blend) is covered in
 ``tests/unit/modules/graph/cognee_graph_test.py``.
 """
 
-from typing import Dict, Tuple
-
 import pytest
 
 import cognee.modules.retrieval.graph_completion_retriever as retriever_module
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 
 
-def _patch_lookup(monkeypatch, result: Tuple[str, Dict[str, float]]):
+def _patch_lookup(monkeypatch, result: tuple[str, dict[str, float]]):
     text, weights = result
 
     async def fake_load_preference_text():

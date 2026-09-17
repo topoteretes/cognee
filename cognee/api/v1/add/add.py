@@ -1,61 +1,75 @@
+from typing import Any, BinaryIO
+from urllib.parse import urlparse
 from uuid import UUID
-from typing import Union, BinaryIO, List, Optional, Any
 
-from cognee.modules.users.models import User
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
 from cognee.infrastructure.llm.config import LLMConfig
-from cognee.modules.pipelines import Task, run_pipeline
-from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
-    resolve_authorized_user_dataset,
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+from cognee.modules.engine.operations.setup import setup
+from cognee.modules.observability import (
+    COGNEE_DATASET_NAME,
+    MEMORY_COLLECTION,
+    MEMORY_OPERATION,
+    MEMORY_SYSTEM,
+    increment_items_stored,
+    new_span,
+    record_operation_duration,
 )
+from cognee.modules.pipelines import Task, run_pipeline
+from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
     reset_dataset_pipeline_run_status,
 )
-from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
-from cognee.modules.engine.operations.setup import setup
+from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
+    resolve_authorized_user_dataset,
+)
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.resolve_dlt_sources import resolve_dlt_sources
 from cognee.tasks.ingestion.utils import materialize_stream_for_background
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.data.constants import DEFAULT_DATASET_NAME
-from cognee.modules.observability import (
-    new_span,
-    MEMORY_SYSTEM,
-    MEMORY_OPERATION,
-    MEMORY_COLLECTION,
-    COGNEE_DATASET_NAME,
-    record_operation_duration,
-    increment_items_stored,
-)
 
 logger = get_logger()
 
 
+def _add_pipeline_needs_llm(data: Any, preferred_loaders: list | None) -> bool:
+    """Only known plain-text inputs can safely skip the LLM check."""
+    if preferred_loaders:
+        return True
+
+    data_items = data if isinstance(data, list) else [data]
+    for data_item in data_items:
+        data_item = data_item.data if isinstance(data_item, DataItem) else data_item
+        if not isinstance(data_item, str) or urlparse(data_item).scheme:
+            return True
+        try:
+            resolve_local_path(data_item, must_exist=True)
+        except (FileNotFoundError, OSError, ValueError):
+            pass
+        else:
+            return True
+    return False
+
+
 async def add(
-    data: Union[
-        BinaryIO,
-        list[BinaryIO],
-        str,
-        list[str],
-        DataItem,
-        list[DataItem],
-        Any,  # DltResource, SourceFactory, or other dlt types
-    ],
+    data: BinaryIO | list[BinaryIO] | str | list[str] | DataItem | list[DataItem] | Any,
     dataset_name: str = DEFAULT_DATASET_NAME,
     user: User = None,
-    node_set: Optional[List[str]] = None,
-    vector_db_config: dict = None,
-    graph_db_config: dict = None,
-    dataset_id: Optional[UUID] = None,
-    preferred_loaders: Optional[List[Union[str, dict[str, dict[str, Any]]]]] = None,
+    node_set: list[str] | None = None,
+    vector_db_config: dict | None = None,
+    graph_db_config: dict | None = None,
+    dataset_id: UUID | None = None,
+    preferred_loaders: list[str | dict[str, dict[str, Any]]] | None = None,
     incremental_loading: bool = True,
-    data_per_batch: Optional[int] = 20,
-    importance_weight: Optional[float] = 0.5,
+    data_per_batch: int | None = 20,
+    importance_weight: float | None = 0.5,
     run_in_background: bool = False,
-    llm_config: Optional[LLMConfig] = None,
-    embedding_config: Optional[EmbeddingConfig] = None,
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = True,
+    skip_connection_test: bool = False,
     **kwargs,
 ):
     """
@@ -196,12 +210,12 @@ async def add(
         ```
 
     Environment Variables:
-        Required:
-        - LLM_API_KEY: API key for your LLM provider (OpenAI, Anthropic, etc.)
+        - LLM_API_KEY: API key for your LLM provider (OpenAI, Anthropic, etc.). When
+          unset, ingestion runs on local models (GLiNER extraction, fastembed embeddings).
 
         Optional:
         - LLM_PROVIDER: "openai" (default), "anthropic", "gemini", "ollama", "mistral", "bedrock"
-        - LLM_MODEL: Model name (default: "gpt-5-mini")
+        - LLM_MODEL: Model name (default: "openai/gpt-5.6-luna")
         - DEFAULT_USER_EMAIL: Custom default user email
         - DEFAULT_USER_PASSWORD: Custom default user password
         - VECTOR_DB_PROVIDER: "lancedb" (default), "pgvector"
@@ -230,12 +244,12 @@ async def add(
                 transformed[item] = {}
         preferred_loaders = transformed
 
-    # Fail loudly on inconsistent LLM/embedding provider config before any DB
-    # or ingestion work — otherwise the mismatch surfaces minutes later as an
-    # opaque auth error mid-cognify. Cheap (no network), once per process.
+    # Validate only the ingestion work this call will perform. Obvious direct
+    # text is LLM-free; inputs whose loader is not known yet stay conservative.
     from cognee.modules.preflight import validate_provider_config
 
-    validate_provider_config()
+    add_pipeline_needs_llm = _add_pipeline_needs_llm(data, preferred_loaders)
+    validate_provider_config(needs_llm=add_pipeline_needs_llm)
 
     await setup()
 
@@ -265,7 +279,7 @@ async def add(
     # every item (the pipeline also passes the dataset via ctx — this keeps the
     # non-pipeline fallback on the cheap branch too).
     tasks = [
-        Task(resolve_data_directories, include_subdirectories=True),
+        Task(resolve_data_directories, include_subdirectories=True, needs_llm=False),
         Task(
             ingest_data,
             dataset_name,
@@ -274,6 +288,7 @@ async def add(
             authorized_dataset.id,
             preferred_loaders,
             importance_weight,
+            needs_llm=add_pipeline_needs_llm,
         ),
     ]
 
@@ -324,6 +339,7 @@ async def add(
         llm_config=llm_config,
         embedding_config=embedding_config,
         data_cache=data_cache,
+        skip_connection_test=skip_connection_test,
     )
 
     # Foreground runs: the fresh rows are committed by pipeline_executor_func

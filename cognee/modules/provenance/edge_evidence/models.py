@@ -9,7 +9,7 @@ It is append-only and is never consulted by graph-native deletion.
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, Float, Index, Integer, String, Text, UUID
+from sqlalchemy import UUID, Column, DateTime, Float, Index, Integer, String, Text
 
 from cognee.infrastructure.databases.relational import Base
 

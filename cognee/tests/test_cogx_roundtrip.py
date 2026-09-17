@@ -132,10 +132,8 @@ async def main():
         # Social layer: a second user with a granted read, exported alongside
         # the knowledge so the target can restore accounts and grants.
         from cognee.modules.data.methods import get_authorized_existing_datasets
-        from cognee.modules.users.methods import create_user, get_default_user
+        from cognee.modules.users.methods import create_user, get_default_user, get_user_by_email
         from cognee.modules.users.permissions.methods import give_permission_on_dataset
-
-        from cognee.modules.users.methods import get_user_by_email
 
         owner = await get_default_user()
         await create_user("reviewer@example.com", "reviewer-pw")

@@ -1,4 +1,3 @@
-# ruff: noqa: E402
 """
 Q&A over a full real document.
 
@@ -17,11 +16,10 @@ Requires:
 import asyncio
 import os
 
-# By default cognee uses OpenAI's gpt-5-mini LLM model
+# By default cognee uses OpenAI's gpt-5.6-luna LLM model
 # Provide your OpenAI LLM API KEY, in case you did not set it in the .env file
 # Set this before importing Cognee so Cognee reads the example value instead of defaults or .env settings.
 # os.environ["LLM_API_KEY"] = ""
-
 import cognee
 
 

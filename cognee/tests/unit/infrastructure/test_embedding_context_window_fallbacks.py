@@ -57,9 +57,11 @@ async def test_ollama_embedding_raises_when_short_text_still_exceeds_context_win
     async def always_fail(_prompt):
         raise ValueError("maximum context length exceeded")
 
-    with patch.object(engine, "_get_embedding", side_effect=always_fail):
-        with pytest.raises(EmbeddingException, match="too short to split further"):
-            await engine.embed_text(["ab"])
+    with (
+        patch.object(engine, "_get_embedding", side_effect=always_fail),
+        pytest.raises(EmbeddingException, match="too short to split further"),
+    ):
+        await engine.embed_text(["ab"])
 
 
 @pytest.mark.asyncio

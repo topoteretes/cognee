@@ -198,7 +198,7 @@ def test_frozen_derivations_currently_match_live_models():
 
 
 def test_apply_runs_pending_in_order_and_stamps_per_step(monkeypatch):
-    import cognee.modules.migrations.runner as runner
+    from cognee.modules.migrations import runner
 
     applied_order: list[str] = []
     stamps: list = []
@@ -304,7 +304,7 @@ def test_runner_routes_to_global_path_without_access_control(monkeypatch):
     """With access control off there are no per-dataset rows: the runner must
     migrate via the single global_database_version row, never the per-dataset
     iteration."""
-    import cognee.modules.migrations.runner as runner
+    from cognee.modules.migrations import runner
 
     monkeypatch.setattr(runner, "backend_access_control_enabled", lambda: False)
 
@@ -338,10 +338,10 @@ def test_adapter_storage_sync_runs_on_version_change_even_at_chain_head(monkeypa
     would never re-run). Drives the real global runner path against a real
     SQLite engine, with the chain stamped at head and the recorded version
     older than the library."""
-    import cognee.modules.migrations.runner as runner
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
     )
+    from cognee.modules.migrations import runner
     from cognee.modules.migrations.models import (
         GLOBAL_DATABASE_VERSION_ROW_ID,
         GlobalDatabaseVersion,
@@ -400,7 +400,6 @@ class _AsyncCounter:
 
     async def __call__(self, *args, **kwargs):
         self.calls += 1
-        return None
 
 
 # ── cross-process migration lock (SQLite) ────────────────────────────────────
@@ -411,11 +410,12 @@ def test_sqlite_migration_lock_is_a_real_cross_process_file_lock(tmp_path):
     process is inside ``_migration_lock``, an independent ``FileLock`` on the
     same path (standing in for a second process / worker) cannot acquire it; it
     frees on exit. The lock file lives next to the database, keyed per migration."""
-    import cognee.modules.migrations.runner as runner
+    from filelock import FileLock, Timeout
+
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
     )
-    from filelock import FileLock, Timeout
+    from cognee.modules.migrations import runner
 
     async def scenario():
         eng = create_relational_engine(str(tmp_path), "lock.db", "", "", "", "", "sqlite")
@@ -439,7 +439,7 @@ def test_sqlite_migration_lock_is_a_real_cross_process_file_lock(tmp_path):
 
 def test_migration_lock_path_skips_in_memory_sqlite():
     """An in-memory / pathless DB has nothing to coordinate across processes."""
-    import cognee.modules.migrations.runner as runner
+    from cognee.modules.migrations import runner
 
     fake = type(
         "E", (), {"engine": type("X", (), {"url": type("U", (), {"database": ":memory:"})()})()}

@@ -18,7 +18,6 @@ import pytest_asyncio
 from cognee.infrastructure.databases.graph.postgres_demo.adapter import PostgresDemoAdapter
 from cognee.infrastructure.databases.provenance import EdgeIdentity, make_source_ref_key
 
-
 # -- Session-scoped event loop so the async engine's connection pool
 #    stays on a single loop across all tests.
 
@@ -490,7 +489,7 @@ async def test_get_connections(adapter):
 
     connections = await adapter.get_connections("cn1")
     assert len(connections) == 1
-    src, edge, tgt = connections[0]
+    _src, edge, _tgt = connections[0]
     assert edge["relationship_name"] == "LINKED"
 
 
@@ -807,3 +806,28 @@ async def test_get_triplets_batch_validation(adapter):
 async def test_query_raises_not_implemented(adapter):
     with pytest.raises(NotImplementedError):
         await adapter.query("MATCH (n) RETURN n")
+
+
+@pytest.mark.asyncio
+async def test_degree_seeds_cover_empty_isolated_and_bidirectional_graphs(adapter):
+    from unittest.mock import AsyncMock
+
+    adapter.get_graph_data = AsyncMock(side_effect=AssertionError("unexpected full graph read"))
+    assert await adapter.get_top_degree_node_ids(5) == []
+    await adapter.add_nodes(
+        [_FakeDataPoint(id=n) for n in ["hub", "incoming", "outgoing", "isolated"]]
+    )
+    # Exercises the intentionally empty ANY(:seed_ids) binding with asyncpg.
+    assert set(await adapter.get_top_degree_node_ids(5)) == {
+        "hub",
+        "incoming",
+        "outgoing",
+        "isolated",
+    }
+    await adapter.add_edge("incoming", "hub", "rel")
+    await adapter.add_edge("hub", "outgoing", "rel")
+    assert await adapter.get_top_degree_node_ids(1) == ["hub"]
+    seeds = await adapter.get_top_degree_node_ids(5)
+    assert seeds[0] == "hub"
+    assert set(seeds) == {"hub", "incoming", "outgoing", "isolated"}
+    adapter.get_graph_data.assert_not_awaited()

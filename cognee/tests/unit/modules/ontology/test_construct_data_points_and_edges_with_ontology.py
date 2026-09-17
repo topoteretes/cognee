@@ -4,7 +4,6 @@ from unittest.mock import MagicMock
 import pytest
 
 import cognee.modules.ontology.construct_data_points_and_edges_with_ontology as ontology_module
-
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.construct_data_points_and_edges_with_ontology import (

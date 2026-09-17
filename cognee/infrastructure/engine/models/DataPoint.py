@@ -27,17 +27,30 @@ class MetaData(TypedDict):
 # Updated DataPoint model with versioning and new fields
 class DataPoint(BaseModel):
     """
-    Model representing a data point with versioning and metadata support.
+    Base class for every graph node cognee stores.
 
-    Public methods include:
-    - get_embeddable_data
-    - get_embeddable_properties
-    - get_embeddable_property_names
-    - update_version
-    - to_json
-    - from_json
-    - to_dict
-    - from_dict
+    Subclass it with plain pydantic fields. A field holding another ``DataPoint`` (or a
+    list of them) becomes an edge named after the field when the tree is written to the
+    graph; scalar fields become node properties.
+
+    The ``metadata`` dict is the storage contract:
+
+    * ``index_fields``: field names to embed. Each gets its own vector collection
+      ``<TypeName>_<field>``; the first one is what ``get_embeddable_data`` returns.
+      Declare with ``Annotated[str, Embeddable()]`` or list them explicitly.
+    * ``identity_fields``: fields whose values derive the node id (``uuid5``), so the same
+      real-world thing maps to the same node on every ingestion and graph writes merge.
+      A subclass without them gets a random id and can never be merged.
+      Declare with ``Annotated[str, Dedup()]`` or list them explicitly. Exactly one is
+      required for ``Edge[...]`` endpoints and ``FromIdentity`` references.
+    * ``transparent`` (optional): the node is unwrapped when written -- its edges attach
+      to its children instead (see ``modules.graph.utils.unwrap_transparent_nodes``).
+
+    Declaring ``metadata`` explicitly on a subclass disables the ``Annotated``
+    derivation for that class. ``type`` is set from the class name automatically;
+    ``version``/``updated_at`` track edits (``update_version``). Markers live in
+    ``FieldAnnotations.py``; the typed-edge and identity-reference forms are documented
+    in ``cognee/shared/llm_graph_model.py``.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

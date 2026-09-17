@@ -86,7 +86,7 @@ def get_anonymous_id() -> str:
         else:
             anonymous_id = _ANON_ID_FILE.read_text(encoding="utf-8").strip()
     except Exception as e:
-        logger.warning("Could not create or read anonymous id file: %s", e)
+        logger.warning("Could not create or read anonymous id file: %s", e, exc_info=True)
         return "unknown-anonymous-id"
     return anonymous_id
 
@@ -118,8 +118,15 @@ def get_persistent_id() -> str:
         _PERSISTENT_ID_FILE.write_text(persistent_id, encoding="utf-8")
         return persistent_id
     except Exception as e:
-        logger.warning("Could not create or read persistent id file: %s", e)
+        logger.warning("Could not create or read persistent id file: %s", e, exc_info=True)
         return get_anonymous_id()
+
+
+# Property keys hashed (uuid5 fingerprint) in every telemetry event's
+# additional_properties before they leave the process. session_id/session_ids
+# are user-chosen names and may carry meaning; only a fingerprint may leave —
+# the one place enforcing what remember/improve previously hashed by hand.
+TELEMETRY_SANITIZED_PROPERTIES = ["url", "session_id", "session_ids"]
 
 
 def _sanitize_nested_properties(obj: Any, property_names: list[str]) -> Any:
@@ -186,7 +193,7 @@ async def _get_telemetry_session() -> aiohttp.ClientSession:
                 try:
                     await _telemetry_session.close()
                 except Exception:
-                    pass
+                    logger.debug("Ignoring exception in _get_telemetry_session", exc_info=True)
             timeout = aiohttp.ClientTimeout(total=TELEMETRY_REQUEST_TIMEOUT)
             _telemetry_session = aiohttp.ClientSession(timeout=timeout)
             _telemetry_session_loop = loop
@@ -208,7 +215,7 @@ async def close_telemetry_session() -> None:
         try:
             await asyncio.gather(*list(_TELEMETRY_TASKS), return_exceptions=True)
         except Exception:
-            pass
+            logger.debug("Ignoring exception in close_telemetry_session", exc_info=True)
     session = _telemetry_session
     _telemetry_session = None
     _telemetry_session_loop = None
@@ -216,7 +223,7 @@ async def close_telemetry_session() -> None:
         try:
             await session.close()
         except Exception:
-            pass
+            logger.debug("Ignoring exception in close_telemetry_session", exc_info=True)
 
 
 _telemetry_atexit_registered = False
@@ -239,7 +246,10 @@ def _register_telemetry_session_atexit() -> None:
         try:
             asyncio.run(close_telemetry_session())
         except Exception:
-            pass
+            logger.debug(
+                "Ignoring exception in _register_telemetry_session_atexit._close_at_exit",
+                exc_info=True,
+            )
 
     atexit.register(_close_at_exit)
 
@@ -314,11 +324,13 @@ def _resolve_identity(user) -> tuple[str, str | None]:
     try:
         resolved_id = str(getattr(user, "id", user))
     except Exception:
+        logger.debug("Ignoring exception in _resolve_identity", exc_info=True)
         resolved_id = "unknown-user"
     try:
         tenant_id = getattr(user, "tenant_id", None)
         resolved_tenant = str(tenant_id) if tenant_id else None
     except Exception:
+        logger.debug("Ignoring exception in _resolve_identity", exc_info=True)
         resolved_tenant = None
     return resolved_id, resolved_tenant
 
@@ -366,7 +378,7 @@ def send_telemetry(
     if env in ["test", "dev"]:
         return
     additional_properties = _sanitize_nested_properties(
-        obj=additional_properties, property_names=["url"]
+        obj=additional_properties, property_names=TELEMETRY_SANITIZED_PROPERTIES
     )
     resolved_user_id, tenant_id = _resolve_identity(user if user is not None else user_id)
     anonymous_id = str(get_anonymous_id())

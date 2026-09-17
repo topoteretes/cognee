@@ -104,13 +104,15 @@ class SlackIntegration(OAuthIntegration):
             return
 
         try:
-            async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-                async with session.post(
+            async with (
+                aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+                session.post(
                     _REVOKE_URL,
                     headers={"Authorization": f"Bearer {access_token}"},
-                ) as response:
-                    payload = await response.json()
-        except Exception:  # noqa: BLE001 - a failed revoke must never block disconnect
+                ) as response,
+            ):
+                payload = await response.json()
+        except Exception:  # a failed revoke must never block disconnect
             logger.exception(
                 "Slack auth.revoke request failed for account %s", credential.provider_account_id
             )
@@ -141,8 +143,9 @@ class SlackIntegration(OAuthIntegration):
         if not refresh_token:
             return
 
-        async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-            async with session.post(
+        async with (
+            aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+            session.post(
                 _oauth._ACCESS_URL,
                 data={
                     "client_id": require("client_id"),
@@ -150,8 +153,9 @@ class SlackIntegration(OAuthIntegration):
                     "grant_type": "refresh_token",
                     "refresh_token": refresh_token,
                 },
-            ) as response:
-                payload = await response.json()
+            ) as response,
+        ):
+            payload = await response.json()
 
         if not payload.get("ok"):
             raise RuntimeError(f"Slack token refresh failed: {payload.get('error', 'unknown')}")

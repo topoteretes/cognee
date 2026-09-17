@@ -299,11 +299,11 @@ async def test_create_dataset_opens_a_real_graph(tmp_path):
     windows-latest tmp_path is a real drive-letter path, which makes this the
     acceptance test for "a per-dataset Turso graph opens on Windows"; on POSIX
     it is an ordinary sqlite round trip."""
-    kwargs = dict(
-        graph_database_provider="turso",
-        graph_file_path="",
-        graph_database_key="",
-    )
+    kwargs = {
+        "graph_database_provider": "turso",
+        "graph_file_path": "",
+        "graph_database_key": "",
+    }
 
     with (
         patch.object(
