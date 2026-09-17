@@ -408,8 +408,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       # The codegraph extra installs enola as the enola-cli wheel, the same way
-      # the Docker image and `pip install cognee[codegraph]` get it; the test
-      # must run from that binary, never from the runtime download.
+      # the Docker image and `pip install cognee[codegraph]` get it.
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
@@ -421,7 +420,6 @@ jobs:
       - name: Run code graph e2e test
         env:
           ENV: 'dev'
-          ENOLA_AUTO_INSTALL: 'false'
         run: uv run python ./cognee/tests/test_code_graph_e2e.py
 
   run-s3-bucket-test:

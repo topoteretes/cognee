@@ -26,7 +26,11 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("enola")
 
-ENOLA_INSTALL_URL = "https://github.com/enola-labs/enola#installation"
+INSTALL_HINT = (
+    "The code graph route needs the enola binary. "
+    'Install it with: pip install "cognee[codegraph]", '
+    "or point the ENOLA_PATH environment variable at an enola binary."
+)
 
 # Snapshot artifact format generations this reader understands (receipt.json
 # ``format_version``, written since enola 0.4.10). Additive vocabulary — new
@@ -57,11 +61,7 @@ _SUBPROCESS_ENV_OVERRIDES = {"ENOLA_NO_UPDATE_CHECK": "1", "ENOLA_NO_PROMPTS": "
 class EnolaNotInstalledError(CogneeConfigurationError):
     def __init__(
         self,
-        message: str = (
-            "The enola binary was not found. Install it from "
-            f"{ENOLA_INSTALL_URL} and make sure it is on PATH, "
-            "or point the ENOLA_PATH environment variable at the binary."
-        ),
+        message: str = INSTALL_HINT,
         name: str = "EnolaNotInstalledError",
         status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
     ):
@@ -104,10 +104,7 @@ def find_enola_binary() -> str:
         if os.path.isfile(env_path):
             return env_path
         raise EnolaNotInstalledError(
-            message=(
-                f"ENOLA_PATH is set to '{env_path}' but no file exists there. "
-                f"Install enola from {ENOLA_INSTALL_URL} or fix ENOLA_PATH."
-            )
+            message=f"ENOLA_PATH is set to '{env_path}' but no file exists there. {INSTALL_HINT}"
         )
 
     binary = _environment_scripts_binary() or shutil.which("enola")
@@ -123,19 +120,10 @@ async def run_enola_generate(
 ) -> Path:
     """Run `enola --generate` in repo_path and return the snapshot directory.
 
-    When the binary is missing (and ENOLA_PATH is not explicitly set), the
-    pinned release is downloaded and installed automatically; see
-    install_enola.py. Disable with ENOLA_AUTO_INSTALL=false.
+    Raises EnolaNotInstalledError when no binary is found; nothing is
+    downloaded at runtime (the binary ships with the ``codegraph`` extra).
     """
-    binary = None
-    try:
-        binary = find_enola_binary()
-    except EnolaNotInstalledError:
-        from cognee.tasks.code_graph.install_enola import auto_install_enabled, install_enola
-
-        if os.environ.get("ENOLA_PATH") or not auto_install_enabled():
-            raise
-        binary = await asyncio.to_thread(install_enola)
+    binary = find_enola_binary()
     repo_path = Path(repo_path)
 
     if not repo_path.is_dir():
