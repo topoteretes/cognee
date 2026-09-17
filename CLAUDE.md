@@ -327,6 +327,8 @@ LLM_MODEL="openai/gpt-5.6-luna"  # Default model
 
 **Important**: If you configure only LLM or only embeddings, the other defaults to OpenAI. Ensure you have a working OpenAI API key, or configure both to avoid unexpected defaults.
 
+**No key at all** is also a working setup: with no LLM and no embedding credentials configured, cognify extracts the graph with the local GLiNER2 model (`pip install "cognee[gliner]"`) and embeds with the local fastembed model (a core dependency); models download on first use, and `recall()` without a `query_type` answers with `CHUNKS`. The switch is per half — `GRAPH_EXTRACTOR=auto` (default) resolves on the LLM key, embeddings resolve on "nothing configured and no LLM key" — so setting any credential or any embedding setting takes that half back to the configured provider. The env vars that disable the preflight (`COGNEE_SKIP_PREFLIGHT`, `COGNEE_SKIP_CONNECTION_TEST`, `MOCK_EMBEDDING`) also disable this rerouting (`keyless_local_defaults_apply()`): a mocked or deliberately partial config is honoured, not replaced. See "LLM-free Graph Extraction (GLiNER)" below.
+
 Default databases (no extra setup needed):
 - **Relational**: SQLite (metadata and state storage)
 - **Vector**: LanceDB (embeddings for semantic search)
@@ -669,7 +671,7 @@ this rule applies only to internal PRs.
 Tests are organized in `cognee/tests/` (layout, credentials per folder, and how to run without API keys: `cognee/tests/README.md`; `pytest` with no path collects only this tree):
 - `unit/` - Unit tests for individual modules
 - `integration/` - Full pipeline integration tests
-- `e2e/` - Full-stack end-to-end suites run per backend in CI (e.g. `e2e/incremental_update/` runs on LadybugDB + LanceDB, Postgres graph + PGVector, and Neo4j + LanceDB)
+- `e2e/` - Full-stack end-to-end suites run per backend in CI (e.g. `e2e/incremental_update/` runs on LadybugDB + LanceDB, Postgres graph + PGVector, and Neo4j + LanceDB; `e2e/keyless/` proves ingestion with no LLM key on real local models, core deps + `cognee[gliner]` only)
 - `cli_tests/` - CLI command tests
 - `tasks/` - Task-specific tests
 
@@ -795,7 +797,7 @@ Opt-in LLM check that runs as the last `cognify()` task (default **off**). After
 - **Scope / limitations**: only the 1-hop neighbourhood of the touched entities is compared; structural edges (`contains`, `is_part_of`, `made_from`, `exists_in`, `contradicts`) and edges with an unnamed endpoint are skipped; the temporal cognify path is not covered.
 
 ### LLM-free Graph Extraction (GLiNER)
-Opt-in replacement for the default `cognify()` task list (default **llm**, unchanged). `GRAPH_EXTRACTOR=gliner` or `cognify(extractor="gliner")` / `remember(extractor="gliner")` (explicit argument wins over the env setting) selects the dedicated GLiNER2 pipeline in `cognee/tasks/graph/gliner/`: one batched local-model pass per chunk batch builds the `KnowledgeGraph` **and** a deterministic two-line `TextSummary` (kept edges as `head rel tail`, then `type: names`). No `extract_content_graph` / `extract_summary` calls; embeddings in `add_data_points` still run.
+Replacement for the LLM extract-and-summarize step of the default `cognify()` task list. `GRAPH_EXTRACTOR` defaults to **auto**: the LLM path when a usable LLM key is configured (`llm_available()`), GLiNER when none is — so a fresh install with no credentials ingests on local models, and the moment `LLM_API_KEY` is set the pipeline is the LLM one, unchanged. `GRAPH_EXTRACTOR=gliner` / `llm`, or `cognify(extractor=...)` / `remember(extractor=...)` (explicit argument wins over the env setting) pin one regardless of credentials. Resolution happens once, in `resolve_extractor()` (`cognee/modules/cognify/config.py`); with no key and `gliner2` missing it raises `KeylessExtractorNotInstalledError` with the install hint before any work starts. The GLiNER pipeline in `cognee/tasks/graph/gliner/` runs one batched local-model pass per chunk batch that builds the `KnowledgeGraph` **and** a deterministic two-line `TextSummary` (kept edges as `head rel tail`, then `type: names`). No `extract_content_graph` / `extract_summary` calls; embeddings in `add_data_points` still run — on keyless setups via the fastembed default (`resolve_embedding_defaults()` in `cognee/infrastructure/databases/vector/embeddings/config.py`: no embedding setting configured + no usable LLM key → `fastembed` / `BAAI/bge-small-en-v1.5`, vector size read from fastembed's model registry; `KeylessEmbedderNotInstalledError` when `fastembed` is missing).
 
 - **Install**: `pip install "cognee[gliner]"` (pulls torch; `fastino/gliner2.5-base-v1`, ~800 MB, downloads on first use). Missing package → `GlinerNotInstalledError` with the install hint.
 - **Schema** (closed, resolved per document before chunk extraction): caller `entity_types`/`relation_types` → else OWL classes / object properties of `ONTOLOGY_FILE_PATH` (snake_case of `rdfs:label` or local name, `rdfs:comment` as description) → else the frozen `LABEL_BANK`/`RELATION_BANK`, filtered by one GLiNER pass over a bounded document sketch. Capped at 20 per kind. Explicit labels are only reachable through `get_gliner_tasks(...)` + `run_custom_pipeline(pipeline_name="cognify_pipeline")`.
