@@ -227,7 +227,15 @@ docling = [
 docling-full = ["docling>=2.115,<3", "transformers>=4.55"]
 # LLM-free graph extraction and summaries with GLiNER2 (cognee/tasks/graph/gliner).
 # Pulls torch; protobuf + sentencepiece are needed by the DeBERTa tokenizer fallback.
-gliner = ["gliner2[local]>=2.0.0,<3", "protobuf>=5.29.6", "sentencepiece>=0.2.0"]
+# torch is what gliner2[local] needs anyway; it is named here so the
+# [tool.uv.sources] CPU-index pin below applies to it (sources only cover
+# dependencies the project declares directly).
+gliner = [
+    "gliner2[local]>=2.0.0,<3",
+    "torch>=2.1,<3",
+    "protobuf>=5.29.6",
+    "sentencepiece>=0.2.0",
+]
 rapidocr = ["rapidocr-onnxruntime>=1.3.0,<2"]
 
 [project.urls]
@@ -290,6 +298,19 @@ constraint-dependencies = [
     # transitively via pandas / scikit-learn / fastembed.
     "scipy>=1.16.1 ; python_version >= '3.14'",
 ]
+
+# torch (pulled in by the `gliner` extra) ships CUDA-enabled wheels on PyPI for
+# Linux, which add several GB of nvidia-* packages that cognee never uses: the
+# local GLiNER extractor runs on CPU. Resolve torch from the PyTorch CPU index
+# on Linux only; macOS and Windows PyPI wheels are CPU-only already. Applies to
+# uv installs (the Dockerfile, CI, `uv sync`); pip installs are unaffected.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 
 [tool.pytest.ini_options]
 # `pytest` with no path collects only the library test tree; cognee-mcp has its

@@ -671,7 +671,7 @@ this rule applies only to internal PRs.
 Tests are organized in `cognee/tests/` (layout, credentials per folder, and how to run without API keys: `cognee/tests/README.md`; `pytest` with no path collects only this tree):
 - `unit/` - Unit tests for individual modules
 - `integration/` - Full pipeline integration tests
-- `e2e/` - Full-stack end-to-end suites run per backend in CI (e.g. `e2e/incremental_update/` runs on LadybugDB + LanceDB, Postgres graph + PGVector, and Neo4j + LanceDB)
+- `e2e/` - Full-stack end-to-end suites run per backend in CI (e.g. `e2e/incremental_update/` runs on LadybugDB + LanceDB, Postgres graph + PGVector, and Neo4j + LanceDB; `e2e/keyless/` proves ingestion with no LLM key on real local models, core deps + `cognee[gliner]` only)
 - `cli_tests/` - CLI command tests
 - `tasks/` - Task-specific tests
 
