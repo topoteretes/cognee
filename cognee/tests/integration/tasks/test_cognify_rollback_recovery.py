@@ -566,6 +566,89 @@ async def test_startup_recovery_finds_a_run_buried_under_a_newer_completed_run(
 
 
 @pytest.mark.asyncio
+async def test_startup_recovery_keeps_documents_the_abandoned_run_completed(
+    clean_test_environment,
+):
+    """Recovery removes only the abandoned run's unfinished work: a document the run
+    marked complete keeps its graph rows and its completed status, so a later run
+    that skipped it (already complete) is not left with a hole."""
+    from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
+
+    user = await get_default_user()
+    dataset = await create_authorized_dataset("recovery_keep_completed_dataset", user)
+    add_result = await cognee.add(
+        ["Completed doc text", "Unfinished doc text"], dataset_name=dataset.name, user=user
+    )
+    done_id, unfinished_id = (item["data_id"] for item in add_result.data_ingestion_info[:2])
+
+    run_id = uuid4()
+    done_nodes = [Person(name="Done-1"), Person(name="Done-2")]
+    unfinished_nodes = [Person(name="Unfinished-1"), Person(name="Unfinished-2")]
+    async with _dataset_context(dataset.id, dataset.owner_id):
+        for nodes, data_id in ((done_nodes, done_id), (unfinished_nodes, unfinished_id)):
+            await add_data_points(
+                nodes,
+                custom_edges=[(nodes[0].id, nodes[1].id, "links", {"edge_text": "links"})],
+                ctx=PipelineContext(
+                    user=user,
+                    dataset=dataset,
+                    data_item=SimpleNamespace(id=data_id),
+                    pipeline_name="cognify_pipeline",
+                    pipeline_run_id=run_id,
+                ),
+            )
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        done_record = await session.get(Data, done_id)
+        done_record.pipeline_status = {
+            **(done_record.pipeline_status or {}),
+            "cognify_pipeline": {str(dataset.id): DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED},
+        }
+        await session.merge(done_record)
+        session.add(
+            PipelineRun(
+                pipeline_run_id=run_id,
+                pipeline_name="cognify_pipeline",
+                pipeline_id=uuid4(),
+                status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+                dataset_id=dataset.id,
+                run_info={"data": [str(done_id), str(unfinished_id)]},
+                created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+            )
+        )
+        await session.commit()
+
+    await recover_stale_pipeline_runs_on_startup()
+
+    await assert_graph_nodes_present(done_nodes)
+    await assert_graph_nodes_not_present(unfinished_nodes)
+    nodes_after, _edges_after = await _count_nodes_edges_for_run(dataset.id, run_id)
+    assert {node.data_id for node in nodes_after} == {done_id}
+
+    done_record = await _get_data_record(done_id)
+    assert done_record.pipeline_status["cognify_pipeline"][str(dataset.id)] == (
+        DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
+    )
+    unfinished_record = await _get_data_record(unfinished_id)
+    assert str(dataset.id) not in (
+        (unfinished_record.pipeline_status or {}).get("cognify_pipeline") or {}
+    )
+
+    async with db_engine.get_async_session() as session:
+        newest = (
+            await session.execute(
+                select(PipelineRun)
+                .filter(PipelineRun.pipeline_run_id == run_id)
+                .order_by(PipelineRun.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one()
+    assert newest.status == PipelineRunStatus.DATASET_PROCESSING_ERRORED
+    assert newest.error_class == "AbandonedPipelineRunError"
+
+
+@pytest.mark.asyncio
 async def test_cognify_rollback_is_idempotent(clean_test_environment):
     # Test 5: calling rollback twice should be safe no-op on second invocation.
     user = await get_default_user()

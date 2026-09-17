@@ -161,7 +161,9 @@ async def test_graph_provenance_rollback_resets_status_without_ingestion_info(mo
         async def find_edge_source_refs_by_pipeline_run(self, _run):
             return {}
 
-    async def _rollback(run):
+    async def _rollback(run, *, keep_data_ids=None):
+        # The inline failure path keeps nothing: whole-run rollback.
+        assert keep_data_ids is None
         rolled_back.append(run)
 
     fake_unified = SimpleNamespace(
@@ -335,3 +337,90 @@ async def test_rollback_preserves_markers_of_previously_extracted_data(monkeypat
 
     assert reset_calls == [{errored_id}]
     assert previously_extracted_id not in reset_calls[0]
+
+
+@pytest.mark.asyncio
+async def test_graph_provenance_rollback_keeps_completed_documents_when_asked(monkeypatch):
+    """Startup recovery asks for keep_completed_data: a document the run marked
+    complete keeps its refs and its completed status; the unfinished one is
+    rolled back and its status cleared."""
+    from cognee.infrastructure.databases.provenance import make_source_ref_key
+    from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
+
+    pipeline_run_id = uuid4()
+    dataset_id = uuid4()
+    done_id, unfinished_id = uuid4(), uuid4()
+    done_ref = make_source_ref_key(dataset_id, done_id)
+    unfinished_ref = make_source_ref_key(dataset_id, unfinished_id)
+
+    rollback_calls = []
+
+    class _FakeGraph:
+        async def find_node_source_refs_by_pipeline_run(self, _run):
+            return {"n-done": [done_ref], "n-unfinished": [unfinished_ref]}
+
+        async def find_edge_source_refs_by_pipeline_run(self, _run):
+            return {}
+
+    async def _rollback(run, *, keep_data_ids=None):
+        rollback_calls.append((run, keep_data_ids))
+
+    fake_unified = SimpleNamespace(
+        supports_graph_provenance_delete=lambda: True,
+        graph=_FakeGraph(),
+        rollback_by_pipeline_run_id=_rollback,
+    )
+    done_record = SimpleNamespace(
+        id=done_id,
+        pipeline_status={
+            "cognify_pipeline": {str(dataset_id): DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED}
+        },
+    )
+    unfinished_record = SimpleNamespace(
+        id=unfinished_id,
+        pipeline_status={"cognify_pipeline": {str(dataset_id): "DATASET_PROCESSING_STARTED"}},
+    )
+    # First session answers the completed-status lookup for both ids; the second
+    # is the status reset, whose query only covers the unfinished id.
+    lookup_session = _FakeSession([_FakeExecuteResult([done_record, unfinished_record])])
+    reset_session = _FakeSession([_FakeExecuteResult([unfinished_record])])
+    engine = _FakeEngine([lookup_session, reset_session])
+
+    async def _get_unified_engine():
+        return fake_unified
+
+    async def _stores_provenance_in_graph(_graph):
+        return True
+
+    monkeypatch.setattr(rollback_module, "get_unified_engine", _get_unified_engine)
+    monkeypatch.setattr(rollback_module, "stores_provenance_in_graph", _stores_provenance_in_graph)
+    monkeypatch.setattr(rollback_module, "get_relational_engine", lambda: engine)
+    monkeypatch.setattr(rollback_module.orm_attributes, "flag_modified", lambda *_args: None)
+
+    await rollback_module.cognify_rollback_handler(
+        pipeline_run_id=pipeline_run_id,
+        dataset=SimpleNamespace(id=dataset_id),
+        keep_completed_data=True,
+    )
+
+    assert rollback_calls == [(str(pipeline_run_id), {done_id})]
+    assert done_record.pipeline_status["cognify_pipeline"][str(dataset_id)] == (
+        DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
+    )
+    assert str(dataset_id) not in unfinished_record.pipeline_status["cognify_pipeline"]
+    assert reset_session.committed is True
+
+
+def test_without_kept_refs_drops_only_the_kept_documents_refs():
+    from cognee.infrastructure.databases.provenance import make_source_ref_key
+    from cognee.infrastructure.databases.unified.unified_store_engine import _without_kept_refs
+
+    dataset_id, kept, other = uuid4(), uuid4(), uuid4()
+    refs = {
+        "shared": [make_source_ref_key(dataset_id, kept), make_source_ref_key(dataset_id, other)],
+        "only-kept": [make_source_ref_key(dataset_id, kept)],
+    }
+
+    trimmed = _without_kept_refs(refs, {kept})
+
+    assert trimmed == {"shared": [make_source_ref_key(dataset_id, other)]}
