@@ -9,6 +9,14 @@ against a real (tmp sqlite) engine:
 - a run is returned once even when it carries two STARTED rows
 - operation records, which carry no pipeline_name, stay out
 - dataset scoping, including the empty-list short circuit
+- a run stamped with an origin the caller does not own is left alone, one it
+  does own is returned, and a run with no origin at all is always returned
+  regardless of owned_origins
+
+Tests that are not about origin pass ``NO_ORIGINS`` (an empty set) as
+``owned_origins``: every row these tests build carries no origin (the default
+on ``_row``), and a NULL origin is always included no matter what the caller
+owns, so an empty owned set changes nothing about what they assert.
 """
 
 import importlib
@@ -31,6 +39,10 @@ unclosed_module = importlib.import_module(
     "cognee.modules.pipelines.methods.get_unclosed_pipeline_runs"
 )
 get_unclosed_pipeline_runs = unclosed_module.get_unclosed_pipeline_runs
+
+# See the module docstring: tests unrelated to origin pass this, since every
+# row they build carries no origin and a NULL origin is always included.
+NO_ORIGINS = frozenset()
 
 
 @pytest_asyncio.fixture
@@ -63,7 +75,7 @@ async def _insert(engine, *rows):
         await session.commit()
 
 
-def _row(dataset_id, pipeline_name, status, run_id, minutes_ago=0):
+def _row(dataset_id, pipeline_name, status, run_id, minutes_ago=0, origin=None):
     return PipelineRun(
         pipeline_run_id=run_id,
         pipeline_name=pipeline_name,
@@ -72,6 +84,7 @@ def _row(dataset_id, pipeline_name, status, run_id, minutes_ago=0):
         dataset_id=dataset_id,
         run_info={},
         created_at=datetime.now(timezone.utc) - timedelta(minutes=minutes_ago),
+        origin=origin,
     )
 
 
@@ -95,7 +108,7 @@ async def test_every_open_run_of_the_same_pipeline_comes_back(runs_engine):
         ),
     )
 
-    runs = await get_unclosed_pipeline_runs()
+    runs = await get_unclosed_pipeline_runs(NO_ORIGINS)
 
     # Oldest first: recovery closes them in the order they were abandoned.
     assert [run.pipeline_run_id for run in runs] == [first, second, third]
@@ -140,7 +153,7 @@ async def test_a_run_with_a_terminal_row_is_closed(runs_engine):
         ),
     )
 
-    runs = await get_unclosed_pipeline_runs()
+    runs = await get_unclosed_pipeline_runs(NO_ORIGINS)
 
     assert [run.pipeline_run_id for run in runs] == [open_run]
 
@@ -161,7 +174,7 @@ async def test_a_run_with_two_started_rows_is_returned_once(runs_engine):
         ),
     )
 
-    runs = await get_unclosed_pipeline_runs()
+    runs = await get_unclosed_pipeline_runs(NO_ORIGINS)
 
     assert [run.pipeline_run_id for run in runs] == [run_id]
 
@@ -188,7 +201,7 @@ async def test_operation_records_are_not_runs(runs_engine):
         ),
     )
 
-    runs = await get_unclosed_pipeline_runs()
+    runs = await get_unclosed_pipeline_runs(NO_ORIGINS)
 
     assert [run.pipeline_run_id for run in runs] == [open_run]
 
@@ -216,7 +229,7 @@ async def test_a_terminal_row_without_a_run_id_does_not_blank_the_result(runs_en
         ),
     )
 
-    runs = await get_unclosed_pipeline_runs()
+    runs = await get_unclosed_pipeline_runs(NO_ORIGINS)
 
     assert [run.pipeline_run_id for run in runs] == [open_run]
 
@@ -235,12 +248,107 @@ async def test_dataset_scoping(runs_engine):
         ),
     )
 
-    scoped = await get_unclosed_pipeline_runs([wanted_dataset])
+    scoped = await get_unclosed_pipeline_runs(NO_ORIGINS, [wanted_dataset])
     assert [run.pipeline_run_id for run in scoped] == [wanted]
 
     # No dataset filter covers every dataset, the way startup recovery calls it.
-    unscoped = await get_unclosed_pipeline_runs()
+    unscoped = await get_unclosed_pipeline_runs(NO_ORIGINS)
     assert {run.pipeline_run_id for run in unscoped} == {wanted, other}
 
     # An empty list scopes to nothing, rather than falling back to everything.
-    assert await get_unclosed_pipeline_runs([]) == []
+    assert await get_unclosed_pipeline_runs(NO_ORIGINS, []) == []
+
+
+@pytest.mark.asyncio
+async def test_a_run_stamped_with_an_unowned_origin_is_left_alone(runs_engine):
+    """A relational database is shared more often than it looks: docker-compose
+    runs the API and the MCP server against one. A run another surface started
+    is not this caller's to close — closing it wrong deletes a live run's
+    graph."""
+    dataset_id = uuid4()
+    mine, someone_elses = uuid4(), uuid4()
+    await _insert(
+        runs_engine,
+        _row(
+            dataset_id,
+            "cognify_pipeline",
+            PipelineRunStatus.DATASET_PROCESSING_STARTED,
+            mine,
+            10,
+            origin="api",
+        ),
+        _row(
+            dataset_id,
+            "cognify_pipeline",
+            PipelineRunStatus.DATASET_PROCESSING_STARTED,
+            someone_elses,
+            10,
+            origin="mcp",
+        ),
+    )
+
+    runs = await get_unclosed_pipeline_runs(frozenset({"api"}))
+
+    assert [run.pipeline_run_id for run in runs] == [mine]
+
+
+@pytest.mark.asyncio
+async def test_a_run_with_no_origin_is_always_returned(runs_engine):
+    """A row written before the origin column existed carries no origin.
+    Nothing running today can be the process that owns a NULL, so no live run
+    is ever attributed to one — it is included no matter what the caller
+    owns, even a caller that owns nothing at all."""
+    dataset_id = uuid4()
+    legacy_run = uuid4()
+    await _insert(
+        runs_engine,
+        _row(
+            dataset_id,
+            "cognify_pipeline",
+            PipelineRunStatus.DATASET_PROCESSING_STARTED,
+            legacy_run,
+            10,
+            origin=None,
+        ),
+    )
+
+    runs = await get_unclosed_pipeline_runs(frozenset({"mcp"}))
+
+    assert [run.pipeline_run_id for run in runs] == [legacy_run]
+
+
+@pytest.mark.asyncio
+async def test_owning_several_origins_covers_all_of_them(runs_engine):
+    dataset_id = uuid4()
+    api_run, cli_run, mcp_run = uuid4(), uuid4(), uuid4()
+    await _insert(
+        runs_engine,
+        _row(
+            dataset_id,
+            "add_pipeline",
+            PipelineRunStatus.DATASET_PROCESSING_STARTED,
+            api_run,
+            10,
+            origin="api",
+        ),
+        _row(
+            dataset_id,
+            "add_pipeline",
+            PipelineRunStatus.DATASET_PROCESSING_STARTED,
+            cli_run,
+            10,
+            origin="cli",
+        ),
+        _row(
+            dataset_id,
+            "add_pipeline",
+            PipelineRunStatus.DATASET_PROCESSING_STARTED,
+            mcp_run,
+            10,
+            origin="mcp",
+        ),
+    )
+
+    runs = await get_unclosed_pipeline_runs(frozenset({"api", "cli"}))
+
+    assert {run.pipeline_run_id for run in runs} == {api_run, cli_run}

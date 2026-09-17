@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import aliased
 
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -14,9 +14,11 @@ _TERMINAL_STATUSES = (
 
 
 async def get_unclosed_pipeline_runs(
+    owned_origins: frozenset[str],
     dataset_ids: list[UUID] | None = None,
 ) -> list[PipelineRun]:
-    """Every STARTED pipeline run that never got a terminal row of its own.
+    """Every STARTED pipeline run that never got a terminal row of its own,
+    restricted to the origins the caller owns.
 
     Deliberately not built on the latest-run-per-dataset lookups next door.
     Those answer "what is this dataset's current status", where only the
@@ -30,6 +32,18 @@ async def get_unclosed_pipeline_runs(
     returned oldest first, one row per run: ``log_pipeline_run_progress`` can
     insert a second STARTED row for the same run, and a caller closing a run
     wants to see it once.
+
+    ``owned_origins`` is required, not defaulted, on purpose: this function
+    exists to be destructive (its only caller rolls back and closes what it
+    returns), so a caller that forgets to scope it should get a loud missing
+    argument, not a silent sweep of every surface's rows. A relational
+    database is shared more often than it looks — docker-compose runs the API
+    and the MCP server against one — and a process has no way to tell a dead
+    run of another surface, or of a live sibling of its own surface, from one
+    it may safely close. Rows with no origin at all (written before this
+    column existed) are included regardless of ``owned_origins``: nothing
+    running today can be the process that owns a NULL, so no live run is ever
+    attributed to one.
 
     Operation records (``record_operation``) carry no ``pipeline_name`` and no
     status, so they are excluded rather than mistaken for runs.
@@ -60,6 +74,7 @@ async def get_unclosed_pipeline_runs(
         PipelineRun.status == PipelineRunStatus.DATASET_PROCESSING_STARTED,
         PipelineRun.pipeline_name.isnot(None),
         PipelineRun.pipeline_run_id.notin_(closed_run_ids),
+        or_(PipelineRun.origin.in_(owned_origins), PipelineRun.origin.is_(None)),
     )
     if dataset_ids is not None:
         query = query.filter(PipelineRun.dataset_id.in_(dataset_ids))

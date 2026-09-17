@@ -1,7 +1,5 @@
 import asyncio
-import os
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
@@ -12,7 +10,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.data.models import Dataset
-from cognee.modules.operations import ORIGIN_BACKGROUND, operation_origin_scope
+from cognee.modules.operations import ORIGIN_API, ORIGIN_BACKGROUND, operation_origin_scope
 from cognee.modules.pipelines.exceptions import AbandonedPipelineRunError
 from cognee.modules.pipelines.methods.get_unclosed_pipeline_runs import (
     get_unclosed_pipeline_runs,
@@ -29,57 +27,27 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("pipelines.recovery")
 
-# A pipeline run is only treated as "stale" (abandoned by a crashed process)
-# once it has stayed non-terminal longer than this threshold. This guards
-# against closing a run that is still actively executing in another live
-# worker/replica (e.g. during a rolling deploy or a multi-process deployment
-# sharing one database). A heartbeat/lease would be more precise (SDK-578); an
-# age threshold is a pragmatic guard. Raise it via env when long-running jobs
-# legitimately exceed the default, and note it now gates every pipeline, not
-# just cognify: a big add or a migration import can outlive an hour.
-_STALE_RUN_MIN_AGE_ENV = "COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS"
-_DEFAULT_STALE_RUN_MIN_AGE_SECONDS = 3600
-# One minute, so a typo like "0" or "-1" cannot turn recovery into a sweep that
-# closes runs the current process started seconds ago.
-_MIN_STALE_RUN_MIN_AGE_SECONDS = 60
-
-
-def _read_stale_run_min_age() -> int:
-    """The staleness threshold from env, floored, never fatal.
-
-    This module is imported from the API lifespan, so raising here (which a
-    bare ``int(os.getenv(...))`` does for "30m") would stop the server from
-    starting over a misconfigured recovery guard.
-    """
-    raw = os.getenv(_STALE_RUN_MIN_AGE_ENV)
-    if raw is None:
-        return _DEFAULT_STALE_RUN_MIN_AGE_SECONDS
-
-    try:
-        value = int(raw)
-    except ValueError:
-        logger.warning(
-            "Ignoring %s=%r: not an integer number of seconds. Using %ds.",
-            _STALE_RUN_MIN_AGE_ENV,
-            raw,
-            _DEFAULT_STALE_RUN_MIN_AGE_SECONDS,
-        )
-        return _DEFAULT_STALE_RUN_MIN_AGE_SECONDS
-
-    if value < _MIN_STALE_RUN_MIN_AGE_SECONDS:
-        logger.warning(
-            "Raising %s=%d to the %ds floor: a lower threshold would close runs "
-            "that are still executing.",
-            _STALE_RUN_MIN_AGE_ENV,
-            value,
-            _MIN_STALE_RUN_MIN_AGE_SECONDS,
-        )
-        return _MIN_STALE_RUN_MIN_AGE_SECONDS
-
-    return value
-
-
-STALE_RUN_MIN_AGE_SECONDS = _read_stale_run_min_age()
+# Duration is deliberately not a signal here. A run's age says nothing about
+# whether it is still running: a cognify on a local model, or a large add, can
+# legitimately take days, so any threshold either closes a job that is still
+# genuinely executing or, set high enough not to, leaves a truly dead run
+# reported as processing for as long as that threshold allows. What proves a
+# run is dead is this process's own restart: recovery runs once, at startup,
+# before this process has started a pipeline of its own, so every row it finds
+# unclosed belonged to whatever ran before this boot.
+#
+# That argument only holds for THIS process, though, which is what
+# owned_origins is for. A relational database is shared more often than it
+# looks (docker-compose runs the API and the MCP server against one, and two
+# replicas of the same surface share one on purpose), and a process has no
+# way to tell a dead run of another surface, or of a live sibling of its own
+# surface, from one that is safe to close — restart is only evidence about
+# this process. So each surface recovers only the origin it stamps: the API
+# passes ORIGIN_API, the MCP server would pass ORIGIN_MCP. A real liveness
+# signal for two instances of the SAME surface sharing a database is still
+# SDK-578's job; origin narrows the blast radius to that one remaining case
+# rather than solving it.
+_DEFAULT_OWNED_ORIGINS = frozenset({ORIGIN_API})
 
 
 def _max_concurrent_dataset_recoveries() -> int:
@@ -121,23 +89,6 @@ def _rollback_handlers() -> dict[str, Callable[..., Awaitable[None]]]:
     substitutable on this module.
     """
     return {"cognify_pipeline": cognify_rollback_handler}
-
-
-def _is_older_than_threshold(created_at) -> bool:
-    """Return True if the run started long enough ago to be considered stale.
-
-    When ``created_at`` is missing or is not a datetime (legacy or hand-written
-    rows) we cannot prove the run is young, so we conservatively allow recovery
-    to proceed rather than raise: this runs before the per-run guard.
-    """
-    if not isinstance(created_at, datetime):
-        return True
-
-    if created_at.tzinfo is None:
-        created_at = created_at.replace(tzinfo=timezone.utc)
-
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=STALE_RUN_MIN_AGE_SECONDS)
-    return created_at <= cutoff
 
 
 # SQLite's parameter ceiling is per statement and lower on older builds, and
@@ -331,8 +282,11 @@ async def _recover_dataset(dataset, pipeline_runs, users_by_id, rollback_handler
     return closed
 
 
-async def recover_abandoned_pipeline_runs() -> None:
-    """Close pipeline runs abandoned by a crashed process.
+async def recover_abandoned_pipeline_runs(
+    owned_origins: frozenset[str] = _DEFAULT_OWNED_ORIGINS,
+) -> None:
+    """Close pipeline runs abandoned by a crashed process, among the ones this
+    surface owns.
 
     Every pipeline is covered, not just cognify. A process killed mid-run
     (SIGKILL, OOM, pod eviction) executes no Python, so nothing writes a
@@ -342,8 +296,13 @@ async def recover_abandoned_pipeline_runs() -> None:
     add to it, which for a dataset nobody adds to again never happens.
 
     Candidates are runs with a STARTED row and no terminal row of their own,
-    so one crash that abandoned several runs has all of them recovered, and a
-    run this function already closed is never selected again. Each candidate
+    stamped with an origin this call owns (or no origin at all — see
+    ``owned_origins`` on ``get_unclosed_pipeline_runs``), so one crash that
+    abandoned several runs has all of them recovered, and a run this function
+    already closed is never selected again. Nothing about a candidate's age is
+    consulted: this runs once, at startup, before this process has started a
+    pipeline of its own, so an unclosed row owned by this surface can only
+    belong to whatever ran before this boot. Each candidate
     first gets its pipeline's rollback handler, if that pipeline has one, and
     is then closed as ``DATASET_PROCESSING_ERRORED`` carrying an
     ``AbandonedPipelineRunError``: the terminal status the killed process never
@@ -363,24 +322,7 @@ async def recover_abandoned_pipeline_runs() -> None:
     sweep itself, and if it fails there is no recovery to speak of, so it
     propagates to the caller that started this.
     """
-    # The staleness filter runs before the datasets and users are read, not
-    # after: on a busy instance the unclosed runs at boot are mostly runs that
-    # are genuinely in flight, and those are exactly the ones this discards, so
-    # reading rows for them first would be reading for the set about to be
-    # thrown away.
-    abandoned_candidates = []
-
-    for pipeline_run in await get_unclosed_pipeline_runs():
-        if not _is_older_than_threshold(getattr(pipeline_run, "created_at", None)):
-            logger.info(
-                "Skipping recovery for run %s: started less than %ds ago, "
-                "treating it as a live run rather than a stale one.",
-                pipeline_run.pipeline_run_id,
-                STALE_RUN_MIN_AGE_SECONDS,
-            )
-            continue
-
-        abandoned_candidates.append(pipeline_run)
+    abandoned_candidates = await get_unclosed_pipeline_runs(owned_origins)
 
     if not abandoned_candidates:
         return

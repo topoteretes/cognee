@@ -23,9 +23,10 @@ Covered here:
 - the batched read is keyed by id and survives its own chunk boundary
 - datasets recover concurrently and each under its own lock, and one dataset's
   bug does not leave the others half-recovered
-- a missing dataset, and a run younger than the staleness threshold, are
-  skipped
-- the staleness threshold survives a misconfigured env var
+- a missing dataset is skipped
+- a run is recovered regardless of age: duration is never the signal, only
+  this process's own restart is
+- a boot where nothing is unclosed reads no datasets
 """
 
 import asyncio
@@ -137,7 +138,7 @@ def _dataset(owner_id=None):
     return Dataset(id=uuid4(), name=f"ds_{uuid4().hex[:8]}", owner_id=owner_id or uuid4())
 
 
-def _started_run(dataset_id, pipeline_name, hours_ago=2, user_id=None, run_info=None):
+def _started_run(dataset_id, pipeline_name, hours_ago=2, user_id=None, run_info=None, origin=None):
     started_at = datetime.now(timezone.utc) - timedelta(hours=hours_ago)
     return PipelineRun(
         pipeline_run_id=uuid4(),
@@ -149,6 +150,7 @@ def _started_run(dataset_id, pipeline_name, hours_ago=2, user_id=None, run_info=
         user_id=user_id,
         created_at=started_at,
         started_at=started_at,
+        origin=origin,
     )
 
 
@@ -397,40 +399,21 @@ async def test_a_missing_dataset_is_skipped(recovery_db):
 
 
 @pytest.mark.asyncio
-async def test_a_recent_run_is_left_alone(recovery_db):
-    """A STARTED run younger than the staleness threshold is left alone so a
-    live run on another worker is not closed out from under it."""
+async def test_a_run_that_only_just_started_is_still_recovered(recovery_db):
+    """Duration is never consulted: recovery runs once, at startup, before
+    this process has started a pipeline of its own, so an unclosed row a
+    second old is closed exactly like one from hours ago. A cognify on a
+    local model can legitimately run for days, so age can never be the
+    signal that decides this."""
     dataset = _dataset()
-    recent_run = _started_run(dataset.id, "cognify_pipeline", hours_ago=0)
-    await _insert(recovery_db.engine, dataset, recent_run)
+    fresh_run = _started_run(dataset.id, "cognify_pipeline", hours_ago=0)
+    await _insert(recovery_db.engine, dataset, fresh_run)
 
     await recovery_module.recover_abandoned_pipeline_runs()
 
-    assert await _rows(recovery_db.engine, status=ERRORED) == []
-    assert recovery_db.calls.rollbacks == []
-
-
-@pytest.mark.parametrize(
-    "raw, expected",
-    [
-        (None, 3600),
-        ("7200", 7200),
-        # A typo must not stop the server: this module is imported from the
-        # API lifespan, where a raising int() would.
-        ("30m", 3600),
-        # Nor may it turn recovery into a sweep that closes runs started
-        # seconds ago.
-        ("0", 60),
-        ("-1", 60),
-    ],
-)
-def test_the_staleness_threshold_survives_a_bad_env_var(monkeypatch, raw, expected):
-    if raw is None:
-        monkeypatch.delenv("COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS", raising=False)
-    else:
-        monkeypatch.setenv("COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS", raw)
-
-    assert recovery_module._read_stale_run_min_age() == expected
+    closed = await _rows(recovery_db.engine, status=ERRORED)
+    assert [row.pipeline_run_id for row in closed] == [fresh_run.pipeline_run_id]
+    assert len(recovery_db.calls.rollbacks) == 1
 
 
 @pytest.mark.asyncio
@@ -518,7 +501,9 @@ async def test_a_dataset_that_fails_does_not_cost_the_others_their_recovery(
     assert [row.pipeline_run_id for row in closed] == [healthy_run.pipeline_run_id]
 
     # And the one that failed is still selectable, so a later attempt sees it.
-    still_open = await recovery_module.get_unclosed_pipeline_runs([broken_dataset.id])
+    still_open = await recovery_module.get_unclosed_pipeline_runs(
+        recovery_module._DEFAULT_OWNED_ORIGINS, [broken_dataset.id]
+    )
     assert [run.pipeline_run_id for run in still_open] == [broken_run.pipeline_run_id]
 
 
@@ -598,45 +583,82 @@ async def test_the_closing_row_says_whether_anything_was_unwound(recovery_db):
 
 
 @pytest.mark.asyncio
-async def test_the_batch_read_covers_only_the_abandoned_runs(recovery_db, monkeypatch):
-    """The runs genuinely in flight are the ones most likely to be unclosed at
-    boot, and they are exactly what the staleness filter discards, so they must
-    not cost a dataset and user read on their way out."""
+async def test_a_boot_with_nothing_unclosed_reads_no_datasets(recovery_db, monkeypatch):
+    """The ordinary boot: every run already has a terminal row of its own, so
+    there are no candidates at all. It costs the one candidate query and
+    nothing else — no dataset or user is ever read."""
     dataset = _dataset()
-    abandoned = _started_run(dataset.id, "add_pipeline", hours_ago=2)
-    live = _started_run(dataset.id, "cognify_pipeline", hours_ago=0)
-    await _insert(recovery_db.engine, dataset, abandoned, live)
-
-    real_loader = recovery_module._load_datasets_and_users
-    read_for = []
-
-    async def _spying_loader(pipeline_runs):
-        read_for.append([run.pipeline_run_id for run in pipeline_runs])
-        return await real_loader(pipeline_runs)
-
-    monkeypatch.setattr(recovery_module, "_load_datasets_and_users", _spying_loader)
-
-    await recovery_module.recover_abandoned_pipeline_runs()
-
-    assert read_for == [[abandoned.pipeline_run_id]]
-    closed = await _rows(recovery_db.engine, status=ERRORED)
-    assert [row.pipeline_run_id for row in closed] == [abandoned.pipeline_run_id]
-
-
-@pytest.mark.asyncio
-async def test_a_boot_with_nothing_abandoned_reads_no_datasets(recovery_db, monkeypatch):
-    """The ordinary boot: runs are unclosed because they are running. It costs
-    the one candidate query and nothing else."""
-    dataset = _dataset()
-    await _insert(
-        recovery_db.engine, dataset, _started_run(dataset.id, "add_pipeline", hours_ago=0)
-    )
+    finished = _started_run(dataset.id, "add_pipeline", hours_ago=0)
+    finished.status = ERRORED
+    await _insert(recovery_db.engine, dataset, finished)
 
     async def _must_not_be_called(_pipeline_runs):
-        raise AssertionError("datasets were read for a boot with no abandoned runs")
+        raise AssertionError("datasets were read for a boot with nothing unclosed")
 
     monkeypatch.setattr(recovery_module, "_load_datasets_and_users", _must_not_be_called)
 
     await recovery_module.recover_abandoned_pipeline_runs()
 
+    # The one row that was already terminal, untouched — not a second one.
+    assert [row.pipeline_run_id for row in await _rows(recovery_db.engine, status=ERRORED)] == [
+        finished.pipeline_run_id
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_surface_does_not_close_another_surfaces_run(recovery_db):
+    """A relational database is shared more often than it looks (docker-compose
+    runs the API and the MCP server against one). The default owned_origins is
+    "api"; an "mcp"-origin run is not this surface's to roll back or close —
+    doing so wrong deletes a live process's graph."""
+    dataset = _dataset()
+    mcp_run = _started_run(dataset.id, "cognify_pipeline", origin="mcp")
+    await _insert(recovery_db.engine, dataset, mcp_run)
+
+    await recovery_module.recover_abandoned_pipeline_runs()
+
     assert await _rows(recovery_db.engine, status=ERRORED) == []
+    assert recovery_db.calls.rollbacks == []
+
+
+@pytest.mark.asyncio
+async def test_a_surface_closes_its_own_origins_run(recovery_db):
+    dataset = _dataset()
+    api_run = _started_run(dataset.id, "cognify_pipeline", origin="api")
+    await _insert(recovery_db.engine, dataset, api_run)
+
+    await recovery_module.recover_abandoned_pipeline_runs()
+
+    closed = await _rows(recovery_db.engine, status=ERRORED)
+    assert [row.pipeline_run_id for row in closed] == [api_run.pipeline_run_id]
+    assert len(recovery_db.calls.rollbacks) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_caller_can_own_a_different_origin(recovery_db):
+    """The MCP server would call this with owned_origins={"mcp"}: it must
+    close its own run and leave the API's alone, the mirror of the default."""
+    dataset = _dataset()
+    mcp_run = _started_run(dataset.id, "cognify_pipeline", origin="mcp")
+    api_run = _started_run(dataset.id, "add_pipeline", origin="api")
+    await _insert(recovery_db.engine, dataset, mcp_run, api_run)
+
+    await recovery_module.recover_abandoned_pipeline_runs(owned_origins=frozenset({"mcp"}))
+
+    closed = await _rows(recovery_db.engine, status=ERRORED)
+    assert [row.pipeline_run_id for row in closed] == [mcp_run.pipeline_run_id]
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_run_with_no_origin_is_still_recovered(recovery_db):
+    """A row written before the origin column existed carries no origin.
+    Nothing running today can be the process that owns a NULL, so it is
+    recovered regardless of which origins this caller owns."""
+    dataset = _dataset()
+    legacy_run = _started_run(dataset.id, "cognify_pipeline", origin=None)
+    await _insert(recovery_db.engine, dataset, legacy_run)
+
+    await recovery_module.recover_abandoned_pipeline_runs(owned_origins=frozenset({"mcp"}))
+
+    closed = await _rows(recovery_db.engine, status=ERRORED)
+    assert [row.pipeline_run_id for row in closed] == [legacy_run.pipeline_run_id]
