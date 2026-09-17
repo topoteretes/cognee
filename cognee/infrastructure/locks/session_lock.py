@@ -179,6 +179,15 @@ async def request_improve_rerun_many(keys: Iterable[str]) -> bool:
         return True
 
 
+async def has_pending_improve_rerun(keys: Iterable[str]) -> bool:
+    """Read-only: is a rerun request pending on any of ``keys``? Consumes nothing."""
+    wanted = [key for key in keys if key]
+    if not wanted:
+        return False
+    async with _improve_registry_lock:
+        return any(key in _rerun_requested for key in wanted)
+
+
 async def release_or_rerun_improve_lock_many(
     keys: Iterable[str], *, rerun_keys: Iterable[str]
 ) -> bool:

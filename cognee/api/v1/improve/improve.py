@@ -28,6 +28,7 @@ from typing_extensions import TypedDict, Unpack
 from cognee.api.v1.serve.state import get_remote_client
 from cognee.infrastructure.background_tasks import register_background_task
 from cognee.infrastructure.locks.session_lock import (
+    has_pending_improve_rerun,
     improve_lock_keys,
     release_improve_lock_many,
     release_or_rerun_improve_lock_many,
@@ -206,12 +207,27 @@ async def improve(
                 if not session_keys:
                     break
                 if passes >= IMPROVE_MAX_RERUN_PASSES:
-                    logger.info(
-                        "improve: %d-pass bound reached for %s; a further rerun request "
-                        "is left to the next claimant",
-                        passes,
-                        ", ".join(session_keys),
-                    )
+                    # Known gap: a loser that requested a rerun during this last
+                    # pass was told rerun_requested=True, but we stop here and
+                    # leave its request for the next claimant — which, for an
+                    # ended plugin session, may never come. Three colliding
+                    # runs inside one hold are needed to get here; make it
+                    # visible rather than restructure for it.
+                    if await has_pending_improve_rerun(session_keys):
+                        logger.warning(
+                            "improve: %d-pass bound reached for %s with a rerun request "
+                            "still pending; it is left to the next claimant, which may "
+                            "not arrive for an ended session",
+                            passes,
+                            ", ".join(session_keys),
+                        )
+                    else:
+                        logger.info(
+                            "improve: %d-pass bound reached for %s; a further rerun "
+                            "request is left to the next claimant",
+                            passes,
+                            ", ".join(session_keys),
+                        )
                     break
                 if await release_or_rerun_improve_lock_many(lock_keys, rerun_keys=session_keys):
                     released = True

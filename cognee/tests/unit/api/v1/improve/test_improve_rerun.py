@@ -108,9 +108,10 @@ async def test_session_loser_against_a_dataset_only_holder_gets_no_promise(harne
 
 
 @pytest.mark.asyncio
-async def test_rerun_passes_are_bounded(harness):
+async def test_rerun_passes_are_bounded(harness, caplog):
     """A stage that keeps re-requesting (standing in for a stream of losers) cannot
     keep the holder alive forever."""
+    caplog.set_level("INFO", logger="improve")
     calls = []
     improve_mod = harness.improve_mod
     session_key = f"session:{harness.user.id}:chat_1"
@@ -126,7 +127,10 @@ async def test_rerun_passes_are_bounded(harness):
 
     assert len(calls) == improve_mod.IMPROVE_MAX_RERUN_PASSES
     assert len(result.rerun_passes) == improve_mod.IMPROVE_MAX_RERUN_PASSES - 1
-    # The lock is released at the bound; the leftover request is the next claimant's.
+    # The lock is released at the bound with the last request still pending —
+    # a promise this run cannot keep, so it is logged at warning, not info.
+    assert "rerun request still pending" in caplog.text
+    # The leftover request is the next claimant's, whose claim clears it.
     keys = session_lock.improve_lock_keys(["chat_1"], harness.dataset.id, harness.user.id)
     assert await session_lock.try_acquire_improve_lock_many(keys)
     assert session_key not in session_lock._rerun_requested
