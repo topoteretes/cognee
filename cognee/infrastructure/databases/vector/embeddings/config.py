@@ -150,11 +150,7 @@ class EmbeddingConfig(BaseSettings):
                 )
                 self.embedding_dimensions = _FALLBACK_DIMENSIONS
 
-        if (
-            not self.embedding_batch_size
-            and self.embedding_provider.lower() == "openai"
-            or not self.embedding_batch_size
-        ):
+        if not self.embedding_batch_size:
             self.embedding_batch_size = 36
 
     def to_dict(self) -> dict:

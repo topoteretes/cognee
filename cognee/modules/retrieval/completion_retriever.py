@@ -86,6 +86,10 @@ class CompletionRetriever(BaseRetriever):
     Retriever for handling LLM-based completion searches.
     """
 
+    # Search is not an LLM gateway: no retrieved chunks means no answer
+    # (SDK-270 / gh #3728).
+    skip_completion_on_empty_context = True
+
     def __init__(
         self,
         user_prompt_path: str = "context_for_question.txt",
@@ -258,6 +262,13 @@ class CompletionRetriever(BaseRetriever):
 
             - Any: The generated completion based on the provided query and context.
         """
+        if self.skip_completion_on_empty_context and not context:
+            # Empty context must not reach the LLM: search is not an LLM
+            # gateway, and the only possible output is a phantom "no context
+            # provided" deflection (SDK-270 / gh #3728).
+            logger.warning("Empty context: skipping LLM completion, returning no results")
+            return []
+
         cache_config = CacheConfig()
         user = session_user.get()
         user_id = getattr(user, "id", None)

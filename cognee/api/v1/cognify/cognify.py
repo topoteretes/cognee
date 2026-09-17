@@ -10,7 +10,11 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm import get_max_chunk_tokens
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.chunking.TextChunker import TextChunker
-from cognee.modules.cognify.config import get_cognify_config, resolve_extractor
+from cognee.modules.cognify.config import (
+    GLINER_DEMO_EXTRACTOR,
+    get_cognify_config,
+    resolve_extractor,
+)
 from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
 from cognee.modules.observability import (
@@ -124,7 +128,7 @@ async def cognify(
     dry_run: bool = False,
     raise_on_error: bool = True,
     chunk_attachment: Literal["direct", "all"] | None = None,
-    extractor: Literal["llm", "gliner"] | None = None,
+    extractor: Literal["llm", "gliner_demo", "gliner"] | None = None,
     ontology_file_path: str | None = None,
     **kwargs,
 ):
@@ -137,8 +141,8 @@ async def cognify(
 
     Prerequisites:
         - **LLM_API_KEY**: Must be configured (required for entity extraction and graph generation
-          on the default ``llm`` extractor; ``extractor="gliner"`` extracts the graph and
-          summaries with a local GLiNER2 model instead — see the ``gliner`` extra)
+          on the default ``llm`` extractor; ``extractor="gliner_demo"`` extracts the graph
+          and summaries with the local GLiNER demo model instead — see the ``gliner`` extra)
         - **Data Added**: Must have data previously added via `cognee.add()`
         - **Vector Database**: Must be accessible for embeddings storage
         - **Graph Database**: Must be accessible for relationship storage
@@ -221,10 +225,12 @@ async def cognify(
                  and contains edge text is "<chunk label> contains <node label>." - so a model
                  yielding N nodes per chunk means roughly N extra embedded rows per chunk.
         extractor: Which implementation fills the extract-and-summarize step of the
-                 standard pipeline. Accepts "llm", "gliner", or None; the explicit
-                 argument wins over the GRAPH_EXTRACTOR setting and None resolves to
-                 "llm". "gliner" builds the graph and the chunk summaries with the
-                 local GLiNER2 model (requires the `gliner` extra) — no LLM call for
+                 standard pipeline. Accepts "llm", "gliner_demo", or None; the
+                 explicit argument wins over the GRAPH_EXTRACTOR setting and None
+                 resolves to that setting ("auto" by default: "llm" with a usable
+                 LLM key, "gliner_demo" without). "gliner_demo" builds the graph and
+                 the chunk summaries with the local GLiNER demo model (requires the
+                 `gliner` extra) — a demo of cognee's enterprise GLiNER extraction, no LLM call for
                  extraction or summaries; embeddings still run. It produces the
                  generic KnowledgeGraph, so a custom graph_model raises. Raises with
                  temporal_cognify=True, with dry_run=True, or while connected to a
@@ -298,8 +304,8 @@ async def cognify(
 
     Environment Variables:
         - LLM_API_KEY: API key for your LLM provider. When unset (and no embedding
-          settings are configured), cognify extracts with the local GLiNER model and
-          embeds with the local fastembed model instead (GRAPH_EXTRACTOR=auto).
+          settings are configured), cognify extracts with the local GLiNER demo model
+          and embeds with the local fastembed model instead (GRAPH_EXTRACTOR=auto).
 
         Optional (same as add function):
         - LLM_PROVIDER, LLM_MODEL, VECTOR_DB_PROVIDER, GRAPH_DATABASE_PROVIDER
@@ -312,15 +318,15 @@ async def cognify(
     # other than what the caller selected.
     resolved_extractor = resolve_extractor(extractor, cognify_config)
 
-    if temporal_cognify and resolved_extractor == "gliner":
+    if temporal_cognify and resolved_extractor == GLINER_DEMO_EXTRACTOR:
         raise ValueError(
-            "extractor='gliner' is not supported with temporal_cognify=True; the temporal "
-            "pipeline extracts events with the LLM."
+            "extractor='gliner_demo' is not supported with temporal_cognify=True; the "
+            "temporal pipeline extracts events with the LLM."
         )
-    if dry_run and resolved_extractor == "gliner":
+    if dry_run and resolved_extractor == GLINER_DEMO_EXTRACTOR:
         raise ValueError(
             "dry_run estimates the LLM extraction pipeline only; it has no cost model "
-            "for the gliner extractor."
+            "for the gliner_demo extractor."
         )
 
     if chunk_attachment is not None:
@@ -418,22 +424,23 @@ async def cognify(
                 chunk_size=chunk_size,
                 chunks_per_batch=chunks_per_batch,
             )
-        elif resolved_extractor == "gliner":
+        elif resolved_extractor == GLINER_DEMO_EXTRACTOR:
             if graph_model is not KnowledgeGraph:
                 raise ValueError(
-                    "extractor='gliner' builds the generic KnowledgeGraph; "
+                    "extractor='gliner_demo' builds the generic KnowledgeGraph; "
                     "a custom graph_model is only supported by the 'llm' extractor."
                 )
             if custom_prompt:
-                logger.warning("custom_prompt is ignored when extractor='gliner'.")
+                logger.warning("custom_prompt is ignored when extractor='gliner_demo'.")
             if kwargs:
                 raise ValueError(
-                    f"Unsupported arguments for extractor='gliner': {', '.join(sorted(kwargs))}"
+                    "Unsupported arguments for extractor='gliner_demo': "
+                    f"{', '.join(sorted(kwargs))}"
                 )
 
-            from cognee.tasks.graph.gliner.tasks import get_gliner_tasks
+            from cognee.tasks.graph.gliner_demo.tasks import get_gliner_demo_tasks
 
-            tasks = await get_gliner_tasks(
+            tasks = await get_gliner_demo_tasks(
                 chunker=chunker,
                 chunk_size=chunk_size,
                 chunks_per_batch=chunks_per_batch,
@@ -503,7 +510,6 @@ async def cognify(
                 vector_db_config=vector_db_config,
                 graph_db_config=graph_db_config,
                 incremental_loading=incremental_loading,
-                use_pipeline_cache=False,
                 data_per_batch=data_per_batch,
                 needs_llm=needs_llm,
                 rollback_handler=cognify_rollback_handler,

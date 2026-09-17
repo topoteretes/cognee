@@ -3,7 +3,7 @@
 Each document receives a closed schema through this fallback chain — first
 non-empty source wins:
 
-1. labels the caller passed to ``get_gliner_tasks``,
+1. labels the caller passed to ``get_gliner_demo_tasks``,
 2. else classes / object properties of the configured OWL ontology,
 3. else the frozen label banks, filtered to the labels that fire on a document
    sketch.

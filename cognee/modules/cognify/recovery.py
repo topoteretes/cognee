@@ -5,10 +5,7 @@ from cognee.context_global_variables import set_database_global_context_variable
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.data.models import Dataset
-from cognee.modules.pipelines.methods import (
-    get_latest_pipeline_runs_by_datasets,
-    reset_pipeline_run_status,
-)
+from cognee.modules.pipelines.methods import get_latest_pipeline_runs_by_datasets
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.shared.logging_utils import get_logger
 
@@ -49,9 +46,10 @@ async def recover_stale_cognify_runs_on_startup() -> None:
     Only runs whose latest status is ``DATASET_PROCESSING_STARTED`` are
     recovered: an ``ERRORED`` run has already been rolled back inline at error
     time (see ``run_tasks``), so re-selecting it here would repeat the rollback
-    on every restart. After a successful rollback the dataset's pipeline status
-    is reset to ``DATASET_PROCESSING_INITIATED`` so it is no longer reported as
-    "already being processed" and can be cognified again.
+    on every restart. Nothing gates a new run on the STARTED row (concurrent
+    runs are serialized by the per-dataset lock), so the dataset can be
+    cognified again straight after the rollback. Closing the run with a
+    terminal status is a separate change (see PR #5090).
     """
     db_engine = get_relational_engine()
 
@@ -92,13 +90,6 @@ async def recover_stale_cognify_runs_on_startup() -> None:
                 await cognify_rollback_handler(
                     pipeline_run_id=pipeline_run.pipeline_run_id,
                     dataset=dataset,
-                )
-                # Clear the lingering STARTED status so a re-run is not blocked by
-                # check_pipeline_run_qualification ("already being processed").
-                await reset_pipeline_run_status(
-                    user_id=dataset.owner_id,
-                    dataset_id=dataset.id,
-                    pipeline_name="cognify_pipeline",
                 )
             logger.info(
                 "Startup recovery completed for cognify run %s (dataset=%s).",

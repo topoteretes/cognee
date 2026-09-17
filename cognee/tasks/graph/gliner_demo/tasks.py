@@ -1,14 +1,15 @@
 """LLM-free cognify tasks backed by GLiNER.
 
-``get_gliner_tasks`` returns the complete task list
+``get_gliner_demo_tasks`` returns the complete task list
 ``classify_documents -> prepare_gliner_schema -> extract_chunks_from_documents ->
 extract_graph_and_summarize_with_gliner -> add_data_points``. Run it with
 ``cognee.run_custom_pipeline(tasks=..., dataset=..., pipeline_name="cognify_pipeline")``;
 the pipeline loads the dataset's Data records itself, exactly as ``cognify()`` does.
 
-The default ``cognify()`` pipeline keeps its LLM task list unless told
-otherwise: ``cognify(extractor="gliner")`` (or the
-``GRAPH_EXTRACTOR=gliner`` setting) selects this list instead.
+``cognify(extractor="gliner_demo")`` (or the ``GRAPH_EXTRACTOR=gliner_demo``
+setting) selects this list instead of the LLM one, as does the default ``auto``
+setting when no usable LLM key is configured. This is a demo of cognee's
+enterprise GLiNER extraction — see the package docstring.
 """
 
 from __future__ import annotations
@@ -67,7 +68,7 @@ logger = get_logger("gliner.tasks")
 
 @dataclass
 class GlinerRunStats:
-    """Counters the task fills in; pass one to ``get_gliner_tasks(stats=...)`` to read them."""
+    """Counters the task fills in; pass one to ``get_gliner_demo_tasks(stats=...)`` to read them."""
 
     chunks: int = 0
     nodes: int = 0
@@ -228,8 +229,8 @@ def build_gliner_extraction_task(
 ) -> Task:
     """Build only the GLiNER extract+summarize ``Task``.
 
-    This is the task ``get_gliner_tasks`` places fourth and the one
-    ``get_gliner_tasks`` places in its extraction step. Raises
+    This is the task ``get_gliner_demo_tasks`` places fourth and the one
+    ``get_gliner_demo_tasks`` places in its extraction step. Raises
     :class:`GlinerNotInstalledError` when ``gliner2`` is not installed and
     ``ValueError`` on bad options.
     """
@@ -282,7 +283,7 @@ def build_gliner_schema_task(
     )
 
 
-async def get_gliner_tasks(
+async def get_gliner_demo_tasks(
     entity_types: LabelSpec | None = None,
     relation_types: LabelSpec | None = None,
     *,

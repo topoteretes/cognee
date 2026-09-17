@@ -10,6 +10,7 @@ import cognee
 from cognee.infrastructure.session.session_manager import SessionManager
 from cognee.low_level import DataPoint
 from cognee.low_level import setup as cognee_setup
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
     GraphCompletionDecompositionRetriever,
     QueryDecomposition,
@@ -228,21 +229,21 @@ async def test_graph_completion_decomposition_answer_per_subquery_synthesis(
 
 @pytest.mark.asyncio
 async def test_graph_completion_decomposition_context_empty_graph(setup_test_environment_empty):
+    """An empty graph raises NoDataError before the query is decomposed, so no LLM
+    call is made (SDK-270 / gh #3728)."""
     retriever = GraphCompletionDecompositionRetriever()
 
-    with patch(
-        "cognee.infrastructure.llm.LLMGateway.LLMGateway.acreate_structured_output",
-        new_callable=AsyncMock,
-        return_value=_combined_decomposition(),
+    with (
+        patch(
+            "cognee.infrastructure.llm.LLMGateway.LLMGateway.acreate_structured_output",
+            new_callable=AsyncMock,
+            return_value=_combined_decomposition(),
+        ) as mock_llm,
+        pytest.raises(NoDataError, match="knowledge graph is empty"),
     ):
-        triplets = await retriever.get_retrieved_objects(ORIGINAL_QUERY)
-        context = await retriever.get_context_from_objects(
-            query=ORIGINAL_QUERY,
-            retrieved_objects=triplets,
-        )
+        await retriever.get_retrieved_objects(ORIGINAL_QUERY)
 
-    assert triplets == []
-    assert context == ""
+    mock_llm.assert_not_awaited()
 
 
 @pytest.mark.asyncio
