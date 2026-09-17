@@ -51,6 +51,7 @@ class AnthropicAdapter(GenericAPIAdapter):
         api_key: str,
         model: str,
         max_completion_tokens: int,
+        transcription_model: str | None = None,
         image_transcribe_model: str | None = None,
         instructor_mode: str | None = None,
         llm_args: dict[str, Any] | None = None,
@@ -62,6 +63,7 @@ class AnthropicAdapter(GenericAPIAdapter):
             model=model,
             max_completion_tokens=max_completion_tokens,
             name="Anthropic",
+            transcription_model=transcription_model,
             image_transcribe_model=image_transcribe_model,
             llm_args=llm_args,
         )

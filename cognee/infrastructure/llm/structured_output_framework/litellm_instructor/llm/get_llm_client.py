@@ -268,6 +268,7 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             instructor_mode=cache_key.instructor_mode,
             llm_args=llm_args,
             ollama_num_ctx=cache_key.ollama_num_ctx,
+            transcription_model=cache_key.transcription_model,
             image_transcribe_model=cache_key.image_transcribe_model or None,
         )
 
@@ -281,6 +282,7 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             cache_key.model,
             max_completion_tokens,
             instructor_mode=cache_key.instructor_mode,
+            transcription_model=cache_key.transcription_model,
             image_transcribe_model=cache_key.image_transcribe_model or None,
             llm_args=llm_args,
         )
@@ -297,6 +299,7 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             name="Custom",
             endpoint=cache_key.endpoint,
             instructor_mode=cache_key.instructor_mode,
+            transcription_model=cache_key.transcription_model,
             image_transcribe_model=cache_key.image_transcribe_model or None,
             fallback_api_key=llm_config.fallback_api_key,
             fallback_endpoint=cache_key.fallback_endpoint,
@@ -316,6 +319,7 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             endpoint=cache_key.endpoint,
             api_version=cache_key.api_version,
             instructor_mode=cache_key.instructor_mode,
+            transcription_model=cache_key.transcription_model,
             image_transcribe_model=cache_key.image_transcribe_model or None,
             llm_args=llm_args,
         )
@@ -331,6 +335,7 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             max_completion_tokens=max_completion_tokens,
             endpoint=cache_key.endpoint,
             instructor_mode=cache_key.instructor_mode,
+            transcription_model=cache_key.transcription_model,
             image_transcribe_model=cache_key.image_transcribe_model or None,
             llm_args=llm_args,
         )
