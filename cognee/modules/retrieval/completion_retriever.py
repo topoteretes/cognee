@@ -8,7 +8,7 @@ from cognee.infrastructure.databases.vector.exceptions import CollectionNotFound
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.modules.retrieval.utils.completion import generate_completion
+from cognee.modules.retrieval.utils.completion import SessionPrompt, generate_completion
 from cognee.modules.retrieval.utils.evidence import chunk_context_evidence
 from cognee.modules.retrieval.utils.merge_results import conversational_reserve, merge_ranked
 from cognee.modules.retrieval.utils.references import append_chunk_evidence
@@ -211,18 +211,18 @@ class CompletionRetriever(BaseRetriever):
     async def _generate_completion_without_session(self, query: str, context: str) -> list[Any]:
         """Generate completion without session; returns list of one completion."""
         kwargs = self._completion_kwargs(context)
-        # Sessionless guidance site: preference text rides the guidance channel
-        # (conversation_history), never context. The lookup is memoized per
+        # Sessionless guidance site: preference text is the guidance layer of the
+        # session prompt, never context. The lookup is memoized per
         # context; this sessionless path runs retrieval and completion in one
         # context, so this reuses the get_retrieved_objects read. (Across a
         # task fan-out that sharing needs warm_preference_cache in the parent
         # — the ContextVar does not propagate out of gather lanes.) Empty text
-        # is falsy and leaves the system prompt untouched. The session path
+        # is falsy and adds nothing to the prompt. The session path
         # never reaches this method, so it cannot collide with the session
         # guidance block, which owns preference rendering on that path.
         preference_text = await load_preference_text()
         completion = await generate_completion(
-            query=query, conversation_history=preference_text, **kwargs
+            query=query, session=SessionPrompt(guidance=preference_text), **kwargs
         )
         return [completion]
 

@@ -315,11 +315,11 @@ async def test_search_passes_retriever_specific_config_to_authorized_search(
 
 
 @pytest.mark.asyncio
-async def test_prompt_format_fan_out_shares_one_history_reader(monkeypatch, search_mod):
+async def test_only_context_fan_out_shares_one_history_reader(monkeypatch, search_mod):
     """Ten datasets must not mean ten embedding calls: one SharedSessionHistory per search."""
     from contextlib import asynccontextmanager
 
-    from cognee.modules.retrieval.context_preview import SharedSessionHistory
+    from cognee.modules.retrieval.only_context_prompt import SharedSessionHistory
 
     user = _make_user()
     datasets = [_make_dataset(name="ds1"), _make_dataset(name="ds2"), _make_dataset(name="ds3")]
@@ -342,7 +342,6 @@ async def test_prompt_format_fan_out_shares_one_history_reader(monkeypatch, sear
         return SearchResultPayload(
             context="ctx",
             only_context=True,
-            context_format=kwargs["context_format"],
             search_type=query_type,
             dataset_name=dataset.name,
             dataset_id=dataset.id,
@@ -360,7 +359,6 @@ async def test_prompt_format_fan_out_shares_one_history_reader(monkeypatch, sear
         query_text="q",
         user=user,
         only_context=True,
-        context_format="prompt",
         session_id="s1",
     )
 
@@ -372,7 +370,7 @@ async def test_prompt_format_fan_out_shares_one_history_reader(monkeypatch, sear
 
 
 @pytest.mark.asyncio
-async def test_default_format_fan_out_creates_no_history_reader(monkeypatch, search_mod):
+async def test_fan_out_without_only_context_creates_no_history_reader(monkeypatch, search_mod):
     from contextlib import asynccontextmanager
 
     captured = []
@@ -390,7 +388,7 @@ async def test_default_format_fan_out_creates_no_history_reader(monkeypatch, sea
 
     async def dummy_get_retriever_output(query_type, query_text, **kwargs):
         captured.append(kwargs)
-        return SearchResultPayload(context="ctx", only_context=True, search_type=query_type)
+        return SearchResultPayload(completion=["answer"], search_type=query_type)
 
     monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: True)
     monkeypatch.setattr(search_mod, "set_database_global_context_variables", dummy_context)
@@ -402,39 +400,64 @@ async def test_default_format_fan_out_creates_no_history_reader(monkeypatch, sea
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="q",
         user=_make_user(),
-        only_context=True,
     )
 
     assert captured[0]["shared_history"] is None
 
 
-def test_prompt_preview_fields_follow_the_requested_format_not_session_state(search_mod):
-    """Verbose key set depends on the request: always three keys for 'prompt', none otherwise."""
-    plain = SearchResultPayload(context="ctx", only_context=True, search_type=SearchType.CHUNKS)
-    assert search_mod._prompt_preview_fields(plain) == {}
-
-    # Non-generative, no session: every value is None — the keys must still be there.
-    empty_prompt = SearchResultPayload(
-        context="ctx", only_context=True, context_format="prompt", search_type=SearchType.CHUNKS
-    )
-    assert search_mod._prompt_preview_fields(empty_prompt) == {
-        "session_context_result": None,
-        "user_prompt_result": None,
-        "system_prompt_result": None,
-    }
-
-    # A real completion with the knob set but only_context off: not an only_context result,
-    # yet the shape rule is about the requested format, so the keys appear (all None).
-    filled = SearchResultPayload(
+def _only_context_payloads():
+    ds = _make_dataset(name="ds1")
+    built = SearchResultPayload(
         context="ctx",
         only_context=True,
-        context_format="prompt",
-        session_context="## Active session guidance\n- x",
-        user_prompt="The question is: `q`",
+        user_prompt="The question is: `q` ... ctx",
         system_prompt="## Active session guidance\n- x\nTASK:answer",
         search_type=SearchType.GRAPH_COMPLETION,
+        dataset_name=ds.name,
+        dataset_id=ds.id,
+        dataset_tenant_id=ds.tenant_id,
     )
-    assert search_mod._prompt_preview_fields(filled)["user_prompt_result"] == "The question is: `q`"
+    bare = SearchResultPayload(
+        context=["chunk"],
+        only_context=True,
+        search_type=SearchType.CHUNKS,
+        dataset_name=ds.name,
+        dataset_id=ds.id,
+        dataset_tenant_id=ds.tenant_id,
+    )
+    return built, bare
+
+
+def test_only_context_search_result_is_the_user_prompt_when_built(monkeypatch, search_mod):
+    """Completion types hand back the user prompt; retrieval-only types their context."""
+    monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: True)
+    built, bare = _only_context_payloads()
+
+    out = search_mod._backwards_compatible_search_results([built, bare], verbose=False)
+
+    assert out[0]["search_result"] == built.user_prompt
+    assert isinstance(out[0]["search_result"], str)
+    assert out[1]["search_result"] == ["chunk"]
+
+
+@pytest.mark.parametrize("access_control", [True, False])
+def test_verbose_results_carry_both_prompts_next_to_the_bare_context(
+    monkeypatch, search_mod, access_control
+):
+    """`user_prompt_result` and `system_prompt_result` are always present in verbose
+    output: the prompts when they were built, None otherwise — so a verbose caller can take
+    any layer."""
+    monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: access_control)
+    built, bare = _only_context_payloads()
+
+    out = search_mod._backwards_compatible_search_results([built, bare], verbose=True)
+
+    assert out[0]["user_prompt_result"] == built.user_prompt
+    assert out[0]["system_prompt_result"] == built.system_prompt
+    assert out[0]["context_result"] == "ctx"
+    assert out[1]["user_prompt_result"] is None
+    assert out[1]["system_prompt_result"] is None
+    assert out[1]["context_result"] == ["chunk"]
 
 
 # --- SDK-270: NoDataError names the datasets, and only fires when all are empty ---
@@ -681,19 +704,11 @@ async def test_empty_dataset_entry_follows_the_only_context_shape(monkeypatch, s
     assert empty.context == []
     assert empty.result == []
     assert empty.error is not None
-
-    prompt_results = await search_mod.search_in_datasets_context(
-        search_datasets=[fresh, populated],
-        query_type=SearchType.GRAPH_COMPLETION,
-        query_text="What did Jane propose?",
-        user=_make_user(),
-        only_context=True,
-        context_format="prompt",
-    )
-    envelope = prompt_results[0].result
-    assert envelope["question"] == "What did Jane propose?"
-    assert envelope["context"] == []
-    assert envelope["user_prompt"] is None
+    # There is one only_context shape (COG-6127): the user prompt when the pair was
+    # built, the bare context otherwise. Nothing is ever wrapped around an empty
+    # retrieval, so this entry keeps falling back to the empty context above.
+    assert empty.user_prompt is None
+    assert empty.system_prompt is None
 
 
 def test_compat_dicts_carry_error_only_on_the_entry_that_has_one(monkeypatch, search_mod):

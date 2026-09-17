@@ -14,6 +14,7 @@ from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.retrieval.utils.completion import (
+    SessionPrompt,
     generate_completion,
     generate_completion_batch,
 )
@@ -342,22 +343,22 @@ class GraphCompletionRetriever(BaseRetriever):
     ) -> list[Any]:
         """Generate completion(s) without session; returns list of completions."""
         kwargs = self._completion_kwargs(context)
-        # Sessionless guidance site: preference text rides the guidance channel
-        # (conversation_history), never context. The lookup is memoized per
+        # Sessionless guidance site: preference text is the guidance layer of the
+        # session prompt, never context. The lookup is memoized per
         # context; this sessionless path runs retrieval and completion in one
         # context, so this reuses the get_triplets read. (Across a task
         # fan-out that sharing needs warm_preference_cache in the parent — the
         # ContextVar does not propagate out of gather lanes.) Empty text is
-        # falsy and leaves the system prompt untouched. The session path never
+        # falsy and adds nothing to the prompt. The session path never
         # reaches this method, so it cannot collide with the session guidance
         # block, which owns preference rendering on that path.
         preference_text = await load_preference_text()
         if query_batch:
             return await generate_completion_batch(
-                query_batch=query_batch, conversation_history=preference_text, **kwargs
+                query_batch=query_batch, session=SessionPrompt(guidance=preference_text), **kwargs
             )
         completion = await generate_completion(
-            query=query, conversation_history=preference_text, **kwargs
+            query=query, session=SessionPrompt(guidance=preference_text), **kwargs
         )
         return [completion]
 
