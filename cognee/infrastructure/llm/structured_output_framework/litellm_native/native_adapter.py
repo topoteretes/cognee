@@ -176,7 +176,7 @@ class NativeLiteLLMAdapter:
     Instance variables:
         - model, api_key, endpoint, api_version, max_completion_tokens,
           fallback_model, fallback_api_key, fallback_endpoint, llm_args, name,
-          transcription_model
+          transcription_model, image_transcribe_model
     """
 
     # The default framework's answer path, so this is the one that decides
@@ -200,6 +200,7 @@ class NativeLiteLLMAdapter:
         fallback_endpoint: str | None = None,
         llm_args: dict[str, Any] | None = None,
         transcription_model: str | None = None,
+        image_transcribe_model: str | None = None,
     ) -> None:
         self.name = name
         self.model = model
@@ -211,9 +212,11 @@ class NativeLiteLLMAdapter:
         self.fallback_api_key = fallback_api_key
         self.fallback_endpoint = fallback_endpoint
         self.llm_args: dict[str, Any] = llm_args or {}
-        # Audio goes to a dedicated speech-to-text model; images reuse the chat
-        # model, which has to be multimodal for image ingestion to work at all.
+        # Audio goes to a dedicated speech-to-text model. Images default to the
+        # chat model, which then has to be multimodal; IMAGE_TRANSCRIBE_MODEL
+        # points them at a vision model when it is not.
         self.transcription_model = transcription_model or model
+        self.image_transcribe_model = image_transcribe_model or model
 
     async def _acreate_str_output(
         self,
@@ -616,7 +619,7 @@ class NativeLiteLLMAdapter:
                 f"Could not determine MIME type for image file: {input}. Is the extension correct?"
             )
         response: litellm.ModelResponse = await litellm.acompletion(
-            model=self.model,
+            model=self.image_transcribe_model,
             messages=[
                 {
                     "role": "user",
