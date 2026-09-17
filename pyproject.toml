@@ -162,7 +162,10 @@ docs = [
     "nltk>=3.9.3,<4", # TODO: Remove when unstructured is above v0.21.0 as it won't use nltk anymore
 ]
 codegraph = [
-    "transformers>=4.46.3,<6",
+    # The enola binary as a platform wheel; the code-graph route needs nothing else.
+    # This is the only enola version pin; bumping it means re-checking the known
+    # answers in cognee/tests/test_code_graph_e2e.py.
+    "enola-cli==0.4.19",
 ]
 evals = [
     "plotly>=6.0.0,<7",
