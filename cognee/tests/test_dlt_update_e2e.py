@@ -103,6 +103,19 @@ async def main():
     assert [row.id for row in survivors] == [manifest.id], (
         "the refusal must not delete the manifest"
     )
+
+    # A replacement of another kind: the row is refreshed in place, so the DLT
+    # route stamp must go with the rows it described, or the text is read as
+    # a manifest and every later cognify of the dataset fails.
+    result = await cognee.update(
+        manifest.id, "Plain text replacing the source. Ada Lovelace.", dataset.id, user=user
+    )
+    assert result["status"] == "full_rebuild", result
+    (replaced,) = await get_dataset_data(dataset.id)
+    assert replaced.id == manifest.id
+    assert _system_metadata(replaced).get("source") is None, _system_metadata(replaced)
+    assert await _row_names(dataset.id, user) == [], "no DLT rows may survive the replacement"
+    await cognee.cognify(datasets=[dataset.id])  # must not raise
     logger.info("DLT update e2e passed: %d -> %d rows", len(ROWS_V1), len(ROWS_V2))
 
 

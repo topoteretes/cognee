@@ -61,10 +61,10 @@ async def check_dlt_replacement(
 ) -> None:
     """Refuse a dlt source that cannot replace the document ``pinned_id``.
 
-    update()'s full rebuild deletes the document and re-adds the replacement
-    pinned to its id, so this runs BEFORE that delete: a replacement that
+    update()'s full rebuild drops the document's memory and re-adds the
+    replacement pinned to its id, so this runs BEFORE that: a replacement that
     would not resolve to the same manifest must be refused while the
-    document still exists. A document-tagged source yields one document per
+    document's memory still exists. A document-tagged source yields one document per
     row and has no single identity; a relational source under another name
     resolves to a different manifest, and rebuilding it under the old id
     would leave the next plain add() of that source minting a second one.
