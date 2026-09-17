@@ -34,27 +34,17 @@ class RouteDecision:
 
 
 # (rule name, pattern, search type). Shape rules (what the input looks like) come
-# first and win: a quoted string or a Cypher statement is handled as what it is,
-# even when its text also reads as intent — `"coding rules"` is a lexical search.
+# first and win: a quoted string is handled as what it is, even when its text
+# also reads as intent — `"coding rules"` is a lexical search.
 # No query in the golden table depends on the order (test_no_query_matches_two_rules).
+#
+# CYPHER is deliberately NOT routable. A retriever runs the query text verbatim
+# through graph_engine.query(), and the whole recall path only ever checks read
+# permission, so auto-routing would let `{"query": "MATCH (n) DETACH DELETE n"}`
+# mutate the graph for anyone who can read it. Reaching CYPHER takes an explicit
+# query_type, which is a deliberate act by the caller rather than whatever text
+# arrived in a request body.
 _RULES: tuple[tuple[str, re.Pattern, SearchType], ...] = (
-    # Case-sensitive, and the clause keyword must open a node pattern or the body
-    # must carry relationship syntax. A leading clause word on its own is not
-    # enough: "RETURN POLICY FOR DAMAGED GOODS" is a heading, not a query.
-    (
-        "cypher_syntax",
-        re.compile(
-            r"^(?:"
-            # A clause that opens a node pattern: MATCH (n ..., MATCH p=(a ...
-            r"(?:OPTIONAL\s+MATCH|MATCH|CREATE|MERGE)\s+(?:\w+\s*=\s*)?\("
-            # UNWIND over a list literal or a parameter.
-            r"|UNWIND\s+[\[$]"
-            # Any clause plus relationship syntax somewhere in the body.
-            r"|(?:OPTIONAL\s+MATCH|MATCH|RETURN|CREATE|MERGE|UNWIND)\s.*(?:-\[|\]->|\)-|-\()"
-            r")"
-        ),
-        SearchType.CYPHER,
-    ),
     (
         "quoted_phrase",
         re.compile(r'^"[^"]+"$'),

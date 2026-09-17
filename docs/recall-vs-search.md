@@ -82,14 +82,22 @@ like* — come first and win over intent rules, so a quoted string or a Cypher s
 handled as what it is even when its text also reads as intent: `"coding rules"` is a lexical
 search for that phrase, not a request for the rule list. No query in the golden table depends
 on that ordering (a test enforces this). Anything unmatched goes to `HYBRID_COMPLETION`.
-Matching is case-insensitive except for Cypher.
+Matching is case-insensitive.
 
 | # | Rule | Signal in the query | Routes to |
 |---|---|---|---|
-| 1 | `cypher_syntax` | An upper-case Cypher clause that opens a node pattern (`MATCH (n ...`, `CREATE (a:Person {...})`, `UNWIND [...]`), or any clause plus relationship syntax (`-[`, `]->`, `)-`, `-(`) | `CYPHER` |
-| 2 | `quoted_phrase` | The whole query is one `"quoted phrase"` | `CHUNKS_LEXICAL` |
-| 3 | `coding_rules_intent` | `coding rules` / `coding standards` / `coding conventions`, or `code review guidelines` (and the `rules`, `standards`, `checklist`, `conventions` variants) | `CODING_RULES` |
+| 1 | `quoted_phrase` | The whole query is one `"quoted phrase"` | `CHUNKS_LEXICAL` |
+| 2 | `coding_rules_intent` | `coding rules` / `coding standards` / `coding conventions`, or `code review guidelines` (and the `rules`, `standards`, `checklist`, `conventions` variants) | `CODING_RULES` |
 | — | `default` | Anything else | `HYBRID_COMPLETION` |
+
+`CYPHER` is **not** in the table and never will be. The Cypher retriever runs
+the query text verbatim through `graph_engine.query()`, and the whole recall
+path checks read permission only — so a routable `CYPHER` would let anyone who
+can read a dataset destroy it by posting
+`{"query": "MATCH (n) DETACH DELETE n"}`. Reaching `CYPHER` requires an
+explicit `query_type` / `searchType`, which is a deliberate act by the caller
+rather than whatever text arrived in a request body. Pasted Cypher therefore
+routes to `HYBRID_COMPLETION` like any other text.
 
 The rule for what belongs in the table: **auto-routing may only pick a
 strategy that is at least as good as HYBRID on a default-built graph and does
@@ -135,15 +143,10 @@ A routed type is a guess, so `recall()` never lets one do worse than the
 default. When the router picked a type **other than the default**, the query is
 retried once as `HYBRID_COMPLETION` in two cases:
 
-- the backend rejects the type, as `CYPHER` does under
-  `ALLOW_CYPHER_QUERY=false`; or
+- the backend rejects the type; or
 - the search returns nothing and the empty result means the lane was
   unavailable — `CHUNKS_LEXICAL` with no lexical hits, `CODING_RULES` on a
   dataset with no rules nodeset.
-
-`CYPHER` is deliberately not retried on an empty result: a valid query that
-matched no rows has answered you, and re-asking an LLM to interpret the Cypher
-text as a question would replace that answer with prose.
 
 The search history records the type that actually answered. Two things are
 never second-guessed: a type you pinned yourself returns empty or raises as

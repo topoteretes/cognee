@@ -54,8 +54,8 @@ logger = get_logger("recall")
 _MIN_WORD_LEN = 2
 
 # Routed types whose empty result means the lane was unavailable — no lexical
-# hits, no rules nodeset — and so is worth retrying as the default. CYPHER is
-# absent on purpose: there, no rows is the answer rather than a failure.
+# hits, no rules nodeset — and so is worth retrying as the default. Types the
+# router cannot pick never reach this set: the retry only second-guesses a guess.
 _RETRY_ON_EMPTY = frozenset({SearchType.CHUNKS_LEXICAL, SearchType.CODING_RULES})
 
 
@@ -825,8 +825,8 @@ async def recall(
                 except (UnsupportedSearchTypeError, SearchTypeNotSupported) as error:
                     if not routed_guess:
                         raise
-                    # The backend rejected a routed guess (CYPHER under
-                    # ALLOW_CYPHER_QUERY=false); the default always substitutes.
+                    # The backend rejected a routed guess — a deployment-level
+                    # choice, not the caller's; the default always substitutes.
                     logger.info(
                         "Rule %s routed to %s, which the backend rejected (%s); retrying as %s.",
                         routed_rule,

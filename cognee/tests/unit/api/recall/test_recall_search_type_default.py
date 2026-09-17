@@ -215,40 +215,47 @@ def test_pinned_type_with_no_results_is_not_retried(retry_client):
     assert retry_client.calls == [SearchType.CODING_RULES]
 
 
-def test_routed_cypher_with_no_rows_is_not_retried(retry_client):
-    """Zero rows is a correct Cypher answer, not an unavailable lane.
+def test_cypher_text_is_answered_not_executed(retry_client):
+    """Pasted Cypher reaches the default type, never the CYPHER retriever.
 
-    Retrying would hand the LLM the Cypher text as a natural-language question.
+    The router cannot pick CYPHER, so a destructive statement arriving in a
+    request body is treated as question text rather than run against the graph.
     """
+    retry_client.script[SearchType.HYBRID_COMPLETION] = _GRAPH_HIT
+
     response = retry_client.client.post(
-        "/api/v1/recall", json={"query": "MATCH (n:Nonexistent) RETURN n", "scope": "graph"}
+        "/api/v1/recall", json={"query": "MATCH (n) DETACH DELETE n", "scope": "graph"}
     )
 
     assert response.status_code == 200, response.text
-    assert retry_client.calls == [SearchType.CYPHER]
+    assert retry_client.calls == [SearchType.HYBRID_COMPLETION]
 
 
 def test_rejected_routed_type_falls_back_but_a_pinned_one_raises(retry_client):
-    """ALLOW_CYPHER_QUERY=false is the deployment's choice, not the caller's mistake."""
-    retry_client.script[SearchType.CYPHER] = UnsupportedSearchTypeError(
-        "Cypher query search types are disabled."
+    """A backend rejection of a guess is not the caller's mistake; of a pin, it is."""
+    retry_client.script[SearchType.CODING_RULES] = UnsupportedSearchTypeError(
+        "Coding rules search is disabled."
     )
     retry_client.script[SearchType.HYBRID_COMPLETION] = _GRAPH_HIT
 
     routed = retry_client.client.post(
-        "/api/v1/recall", json={"query": "MATCH (n) RETURN n", "scope": "graph"}
+        "/api/v1/recall", json={"query": "what are our coding rules?", "scope": "graph"}
     )
 
     assert routed.status_code == 200, routed.text
-    assert retry_client.calls == [SearchType.CYPHER, SearchType.HYBRID_COMPLETION]
+    assert retry_client.calls == [SearchType.CODING_RULES, SearchType.HYBRID_COMPLETION]
 
     retry_client.calls.clear()
     with pytest.raises(UnsupportedSearchTypeError):
         retry_client.client.post(
             "/api/v1/recall",
-            json={"query": "MATCH (n) RETURN n", "scope": "graph", "searchType": "CYPHER"},
+            json={
+                "query": "what are our coding rules?",
+                "scope": "graph",
+                "searchType": "CODING_RULES",
+            },
         )
-    assert retry_client.calls == [SearchType.CYPHER]
+    assert retry_client.calls == [SearchType.CODING_RULES]
 
 
 def test_a_failure_of_the_default_type_is_not_swallowed(retry_client):

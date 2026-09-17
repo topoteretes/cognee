@@ -15,17 +15,11 @@ from cognee.modules.search.types import SearchType
 # a different operation from HYBRID, never a narrower completion.
 ROUTABLE_TYPES = {
     SearchType.HYBRID_COMPLETION,
-    SearchType.CYPHER,
     SearchType.CHUNKS_LEXICAL,
     SearchType.CODING_RULES,
 }
 
 GOLDEN = [
-    # cypher_syntax
-    ("MATCH (n:Person) RETURN n.name", SearchType.CYPHER),
-    ("MATCH (a)--(b) RETURN a", SearchType.CYPHER),
-    ("OPTIONAL MATCH (n:Person) RETURN n", SearchType.CYPHER),
-    ("UNWIND [1, 2, 3] AS x RETURN x", SearchType.CYPHER),
     # quoted_phrase
     ('"polonium and radium"', SearchType.CHUNKS_LEXICAL),
     # coding_rules_intent
@@ -123,11 +117,11 @@ class TestRouteDecision:
         assert decision == RouteDecision(search_type=ROUTER_FALLBACK_TYPE, rule="default")
 
     def test_matching_rule_name(self):
-        assert route_query("MATCH (n) RETURN n").rule == "cypher_syntax"
+        assert route_query('"polonium and radium"').rule == "quoted_phrase"
         assert route_query("Show me the coding rules").rule == "coding_rules_intent"
 
     def test_whitespace_is_ignored(self):
-        assert route_query("   MATCH (n) RETURN n  ").search_type == SearchType.CYPHER
+        assert route_query('   "polonium and radium"  ').search_type == SearchType.CHUNKS_LEXICAL
 
 
 class TestNegativeInvariants:
@@ -154,25 +148,27 @@ class TestNegativeInvariants:
     @pytest.mark.parametrize(
         "query",
         [
-            # All-caps headings. The rule is case-sensitive, so only these can
-            # reach it at all: a leading clause word is not enough, the keyword
-            # has to open a node pattern.
+            # Valid Cypher, including statements that mutate or destroy.
+            "MATCH (n) DETACH DELETE n",
+            "MATCH (n:Person) RETURN n.name",
+            "CREATE (x:Note {t: 1}) RETURN x",
+            "MERGE (a:Tag {name: 'x'}) RETURN a",
+            "MATCH (n:User) SET n.admin = true RETURN n",
+            "MATCH (n:Doc) REMOVE n.secret RETURN n",
+            "OPTIONAL MATCH (n:Person) RETURN n",
+            "UNWIND [1, 2, 3] AS x RETURN x",
+            "MATCH (a)--(b) RETURN a",
+            # Prose that merely looks Cypher-ish.
             "RETURN POLICY FOR DAMAGED GOODS",
-            "RETURN TO SENDER (urgent)",
-            "CREATE TABLE users (id int)",
             "MERGE CONFLICT in the deploy branch",
-            "MERGE REQUEST for the api-client (draft)",
-            "MATCH REPORT (Q3) summary",
-            "UNWIND the cable carefully",
-            # Sentence case never matches.
-            "Which teams match the description?",
-            "Does the return value matter?",
-            "create a summary of the merge",
-            # Relationship-like syntax mid-sentence is not Cypher on its own.
-            "What happened at --( the meeting",
-            "Compare (a)--(b) style notation with arrows",
             "Run diff --( format on the file",
         ],
     )
-    def test_no_cypher_without_leading_keyword(self, query):
+    def test_cypher_is_never_auto_routed(self, query):
+        """CYPHER must only ever come from an explicit query_type.
+
+        The retriever runs the text verbatim through graph_engine.query() and
+        the recall path checks read permission only, so a routable CYPHER would
+        let any request body that reaches the endpoint mutate the graph.
+        """
         assert route_query(query).search_type != SearchType.CYPHER
