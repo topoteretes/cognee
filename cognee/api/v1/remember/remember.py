@@ -1395,12 +1395,18 @@ async def _remember_inner(
     )
     from cognee.modules.preflight import validate_provider_config
 
-    cognify_config = get_cognify_config()
-    validate_provider_config(
-        needs_llm=default_pipeline_needs_llm(
-            resolve_extractor(kwargs.get("extractor"), cognify_config), cognify_config
+    if kwargs.get("content_type") == "code":
+        # The code route runs enola only: no LLM and no graph extractor, so it
+        # must not resolve one. Keyless installs without gliner2 would otherwise
+        # fail the extractor gate for a pipeline that never uses it.
+        validate_provider_config(needs_llm=False)
+    else:
+        cognify_config = get_cognify_config()
+        validate_provider_config(
+            needs_llm=default_pipeline_needs_llm(
+                resolve_extractor(kwargs.get("extractor"), cognify_config), cognify_config
+            )
         )
-    )
 
     # Run vector migrations lazily on the first local SDK call.
     # This ensures stale LanceDB schemas are migrated before any
