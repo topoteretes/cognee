@@ -135,7 +135,16 @@ MEMORY_ENTRY_TYPES = (QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry)
 
 
 RecallScope = Literal[
-    "auto", "graph", "session", "trace", "graph_context", "session_context", "all", "tools", "code"
+    "auto",
+    "graph",
+    "session",
+    "session_first",
+    "trace",
+    "graph_context",
+    "session_context",
+    "all",
+    "tools",
+    "code",
 ]
 
 
