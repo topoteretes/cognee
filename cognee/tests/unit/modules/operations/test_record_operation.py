@@ -159,6 +159,55 @@ async def test_persistence_failure_never_breaks_the_operation(ops_engine, monkey
 
 
 @pytest.mark.asyncio
+async def test_missing_store_logs_debug_not_warning(ops_engine, monkeypatch, caplog):
+    """An unreachable relational store must not splash a warning traceback.
+
+    Prune deletes the very database the ledger writes to, and nothing exists
+    before setup() — both are normal in the quickstart examples, so the
+    skipped write logs at debug only."""
+    from sqlalchemy.exc import OperationalError
+
+    def _store_gone():
+        raise OperationalError("stmt", None, Exception("unable to open database file"))
+
+    monkeypatch.setattr(record_operation_mod, "get_relational_engine", _store_gone)
+
+    with caplog.at_level("DEBUG"):
+        async with record_operation("prune_data"):
+            pass
+
+    warnings = [
+        r for r in caplog.records if r.levelname == "WARNING" and "persist" in r.getMessage()
+    ]
+    assert warnings == []
+    debugs = [
+        r
+        for r in caplog.records
+        if r.levelname == "DEBUG" and "relational store unavailable" in r.getMessage()
+    ]
+    assert len(debugs) == 1
+
+
+@pytest.mark.asyncio
+async def test_unexpected_persist_failure_still_warns(ops_engine, monkeypatch, caplog):
+    """Only the store-unavailable class is quiet; other failures stay loud."""
+
+    def _broken_engine():
+        raise RuntimeError("relational database is gone")
+
+    monkeypatch.setattr(record_operation_mod, "get_relational_engine", _broken_engine)
+
+    with caplog.at_level("DEBUG"):
+        async with record_operation("prune_data"):
+            pass
+
+    warnings = [
+        r for r in caplog.records if r.levelname == "WARNING" and "persist" in r.getMessage()
+    ]
+    assert len(warnings) == 1
+
+
+@pytest.mark.asyncio
 async def test_persistence_failure_does_not_mask_operation_error(ops_engine, monkeypatch):
     """When both the operation and the write fail, the operation's error wins."""
 

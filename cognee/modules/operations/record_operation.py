@@ -27,6 +27,8 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID, uuid4
 
+from sqlalchemy.exc import OperationalError
+
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.shared.logging_utils import get_logger
 
@@ -244,6 +246,18 @@ async def record_operation(
                     await _write_operation_row(
                         context, context.started_at, outcome.value, error_class, error_message
                     )
+                except OperationalError as write_error:
+                    # An unreachable relational store is an expected state
+                    # around the operations that manage the store itself:
+                    # prune deletes the database the ledger lives in, and
+                    # nothing exists before setup() — the quickstart examples
+                    # hit both. A warning with a traceback made every example
+                    # run look broken, so the skipped write logs at debug.
+                    logger.debug(
+                        "record_operation: skipping %s record, relational store unavailable (%s)",
+                        operation_name,
+                        write_error,
+                    )
                 except Exception as write_error:
                     logger.warning(
                         "record_operation: failed to persist %s record (%s)",
@@ -274,6 +288,14 @@ async def finish_operation(context: OperationContext, error: BaseException | Non
     try:
         await _write_operation_row(
             context, context.started_at, outcome.value, error_class, error_message
+        )
+    except OperationalError as write_error:
+        # Store unavailable: expected around prune / before setup(), see the
+        # matching handler in record_operation.
+        logger.debug(
+            "record_operation: skipping %s record, relational store unavailable (%s)",
+            context.operation_name,
+            write_error,
         )
     except Exception as write_error:
         logger.warning(
