@@ -649,6 +649,71 @@ async def test_startup_recovery_keeps_documents_the_abandoned_run_completed(
 
 
 @pytest.mark.asyncio
+async def test_startup_recovery_keeps_a_node_shared_by_completed_and_unfinished_documents(
+    clean_test_environment,
+):
+    """An entity both documents mention: the completed document's row keeps it in
+    the graph after the unfinished document's row is removed."""
+    from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
+
+    user = await get_default_user()
+    dataset = await create_authorized_dataset("recovery_shared_node_dataset", user)
+    add_result = await cognee.add(
+        ["Shared doc one", "Shared doc two"], dataset_name=dataset.name, user=user
+    )
+    done_id, unfinished_id = (item["data_id"] for item in add_result.data_ingestion_info[:2])
+
+    run_id = uuid4()
+    shared = Person(name="Shared-Entity")
+    only_done = Person(name="Only-Done")
+    only_unfinished = Person(name="Only-Unfinished")
+    async with _dataset_context(dataset.id, dataset.owner_id):
+        for nodes, data_id in (
+            ([shared, only_done], done_id),
+            ([shared, only_unfinished], unfinished_id),
+        ):
+            await add_data_points(
+                nodes,
+                custom_edges=[(nodes[0].id, nodes[1].id, "links", {"edge_text": "links"})],
+                ctx=PipelineContext(
+                    user=user,
+                    dataset=dataset,
+                    data_item=SimpleNamespace(id=data_id),
+                    pipeline_name="cognify_pipeline",
+                    pipeline_run_id=run_id,
+                ),
+            )
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        done_record = await session.get(Data, done_id)
+        done_record.pipeline_status = {
+            **(done_record.pipeline_status or {}),
+            "cognify_pipeline": {str(dataset.id): DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED},
+        }
+        await session.merge(done_record)
+        session.add(
+            PipelineRun(
+                pipeline_run_id=run_id,
+                pipeline_name="cognify_pipeline",
+                pipeline_id=uuid4(),
+                status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+                dataset_id=dataset.id,
+                run_info={},
+                created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+            )
+        )
+        await session.commit()
+
+    await recover_stale_pipeline_runs_on_startup()
+
+    await assert_graph_nodes_present([shared, only_done])
+    await assert_graph_nodes_not_present([only_unfinished])
+    nodes_after, _ = await _count_nodes_edges_for_run(dataset.id, run_id)
+    assert {node.data_id for node in nodes_after} == {done_id}
+
+
+@pytest.mark.asyncio
 async def test_cognify_rollback_is_idempotent(clean_test_environment):
     # Test 5: calling rollback twice should be safe no-op on second invocation.
     user = await get_default_user()

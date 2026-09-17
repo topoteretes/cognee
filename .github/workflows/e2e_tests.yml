@@ -165,6 +165,12 @@ jobs:
       - name: Run keyless e2e
         run: uv run python ./cognee/tests/e2e/keyless/keyless_ingest_check.py
 
+      # A cognify run SIGKILLed after two documents, a second run, then startup
+      # recovery: the two completed documents must survive and the run must be
+      # closed as abandoned. Same keyless GLiNER stack, so it lives here.
+      - name: Run startup recovery crash check
+        run: uv run python ./cognee/tests/e2e/keyless/startup_recovery_crash_check.py
+
   run-telemetry-test:
     name: Run Telemetry Test
     runs-on: ubuntu-22.04

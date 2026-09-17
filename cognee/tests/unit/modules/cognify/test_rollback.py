@@ -4,6 +4,7 @@ from uuid import uuid4
 import pytest
 
 from cognee.modules.cognify import rollback as rollback_module
+from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunAlreadyCompleted,
     PipelineRunCompleted,
@@ -345,7 +346,6 @@ async def test_graph_provenance_rollback_keeps_completed_documents_when_asked(mo
     complete keeps its refs and its completed status; the unfinished one is
     rolled back and its status cleared."""
     from cognee.infrastructure.databases.provenance import make_source_ref_key
-    from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
 
     pipeline_run_id = uuid4()
     dataset_id = uuid4()
@@ -424,3 +424,110 @@ def test_without_kept_refs_drops_only_the_kept_documents_refs():
     trimmed = _without_kept_refs(refs, {kept})
 
     assert trimmed == {"shared": [make_source_ref_key(dataset_id, other)]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "completed_slot",
+    [
+        DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED,
+        "DATA_ITEM_PROCESSING_COMPLETED",
+        {"status": DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED, "content_hash": "abc"},
+    ],
+    ids=["enum", "legacy-string", "dict-shaped"],
+)
+async def test_completed_data_ids_accepts_every_completed_shape(completed_slot):
+    dataset_id = uuid4()
+    done, started, missing_slot = uuid4(), uuid4(), uuid4()
+    records = [
+        SimpleNamespace(
+            id=done, pipeline_status={"cognify_pipeline": {str(dataset_id): completed_slot}}
+        ),
+        SimpleNamespace(
+            id=started, pipeline_status={"cognify_pipeline": {str(dataset_id): "STARTED"}}
+        ),
+        SimpleNamespace(id=missing_slot, pipeline_status=None),
+    ]
+    session = _FakeSession([_FakeExecuteResult(records)])
+
+    kept = await rollback_module._completed_data_ids(
+        session, {done, started, missing_slot}, dataset_id
+    )
+
+    assert kept == {done}
+
+
+@pytest.mark.asyncio
+async def test_completed_data_ids_is_empty_for_no_ids():
+    session = _FakeSession([])
+    assert await rollback_module._completed_data_ids(session, set(), uuid4()) == set()
+
+
+@pytest.mark.asyncio
+async def test_graph_provenance_rollback_with_everything_completed_removes_nothing(monkeypatch):
+    """Every document the run touched is complete: nothing is rolled back, no
+    status is cleared, and the unified rollback is told to keep all of them."""
+    from cognee.infrastructure.databases.provenance import make_source_ref_key
+
+    pipeline_run_id, dataset_id = uuid4(), uuid4()
+    ids = [uuid4(), uuid4()]
+    rollback_calls = []
+
+    class _FakeGraph:
+        async def find_node_source_refs_by_pipeline_run(self, _run):
+            return {f"n{i}": [make_source_ref_key(dataset_id, d)] for i, d in enumerate(ids)}
+
+        async def find_edge_source_refs_by_pipeline_run(self, _run):
+            return {}
+
+    async def _rollback(run, *, keep_data_ids=None):
+        rollback_calls.append(keep_data_ids)
+
+    fake_unified = SimpleNamespace(
+        supports_graph_provenance_delete=lambda: True,
+        graph=_FakeGraph(),
+        rollback_by_pipeline_run_id=_rollback,
+    )
+    records = [
+        SimpleNamespace(
+            id=d,
+            pipeline_status={
+                "cognify_pipeline": {str(dataset_id): DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED}
+            },
+        )
+        for d in ids
+    ]
+    lookup_session = _FakeSession([_FakeExecuteResult(records)])
+    reset_session = _FakeSession([_FakeExecuteResult([])])
+    engine = _FakeEngine([lookup_session, reset_session])
+
+    async def _get_unified_engine():
+        return fake_unified
+
+    async def _stores_provenance_in_graph(_graph):
+        return True
+
+    monkeypatch.setattr(rollback_module, "get_unified_engine", _get_unified_engine)
+    monkeypatch.setattr(rollback_module, "stores_provenance_in_graph", _stores_provenance_in_graph)
+    monkeypatch.setattr(rollback_module, "get_relational_engine", lambda: engine)
+    monkeypatch.setattr(rollback_module.orm_attributes, "flag_modified", lambda *_args: None)
+
+    await rollback_module.cognify_rollback_handler(
+        pipeline_run_id=pipeline_run_id,
+        dataset=SimpleNamespace(id=dataset_id),
+        keep_completed_data=True,
+    )
+
+    assert rollback_calls == [set(ids)]
+    for record in records:
+        assert record.pipeline_status["cognify_pipeline"][str(dataset_id)] == (
+            DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
+        )
+
+
+def test_without_kept_refs_keeps_everything_when_nothing_is_kept():
+    from cognee.infrastructure.databases.provenance import make_source_ref_key
+    from cognee.infrastructure.databases.unified.unified_store_engine import _without_kept_refs
+
+    refs = {"n": [make_source_ref_key(uuid4(), uuid4())]}
+    assert _without_kept_refs(refs, set()) == refs
