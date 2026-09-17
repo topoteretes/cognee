@@ -38,7 +38,8 @@ class SearchPayloadDTO(InDTO):
         examples=[["default_dataset"]],
         description=(
             "Dataset names to search. Names only resolve to datasets owned by the caller;"
-            " use dataset_ids for datasets shared with you."
+            " use dataset_ids for datasets shared with you. A name that does not resolve"
+            " fails the request with 404."
         ),
     )
     dataset_ids: list[UUID] | None = Field(

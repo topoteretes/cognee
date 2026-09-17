@@ -36,7 +36,8 @@ class RecallPayloadDTO(InDTO):
         examples=[["default_dataset"]],
         description=(
             "Dataset names to search within. Omit (null) to search all datasets "
-            "you have read access to."
+            "you have read access to. Every name must resolve to a dataset you own "
+            "in the current tenant; one that does not fails the request with 404."
         ),
     )
     dataset_ids: list[UUID] | None = Field(

@@ -15,6 +15,7 @@ from .get_last_added_data import get_last_added_data
 from .get_unique_dataset_id import get_unique_dataset_id
 from .get_unique_data_id import get_unique_data_id
 from .get_authorized_existing_datasets import get_authorized_existing_datasets
+from .get_authorized_datasets_by_names import get_authorized_datasets_by_names
 from .get_dataset_ids import get_dataset_ids
 
 # Update

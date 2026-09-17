@@ -8,7 +8,7 @@ from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.data.exceptions import DatasetNotFoundError
-from cognee.modules.data.methods import get_authorized_existing_datasets
+from cognee.modules.data.methods import get_authorized_datasets_by_names
 from cognee.modules.engine.models import Skill
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.observability import (
@@ -144,6 +144,9 @@ async def search(
             - Single dataset: "research_papers"
             - Multiple datasets: ["docs", "reports", "analysis"]
             - None: Search across all user datasets
+            Names resolve only among the datasets you own in the current tenant;
+            any name that does not resolve raises DatasetNotFoundError rather
+            than being dropped from the scope.
 
         dataset_ids: Alternative to datasets - use specific UUID identifiers.
 
@@ -331,7 +334,9 @@ async def search(
 
             # Transform string based datasets to UUID - String based datasets can only be found for current user
             if datasets is not None and all(isinstance(dataset, str) for dataset in datasets):
-                datasets = await get_authorized_existing_datasets(datasets, "read", user)
+                # Strict: a name that resolves to nothing fails the request, the
+                # same all-or-nothing contract dataset_ids has always had.
+                datasets = await get_authorized_datasets_by_names(datasets, "read", user)
                 datasets = [dataset.id for dataset in datasets]
                 if not datasets:
                     raise DatasetNotFoundError(message="No datasets found.")

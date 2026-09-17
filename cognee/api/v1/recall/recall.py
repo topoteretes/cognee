@@ -14,7 +14,10 @@ from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingCo
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.memory.entries import normalize_scope
 from cognee.modules.data.exceptions import DatasetNotFoundError
-from cognee.modules.data.methods import get_authorized_existing_datasets
+from cognee.modules.data.methods import (
+    get_authorized_datasets_by_names,
+    get_authorized_existing_datasets,
+)
 from cognee.modules.observability import (
     COGNEE_RECALL_SCOPE,
     COGNEE_RECALL_SOURCE,
@@ -392,7 +395,10 @@ async def recall(
     Args:
         query_text: Natural-language query.
         query_type: Search strategy. When provided, the router is bypassed.
-        datasets: Dataset names to search within.
+        datasets: Dataset names to search within. Names resolve only among the
+            datasets you own in the current tenant; any name that does not
+            resolve raises DatasetNotFoundError instead of being dropped from
+            the scope.
         dataset_ids: Dataset UUIDs to search within. Takes precedence over datasets.
         top_k: Maximum results to return (default *15*).
         auto_route: If True and query_type is None, classify the query
@@ -659,12 +665,14 @@ async def recall(
                 )
 
                 # Dataset UUIDs take precedence over names, matching /api/v1/search.
-                # String dataset names can only resolve for the current user.
+                # String dataset names can only resolve for the current user, and a
+                # name that resolves to nothing fails the request rather than being
+                # dropped from the scope.
                 search_dataset_ids = dataset_ids or None
                 if search_dataset_ids is None and datasets is not None:
                     search_dataset_ids = [
                         dataset.id
-                        for dataset in await get_authorized_existing_datasets(
+                        for dataset in await get_authorized_datasets_by_names(
                             datasets, "read", user
                         )
                     ]
@@ -899,7 +907,7 @@ async def recall(
                 if search_dataset_ids is None and datasets is not None:
                     search_dataset_ids = [
                         dataset.id
-                        for dataset in await get_authorized_existing_datasets(
+                        for dataset in await get_authorized_datasets_by_names(
                             datasets, "read", user
                         )
                     ]
