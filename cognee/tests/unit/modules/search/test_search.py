@@ -700,19 +700,10 @@ async def test_empty_dataset_entry_follows_the_only_context_shape(monkeypatch, s
     assert empty.context == []
     assert empty.result == []
     assert empty.error is not None
-
-    prompt_results = await search_mod.search_in_datasets_context(
-        search_datasets=[fresh, populated],
-        query_type=SearchType.GRAPH_COMPLETION,
-        query_text="What did Jane propose?",
-        user=_make_user(),
-        only_context=True,
-        context_format="prompt",
-    )
-    envelope = prompt_results[0].result
-    assert envelope["question"] == "What did Jane propose?"
-    assert envelope["context"] == []
-    assert envelope["user_prompt"] is None
+    # There is one only_context shape (COG-6127): the full LLM input when a prompt was
+    # built, the bare context otherwise. Nothing is ever wrapped around an empty
+    # retrieval, so this entry keeps falling back to the empty context above.
+    assert empty.prompt is None
 
 
 def test_compat_dicts_carry_error_only_on_the_entry_that_has_one(monkeypatch, search_mod):

@@ -22,8 +22,8 @@ from cognee.modules.observability import (
     COGNEE_SEARCH_TYPE,
     new_span,
 )
-from cognee.modules.retrieval.only_context_prompt import SharedSessionHistory
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+from cognee.modules.retrieval.only_context_prompt import SharedSessionHistory
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.operations import log_search_history
@@ -501,6 +501,7 @@ async def search_in_datasets_context(
         query_text=query_text,
         only_context=only_context,
     )
+
 
 class DatasetNoDataError(NoDataError):
     """A retriever's NoDataError, tagged with the dataset it was searching.
