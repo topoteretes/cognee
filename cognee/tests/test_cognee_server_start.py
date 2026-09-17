@@ -11,9 +11,9 @@ from pathlib import Path
 import requests
 
 DEFAULT_USER_EMAIL = "default_user@example.com"
-# The default superuser is only loginable when DEFAULT_USER_PASSWORD is set --
-# unset, it is created with an unrecorded random password. This test logs in
-# over HTTP, so it pins the value for the server subprocess below.
+# The default user has no password until a server started with
+# DEFAULT_USER_PASSWORD sets it once. This test logs in over HTTP, so it pins
+# the value for the server subprocess below.
 DEFAULT_USER_PASSWORD = "default_password"
 
 

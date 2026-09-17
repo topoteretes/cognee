@@ -17,10 +17,10 @@ export async function GET(request: NextRequest) {
   // If no auth available from headers, try to login as default user server-side
   // Server-side default-user login, used only when the browser sent no
   // credentials at all. DEFAULT_USER_PASSWORD is the configured password;
-  // the literal is the pre-SDK-549 default, kept so deployments created before
-  // that change keep working. On a new install the default user's password is
-  // random and unrecorded, so this attempt simply fails and the request is
-  // forwarded unauthenticated, exactly as it would with no fallback at all.
+  // the literal is the local dev-stack value (`cognee-cli -ui`, docker-compose.yml),
+  // kept so deployments created before SDK-549 keep working. Against a server
+  // whose default user has no password this attempt simply fails and the
+  // request is forwarded unauthenticated, exactly as it would with no fallback.
   const defaultUserPassword = process.env.DEFAULT_USER_PASSWORD || "default_password";
   if (!cookie && !authHeader && !apiKey) {
     try {

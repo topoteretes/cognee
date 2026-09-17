@@ -6,10 +6,11 @@ import AuthCard from "@/ui/elements/Auth/AuthCard";
 import { getLocalApiUrl } from "@/modules/users/getLocalApiUrl";
 
 const DEFAULT_EMAIL = "default_user@example.com";
-// The pre-SDK-549 default, kept as a prefill so deployments created before that
-// change log in exactly as they did. New installs give the default user a
-// random, unrecorded password, so there the prefill fails until the operator
-// sets DEFAULT_USER_PASSWORD -- the field is editable either way.
+// The local dev-stack password: `cognee-cli -ui` and docker-compose.yml set
+// DEFAULT_USER_PASSWORD to this value, so the prefill logs in there and on
+// deployments created before SDK-549. Against a server whose default user has
+// no password it fails until the operator sets DEFAULT_USER_PASSWORD -- the
+// field is editable either way.
 const DEFAULT_PASSWORD = "default_password";
 
 export default function LocalSignInForm() {

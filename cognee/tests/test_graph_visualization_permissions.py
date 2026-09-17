@@ -15,9 +15,9 @@ from cognee.modules.users.permissions.methods import authorized_give_permission_
 # Use pytest-asyncio to handle all async tests
 pytestmark = pytest.mark.asyncio
 
-# The default superuser is only loginable when DEFAULT_USER_PASSWORD is set --
-# unset, it is created with an unrecorded random password. These tests
-# authenticate as it over HTTP, so they pin the value themselves.
+# The default user has no password until a server started with
+# DEFAULT_USER_PASSWORD sets it once. These tests authenticate as it over
+# HTTP, so they pin the value themselves.
 DEFAULT_USER_EMAIL = "default_user@example.com"
 DEFAULT_USER_PASSWORD = "default_password"
 
