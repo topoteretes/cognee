@@ -1613,34 +1613,6 @@ jobs:
           CACHE_HOST: 'localhost'
         run: uv run python ./cognee/tests/test_feedback_weights_memify_pipeline.py
 
-  run-pipeline-cache-test:
-    name: Test Pipeline Caching
-    runs-on: ubuntu-22.04
-    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
-    steps:
-      - name: Check out
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
-        with:
-          fetch-depth: 0
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
-
-      - name: Run Pipeline Cache Test
-        env:
-          ENV: 'dev'
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_ARGS: ${{ secrets.LLM_ARGS }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          EMBEDDING_DIMENSIONS: 300
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-        run: uv run python ./cognee/tests/test_pipeline_cache.py
-
   run-graph-model-from-schema-test:
     name: Test Graph Model Generation From Schema
     runs-on: ubuntu-22.04

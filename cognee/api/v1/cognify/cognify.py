@@ -510,7 +510,6 @@ async def cognify(
                 vector_db_config=vector_db_config,
                 graph_db_config=graph_db_config,
                 incremental_loading=incremental_loading,
-                use_pipeline_cache=False,
                 data_per_batch=data_per_batch,
                 needs_llm=needs_llm,
                 rollback_handler=cognify_rollback_handler,

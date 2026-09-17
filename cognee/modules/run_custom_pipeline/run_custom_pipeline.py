@@ -18,7 +18,6 @@ async def run_custom_pipeline(
     user: User = None,
     vector_db_config: dict | None = None,
     graph_db_config: dict | None = None,
-    use_pipeline_cache: bool = False,
     incremental_loading: bool = False,
     data_per_batch: int = 20,
     run_in_background: bool = False,
@@ -44,8 +43,6 @@ async def run_custom_pipeline(
         user: User context for authentication and data access. Uses default if None.
         vector_db_config: Custom vector database configuration for embeddings storage.
         graph_db_config: Custom graph database configuration for relationship storage.
-        use_pipeline_cache: If True, pipelines with the same ID that are currently executing and pipelines with the same ID that were completed won't process data again.
-                        Pipelines ID is created based on the generate_pipeline_id function. Pipeline status can be manually reset with the reset_dataset_pipeline_run_status function.
         incremental_loading: If True, only new or modified data will be processed to avoid duplication. (Only works if data is used with the Cognee python Data model).
                             The incremental system stores and compares hashes of processed data in the Data model and skips data with the same content hash.
         data_cache: If True, only new or modified data will be processed to avoid duplication. (Only works if data is used with the Cognee python Data model).
@@ -87,7 +84,6 @@ async def run_custom_pipeline(
         datasets=dataset,
         vector_db_config=vector_db_config,
         graph_db_config=graph_db_config,
-        use_pipeline_cache=use_pipeline_cache,
         incremental_loading=incremental_loading,
         data_per_batch=data_per_batch,
         pipeline_name=pipeline_name,
