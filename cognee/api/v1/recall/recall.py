@@ -509,7 +509,8 @@ async def recall(
             "top_k": top_k,
             "search_type": str(query_type.value) if query_type else "auto",
             "session_id": session_id or "",
-            "datasets": ",".join(datasets) if datasets else "",
+            # A list, not a joined string: send_telemetry fingerprints each name.
+            "datasets": list(datasets) if datasets else [],
             "dataset_ids": ",".join(str(dataset_id) for dataset_id in dataset_ids or []),
             "include_references": include_references,
             "cognee_version": cognee_version,

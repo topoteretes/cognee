@@ -303,14 +303,6 @@ async def exception_handler(request: Request, exc: CogneeApiError) -> JSONRespon
 
     # log the stack trace for easier serverside debugging
     logger.error(format_exc())
-    content = {"detail": detail["message"]}
-    # A hint the caller can act on: the exception's own remediation first, else the
-    # shared first-run table. Only present when a fix is known, so existing clients
-    # that read only `detail` are unaffected.
-    remediation = remediation_for(exc)
-    if remediation:
-        content["remediation"] = remediation
-
     send_api_exception_telemetry(
         request,
         exc,
@@ -318,7 +310,13 @@ async def exception_handler(request: Request, exc: CogneeApiError) -> JSONRespon
         error_name=exc.name if not improperly_defined else None,
         improperly_defined=improperly_defined,
     )
-
+    content = {"detail": detail["message"]}
+    # A hint the caller can act on: the exception's own remediation first, else the
+    # shared first-run table. Only present when a fix is known, so existing clients
+    # that read only `detail` are unaffected.
+    remediation = remediation_for(exc)
+    if remediation:
+        content["remediation"] = remediation
     return JSONResponse(status_code=status_code, content=content)
 
 

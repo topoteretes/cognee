@@ -174,6 +174,36 @@ def test_missing_request_does_not_raise(request_object):
     )
 
 
+def test_multi_segment_path_parameter_is_templated():
+    """A ``{name:path}`` parameter spans several segments and must still be replaced."""
+    from cognee.api.exception_telemetry import _endpoint
+
+    request = _fake_request(
+        "GET", "/api/v1/files/team-a/q3/report.pdf", {"file_path": "team-a/q3/report.pdf"}
+    )
+
+    assert _endpoint(request) == "GET /api/v1/files/{file_path}"
+
+
+def test_parameter_value_equal_to_a_static_segment_is_not_confused():
+    """Only the parameter's own segment is templated, even when its value repeats a static one."""
+    from cognee.api.exception_telemetry import _endpoint
+
+    request = _fake_request("GET", "/api/v1/datasets/graph/graph", {"dataset_id": "graph"})
+
+    assert _endpoint(request) == "GET /api/v1/datasets/{dataset_id}/graph"
+
+
+def _fake_request(method: str, path: str, path_params: dict | None = None):
+    from unittest.mock import MagicMock
+
+    request = MagicMock()
+    request.method = method
+    request.url.path = path
+    request.path_params = path_params or {}
+    return request
+
+
 class TestRealApplicationWiring:
     """The tests above drive a replica of the wiring; these drive the real app.
 
@@ -182,15 +212,8 @@ class TestRealApplicationWiring:
     """
 
     @staticmethod
-    def _request(method: str, template: str):
-        from unittest.mock import MagicMock
-
-        request = MagicMock()
-        request.method = method
-        route = MagicMock()
-        route.path = template
-        request.scope = {"route": route}
-        return request
+    def _request(method: str, path: str, path_params: dict | None = None):
+        return _fake_request(method, path, path_params)
 
     def test_unhandled_exception_middleware_is_registered(self):
         from cognee.api.client import app
@@ -212,7 +235,7 @@ class TestRealApplicationWiring:
             status_code=status.HTTP_404_NOT_FOUND,
             log=False,
         )
-        request = self._request("POST", "/api/v1/datasets/{dataset_id}/graph")
+        request = self._request("POST", "/api/v1/datasets/abc-123/graph", {"dataset_id": "abc-123"})
 
         with patch(TELEMETRY_TARGET) as telemetry:
             response = await exception_handler(request, error)
@@ -248,7 +271,6 @@ class TestRealApplicationWiring:
         from cognee.api.client import request_validation_exception_handler
 
         request = self._request("POST", "/api/v1/search")
-        request.url.path = "/api/v1/search"
         error = RequestValidationError([])
 
         with patch(TELEMETRY_TARGET) as telemetry:
@@ -287,3 +309,50 @@ class TestRealApplicationWiring:
         props = events[0].kwargs["additional_properties"]
         assert props["exception_type"] == "RuntimeError"
         assert props["status_code"] == 500
+
+
+class TestRealRoutesOverHttp:
+    """Drive the real app through its router-mounted routes.
+
+    The handler-level tests above hand the handlers a request double, which is how
+    the first version shipped an endpoint label that was wrong for every router
+    route: ``request.scope["route"]`` is the router-relative route, so the label
+    lost its ``/api/v1/...`` prefix and collapsed to "unmatched" for routes
+    declared with an empty path. Only a request that really went through routing
+    can catch that.
+    """
+
+    @pytest.fixture
+    def client(self):
+        from cognee.api.client import app
+        from cognee.modules.users.methods import get_authenticated_user
+
+        # The validation failures below are raised while the route's
+        # dependencies are solved, so the auth dependency would hit the
+        # relational database; a fixed user keeps the test free of any store.
+        app.dependency_overrides[get_authenticated_user] = lambda: object()
+        try:
+            yield TestClient(app, raise_server_exceptions=False)
+        finally:
+            app.dependency_overrides.pop(get_authenticated_user, None)
+
+    def test_prefixed_route_with_path_parameter_reports_full_template(self, client):
+        with patch(TELEMETRY_TARGET) as telemetry:
+            response = client.get("/api/v1/datasets/not-a-uuid/graph")
+
+        assert response.status_code == 400
+        events = _events(telemetry)
+        assert len(events) == 1
+        endpoint = events[0].kwargs["additional_properties"]["endpoint"]
+        assert endpoint == "GET /api/v1/datasets/{dataset_id}/graph"
+        assert "not-a-uuid" not in endpoint
+
+    def test_empty_path_router_route_reports_its_prefix(self, client):
+        """``@router.post("")`` under ``/api/v1/search`` must not read as unmatched."""
+        with patch(TELEMETRY_TARGET) as telemetry:
+            response = client.post("/api/v1/search", json={"query": "q", "top_k": "many"})
+
+        assert response.status_code == 400
+        events = _events(telemetry)
+        assert len(events) == 1
+        assert events[0].kwargs["additional_properties"]["endpoint"] == "POST /api/v1/search"
