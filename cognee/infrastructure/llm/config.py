@@ -106,7 +106,7 @@ class LLMConfig(BaseSettings):
     structured_output_framework: str = "litellm_native"
     llm_instructor_mode: str = ""
     llm_provider: str = "openai"
-    llm_model: str = "openai/gpt-5-mini"
+    llm_model: str = "openai/gpt-5.6-luna"
     llm_endpoint: str = ""
     llm_api_key: str | None = None
     llm_api_version: str | None = None
@@ -149,7 +149,7 @@ class LLMConfig(BaseSettings):
     llm_max_completion_tokens: int = 16384
 
     baml_llm_provider: str = "openai"
-    baml_llm_model: str = "gpt-5-mini"
+    baml_llm_model: str = "gpt-5.6-luna"
     baml_llm_endpoint: str = ""
     baml_llm_api_key: str | None = None
     baml_llm_temperature: float = 0.0
@@ -362,7 +362,7 @@ class LLMConfig(BaseSettings):
         #
         # llm_endpoint/llm_api_key default to blank ("" / None), so "has a
         # non-blank value" alone tells us whether they were configured.
-        # llm_model defaults to a real model id ("openai/gpt-5-mini"), so the
+        # llm_model defaults to a real model id ("openai/gpt-5.6-luna"), so the
         # same non-blank check can't tell "configured, happens to match the
         # default" from "left unset" - that also needs `model_fields_set`
         # (populated by pydantic-settings whether the value came from a kwarg

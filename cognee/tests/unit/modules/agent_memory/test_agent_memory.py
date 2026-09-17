@@ -1211,3 +1211,83 @@ async def test_session_memory_decorator_flow_injects_into_llmgateway(monkeypatch
         "Original Input:\n"
         "original question"
     )
+
+
+def test_agent_memory_session_trace_summary_defaults_off():
+    """Plan C7: the per-tool-call LLM summary is opt-in.
+
+    It costs one LLM call per wrapped invocation and the batch agent-context extraction
+    in improve() reads the stored return value directly, so the default is False.
+    """
+    import inspect as _inspect
+
+    parameter = _inspect.signature(cognee.agent_memory).parameters["session_trace_summary"]
+    assert parameter.default is False
+
+
+def test_agent_memory_decorator_default_disables_trace_summary_on_the_config(monkeypatch):
+    import cognee.modules.agent_memory.decorator as decorator_module
+
+    captured = {}
+    real_validate = decorator_module.validate_agent_memory_config
+
+    def _capture(**kwargs):
+        captured["config"] = real_validate(**kwargs)
+        return captured["config"]
+
+    monkeypatch.setattr(decorator_module, "validate_agent_memory_config", _capture)
+
+    @decorator_module.agent_memory(with_memory=False)
+    async def _agent(question: str):
+        return question
+
+    assert captured["config"].session_trace_summary is False
+    # The change is documented where users read it.
+    docstring = decorator_module.agent_memory.__doc__ or ""
+    assert "session_trace_summary" in docstring
+    assert "AUTO_FEEDBACK" in docstring
+
+
+class TestValidateSessionBackedOptions:
+    """One helper carries the session-cache checks the decorator used to spell out twice."""
+
+    @staticmethod
+    def _call(monkeypatch, *, caching=True, **kwargs):
+        from cognee.modules.agent_memory.runtime import _validate_session_backed_options
+
+        monkeypatch.setattr(
+            "cognee.infrastructure.databases.cache.config.get_cache_config",
+            lambda: SimpleNamespace(caching=caching),
+        )
+        defaults = {
+            "with_session_memory": False,
+            "save_session_traces": False,
+            "persist_session_trace_after": None,
+        }
+        defaults.update(kwargs)
+        return _validate_session_backed_options(**defaults)
+
+    def test_accepts_defaults_without_caching(self, monkeypatch):
+        assert self._call(monkeypatch, caching=False) is None
+
+    @pytest.mark.parametrize("bad", [0, -1, "2", 1.5])
+    def test_rejects_non_positive_persist_after(self, monkeypatch, bad):
+        with pytest.raises(CogneeValidationError, match="positive integer"):
+            self._call(monkeypatch, save_session_traces=True, persist_session_trace_after=bad)
+
+    def test_persist_after_requires_save_session_traces(self, monkeypatch):
+        with pytest.raises(CogneeValidationError, match="requires save_session_traces=True"):
+            self._call(monkeypatch, persist_session_trace_after=2)
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"with_session_memory": True},
+            {"save_session_traces": True},
+            {"save_session_traces": True, "persist_session_trace_after": 2},
+        ],
+    )
+    def test_session_backed_options_need_caching(self, monkeypatch, kwargs):
+        with pytest.raises(CogneeValidationError, match="Caching must be enabled"):
+            self._call(monkeypatch, caching=False, **kwargs)
+        assert self._call(monkeypatch, caching=True, **kwargs) is None

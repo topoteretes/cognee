@@ -18,6 +18,13 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
+from cognee.modules.improve.constants import (
+    AGENT_TRACE_FEEDBACKS_NODE_SET,
+    SESSION_LEARNINGS_NODE_SET,
+    SKILLS_NODE_SET,
+    USER_SESSIONS_NODE_SET,
+)
+
 # ── Constants ────────────────────────────────────────────────────────────────
 
 
@@ -134,11 +141,12 @@ _UNKNOWN_TYPE_COLOR = "#DBD8D8"
 # These get stable, meaningful colors in the "color by node set" overlay
 # instead of the deterministic hue-rotation, so they stay recognizable across
 # graphs. session_learnings (distilled lessons) is the headline feature.
-_DISTILLED_LEARNING_NODE_SET = "session_learnings"
+_DISTILLED_LEARNING_NODE_SET = SESSION_LEARNINGS_NODE_SET
 _MEMORY_NODESET_COLORS: dict[str, str] = {
-    "session_learnings": "#FFC53D",  # distilled lessons (gold)
-    "user_sessions_from_cache": "#00C2AA",  # persisted session Q&A (teal)
-    "agent_trace_feedbacks": "#FF7A59",  # persisted agent trace feedback (coral)
+    SESSION_LEARNINGS_NODE_SET: "#FFC53D",  # distilled lessons (gold)
+    USER_SESSIONS_NODE_SET: "#00C2AA",  # persisted session Q&A (teal)
+    AGENT_TRACE_FEEDBACKS_NODE_SET: "#FF7A59",  # persisted agent trace feedback (coral)
+    SKILLS_NODE_SET: "#7DD3FC",  # ingested / improved skills (sky)
 }
 
 
@@ -819,13 +827,17 @@ def build_operation_layer(
     def resolve_targets(effect):
         names = set()
         target_type = effect.get("target_type")
-        if target_type == "Entity":
+        node_set = effect.get("target_node_set")
+        # A node set on the effect SCOPES it: the operation touches only that
+        # set's subgraph, so expanding "Entity" to every semantic entity type
+        # would mark e.g. distill_sessions as the observed producer of any
+        # cognify-built graph's types (both publish through cognify_pipeline).
+        if target_type == "Entity" and not node_set:
             names |= semantic_entity_types & present
             if "Entity" in present:
                 names.add("Entity")
-        elif target_type and target_type in present:
+        elif target_type and target_type != "Entity" and target_type in present:
             names.add(target_type)
-        node_set = effect.get("target_node_set")
         if node_set and node_set in present:
             names.add(node_set)
         return names
@@ -837,7 +849,9 @@ def build_operation_layer(
         links_for_op = []
         for effect in op.get("effects", []):
             for type_name in resolve_targets(effect):
-                key = (effect["effect"], type_name)
+                # Include the property: two effects of the same kind on the same
+                # type are distinct rows when they touch different properties.
+                key = (effect["effect"], type_name, effect.get("property"))
                 if key in seen:
                     continue
                 seen.add(key)

@@ -1,32 +1,88 @@
-# recall() vs search(), and how recall() routes a query
+# recall() vs search()
 
-`recall()` is the memory API's read path. It wraps `search()` and adds three
-things:
+Both functions query the knowledge graph. `recall()` is the memory-API entry point and the one
+to reach for by default; `search()` is the low-level operation it calls underneath. This page says
+what `recall()` adds, when to drop down to `search()`, the two places where the same argument
+means different things, and how the query router picks a strategy.
 
-1. **Query routing.** When `query_type` is omitted, a rule-based classifier
-   picks the search strategy. No LLM call is involved, so routing is free.
-2. **Session memory as a source.** `scope` selects `graph`, `session`,
-   `trace`, `session_context`, or a list of them. With a bare `session_id`, a
-   session hit short-circuits the graph search.
-3. **Normalized results.** Every entry carries `source` (`"graph"`,
-   `"session"`, `"trace"`, ...) and, for graph results, the `search_type` that
-   actually ran.
+Source of truth: `cognee/api/v1/recall/recall.py` and `cognee/api/v1/search/search.py`.
 
-Use `recall()` for ordinary retrieval. Drop to `search()` when you need the
-agentic extras as first-class parameters (`skills`, `tools`, `max_iter`,
-`code_query`, `node_type`), raw `SearchResult` objects, or a pinned
-`query_type` with no router in the path. Note that `search(session_id=...)`
-only adds session history to the retrieval context. It never searches the
-session cache as a source; that is `recall()`-only.
+## What recall() adds on top of search()
+
+1. **Query routing.** When `query_type` is omitted and `auto_route=True` (the default), an
+   ordered table of regex rules picks a `SearchType` — first match wins, no LLM call, so
+   routing is free. With `auto_route=False` and no `query_type`, recall uses
+   `HYBRID_COMPLETION`. Passing `query_type` bypasses the router entirely. See
+   [The router](#the-router) below.
+2. **Session memory as a source.** `scope` selects where results come from: `"graph"` (the
+   permanent graph via `search()`), `"session"` (Q&A entries in the session cache),
+   `"trace"` (agent trace entries), `"session_context"` (the distilled guidance block), plus
+   opt-in `"tools"` (authorized external databases) and `"code"` (the code graph). `"auto"` (the
+   default) and `"all"` never imply `"tools"` or `"code"`. With a bare `session_id` and no
+   `datasets`/`query_type`, a session hit short-circuits the graph search; `scope="session_first"`
+   asks for that short-circuit explicitly, with a pinned type and datasets in play.
+3. **Normalized results.** Every returned entry is tagged with a `source` key (`"graph"`,
+   `"session"`, `"trace"`, `"session_context"`, `"tools"`, `"code"`, `"skills"`), so callers
+   can tell where it came from, and graph entries also carry the `search_type` that actually
+   ran. `search()` returns raw `SearchResult` objects.
+4. **Skill gate.** Procedural-sounding queries trigger a concurrent `SKILLS` lookup whose hits
+   are appended tagged `source="skills"` (only when exactly one dataset is targeted; disable
+   with `SKILL_GATE_ENABLED=false`).
+5. **Structured output shorthand.** `response_model=` validates the LLM answer against a
+   Pydantic model and returns it in the result's `structured` field.
+
+## When to call search() directly
+
+- You need the agentic extras as first-class parameters: `skills`, `tools`, `max_iter`,
+  `code_query`, `node_type`. (`recall()` reaches most of these through
+  `retriever_specific_config={...}`, which you assemble yourself.)
+- You want raw `SearchResult` objects rather than `source`-tagged entries.
+- You want a pinned `query_type` with no router and no session layer in the path, for
+  example when benchmarking one retriever.
+- You are writing a custom pipeline task or debugging a single retrieval stage.
+
+## Same argument, different meaning
+
+| Argument | `recall()` | `search()` |
+|---|---|---|
+| `session_id` | Makes the session cache a *source* (and may short-circuit the graph) | Only adds session history to the retrieval *context*; never searches the cache as a source |
+| omitted `query_type` | Router picks one; `HYBRID_COMPLETION` if routing is off | Always `HYBRID_COMPLETION` |
+| `top_k` | default 15 | default 15 (the CLI's `recall --top-k` defaults to 10) |
+| `only_context=True` | Same as `search()`; pin `query_type` so the hybrid retriever cannot defer to `GRAPH_COMPLETION` behind your back | Returns the retrieval context instead of a completion; `context_format="prompt"` returns the full prompt envelope |
+
+## Quick reference
+
+```python
+import cognee
+from cognee import SearchType
+
+# Ordinary retrieval: let recall route the query and tag the sources.
+results = await cognee.recall("What did Alice work on?", datasets=["project"])
+
+# Session-first: answers the current conversation from the cache before touching the graph.
+results = await cognee.recall("what did I just say about deadlines?", session_id="chat_1")
+
+# Pinned strategy, no router.
+results = await cognee.recall("timeline of the migration", query_type=SearchType.TEMPORAL)
+
+# Low level: raw SearchResult objects, agentic parameters as keywords.
+raw = await cognee.search(
+    "Which functions call UserService?",
+    query_type=SearchType.CODE,
+    code_query={"operation": "impact_analysis", "seeds": ["UserService"]},
+)
+```
 
 ## The router
 
 Source: `cognee/api/v1/recall/query_router.py`.
 
-Rules are checked in order and the first match wins, but no two rules may match
-the same query, so the order is cosmetic (a test enforces this). Anything
-unmatched goes to `HYBRID_COMPLETION`. Matching is case-insensitive except for
-Cypher.
+Rules are checked in order and the first match wins. Shape rules — what the input *looks
+like* — come first and win over intent rules, so a quoted string or a Cypher statement is
+handled as what it is even when its text also reads as intent: `"coding rules"` is a lexical
+search for that phrase, not a request for the rule list. No query in the golden table depends
+on that ordering (a test enforces this). Anything unmatched goes to `HYBRID_COMPLETION`.
+Matching is case-insensitive except for Cypher.
 
 | # | Rule | Signal in the query | Routes to |
 |---|---|---|---|
@@ -105,9 +161,10 @@ there is nothing left to fall back to, so the error is real.
 All three surfaces auto-route by default. On every surface, omitting the type
 also makes the session a search source whenever a `session_id` is given: alone
 it short-circuits the graph on a hit, alongside datasets both contribute.
-Pinning a type leaves the graph as the only source. REST clients that relied on
-the old `HYBRID_COMPLETION` default should pass
-`"searchType": "HYBRID_COMPLETION"` explicitly.
+Pinning a type leaves the graph as the only source unless you ask for the
+session by name with `scope`. REST clients that relied on the old
+`HYBRID_COMPLETION` default should pass `"searchType": "HYBRID_COMPLETION"`
+explicitly.
 
 ### Seeing what ran
 
@@ -124,7 +181,10 @@ Add a `(name, compiled pattern, SearchType)` tuple to `_RULES` in
 `query_router.py`, then add cases to the golden table and the negative
 invariants in `cognee/tests/unit/api/v1/recall/test_query_router.py`. Two
 structural tests constrain what you can add: the new target must be in
-`ROUTABLE_TYPES`, and the new pattern must not match any query an existing
-rule already matches. Keep the size principle above in mind: a rule that sends
+`ROUTABLE_TYPES`, and the new pattern must not change how any query in the
+golden table routes. Keep the size principle above in mind: a rule that sends
 ordinary questions to a slower or narrower retriever is a regression, not an
 improvement.
+
+Related: the search-type list in `CLAUDE.md` ("SEARCH: Retrieval"), `examples/guides/recall_core.py`,
+`examples/guides/hybrid_retrieval_recall.py`.

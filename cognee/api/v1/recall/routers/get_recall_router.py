@@ -178,7 +178,11 @@ def get_recall_router() -> APIRouter:
         # Null when the recall was not scoped to a single dataset.
         dataset_id: UUID | None = None
 
-    @router.get("", response_model=list[RecallHistoryItem])
+    @router.get(
+        "",
+        summary="List the caller's recent recall history",
+        response_model=list[RecallHistoryItem],
+    )
     async def get_recall_history(user: User = Depends(get_authenticated_user)):
         """Get search/recall history for the authenticated user."""
         send_telemetry(
@@ -198,7 +202,11 @@ def get_recall_router() -> APIRouter:
                 content={"error": "An error occurred while fetching recall history."},
             )
 
-    @router.post("", response_model=list[RecallResponse])
+    @router.post(
+        "",
+        summary="Recall: query memory with auto-routed search type and session-first lookup",
+        response_model=list[RecallResponse],
+    )
     @log_usage(function_name="POST /v1/recall", log_type="api_endpoint")
     async def recall(
         payload: RecallPayloadDTO,

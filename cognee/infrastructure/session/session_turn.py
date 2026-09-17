@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from cognee.base_config import get_base_config
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.session.feedback_detection import analyze_turn_for_session_context
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
@@ -79,6 +78,32 @@ async def load_preference_lines_safe() -> list[str]:
 
 def _empty_turn_preparation(query: str) -> SessionTurnPreparation:
     return SessionTurnPreparation(should_answer=True, effective_query=query)
+
+
+DEFAULT_NO_ANSWER_ACK = "Got it."
+
+
+def should_answer_turn(analysis: SessionTurnAnalysis, *, has_previous_qa: bool) -> bool:
+    """Whether sequential and concurrent session paths should generate an answer.
+
+    Answers when the analysis names a query to answer, when the analysis found nothing
+    worth acting on (so there is nothing to acknowledge instead), or when there is no
+    previous QA entry for the message to be feedback about.
+    """
+    query_to_answer = (analysis.query_to_answer or "").strip()
+    response_to_user = (analysis.response_to_user or "").strip()
+    has_analysis_signal = bool(
+        query_to_answer
+        or response_to_user
+        or analysis.candidate_context_updates
+        or analysis.served_context_ratings
+    )
+    return bool(query_to_answer or not has_analysis_signal or not has_previous_qa)
+
+
+def acknowledgement_for_turn(response_to_user: str | None) -> str:
+    """Acknowledgement stored and returned when a turn does not generate an answer."""
+    return (response_to_user or "").strip() or DEFAULT_NO_ANSWER_ACK
 
 
 def coerce_qa_entry(entry: Any) -> dict:
@@ -351,14 +376,11 @@ async def apply_session_turn_analysis(
     served_ids: list[str],
 ) -> list[str]:
     """Persist turn evidence, apply candidate updates, and bump helpful/harmful counters."""
-    # A rating is only evidence when there is a previous turn it can refer to,
-    # and only worth persisting when preference personalization can ever
-    # consume it — with the flag off, a rating-only turn must save nothing.
-    previous_answer_rating = (
-        analysis.previous_answer_rating
-        if previous_qa_id and get_base_config().personalization_enabled
-        else None
-    )
+    # A rating is only evidence when there is a previous turn it can refer to.
+    # It is persisted whenever the analysis produced one: the row is the
+    # signal, and which consumers read it (personalization, feedback weights)
+    # is decided where they run, not here.
+    previous_answer_rating = analysis.previous_answer_rating if previous_qa_id else None
     if (
         not analysis.candidate_context_updates
         and not analysis.served_context_ratings
@@ -481,24 +503,17 @@ async def prepare_session_turn(
         logger.warning("Session turn analysis application failed open: %s", error, exc_info=True)
         accepted_context_ids = []
 
-    query_to_answer = (analysis.query_to_answer or "").strip()
-    response_to_user = (analysis.response_to_user or "").strip() or None
-    has_analysis_signal = bool(
-        query_to_answer
-        or response_to_user
-        or analysis.candidate_context_updates
-        or analysis.served_context_ratings
+    should_answer = should_answer_turn(analysis, has_previous_qa=bool(previous_qa_id))
+    response_to_user = (
+        acknowledgement_for_turn(analysis.response_to_user)
+        if not should_answer
+        else ((analysis.response_to_user or "").strip() or None)
     )
-    has_previous_answer = bool(previous_qa_id)
-    should_answer = bool(query_to_answer or not has_analysis_signal or not has_previous_answer)
-    effective_query = query_to_answer or query
-    if not should_answer and not response_to_user:
-        response_to_user = "Got it."
 
     return SessionTurnPreparation(
         should_answer=should_answer,
         response_to_user=response_to_user,
-        effective_query=effective_query,
+        effective_query=(analysis.query_to_answer or "").strip() or query,
         analysis=analysis,
         accepted_context_ids=accepted_context_ids,
         previous_qa_id=previous_qa_id,
