@@ -124,22 +124,31 @@ def get_persistent_id() -> str:
 
 # Property keys hashed (uuid5 fingerprint) in every telemetry event's
 # additional_properties before they leave the process. session_id/session_ids
-# are user-chosen names and may carry meaning; only a fingerprint may leave —
-# the one place enforcing what remember/improve previously hashed by hand.
-TELEMETRY_SANITIZED_PROPERTIES = ["url", "session_id", "session_ids"]
+# and dataset names are user-chosen and may carry meaning; only a fingerprint
+# may leave — the one place enforcing what remember/improve previously hashed
+# by hand. A key holding a list is hashed element by element, so per-dataset
+# activity can still be grouped without the name.
+TELEMETRY_SANITIZED_PROPERTIES = ["url", "session_id", "session_ids", "datasets"]
+
+
+def _fingerprint(value: str) -> str:
+    return str(uuid5(NAMESPACE_OID, value))
 
 
 def _sanitize_nested_properties(obj: Any, property_names: list[str]) -> Any:
     """
     Recursively replaces any property whose key matches one of `property_names`
     (e.g., ['url', 'path']) in a nested dict or list with a uuid5 hash
-    of its string value. Returns a new sanitized copy.
+    of its string value, or of each string element when the value is a list.
+    Returns a new sanitized copy.
     """
     if isinstance(obj, dict):
         new_obj = {}
         for k, v in obj.items():
             if k in property_names and isinstance(v, str):
-                new_obj[k] = str(uuid5(NAMESPACE_OID, v))
+                new_obj[k] = _fingerprint(v)
+            elif k in property_names and isinstance(v, list):
+                new_obj[k] = [_fingerprint(item) if isinstance(item, str) else item for item in v]
             else:
                 new_obj[k] = _sanitize_nested_properties(v, property_names)
         return new_obj
