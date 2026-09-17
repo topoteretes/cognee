@@ -25,7 +25,7 @@ export interface RecallRequest {
 /**
  * Unified recall call. Hits POST /v1/recall (not /v1/search), so the
  * server's scope-aware fan-out applies: graph + session + trace +
- * graph_context, tagged with _source.
+ * graph_context, tagged with source.
  *
  * ``searchType`` is omitted by default, which lets the server auto-route
  * the query (rule-based, HYBRID_COMPLETION fallback). Pass a value to pin a

@@ -106,7 +106,7 @@ class RecallPayloadDTO(InDTO):
             "'tools' and 'code' are explicit opt-in only — never implied by 'auto' or "
             "'all'. 'tools' requires TOOL_CALLS_ENABLED on the server; 'code' runs a "
             "deterministic code-graph query (see code_query) and tags results "
-            "_source='code'."
+            "source='code'."
         ),
     )
     tool_connections: list[str] | None = Field(
@@ -250,7 +250,7 @@ def get_recall_router() -> APIRouter:
           "all", "auto", or a list of these (default: "auto" — session first when
           session_id is set, else graph). "session_first" requests that short-circuit
           explicitly rather than by omitting searchType. "code" is explicit opt-in only
-          and returns deterministic code-graph facts tagged _source="code"
+          and returns deterministic code-graph facts tagged source="code"
           (e.g. scope=["graph", "code"])
         - **code_query** (Optional[dict]): "code" scope only — operation and arguments
           for the code-graph query (same format as /v1/search code_query); omit for
