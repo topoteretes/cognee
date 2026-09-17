@@ -291,6 +291,11 @@ def _dispatch_remember(client: CogneeApiClient, args: argparse.Namespace) -> Non
 
 
 def _dispatch_recall(client: CogneeApiClient, args: argparse.Namespace) -> None:
+    # Same normalization as the in-process lane, applied before anything reads
+    # it: `-d` with no names parses to [], which the server would resolve and
+    # pin rather than leave unscoped. See recall_command.py.
+    args.datasets = args.datasets or None
+
     # Session-only mode: -s without -d and without explicit -t. Mirrors the
     # local recall_command behaviour so --api-url users get the same UX.
     session_only = args.session_id is not None and not args.datasets and args.query_type is None

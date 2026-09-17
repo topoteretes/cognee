@@ -172,6 +172,16 @@ class TestRecallDispatch:
         assert "using GRAPH_SUMMARY_COMPLETION" in capsys.readouterr().out
 
     @patch("cognee.cli.api_dispatch.CogneeApiClient")
+    def test_bare_datasets_flag_is_normalized_to_none(self, MockClient):
+        """`-d` with no names parses to []; both lanes must send None so the
+        server leaves the search unscoped instead of pinning every dataset."""
+        mock_instance = self._client(MockClient, ["answer"])
+
+        dispatch(self._args(datasets=[]))
+
+        assert mock_instance.recall.call_args.kwargs["datasets"] is None
+
+    @patch("cognee.cli.api_dispatch.CogneeApiClient")
     def test_explicit_query_type_is_forwarded(self, MockClient):
         mock_instance = self._client(MockClient, ["answer"])
 

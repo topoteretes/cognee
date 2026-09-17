@@ -305,6 +305,28 @@ class TestRecallCommand:
         assert kwargs["datasets"] == ["docs"]
 
     @patch("cognee.cli.commands.recall_command.asyncio.run", side_effect=_mock_run)
+    def test_bare_datasets_flag_is_normalized_to_none(self, mock_asyncio_run):
+        """`-d` with no names parses to []; recall() keys on `is not None`, so []
+        would pin every readable dataset instead of leaving the search unscoped."""
+        mock_cognee = MagicMock()
+        mock_cognee.recall = AsyncMock(return_value=["answer"])
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = RecallCommand()
+            args = argparse.Namespace(
+                query_text="Summarize the report",
+                query_type=None,
+                datasets=[],
+                top_k=10,
+                system_prompt=None,
+                session_id=None,
+                output_format="pretty",
+            )
+            command.execute(args)
+
+        assert mock_cognee.recall.await_args.kwargs["datasets"] is None
+
+    @patch("cognee.cli.commands.recall_command.asyncio.run", side_effect=_mock_run)
     def test_explicit_hybrid_with_session_is_not_session_only(self, mock_asyncio_run):
         mock_cognee = MagicMock()
         mock_cognee.recall = AsyncMock(return_value=["answer"])

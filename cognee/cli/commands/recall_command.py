@@ -91,8 +91,10 @@ With --query-type CODE, --code-query selects the code-graph operation and
 
             code_query = build_code_query(args, args.query_type)
 
-            # `-d` with no names parses to [], which recall() would treat as an
-            # empty dataset list rather than "all datasets".
+            # `-d` with no names parses to []. recall() keys on
+            # `datasets is not None`, so [] makes it resolve and pin every
+            # readable dataset — and raise DatasetNotFoundError when there are
+            # none — where None skips the lookup and leaves the search unscoped.
             args.datasets = args.datasets or None
 
             # Session-only mode: -s without -d and without explicit -t. Only the
