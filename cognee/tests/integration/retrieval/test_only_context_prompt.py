@@ -16,6 +16,7 @@ import pytest_asyncio
 import cognee
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.low_level import DataPoint, setup
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.only_context_prompt import (
     SYSTEM_PROMPT_HEADER,
     USER_PROMPT_HEADER,
@@ -118,11 +119,17 @@ async def test_only_context_returns_the_full_llm_input_over_the_real_graph(small
 
 
 @pytest.mark.asyncio
-async def test_only_context_on_an_empty_graph_returns_the_bare_empty_context(empty_graph):
-    with _no_llm():
-        payload = await get_retriever_output(
-            SearchType.GRAPH_COMPLETION, QUESTION, only_context=True
-        )
+async def test_only_context_on_an_empty_graph_raises_instead_of_building_a_prompt(empty_graph):
+    """An empty graph is a state problem, not a query miss (SDK-270), so the retriever
+    raises before retrieval returns and no prompt is ever built. only_context is not
+    exempt: it reports the same 404 a completion call would.
 
-    assert payload.prompt is None
-    assert payload.result == ""
+    The neighbouring guarantee — an empty *retrieval* over a populated graph yields the
+    bare context and never a prompt wrapped around nothing — cannot be staged here
+    (graph retrieval is nearest-neighbour, so a populated graph always returns
+    something). It is pinned deterministically in the unit tests instead:
+    ``test_only_context_prompt.py::test_empty_retrieval_gets_no_prompt`` and
+    ``test_get_retriever_output.py::test_only_context_falls_back_to_the_bare_context_when_no_prompt_is_built``.
+    """
+    with _no_llm(), pytest.raises(NoDataError):
+        await get_retriever_output(SearchType.GRAPH_COMPLETION, QUESTION, only_context=True)
