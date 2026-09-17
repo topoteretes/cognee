@@ -224,3 +224,61 @@ async def test_work_done_only_in_a_rerun_pass_makes_the_run_completed_not_skippe
     from cognee.modules.pipelines.models import OperationOutcome
 
     assert harness.operations[-1].outcome is not OperationOutcome.NOOP
+
+
+@pytest.mark.asyncio
+async def test_a_successful_release_is_never_followed_by_a_second_release(harness, monkeypatch):
+    """release_improve_lock_many is not holder-scoped: a second release after the
+    combined check-and-release let go would drop a claim a contender won in between."""
+    improve_mod = harness.improve_mod
+    calls = []
+    real_release_or_rerun = improve_mod.release_or_rerun_improve_lock_many
+    real_release = improve_mod.release_improve_lock_many
+
+    async def spy_release_or_rerun(keys, *, rerun_keys):
+        outcome = await real_release_or_rerun(keys, rerun_keys=rerun_keys)
+        calls.append(("release_or_rerun", outcome))
+        return outcome
+
+    async def spy_release(keys):
+        calls.append(("release", None))
+        await real_release(keys)
+
+    monkeypatch.setattr(improve_mod, "release_or_rerun_improve_lock_many", spy_release_or_rerun)
+    monkeypatch.setattr(improve_mod, "release_improve_lock_many", spy_release)
+    harness.use_stages([FakeStage("a")])
+
+    await harness.improve(session_ids=["chat_1"])
+
+    # Session-keyed run, no rerun pending: the combined call released, the finally did not.
+    assert calls == [("release_or_rerun", True)]
+
+    # Dataset-only run: no combined call, exactly one plain release.
+    calls.clear()
+    await harness.improve()
+    assert calls == [("release", None)]
+
+
+@pytest.mark.asyncio
+async def test_a_claim_won_right_after_the_release_is_not_dropped(harness):
+    """The interleaving the double release would break: a contender claims the keys
+    the instant they are freed; when the holder's run finishes, the contender's
+    claim must still stand."""
+    keys = session_lock.improve_lock_keys(["chat_1"], harness.dataset.id, harness.user.id)
+    contender_claimed = asyncio.Event()
+
+    async def contender():
+        while not await session_lock.try_acquire_improve_lock_many(keys):
+            await asyncio.sleep(0)
+        contender_claimed.set()
+
+    harness.use_stages([FakeStage("a")])
+    contender_task = asyncio.create_task(contender())
+    await asyncio.sleep(0)  # the contender is spinning; the holder now runs
+    await harness.improve(session_ids=["chat_1"])
+    await asyncio.wait_for(contender_claimed.wait(), timeout=1)
+    await contender_task
+
+    # The contender still holds every key: the holder's run released only once.
+    assert not await session_lock.try_acquire_improve_lock_many(keys)
+    await session_lock.release_improve_lock_many(keys)

@@ -179,6 +179,11 @@ async def improve(
         """
         stages = list(DEFAULT_STAGES)
         session_keys = _session_lock_keys(lock_keys)
+        # The claim is released exactly once: either by the combined
+        # check-and-release below (set ``released``) or by the finally. A second
+        # release is not holder-scoped and would drop a claim a contender won in
+        # between, so the finally must never run after a successful release.
+        released = False
         try:
             passes = 0
             while True:
@@ -209,6 +214,7 @@ async def improve(
                     )
                     break
                 if await release_or_rerun_improve_lock_many(lock_keys, rerun_keys=session_keys):
+                    released = True
                     break
                 logger.info(
                     "improve: rerun requested on %s while running; starting pass %d",
@@ -228,7 +234,8 @@ async def improve(
                 # Nothing ran: record that truthfully, and keep the stamp-less
                 # row out of the bounded scan stamp readers do.
                 operation.set_outcome(OperationOutcome.NOOP)
-            await release_improve_lock_many(lock_keys)
+            if not released:
+                await release_improve_lock_many(lock_keys)
 
     session_ids = [session_id for session_id in (session_ids or []) if session_id]
     _send_improve_telemetry(

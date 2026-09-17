@@ -144,10 +144,13 @@ async def try_acquire_improve_lock_many(keys: Iterable[str]) -> bool:
 
 
 async def release_improve_lock_many(keys: Iterable[str]) -> None:
-    """Release every key claimed by ``try_acquire_improve_lock_many``. Idempotent.
+    """Release every key claimed by ``try_acquire_improve_lock_many``.
 
-    Unconditional: a rerun request still pending on one of the keys is left in
-    place for the next claimant, whose full pass covers it.
+    Not holder-scoped: it drops the keys whoever holds them, so a run must
+    release its claim exactly once — a second release after another run
+    re-claimed the keys would drop THAT run's claim. Unconditional about rerun
+    requests: one still pending on a key is left for the next claimant, whose
+    full pass covers it.
     """
     wanted = [key for key in keys if key]
     if not wanted:
