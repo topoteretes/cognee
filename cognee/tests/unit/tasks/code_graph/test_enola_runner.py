@@ -35,12 +35,27 @@ def test_find_enola_binary_respects_enola_path_override(monkeypatch, tmp_path):
     assert enola_module.find_enola_binary() == str(fake_binary)
 
 
-def test_find_enola_binary_prefers_environment_scripts_dir(monkeypatch, tmp_path):
-    """The enola-cli wheel installs the binary next to the interpreter; that wins over PATH."""
+@pytest.mark.parametrize(
+    ("system", "binary_name"),
+    [("Linux", "enola"), ("Darwin", "enola"), ("Windows", "enola.exe")],
+)
+def test_find_enola_binary_prefers_environment_scripts_dir(
+    monkeypatch, tmp_path, system, binary_name
+):
+    """The enola-cli wheel installs the binary next to the interpreter; that wins over PATH.
+
+    The wheel's console-script shim is ``enola.exe`` on Windows and ``enola``
+    everywhere else, and the lookup builds that name from ``platform.system()``.
+    The platform is driven here rather than inherited from the host so all three
+    names are covered on every runner: a fixture that only matched the host's
+    naming passed on Linux and macOS while failing on Windows for the whole
+    lifetime of the test.
+    """
     monkeypatch.delenv("ENOLA_PATH", raising=False)
+    monkeypatch.setattr(enola_module.platform, "system", lambda: system)
     scripts_dir = tmp_path / "venv-bin"
     scripts_dir.mkdir()
-    wheel_binary = scripts_dir / "enola"
+    wheel_binary = scripts_dir / binary_name
     wheel_binary.write_text("#!/bin/sh\n")
     wheel_binary.chmod(0o755)
     monkeypatch.setattr(enola_module.sysconfig, "get_path", lambda name: str(scripts_dir))

@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 # are explicit here.
 import cognee.modules.integrations.github
 import cognee.modules.integrations.linear
+from cognee.api.exception_telemetry import send_api_exception_telemetry
 from cognee.api.startup_checks import report_default_user_login_posture
 from cognee.api.v1.activity.routers import get_activity_router
 from cognee.api.v1.add.routers import get_add_router
@@ -182,6 +183,22 @@ app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)
 
 
 @app.middleware("http")
+async def _report_unhandled_exceptions(request, call_next):
+    # Exceptions a registered handler claims (CogneeApiError,
+    # RequestValidationError) are turned into responses by Starlette's
+    # ExceptionMiddleware, which sits INSIDE this one -- so they arrive here as
+    # ordinary responses and are not double-counted. What reaches this except
+    # is what no handler claimed: the genuine crashes that become a bare 500,
+    # and the ones most worth seeing. Re-raised untouched so the response is
+    # byte-for-byte what it is today.
+    try:
+        return await call_next(request)
+    except Exception as error:
+        send_api_exception_telemetry(request, error, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        raise
+
+
+@app.middleware("http")
 async def _stamp_operation_origin(request, call_next):
     # Operations executed for this request record origin="api" in
     # pipeline_runs. ContextVars set here propagate into the handler task.
@@ -254,6 +271,8 @@ app.openapi = custom_openapi
 
 @app.exception_handler(RequestValidationError)
 async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
+    send_api_exception_telemetry(request, exc, status.HTTP_400_BAD_REQUEST)
+
     if request.url.path == "/api/v1/auth/login":
         return JSONResponse(
             status_code=400,
@@ -267,14 +286,16 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
 
 
 @app.exception_handler(CogneeApiError)
-async def exception_handler(_: Request, exc: CogneeApiError) -> JSONResponse:
+async def exception_handler(request: Request, exc: CogneeApiError) -> JSONResponse:
     detail = {}
+    improperly_defined = False
 
     if exc.name and exc.message and exc.status_code:
         status_code = exc.status_code
         detail["message"] = f"{exc.message} [{exc.name}]"
     else:
         # Log an error indicating the exception is improperly defined
+        improperly_defined = True
         logger.error("Improperly defined exception: %s", exc)
         # Provide a default error response
         detail["message"] = "An unexpected error occurred."
@@ -282,6 +303,13 @@ async def exception_handler(_: Request, exc: CogneeApiError) -> JSONResponse:
 
     # log the stack trace for easier serverside debugging
     logger.error(format_exc())
+    send_api_exception_telemetry(
+        request,
+        exc,
+        status_code,
+        error_name=exc.name if not improperly_defined else None,
+        improperly_defined=improperly_defined,
+    )
     content = {"detail": detail["message"]}
     # A hint the caller can act on: the exception's own remediation first, else the
     # shared first-run table. Only present when a fix is known, so existing clients
