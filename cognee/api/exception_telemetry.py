@@ -27,20 +27,37 @@ logger = get_logger()
 
 API_EXCEPTION_EVENT = "API Exception Raised"
 
-# Routing has already matched by the time a handler runs, so the route object
-# carries the templated path. Without it the raw URL would embed dataset and
-# document ids, so an unmatched request reports this instead.
 UNMATCHED_ROUTE = "unmatched"
 
 
 def _endpoint(request) -> str:
-    """``"POST /api/v1/datasets/{dataset_id}/graph"`` — templated, never resolved."""
+    """``"POST /api/v1/datasets/{dataset_id}/graph"`` — templated, never resolved.
+
+    Built from the resolved path with every path parameter's value swapped back
+    for its ``{name}``. It is not read off ``request.scope["route"]``: with
+    routers included under a prefix (every cognee router), that object is the
+    router-relative route, so it reports ``/{dataset_id}/graph`` without the
+    ``/api/v1/datasets`` prefix and an empty path for routes declared as
+    ``@router.post("")``. Ids only ever enter a path as path parameters, so
+    substituting them keeps user data out of the event.
+    """
     if request is None:
         return f"UNKNOWN {UNMATCHED_ROUTE}"
-    route = request.scope.get("route") if hasattr(request, "scope") else None
-    path = getattr(route, "path", None) or UNMATCHED_ROUTE
     method = getattr(request, "method", None) or "UNKNOWN"
-    return f"{method} {path}"
+    path = getattr(getattr(request, "url", None), "path", None)
+    if not path:
+        return f"{method} {UNMATCHED_ROUTE}"
+    params = dict(getattr(request, "path_params", None) or {})
+    segments = path.split("/")
+    for name, value in params.items():
+        value = str(value)
+        if value in segments:
+            segments[segments.index(value)] = f"{{{name}}}"
+        else:
+            # A ``{name:path}`` parameter spans several segments; fall back to
+            # replacing the value inside the joined path.
+            segments = "/".join(segments).replace(value, f"{{{name}}}", 1).split("/")
+    return f"{method} {'/'.join(segments)}"
 
 
 def send_api_exception_telemetry(
