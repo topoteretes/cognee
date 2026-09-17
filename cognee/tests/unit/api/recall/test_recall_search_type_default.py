@@ -269,6 +269,47 @@ def test_a_failure_of_the_default_type_is_not_swallowed(retry_client):
     assert retry_client.calls == [SearchType.HYBRID_COMPLETION]
 
 
+def test_no_llm_configured_picks_chunks_before_the_router(retry_client, monkeypatch):
+    """The keyless rung sits ABOVE the router, so a keyless install never routes.
+
+    Nothing can write a completion answer without an LLM, so the default lookup
+    is the vector search over chunks. Keyed on LLM availability, not on the
+    extractor that built the graph.
+    """
+    monkeypatch.setattr(
+        importlib.import_module("cognee.api.v1.recall.recall"),
+        "llm_available",
+        lambda _config: False,
+    )
+    retry_client.script[SearchType.CHUNKS] = _GRAPH_HIT
+
+    # A query the router would otherwise send to CODING_RULES.
+    response = retry_client.client.post(
+        "/api/v1/recall", json={"query": "what are our coding rules?", "scope": "graph"}
+    )
+
+    assert response.status_code == 200, response.text
+    assert retry_client.calls == [SearchType.CHUNKS]
+
+
+def test_no_llm_still_honours_a_pinned_type(retry_client, monkeypatch):
+    """The keyless rung is a default, not a ceiling: an explicit type still wins."""
+    monkeypatch.setattr(
+        importlib.import_module("cognee.api.v1.recall.recall"),
+        "llm_available",
+        lambda _config: False,
+    )
+    retry_client.script[SearchType.RAG_COMPLETION] = _GRAPH_HIT
+
+    response = retry_client.client.post(
+        "/api/v1/recall",
+        json={"query": "anything", "scope": "graph", "searchType": "RAG_COMPLETION"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert retry_client.calls == [SearchType.RAG_COMPLETION]
+
+
 def test_an_empty_graph_surfaces_through_the_fallback(retry_client):
     """SDK-270 made an empty graph raise instead of returning []; the retry
     must surface that rather than swallow it into an empty 200.
