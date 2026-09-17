@@ -131,14 +131,21 @@ def test_the_default_is_inherited_not_abstract():
 def test_in_tree_adapters_override_the_expensive_default(adapter_module):
     """These are the adapters cognee ships; none should be on the full-read path."""
     import inspect
+    import types
 
     # Each adapter's driver is an optional extra, so an uninstalled one is
     # skipped rather than reported as a missing override.
     module = pytest.importorskip(adapter_module)
+    # On Python <= 3.10, isinstance(tuple[int], type) is True (changed in
+    # 3.11), so inspect.isclass lets module-level builtin-generic aliases
+    # like ``tuple[str, str, str, dict[str, Any]]`` through — and issubclass
+    # then raises TypeError on them. Filter the aliases out explicitly.
     adapters = [
         obj
         for _, obj in inspect.getmembers(module, inspect.isclass)
-        if issubclass(obj, GraphDBInterface) and obj is not GraphDBInterface
+        if not isinstance(obj, types.GenericAlias)
+        and issubclass(obj, GraphDBInterface)
+        and obj is not GraphDBInterface
     ]
 
     assert adapters, f"no GraphDBInterface subclass found in {adapter_module}"

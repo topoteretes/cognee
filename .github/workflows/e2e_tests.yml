@@ -132,6 +132,39 @@ jobs:
       - name: Run offline bundled-extension e2e
         run: ./cognee/tests/e2e/bundled_extension/run_offline_e2e.sh
 
+  run-keyless-e2e:
+    name: Keyless e2e — GLiNER + fastembed, no LLM key
+    # Bare runner on purpose: the ci-image carries pre-installed extras and
+    # secrets-shaped config, and this job has to prove the install a new user
+    # gets — core deps plus `cognee[gliner]`, nothing configured.
+    runs-on: ubuntu-22.04
+    env:
+      # The workflow-level skip disables the keyless rerouting as well
+      # (keyless_local_defaults_apply), so it must be off here.
+      COGNEE_SKIP_CONNECTION_TEST: 'false'
+      HF_HOME: ${{ github.workspace }}/.model-cache/huggingface
+      FASTEMBED_CACHE_PATH: ${{ github.workspace }}/.model-cache/fastembed
+    steps:
+      - name: Check out
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.12.x'
+          base-extras: ''
+          extra-dependencies: gliner
+
+      # No LLM_API_KEY, no EMBEDDING_*: GRAPH_EXTRACTOR=auto must resolve to
+      # GLiNER and embeddings to fastembed, and add -> cognify -> search ->
+      # visualize -> remember -> recall must all complete without a provider
+      # call. The script scrubs any provider variable that leaks in.
+      # TODO: expand this job — cache the model downloads (~800 MB per run),
+      # add the session-scoped remember/improve path (SDK-691) and the CLI /
+      # REST default search types once they are keyless-aware (SDK-690).
+      - name: Run keyless e2e
+        run: uv run python ./cognee/tests/e2e/keyless/keyless_ingest_check.py
+
   run-telemetry-test:
     name: Run Telemetry Test
     runs-on: ubuntu-22.04

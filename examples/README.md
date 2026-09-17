@@ -37,7 +37,7 @@ features.** See [Contributing](#-contributing-a-new-example) for the precise cat
 | [`recall_core.py`](guides/recall_core.py) | `recall` semantics and parameters |
 | [`improve_quickstart.py`](guides/improve_quickstart.py) | Graph enrichment before/after `improve()` |
 | [`agent_memory_quickstart.py`](guides/agent_memory_quickstart.py) | Wrap an LLM agent with `@cognee.agent_memory` |
-| [`no_llm_remember_recall.py`](guides/no_llm_remember_recall.py) | `remember → recall` with no LLM key at all: GLiNER graph + `CHUNKS` recall (needs `cognee[gliner,fastembed]`) |
+| [`no_llm_remember_recall.py`](guides/no_llm_remember_recall.py) | `remember → recall` with no LLM key at all: GLiNER graph + `CHUNKS` recall (needs `cognee[gliner]`) |
 
 ### Sessions & self-improvement
 | Script | Demonstrates |
