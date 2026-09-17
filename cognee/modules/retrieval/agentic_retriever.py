@@ -84,6 +84,11 @@ class AgenticRetriever(GraphCompletionRetriever):
     # so a single rendered prompt would misrepresent what this retriever sends.
     supports_prompt_preview = False
 
+    # Skills and tools can answer without any memory context (the formatted
+    # context here is never empty anyway — empty memory renders as "(empty)"),
+    # so the graph-completion family's empty-context skip must not apply.
+    skip_completion_on_empty_context = False
+
     def __init__(
         self,
         skills: Sequence[str | Skill] | None = None,

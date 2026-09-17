@@ -509,7 +509,8 @@ async def recall(
             "top_k": top_k,
             "search_type": str(query_type.value) if query_type else "auto",
             "session_id": session_id or "",
-            "datasets": ",".join(datasets) if datasets else "",
+            # A list, not a joined string: send_telemetry fingerprints each name.
+            "datasets": list(datasets) if datasets else [],
             "dataset_ids": ",".join(str(dataset_id) for dataset_id in dataset_ids or []),
             "include_references": include_references,
             "cognee_version": cognee_version,
@@ -641,7 +642,7 @@ async def recall(
                     # No usable LLM is configured, so nothing can write a
                     # completion answer; the default lookup is the vector
                     # search over chunks. Keyed on LLM availability, not on the
-                    # extractor that built the graph — a gliner-built graph
+                    # extractor that built the graph — a gliner_demo-built graph
                     # with a key present answers completions fine. An explicit
                     # query_type still selects any search type.
                     local_query_type = SearchType.CHUNKS
@@ -925,7 +926,9 @@ async def recall(
                 tagged: list[RecallResponse] = []
                 for payload in code_results:
                     completion = getattr(payload, "completion", None)
-                    if isinstance(completion, dict) and completion.get("seed_not_found"):
+                    if getattr(payload, "error", None) or (
+                        isinstance(completion, dict) and completion.get("seed_not_found")
+                    ):
                         # Multi-dataset searches soften per-dataset seed misses
                         # into marker payloads; they carry no facts, so drop
                         # them here for the same reason as the except above.
