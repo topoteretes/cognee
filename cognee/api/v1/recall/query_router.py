@@ -33,9 +33,10 @@ class RouteDecision:
     rule: str
 
 
-# (rule name, pattern, search type). Shape rules (what the input looks
-# like) come first, intent rules (what it says) after. No two rules may match the same query
-# (test_no_query_matches_two_rules), so the order is cosmetic, not a tiebreak.
+# (rule name, pattern, search type). Shape rules (what the input looks like) come
+# first and win: a quoted string or a Cypher statement is handled as what it is,
+# even when its text also reads as intent — `"coding rules"` is a lexical search.
+# No query in the golden table depends on the order (test_no_query_matches_two_rules).
 _RULES: tuple[tuple[str, re.Pattern, SearchType], ...] = (
     # Case-sensitive, and the clause keyword must open a node pattern or the body
     # must carry relationship syntax. A leading clause word on its own is not

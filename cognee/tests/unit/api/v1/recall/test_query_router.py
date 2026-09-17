@@ -101,10 +101,20 @@ def test_rules_only_target_routable_types():
 
 
 def test_no_query_matches_two_rules():
-    """Table order must not decide any routing outcome."""
+    """No query in the golden table depends on table order."""
     for query, _ in GOLDEN:
         matched = [name for name, pattern, _ in _RULES if pattern.search(query.strip())]
         assert len(matched) <= 1, f"{query!r} matches {matched}; table order decides it"
+
+
+def test_shape_rules_win_over_intent_rules():
+    """The one deliberate precedence, which the golden table cannot state.
+
+    A quoted string whose text also reads as intent matches two rules, and the
+    shape rule is printed first so it wins. Reordering `_RULES` would silently
+    turn this into a rules listing.
+    """
+    assert route_query('"coding rules"').rule == "quoted_phrase"
 
 
 class TestRouteDecision:
