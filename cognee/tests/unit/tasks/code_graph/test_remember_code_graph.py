@@ -13,6 +13,7 @@ remember_module = importlib.import_module("cognee.api.v1.remember.remember")
 resolve_module = importlib.import_module("cognee.tasks.code_graph.resolve_repo")
 pipeline_module = importlib.import_module("cognee.modules.run_custom_pipeline")
 migrations_module = importlib.import_module("cognee.modules.migrations.startup")
+cognify_config_module = importlib.import_module("cognee.modules.cognify.config")
 
 
 @pytest.fixture
@@ -96,7 +97,10 @@ async def test_non_string_data_is_rejected(code_remember_env):
 
 
 @pytest.mark.asyncio
-async def test_index_vectors_without_code_content_type_is_rejected(code_remember_env):
+async def test_index_vectors_without_code_content_type_is_rejected(code_remember_env, monkeypatch):
+    # A text remember() runs the keyless extractor gate before argument
+    # validation; disable the preflight so this test checks the argument only.
+    monkeypatch.setenv("COGNEE_SKIP_CONNECTION_TEST", "true")
     with pytest.raises(ValueError, match="index_vectors"):
         await remember("some text", index_vectors=True)
 
@@ -208,3 +212,24 @@ async def test_blocking_ignores_background_machinery(code_remember_env):
 
     assert result._task is None
     assert result.done
+
+
+@pytest.mark.asyncio
+async def test_code_route_never_resolves_the_graph_extractor(code_remember_env, monkeypatch):
+    """A keyless install without gliner2 must still build code graphs.
+
+    The code route runs enola only, so the extractor gate that a keyless
+    text remember() hits (KeylessExtractorNotInstalledError) must not run.
+    """
+
+    def _gate_would_fail(*_args, **_kwargs):
+        raise cognify_config_module.KeylessExtractorNotInstalledError()
+
+    monkeypatch.setattr(cognify_config_module, "resolve_extractor", _gate_would_fail)
+
+    result = await remember(
+        str(code_remember_env["repo_dir"]), dataset_name="my_code", content_type="code"
+    )
+
+    assert result.status == "completed"
+    code_remember_env["pipeline"].assert_awaited_once()

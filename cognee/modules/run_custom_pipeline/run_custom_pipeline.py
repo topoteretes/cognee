@@ -60,7 +60,7 @@ async def run_custom_pipeline(
                           or embedding calls (e.g. the deterministic code graph pipeline).
                           Pipelines that skip only the LLM probe need no flag: when every
                           task in the list declares needs_llm=False (e.g. the GLiNER list
-                          from get_gliner_tasks), run_pipeline derives it and probes only
+                          from get_gliner_demo_tasks), run_pipeline derives it and probes only
                           embeddings.
         pipeline_name: Name recorded on the pipeline run. Graph-writing
                           pipelines should keep a name listed in

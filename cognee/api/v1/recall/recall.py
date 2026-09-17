@@ -641,7 +641,7 @@ async def recall(
                     # No usable LLM is configured, so nothing can write a
                     # completion answer; the default lookup is the vector
                     # search over chunks. Keyed on LLM availability, not on the
-                    # extractor that built the graph — a gliner-built graph
+                    # extractor that built the graph — a gliner_demo-built graph
                     # with a key present answers completions fine. An explicit
                     # query_type still selects any search type.
                     local_query_type = SearchType.CHUNKS

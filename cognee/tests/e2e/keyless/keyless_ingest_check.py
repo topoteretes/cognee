@@ -1,7 +1,7 @@
 """Keyless end to end: no LLM key, no embedding settings, real local models.
 
 Proves the default routing a fresh install gets with nothing configured:
-``GRAPH_EXTRACTOR=auto`` resolves to GLiNER, embeddings resolve to fastembed,
+``GRAPH_EXTRACTOR=auto`` resolves to the GLiNER demo, embeddings resolve to fastembed,
 and ``add -> cognify -> search(CHUNKS) -> visualize`` and ``remember`` all
 complete without a single provider call. Needs ``cognee[gliner]``; models
 download on first run (GLiNER ~750 MB, bge-small ~67 MB).
@@ -64,7 +64,9 @@ async def main() -> None:
 
     assert not get_llm_config().llm_api_key, "an LLM key leaked into the environment"
     extractor = resolve_extractor(None, get_cognify_config())
-    assert extractor == "gliner", f"expected the gliner extractor without a key, got {extractor}"
+    assert extractor == "gliner_demo", (
+        f"expected the gliner_demo extractor without a key, got {extractor}"
+    )
     engine = get_embedding_engine()
     assert type(engine).__name__ == "FastembedEmbeddingEngine", type(engine).__name__
     print(f"routing: extractor={extractor} embeddings={engine.model} ({engine.get_vector_size()}d)")
