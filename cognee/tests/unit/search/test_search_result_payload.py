@@ -47,15 +47,18 @@ def test_search_result_payload_only_context():
     assert payload.result == "Some context here"
 
 
-def test_search_result_payload_only_context_returns_the_prompt_when_one_was_built():
-    """The full LLM input replaces the bare context as the result; the context stays."""
+def test_search_result_payload_only_context_returns_the_user_prompt_when_one_was_built():
+    """The user prompt replaces the bare context as the result; the system prompt rides on
+    its own field and the context stays."""
     payload = SearchResultPayload(
         context="Some context here",
         only_context=True,
-        prompt="SYSTEM:\nhistory\nTASK:answer\n\nUSER:\nThe question is: `why?` ... Some context here",
+        user_prompt="The question is: `why?` ... Some context here",
+        system_prompt="history\nTASK:answer",
         search_type=SearchType.GRAPH_COMPLETION,
     )
-    assert payload.result == payload.prompt
+    assert payload.result == payload.user_prompt
+    assert payload.system_prompt == "history\nTASK:answer"
     assert payload.context == "Some context here"
 
 
@@ -64,7 +67,8 @@ def test_search_result_payload_only_context_without_a_prompt_returns_the_context
     payload = SearchResultPayload(
         context=["chunk-a", "chunk-b"], only_context=True, search_type=SearchType.CHUNKS
     )
-    assert payload.prompt is None
+    assert payload.user_prompt is None
+    assert payload.system_prompt is None
     assert payload.result == ["chunk-a", "chunk-b"]
 
 

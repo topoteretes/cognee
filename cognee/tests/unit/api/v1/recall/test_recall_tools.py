@@ -309,18 +309,16 @@ async def test_only_context_graph_hit_is_the_prompt_and_an_empty_retrieval_still
     from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
     from cognee.modules.search.types import SearchType
 
-    prompt = (
-        "=== SYSTEM PROMPT ===\nAnswer briefly.\n\n"
-        "=== USER PROMPT ===\nThe question is: `q` ... node1 -- rel -- node2"
-    )
+    user_prompt = "The question is: `q` ... node1 -- rel -- node2"
     graph_hit = SearchResultPayload(
         search_type=SearchType.GRAPH_COMPLETION,
         only_context=True,
         context="node1 -- rel -- node2",
-        prompt=prompt,
+        user_prompt=user_prompt,
+        system_prompt="Answer briefly.",
     )
     graph_miss = SearchResultPayload(
-        search_type=SearchType.GRAPH_COMPLETION, only_context=True, context="", prompt=None
+        search_type=SearchType.GRAPH_COMPLETION, only_context=True, context=""
     )
 
     async def with_hit(**kwargs):
@@ -347,8 +345,8 @@ async def test_only_context_graph_hit_is_the_prompt_and_an_empty_retrieval_still
     )
     assert tool_calls == []
     assert [entry.source for entry in results] == ["graph"]
-    assert results[0].text == prompt
-    assert results[0].raw["context"] == "node1 -- rel -- node2"
+    assert results[0].text == user_prompt
+    assert results[0].system_prompt == "Answer briefly."
 
     monkeypatch.setattr(search_methods, "authorized_search", with_miss)
     results = await api_recall_mod.recall(

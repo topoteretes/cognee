@@ -412,7 +412,7 @@ async def test_retrieve_memory_context_passes_custom_memory_system_prompt(monkey
 @pytest.mark.asyncio
 async def test_retrieve_memory_context_can_request_context_only_search(monkeypatch):
     """memory_only_context reads the bare context from the verbose payload: an only_context
-    search result is the full LLM input, cognee's answer instructions included, and that
+    search result is the user prompt, cognee's own question framing included, and that
     must never be pasted into the agent's prompt as memory."""
     search_mock = AsyncMock(
         return_value=[
@@ -420,7 +420,8 @@ async def test_retrieve_memory_context_can_request_context_only_search(monkeypat
                 "text_result": None,
                 "context_result": "Relevant memory",
                 "objects_result": [],
-                "prompt_result": "SYSTEM:\nTASK:You are cognee\n\nUSER:\nRelevant memory",
+                "user_prompt_result": "The question is: `Find memory` ... Relevant memory",
+                "system_prompt_result": "TASK:You are cognee",
                 "evidence": [],
             }
         ]

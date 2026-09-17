@@ -152,16 +152,16 @@ def test_only_context_without_a_prompt_yields_one_item_per_context_entry():
     assert [item.text for item in items] == ["triplet-a", "triplet-b"]
 
 
-def test_only_context_with_a_prompt_yields_one_item_carrying_the_full_llm_input():
-    """The prompt is a single artifact, so it must not be split per context entry."""
-    prompt = (
-        "SYSTEM:\nhistory\nTASK:answer\n\n"
-        "USER:\nThe question is: `why?` ... triplet-a\n---\ntriplet-b"
-    )
+def test_only_context_with_a_prompt_yields_one_item_with_user_and_system_prompts():
+    """The LLM input is a single artifact, so it must not be split per context entry:
+    the user prompt is the item's text, the system prompt its own field."""
+    user_prompt = "The question is: `why?` ... triplet-a\n---\ntriplet-b"
+    system_prompt = "history\nTASK:answer"
     payload = SearchResultPayload(
         context=["triplet-a", "triplet-b"],
         only_context=True,
-        prompt=prompt,
+        user_prompt=user_prompt,
+        system_prompt=system_prompt,
         search_type=SearchType.GRAPH_COMPLETION,
     )
 
@@ -169,10 +169,14 @@ def test_only_context_with_a_prompt_yields_one_item_carrying_the_full_llm_input(
 
     assert len(items) == 1
     assert items[0].kind == SearchResultKind.GRAPH_COMPLETION
-    assert items[0].text == prompt
-    # The bare context rides along: /api/v1/recall has no verbose shape, so this is how
-    # an HTTP caller takes the context without cognee's answer instructions.
-    assert items[0].raw == {"value": prompt, "context": ["triplet-a", "triplet-b"]}
+    assert items[0].text == user_prompt
+    assert items[0].system_prompt == system_prompt
+    assert items[0].raw == {"value": user_prompt}
+
+
+def test_system_prompt_is_unset_outside_only_context():
+    payload = SearchResultPayload(completion="an answer", search_type=SearchType.GRAPH_COMPLETION)
+    assert normalize_search_payload(payload)[0].system_prompt is None
 
 
 def test_only_context_with_empty_context_and_no_prompt_yields_no_items():

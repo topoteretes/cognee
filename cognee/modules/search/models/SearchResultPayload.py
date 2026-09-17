@@ -28,11 +28,14 @@ class SearchResultPayload(BaseModel):
     search_type: SearchType
     only_context: bool = False
 
-    # The full LLM input an only_context call stands in for: the system prompt (session
-    # guidance, conversation history, task template) and the rendered user prompt, as one
-    # string. Set only when only_context is on, the retriever sends one templated prompt,
-    # and retrieval found something; otherwise None and `result` falls back to `context`.
-    prompt: str | None = None
+    # The two messages an only_context call stands in for, kept apart as the LLM receives
+    # them: user_prompt is the question and the retrieval context rendered through the
+    # retriever's template; system_prompt is the session layer (guidance, conversation
+    # history) plus the retriever's task instructions. Set only when only_context is on,
+    # the retriever sends one templated prompt, and retrieval found something; otherwise
+    # both are None and `result` falls back to `context`.
+    user_prompt: str | None = None
+    system_prompt: str | None = None
 
     dataset_name: str | None = None
     dataset_id: UUID | None = None
@@ -86,11 +89,12 @@ class SearchResultPayload(BaseModel):
     def result(self) -> Any:
         """Function used to determine search_result for users request.
 
-        With only_context, return the full LLM input when one was built, else the bare
-        context; otherwise return the completion if it exists, else the result_object.
+        With only_context, return the user prompt when one was built (the system prompt
+        travels separately, see ``system_prompt``), else the bare context; otherwise
+        return the completion if it exists, else the result_object.
         """
         if self.only_context:
-            return self.prompt if self.prompt is not None else self.context
+            return self.user_prompt if self.user_prompt is not None else self.context
         elif self.completion:
             return self.completion
         elif self.context:

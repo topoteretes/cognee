@@ -279,9 +279,8 @@ def _only_context_patches(retriever):
     )
 
 
-FULL_PROMPT = (
-    "SYSTEM:\nhistory\nTASK:answer\n\nUSER:\nThe question is: `why?` ... node1 -- rel -- node2"
-)
+# The (user_prompt, system_prompt) pair the builder hands back.
+FULL_PROMPT = ("The question is: `why?` ... node1 -- rel -- node2", "history\nTASK:answer")
 
 
 @pytest.mark.asyncio
@@ -320,8 +319,9 @@ async def test_only_context_result_is_the_full_llm_input_built_from_the_retrieve
     assert result.only_context is True
     assert result.completion is None
     assert result.context == "node1 -- rel -- node2"
-    assert result.prompt == FULL_PROMPT
-    assert result.result == FULL_PROMPT
+    assert result.user_prompt == FULL_PROMPT[0]
+    assert result.system_prompt == FULL_PROMPT[1]
+    assert result.result == FULL_PROMPT[0]
 
 
 @pytest.mark.asyncio
@@ -341,7 +341,8 @@ async def test_only_context_falls_back_to_the_bare_context_when_no_prompt_is_bui
     ):
         result = await get_retriever_output(SearchType.GRAPH_COMPLETION, "why?", only_context=True)
 
-    assert result.prompt is None
+    assert result.user_prompt is None
+    assert result.system_prompt is None
     assert result.result == "node1 -- rel -- node2"
 
 
@@ -362,7 +363,8 @@ async def test_no_prompt_is_built_when_only_context_is_off():
         result = await get_retriever_output(SearchType.CODE, "Checkout")
 
     builder.assert_not_awaited()
-    assert result.prompt is None
+    assert result.user_prompt is None
+    assert result.system_prompt is None
     assert result.completion == {"operation": "query_facts", "facts": []}
 
 

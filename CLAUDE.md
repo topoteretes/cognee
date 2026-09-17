@@ -433,23 +433,25 @@ neither mode analyzes the turn.
 #### only_context
 
 `only_context=True` returns what the LLM would have received instead of its answer. For
-completion search types that is **one string**, the full LLM input: the system prompt
-(session guidance block, conversation history, then `TASK:` and the system template)
-followed by the rendered user prompt (the question and the retrieval context through the
-retriever's user template), under fenced `=== SYSTEM PROMPT ===` / `=== USER PROMPT ===`
-lines so a caller can still split them. Content passes through verbatim, so the string is
-a rendering, not a parseable protocol: a marker line inside retrieved text is not escaped. It is built by the same code the real completion uses (`build_session_prompt` in
+completion search types that is the two messages a completion sends, kept apart: the
+**user prompt** (the question and the retrieval context rendered through the retriever's
+user template) and the **system prompt** (session guidance block, conversation history,
+then `TASK:` and the system template). `search()` returns the user prompt as the result
+and, with `verbose=True`, carries both as `user_prompt_result` / `system_prompt_result`; a
+`recall()` item has the user prompt in `text` and the system prompt in `system_prompt`.
+Both are built by the same code the real completion uses (`build_session_prompt` in
 read-only mode plus `build_completion_prompts`, see
-`cognee/modules/retrieval/only_context_prompt.py`), so it cannot drift from what
+`cognee/modules/retrieval/only_context_prompt.py`), so they cannot drift from what
 `generate_completion` sends.
 
 ```python
-prompt = await cognee.recall(
+items = await cognee.recall(
     "why did the migration stall?",
     query_type=SearchType.GRAPH_COMPLETION,  # pin the graph lane — with a bare
     session_id="s1",  # session_id a session hit would
     only_context=True,  # short-circuit it (see recall vs search)
 )
+user_prompt, system_prompt = items[0].text, items[0].system_prompt
 ```
 
 What it does and does not do: no LLM completion, no turn-analysis call, nothing written
@@ -460,30 +462,26 @@ carries the durable preference block, exactly as the real sessionless completion
 Retrievers whose *retrieval* stage calls an LLM (`GRAPH_COMPLETION_COT`,
 `GRAPH_COMPLETION_DECOMPOSITION`, `GRAPH_COMPLETION_CONTEXT_EXTENSION`, `TEMPORAL`'s time
 extraction, `GRAPH_SUMMARY_COMPLETION`'s summaries) still make those calls under
-`only_context`, as they always have; for them the string is the final prompt pair over the
+`only_context`, as they always have; for them the pair is the final prompts over the
 final context.
 
-Where the string is *not* built and the bare retrieval context comes back instead: the
+Where the pair is *not* built and the bare retrieval context comes back instead: the
 non-generative types (`CHUNKS`, `SUMMARIES`, `CODE`, `SKILLS`, …) have no prompt
 template; `CYPHER` and `AGENTIC_COMPLETION` opt out via `supports_prompt_preview = False`
 (Cypher never prompts; the agentic loop answers through other templates); and an empty
 retrieval returns the empty context, never a prompt wrapped around nothing, so "nothing
 found" stays detectable — for `recall()` it yields zero items and the `on_empty` tools
 fallback still fires. The bare context stays reachable for callers that only want that:
-`search(verbose=True)` carries the string as `prompt_result` next to `context_result`, and
-a `recall()` item carries it under `raw["context"]` next to the string in `text` (there
-is no verbose shape on `/api/v1/recall`, so this is the channel for HTTP consumers such
-as the Claude Code plugin). `@agent_memory(memory_only_context=True)` reads
-`context_result`, so an agent's memory block never contains cognee's own answer
-instructions. Consumers that truncate the string to a budget cut the retrieved content
-first, since the system prompt comes first; take the bare context instead.
+`search(verbose=True)` carries it as `context_result` next to the two prompts.
+`@agent_memory(memory_only_context=True)` reads `context_result`, so an agent's memory
+block never contains cognee's own question framing or answer instructions.
 
 Caveats. `POST /api/v1/search` accepts `session_id`; without one the session layer is
-the default session's. And the string is knowingly unfaithful in one place: a real
+the default session's. And the pair is knowingly unfaithful in one place: a real
 sequential turn first rewrites the question (`effective_query`), and that rewrite fills
 `{{ question }}`, drives history selection, and ranks the guidance block — concurrent
 mode also merges a second retrieval lane. Producing the rewrite is an LLM call, so the
-raw query is used for all of them: the string is the prompt for the context actually
+raw query is used for all of them: the pair is the prompts for the context actually
 retrieved, not a replay of a full turn.
 
 ### Memory & Performance Tuning Flags

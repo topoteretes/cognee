@@ -156,18 +156,15 @@ def normalize_search_payload(payload: SearchResultPayload) -> list[SearchResultI
     """Normalize one dataset's retriever payload into SearchResultItems."""
     kind = _KIND_BY_SEARCH_TYPE.get(payload.search_type, SearchResultKind.UNKNOWN)
 
-    if payload.only_context and payload.prompt:
-        # One item, not one per context entry: the full LLM input is a single artifact.
-        # It is only ever set when retrieval found something, so the item count keeps
-        # meaning "did retrieval find anything" — recall's on_empty tools fallback and
-        # the session short-circuit both read it.
-        #
-        # The bare retrieval context rides along under raw["context"]. recall() has no
-        # verbose shape, so this is the only way an HTTP caller of /api/v1/recall (the
-        # Claude Code plugin, for one) can take the context without cognee's own answer
-        # instructions — the same need @agent_memory meets through search(verbose=True).
-        item = _build_item(payload.prompt, payload, kind)
-        return [item.model_copy(update={"raw": {**item.raw, "context": payload.context}})]
+    if payload.only_context and payload.user_prompt:
+        # One item, not one per context entry: the LLM input is a single artifact. Its
+        # text is the user prompt; the system prompt rides on its own field, as the LLM
+        # receives the two as separate messages. The pair is only ever set when
+        # retrieval found something, so the item count keeps meaning "did retrieval
+        # find anything" — recall's on_empty tools fallback and the session
+        # short-circuit both read it.
+        item = _build_item(payload.user_prompt, payload, kind)
+        return [item.model_copy(update={"system_prompt": payload.system_prompt})]
 
     if payload.only_context:
         # Retrievers report a miss as None, "" or []; a bare "" must not become an item,

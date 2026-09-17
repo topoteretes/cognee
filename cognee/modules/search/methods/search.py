@@ -110,10 +110,11 @@ async def search(
         node_name: Restrict retrieval to these node names (e.g. node-set tags),
             combined with ``node_name_filter_operator`` (``"OR"``/``"AND"``).
         only_context: Return what the LLM would have received instead of its answer.
-            For completion types that is one string: the system prompt (session
-            guidance, conversation history, task template) and the rendered user
-            prompt (question plus retrieval context). Retrieval-only types return
-            their context as always, and an empty retrieval returns the bare
+            For completion types the result is the user prompt (question plus
+            retrieval context through the retriever's template); the matching
+            system prompt (session guidance, conversation history, task template)
+            is ``system_prompt_result`` under ``verbose=True``. Retrieval-only types
+            return their context as always, and an empty retrieval returns the bare
             (empty) context so "nothing found" stays detectable.
         session_id: Session whose history is added to the completion context and
             that receives the QA entry. Does not search the session cache; that is
@@ -650,8 +651,9 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                 search_result_dict["text_result"] = search_result.completion
                 search_result_dict["context_result"] = search_result.context
                 search_result_dict["objects_result"] = search_result.result_object
-                # The full LLM input an only_context call built; None otherwise.
-                search_result_dict["prompt_result"] = search_result.prompt
+                # The two messages an only_context call built; None otherwise.
+                search_result_dict["user_prompt_result"] = search_result.user_prompt
+                search_result_dict["system_prompt_result"] = search_result.system_prompt
                 search_result_dict["evidence"] = [
                     reference.model_dump(mode="json") for reference in search_result.evidence
                 ]
@@ -675,7 +677,8 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                     "text_result": search_result.completion,
                     "context_result": search_result.context,
                     "objects_result": search_result.result_object,
-                    "prompt_result": search_result.prompt,
+                    "user_prompt_result": search_result.user_prompt,
+                    "system_prompt_result": search_result.system_prompt,
                     "evidence": [
                         reference.model_dump(mode="json") for reference in search_result.evidence
                     ],

@@ -68,10 +68,11 @@ class RecallPayloadDTO(InDTO):
         default=False,
         description=(
             "Return what the LLM would have received instead of its answer. For"
-            " completion search types that is one string: the system prompt (session"
-            " guidance, conversation history, task template) and the rendered user"
-            " prompt (question plus retrieval context). Retrieval-only types return"
-            " their context. No LLM call is made and nothing is written to the session."
+            " completion search types each item's text is the user prompt (question"
+            " plus retrieval context through the retriever's template) and its"
+            " system_prompt field carries the matching system prompt (session guidance,"
+            " conversation history, task template). Retrieval-only types return their"
+            " context. No LLM call is made and nothing is written to the session."
         ),
     )
     verbose: bool = Field(default=False)
@@ -225,9 +226,10 @@ def get_recall_router() -> APIRouter:
         - **node_name** (Optional[List[str]]): Filter to specific node sets
         - **top_k** (Optional[int]): Maximum results (default: 15)
         - **only_context** (bool): Return what the LLM would have received instead of
-          its answer — for completion types one string holding the system prompt
-          (session guidance, conversation history, task template) and the rendered
-          user prompt; retrieval-only types return their context
+          its answer — for completion types each item's text is the user prompt
+          (question plus retrieval context) and its system_prompt field the matching
+          system prompt (session guidance, conversation history, task template);
+          retrieval-only types return their context
         - **verbose** (bool): Verbose output
         - **include_references** (bool): Include source/provenance references in
           completion results (default: true)

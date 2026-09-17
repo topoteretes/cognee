@@ -1,5 +1,5 @@
-"""POST /api/v1/search and /recall with only_context: one string, and the retired
-``context_format`` field is ignored rather than rejected (COG-6127).
+"""POST /api/v1/search and /recall with only_context: the user prompt as the result, and
+the retired ``context_format`` field is ignored rather than rejected (COG-6127).
 """
 
 import importlib

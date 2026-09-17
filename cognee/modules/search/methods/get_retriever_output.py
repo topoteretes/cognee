@@ -91,14 +91,15 @@ async def get_retriever_output(
         search_type_for_spans=effective_query_type,
     )
 
-    prompt = None
+    prompts = None
     if only_context:
-        # The full LLM input the completion would have received, or None when the
-        # retriever sends no single templated prompt (bare context is returned then).
-        # The caller's session_id is passed explicitly: non-generative retrievers do not
-        # keep one, and the string must describe the session that was asked about.
-        # shared_history is the fan-out's single conversation-history read.
-        prompt = await build_only_context_prompt(
+        # The (user_prompt, system_prompt) pair the completion would have received, or
+        # None when the retriever sends no single templated prompt (bare context is
+        # returned then). The caller's session_id is passed explicitly: non-generative
+        # retrievers do not keep one, and the system prompt must describe the session
+        # that was asked about. shared_history is the fan-out's single
+        # conversation-history read.
+        prompts = await build_only_context_prompt(
             retriever_instance,
             query=query_text,
             context=context,
@@ -126,6 +127,7 @@ async def get_retriever_output(
         evidence=evidence,
         search_type=effective_query_type,
         only_context=only_context,
-        prompt=prompt,
+        user_prompt=prompts[0] if prompts else None,
+        system_prompt=prompts[1] if prompts else None,
         **_dataset_fields(kwargs),
     )
