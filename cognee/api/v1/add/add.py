@@ -18,9 +18,6 @@ from cognee.modules.observability import (
 )
 from cognee.modules.pipelines import Task, run_pipeline
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
-from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
-    reset_dataset_pipeline_run_status,
-)
 from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
     resolve_authorized_user_dataset,
 )
@@ -210,12 +207,12 @@ async def add(
         ```
 
     Environment Variables:
-        Required:
-        - LLM_API_KEY: API key for your LLM provider (OpenAI, Anthropic, etc.)
+        - LLM_API_KEY: API key for your LLM provider (OpenAI, Anthropic, etc.). When
+          unset, ingestion runs on local models (GLiNER extraction, fastembed embeddings).
 
         Optional:
         - LLM_PROVIDER: "openai" (default), "anthropic", "gemini", "ollama", "mistral", "bedrock"
-        - LLM_MODEL: Model name (default: "gpt-5-mini")
+        - LLM_MODEL: Model name (default: "openai/gpt-5.6-luna")
         - DEFAULT_USER_EMAIL: Custom default user email
         - DEFAULT_USER_PASSWORD: Custom default user password
         - VECTOR_DB_PROVIDER: "lancedb" (default), "pgvector"
@@ -316,12 +313,6 @@ async def add(
             orphan_cleanup = None
         data = await materialize_stream_for_background(data)
 
-    await reset_dataset_pipeline_run_status(
-        authorized_dataset.id,
-        user,
-        pipeline_names=["add_pipeline", "cognify_pipeline"],
-    )
-
     pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
 
     result = await pipeline_executor_func(
@@ -333,7 +324,6 @@ async def add(
         pipeline_name="add_pipeline",
         vector_db_config=vector_db_config,
         graph_db_config=graph_db_config,
-        use_pipeline_cache=False,
         incremental_loading=incremental_loading,
         data_per_batch=data_per_batch,
         llm_config=llm_config,

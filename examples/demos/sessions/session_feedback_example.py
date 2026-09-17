@@ -1,3 +1,14 @@
+"""Tour the session feedback API: get_session (full and last_n), add_feedback and delete_feedback.
+
+Questions are recalled in a named session and in default_session, feedback is attached to the
+latest answers, and one entry's feedback is retracted; each step prints the API's return value
+so the before/after state is visible.
+
+Requires: LLM_API_KEY; the script defaults CACHING=true and CACHE_BACKEND=redis, so a running
+Redis is needed unless CACHE_BACKEND is set to another backend first.
+Run: uv run python examples/demos/sessions/session_feedback_example.py
+"""
+
 import asyncio
 import os
 
