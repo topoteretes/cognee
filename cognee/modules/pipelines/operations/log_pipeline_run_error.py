@@ -24,17 +24,15 @@ async def log_pipeline_run_error(
     tokens_out: int | None = None,
     data_info: Any | None = None,
     origin: str | None = None,
-    parent_operation_id: UUID | None = None,
 ):
     """Append the ERRORED row for a run.
 
-    ``data_info``, ``origin`` and ``parent_operation_id`` default to what this
-    call's own context provides (a summary of ``data``, the calling process's
-    origin, the enclosing run). A writer closing a run on behalf of a process
-    that is gone — startup recovery — passes the STARTED row's own values for
-    all three instead, so the ERRORED row describes the run that died, not the
-    process closing it: a dataset abandoned by an "mcp" run still reads "mcp"
-    on its closing row, not "background".
+    ``data_info`` and ``origin`` default to what this call's own context
+    provides (a summary of ``data``, the calling process's origin). A writer
+    closing a run on behalf of a process that is gone — startup recovery —
+    passes the STARTED row's own origin instead, so the ERRORED row describes
+    the run that died, not the process closing it: a dataset abandoned by an
+    "mcp" run still reads "mcp" on its closing row, not "background".
     """
     # ``data_info`` is for a caller that already holds a summarized value: the
     # startup recovery closes a run whose STARTED row carries one, and
@@ -66,13 +64,9 @@ async def log_pipeline_run_error(
         tokens_in=tokens_in,
         tokens_out=tokens_out,
         origin=origin if origin is not None else get_operation_origin(),
-        parent_operation_id=(
-            parent_operation_id
-            if parent_operation_id is not None
-            # This writer runs inside the pipeline's own parent_run_scope —
-            # exclude it so the row parents to the next enclosing run.
-            else get_parent_run_id(excluding=pipeline_run_id)
-        ),
+        # This writer runs inside the pipeline's own parent_run_scope —
+        # exclude it so the row parents to the next enclosing run.
+        parent_operation_id=get_parent_run_id(excluding=pipeline_run_id),
     )
 
     db_engine = get_relational_engine()

@@ -130,15 +130,6 @@ async def lifespan(app: FastAPI):
     from cognee.modules.users.methods import get_default_user
 
     await get_default_user()
-    from cognee.modules.pipelines.recovery import recover_abandoned_pipeline_runs
-
-    # Recovery of runs a previous process abandoned runs in the background, so
-    # a boot that finds work to do does not hold the port closed while it does
-    # it. Each dataset is recovered under that dataset's lock, so operations
-    # arriving for a dataset queue behind its recovery instead of racing it
-    # (in this process: the lock is asyncio, see infrastructure/locks).
-    recovery_task = asyncio.create_task(recover_abandoned_pipeline_runs())
-    recovery_task.add_done_callback(_report_recovery_outcome)
 
     from cognee.modules.users.authentication.get_auth_secret import resolve_auth_secrets
 
@@ -150,6 +141,23 @@ async def lifespan(app: FastAPI):
     from cognee.modules.improve import get_improve_config
 
     get_improve_config()
+
+    from cognee.modules.pipelines.recovery import recover_abandoned_pipeline_runs
+
+    # Recovery of runs a previous process abandoned runs in the background, so
+    # a boot that finds work to do does not hold the port closed while it does
+    # it. Each dataset is recovered under that dataset's lock, so operations
+    # arriving for a dataset queue behind its recovery instead of racing it
+    # (in this process: the lock is asyncio, see infrastructure/locks).
+    #
+    # Created last, right before yield: everything above can still fail the
+    # boot (a bad secret, a bad IMPROVE_* value), and a task created before
+    # that point would dangle on a failed boot — the generator frame holding
+    # its only strong reference tears down without ever reaching the shutdown
+    # code that cancels it, leaving the task to the event loop's own weak
+    # reference (#4312).
+    recovery_task = asyncio.create_task(recover_abandoned_pipeline_runs())
+    recovery_task.add_done_callback(_report_recovery_outcome)
 
     # Emit a clear startup message for docker logs
     logger.info("Backend server has started")

@@ -3,7 +3,7 @@ import importlib
 import logging
 import pathlib
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -387,9 +387,12 @@ async def test_cognify_startup_recovery_rolls_back_stale_started_runs(clean_test
                 status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
                 dataset_id=dataset.id,
                 run_info={"data": [str(data_id)]},
-                # Mark the run as old enough to be considered stale; a freshly
-                # started run is treated as live and intentionally not recovered.
-                created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+                created_at=datetime.now(timezone.utc),
+                # Origin, not a legacy NULL row: this is the only end-to-end
+                # test that runs recover_abandoned_pipeline_runs() against a
+                # real graph, so it should exercise the same owned_origins
+                # default path a real boot does, not the NULL fallback.
+                origin="api",
             )
         )
         await session.commit()

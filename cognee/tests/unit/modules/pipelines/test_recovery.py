@@ -27,6 +27,11 @@ Covered here:
 - a run is recovered regardless of age: duration is never the signal, only
   this process's own restart is
 - a boot where nothing is unclosed reads no datasets
+- a candidate that finishes on its own, in this process, between the read
+  that selected it and recovery reaching it under the lock is left alone,
+  not rolled back or re-closed
+- the API's default owned_origins covers its own background work (the
+  session bridge), not just its own requests
 """
 
 import asyncio
@@ -34,6 +39,7 @@ import importlib
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -60,6 +66,9 @@ log_error_module = importlib.import_module(
 )
 run_by_dataset_module = importlib.import_module(
     "cognee.modules.pipelines.methods.get_pipeline_run_by_dataset"
+)
+terminal_row_module = importlib.import_module(
+    "cognee.modules.pipelines.methods.pipeline_run_has_terminal_row"
 )
 get_pipeline_status = importlib.import_module(
     "cognee.modules.pipelines.operations.get_pipeline_status"
@@ -96,7 +105,13 @@ async def recovery_db(tmp_path, monkeypatch):
     async with engine.engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
 
-    for module in (recovery_module, unclosed_module, log_error_module, run_by_dataset_module):
+    for module in (
+        recovery_module,
+        unclosed_module,
+        log_error_module,
+        run_by_dataset_module,
+        terminal_row_module,
+    ):
         monkeypatch.setattr(module, "get_relational_engine", lambda: engine)
 
     calls = SimpleNamespace(rollbacks=[], dataset_contexts=[])
@@ -183,7 +198,9 @@ async def test_a_stale_add_run_ends_up_terminal(recovery_db):
     assert closed[0].started_at is not None
     assert closed[0].error_class == AbandonedPipelineRunError.__name__
     assert closed[0].outcome == "failed"
-    # Nothing about this row came from a caller.
+    # This row has no origin of its own (legacy — see _started_run's
+    # default), so it falls all the way through to "background". A run with
+    # a real origin keeps it instead: test_the_closing_row_keeps_the_dead_runs_own_origin.
     assert closed[0].origin == "background"
 
 
@@ -677,3 +694,67 @@ async def test_the_closing_row_keeps_the_dead_runs_own_origin(recovery_db):
 
     closed = await _rows(recovery_db.engine, run_id=mcp_run.pipeline_run_id, status=ERRORED)
     assert closed[0].origin == "mcp"
+
+
+@pytest.mark.asyncio
+async def test_the_default_owned_origins_also_covers_background(recovery_db):
+    """The session-to-graph bridge runs under ORIGIN_BACKGROUND, spawned by
+    the API itself with no independent process of its own to restart, so the
+    API's default owned_origins has to cover it too, not just its own
+    requests' "api" origin — otherwise a bridge killed mid-run is exactly the
+    "STARTED forever" bug this module exists to fix."""
+    dataset = _dataset()
+    bridge_run = _started_run(dataset.id, "cognify_pipeline", origin="background")
+    await _insert(recovery_db.engine, dataset, bridge_run)
+
+    await recovery_module.recover_abandoned_pipeline_runs()
+
+    closed = await _rows(recovery_db.engine, status=ERRORED)
+    assert [row.pipeline_run_id for row in closed] == [bridge_run.pipeline_run_id]
+
+
+@pytest.mark.asyncio
+async def test_a_run_that_finishes_on_its_own_before_recovery_acts_is_left_alone(
+    recovery_db, monkeypatch
+):
+    """Candidates are read once, before any dataset lock is taken (see
+    get_unclosed_pipeline_runs). A candidate can finish on its own, in this
+    same process, between that read and recovery reaching it under the
+    dataset lock — the live run releases the lock only after writing its own
+    terminal row, so recovery must notice that row before acting, or it rolls
+    back and re-closes a run that already succeeded.
+
+    The stale read itself is simulated (get_unclosed_pipeline_runs is
+    patched to return a candidate that, in the real database, already has a
+    terminal row) rather than raced for real, since the property under test
+    is what recovery does with a stale candidate, not the scheduler timing
+    that produces one.
+    """
+    dataset = _dataset()
+    run = _started_run(dataset.id, "cognify_pipeline", origin="api")
+    await _insert(recovery_db.engine, dataset, run)
+
+    # The run finished for real, on its own, after the stale candidate list
+    # below was already built.
+    finished = PipelineRun(
+        pipeline_run_id=run.pipeline_run_id,
+        pipeline_name="cognify_pipeline",
+        pipeline_id=run.pipeline_id,
+        status=PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+        dataset_id=dataset.id,
+        run_info={},
+    )
+    await _insert(recovery_db.engine, finished)
+
+    monkeypatch.setattr(
+        recovery_module, "get_unclosed_pipeline_runs", AsyncMock(return_value=[run])
+    )
+
+    await recovery_module.recover_abandoned_pipeline_runs()
+
+    assert recovery_db.calls.rollbacks == []
+    rows = await _rows(recovery_db.engine, run_id=run.pipeline_run_id)
+    assert [row.status for row in rows] == [
+        STARTED,
+        PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+    ]

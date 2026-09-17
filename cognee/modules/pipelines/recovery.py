@@ -15,6 +15,9 @@ from cognee.modules.pipelines.exceptions import AbandonedPipelineRunError
 from cognee.modules.pipelines.methods.get_unclosed_pipeline_runs import (
     get_unclosed_pipeline_runs,
 )
+from cognee.modules.pipelines.methods.pipeline_run_has_terminal_row import (
+    pipeline_run_has_terminal_row,
+)
 
 # The submodule, not cognee.modules.pipelines.operations: that package's
 # __init__ pulls in run_pipeline and the whole task machinery, which this
@@ -32,22 +35,36 @@ logger = get_logger("pipelines.recovery")
 # legitimately take days, so any threshold either closes a job that is still
 # genuinely executing or, set high enough not to, leaves a truly dead run
 # reported as processing for as long as that threshold allows. What proves a
-# run is dead is this process's own restart: recovery runs once, at startup,
-# before this process has started a pipeline of its own, so every row it finds
-# unclosed belonged to whatever ran before this boot.
+# run is dead is this process's own restart — but only for a candidate this
+# process can actually act on without racing something still live, which is
+# two narrower guarantees than "restart happened", not one:
 #
-# That argument only holds for THIS process, though, which is what
-# owned_origins is for. A relational database is shared more often than it
-# looks (docker-compose runs the API and the MCP server against one, and two
-# replicas of the same surface share one on purpose), and a process has no
-# way to tell a dead run of another surface, or of a live sibling of its own
-# surface, from one that is safe to close — restart is only evidence about
-# this process. So each surface recovers only the origin it stamps: the API
-# passes ORIGIN_API, the MCP server would pass ORIGIN_MCP. A real liveness
-# signal for two instances of the SAME surface sharing a database is still
-# SDK-578's job; origin narrows the blast radius to that one remaining case
-# rather than solving it.
-_DEFAULT_OWNED_ORIGINS = frozenset({ORIGIN_API})
+# 1. Nothing unclosed can belong to a pipeline THIS process already started,
+#    because recovery reads its candidates once, before this process starts
+#    any pipeline of its own (see recover_abandoned_pipeline_runs). A run
+#    this same process starts *after* that read is a different hazard, and
+#    is what the terminal-row recheck in _recover_one_run is for: it runs
+#    under the candidate's dataset lock, which a live run of this process
+#    releases only after writing its own terminal row, so a candidate that
+#    finished on its own between the read and the recheck is caught before
+#    anything is rolled back or re-closed.
+# 2. Nothing unclosed belongs to a *different* process this one has no way
+#    to observe — another surface, or a live sibling of this same surface
+#    sharing the database — which is what owned_origins is for. So each
+#    surface recovers only the origins it can attribute to itself: the API
+#    owns ORIGIN_API (its own requests) and ORIGIN_BACKGROUND (background
+#    work it spawns, like the session-to-graph bridge — nothing else stamps
+#    a STARTED row with no independent process of its own to restart), the
+#    MCP server would own ORIGIN_MCP.
+#
+# Neither guarantee reaches a live sibling of this exact surface (two API
+# replicas sharing a database) or a STARTED row an *old* build of this
+# surface wrote without stamping origin, mid-rollout, before every replica
+# is running this code — both look identical to a genuinely dead row from
+# here, and both are SDK-578's job: a real cross-process liveness signal,
+# not something this process can derive from its own restart. Origin narrows
+# the blast radius to that one remaining case rather than solving it.
+_DEFAULT_OWNED_ORIGINS = frozenset({ORIGIN_API, ORIGIN_BACKGROUND})
 
 
 def _max_concurrent_dataset_recoveries() -> int:
@@ -115,7 +132,8 @@ async def _load_datasets_and_users(pipeline_runs) -> tuple[dict[UUID, Any], dict
 
     A session and two primary-key reads per run was over half the cost of the
     sweep (500 abandoned runs measured 2.7s that way against 1.2s batched),
-    and the sweep blocks the API lifespan before the port opens. Failing here
+    and the sweep runs as a background task the API does not wait on, but
+    still competes with ordinary traffic for the same database. Failing here
     costs the whole sweep rather than one run, which is the trade: the per-run
     guard still wraps the rollback and the close, where the work and the real
     failure risk are, and a boot that reads nothing has done nothing, so the
@@ -151,8 +169,28 @@ async def _recover_one_run(pipeline_run, dataset, run_user, rollback_handler) ->
     dataset its recovery. Each failure is reported with the dataset, the run,
     the error and what it leaves behind, which is the status of that dataset's
     attempt.
+
+    Called under the caller's dataset lock, which is what makes the first
+    check below sufficient: a live run of this same dataset, in this same
+    process, releases that lock only after writing its own terminal row, so
+    by the time this function runs, a candidate that finished on its own
+    since the read that selected it already has one.
     """
     pipeline_name = pipeline_run.pipeline_name
+
+    if await pipeline_run_has_terminal_row(pipeline_run.pipeline_run_id):
+        # Selected as a candidate before this dataset's lock was taken (see
+        # recover_abandoned_pipeline_runs), and resolved on its own — by this
+        # same process — since then. Not abandoned after all: leave it, there
+        # is nothing to roll back or close.
+        logger.info(
+            "Skipping recovery for %s run %s (dataset=%s): it already reached a "
+            "terminal status on its own.",
+            pipeline_name,
+            pipeline_run.pipeline_run_id,
+            dataset.id,
+        )
+        return False
 
     if rollback_handler is not None:
         # The dataset's own databases are entered only to unwind partial data:
@@ -196,14 +234,14 @@ async def _recover_one_run(pipeline_run, dataset, run_user, rollback_handler) ->
     # executed. pipeline_runs lives in the shared relational database, so this
     # needs no dataset database context.
     #
-    # origin and parent_operation_id below are the dead run's own, passed
-    # through rather than left to log_pipeline_run_error's own default (the
-    # current context, which the operation_origin_scope just below would make
-    # "background"): the closing row should say "mcp" or "api" — whichever
-    # surface actually abandoned the run — not "background" for every run
-    # this sweep ever closes, regardless of who started it. A legacy row with
-    # no origin of its own (getattr returns None) still falls through to that
-    # same "background" default, since there is nothing truer to say about it.
+    # origin below is the dead run's own, passed through rather than left to
+    # log_pipeline_run_error's own default (the current context, which the
+    # operation_origin_scope just below would make "background"): the closing
+    # row should say "mcp" or "api" — whichever surface actually abandoned the
+    # run — not "background" for every run this sweep ever closes, regardless
+    # of who started it. A legacy row with no origin of its own (getattr
+    # returns None) still falls through to that same "background" default,
+    # since there is nothing truer to say about it.
     try:
         with operation_origin_scope(ORIGIN_BACKGROUND):
             await log_pipeline_run_error(
@@ -226,7 +264,6 @@ async def _recover_one_run(pipeline_run, dataset, run_user, rollback_handler) ->
                 user=run_user,
                 started_at=getattr(pipeline_run, "started_at", None),
                 origin=getattr(pipeline_run, "origin", None),
-                parent_operation_id=getattr(pipeline_run, "parent_operation_id", None),
             )
     except Exception as error:
         # Same scope as above: this one dataset's closing row.
@@ -309,10 +346,12 @@ async def recover_abandoned_pipeline_runs(
     stamped with an origin this call owns (or no origin at all — see
     ``owned_origins`` on ``get_unclosed_pipeline_runs``), so one crash that
     abandoned several runs has all of them recovered, and a run this function
-    already closed is never selected again. Nothing about a candidate's age is
-    consulted: this runs once, at startup, before this process has started a
-    pipeline of its own, so an unclosed row owned by this surface can only
-    belong to whatever ran before this boot. Each candidate
+    already closed is never selected again. Nothing about a candidate's age
+    is consulted: candidates are read once, before this process's own restart
+    (or its own startup) has run any pipeline of its own, and each one is
+    re-checked for a fresh terminal row right before it is acted on (see
+    ``_recover_one_run``), so a candidate this same process itself completes
+    in the meantime is caught rather than rolled back. Each candidate
     first gets its pipeline's rollback handler, if that pipeline has one, and
     is then closed as ``DATASET_PROCESSING_ERRORED`` carrying an
     ``AbandonedPipelineRunError``: the terminal status the killed process never

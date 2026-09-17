@@ -7,7 +7,10 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 
 from ..models import PipelineRun, PipelineRunStatus
 
-_TERMINAL_STATUSES = (
+# Public: also used by pipeline_run_has_terminal_row, which recovery
+# consults again right before acting on a candidate this query already
+# selected — a single source of truth for what "closed" means.
+TERMINAL_STATUSES = (
     PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
     PipelineRunStatus.DATASET_PROCESSING_ERRORED,
 )
@@ -40,10 +43,23 @@ async def get_unclosed_pipeline_runs(
     database is shared more often than it looks — docker-compose runs the API
     and the MCP server against one — and a process has no way to tell a dead
     run of another surface, or of a live sibling of its own surface, from one
-    it may safely close. Rows with no origin at all (written before this
-    column existed) are included regardless of ``owned_origins``: nothing
-    running today can be the process that owns a NULL, so no live run is ever
-    attributed to one.
+    it may safely close.
+
+    Rows with no origin at all are included regardless of ``owned_origins``,
+    for two different reasons that both land on the same answer. Genuinely
+    legacy rows (written before this column existed) are safe: by the time
+    any of them could still be unclosed, whatever wrote it is long gone.
+    Rows written by an *old* build of this same surface, mid-rollout, during
+    the one rolling deploy that ships origin stamping, are not necessarily
+    safe by origin alone — an old-code sibling replica does not stamp
+    origin, so its live run looks identical to a genuinely legacy row. That
+    window is covered by ``pipeline_run_has_terminal_row`` instead: recovery
+    re-checks every candidate under the dataset's lock immediately before
+    acting, and a live sibling releases that lock only after writing its own
+    terminal row (see ``recovery.py:_recover_one_run``) — but only within
+    *this* process; a live sibling running as a genuinely separate OS
+    process is the one case that check cannot see, and is SDK-578's job, not
+    this function's.
 
     Operation records (``record_operation``) carry no ``pipeline_name`` and no
     status, so they are excluded rather than mistaken for runs.
@@ -66,7 +82,7 @@ async def get_unclosed_pipeline_runs(
     closed = aliased(PipelineRun)
     closed_run_ids = (
         select(closed.pipeline_run_id)
-        .filter(closed.status.in_(_TERMINAL_STATUSES))
+        .filter(closed.status.in_(TERMINAL_STATUSES))
         .filter(closed.pipeline_run_id.isnot(None))
     )
 
