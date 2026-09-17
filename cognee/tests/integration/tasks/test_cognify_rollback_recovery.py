@@ -485,6 +485,87 @@ async def test_startup_recovery_closes_stale_runs_of_every_pipeline(clean_test_e
 
 
 @pytest.mark.asyncio
+async def test_startup_recovery_finds_a_run_buried_under_a_newer_completed_run(
+    clean_test_environment,
+):
+    """An abandoned run must be closed even when a newer run of the same pipeline on
+    the same dataset completed after it: "newest row per dataset" would hide it."""
+    user = await get_default_user()
+    dataset = await create_authorized_dataset("recovery_buried_run_dataset", user)
+
+    abandoned_run_id = uuid4()
+    completed_run_id = uuid4()
+    pipeline_id = uuid4()
+    two_hours_ago = datetime.now(timezone.utc) - timedelta(hours=2)
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        session.add_all(
+            [
+                PipelineRun(
+                    pipeline_run_id=abandoned_run_id,
+                    pipeline_name="add_pipeline",
+                    pipeline_id=pipeline_id,
+                    status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+                    dataset_id=dataset.id,
+                    run_info={},
+                    user_id=user.id,
+                    created_at=two_hours_ago,
+                    started_at=two_hours_ago,
+                ),
+                PipelineRun(
+                    pipeline_run_id=completed_run_id,
+                    pipeline_name="add_pipeline",
+                    pipeline_id=pipeline_id,
+                    status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+                    dataset_id=dataset.id,
+                    run_info={},
+                    user_id=user.id,
+                    created_at=two_hours_ago + timedelta(minutes=30),
+                ),
+                PipelineRun(
+                    pipeline_run_id=completed_run_id,
+                    pipeline_name="add_pipeline",
+                    pipeline_id=pipeline_id,
+                    status=PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+                    dataset_id=dataset.id,
+                    run_info={},
+                    user_id=user.id,
+                    created_at=two_hours_ago + timedelta(minutes=40),
+                ),
+            ]
+        )
+        await session.commit()
+
+    await recover_stale_pipeline_runs_on_startup()
+
+    async with db_engine.get_async_session() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(PipelineRun)
+                    .filter(PipelineRun.dataset_id == dataset.id)
+                    .order_by(PipelineRun.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    by_run = {}
+    for row in rows:
+        by_run.setdefault(row.pipeline_run_id, []).append(row.status)
+    assert by_run[abandoned_run_id] == [
+        PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        PipelineRunStatus.DATASET_PROCESSING_ERRORED,
+    ]
+    assert rows[-1].pipeline_run_id == abandoned_run_id
+    assert rows[-1].error_class == "AbandonedPipelineRunError"
+    assert by_run[completed_run_id] == [
+        PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+    ]
+
+
+@pytest.mark.asyncio
 async def test_cognify_rollback_is_idempotent(clean_test_environment):
     # Test 5: calling rollback twice should be safe no-op on second invocation.
     user = await get_default_user()

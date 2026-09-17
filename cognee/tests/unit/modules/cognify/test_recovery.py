@@ -77,7 +77,7 @@ def _wire(monkeypatch, runs, datasets, *, rollback_fails=False):
         return runs
 
     monkeypatch.setattr(recovery_module, "get_relational_engine", lambda: _FakeEngine(datasets))
-    monkeypatch.setattr(recovery_module, "get_latest_pipeline_runs_for_all_pipelines", _latest_runs)
+    monkeypatch.setattr(recovery_module, "get_unterminated_pipeline_runs", _latest_runs)
     monkeypatch.setattr(recovery_module, "set_database_global_context_variables", _no_op_context)
     monkeypatch.setattr(recovery_module, "ROLLBACK_HANDLERS", {"cognify_pipeline": _rollback})
     monkeypatch.setattr(recovery_module, "log_pipeline_run_error", _log_error)
@@ -144,23 +144,16 @@ async def test_every_pipeline_with_a_stale_started_run_is_closed(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "status",
-    [
-        PipelineRunStatus.DATASET_PROCESSING_ERRORED,
-        PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
-        PipelineRunStatus.DATASET_PROCESSING_INITIATED,
-    ],
-)
-async def test_run_not_left_started_is_untouched(monkeypatch, status):
-    """An ERRORED run stays ERRORED (its inline rollback already ran); COMPLETED and
-    INITIATED runs are not the recovery's business either."""
-    run = _run("cognify_pipeline", status=status)
-    calls = _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)})
+async def test_only_what_the_query_returns_is_touched(monkeypatch):
+    """Selection lives in get_unterminated_pipeline_runs (newest row per run is STARTED);
+    recovery closes exactly what it is handed and nothing else."""
+    open_run = _run("cognify_pipeline")
+    calls = _wire(monkeypatch, [open_run], {open_run.dataset_id: _dataset_for(open_run)})
 
     await recovery_module.recover_stale_pipeline_runs_on_startup()
 
-    assert calls == []
+    assert [name for name, _ in calls] == ["rollback", "error"]
+    assert calls[1][1]["pipeline_run_id"] == open_run.pipeline_run_id
 
 
 @pytest.mark.asyncio

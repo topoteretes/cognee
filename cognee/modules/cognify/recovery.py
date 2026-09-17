@@ -15,8 +15,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.data.models import Dataset
 from cognee.modules.pipelines.exceptions import AbandonedPipelineRunError
-from cognee.modules.pipelines.methods import get_latest_pipeline_runs_for_all_pipelines
-from cognee.modules.pipelines.models import PipelineRunStatus
+from cognee.modules.pipelines.methods import get_unterminated_pipeline_runs
 from cognee.modules.pipelines.operations.log_pipeline_run_error import log_pipeline_run_error
 from cognee.shared.logging_utils import get_logger
 
@@ -49,11 +48,12 @@ def _is_older_than_threshold(created_at) -> bool:
 async def recover_stale_pipeline_runs_on_startup() -> None:
     """Roll back and close every pipeline run left STARTED, during API startup.
 
-    For each (dataset, pipeline) pair only the newest row is considered, and
-    only when it is ``DATASET_PROCESSING_STARTED``. A run whose newest row is
-    already ``ERRORED`` or ``COMPLETED`` stays exactly as it is: an ERRORED run
-    was rolled back inline when it failed (see ``run_tasks``), so touching it
-    again would repeat the rollback on every restart.
+    Candidates are the runs whose newest row is still ``DATASET_PROCESSING_STARTED``,
+    keyed by run id: a run abandoned while a newer run of the same pipeline on the
+    same dataset later completed is still found and closed. A run whose newest row
+    is already ``ERRORED`` or ``COMPLETED`` stays exactly as it is: an ERRORED run
+    was rolled back inline when it failed (see ``run_tasks``), so touching it again
+    would repeat the rollback on every restart.
 
     A candidate is first rolled back with the pipeline's own handler from
     ``ROLLBACK_HANDLERS``, if it has one, then closed with a
@@ -68,10 +68,7 @@ async def recover_stale_pipeline_runs_on_startup() -> None:
     db_engine = get_relational_engine()
 
     try:
-        latest_runs = await get_latest_pipeline_runs_for_all_pipelines()
-        recovery_candidates = [
-            run for run in latest_runs if run.status == PipelineRunStatus.DATASET_PROCESSING_STARTED
-        ]
+        recovery_candidates = await get_unterminated_pipeline_runs()
     except Exception:
         logger.exception("Failed to load pipeline runs for startup recovery.")
         return
