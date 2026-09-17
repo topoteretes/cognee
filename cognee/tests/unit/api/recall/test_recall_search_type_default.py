@@ -14,6 +14,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchType
 
@@ -140,3 +141,128 @@ def test_pinned_search_type_keeps_the_graph_as_the_only_source(live_recall_clien
 
     assert response.status_code == 200, response.text
     assert [entry["source"] for entry in response.json()] == ["graph"]
+
+
+@pytest.fixture
+def retry_client(monkeypatch):
+    """A client on the real recall(), with the graph search scripted per type.
+
+    ``calls`` records the search type of every ``authorized_search`` the request
+    made, so a fallback shows up as a second entry, and ``logged`` captures the
+    type search history recorded as having answered. ``script`` maps a search
+    type to the results it returns, or to an exception it raises; anything
+    unscripted returns no results.
+    """
+    calls: list[SearchType] = []
+    logged: list[str] = []
+    script: dict[SearchType, object] = {}
+
+    async def fake_authorized_search(*args, **kwargs):
+        query_type = kwargs["query_type"]
+        calls.append(query_type)
+        outcome = script.get(query_type, [])
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    async def fake_log_search_history(query_text, search_type, *args, **kwargs):
+        logged.append(search_type)
+
+    monkeypatch.setattr(
+        importlib.import_module("cognee.modules.search.methods.search"),
+        "authorized_search",
+        fake_authorized_search,
+    )
+    monkeypatch.setattr(
+        importlib.import_module("cognee.modules.search.operations"),
+        "log_search_history",
+        fake_log_search_history,
+    )
+    return SimpleNamespace(client=_build_client(), calls=calls, logged=logged, script=script)
+
+
+_GRAPH_HIT = [
+    SearchResultPayload(result_object="from the graph", search_type=SearchType.HYBRID_COMPLETION)
+]
+
+
+def test_routed_type_with_no_results_falls_back_to_the_default(retry_client):
+    """CODING_RULES on a dataset with no rules nodeset must not be the answer."""
+    retry_client.script[SearchType.HYBRID_COMPLETION] = _GRAPH_HIT
+
+    response = retry_client.client.post(
+        "/api/v1/recall", json={"query": "what are our coding rules?", "scope": "graph"}
+    )
+
+    assert response.status_code == 200, response.text
+    assert retry_client.calls == [SearchType.CODING_RULES, SearchType.HYBRID_COMPLETION]
+    assert retry_client.logged == ["HYBRID_COMPLETION"]
+
+
+def test_pinned_type_with_no_results_is_not_retried(retry_client):
+    """A type the caller chose is never second-guessed, empty or not."""
+    response = retry_client.client.post(
+        "/api/v1/recall",
+        json={
+            "query": "what are our coding rules?",
+            "scope": "graph",
+            "searchType": "CODING_RULES",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert retry_client.calls == [SearchType.CODING_RULES]
+
+
+def test_routed_cypher_with_no_rows_is_not_retried(retry_client):
+    """Zero rows is a correct Cypher answer, not an unavailable lane.
+
+    Retrying would hand the LLM the Cypher text as a natural-language question.
+    """
+    response = retry_client.client.post(
+        "/api/v1/recall", json={"query": "MATCH (n:Nonexistent) RETURN n", "scope": "graph"}
+    )
+
+    assert response.status_code == 200, response.text
+    assert retry_client.calls == [SearchType.CYPHER]
+
+
+def test_rejected_routed_type_falls_back_but_a_pinned_one_raises(retry_client):
+    """ALLOW_CYPHER_QUERY=false is the deployment's choice, not the caller's mistake."""
+    retry_client.script[SearchType.CYPHER] = UnsupportedSearchTypeError(
+        "Cypher query search types are disabled."
+    )
+    retry_client.script[SearchType.HYBRID_COMPLETION] = _GRAPH_HIT
+
+    routed = retry_client.client.post(
+        "/api/v1/recall", json={"query": "MATCH (n) RETURN n", "scope": "graph"}
+    )
+
+    assert routed.status_code == 200, routed.text
+    assert retry_client.calls == [SearchType.CYPHER, SearchType.HYBRID_COMPLETION]
+
+    retry_client.calls.clear()
+    with pytest.raises(UnsupportedSearchTypeError):
+        retry_client.client.post(
+            "/api/v1/recall",
+            json={"query": "MATCH (n) RETURN n", "scope": "graph", "searchType": "CYPHER"},
+        )
+    assert retry_client.calls == [SearchType.CYPHER]
+
+
+def test_a_failure_of_the_default_type_is_not_swallowed(retry_client):
+    """The router labels its own fallback "default", which once read as a guess.
+
+    That made an unpinned request swallow the rejection and answer 200 with no
+    results, while the identical pinned request raised.
+    """
+    retry_client.script[SearchType.HYBRID_COMPLETION] = UnsupportedSearchTypeError(
+        "skills/tools are supported only with SearchType.AGENTIC_COMPLETION"
+    )
+
+    with pytest.raises(UnsupportedSearchTypeError):
+        retry_client.client.post(
+            "/api/v1/recall", json={"query": "what did we decide?", "scope": "graph"}
+        )
+
+    assert retry_client.calls == [SearchType.HYBRID_COMPLETION]

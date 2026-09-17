@@ -76,11 +76,23 @@ That is why these are *not* auto-routed, even though they are valid
 ### When a routed strategy comes up empty
 
 A routed type is a guess, so `recall()` never lets one do worse than the
-default. If the router picked a type and the search returns nothing — or the
-backend rejects it, as `CYPHER` does under `ALLOW_CYPHER_QUERY=false` — the
-query is retried once as `HYBRID_COMPLETION`, and the search history records
-the type that actually answered. A type you pinned yourself is never
-second-guessed: it returns empty, or raises, as before.
+default. When the router picked a type **other than the default**, the query is
+retried once as `HYBRID_COMPLETION` in two cases:
+
+- the backend rejects the type, as `CYPHER` does under
+  `ALLOW_CYPHER_QUERY=false`; or
+- the search returns nothing and the empty result means the lane was
+  unavailable — `CHUNKS_LEXICAL` with no lexical hits, `CODING_RULES` on a
+  dataset with no rules nodeset.
+
+`CYPHER` is deliberately not retried on an empty result: a valid query that
+matched no rows has answered you, and re-asking an LLM to interpret the Cypher
+text as a question would replace that answer with prose.
+
+The search history records the type that actually answered. Two things are
+never second-guessed: a type you pinned yourself returns empty or raises as
+before, and a failure of the default itself is raised rather than hidden —
+there is nothing left to fall back to, so the error is real.
 
 ### Bypassing the router
 

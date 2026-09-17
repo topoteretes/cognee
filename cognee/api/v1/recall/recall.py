@@ -53,6 +53,11 @@ logger = get_logger("recall")
 # Minimum word length to avoid matching noise words like "a", "I"
 _MIN_WORD_LEN = 2
 
+# Routed types whose empty result means the lane was unavailable — no lexical
+# hits, no rules nodeset — and so is worth retrying as the default. CYPHER is
+# absent on purpose: there, no rows is the answer rather than a failure.
+_RETRY_ON_EMPTY = frozenset({SearchType.CHUNKS_LEXICAL, SearchType.CODING_RULES})
+
 
 class RecallKwargs(TypedDict, total=False):
     """Backward-compatible export for callers that import RecallKwargs."""
@@ -802,21 +807,31 @@ async def recall(
                         embedding_config=embedding_config,
                     )
 
-                # A routed type is a guess and may never do worse than the
-                # default, so an empty result or a rejected type (CYPHER under
-                # ALLOW_CYPHER_QUERY=false) falls back instead of failing.
+                # The router picked something other than the default, so the
+                # default is still untried and may replace this result. Neither a
+                # pinned type nor the default itself is ever second-guessed.
+                routed_guess = (
+                    routed_rule is not None and local_query_type is not ROUTER_FALLBACK_TYPE
+                )
+
                 try:
                     graph_results = await _search(local_query_type)
-                except (UnsupportedSearchTypeError, SearchTypeNotSupported):
-                    if routed_rule is None:
+                except (UnsupportedSearchTypeError, SearchTypeNotSupported) as error:
+                    if not routed_guess:
                         raise
-                    graph_results = []
+                    # The backend rejected a routed guess (CYPHER under
+                    # ALLOW_CYPHER_QUERY=false); the default always substitutes.
+                    logger.info(
+                        "Rule %s routed to %s, which the backend rejected (%s); retrying as %s.",
+                        routed_rule,
+                        local_query_type.value,
+                        error,
+                        ROUTER_FALLBACK_TYPE.value,
+                    )
+                    local_query_type = ROUTER_FALLBACK_TYPE
+                    graph_results = await _search(local_query_type)
 
-                if (
-                    routed_rule is not None
-                    and not graph_results
-                    and local_query_type is not ROUTER_FALLBACK_TYPE
-                ):
+                if routed_guess and not graph_results and local_query_type in _RETRY_ON_EMPTY:
                     logger.info(
                         "Rule %s routed to %s, which returned nothing; retrying as %s.",
                         routed_rule,
@@ -825,6 +840,10 @@ async def recall(
                     )
                     local_query_type = ROUTER_FALLBACK_TYPE
                     graph_results = await _search(local_query_type)
+
+                # A fallback above may have changed the type that answered; the
+                # span recorded the routed one before the search ran.
+                span.set_attribute(COGNEE_SEARCH_TYPE, local_query_type.value)
 
                 # /v1/search records every question it answers; recall never did,
                 # because it calls authorized_search() directly and skips the
