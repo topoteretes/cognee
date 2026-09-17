@@ -1,5 +1,6 @@
 """Session turn analysis from user messages via LLM."""
 
+from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
@@ -32,8 +33,19 @@ def _render_served_context(served_context) -> str:
                 continue
             lines.append(f"{str(entry_id).strip()}: {str(content).strip()}")
     except Exception:
+        logger.debug("Falling back to  after error in _render_served_context", exc_info=True)
         return ""
     return "\n".join(lines)
+
+
+def is_auto_feedback_enabled() -> bool:
+    """True when session caching and automatic turn-feedback analysis are both on.
+
+    Fresh read, not the lru-cached accessor: ``import cognee`` fills that cache,
+    and AUTO_FEEDBACK is toggled after import (the demo command, library tests).
+    """
+    cache_config = CacheConfig()
+    return bool(cache_config.caching and cache_config.auto_feedback)
 
 
 def _append_optional_section(text_input: str, title: str, content: str | None) -> str:
@@ -69,6 +81,15 @@ async def analyze_turn_for_session_context(
             logger.warning("Feedback detection: system prompt not found, skipping")
             return SessionTurnAnalysis()
 
+        # The 1-5 previous-answer-rating question is part of automatic feedback
+        # analysis: it is asked whenever AUTO_FEEDBACK is on, so the implicit
+        # rating is produced and stored even when no consumer is switched on
+        # yet. Personalization is one consumer of it, not its gate.
+        if is_auto_feedback_enabled():
+            rating_section = read_query_prompt("feedback_detection_rating_section.txt")
+            if rating_section:
+                system_prompt = system_prompt + "\n\n" + rating_section
+
         text_input = "CURRENT USER MESSAGE:\n" + user_message.strip()
         text_input = _append_optional_section(
             text_input,
@@ -98,7 +119,7 @@ async def analyze_turn_for_session_context(
         logger.warning(
             "Session turn analysis failed, proceeding with empty analysis: %s",
             e,
-            exc_info=False,
+            exc_info=True,
         )
         return SessionTurnAnalysis()
 

@@ -2,20 +2,21 @@
 Tests for CLI edge cases and error scenarios with proper mocking.
 """
 
-import os
-import pytest
-import sys
-import asyncio
 import argparse
+import asyncio
+import os
+import sys
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from uuid import uuid4
-from unittest.mock import patch, MagicMock, AsyncMock, ANY
+
+import pytest
 
 import cognee
 from cognee.cli.commands.add_command import AddCommand
-from cognee.cli.commands.search_command import SearchCommand
 from cognee.cli.commands.cognify_command import CognifyCommand
-from cognee.cli.commands.delete_command import DeleteCommand
 from cognee.cli.commands.config_command import ConfigCommand
+from cognee.cli.commands.delete_command import DeleteCommand
+from cognee.cli.commands.search_command import SearchCommand
 from cognee.cli.exceptions import CliCommandException
 from cognee.modules.data.methods.get_deletion_counts import DeletionCountsPreview
 from cognee.modules.engine.operations.setup import setup
@@ -511,7 +512,7 @@ class TestConfigCommandEdgeCases:
 
         # Should handle the exception gracefully
         command.execute(args)
-        mock_cognee.config.get.assert_called_once_with("nonexistent_key")
+        mock_cognee.config.get.assert_called_once_with("nonexistent_key", reveal_secrets=False)
 
     @patch("builtins.__import__")
     def test_config_set_complex_json_value(self, mock_import):
@@ -528,7 +529,7 @@ class TestConfigCommandEdgeCases:
 
         command.execute(args)
         mock_cognee.config.set.assert_called_once_with(
-            "complex_config", complex_json_expected_value
+            "complex_config", complex_json_expected_value, persist=True
         )
 
     @patch("builtins.__import__")
@@ -544,7 +545,7 @@ class TestConfigCommandEdgeCases:
         args = argparse.Namespace(config_action="set", key="test_key", value=invalid_json)
 
         command.execute(args)
-        mock_cognee.config.set.assert_called_once_with("test_key", invalid_json)
+        mock_cognee.config.set.assert_called_once_with("test_key", invalid_json, persist=True)
 
     @patch("cognee.cli.commands.config_command.fmt.confirm")
     def test_config_unset_unknown_key(self, mock_confirm):

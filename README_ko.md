@@ -23,7 +23,7 @@
 
 
   [![GitHub forks](https://img.shields.io/github/forks/topoteretes/cognee.svg?style=social&label=Fork&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/network/)
-  [![GitHub stars](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social&label=Star&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/stargazers/)
+  [![GitHub stars](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social&label=Star&maxAge=2592000)](https://github.com/topoteretes/cognee)
   [![GitHub commits](https://badgen.net/github/commits/topoteretes/cognee)](https://GitHub.com/topoteretes/cognee/commit/)
   [![GitHub tag](https://badgen.net/github/tag/topoteretes/cognee)](https://github.com/topoteretes/cognee/tags/)
   [![Downloads](https://static.pepy.tech/badge/cognee)](https://pepy.tech/project/cognee)
@@ -111,6 +111,7 @@ uv pip install cognee
 ### 2단계: LLM 구성
 ```python
 import os
+
 os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
 ```
 또는 [템플릿](https://github.com/topoteretes/cognee/blob/main/.env.template)을 사용하여 `.env` 파일을 생성하세요.
@@ -147,9 +148,8 @@ async def main():
         pprint(result)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
-
 ```
 
 보시다시피, 출력은 이전에 Cognee에 저장한 문서에서 생성됩니다.

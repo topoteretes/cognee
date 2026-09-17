@@ -2,15 +2,27 @@
 
 import io
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 import aiohttp
 
+from cognee.modules.improve import MEMIFY_PASSTHROUGH_KEYS
 from cognee.modules.ingestion.data_types.TextData import create_text_data
+from cognee.modules.search.types import ContextFormat
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("serve.cloud_client")
+
+# The memify passthrough surface, partitioned by what the /improve DTO can
+# carry: registry task names (list[str]) and a data string cross the wire.
+# The refused set is derived by subtraction, so a key added to
+# MEMIFY_PASSTHROUGH_KEYS is refused loudly here until the DTO learns it —
+# never silently dropped.
+_SERIALIZABLE_MEMIFY_TASK_KEYS = ("extraction_tasks", "enrichment_tasks")
+_UNSERIALIZABLE_MEMIFY_KEYS = tuple(
+    key for key in MEMIFY_PASSTHROUGH_KEYS if key not in (*_SERIALIZABLE_MEMIFY_TASK_KEYS, "data")
+)
 
 
 def _text_upload_filename(text: str) -> str:
@@ -35,7 +47,7 @@ class CloudClient:
     def __init__(self, service_url: str, api_key: str):
         self.service_url = service_url.rstrip("/")
         self.api_key = api_key
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: aiohttp.ClientSession | None = None
 
     # Default for ordinary API calls: aiohttp's standard 5-minute total,
     # with connect failures surfacing quickly.
@@ -67,7 +79,27 @@ class CloudClient:
             async with session.get(f"{self.service_url}/health") as resp:
                 return resp.status == 200
         except Exception:
+            logger.debug(
+                "Falling back to False after error in CloudClient._health_check", exc_info=True
+            )
             return False
+
+    async def _auth_check(self) -> int | None:
+        """Status of an authenticated probe, or None when unreachable.
+
+        ``/health`` is unauthenticated, so it cannot tell a working API key
+        from a rejected one. Probing an authenticated endpoint lets serve()
+        fail at connect time instead of on the first real operation.
+        """
+        try:
+            session = await self._get_session()
+            async with session.get(f"{self.service_url}/api/v1/datasets") as resp:
+                return resp.status
+        except Exception:
+            logger.debug(
+                "Falling back to None after error in CloudClient._auth_check", exc_info=True
+            )
+            return None
 
     # ----- V2 Operations -----
 
@@ -84,6 +116,8 @@ class CloudClient:
             form.add_field("session_id", kwargs["session_id"])
         if kwargs.get("run_in_background"):
             form.add_field("run_in_background", "true")
+        if kwargs.get("self_improvement") is not None:
+            form.add_field("self_improvement", "true" if kwargs["self_improvement"] else "false")
         if kwargs.get("custom_prompt"):
             form.add_field("custom_prompt", kwargs["custom_prompt"])
         if kwargs.get("chunk_size") is not None:
@@ -96,12 +130,22 @@ class CloudClient:
         if kwargs.get("import_mode") is not None:
             form.add_field("import_mode", str(kwargs["import_mode"]))
 
+        # Code repos travel as spec strings in the 'raw_data' form field —
+        # the server clones git URLs itself and reads local paths from its own
+        # filesystem (only useful when it shares the caller's filesystem).
+        # Nothing is uploaded.
+        if content_type_kw == "code":
+            specs = data if isinstance(data, list) else [data]
+            for spec in specs:
+                form.add_field("raw_data", str(spec))
+            if kwargs.get("index_vectors"):
+                form.add_field("index_vectors", "true")
         # Skills are local SKILL.md files. The server's add_skills() reads
         # paths from its own filesystem — sending the path string verbatim
         # would have the server look for that path on the POD, not the
         # caller. For content_type="skills", read each SKILL.md and upload
         # its bytes so the server can write them to a tempdir.
-        if content_type_kw == "skills" and isinstance(data, (str, Path)):
+        elif content_type_kw == "skills" and isinstance(data, (str, Path)):
             source = Path(data).expanduser()
             if source.is_file():
                 skill_files = [source] if source.name == "SKILL.md" else []
@@ -141,9 +185,12 @@ class CloudClient:
             name = getattr(data, "name", "upload")
             form.add_field("data", data, filename=name)
 
+        # Code ingestion can block on a clone + whole-repo parse; the archive
+        # timeout (no total cap) fits both. Prefer run_in_background=True for
+        # large repos regardless.
         timeout = (
             self.UPLOAD_TIMEOUT
-            if kwargs.get("content_type") == "cogx-archive"
+            if kwargs.get("content_type") in ("cogx-archive", "code")
             else self.DEFAULT_TIMEOUT
         )
         async with session.post(
@@ -158,8 +205,8 @@ class CloudClient:
         self,
         entry,
         dataset_name: str = "main_dataset",
-        session_id: Optional[str] = None,
-        skill_improvement: Optional[dict] = None,
+        session_id: str | None = None,
+        skill_improvement: dict | None = None,
     ) -> dict:
         """POST /api/v1/remember/entry — store a typed MemoryEntry.
 
@@ -186,7 +233,7 @@ class CloudClient:
                 raise RuntimeError(f"Remote remember_entry failed ({resp.status}): {body}")
             return await resp.json()
 
-    async def recall(self, query_text: str, query_type: Optional[str] = None, **kwargs) -> list:
+    async def recall(self, query_text: str, query_type: str | None = None, **kwargs) -> list:
         """POST /api/v1/recall — query the knowledge graph and/or session cache."""
         session = await self._get_session()
 
@@ -205,6 +252,10 @@ class CloudClient:
             payload["node_name"] = kwargs["node_name"]
         if kwargs.get("only_context"):
             payload["only_context"] = kwargs["only_context"]
+        # Only the non-default shape is worth sending: an older instance ignores the
+        # field, and omitting it keeps the request identical to what it always was.
+        if ContextFormat.parse(kwargs.get("context_format")) is ContextFormat.PROMPT:
+            payload["context_format"] = ContextFormat.PROMPT.value
         if kwargs.get("verbose"):
             payload["verbose"] = kwargs["verbose"]
         if kwargs.get("session_id"):
@@ -215,6 +266,14 @@ class CloudClient:
             payload["context_profile"] = kwargs["context_profile"]
         if kwargs.get("include_references") is not None:
             payload["include_references"] = kwargs["include_references"]
+        if kwargs.get("response_schema") is not None:
+            payload["response_schema"] = kwargs["response_schema"]
+        if kwargs.get("tool_connections") is not None:
+            payload["tool_connections"] = kwargs["tool_connections"]
+        if kwargs.get("tools_trigger") not in (None, "always"):
+            payload["tools_trigger"] = kwargs["tools_trigger"]
+        if kwargs.get("code_query") is not None:
+            payload["code_query"] = kwargs["code_query"]
 
         async with session.post(
             f"{self.service_url}/api/v1/recall",
@@ -238,6 +297,34 @@ class CloudClient:
             payload["run_in_background"] = True
         if kwargs.get("node_name"):
             payload["node_name"] = kwargs["node_name"]
+        if kwargs.get("session_ids"):
+            payload["session_ids"] = list(kwargs["session_ids"])
+        if kwargs.get("build_global_context_index"):
+            payload["build_global_context_index"] = True
+        if kwargs.get("build_truth_subspace"):
+            payload["build_truth_subspace"] = True
+        if kwargs.get("feedback_alpha") is not None:
+            payload["feedback_alpha"] = kwargs["feedback_alpha"]
+        # Memify passthrough: the improve DTO takes registry task names and a
+        # data string; Task objects and the db-config overrides cannot cross
+        # the wire, so they fail loudly instead of silently running defaults.
+        for key in _SERIALIZABLE_MEMIFY_TASK_KEYS:
+            tasks = kwargs.get(key)
+            if tasks:
+                if not all(isinstance(task, str) for task in tasks):
+                    raise ValueError(
+                        f"improve({key}=...) on a remote instance takes registry "
+                        "task names (strings); Task objects cannot be serialized."
+                    )
+                payload[key] = list(tasks)
+        if kwargs.get("data") is not None:
+            payload["data"] = kwargs["data"]
+        for key in _UNSERIALIZABLE_MEMIFY_KEYS:
+            if kwargs.get(key) is not None:
+                raise ValueError(
+                    f"improve({key}=...) is not supported on a remote instance; "
+                    "run it locally or extend the /improve payload."
+                )
 
         async with session.post(
             f"{self.service_url}/api/v1/improve",
@@ -284,6 +371,74 @@ class CloudClient:
             if resp.status >= 400:
                 body = await resp.text()
                 raise RuntimeError(f"Remote add failed ({resp.status}): {body}")
+            return await resp.json()
+
+    async def update(
+        self,
+        data_id: UUID,
+        data: Any,
+        dataset_id: UUID,
+        node_set: list | None = None,
+        chunk_level_diff: bool = True,
+    ) -> dict:
+        """PATCH /api/v1/update — replace one document in place on the remote.
+
+        Mirrors the route: ``data_id``, ``dataset_id`` and ``chunk_level_diff``
+        travel as query params, the new content as the multipart ``data`` file,
+        ``node_set`` as repeated form fields. The server keeps the document's
+        id across the update, so this is a real replace.
+        """
+        # update() replaces exactly one document; the local implementation
+        # unwraps single-item lists and DataItem wrappers the same way.
+        if isinstance(data, list):
+            if len(data) != 1:
+                raise ValueError(f"update() replaces exactly one document; got {len(data)} items.")
+            data = data[0]
+        if hasattr(data, "data") and hasattr(data, "data_id") and not hasattr(data, "read"):
+            data = data.data
+
+        session = await self._get_session()
+
+        form = aiohttp.FormData()
+        if isinstance(data, str):
+            form.add_field(
+                "data",
+                io.BytesIO(data.encode("utf-8")),
+                filename=_text_upload_filename(data),
+                content_type="text/plain",
+            )
+        elif hasattr(data, "read"):
+            name = getattr(data, "name", "upload")
+            form.add_field("data", data, filename=Path(name).name or "upload")
+        else:
+            raise TypeError(
+                f"update() over serve() accepts text or a file object; got {type(data)}"
+            )
+        for tag in node_set or []:
+            if tag:
+                form.add_field("node_set", str(tag))
+
+        params = {
+            "data_id": str(data_id),
+            "dataset_id": str(dataset_id),
+            "chunk_level_diff": "true" if chunk_level_diff else "false",
+        }
+        async with session.patch(
+            f"{self.service_url}/api/v1/update", params=params, data=form
+        ) as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Remote update failed ({resp.status}): {body}")
+            return await resp.json()
+
+    async def list_data(self, dataset_id: UUID) -> list:
+        """GET /api/v1/datasets/{dataset_id}/data — the documents in a dataset."""
+        session = await self._get_session()
+
+        async with session.get(f"{self.service_url}/api/v1/datasets/{dataset_id}/data") as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Remote list_data failed ({resp.status}): {body}")
             return await resp.json()
 
     async def cognify(self, datasets: Any = None, **kwargs) -> dict:
@@ -336,6 +491,8 @@ class CloudClient:
             payload["nodeName"] = kwargs["node_name"]
         if kwargs.get("only_context") is not None:
             payload["onlyContext"] = kwargs["only_context"]
+        if ContextFormat.parse(kwargs.get("context_format")) is ContextFormat.PROMPT:
+            payload["contextFormat"] = ContextFormat.PROMPT.value
         if kwargs.get("verbose") is not None:
             payload["verbose"] = kwargs["verbose"]
         if kwargs.get("skills") is not None:

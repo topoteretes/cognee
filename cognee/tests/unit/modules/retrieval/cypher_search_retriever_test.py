@@ -7,7 +7,7 @@ from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriev
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
 
 POSTGRES_ADAPTER_MODULES = [
-    "cognee.infrastructure.databases.graph.postgres.adapter",
+    "cognee.infrastructure.databases.graph.postgres_demo.adapter",
 ]
 
 
@@ -77,12 +77,14 @@ async def test_cypher_search_rejects_backend_without_cypher_support():
 
     retriever = CypherSearchRetriever()
 
-    with patch(
-        "cognee.modules.retrieval.cypher_search_retriever.get_graph_engine",
-        return_value=_NoCypherEngine(),
+    with (
+        patch(
+            "cognee.modules.retrieval.cypher_search_retriever.get_graph_engine",
+            return_value=_NoCypherEngine(),
+        ),
+        pytest.raises(SearchTypeNotSupported, match="_NoCypherEngine"),
     ):
-        with pytest.raises(SearchTypeNotSupported, match="_NoCypherEngine"):
-            await retriever.get_retrieved_objects("MATCH (n) RETURN count(n)")
+        await retriever.get_retrieved_objects("MATCH (n) RETURN count(n)")
 
 
 @pytest.mark.asyncio
@@ -91,18 +93,20 @@ async def test_natural_language_search_rejects_backend_without_cypher_support():
 
     retriever = NaturalLanguageRetriever()
 
-    with patch(
-        "cognee.modules.retrieval.natural_language_retriever.get_graph_engine",
-        return_value=_NoCypherEngine(),
+    with (
+        patch(
+            "cognee.modules.retrieval.natural_language_retriever.get_graph_engine",
+            return_value=_NoCypherEngine(),
+        ),
+        pytest.raises(SearchTypeNotSupported, match="_NoCypherEngine"),
     ):
-        with pytest.raises(SearchTypeNotSupported, match="_NoCypherEngine"):
-            await retriever.get_retrieved_objects("How many nodes are there?")
+        await retriever.get_retrieved_objects("How many nodes are there?")
 
 
 def test_postgres_adapters_declare_no_cypher_support():
     """The class attribute is set without instantiating (no DB connection needed)."""
     postgres_adapter = pytest.importorskip(
-        "cognee.infrastructure.databases.graph.postgres.adapter",
+        "cognee.infrastructure.databases.graph.postgres_demo.adapter",
         reason="postgres extra not installed",
     )
-    assert postgres_adapter.PostgresAdapter.supports_cypher_queries is False
+    assert postgres_adapter.PostgresDemoAdapter.supports_cypher_queries is False

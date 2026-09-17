@@ -1,0 +1,26 @@
+id: langgraph
+title: Cognee memory node for LangGraph
+kind: integration
+stack: framework
+tags:
+  - langgraph
+  - langchain
+  - python
+  - graph-workflow
+summary: Add cognee memory to a LangGraph agent as tools it can call to store and search context.
+what_youll_build: A LangGraph agent wired with cognee add and search tools, so it can persist context during a run and pull back relevant prior context on later steps.
+quickstart: |
+  pip install cognee-integration-langgraph
+  export LLM_API_KEY=your_openai_key
+  # in your async agent code:
+  from cognee_integration_langgraph import get_sessionized_cognee_tools
+  add_tool, search_tool = get_sessionized_cognee_tools("user-123")
+  # pass [add_tool, search_tool] into your LangGraph agent, then await agent.ainvoke(...)
+expected_output: |
+  An agent run where the model calls the cognee add tool to store context and
+  the search tool to retrieve relevant prior context for its next step.
+difficulty: medium
+repo: topoteretes/cognee-integrations
+path: integrations/langgraph
+inventory_slug: langgraph
+docs_url: https://docs.cognee.ai/integrations/langgraph

@@ -11,7 +11,7 @@ import {
 // whose id starts with the prefix counts as connected. Keep these in sync with
 // the shipped integrations (claude-code → "cc_", codex → "codex_" as emitted by
 // the plugins' _generate_session_id). Openclaw and API/MCP have no fixed prefix.
-const INTEGRATION_SESSION_PREFIX: Record<string, string> = {
+export const INTEGRATION_SESSION_PREFIX: Record<string, string> = {
   "claude-code": "cc_",
   codex: "codex_",
 };

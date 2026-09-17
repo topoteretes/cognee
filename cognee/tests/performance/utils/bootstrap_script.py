@@ -3,6 +3,7 @@
 # interpreter that never imports locust.
 
 import asyncio
+import os
 import sys
 
 import cognee
@@ -17,7 +18,11 @@ async def main(out_path: str) -> None:
     await setup()
     user = await create_default_user()
     api_key_obj = await create_api_key(user, name="locust-loadtest")
-    with open(out_path, "w") as f:
+    fd = os.open(out_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    # os.open only applies the mode when it creates the file; enforce 0o600 for
+    # a pre-existing file too so the secret is never left world-readable.
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w") as f:
         f.write(api_key_obj.api_key)
 
 

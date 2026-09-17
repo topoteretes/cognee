@@ -15,17 +15,35 @@ cheap on empty stores; see README.md in this package for the full contract.
 """
 
 from cognee.modules.migrations.migration import Migration, order_migrations
-from cognee.modules.migrations.versions.namespace_entity_type_node_ids import (
-    downgrade as namespace_entity_type_node_ids_down,
-    migrate as namespace_entity_type_node_ids,
+from cognee.modules.migrations.versions.ladybug_graph_provenance_columns import (
+    downgrade as ladybug_graph_provenance_columns_down,
+)
+from cognee.modules.migrations.versions.ladybug_graph_provenance_columns import (
+    migrate as ladybug_graph_provenance_columns,
 )
 from cognee.modules.migrations.versions.namespace_edge_type_point_ids import (
     downgrade as namespace_edge_type_point_ids_down,
+)
+from cognee.modules.migrations.versions.namespace_edge_type_point_ids import (
     migrate as namespace_edge_type_point_ids,
+)
+from cognee.modules.migrations.versions.namespace_entity_type_node_ids import (
+    downgrade as namespace_entity_type_node_ids_down,
+)
+from cognee.modules.migrations.versions.namespace_entity_type_node_ids import (
+    migrate as namespace_entity_type_node_ids,
 )
 from cognee.modules.migrations.versions.postgres_graph_provenance_columns import (
     downgrade as postgres_graph_provenance_columns_down,
+)
+from cognee.modules.migrations.versions.postgres_graph_provenance_columns import (
     migrate as postgres_graph_provenance_columns,
+)
+from cognee.modules.migrations.versions.rekey_fork_document_ids import (
+    downgrade as rekey_fork_document_ids_down,
+)
+from cognee.modules.migrations.versions.rekey_fork_document_ids import (
+    migrate as rekey_fork_document_ids,
 )
 
 # The vector adapter's storage-schema sync (e.g. LanceDB adding columns) is NOT
@@ -66,6 +84,30 @@ MIGRATIONS: list[Migration] = [
         up=postgres_graph_provenance_columns,
         down_revision="namespace_edge_type_point_ids",
         down=postgres_graph_provenance_columns_down,
+    ),
+    # COG-5522: same backfill for the Ladybug/Kuzu backend. Fresh databases get
+    # the provenance columns from _ensure_schema's CREATE ... IF NOT EXISTS,
+    # which no-ops on tables a pre-provenance release already created — an
+    # EMPTY legacy graph then gets marked graph-provenance on first write and
+    # every stamped write dies on the missing columns (caught by the
+    # backwards-compatibility CI). No-op on every non-Ladybug graph backend.
+    Migration(
+        slug="ladybug_graph_provenance_columns",
+        cognee_version="1.5.0",
+        up=ladybug_graph_provenance_columns,
+        down_revision="postgres_graph_provenance_columns",
+        down=ladybug_graph_provenance_columns_down,
+    ),
+    # Dataset-scoping backfill split pre-refactor shared Data rows; fork
+    # datasets' graph document nodes still carried the pre-fork id. Re-keys
+    # them to the canonical relational id (ledger references included), so no
+    # graph/vector path needs legacy awareness afterwards.
+    Migration(
+        slug="rekey_fork_document_ids",
+        cognee_version="1.5.0",
+        up=rekey_fork_document_ids,
+        down_revision="ladybug_graph_provenance_columns",
+        down=rekey_fork_document_ids_down,
     ),
 ]
 

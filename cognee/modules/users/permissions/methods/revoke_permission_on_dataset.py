@@ -1,12 +1,13 @@
 from uuid import UUID
-from sqlalchemy.future import select
+
 from sqlalchemy import delete
+from sqlalchemy.future import select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.users.permissions import PERMISSION_TYPES
 from cognee.modules.users.exceptions import PermissionNotFoundError
+from cognee.modules.users.permissions import PERMISSION_TYPES
 
-from ...models import Principal, ACL, Permission
+from ...models import ACL, Permission, Principal
 
 
 async def revoke_permission_on_dataset(

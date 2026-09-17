@@ -1,0 +1,90 @@
+# Slack app manifest for testing the *SDK* Slack integration locally.
+#
+# This is NOT the cloud manifest. cognee-saas-backend/slack-app-manifest.yml
+# describes the control plane's app: 12 scopes, /cognee-recall, /cognee-remember,
+# app_mention, message.channels. The SDK implements none of that. Installing the
+# cloud manifest against an SDK server gives you an app whose buttons hit
+# handlers that do not exist.
+#
+# Create a SEPARATE Slack app for SDK testing — do not point the cloud app at
+# your laptop. Reusing one app means whoever else is testing has their events
+# routed to your ngrok tunnel.
+#
+# Replace <ngrok> with your tunnel host, e.g. abc123.ngrok-free.app
+#
+# ── First save will fail unless the server is already reachable ────────────
+# Slack POSTs a url_verification challenge to request_url the moment you save
+# event_subscriptions. Start the SDK server AND ngrok first, then create the
+# app from this manifest.
+
+display_information:
+  name: Cognee SDK (local)
+  description: Local SDK testing — not the production Cognee app.
+  background_color: "#6510F4"
+
+features:
+  bot_user:
+    display_name: cognee-sdk-local
+    always_online: false
+  # app_home_opened only fires when the Home tab is enabled. handle_slack_event
+  # publishes the view via home.py::publish_home_view on that event.
+  app_home:
+    home_tab_enabled: true
+    messages_tab_enabled: false
+  slash_commands:
+    # The only three commands handle_slack_command dispatches. Anything else
+    # falls through to its unknown-command reply.
+    #
+    # Adding a command here is not enough on its own: Slack does not grant a
+    # new slash command to an existing install, so the app must be REINSTALLED
+    # before it can be invoked. Until then Slack refuses it client-side and
+    # nothing reaches the server at all.
+    - command: /cognee-ask
+      url: https://<ngrok>/api/v1/slack/commands
+      description: Ask your memory a question
+      usage_hint: why did we choose Neon for v2?
+    - command: /cognee-remember
+      url: https://<ngrok>/api/v1/slack/commands
+      description: Save a decision or fact worth keeping
+      usage_hint: we chose Neon for v2, branching is cheaper
+    - command: /cognee-link
+      url: https://<ngrok>/api/v1/slack/commands
+      description: Link your Slack account to cognee
+  shortcuts:
+    # callback_id must be exactly remember_this — handle_slack_interactive
+    # matches on REMEMBER_THIS_CALLBACK_ID.
+    - name: Remember this
+      type: message
+      callback_id: remember_this
+      description: Save this message to your memory
+
+oauth_config:
+  redirect_urls:
+    # Must byte-match SLACK_REDIRECT_URI in your .env.
+    - https://<ngrok>/api/v1/integrations/slack/callback
+  scopes:
+    bot:
+      # Exactly _BOT_SCOPES in cognee/modules/integrations/slack/oauth.py.
+      # Adding more here without changing that constant does nothing: the
+      # authorize URL only requests what the constant lists.
+      - commands
+      - chat:write
+      - im:write
+      - channels:read
+
+settings:
+  event_subscriptions:
+    request_url: https://<ngrok>/api/v1/slack/events
+    bot_events:
+      # The three the SDK actually acts on. Deliberately no app_mention or
+      # message.channels — the SDK has no handler for either, and subscribing
+      # them just spams your tunnel with events that get a bare ack.
+      - app_home_opened
+      - app_uninstalled
+      - tokens_revoked
+  interactivity:
+    is_enabled: true
+    request_url: https://<ngrok>/api/v1/slack/interactive
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

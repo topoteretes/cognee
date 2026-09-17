@@ -74,12 +74,7 @@ Please refer to our documentation [here](https://docs.cognee.ai/how-to-guides/de
     ```
     LLM_API_KEY="YOUR_OPENAI_API_KEY"
     ```
-7. (Optional — running from source only) Build the MCP App workspace UI bundle. Requires Node.js. Docker users skip this; the image build runs it automatically.
-    ```
-    cd apps-src && npm install && npm run build && cd ..
-    ```
-    This produces `src/app_bundles/visualize-graph.html`, which is gitignored. If you skip this step, `visualize_graph_ui` and the workspace tools will raise a clear error pointing back to this command.
-8. Run cognee mcp server with stdio (default)
+7. Run cognee mcp server with stdio (default)
     ```
     python src/server.py
     ```
@@ -149,9 +144,8 @@ If you'd rather run cognee-mcp in a container, you have two options:
       - `postgres` / `postgres-binary` - PostgreSQL database support
       - `neo4j` - Neo4j graph database support
       - `neptune` - AWS Neptune support
-      - `chromadb` - ChromaDB vector store support
+      - `turso` - Turso vector/graph store support
       - `scraping` - Web scraping capabilities
-      - `distributed` - Modal distributed execution
       - `langchain` - LangChain integration
       - `llama-index` - LlamaIndex integration
       - `anthropic` - Anthropic models
@@ -259,14 +253,42 @@ docker run \
 
 **Note:** When running in API mode:
 - Database migrations are automatically skipped (API server handles its own DB)
-- Some features are limited (see [API Mode Limitations](#-api-mode))
+- Some features are limited (see [API Mode Limitations](#api-mode))
 
 
 ## 🔗 MCP Client Configuration
 
 After starting your Cognee MCP server with Docker, you need to configure your MCP client to connect to it.
 
-### **SSE Transport Configuration** (Recommended)
+> ### ⚠️ Host/Origin protection (why you might get HTTP 421 or 403)
+>
+> Both the **http** and **sse** transports validate the `Host` and `Origin` headers to
+> block DNS-rebinding attacks, on every bind address including loopback — rebinding
+> targets loopback services specifically, so `127.0.0.1` is not a mitigation.
+>
+> * A `Host` the server does not recognise returns **`421 Misdirected Request`**
+> * An `Origin` it does not recognise returns **`403 Forbidden`**
+>
+> When you bind a non-loopback address (`--host 0.0.0.0`, which is what the Docker
+> entrypoint does), only `localhost` / `127.0.0.1` / `[::1]` are accepted by default, so
+> reaching the server by **LAN IP or a custom hostname returns 421** — the guard working,
+> not a bug.
+>
+> Allow specific hosts (the `:*` port glob is required):
+> ```bash
+> -e MCP_ALLOWED_HOSTS="192.168.1.50:*,myserver.local:*"
+> ```
+> Or turn the guard off entirely (only on a trusted network):
+> ```bash
+> -e MCP_DISABLE_DNS_REBINDING_PROTECTION=true
+> ```
+>
+> **Implementation note.** FastMCP installs this guard on its streamable-http app only —
+> `create_sse_app()` accepts no such option, so the allow-lists were silently dropped for
+> SSE. cognee-mcp mounts the same middleware on the SSE app itself, with the same
+> allow-lists, so both transports behave identically.
+
+### **SSE Transport Configuration** (Legacy — prefer HTTP below; both are guarded)
 
 **Start the server with SSE transport:**
 ```bash
@@ -317,7 +339,7 @@ cognee-sse: http://localhost:8000/sse (SSE) - ✓ Connected
 }
 ```
 
-### **HTTP Transport Configuration** (Alternative)
+### **HTTP Transport Configuration** (Recommended)
 
 **Start the server with HTTP transport:**
 ```bash
@@ -480,7 +502,7 @@ docker run \
 - `API_TOKEN`: Authentication token (optional, required if API has authentication enabled)
 
 **API Mode behavior:**
-The MCP server intentionally exposes only the memory API: `remember`, `recall`, and `forget`.
+The MCP server intentionally exposes only the memory API: `remember`, `recall`, and `forget` (plus the `cognify_status` progress check).
 In API mode these tools call the Cognee API server endpoints directly. Operational helpers such as
 `cognify`, `search`, `list_data`, `delete`, `prune`, `improve`, and document retrieval helpers are
 kept internal and are not exposed as MCP tools.
@@ -492,29 +514,45 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 ### Available Tools
 
-The MCP server exposes three tools:
+The MCP server exposes four tools (three memory tools pinned in `tools/list`, plus `cognify_status`):
 
-- **remember**: Store data in memory. With `session_id`: fast session cache. Without `session_id`: permanent graph memory
+- **remember**: Store data in memory. Pass `data` for text, or `filename` + `content_base64` to ingest an uploaded file (up to 10 MB). With `session_id`: fast session cache (text only). Without `session_id`: permanent graph memory
 - **recall**: Search memory with auto-routing. Searches session cache first when `session_id` is provided, then falls through to the permanent graph
-- **forget**: Delete memory by dataset name, or delete all owned memory with `everything=True`
+- **forget**: Delete memory by dataset name or id, a single data item by `data_id`, or delete all owned memory with `everything=True`
+- **cognify_status**: Check the progress of background ingestion started by `remember(background=True)`. Unadvertised by default; discoverable via `search_tools` and callable by name
 
-**Workspace UI Tools** (MCP Apps — Cursor, Claude Desktop, etc.):
+### Tool surface (`COGNEE_MCP_TOOL_MODE`)
 
-- **visualize_graph_ui**: Open the workspace and render the current knowledge graph
-- **upload_file_ui**: Open the workspace for file upload
-- **open_cognee_workspace**: Generic "open the cognee UI" entry point
-- **cognify_file**: Ingest an uploaded file (used by the workspace; accepts base64 content)
-- **list_datasets_json / list_dataset_data_json / create_dataset_json / get_client_info_json**: Structured-JSON helpers powering the workspace dropdown
+Advertising every tool up front costs agent context and hurts tool-selection accuracy, so by default the server pins a small set in `tools/list` and makes the rest discoverable through FastMCP's built-in `search_tools`. **Unadvertised tools stay callable by name.**
 
-The workspace lets you create/switch/delete datasets, upload files, add text, search, and view the graph from one inline panel.
+```bash
+COGNEE_MCP_TOOL_MODE=default   # pinned: remember, recall, forget
+COGNEE_MCP_TOOL_MODE=minimal   # pinned: remember, recall, forget
+COGNEE_MCP_TOOL_MODE=all       # no search transform; advertise every tool
+```
 
-The bundle that powers the workspace lives at `cognee-mcp/src/app_bundles/visualize-graph.html`. It is built from `cognee-mcp/apps-src/` via `npm run build` and is gitignored. The Docker image builds it as part of the image; PyPI wheels carry it (the maintainer runs `npm run build` before `uv build`); from-source users build it manually (see [Quick Start](#-quick-start) step 7). If the bundle is missing at runtime, the workspace tools raise a `FileNotFoundError` pointing back to the build command.
+Also settable per-process with `--tool-mode`. In `default`/`minimal` an agent calls `search_tools(query=...)` to find a tool and either calls it by name or goes through the `call_tool` proxy. Tiers are declared per tool via `@registry.tool(tags={...})` in `src/server.py`, so the pinned set is derived from the decorators rather than a separate list.
+
+`search_tools` returns up to `TOOL_SEARCH_MAX_RESULTS` (10) tools, sized for a catalog that will grow. The window only costs context on turns that actually call search; `tools/list` stays constant either way. See `tests/test_tool_search_benchmark.py` for the recall sweep behind the number.
+
+#### Writing a tool so search can find it
+
+Search works well on natural-language queries. Every phrasing below returns its target ranked first (covered by `tests/test_tool_search.py`):
+
+| query | returns |
+|---|---|
+| "is my background ingestion finished?" | `cognify_status` |
+| "check the progress of a pipeline job" | `cognify_status` |
+
+The one thing to know when **adding** a tool: matching is purely lexical. FastMCP's BM25 tokenizer does no stemming and drops tools that score zero, so a query shares no credit with a word it doesn't literally contain. Multi-word queries paper over this (they usually contain some matching token), which is why the table above passes, but terse queries won't.
+
+So: **write descriptions in the words an agent would use, including both singular and plural.** Recall is bounded by vocabulary, not by `TOOL_SEARCH_MAX_RESULTS`. If lexical matching ever stops being enough, `BaseSearchTransform` leaves `_search()` abstract — a semantic ranker over cognee's own embeddings can be dropped in without touching the rest of the plumbing.
 
 ### Agent Scoping (per-client default datasets)
 
-By default, each MCP client gets its own auto-named dataset (e.g. Cursor → `cursor_vscode_memory`, Claude Code → `claude_code_memory`) so different agents don't share memory unintentionally. The dataset is created on demand the first time a client calls a workspace tool.
+By default, each MCP client gets its own auto-named dataset (e.g. Cursor → `cursor_vscode_memory`, Claude Code → `claude_code_memory`) so different agents don't share memory unintentionally. The dataset is created on demand the first time a client writes to it.
 
-LLM-direct calls to `cognify`, `remember`, `improve`, `cognify_status`, and `cognify_file` route to the agent-scoped dataset when `dataset_name` is omitted. Pass `dataset_name` explicitly to override (e.g. `dataset_name="main_dataset"` still works).
+`remember` and `cognify_status` route to the agent-scoped dataset when `dataset_name` is omitted (the internal `cognify`/`improve` helpers, which are not exposed as tools, do the same). Pass `dataset_name` explicitly to override (e.g. `dataset_name="main_dataset"` still works).
 
 To disable agent scoping and have all clients share `main_dataset` as the default, set in `.env`:
 
@@ -522,14 +560,14 @@ To disable agent scoping and have all clients share `main_dataset` as the defaul
 COGNEE_MCP_AGENT_SCOPED=false
 ```
 
-When disabled, the workspace UI header shows `(agent scoping off)` and no per-client datasets are autocreated.
+When disabled, no per-client datasets are autocreated.
 
 ### Per-dataset isolation (`ENABLE_BACKEND_ACCESS_CONTROL`)
 
 Agent scoping decides which dataset *name* a tool defaults to. Whether two datasets are actually isolated at the storage layer is governed by cognee's `ENABLE_BACKEND_ACCESS_CONTROL` flag:
 
-- **`true` (default)** — each `(user, dataset)` pair gets its own per-dataset Kuzu + LanceDB under `.cognee_system/databases/<dataset_uuid>/`. `visualize_graph_ui` and search become strictly per-dataset because the workspace passes `dataset_name` and the server routes the visualization through cognee's `visualize_multi_user_graph` to set the right DB context.
-- **`false`** — all datasets share one Kuzu graph DB and one LanceDB. The dataset filter is honored for top-level data points, but `GRAPH_COMPLETION` traversal can pull connected nodes from any dataset, and `visualize_graph_ui` reflects the full shared graph. Use for single-user local dev; also disables the API auth requirement unless `REQUIRE_AUTHENTICATION=true` is set explicitly.
+- **`true` (default)** — each `(user, dataset)` pair gets its own per-dataset Kuzu + LanceDB under `.cognee_system/databases/<dataset_uuid>/`, and search is strictly per-dataset.
+- **`false`** — all datasets share one Kuzu graph DB and one LanceDB. The dataset filter is honored for top-level data points, but `GRAPH_COMPLETION` traversal can pull connected nodes from any dataset. Use for single-user local dev; also disables the API auth requirement unless `REQUIRE_AUTHENTICATION=true` is set explicitly.
 
 **Switching modes wipes nothing automatically — but data does not migrate.** Data ingested in one mode lives at a different on-disk path than the other and won't be visible after the flip. Clean-slate when changing the flag:
 
@@ -562,21 +600,38 @@ forget(dataset="main_dataset")
 
 ### Debugging
 
-To use debugger, run:
-    ```bash
-    mcp dev src/server.py
-    ```
+Use the **`fastmcp`** CLI, not `mcp`. Since the FastMCP 3 migration this server is a
+standalone `fastmcp.FastMCP` instance, which the `mcp` CLI does not recognise —
+`mcp dev src/server.py` fails with *"Ignoring object 'src/server.py:mcp' as it's not a
+valid server object"*.
 
-Open inspector with timeout passed:
-    ```
-    http://localhost:5173?timeout=120000
-    ```
+Inspect the server without launching anything (fast sanity check — name, version, tool count):
 
-To apply new changes while developing cognee you need to do:
+```bash
+uv run fastmcp inspect src/server.py:mcp
+```
 
-1. Update dependencies in cognee folder if needed
-2. `uv sync --dev --all-extras --reinstall`
-3. `mcp dev src/server.py`
+Run it against the MCP Inspector UI:
+
+```bash
+uv run fastmcp dev src/server.py:mcp
+```
+
+Open the inspector with a longer timeout — cognee's first call can be slow while the
+databases initialise:
+
+```
+http://localhost:5173?timeout=120000
+```
+
+To apply new changes while developing cognee:
+
+1. Update dependencies in the cognee folder if needed
+2. `uv sync --group dev --reinstall`
+3. `uv run fastmcp dev src/server.py:mcp`
+
+> The `:mcp` suffix names the server object in the file. Without it the CLI has to guess,
+> and the guess is not reliable across FastMCP versions.
 
 ### Development
 
@@ -584,14 +639,22 @@ In order to use local cognee:
 
 1. Uncomment the following line in the cognee-mcp [`pyproject.toml`](pyproject.toml) file and set the cognee root path.
     ```
-    #"cognee[postgres,codegraph,gemini,huggingface,docs,neo4j] @ file:/Users/<username>/Desktop/cognee"
+    #"cognee[postgres-binary,docs,neo4j] @ file:/path/to/your/cognee"
     ```
-    Remember to replace `file:/Users/<username>/Desktop/cognee` with your actual cognee root path.
+    Replace `/path/to/your/cognee` with the absolute path to your cognee checkout, and
+    comment out the released `"cognee[...]>=1.5.0,<2.0.0"` line directly below it —
+    otherwise both requirements apply and uv resolves the published package instead.
 
 2. Install dependencies with uv in the mcp folder
     ```
     uv sync --reinstall
     ```
+
+    Re-run this after every change to the local cognee checkout.
+
+> **Note:** editing that line modifies the tracked `pyproject.toml` and rewrites
+> `uv.lock` with a machine-local absolute path. Revert both before committing —
+> `git checkout -- pyproject.toml uv.lock` — or the path leaks into the repo.
 
 ## Code of Conduct
 

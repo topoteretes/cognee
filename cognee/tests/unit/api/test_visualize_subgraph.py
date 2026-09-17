@@ -22,7 +22,7 @@ import pytest
 # the submodule by its module path (bypassing the shadowed attribute); we then
 # grab the module object from sys.modules and patch on it (patch.object), which
 # is import-order independent.
-from cognee.api.v1.visualize.visualize import visualize_graph as _visualize_graph  # noqa: F401
+from cognee.api.v1.visualize.visualize import visualize_graph as _visualize_graph
 
 visualize_module = sys.modules["cognee.api.v1.visualize.visualize"]
 
@@ -53,10 +53,10 @@ def _patches(engine):
     return (
         patch.object(visualize_module, "get_graph_engine", AsyncMock(return_value=engine)),
         patch.object(visualize_module, "set_database_global_context_variables", _noop_db_context),
-        patch(
-            "cognee.modules.visualization.session_events.collect_session_events",
-            AsyncMock(return_value=[]),
-        ),
+        # Patch the name visualize.py binds at import time. Patching the
+        # source module instead silently stops intercepting, because
+        # fetch_visualization_data resolves this through its module global.
+        patch.object(visualize_module, "collect_session_events", AsyncMock(return_value=[])),
     )
 
 
@@ -141,12 +141,16 @@ async def test_no_seed_falls_back_to_degree(tmp_path):
     full_graph = _chain_graph(20)
     subgraph = ([full_graph[0][i] for i in (9, 10, 11)], [full_graph[1][9], full_graph[1][10]])
     engine = MagicMock()
-    engine.get_graph_data = AsyncMock(return_value=full_graph)
+    engine.get_top_degree_node_ids = AsyncMock(return_value=["10"])
+    engine.get_graph_data = AsyncMock(
+        side_effect=AssertionError("degree seeds must not load the full graph")
+    )
     engine.get_neighborhood = AsyncMock(return_value=subgraph)
 
     html = await _visualize(engine, tmp_path)
 
     node_ids, _ = _rendered_ids_and_edges(html)
     assert node_ids == {"9", "10", "11"}
-    engine.get_graph_data.assert_awaited_once()  # degree fallback loads the graph
-    engine.get_neighborhood.assert_awaited_once()
+    engine.get_top_degree_node_ids.assert_awaited_once_with(10)
+    engine.get_graph_data.assert_not_awaited()
+    engine.get_neighborhood.assert_awaited_once_with(node_ids=["10"], depth=2)

@@ -1,14 +1,13 @@
 from uuid import UUID
-from typing import Optional
 
-from cognee.modules.users.models import User
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
+from cognee.modules.users.models import User
 
 
 async def resolve_authorized_user_dataset(
-    dataset_name: str, dataset_id: Optional[UUID] = None, user: Optional[User] = None
+    dataset_name: str, dataset_id: UUID | None = None, user: User | None = None
 ):
     """
     Function handles creation and dataset authorization if dataset already exist for Cognee.

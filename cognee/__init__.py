@@ -1,3 +1,19 @@
+"""Public Python API for Cognee.
+
+This module exposes the main functions and objects intended for direct use
+through ``import cognee``. It groups the stable V1 API, memory-oriented V2 API,
+visualization helpers, tracing utilities, migration helpers, and session models
+behind a single package-level entrypoint.
+
+Common entrypoints include:
+    add: Add data to a Cognee dataset.
+    cognify: Process ingested data into Cognee's knowledge representation.
+    search: Query processed data using the configured search type.
+    remember: Store memory-oriented entries using the V2 API.
+    recall: Retrieve information from memory-oriented entries.
+    delete: Remove data from Cognee-managed storage.
+"""
+
 # ruff: noqa: E402
 from cognee.version import get_cognee_version
 
@@ -29,6 +45,8 @@ from .api.v1.datasets.datasets import datasets
 from .api.v1.agents.agents import agents
 from .api.v1.prune import prune
 from .api.v1.search import SearchType, search
+from .api.v1.report import report
+from .api.v1.validate import validate, ValidationReport, ValidationIssue, ValidationStatus
 from .api.v1.visualize import (
     visualize_graph,
     start_visualization_server,
@@ -68,6 +86,10 @@ from .api.v1 import (
 )
 from .memory import MemoryEntry, QAEntry, TraceEntry, FeedbackEntry
 
+# Background work: wait for fire-and-forget tasks (background remember, the
+# session-to-graph improve bridge) before the process exits.
+from cognee.infrastructure.background_tasks import wait_for_background_tasks
+
 # Memory migration (cognee.migration has the provider sources:
 # Mem0Source, ZepSource/GraphitiSource, LettaSource, COGXArchiveSource)
 from . import migration
@@ -84,6 +106,11 @@ from cognee.modules.observability.trace_context import (
 # Agent memory
 from cognee.modules.agent_memory import agent_memory
 
+# Tool connections (authorized external databases for recall's "tools" scope)
+from .api.v1.tools import tools
+
 # Relational DB models
 from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord
-import cognee.modules.migrations.models  # noqa: F401  (registers global_database_version)
+import cognee.modules.migrations.models  # registers global_database_version
+import cognee.modules.tools.models  # registers tool_connections
+import cognee.modules.provenance.edge_evidence.models  # registers provenance_edge_evidence

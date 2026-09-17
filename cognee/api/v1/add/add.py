@@ -1,52 +1,75 @@
+from typing import Any, BinaryIO
+from urllib.parse import urlparse
 from uuid import UUID
-from typing import Union, BinaryIO, List, Optional, Any
 
-from cognee.modules.users.models import User
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
 from cognee.infrastructure.llm.config import LLMConfig
-from cognee.modules.pipelines import Task, run_pipeline
-from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
-    resolve_authorized_user_dataset,
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+from cognee.modules.engine.operations.setup import setup
+from cognee.modules.observability import (
+    COGNEE_DATASET_NAME,
+    MEMORY_COLLECTION,
+    MEMORY_OPERATION,
+    MEMORY_SYSTEM,
+    increment_items_stored,
+    new_span,
+    record_operation_duration,
 )
+from cognee.modules.pipelines import Task, run_pipeline
+from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
     reset_dataset_pipeline_run_status,
 )
-from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
-from cognee.modules.engine.operations.setup import setup
+from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
+    resolve_authorized_user_dataset,
+)
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.resolve_dlt_sources import resolve_dlt_sources
 from cognee.tasks.ingestion.utils import materialize_stream_for_background
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger()
 
 
+def _add_pipeline_needs_llm(data: Any, preferred_loaders: list | None) -> bool:
+    """Only known plain-text inputs can safely skip the LLM check."""
+    if preferred_loaders:
+        return True
+
+    data_items = data if isinstance(data, list) else [data]
+    for data_item in data_items:
+        data_item = data_item.data if isinstance(data_item, DataItem) else data_item
+        if not isinstance(data_item, str) or urlparse(data_item).scheme:
+            return True
+        try:
+            resolve_local_path(data_item, must_exist=True)
+        except (FileNotFoundError, OSError, ValueError):
+            pass
+        else:
+            return True
+    return False
+
+
 async def add(
-    data: Union[
-        BinaryIO,
-        list[BinaryIO],
-        str,
-        list[str],
-        DataItem,
-        list[DataItem],
-        Any,  # DltResource, SourceFactory, or other dlt types
-    ],
+    data: BinaryIO | list[BinaryIO] | str | list[str] | DataItem | list[DataItem] | Any,
     dataset_name: str = DEFAULT_DATASET_NAME,
     user: User = None,
-    node_set: Optional[List[str]] = None,
-    vector_db_config: dict = None,
-    graph_db_config: dict = None,
-    dataset_id: Optional[UUID] = None,
-    preferred_loaders: Optional[List[Union[str, dict[str, dict[str, Any]]]]] = None,
+    node_set: list[str] | None = None,
+    vector_db_config: dict | None = None,
+    graph_db_config: dict | None = None,
+    dataset_id: UUID | None = None,
+    preferred_loaders: list[str | dict[str, dict[str, Any]]] | None = None,
     incremental_loading: bool = True,
-    data_per_batch: Optional[int] = 20,
-    importance_weight: Optional[float] = 0.5,
+    data_per_batch: int | None = 20,
+    importance_weight: float | None = 0.5,
     run_in_background: bool = False,
-    llm_config: Optional[LLMConfig] = None,
-    embedding_config: Optional[EmbeddingConfig] = None,
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = True,
+    skip_connection_test: bool = False,
     **kwargs,
 ):
     """
@@ -68,6 +91,12 @@ async def add(
             * File URLs: "file:///path/to/document.pdf" or "file://relative/path.txt"
             * S3 paths: "s3://bucket-name/path/to/file.pdf"
         - **Binary file objects**: File handles/streams (BinaryIO)
+        - **Web URLs**: "https://example.com/page" is fetched and ingested as a page
+        - **Code repository URLs**: "https://github.com/<owner>/<repo>" (or a gitlab.com
+          project, or any URL ending in .git) is shallow-cloned and ingested as ONE
+          code-repo item that cognify runs through the enola code graph pipeline
+          (cross-file edges), plus the repo's documents; same as adding a local code
+          project directory. Requires ALLOW_HTTP_REQUESTS and git on PATH.
         - **Lists**: Multiple files or text strings in a single call
 
     Supported File Formats:
@@ -93,7 +122,8 @@ async def add(
             - S3 path: "s3://my-bucket/documents/file.pdf"
             - List of mixed types: ["text content", "/path/file.pdf", "file://doc.txt", file_handle]
             - Binary file object: open("file.txt", "rb")
-            - url: A web link url (https or http)
+            - url: A web link url (https or http); a GitHub/GitLab repository URL is
+              cloned and indexed as a code graph instead of fetched as a page
         dataset_name: Name of the dataset to store data in. Defaults to "main_dataset".
                     Create separate datasets to organize different knowledge domains.
         user: User object for authentication and permissions. Uses default user if None.
@@ -170,22 +200,28 @@ async def add(
         Make sure to set TAVILY_API_KEY = YOUR_TAVILY_API_KEY as a environment variable
         await cognee.add("https://example.com")
 
+        # Add a single url and keenable extract ingestion method
+        Make sure to set KEENABLE_API_KEY = YOUR_KEENABLE_API_KEY as a environment variable
+        (Tavily takes precedence if both keys are set.)
+        await cognee.add("https://example.com")
+
         # Add multiple urls
         await cognee.add(["https://example.com","https://books.toscrape.com"])
         ```
 
     Environment Variables:
-        Required:
-        - LLM_API_KEY: API key for your LLM provider (OpenAI, Anthropic, etc.)
+        - LLM_API_KEY: API key for your LLM provider (OpenAI, Anthropic, etc.). When
+          unset, ingestion runs on local models (GLiNER extraction, fastembed embeddings).
 
         Optional:
         - LLM_PROVIDER: "openai" (default), "anthropic", "gemini", "ollama", "mistral", "bedrock"
-        - LLM_MODEL: Model name (default: "gpt-5-mini")
+        - LLM_MODEL: Model name (default: "openai/gpt-5.6-luna")
         - DEFAULT_USER_EMAIL: Custom default user email
         - DEFAULT_USER_PASSWORD: Custom default user password
         - VECTOR_DB_PROVIDER: "lancedb" (default), "pgvector"
         - GRAPH_DATABASE_PROVIDER: "ladybug" (default), "neo4j"
         - TAVILY_API_KEY: YOUR_TAVILY_API_KEY
+        - KEENABLE_API_KEY: YOUR_KEENABLE_API_KEY
 
     """
     # Route to remote instance if connected via serve()
@@ -208,24 +244,53 @@ async def add(
                 transformed[item] = {}
         preferred_loaders = transformed
 
+    # Validate only the ingestion work this call will perform. Obvious direct
+    # text is LLM-free; inputs whose loader is not known yet stay conservative.
+    from cognee.modules.preflight import validate_provider_config
+
+    add_pipeline_needs_llm = _add_pipeline_needs_llm(data, preferred_loaders)
+    validate_provider_config(needs_llm=add_pipeline_needs_llm)
+
+    await setup()
+
+    # The pipeline-run log writers INSERT the operation-record columns
+    # (user_id, outcome, tokens, ...), so an existing database must be at the
+    # current Alembic head before the first write — same gate as cognify().
+    from cognee.modules.migrations.startup import run_migrations_and_block
+
+    await run_migrations_and_block(dataset_id or dataset_name, user)
+
+    import time as _time
+
+    _add_start_ns = _time.monotonic_ns()
+
+    with new_span("memory.store") as _span:
+        _span.set_attribute(MEMORY_SYSTEM, "cognee")
+        _span.set_attribute(MEMORY_OPERATION, "store")
+        _span.set_attribute(MEMORY_COLLECTION, dataset_name or "main_dataset")
+        _span.set_attribute(COGNEE_DATASET_NAME, dataset_name or "main_dataset")
+
+    user, authorized_dataset = await resolve_authorized_user_dataset(
+        dataset_name=dataset_name, dataset_id=dataset_id, user=user
+    )
+
+    # The dataset is resolved (created if needed) and write-checked above; hand
+    # its id to the ingestion task so it does not resolve the name again on
+    # every item (the pipeline also passes the dataset via ctx — this keeps the
+    # non-pipeline fallback on the cheap branch too).
     tasks = [
-        Task(resolve_data_directories, include_subdirectories=True),
+        Task(resolve_data_directories, include_subdirectories=True, needs_llm=False),
         Task(
             ingest_data,
             dataset_name,
             user,
             node_set,
-            dataset_id,
+            authorized_dataset.id,
             preferred_loaders,
             importance_weight,
+            needs_llm=add_pipeline_needs_llm,
         ),
     ]
-
-    await setup()
-
-    user, authorized_dataset = await resolve_authorized_user_dataset(
-        dataset_name=dataset_name, dataset_id=dataset_id, user=user
-    )
 
     # Expand DLT resources (and auto-detected CSV/connection strings) into
     # standard DataItems before the pipeline sees them. orphan_cleanup (when
@@ -236,6 +301,7 @@ async def add(
         data,
         dataset_name=dataset_name,
         user=user,
+        dataset_id=authorized_dataset.id,
         **kwargs,
     )
 
@@ -251,7 +317,9 @@ async def add(
         data = await materialize_stream_for_background(data)
 
     await reset_dataset_pipeline_run_status(
-        authorized_dataset.id, user, pipeline_names=["add_pipeline", "cognify_pipeline"]
+        authorized_dataset.id,
+        user,
+        pipeline_names=["add_pipeline", "cognify_pipeline"],
     )
 
     pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
@@ -271,6 +339,7 @@ async def add(
         llm_config=llm_config,
         embedding_config=embedding_config,
         data_cache=data_cache,
+        skip_connection_test=skip_connection_test,
     )
 
     # Foreground runs: the fresh rows are committed by pipeline_executor_func
@@ -282,6 +351,16 @@ async def add(
     # run_pipeline_blocking returns {dataset_id: PipelineRunInfo} but callers
     # expect a single PipelineRunInfo (add always processes one dataset).
     if isinstance(result, dict) and len(result) == 1:
-        return next(iter(result.values()))
+        result = next(iter(result.values()))
+
+    _duration_ms = (_time.monotonic_ns() - _add_start_ns) / 1_000_000
+    _attrs = {
+        "memory.system": "cognee",
+        "memory.operation": "store",
+        "memory.collection": dataset_name or "main_dataset",
+    }
+    record_operation_duration(_duration_ms, _attrs)
+    item_count = len(data) if hasattr(data, "__len__") else 1
+    increment_items_stored(item_count, _attrs)
 
     return result

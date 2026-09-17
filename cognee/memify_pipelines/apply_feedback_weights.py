@@ -1,27 +1,26 @@
-from typing import List
-
 from cognee import memify
-from cognee.context_global_variables import (
-    set_database_global_context_variables,
-    set_session_user_context_variable,
-)
+from cognee.context_global_variables import set_session_user_context_variable
 from cognee.exceptions import CogneeValidationError
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.data.methods import get_authorized_existing_datasets
+from cognee.modules.improve.constants import DEFAULT_FEEDBACK_ALPHA
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.memify.apply_feedback_weights import apply_feedback_weights
+from cognee.tasks.memify.apply_feedback_weights import (
+    apply_feedback_weights,
+    validate_feedback_alpha,
+)
 from cognee.tasks.memify.extract_feedback_qas import extract_feedback_qas
-from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger("apply_feedback_weights_pipeline")
 
 
 async def apply_feedback_weights_pipeline(
     user: User,
-    session_ids: List[str],
+    session_ids: list[str],
     dataset: str = DEFAULT_DATASET_NAME,
-    alpha: float = 0.1,
+    alpha: float = DEFAULT_FEEDBACK_ALPHA,
     batch_size: int = 100,
     run_in_background: bool = False,
 ):
@@ -39,8 +38,7 @@ async def apply_feedback_weights_pipeline(
     ):
         raise CogneeValidationError(message="session_ids must be a non-empty list", log=False)
 
-    if alpha <= 0 or alpha > 1:
-        raise CogneeValidationError(message="alpha must be in range (0, 1]", log=False)
+    validate_feedback_alpha(alpha)
     if not isinstance(batch_size, int) or batch_size < 1:
         raise CogneeValidationError(message="batch_size must be a positive integer", log=False)
 
@@ -53,26 +51,27 @@ async def apply_feedback_weights_pipeline(
     )
     if not dataset_to_write:
         raise CogneeValidationError(
-            message=f"User (id: {str(user.id)}) does not have write access to dataset: {dataset}",
+            message=f"User (id: {user.id!s}) does not have write access to dataset: {dataset}",
             log=False,
         )
 
-    async with set_database_global_context_variables(
-        dataset_to_write[0].id, dataset_to_write[0].owner_id
-    ):
-        extraction_tasks = [Task(extract_feedback_qas, session_ids=session_ids)]
-        enrichment_tasks = [
-            Task(apply_feedback_weights, alpha=alpha, task_config={"batch_size": batch_size})
-        ]
+    extraction_tasks = [Task(extract_feedback_qas, session_ids=session_ids)]
+    enrichment_tasks = [
+        Task(apply_feedback_weights, alpha=alpha, task_config={"batch_size": batch_size})
+    ]
 
-        result = await memify(
-            extraction_tasks=extraction_tasks,
-            enrichment_tasks=enrichment_tasks,
-            dataset=dataset_to_write[0].id,
-            data=[{}],
-            user=user,
-            run_in_background=run_in_background,
-        )
+    # No set_database_global_context_variables scope around memify: the pipeline
+    # enters it itself under the dataset lock. Holding the scope's queue slot
+    # while memify waits on that lock inverts the canonical order
+    # (dataset lock -> queue slot) and can deadlock the process (SDK-483).
+    result = await memify(
+        extraction_tasks=extraction_tasks,
+        enrichment_tasks=enrichment_tasks,
+        dataset=dataset_to_write[0].id,
+        data=[{}],
+        user=user,
+        run_in_background=run_in_background,
+    )
 
     logger.info(
         "Feedback weight memify pipeline completed",

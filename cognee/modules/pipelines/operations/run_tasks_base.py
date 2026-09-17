@@ -1,18 +1,18 @@
-from typing import Optional
-
-from cognee.modules.observability import OtelStatusCode as StatusCode
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.users.models import User
-from cognee.shared.utils import send_telemetry
 from cognee import __version__ as cognee_version
-from cognee.modules.pipelines.models import PipelineContext
-from cognee.modules.observability import (
-    new_span,
-    COGNEE_PIPELINE_TASK_NAME,
-    COGNEE_RESULT_SUMMARY,
-    COGNEE_RESULT_COUNT,
-)
 from cognee.infrastructure.engine import DataPoint
+from cognee.modules.observability import (
+    COGNEE_PIPELINE_TASK_NAME,
+    COGNEE_RESULT_COUNT,
+    COGNEE_RESULT_SUMMARY,
+    new_span,
+)
+from cognee.modules.observability import OtelStatusCode as StatusCode
+from cognee.modules.pipelines.models import PipelineContext
+from cognee.modules.pipelines.provenance_config import get_provenance_config
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import send_telemetry
+
 from ..tasks.task import Task
 
 logger = get_logger("run_tasks_base")
@@ -153,7 +153,7 @@ async def handle_task(
     leftover_tasks: list[Task],
     next_task_batch_size: int,
     user: User,
-    ctx: Optional[PipelineContext] = None,
+    ctx: PipelineContext | None = None,
 ):
     """Handle common task workflow with logging, telemetry, and error handling."""
     task_type = running_task.task_type
@@ -161,7 +161,7 @@ async def handle_task(
     logger.info(f"{task_type} task started: `{running_task.executable.__name__}`")
     send_telemetry(
         f"{task_type} Task Started",
-        user_id=user.id,
+        user,
         additional_properties={
             "task_name": running_task.executable.__name__,
             "cognee_version": cognee_version,
@@ -201,23 +201,24 @@ async def handle_task(
             # Reuse the visited set across tasks so already-stamped
             # DataPoints are skipped in subsequent pipeline stages.
             provenance_visited = ctx._provenance_visited if ctx else None
-
+            _provenance_config = get_provenance_config()
             async for result_data in running_task.execute(args, kwargs, next_task_batch_size):
                 if isinstance(result_data, list):
                     result_count += len(result_data)
                 else:
                     result_count += 1
 
-                _stamp_provenance(
-                    result_data,
-                    pipe_name,
-                    task_name,
-                    visited=provenance_visited,
-                    node_set=input_node_set,
-                    user_label=user_label,
-                    content_hash=input_content_hash,
-                    task_index=task_index,
-                )
+                if not _provenance_config.is_disabled():
+                    _stamp_provenance(
+                        result_data,
+                        pipe_name,
+                        task_name,
+                        visited=provenance_visited,
+                        node_set=input_node_set,
+                        user_label=user_label,
+                        content_hash=input_content_hash,
+                        task_index=task_index,
+                    )
 
                 async for result in run_tasks_base(leftover_tasks, result_data, user, ctx):
                     yield result
@@ -231,7 +232,7 @@ async def handle_task(
             logger.info(f"{task_type} task completed: `{task_name}`")
             send_telemetry(
                 f"{task_type} Task Completed",
-                user_id=user.id,
+                user,
                 additional_properties={
                     "task_name": task_name,
                     "cognee_version": cognee_version,
@@ -243,27 +244,26 @@ async def handle_task(
             span.set_status(StatusCode.ERROR, str(error))
             span.record_exception(error)
 
-            logger.error(
-                f"{task_type} task errored: `{task_name}`\n{str(error)}\n",
-                exc_info=True,
+            logger.exception(
+                f"{task_type} task errored: `{task_name}`\n",
             )
             send_telemetry(
                 f"{task_type} Task Errored",
-                user_id=user.id,
+                user,
                 additional_properties={
                     "task_name": task_name,
                     "cognee_version": cognee_version,
                     "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
                 },
             )
-            raise error
+            raise
 
 
 async def run_tasks_base(
     tasks: list[Task],
     data=None,
     user: User = None,
-    ctx: Optional[PipelineContext] = None,
+    ctx: PipelineContext | None = None,
 ):
     """Base function to execute tasks in a pipeline, handling task type detection and execution."""
     if len(tasks) == 0:

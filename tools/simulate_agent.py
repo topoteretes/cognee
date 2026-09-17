@@ -85,7 +85,7 @@ def main():
     if r.status_code in (200, 201):
         key_data = r.json()
         api_key = key_data.get("key") or key_data.get("api_key", "")
-        print(f"  API Key: {api_key[:16]}...")
+        print("  API Key: created")
     else:
         print(f"  Failed: {r.status_code} {r.text}")
         # Try to continue with bearer token

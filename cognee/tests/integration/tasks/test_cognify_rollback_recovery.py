@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import logging
 import pathlib
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -32,6 +33,8 @@ from cognee.tasks.storage.add_data_points import add_data_points
 from cognee.tests.utils.assert_graph_nodes_not_present import assert_graph_nodes_not_present
 from cognee.tests.utils.assert_graph_nodes_present import assert_graph_nodes_present
 
+logger = logging.getLogger(__name__)
+
 
 class Person(DataPoint):
     name: str
@@ -52,11 +55,11 @@ async def clean_test_environment(request, tmp_path, monkeypatch):
     system_directory_path = str(root / "system")
     data_directory_path = str(root / "data")
 
+    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
     )
     from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
-    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
 
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
@@ -113,7 +116,7 @@ async def clean_test_environment(request, tmp_path, monkeypatch):
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in clean_test_environment", exc_info=True)
 
 
 async def _get_data_record(data_id):
@@ -191,7 +194,8 @@ async def _mock_structured_output(
     **_kwargs,
 ):
     from cognee.shared.data_models import Edge as KGEdge
-    from cognee.shared.data_models import KnowledgeGraph, Node as KGNode, SummarizedContent
+    from cognee.shared.data_models import KnowledgeGraph, SummarizedContent
+    from cognee.shared.data_models import Node as KGNode
 
     if response_model == SummarizedContent:
         return SummarizedContent(
@@ -270,7 +274,9 @@ async def test_cognify_rollback_integration_keeps_preexisting_data_when_pipeline
 
     monkeypatch.setattr(cognify_module, "get_default_tasks", _patched_get_default_tasks)
 
-    cognify_result = await cognee.cognify(datasets=[dataset_name], user=user)
+    # raise_on_error=False: this test inspects the errored run info directly;
+    # the default would raise CognifyFailedError here (COG-6276).
+    cognify_result = await cognee.cognify(datasets=[dataset_name], user=user, raise_on_error=False)
     run_info = cognify_result[dataset.id]
     assert run_info.status == "PipelineRunErrored"
 

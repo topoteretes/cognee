@@ -11,20 +11,37 @@ Uses a small async-capable worker so the worker-side concurrent dispatch
 from __future__ import annotations
 
 import asyncio
+import logging
 import multiprocessing as mp
 import pickle
+import sys
 import time
 
 import pytest
 
 from cognee_db_workers.harness import (
+    _TIMEOUT_BEFORE_RESPAWN,
     Request,
     Response,
     SubprocessSession,
     SubprocessTransportError,
-    _TIMEOUT_BEFORE_RESPAWN,
     run_worker_loop,
     spawn_without_main,
+)
+
+logger = logging.getLogger(__name__)
+
+# These tests construct subprocess workers explicitly, so the
+# *_SUBPROCESS_ENABLED=false the Windows CI jobs set cannot keep them from
+# spawning. On Windows the spawned child intermittently deadlocks at
+# interpreter startup (a python.exe frozen at ~3.8 MB that never signals
+# ready) and pytest hangs on it until the job timeout -- observed with the
+# watchdog on runs 33643650, 33648260941 and 33729891452. Tracked as
+# SDK-540; unskip these when its fix lands. Full coverage continues on the
+# ubuntu and macOS legs.
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="explicit worker spawn deadlocks intermittently on Windows (SDK-540)",
 )
 
 
@@ -234,6 +251,10 @@ def test_sync_and_async_calls_interleave_on_one_session():
                     r = session.call(Request(op=OP_ECHO_FAST, args=(f"s{i}",)))
                     sync_results.append(r.result)
             except Exception as e:
+                logger.debug(
+                    "Ignoring exception in test_sync_and_async_calls_interleave_on_one_session.do_sync",
+                    exc_info=True,
+                )
                 errors.append(e)
 
         async def do_async():

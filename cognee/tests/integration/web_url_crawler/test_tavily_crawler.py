@@ -1,5 +1,7 @@
 import os
+
 import pytest
+
 from cognee.tasks.web_scraper.utils import fetch_with_tavily
 
 skip_in_ci = pytest.mark.skipif(

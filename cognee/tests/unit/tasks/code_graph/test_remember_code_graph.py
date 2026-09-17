@@ -1,7 +1,9 @@
 """remember(content_type='code') routes repos through the code-graph pipeline."""
 
 import importlib
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
@@ -11,6 +13,7 @@ remember_module = importlib.import_module("cognee.api.v1.remember.remember")
 resolve_module = importlib.import_module("cognee.tasks.code_graph.resolve_repo")
 pipeline_module = importlib.import_module("cognee.modules.run_custom_pipeline")
 migrations_module = importlib.import_module("cognee.modules.migrations.startup")
+cognify_config_module = importlib.import_module("cognee.modules.cognify.config")
 
 
 @pytest.fixture
@@ -38,7 +41,9 @@ async def test_single_repo_runs_code_graph_pipeline(code_remember_env):
         content_type="code",
     )
 
-    code_remember_env["resolve"].assert_awaited_once_with("https://github.com/org/repo")
+    code_remember_env["resolve"].assert_awaited_once_with(
+        "https://github.com/org/repo", credentials=None
+    )
     code_remember_env["pipeline"].assert_awaited_once()
     call = code_remember_env["pipeline"].await_args
     assert call.kwargs["dataset"] == "my_code"
@@ -92,6 +97,139 @@ async def test_non_string_data_is_rejected(code_remember_env):
 
 
 @pytest.mark.asyncio
-async def test_index_vectors_without_code_content_type_is_rejected(code_remember_env):
+async def test_index_vectors_without_code_content_type_is_rejected(code_remember_env, monkeypatch):
+    # A text remember() runs the keyless extractor gate before argument
+    # validation; disable the preflight so this test checks the argument only.
+    monkeypatch.setenv("COGNEE_SKIP_CONNECTION_TEST", "true")
     with pytest.raises(ValueError, match="index_vectors"):
         await remember("some text", index_vectors=True)
+
+
+def _pipeline_result(status, dataset_name="my_code"):
+    """Shape of a blocking run_custom_pipeline return: {dataset_id: run_info}."""
+    dataset_uuid = uuid4()
+    run_id = uuid4()
+    return (
+        {
+            dataset_uuid: SimpleNamespace(
+                status=status, pipeline_run_id=run_id, dataset_name=dataset_name
+            )
+        },
+        dataset_uuid,
+        run_id,
+    )
+
+
+@pytest.fixture
+def resolved_dataset(monkeypatch):
+    """Stub upfront dataset resolution used by the background code branch."""
+    dataset = SimpleNamespace(id=uuid4(), name="my_code")
+    user = SimpleNamespace(id=uuid4())
+    monkeypatch.setattr(
+        remember_module,
+        "resolve_authorized_user_datasets",
+        AsyncMock(return_value=(user, [dataset])),
+    )
+    return dataset
+
+
+@pytest.mark.asyncio
+async def test_blocking_captures_pipeline_run_info(code_remember_env):
+    pipeline_result, dataset_uuid, run_id = _pipeline_result("PipelineRunCompleted")
+    code_remember_env["pipeline"].return_value = pipeline_result
+
+    result = await remember("/some/repo", dataset_name="my_code", content_type="code")
+
+    assert result.status == "completed"
+    assert result.dataset_id == str(dataset_uuid)
+    assert result.pipeline_run_id == str(run_id)
+    assert result.items[0]["pipeline_run_id"] == str(run_id)
+
+
+@pytest.mark.asyncio
+async def test_blocking_errored_run_marks_result_errored(code_remember_env):
+    pipeline_result, _, _ = _pipeline_result("PipelineRunErrored")
+    code_remember_env["pipeline"].return_value = pipeline_result
+
+    result = await remember("/some/repo", content_type="code")
+
+    assert result.status == "errored"
+    assert "code_graph_pipeline errored" in result.error
+    assert result.items[0]["status"] == "errored"
+    assert result.items_processed == 0
+
+
+@pytest.mark.asyncio
+async def test_run_in_background_returns_running_then_completes(
+    code_remember_env, resolved_dataset
+):
+    result = await remember(
+        "https://github.com/org/repo",
+        dataset_name="my_code",
+        content_type="code",
+        run_in_background=True,
+    )
+
+    assert result.status == "running"
+    assert result.dataset_id == str(resolved_dataset.id)
+    assert result.dataset_name == "my_code"
+
+    await result
+
+    assert result.status == "completed"
+    assert result.items_processed == 1
+    assert code_remember_env["pipeline"].await_args.kwargs["dataset"] == resolved_dataset.id
+
+
+@pytest.mark.asyncio
+async def test_background_failure_continues_batch(code_remember_env, resolved_dataset):
+    repo_dir = code_remember_env["repo_dir"]
+    code_remember_env["resolve"].side_effect = [RuntimeError("clone failed"), repo_dir]
+
+    result = await remember(
+        ["https://github.com/org/bad", "https://github.com/org/good"],
+        content_type="code",
+        run_in_background=True,
+    )
+    await result
+
+    assert result.status == "errored"
+    assert "clone failed" in result.error
+    assert [item["source"] for item in result.items] == [
+        "https://github.com/org/bad",
+        "https://github.com/org/good",
+    ]
+    assert result.items[0]["status"] == "errored"
+    assert result.items[1].get("status") != "errored"
+    assert result.items_processed == 1
+    # The good repo still ran through the pipeline.
+    assert code_remember_env["pipeline"].await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_blocking_ignores_background_machinery(code_remember_env):
+    result = await remember("/some/repo", content_type="code")
+
+    assert result._task is None
+    assert result.done
+
+
+@pytest.mark.asyncio
+async def test_code_route_never_resolves_the_graph_extractor(code_remember_env, monkeypatch):
+    """A keyless install without gliner2 must still build code graphs.
+
+    The code route runs enola only, so the extractor gate that a keyless
+    text remember() hits (KeylessExtractorNotInstalledError) must not run.
+    """
+
+    def _gate_would_fail(*_args, **_kwargs):
+        raise cognify_config_module.KeylessExtractorNotInstalledError()
+
+    monkeypatch.setattr(cognify_config_module, "resolve_extractor", _gate_would_fail)
+
+    result = await remember(
+        str(code_remember_env["repo_dir"]), dataset_name="my_code", content_type="code"
+    )
+
+    assert result.status == "completed"
+    code_remember_env["pipeline"].assert_awaited_once()

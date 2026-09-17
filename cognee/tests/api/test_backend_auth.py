@@ -1,8 +1,9 @@
+import asyncio
 import os
 import uuid
-import asyncio
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 with patch("dotenv.load_dotenv"):
     os.environ["REQUIRE_AUTHENTICATION"] = "true"
@@ -106,7 +107,7 @@ class TestAuthFlow:
 class TestHashApiKey:
     """
     Confirm that when HASH_API_KEY=true, the API key stored in the database
-    is the SHA-256 hash of the raw key, not the raw key itself.
+    is a deterministic hash of the raw key, not the raw key itself.
     """
 
     @pytest.fixture(scope="class")
@@ -119,9 +120,10 @@ class TestHashApiKey:
 
     def test_api_key_is_stored_as_hash(self, client):
         from sqlalchemy import select
-        from cognee.modules.users.models.UserApiKey import UserApiKey
+
         from cognee.infrastructure.databases.relational import get_relational_engine
         from cognee.modules.users.api_key.hash_api_key import hash_api_key as compute_hash
+        from cognee.modules.users.models.UserApiKey import UserApiKey
 
         # Register (ignore if already exists) and login
         client.post(
@@ -159,5 +161,5 @@ class TestHashApiKey:
 
         assert stored_key != raw_key, "Raw key should not be stored in plaintext"
         assert stored_key == compute_hash(raw_key), (
-            "Stored key should be SHA-256 hash of the raw key"
+            "Stored key should be deterministic hash of the raw key"
         )

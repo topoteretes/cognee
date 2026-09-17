@@ -1,0 +1,59 @@
+{
+  "results": [
+    {
+      "id": "mem-001",
+      "memory": "Albert Einstein developed the theory of general relativity in 1915, describing gravity as the curvature of spacetime.",
+      "user_id": "user-01",
+      "agent_id": "agent-science",
+      "run_id": "run-2024-03-15",
+      "categories": ["science", "physics"],
+      "metadata": {"confidence": 0.95, "source": "textbook"},
+      "created_at": "2024-03-15T10:30:00Z",
+      "updated_at": "2024-03-15T10:30:00Z"
+    },
+    {
+      "id": "mem-002",
+      "memory": "Marie Curie won Nobel Prizes in both Physics (1903) and Chemistry (1911) for her pioneering research on radioactivity.",
+      "user_id": "user-01",
+      "agent_id": "agent-science",
+      "run_id": "run-2024-03-15",
+      "categories": ["science", "chemistry", "history"],
+      "metadata": {"confidence": 0.98, "source": "encyclopedia"},
+      "created_at": "2024-03-15T10:31:00Z",
+      "updated_at": "2024-03-15T10:31:00Z"
+    },
+    {
+      "id": "mem-003",
+      "memory": "Niels Bohr proposed the atomic model with quantized electron orbits in 1913, and his debates with Einstein shaped quantum mechanics.",
+      "user_id": "user-01",
+      "agent_id": "agent-science",
+      "run_id": "run-2024-03-15",
+      "categories": ["science", "physics"],
+      "metadata": {"confidence": 0.92, "source": "lecture_notes"},
+      "created_at": "2024-03-15T10:32:00Z",
+      "updated_at": "2024-03-15T10:32:00Z"
+    },
+    {
+      "id": "mem-004",
+      "memory": "The University of Paris (Sorbonne) has been a center of academic excellence since the 13th century.",
+      "user_id": "user-01",
+      "agent_id": null,
+      "run_id": "run-2024-03-16",
+      "categories": ["education", "history"],
+      "metadata": {"confidence": 0.88, "source": "tour_guide"},
+      "created_at": "2024-03-16T09:00:00Z",
+      "updated_at": "2024-03-16T09:00:00Z"
+    },
+    {
+      "id": "mem-005",
+      "memory": "Max Planck introduced the quantum of action (h) in 1900, founding quantum theory with his work on black-body radiation.",
+      "user_id": "user-01",
+      "agent_id": "agent-science",
+      "run_id": "run-2024-03-16",
+      "categories": ["science", "physics"],
+      "metadata": {"confidence": 0.97, "source": "research_paper"},
+      "created_at": "2024-03-16T09:15:00Z",
+      "updated_at": "2024-03-16T09:15:00Z"
+    }
+  ]
+}

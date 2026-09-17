@@ -100,7 +100,7 @@ def get_schema_router() -> APIRouter:
         """
         send_telemetry(
             "Schema Inventory API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/schema/inventory",
                 "dataset_id": str(dataset_id),
@@ -125,8 +125,8 @@ def get_schema_router() -> APIRouter:
                 status_code=403,
                 content={"error": "Not authorized to read this dataset"},
             )
-        except Exception as exc:
-            logger.error("schema inventory failed: %s", exc, exc_info=True)
+        except Exception:
+            logger.exception("schema inventory failed")
             return JSONResponse(
                 status_code=409,
                 content={"error": "Failed to build schema inventory"},
@@ -156,7 +156,7 @@ def get_schema_router() -> APIRouter:
         """
         send_telemetry(
             "Schema Provenance API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/schema/provenance",
                 "cognee_version": cognee_version,
@@ -180,8 +180,8 @@ def get_schema_router() -> APIRouter:
                 scope_user_ids=scope_user_ids,
             )
             return HTMLResponse(html)
-        except Exception as exc:
-            logger.error("schema provenance failed: %s", exc, exc_info=True)
+        except Exception:
+            logger.exception("schema provenance failed")
             return JSONResponse(
                 status_code=409,
                 content={"error": "Failed to build memory provenance"},
@@ -239,8 +239,8 @@ def get_schema_router() -> APIRouter:
                 scope_user_ids=scope_user_ids,
             )
             return JSONResponse(status_code=200, content=payload)
-        except Exception as exc:
-            logger.error("schema provenance json failed: %s", exc, exc_info=True)
+        except Exception:
+            logger.exception("schema provenance json failed")
             return JSONResponse(
                 status_code=409,
                 content={"error": "Failed to build memory provenance"},

@@ -1,29 +1,39 @@
+from io import BufferedReader, BytesIO
 from os import path
-from io import BufferedReader
-from typing import Union, BinaryIO
 from tempfile import SpooledTemporaryFile
+from typing import BinaryIO
 
 from cognee.modules.ingestion.exceptions import IngestionError
-from .data_types import TextData, BinaryData, S3BinaryData
+
+from .data_types import BinaryData, S3BinaryData, TextData
 
 
 def classify(
-    data: Union[str, BinaryIO], filename: str = None
-) -> Union[TextData, BinaryData, S3BinaryData]:
+    data: str | BinaryIO, filename: str | None = None
+) -> TextData | BinaryData | S3BinaryData:
     if isinstance(data, str):
         return TextData(data)
 
-    if isinstance(data, BufferedReader) or isinstance(data, SpooledTemporaryFile):
-        return BinaryData(data, filename if filename else str(data.name).split("/")[-1])
+    if isinstance(data, (BufferedReader, SpooledTemporaryFile, BytesIO)):
+        # In-memory uploads (BytesIO) carry no .name — the caller-supplied
+        # filename is the only identity there, so its absence is an error,
+        # never a made-up name.
+        source_name = filename if filename else getattr(data, "name", None)
+        if source_name is None:
+            raise IngestionError(message="Binary stream has no name: pass filename= to classify().")
+        # Normalize both POSIX ("/") and Windows ("\") separators before taking the
+        # basename. On Windows, data.name is a backslash path (e.g. C:\dir\file.pdf),
+        # so splitting on "/" alone would keep the whole path as the file's name.
+        derived_name = str(source_name).replace("\\", "/").split("/")[-1]
+        return BinaryData(data, derived_name)
 
     try:
         from s3fs import S3File
     except ImportError:
         S3File = None
 
-    if S3File is not None:
-        if isinstance(data, S3File):
-            return S3BinaryData(s3_path=path.join("s3://", data.bucket, data.key), name=data.key)
+    if S3File is not None and isinstance(data, S3File):
+        return S3BinaryData(s3_path=path.join("s3://", data.bucket, data.key), name=data.key)
 
     raise IngestionError(
         message=f"Type of data sent to classify(data: Union[str, BinaryIO) not supported or s3fs is not installed: {type(data)}"

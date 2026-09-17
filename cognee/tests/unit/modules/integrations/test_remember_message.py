@@ -2,6 +2,7 @@
 
 Invariants: the enriched text carries channel/author provenance (falling
 back gracefully when either is missing), the Slack dataset name is used,
+the source node_set is stamped so the origin survives into the graph,
 and the background mode is always requested (no LLM work should block the
 3-second interactive-payload window).
 """
@@ -14,6 +15,7 @@ import pytest
 
 from cognee.modules.integrations.slack.remember_message import (
     SLACK_DATASET_NAME,
+    SLACK_NODE_SET,
     remember_message,
 )
 
@@ -35,6 +37,10 @@ async def test_remembers_with_channel_and_author():
     assert kwargs["dataset_name"] == SLACK_DATASET_NAME
     assert kwargs["user"] is owner
     assert kwargs["run_in_background"] is True
+    # Origin stamp: without this, a Slack-sourced document reaches the graph
+    # with no structured Slack marker at all (only the dataset name and the
+    # prose prefix), so it can't be grouped, colored, or filtered by source.
+    assert kwargs["node_set"] == SLACK_NODE_SET == ["slack"]
 
 
 @pytest.mark.asyncio

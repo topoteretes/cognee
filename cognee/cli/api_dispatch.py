@@ -12,7 +12,8 @@ import json
 import os
 
 import cognee.cli.echo as fmt
-from cognee.cli.api_client import CogneeApiClient
+from cognee.cli.api_client import CogneeApiClient, is_connection_error
+from cognee.cli.config import COMPLETION_SEARCH_TYPES, DEFAULT_SEARCH_TYPE
 
 SUPPORTED_COMMANDS = {
     "add",
@@ -61,16 +62,6 @@ def dispatch(args: argparse.Namespace) -> None:
         headers["Authorization"] = f"Bearer {api_token}"
 
     with CogneeApiClient(args.api_url, headers=headers) as client:
-        # Health probe — fail fast with a clear message
-        try:
-            client.health()
-        except Exception:
-            raise RuntimeError(
-                f"Cannot connect to Cognee API at {args.api_url}.  "
-                f"Is the server running?  Start it with:  "
-                f"uvicorn cognee.api.client:app --port 8000"
-            )
-
         dispatchers = {
             "add": _dispatch_add,
             "cognify": _dispatch_cognify,
@@ -92,7 +83,22 @@ def dispatch(args: argparse.Namespace) -> None:
                 f"Run without --api-url to execute it locally."
             )
 
-        handler(client, args)
+        # No pre-flight /health probe: it queried a DB-backed endpoint that can
+        # hang or return 503 on an otherwise-reachable server (and sent no auth
+        # headers), so it mis-reported healthy cloud tenants as "not running".
+        # Run the real command and only translate genuine transport failures
+        # into a friendly, URL-bearing message; HTTP status errors surface with
+        # their real detail via _raise_for_status.
+        try:
+            handler(client, args)
+        except Exception as exc:
+            if is_connection_error(exc):
+                raise RuntimeError(
+                    f"Could not reach the Cognee API at {args.api_url}: {exc}\n"
+                    f"Check the --api-url value and that the server is reachable "
+                    f"(local server: uvicorn cognee.api.client:app --port 8000)."
+                ) from exc
+            raise
 
 
 # -- individual dispatchers -----------------------------------------------
@@ -224,20 +230,20 @@ def _dispatch_datasets(client: CogneeApiClient, args: argparse.Namespace) -> Non
             fmt.echo(output)
 
     elif action == "delete":
-        if not getattr(args, "force", False):
-            if not fmt.confirm(f"Delete dataset {args.dataset_id}? This cannot be undone"):
-                fmt.echo("Cancelled.")
-                return
+        if not getattr(args, "force", False) and not fmt.confirm(
+            f"Delete dataset {args.dataset_id}? This cannot be undone"
+        ):
+            fmt.echo("Cancelled.")
+            return
         client.datasets_delete(args.dataset_id)
         fmt.success(f"Dataset {args.dataset_id} deleted.")
 
 
 def _dispatch_delete(client: CogneeApiClient, args: argparse.Namespace) -> None:
     if getattr(args, "all", False):
-        if not getattr(args, "force", False):
-            if not fmt.confirm("Delete ALL data?"):
-                fmt.echo("Cancelled.")
-                return
+        if not getattr(args, "force", False) and not fmt.confirm("Delete ALL data?"):
+            fmt.echo("Cancelled.")
+            return
         client.datasets_delete_all()
         fmt.success("All data deleted.")
     elif getattr(args, "dataset_name", None):
@@ -247,10 +253,11 @@ def _dispatch_delete(client: CogneeApiClient, args: argparse.Namespace) -> None:
         if not match:
             fmt.error(f"No dataset found with name '{args.dataset_name}'.")
             return
-        if not getattr(args, "force", False):
-            if not fmt.confirm(f"Delete dataset '{args.dataset_name}'?"):
-                fmt.echo("Cancelled.")
-                return
+        if not getattr(args, "force", False) and not fmt.confirm(
+            f"Delete dataset '{args.dataset_name}'?"
+        ):
+            fmt.echo("Cancelled.")
+            return
         client.datasets_delete(match[0]["id"])
         fmt.success(f"Dataset '{args.dataset_name}' deleted.")
     else:
@@ -285,19 +292,18 @@ def _dispatch_remember(client: CogneeApiClient, args: argparse.Namespace) -> Non
 def _dispatch_recall(client: CogneeApiClient, args: argparse.Namespace) -> None:
     # Session-only mode: -s without -d and without explicit -t. Mirrors the
     # local recall_command behaviour so --api-url users get the same UX.
-    session_only = (
-        args.session_id is not None and not args.datasets and args.query_type == "GRAPH_COMPLETION"
-    )
+    session_only = args.session_id is not None and not args.datasets and args.query_type is None
+    effective_query_type = args.query_type or DEFAULT_SEARCH_TYPE
 
     if session_only:
         fmt.echo(f"Searching session '{args.session_id}': '{args.query_text}'")
     else:
         datasets_msg = f" in datasets {args.datasets}" if args.datasets else " across all datasets"
-        fmt.echo(f"Recalling: '{args.query_text}' (type: {args.query_type}){datasets_msg}")
+        fmt.echo(f"Recalling: '{args.query_text}' (type: {effective_query_type}){datasets_msg}")
 
     results = client.recall(
         query=args.query_text,
-        search_type=None if session_only else args.query_type,
+        search_type=None if session_only else effective_query_type,
         datasets=args.datasets,
         top_k=args.top_k,
         system_prompt=getattr(args, "system_prompt", None),
@@ -333,9 +339,9 @@ def _dispatch_recall(client: CogneeApiClient, args: argparse.Namespace) -> None:
             if i < len(results):
                 fmt.echo("-" * 40)
     else:
-        fmt.echo(f"\nFound {len(results)} result(s) using {args.query_type}:")
+        fmt.echo(f"\nFound {len(results)} result(s) using {effective_query_type}:")
         fmt.echo("=" * 60)
-        if args.query_type in ["GRAPH_COMPLETION", "RAG_COMPLETION"]:
+        if effective_query_type in COMPLETION_SEARCH_TYPES:
             for i, result in enumerate(results, 1):
                 fmt.echo(f"{fmt.bold('Response:')} {result}")
                 if i < len(results):
@@ -351,33 +357,61 @@ def _dispatch_recall(client: CogneeApiClient, args: argparse.Namespace) -> None:
 
 
 def _dispatch_improve(client: CogneeApiClient, args: argparse.Namespace) -> None:
+    from cognee.cli.commands.improve_command import print_improve_result
+
     dataset = args.dataset_id or args.dataset_name
     fmt.echo(f"Improving knowledge graph for dataset '{dataset}'...")
-    if getattr(args, "feedback_alpha", 0.1) != 0.1:
-        fmt.warning("--feedback-alpha is ignored in --api-url mode; the server uses its default.")
     result = client.improve(
         dataset_name=args.dataset_name if not args.dataset_id else None,
         dataset_id=args.dataset_id,
         node_name=getattr(args, "node_name", None),
         session_ids=getattr(args, "session_ids", None),
         run_in_background=getattr(args, "background", False),
+        build_global_context_index=getattr(args, "build_global_context_index", False),
+        build_truth_subspace=getattr(args, "build_truth_subspace", False),
+        feedback_alpha=getattr(args, "feedback_alpha", None),
     )
+    if isinstance(result, dict) and "stages" in result:
+        # The server returned an ImproveResult: same per-stage lines as
+        # in-process. "started in background" only when the run is actually
+        # running — a lost lock claim comes back finished with every stage
+        # skipped, and must print as skipped, not started (the local path
+        # makes the same status check).
+        still_running = getattr(args, "background", False) and result.get("status") == "running"
+        print_improve_result(result, background=still_running)
+        return
     if getattr(args, "background", False):
         fmt.success("Improvement started in background!")
     else:
         fmt.success("Knowledge graph improved successfully!")
     if result:
+        # An older server returns the legacy memify run mapping.
         fmt.echo(json.dumps(result, indent=2, default=str))
 
 
 def _dispatch_forget(client: CogneeApiClient, args: argparse.Namespace) -> None:
     everything = getattr(args, "everything", False)
-    dataset = getattr(args, "dataset_name", None)
+    # ForgetCommand's own flag is --dataset (-> args.dataset), not --dataset-name;
+    # reading dataset_name here always returned None, silently dropping --dataset
+    # in --api-url mode.
+    dataset = getattr(args, "dataset", None)
     dataset_id = getattr(args, "dataset_id", None)
     data_id = getattr(args, "data_id", None)
+    memory_only = getattr(args, "memory_only", False)
+    if dataset and dataset_id:
+        fmt.error("Provide either --dataset or --dataset-id, not both.")
+        return
     if not everything and not dataset and not dataset_id and not data_id:
+        fmt.error("Specify --dataset or --dataset-id, --data-id with dataset, or --everything.")
+        return
+    if data_id and not dataset and not dataset_id:
+        fmt.error("Specify --dataset or --dataset-id when using --data-id.")
+        return
+    if everything and memory_only:
         fmt.error(
-            "Specify --dataset-name or --dataset-id, --data-id with dataset, or --everything."
+            "--memory-only has no effect with --everything: everything deletes all "
+            "datasets and data outright. Specify --dataset or --dataset-id with "
+            "--memory-only instead."
         )
         return
     result = client.forget(
@@ -385,5 +419,6 @@ def _dispatch_forget(client: CogneeApiClient, args: argparse.Namespace) -> None:
         dataset_id=dataset_id,
         data_id=data_id,
         everything=everything,
+        memory_only=memory_only,
     )
     fmt.success(f"Done: {result}")
