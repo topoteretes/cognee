@@ -598,6 +598,7 @@ async def recall(
                     text=format_recall_results(
                         results,
                         json_encoder=JSONEncoder,
+                        items=items,
                         empty_state=empty_state,
                     ),
                     _meta={

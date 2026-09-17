@@ -292,9 +292,15 @@ def format_recall_results(
     *,
     json_encoder: type[json.JSONEncoder] | None = None,
     empty_state: RecallState | None = None,
+    items: list[Any] | None = None,
 ) -> str:
-    """Add one summary line; preserve the existing body beneath it."""
-    items = recall_items(results)
+    """Add one summary line; preserve the existing body beneath it.
+
+    `items` lets a caller that has already extracted them pass them in.
+    recall() computes them to decide whether to run diagnostics at all, and
+    re-deriving them here walked the same payload a second time.
+    """
+    items = recall_items(results) if items is None else items
     count = len(items)
     if count:
         summary = f"{count} {'memory' if count == 1 else 'memories'} found"
