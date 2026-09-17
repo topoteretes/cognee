@@ -78,6 +78,7 @@ class OllamaAPIAdapter(LLMInterface):
         instructor_mode: str | None = None,
         llm_args: dict[str, Any] | None = None,
         ollama_num_ctx: int | None = None,
+        image_transcribe_model: str | None = None,
     ) -> None:
         self.name = name
         self.model = model.removeprefix("ollama/") if model.startswith("ollama/") else model
@@ -86,6 +87,12 @@ class OllamaAPIAdapter(LLMInterface):
         self.max_completion_tokens = max_completion_tokens
         self.llm_args: dict[str, Any] = llm_args or {}
         self.ollama_num_ctx = ollama_num_ctx
+        # Ollama ships vision as separate models (llava, llama3.2-vision), so the
+        # chat model is routinely text-only; IMAGE_TRANSCRIBE_MODEL points images
+        # at a multimodal one without changing the chat model.
+        self.image_transcribe_model = (
+            image_transcribe_model.removeprefix("ollama/") if image_transcribe_model else self.model
+        )
 
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
@@ -255,7 +262,7 @@ class OllamaAPIAdapter(LLMInterface):
             encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
 
         response = await self.client.chat.completions.create(
-            model=self.model,
+            model=self.image_transcribe_model,
             messages=[
                 {
                     "role": "user",
