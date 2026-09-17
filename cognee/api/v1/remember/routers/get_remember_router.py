@@ -430,6 +430,20 @@ def get_remember_router() -> APIRouter:
                 ),
             )
 
+        # An ontology grounds entity extraction and the session-cache path never
+        # extracts, so the keys would be accepted and silently ignored. The MCP
+        # client rejects this too, but a direct HTTP caller bypasses that and the
+        # server owns its own invariants. Checked here, beside the labels rule and
+        # outside the try below, which rewraps raised errors as a 409.
+        if session_id and any(key for key in (ontology_key or [])):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "ontology_key is only supported for permanent writes — "
+                    "remove session_id to ground extraction with an ontology."
+                ),
+            )
+
         # Labels and metadata ride on DataItems, which ingestion unwraps to
         # store them on each file's Data record. A count mismatch raises a
         # CogneeApiError (400), returned by the global handler.
