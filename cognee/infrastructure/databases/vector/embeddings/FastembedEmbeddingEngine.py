@@ -9,8 +9,8 @@ try:
     from fastembed import TextEmbedding
 except ImportError:
     raise ImportError(
-        "fastembed is required for FastembedEmbeddingEngine but is not installed. "
-        "Install it with: pip install 'cognee[fastembed]'"
+        "fastembed is required for FastembedEmbeddingEngine but is not importable; it is a "
+        "core cognee dependency. Reinstall it with: pip install fastembed"
     )
 
 import litellm

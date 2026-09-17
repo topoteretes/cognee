@@ -659,3 +659,30 @@ class TestRecallPermissionDenied:
         assert resp.status_code == 403
         assert "no access" in resp.text
         assert "cognify" not in resp.text.lower()
+
+
+class TestCognifyExternalSchemaRef:
+    """A ``graph_model`` whose ``$ref`` points outside the document is a 400, never fetched."""
+
+    @pytest.mark.parametrize(
+        "ref", ["http://169.254.169.254/latest/meta-data/", "/etc/passwd", "../.env"]
+    )
+    def test_external_ref_is_a_400_and_cognify_never_runs(self, client, ref):
+        cognify_pkg = importlib.import_module("cognee.api.v1.cognify")
+        cognify_pkg.cognify = AsyncMock()
+
+        resp = client.post(
+            "/cognify",
+            json={
+                "datasets": ["ds"],
+                "graph_model": {
+                    "title": "Graph",
+                    "type": "object",
+                    "properties": {"nodes": {"type": "array", "items": {"$ref": ref}}},
+                },
+            },
+        )
+
+        assert resp.status_code == 400
+        assert "ExternalSchemaReferenceError" in resp.json()["detail"]
+        cognify_pkg.cognify.assert_not_awaited()

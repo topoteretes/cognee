@@ -59,6 +59,15 @@ dependencies = [
     "starlette>=0.48",
     "python-multipart>=0.0.22,<1.0.0",
     "fastapi-users[sqlalchemy]>=15.0.2",
+    # Local CPU embeddings (onnxruntime, ~65 MB): the embedder cognee runs on when no
+    # LLM key and no EMBEDDING_* settings are configured, so a bare install can ingest.
+    "fastembed<=0.8.0",
+    # onnxruntime 1.23.2 only ships wheels through cp313; cp314 wheels start
+    # at onnxruntime 1.24.1. Split by python_version so existing 3.10–3.13
+    # users keep the pinned version and 3.14 picks up the first cp314-capable
+    # release.
+    "onnxruntime<=1.23.2 ; python_version < '3.14'",
+    "onnxruntime>=1.24.1 ; python_version >= '3.14'",
     "structlog>=25.2.0,<26",
     "pympler>=1.1,<2.0.0",
     "pylance>=0.22.0,<=0.36.0",
@@ -112,15 +121,8 @@ scraping = [
     "APScheduler>=3.10.0,<=3.11.0"
 ]
 
-fastembed = [
-    "fastembed<=0.8.0",
-    # onnxruntime 1.23.2 only ships wheels through cp313; cp314 wheels start
-    # at onnxruntime 1.24.1. Split by python_version so existing 3.10–3.13
-    # users keep the pinned version and 3.14 picks up the first cp314-capable
-    # release.
-    "onnxruntime<=1.23.2 ; python_version < '3.14'",
-    "onnxruntime>=1.24.1 ; python_version >= '3.14'",
-]
+# fastembed is a core dependency. The empty extra keeps `cognee[fastembed]` installable.
+fastembed = []
 
 neo4j = ["neo4j>=5.28.0,<6"]
 neptune = ["langchain_aws>=0.2.22"]
@@ -160,7 +162,6 @@ docs = [
     "nltk>=3.9.3,<4", # TODO: Remove when unstructured is above v0.21.0 as it won't use nltk anymore
 ]
 codegraph = [
-    "fastembed<=0.8.0 ; python_version < '3.14'",
     "transformers>=4.46.3,<6",
 ]
 evals = [
@@ -289,7 +290,6 @@ constraint-dependencies = [
     # transitively via pandas / scikit-learn / fastembed.
     "scipy>=1.16.1 ; python_version >= '3.14'",
 ]
-
 [tool.pytest.ini_options]
 # `pytest` with no path collects only the library test tree; cognee-mcp has its
 # own pyproject and suite. See cognee/tests/README.md for layout and credentials.
