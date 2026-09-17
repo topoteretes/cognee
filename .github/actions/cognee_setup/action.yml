@@ -13,7 +13,7 @@ inputs:
   base-extras:
     description: "Base extras every CI job gets (space-separated). Override to shrink the environment, e.g. when an extra conflicts with one in the default set or the job must prove a minimal install."
     required: false
-    default: "api docs evals codegraph ollama dev neo4j redis tracing"
+    default: "api docs evals codegraph fastembed ollama dev neo4j redis tracing"
   rebuild-lockfile:
     description: "Whether to rebuild the uv lockfile"
     required: false
