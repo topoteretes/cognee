@@ -70,10 +70,10 @@ class SearchPayloadDTO(InDTO):
         default=False,
         description=(
             "Return what the LLM would have received instead of its answer. For"
-            " completion search types the result is the user prompt (question plus"
-            " retrieval context through the retriever's template); the matching system"
-            " prompt (session guidance, conversation history, task template) is"
-            " system_prompt_result with verbose=true. The session layer comes from"
+            " completion search types the result is the user prompt (conversation"
+            " history, then question plus retrieval context through the retriever's"
+            " template, then the session guidance block); the system prompt (the"
+            " retriever's task template) is system_prompt_result with verbose=true. The session layer comes from"
             " session_id (the default session when omitted). Retrieval-only types"
             " return their context. No LLM call is made and nothing is written to the"
             " session."
@@ -218,7 +218,7 @@ def get_search_router() -> APIRouter:
         - **system_prompt** Optional[str]: System prompt to be used for Completion type searches in Cognee
         - **node_name** Optional[list[str]]: Filter results to specific node_sets defined in the add pipeline (for targeted search).
         - **top_k** (Optional[int]): Maximum number of results to return (default: 15)
-        - **only_context** bool: Return what the LLM would have received instead of its answer. For completion type searches the result is the user prompt (question plus retrieval context through the retriever's template); the matching system prompt (session guidance, conversation history, task template) is `system_prompt_result` with verbose=true. Retrieval-only types return their context. No LLM call is made.
+        - **only_context** bool: Return what the LLM would have received instead of its answer. For completion type searches the result is the user prompt (conversation history, then question plus retrieval context through the retriever's template, then the session guidance block); the system prompt (the retriever's task template) is `system_prompt_result` with verbose=true. Retrieval-only types return their context. No LLM call is made.
         - **session_id** (Optional[str]): Session whose history and guidance feed the completion or the only_context prompt; the default session when omitted.
         - **verbose** (bool): Return detailed result information including the graph representation when available (default: false)
         - **skills** (Optional[List[str]]): Skill names to load into the agentic retriever (AGENTIC_COMPLETION only)

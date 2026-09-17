@@ -29,9 +29,9 @@ class SearchResultPayload(BaseModel):
     only_context: bool = False
 
     # The two messages an only_context call stands in for, kept apart as the LLM receives
-    # them: user_prompt is the question and the retrieval context rendered through the
-    # retriever's template; system_prompt is the session layer (guidance, conversation
-    # history) plus the retriever's task instructions. Set only when only_context is on,
+    # them: user_prompt is the conversation history, the question and the retrieval
+    # context rendered through the retriever's template, and the session guidance block;
+    # system_prompt is the retriever's task template. Set only when only_context is on,
     # the retriever sends one templated prompt, and retrieval found something; otherwise
     # both are None and `result` falls back to `context`.
     user_prompt: str | None = None

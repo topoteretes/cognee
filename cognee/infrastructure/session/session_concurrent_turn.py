@@ -20,12 +20,15 @@ from cognee.infrastructure.session.session_turn import (
     apply_session_turn_analysis,
     build_active_context_block_safe,
     coerce_qa_entry,
-    compose_session_prompt,
     load_preference_lines_safe,
     load_served_context_payload,
     select_session_history,
 )
-from cognee.modules.retrieval.utils.completion import generate_answer, summarize_text
+from cognee.modules.retrieval.utils.completion import (
+    SessionPrompt,
+    generate_answer,
+    summarize_text,
+)
 from cognee.modules.session_lifecycle import track_session_usage
 from cognee.shared.logging_utils import get_logger
 
@@ -208,9 +211,8 @@ async def complete_turn(
         user_prompt_path=prompts.user_prompt_path,
         system_prompt_path=prompts.system_prompt_path,
         system_prompt=prompts.system_prompt,
-        conversation_history=compose_session_prompt(
-            snapshot.active_context,
-            snapshot.completion_history,
+        session=SessionPrompt(
+            history=snapshot.completion_history, guidance=snapshot.active_context
         ),
         response_model=prompts.response_model,
     )

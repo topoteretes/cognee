@@ -2,10 +2,10 @@
 
 ``only_context=True`` promises the caller what cognee's completion would have worked
 from, so it can hand that to its own LLM instead. A real completion sends more than the
-retrieval context: the session guidance block and conversation history ride on the
-system prompt, and the question and context are rendered through the retriever's user
-template. Returning the bare context handed the caller strictly less than cognee itself
-uses.
+retrieval context: the user prompt carries the conversation history, the question and
+context rendered through the retriever's user template, and the session guidance block;
+the system prompt is the retriever's task template. Returning the bare context handed
+the caller strictly less than cognee itself uses.
 
 This module assembles the missing layers through the *same* code the real completion
 uses — ``build_session_prompt`` (``session_turn.py``) for the session layer, in its
@@ -56,7 +56,7 @@ from cognee.infrastructure.session.session_turn import (
     build_session_prompt,
     select_session_history,
 )
-from cognee.modules.retrieval.utils.completion import build_completion_prompts
+from cognee.modules.retrieval.utils.completion import SessionPrompt, build_completion_prompts
 from cognee.modules.user_preferences import load_preference_text
 from cognee.shared.logging_utils import get_logger
 
@@ -126,27 +126,27 @@ async def load_read_only_session_prompt(
     *,
     session_id: str | None = None,
     shared_history: SharedSessionHistory | None = None,
-) -> str:
+) -> SessionPrompt:
     """The session layer a completion would carry, read without writing or calling an LLM.
 
     Mirrors the retriever's branch point exactly:
 
     * caching off, or no user: the real call takes the sessionless path, whose only
-      session-layer content is the durable preference block — return that;
+      session-layer content is the durable preference block — return that as guidance;
     * caching on but the cache backend unavailable: the real call sends a bare prompt;
     * otherwise: ``build_session_prompt`` in read-only mode.
 
-    Fails open to ``""`` — a missing session layer must never take a retrieval-only call
-    down.
+    Fails open to an empty pair — a missing session layer must never take a
+    retrieval-only call down.
     """
     try:
         user_uuid = getattr(session_user.get(), "id", None)
         if not (user_uuid and CacheConfig().caching):
-            return await load_preference_text()
+            return SessionPrompt(guidance=await load_preference_text())
 
         session_manager = get_session_manager()
         if not session_manager.is_session_available_for_completion(user_uuid):
-            return ""
+            return SessionPrompt()
 
         user_id = str(user_uuid)
         resolved_session_id = session_manager.resolve_session_id(session_id)
@@ -156,7 +156,7 @@ async def load_read_only_session_prompt(
                 session_manager, user_id=user_id, resolved_session_id=resolved_session_id
             )
 
-        prompt, _served_ids = await build_session_prompt(
+        session, _served_ids = await build_session_prompt(
             session_manager,
             user_id=user_id,
             session_id=resolved_session_id,
@@ -164,10 +164,10 @@ async def load_read_only_session_prompt(
             history=history,
             stamp_served=False,
         )
-        return prompt
+        return session
     except Exception as error:
         logger.warning("Only-context session prompt failed open: %s", error, exc_info=True)
-        return ""
+        return SessionPrompt()
 
 
 def retriever_sends_one_prompt(retriever) -> bool:
@@ -196,9 +196,10 @@ async def build_only_context_prompt(
     or ``None`` when there is none.
 
     The two are kept apart because the LLM receives them as two messages: the user
-    prompt is the question and the retrieved context rendered through the retriever's
-    template, the system prompt is the session layer plus the retriever's task
-    instructions. Callers surface them as separate fields, never as one string.
+    prompt is the conversation history, the question and the retrieved context rendered
+    through the retriever's template, and the session guidance block; the system prompt
+    is the retriever's task template. Callers surface them as separate fields, never as
+    one string.
 
     ``None`` means "return the bare context instead": the retriever never sends a single
     templated prompt, or retrieval found nothing. Only when a prompt will be built is
@@ -216,7 +217,7 @@ async def build_only_context_prompt(
     requested_session_id = (
         session_id if session_id is not None else getattr(retriever, "session_id", None)
     )
-    session_context = await load_read_only_session_prompt(
+    session = await load_read_only_session_prompt(
         query, session_id=requested_session_id, shared_history=shared_history
     )
 
@@ -226,6 +227,6 @@ async def build_only_context_prompt(
         user_prompt_path=retriever.user_prompt_path,
         system_prompt_path=retriever.system_prompt_path,
         system_prompt=getattr(retriever, "system_prompt", None),
-        conversation_history=session_context or None,
+        session=session,
     )
     return user_prompt, system_prompt

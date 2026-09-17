@@ -25,7 +25,11 @@ from cognee.modules.retrieval.hybrid.facts import (
 from cognee.modules.retrieval.hybrid.merge import merge_hybrid_results
 from cognee.modules.retrieval.hybrid.references import cite_hybrid_completions
 from cognee.modules.retrieval.hybrid.truth import build_truth_context
-from cognee.modules.retrieval.utils.completion import generate_completion, generate_completion_batch
+from cognee.modules.retrieval.utils.completion import (
+    SessionPrompt,
+    generate_completion,
+    generate_completion_batch,
+)
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
     load_root_text,
@@ -274,7 +278,7 @@ class HybridRetriever(BaseRetriever):
             completions = await generate_completion_batch(
                 query_batch=query_batch,
                 context=context,
-                conversation_history=preference_text,
+                session=SessionPrompt(guidance=preference_text),
                 **prompts,
             )
         else:
@@ -283,7 +287,7 @@ class HybridRetriever(BaseRetriever):
                 await generate_completion(
                     query=query,
                     context=context,
-                    conversation_history=preference_text,
+                    session=SessionPrompt(guidance=preference_text),
                     **prompts,
                 )
             ]
