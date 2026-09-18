@@ -12,7 +12,17 @@ from types import SimpleNamespace
 import pytest
 
 from cognee.infrastructure.databases.vector.exceptions import EmbeddingDimensionMismatchError
-from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
+
+# The adapter imports asyncpg at module level, and asyncpg ships only in the
+# postgres extra — the OS matrix installs cognee without it.
+try:
+    from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
+
+    HAS_PGVECTOR = True
+except ModuleNotFoundError:
+    HAS_PGVECTOR = False
+
+pytestmark = pytest.mark.skipif(not HAS_PGVECTOR, reason="asyncpg not installed")
 
 STORED_DIMENSIONS = 384
 CONFIGURED_DIMENSIONS = 3072
