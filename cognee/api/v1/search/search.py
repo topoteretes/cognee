@@ -326,9 +326,13 @@ async def search(
 
             await set_session_user_context_variable(user)
 
-            # Transform string based datasets to UUID - String based datasets can only be found for current user
+            # Transform string based datasets to UUID - String based datasets can only be found for
+            # current user. Strict: a name that resolves to nothing fails the request instead of
+            # being dropped from the scope, the same contract dataset_ids has always had.
             if datasets is not None and all(isinstance(dataset, str) for dataset in datasets):
-                datasets = await get_authorized_existing_datasets(datasets, "read", user)
+                datasets = await get_authorized_existing_datasets(
+                    datasets, "read", user, strict=True
+                )
                 datasets = [dataset.id for dataset in datasets]
                 if not datasets:
                     raise DatasetNotFoundError(message="No datasets found.")
