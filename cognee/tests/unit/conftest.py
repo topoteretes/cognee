@@ -50,13 +50,18 @@ def _relational_db_for_unit_tests():
 
 
 @pytest.fixture(autouse=True)
-def _turn_analysis_sees_a_usable_llm():
-    """Unit tests mock the LLM call itself; the keyless gate must not skip it.
+def _keyless_gates_see_a_usable_llm():
+    """Unit tests mock the LLM call itself; the keyless gates must not skip it.
 
-    ``analyze_turn_for_session_context`` skips the per-turn analysis when no
-    usable LLM is configured (SDK-753). CI has no key, so without this every
-    test that mocks ``LLMGateway`` and counts on the analysis running would
-    see it skipped. Tests of the gate itself patch ``llm_available`` inside.
+    The per-turn analysis, the trace-step summary and the LLM-only improve
+    stages skip their work when no usable LLM is configured (SDK-753). CI has
+    no key, so without this every test that mocks ``LLMGateway`` and counts on
+    those calls would see them skipped. Tests of the gates themselves patch
+    ``llm_available`` back to false inside.
     """
-    with patch("cognee.infrastructure.session.feedback_detection.llm_available", return_value=True):
+    with (
+        patch("cognee.infrastructure.session.feedback_detection.llm_available", return_value=True),
+        patch("cognee.infrastructure.session.session_agent_trace.llm_available", return_value=True),
+        patch("cognee.modules.improve.stages.llm_available", return_value=True),
+    ):
         yield
