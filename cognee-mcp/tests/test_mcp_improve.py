@@ -208,6 +208,10 @@ async def test_cognee_client_api_improve_omits_defaults():
 
 @pytest.mark.asyncio
 async def test_cognee_client_local_improve_returns_the_result_as_json_dict():
+    # This package pins a RELEASED cognee (see pyproject), which may predate the
+    # improve orchestrator. The client's job here is forwarding, and the rest of
+    # this module pins that without the module; only this test needs the types.
+    pytest.importorskip("cognee.modules.improve")
     from cognee.modules.improve import ImproveResult, StageResult
 
     class FakeCognee:

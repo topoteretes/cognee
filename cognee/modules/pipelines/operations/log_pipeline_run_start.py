@@ -3,6 +3,7 @@ from typing import Any
 from uuid import UUID
 
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.operations import get_operation_origin
 from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
 from cognee.modules.pipelines.utils import generate_pipeline_run_id, summarize_run_info_data
 from cognee.modules.users.models import User
@@ -33,6 +34,10 @@ async def log_pipeline_run_start(
         tenant_id=getattr(user, "tenant_id", None) if user else None,
         operation_name=pipeline_name,
         started_at=datetime.now(timezone.utc),
+        # Stamped here too, not just on the terminal row: without it every
+        # in-flight run is invisible to a query filtering pipeline_runs by
+        # originating surface.
+        origin=get_operation_origin(),
     )
 
     db_engine = get_relational_engine()
