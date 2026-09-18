@@ -9,11 +9,13 @@ gate. The trace-step summary follows the same rule: the deterministic
 fallback, no client.
 """
 
+import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import cognee.infrastructure.session.get_session_manager  # bind the real submodule
 import cognee.infrastructure.session.session_agent_trace as trace_module
 import cognee.modules.improve.stages as stages_module
 from cognee.modules.improve.stages import (
@@ -23,6 +25,12 @@ from cognee.modules.improve.stages import (
     ExtractAgentContextStage,
     GlobalContextIndexStage,
 )
+
+
+# The package re-exports the function under the same name, so a dotted patch
+# target resolves to the function unless the submodule was imported first;
+# patch the module object the gate imports from.
+session_manager_module = sys.modules["cognee.infrastructure.session.get_session_manager"]
 
 
 def _inputs(**overrides):
@@ -44,9 +52,8 @@ def _session_manager(available=True, auto_feedback=True):
 def test_llm_stages_decline_without_a_usable_llm(stage):
     with (
         patch.object(stages_module, "llm_available", return_value=False),
-        patch(
-            "cognee.infrastructure.session.get_session_manager.get_session_manager",
-            return_value=_session_manager(),
+        patch.object(
+            session_manager_module, "get_session_manager", return_value=_session_manager()
         ),
     ):
         assert stage.gate(_inputs()) == REASON_NO_LLM_CONFIGURED
@@ -60,9 +67,8 @@ def test_llm_stages_decline_without_a_usable_llm(stage):
 def test_llm_stages_run_when_an_llm_is_configured(stage):
     with (
         patch.object(stages_module, "llm_available", return_value=True),
-        patch(
-            "cognee.infrastructure.session.get_session_manager.get_session_manager",
-            return_value=_session_manager(),
+        patch.object(
+            session_manager_module, "get_session_manager", return_value=_session_manager()
         ),
     ):
         assert stage.gate(_inputs()) is None
