@@ -4,8 +4,15 @@ import pytest
 
 from cognee.api.v1.recall.query_router import (
     _RULES,
+    COMPLETION_ONLY_TYPES,
+    CYPHER_TYPES,
+    LLM_FREE_TYPES,
+    LLM_IN_RETRIEVAL_TYPES,
     ROUTER_FALLBACK_TYPE,
     RouteDecision,
+    RoutingConstraints,
+    constrain,
+    default_route,
     route_query,
 )
 from cognee.modules.search.types import SearchType
@@ -172,3 +179,96 @@ class TestNegativeInvariants:
         let any request body that reaches the endpoint mutate the graph.
         """
         assert route_query(query).search_type != SearchType.CYPHER
+
+
+class TestRoutingConstraints:
+    """What the deployment can run is applied after the rules, in one place."""
+
+    def test_every_search_type_is_classified_exactly_once(self):
+        """A new SearchType must be classified before it can ship: the no-LLM
+        behaviour of an unclassified type would be undefined."""
+        classified = LLM_FREE_TYPES | COMPLETION_ONLY_TYPES | LLM_IN_RETRIEVAL_TYPES
+        assert classified == set(SearchType)
+        assert not (LLM_FREE_TYPES & COMPLETION_ONLY_TYPES)
+        assert not (LLM_FREE_TYPES & LLM_IN_RETRIEVAL_TYPES)
+        assert not (COMPLETION_ONLY_TYPES & LLM_IN_RETRIEVAL_TYPES)
+
+    def test_unconstrained_routing_is_unchanged(self):
+        assert route_query("Tell me something", RoutingConstraints()) == route_query(
+            "Tell me something"
+        )
+        assert route_query('"radium"', RoutingConstraints()).only_context is False
+
+    def test_no_llm_default_is_hybrid_with_only_context(self):
+        decision = route_query(
+            "Where was Marie Curie born?", RoutingConstraints(llm_available=False)
+        )
+        assert decision == RouteDecision(
+            search_type=SearchType.HYBRID_COMPLETION, rule="default", only_context=True
+        )
+        assert default_route(RoutingConstraints(llm_available=False)) == decision
+
+    def test_no_llm_keeps_llm_free_rules_as_they_are(self):
+        no_llm = RoutingConstraints(llm_available=False)
+        assert route_query('"polonium and radium"', no_llm) == RouteDecision(
+            search_type=SearchType.CHUNKS_LEXICAL, rule="quoted_phrase"
+        )
+        assert route_query("show me the coding rules", no_llm) == RouteDecision(
+            search_type=SearchType.CODING_RULES, rule="coding_rules_intent"
+        )
+
+    @pytest.mark.parametrize("search_type", sorted(COMPLETION_ONLY_TYPES, key=lambda s: s.value))
+    def test_no_llm_runs_completion_only_types_as_only_context(self, search_type):
+        decision = constrain(
+            RouteDecision(search_type=search_type, rule="r"),
+            RoutingConstraints(llm_available=False),
+        )
+        assert decision == RouteDecision(search_type=search_type, rule="r", only_context=True)
+
+    @pytest.mark.parametrize("search_type", sorted(LLM_IN_RETRIEVAL_TYPES, key=lambda s: s.value))
+    def test_no_llm_sends_llm_in_retrieval_types_to_the_fallback(self, search_type):
+        decision = constrain(
+            RouteDecision(search_type=search_type, rule="r"),
+            RoutingConstraints(llm_available=False),
+        )
+        assert decision == RouteDecision(
+            search_type=ROUTER_FALLBACK_TYPE, rule="r", only_context=True
+        )
+
+    @pytest.mark.parametrize("search_type", sorted(CYPHER_TYPES, key=lambda s: s.value))
+    def test_cypher_disabled_never_emits_a_cypher_type(self, search_type):
+        decision = constrain(
+            RouteDecision(search_type=search_type, rule="r"),
+            RoutingConstraints(cypher_allowed=False),
+        )
+        assert decision == RouteDecision(search_type=ROUTER_FALLBACK_TYPE, rule="r")
+
+    def test_cypher_disabled_and_no_llm_compose(self):
+        decision = constrain(
+            RouteDecision(search_type=SearchType.CYPHER, rule="r"),
+            RoutingConstraints(llm_available=False, cypher_allowed=False),
+        )
+        assert decision == RouteDecision(
+            search_type=ROUTER_FALLBACK_TYPE, rule="r", only_context=True
+        )
+
+    def test_constraints_come_from_the_shared_predicates(self, monkeypatch):
+        from cognee.modules import preflight
+        from cognee.modules.search.methods import get_search_type_retriever_instance as factory
+
+        monkeypatch.setattr(preflight, "llm_available", lambda _config: False)
+        monkeypatch.setattr(factory, "cypher_queries_allowed", lambda: False)
+
+        assert RoutingConstraints.from_config(None) == RoutingConstraints(
+            llm_available=False, cypher_allowed=False
+        )
+
+    def test_cypher_gate_reads_the_environment(self, monkeypatch):
+        from cognee.modules.search.methods.get_search_type_retriever_instance import (
+            cypher_queries_allowed,
+        )
+
+        monkeypatch.delenv("ALLOW_CYPHER_QUERY", raising=False)
+        assert cypher_queries_allowed() is True
+        monkeypatch.setenv("ALLOW_CYPHER_QUERY", "false")
+        assert cypher_queries_allowed() is False

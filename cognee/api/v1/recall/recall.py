@@ -27,7 +27,6 @@ from cognee.modules.observability import (
     new_span,
 )
 from cognee.modules.operations import get_current_operation, record_operation
-from cognee.modules.preflight import llm_available
 from cognee.modules.recall.types.RecallResponse import (
     RecallResponse,
     ResponseAgentTraceEntry,
@@ -642,28 +641,36 @@ async def recall(
 
                 await set_session_user_context_variable(user)
 
-                from cognee.api.v1.recall.query_router import ROUTER_FALLBACK_TYPE, route_query
+                from cognee.api.v1.recall.query_router import (
+                    ROUTER_FALLBACK_TYPE,
+                    RouteDecision,
+                    RoutingConstraints,
+                    default_route,
+                    route_query,
+                )
 
-                # Set only when the router chose the type, so the retry below
-                # never second-guesses a pinned type or the no-LLM CHUNKS pick.
+                # What this deployment can run: no LLM means only types that work
+                # without one, completion types running with only_context=True;
+                # Cypher off means no Cypher types. Keyed on LLM availability, not on
+                # the extractor that built the graph. Shapes routing and the fallback
+                # only: an explicit query_type is honoured as given.
+                constraints = RoutingConstraints.from_config(llm_config)
+                fallback_decision = default_route(constraints)
+
+                # routed_rule is set only when the router chose the type, so the
+                # retry below never second-guesses a pinned type.
                 routed_rule = None
-
                 if query_type is not None:
-                    local_query_type = query_type
-                elif not llm_available(llm_config):
-                    # No usable LLM is configured, so nothing can write a
-                    # completion answer; the default lookup is the vector
-                    # search over chunks. Keyed on LLM availability, not on the
-                    # extractor that built the graph — a gliner_demo-built graph
-                    # with a key present answers completions fine. An explicit
-                    # query_type still selects any search type.
-                    local_query_type = SearchType.CHUNKS
+                    decision = RouteDecision(search_type=query_type, rule="pinned")
                 elif auto_route:
-                    decision = route_query(query_text)
-                    local_query_type = decision.search_type
+                    decision = route_query(query_text, constraints)
                     routed_rule = decision.rule
                 else:
-                    local_query_type = ROUTER_FALLBACK_TYPE
+                    decision = fallback_decision
+                local_query_type = decision.search_type
+                # The caller's only_context stays what it was for the warm-up guard and
+                # the skill gate below; the router's forced one applies to the search.
+                search_only_context = only_context or decision.only_context
 
                 span.set_attribute(COGNEE_SEARCH_TYPE, local_query_type.value)
                 if routed_rule is not None:
@@ -796,7 +803,7 @@ async def recall(
                         top_k=top_k,
                         node_name=node_name,
                         node_name_filter_operator=node_name_filter_operator,
-                        only_context=only_context,
+                        only_context=search_only_context,
                         session_id=session_id,
                         wide_search_top_k=wide_search_top_k,
                         triplet_distance_penalty=triplet_distance_penalty,
@@ -830,7 +837,8 @@ async def recall(
                         error,
                         ROUTER_FALLBACK_TYPE.value,
                     )
-                    local_query_type = ROUTER_FALLBACK_TYPE
+                    local_query_type = fallback_decision.search_type
+                    search_only_context = only_context or fallback_decision.only_context
                     graph_results = await _search(local_query_type)
 
                 if routed_guess and not graph_results and local_query_type in _RETRY_ON_EMPTY:
@@ -840,7 +848,8 @@ async def recall(
                         local_query_type.value,
                         ROUTER_FALLBACK_TYPE.value,
                     )
-                    local_query_type = ROUTER_FALLBACK_TYPE
+                    local_query_type = fallback_decision.search_type
+                    search_only_context = only_context or fallback_decision.only_context
                     graph_results = await _search(local_query_type)
 
                 # A fallback above may have changed the type that answered; the

@@ -51,6 +51,16 @@ def _hybrid_lane_top_k(config: dict, key: str, search_top_k: int | None) -> int 
     return min(search_top_k, DEFAULT_HYBRID_LANE_TOP_K)
 
 
+def cypher_queries_allowed() -> bool:
+    """The ``ALLOW_CYPHER_QUERY`` gate: whether CYPHER and NATURAL_LANGUAGE may run.
+
+    Read live from the environment so a deployment can flip it without a restart.
+    The retriever factory refuses those types when it is off; the recall router
+    reads the same predicate so it never routes into that refusal.
+    """
+    return os.getenv("ALLOW_CYPHER_QUERY", "true").lower() != "false"
+
+
 async def get_search_type_retriever_instance(
     query_type: SearchType,
     query_text: str,
@@ -403,7 +413,7 @@ async def get_search_type_retriever_instance(
 
     if (
         query_type in [SearchType.CYPHER, SearchType.NATURAL_LANGUAGE]
-        and os.getenv("ALLOW_CYPHER_QUERY", "true").lower() == "false"
+        and not cypher_queries_allowed()
     ):
         raise UnsupportedSearchTypeError("Cypher query search types are disabled.")
 
