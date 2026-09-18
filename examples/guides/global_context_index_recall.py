@@ -1,8 +1,9 @@
 """Compare GRAPH_COMPLETION recall with and without include_global_context_index.
 
 Ten seasonal facts are remembered and indexed with improve(); the same cross-cutting question is
-then recalled in both modes, first with only_context=True to print the retrieval context and then
-for the final answer, so the two contexts and answers can be compared side by side.
+then recalled in both modes, first with only_context=True to print the full prompt the LLM would
+receive (system prompt, then the user prompt with the retrieval context) and then for the final
+answer, so the two prompts and answers can be compared side by side.
 
 Requires: LLM_API_KEY.
 Run: uv run python examples/guides/global_context_index_recall.py

@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from cognee.modules.engine.models import Skill, Tool
 from cognee.modules.engine.models.SkillRun import ToolCall as SkillRunToolCall
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
-from cognee.modules.retrieval.utils.completion import generate_completion
+from cognee.modules.retrieval.utils.completion import SessionPrompt, generate_completion
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 from cognee.modules.tools.context import active_skills_var, opened_skills_var
 from cognee.modules.tools.errors import (
@@ -478,16 +478,11 @@ class AgenticRetriever(GraphCompletionRetriever):
         tool_trace: list[SkillRunToolCall] | None = None,
     ) -> str:
         loop_context = initial_context
-        conversation_history = await self._get_session_history()
-
-        # Prepend the active session-context guidance block above history (gated + fail-open).
-        # served_ids are captured on the instance so _store_session_qa can record them on the QA.
-        block, served_ids = await self._maybe_active_context_block(query)
+        # The guidance block is gated + fail-open. served_ids are captured on the instance
+        # so _store_session_qa can record them on the QA.
+        guidance, served_ids = await self._maybe_active_context_block(query)
         self._active_context_served_ids = served_ids
-        if block:
-            conversation_history = (
-                block + "\n\n" + conversation_history if conversation_history else block
-            )
+        session = SessionPrompt(history=await self._get_session_history(), guidance=guidance)
 
         for iteration in range(self.max_iter):
             step: AgentStep = await generate_completion(
@@ -495,7 +490,7 @@ class AgenticRetriever(GraphCompletionRetriever):
                 context=loop_context,
                 user_prompt_path=self.agentic_user_prompt_path,
                 system_prompt_path=self.agentic_system_prompt_path,
-                conversation_history=conversation_history,
+                session=session,
                 response_model=AgentStep,
             )
 
@@ -535,7 +530,7 @@ class AgenticRetriever(GraphCompletionRetriever):
             context=loop_context,
             user_prompt_path=self.user_prompt_path,
             system_prompt_path=self.system_prompt_path,
-            conversation_history=conversation_history,
+            session=session,
             response_model=str,
         )
         return forced
