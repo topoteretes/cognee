@@ -283,7 +283,9 @@ async def test_mcp_remember_background_forwards_self_improvement(monkeypatch):
     monkeypatch.setattr(server, "cognee_client", fake_client)
     tracked = []
 
-    def track(coro):
+    def track(coro, **kwargs):
+        # dataset= is passed by remember(); accepted here so the stub tracks the
+        # real signature rather than pinning an older one.
         tracked.append(coro)
 
     monkeypatch.setattr(server, "_track_background", track)

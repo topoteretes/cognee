@@ -1,9 +1,7 @@
 from typing import Any, BinaryIO
-from urllib.parse import urlparse
 from uuid import UUID
 
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
-from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.engine.operations.setup import setup
@@ -32,25 +30,6 @@ from cognee.tasks.ingestion.resolve_dlt_sources import resolve_dlt_sources
 from cognee.tasks.ingestion.utils import materialize_stream_for_background
 
 logger = get_logger()
-
-
-def _add_pipeline_needs_llm(data: Any, preferred_loaders: list | None) -> bool:
-    """Only known plain-text inputs can safely skip the LLM check."""
-    if preferred_loaders:
-        return True
-
-    data_items = data if isinstance(data, list) else [data]
-    for data_item in data_items:
-        data_item = data_item.data if isinstance(data_item, DataItem) else data_item
-        if not isinstance(data_item, str) or urlparse(data_item).scheme:
-            return True
-        try:
-            resolve_local_path(data_item, must_exist=True)
-        except (FileNotFoundError, OSError, ValueError):
-            pass
-        else:
-            return True
-    return False
 
 
 async def add(
@@ -250,12 +229,17 @@ async def add(
                 transformed[item] = {}
         preferred_loaders = transformed
 
-    # Validate only the ingestion work this call will perform. Obvious direct
-    # text is LLM-free; inputs whose loader is not known yet stay conservative.
+    # add() stages data and makes no LLM call of its own, so it validates the
+    # embedding side of the provider config only. Whether the run needs an LLM
+    # is decided where the LLM is used: remember() and cognify() from their
+    # task lists, and the media loaders -- the one ingestion step that calls
+    # the LLM -- at the moment they would (``require_llm_for_media``). Keyless
+    # ingestion (local GLiNER extractor, local embedder) is a supported mode,
+    # and a guess made here about a file whose loader is not resolved yet was
+    # blocking it.
     from cognee.modules.preflight import validate_provider_config
 
-    add_pipeline_needs_llm = _add_pipeline_needs_llm(data, preferred_loaders)
-    validate_provider_config(needs_llm=add_pipeline_needs_llm)
+    validate_provider_config(needs_llm=False)
 
     await setup()
 
@@ -294,7 +278,7 @@ async def add(
             authorized_dataset.id,
             preferred_loaders,
             importance_weight,
-            needs_llm=add_pipeline_needs_llm,
+            needs_llm=False,
         ),
     ]
 
