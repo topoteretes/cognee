@@ -9,6 +9,7 @@ of leaving both visible.
 """
 
 import logging
+import re
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -30,19 +31,30 @@ _ALLOWED_RESPONSE_URL_HOST = "hooks.slack.com"
 # attacker's Slack workspace. Genuine response_urls are only ever these two:
 #   slash commands   -> https://hooks.slack.com/commands/T…/…/…
 #   interactivity    -> https://hooks.slack.com/actions/T…/…/…
-_ALLOWED_RESPONSE_URL_PATH_PREFIXES = ("/commands/", "/actions/")
+_ALLOWED_RESPONSE_URL_PATH = re.compile(
+    r"^/(?:commands|actions)/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+$"
+)
 
 
-def _is_slack_response_url(response_url: str) -> bool:
+def _normalize_slack_response_url(response_url: str) -> str | None:
+    """Return a server-originated URL for a valid Slack response path."""
     if not isinstance(response_url, str):
-        return False
+        return None
     try:
         parts = urlsplit(response_url)
+        port = parts.port
     except ValueError:
-        return False
+        return None
     if parts.scheme != "https" or parts.hostname != _ALLOWED_RESPONSE_URL_HOST:
-        return False
-    return parts.path.startswith(_ALLOWED_RESPONSE_URL_PATH_PREFIXES)
+        return None
+    if parts.username is not None or parts.password is not None or port not in (None, 443):
+        return None
+    if parts.query or parts.fragment:
+        return None
+    if not _ALLOWED_RESPONSE_URL_PATH.fullmatch(parts.path):
+        return None
+
+    return f"https://{_ALLOWED_RESPONSE_URL_HOST}{parts.path}"
 
 
 async def post_to_response_url(response_url: str, payload: dict[str, Any]) -> None:
@@ -56,11 +68,11 @@ async def post_to_response_url(response_url: str, payload: dict[str, Any]) -> No
     if not response_url:
         logger.error("No response_url to deliver a Slack message to")
         return
-    if not _is_slack_response_url(response_url):
+    safe_response_url = _normalize_slack_response_url(response_url)
+    if safe_response_url is None:
         logger.error(
-            "Refusing to deliver to a response_url outside https://%s%s",
+            "Refusing to deliver to an invalid https://%s response_url",
             _ALLOWED_RESPONSE_URL_HOST,
-            "|".join(_ALLOWED_RESPONSE_URL_PATH_PREFIXES),
         )
         return
     try:
@@ -71,7 +83,7 @@ async def post_to_response_url(response_url: str, payload: dict[str, Any]) -> No
             # otherwise carry this request -- and on 307/308 the answer text itself,
             # since those preserve method and body -- to whatever Location names,
             # including an internal address. Slack never redirects a response_url.
-            session.post(response_url, json=payload, allow_redirects=False) as response,
+            session.post(safe_response_url, json=payload, allow_redirects=False) as response,
         ):
             if response.status != 200:
                 logger.warning("Slack response_url POST returned %s", response.status)
