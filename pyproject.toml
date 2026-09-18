@@ -162,7 +162,10 @@ docs = [
     "nltk>=3.9.3,<4", # TODO: Remove when unstructured is above v0.21.0 as it won't use nltk anymore
 ]
 codegraph = [
-    "transformers>=4.46.3,<6",
+    # The enola binary as a platform wheel; the code-graph route needs nothing else.
+    # This is the only enola version pin; bumping it means re-checking the known
+    # answers in cognee/tests/test_code_graph_e2e.py.
+    "enola-cli==0.4.19",
 ]
 evals = [
     "plotly>=6.0.0,<7",
@@ -225,7 +228,7 @@ docling = [
     "docling-slim[convert-core,format-pdf,format-office,format-html,format-email,format-markdown,format-latex]>=2.115,<3",
 ]
 docling-full = ["docling>=2.115,<3", "transformers>=4.55"]
-# LLM-free graph extraction and summaries with GLiNER2 (cognee/tasks/graph/gliner).
+# GLiNER demo: LLM-free graph extraction and summaries (cognee/tasks/graph/gliner_demo).
 # Pulls torch; protobuf + sentencepiece are needed by the DeBERTa tokenizer fallback.
 gliner = ["gliner2[local]>=2.0.0,<3", "protobuf>=5.29.6", "sentencepiece>=0.2.0"]
 rapidocr = ["rapidocr-onnxruntime>=1.3.0,<2"]

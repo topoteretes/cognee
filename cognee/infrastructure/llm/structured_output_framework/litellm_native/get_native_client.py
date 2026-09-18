@@ -108,4 +108,5 @@ def get_native_client(raise_api_key_error: bool = True) -> NativeLiteLLMAdapter:
         fallback_endpoint=llm_config.fallback_endpoint or None,
         llm_args=llm_config.llm_args or None,
         transcription_model=_qualify_model(llm_config.transcription_model, provider),
+        image_transcribe_model=_qualify_model(llm_config.image_transcribe_model, provider) or None,
     )

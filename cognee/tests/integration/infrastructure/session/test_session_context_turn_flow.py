@@ -165,8 +165,7 @@ async def test_first_turn_no_block_empty_served_ids(session_manager):
 
     assert result == "Answer one"
     assert ma.call_args.kwargs["served_context"] == []
-    history = mg.call_args.kwargs["conversation_history"]
-    assert "## Active session guidance" not in history
+    assert mg.call_args.kwargs["session"].guidance == ""
 
     entries = await session_manager.get_session(user_id="owner-1", session_id="s1")
     assert len(entries) == 1
@@ -195,10 +194,10 @@ async def test_non_feedback_block_prepended_and_served_ids_recorded(session_mana
         )
 
     assert result == "Answer two"
-    history = mg.call_args.kwargs["conversation_history"]
-    assert "## Active session guidance" in history
-    assert "Background knowledge from the knowledge graph" not in history
-    assert "Always answer in metric units." in history
+    guidance = mg.call_args.kwargs["session"].guidance
+    assert "## Active session guidance" in guidance
+    assert "Background knowledge from the knowledge graph" not in guidance
+    assert "Always answer in metric units." in guidance
 
     entries = await session_manager.get_session(user_id="owner-1", session_id="s1")
     new_qa = entries[-1]
@@ -453,8 +452,7 @@ async def test_layer_disabled_when_auto_feedback_off(session_manager):
             system_prompt_path="sys.txt",
         )
 
-    history = mg.call_args.kwargs["conversation_history"]
-    assert "## Active session guidance" not in history
+    assert mg.call_args.kwargs["session"].guidance == ""
     ma.assert_not_called()
 
     entries = await session_manager.get_session(user_id="owner-1", session_id="s1")

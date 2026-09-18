@@ -1361,7 +1361,7 @@ baml = [
     { name = "baml-py" },
 ]
 codegraph = [
-    { name = "transformers" },
+    { name = "enola-cli" },
 ]
 debug = [
     { name = "debugpy" },
@@ -1536,6 +1536,7 @@ requires-dist = [
     { name = "dlt", extras = ["sqlalchemy"], marker = "extra == 'gmail'", specifier = ">=1.9.0,<2" },
     { name = "docling", marker = "extra == 'docling-full'", specifier = ">=2.115,<3" },
     { name = "docling-slim", extras = ["convert-core", "format-pdf", "format-office", "format-html", "format-email", "format-markdown", "format-latex"], marker = "extra == 'docling'", specifier = ">=2.115,<3" },
+    { name = "enola-cli", marker = "extra == 'codegraph'", specifier = "==0.4.19" },
     { name = "fakeredis", extras = ["lua"], specifier = ">=2.32.0" },
     { name = "fastapi", specifier = ">=0.116.2,<1.0.0" },
     { name = "fastapi-users", extras = ["sqlalchemy"], specifier = ">=15.0.2" },
@@ -1631,7 +1632,6 @@ requires-dist = [
     { name = "tavily-python", marker = "extra == 'scraping'", specifier = ">=0.7.12" },
     { name = "tenacity", specifier = ">=9.0.0" },
     { name = "tiktoken", specifier = ">=0.8.0,<1.0.0" },
-    { name = "transformers", marker = "extra == 'codegraph'", specifier = ">=4.46.3,<6" },
     { name = "transformers", marker = "extra == 'docling-full'", specifier = ">=4.55" },
     { name = "transformers", marker = "extra == 'huggingface'", specifier = ">=4.46.3,<6" },
     { name = "transformers", marker = "extra == 'ollama'", specifier = ">=4.46.3,<6" },
@@ -2723,6 +2723,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/a2/78/0d2db9382c92a163d7095fc08efff7800880f830a152cfced40161e7638d/emoji-2.15.0.tar.gz", hash = "sha256:eae4ab7d86456a70a00a985125a03263a5eac54cd55e51d7e184b1ed3b6757e4", size = 615483, upload-time = "2025-09-21T12:13:02.755Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e1/5e/4b5aaaabddfacfe36ba7768817bd1f71a7a810a43705e531f3ae4c690767/emoji-2.15.0-py3-none-any.whl", hash = "sha256:205296793d66a89d88af4688fa57fd6496732eb48917a87175a023c8138995eb", size = 608433, upload-time = "2025-09-21T12:13:01.197Z" },
+]
+
+[[package]]
+name = "enola-cli"
+version = "0.4.19"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b7/33/8b5f3626bddb119d2a0eb65f027b2a910a4ad39a5297796628e0f7b15224/enola_cli-0.4.19-py3-none-macosx_12_0_arm64.whl", hash = "sha256:763a6ded0d57132b64250cb449b25e02be0074d5e2e268504ebcd9d3fb5feb8b", size = 10634498, upload-time = "2026-09-12T15:56:47.362Z" },
+    { url = "https://files.pythonhosted.org/packages/8b/f4/48478c7c0fad0b03977bac445c9c02532959a956cf6c2e33dddcd17af174/enola_cli-0.4.19-py3-none-macosx_12_0_x86_64.whl", hash = "sha256:b1e2615f98528b0d2d6edc8e018026870a4bcf435275aaf8963ed54ea57dfc3a", size = 11113608, upload-time = "2026-09-12T15:56:49.617Z" },
+    { url = "https://files.pythonhosted.org/packages/84/99/93575e4e45348924a37bd7cfcd8a90cd58b13175a00e6e269da3b5281678/enola_cli-0.4.19-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:ba7317a17a984915f24d8a5d87561dc4824bee76554663db4ee6c5018efb431c", size = 10234655, upload-time = "2026-09-12T15:56:51.697Z" },
+    { url = "https://files.pythonhosted.org/packages/17/09/bc95d37c9cff4dfb39999b1497e851d18ba32428285d3c9d2ab89beb6cad/enola_cli-0.4.19-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9f5040382f624a15e46607acaebdf99ef4c4663a54feab0a4013e931509b6235", size = 11100630, upload-time = "2026-09-12T15:56:53.802Z" },
+    { url = "https://files.pythonhosted.org/packages/85/90/0a89dcfd3ccce0c40a4d2b2e40421d37d176c67138bfa3c1bb830377c548/enola_cli-0.4.19-py3-none-win_amd64.whl", hash = "sha256:61a3aaec9b06c5053c7be7086fbbc94446942b874c452cd9f60492366d1e7b99", size = 11297287, upload-time = "2026-09-12T15:56:56.264Z" },
 ]
 
 [[package]]

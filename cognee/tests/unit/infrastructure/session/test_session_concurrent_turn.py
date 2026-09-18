@@ -21,6 +21,7 @@ from cognee.infrastructure.session.session_concurrent_turn import (
     context_to_store_for_turn,
     load_turn_context,
 )
+from cognee.modules.retrieval.utils.completion import SessionPrompt
 
 
 @pytest.mark.asyncio
@@ -217,7 +218,7 @@ async def test_answer_uses_the_callers_own_prompts_and_response_model():
     # No wrapper model: the caller's own response contract, unchanged.
     assert call["response_model"] is Answer
     assert call["system_prompt"] == "caller system prompt"
-    assert call["conversation_history"] == "active guidance\n\nhistory"
+    assert call["session"] == SessionPrompt(history="history", guidance="active guidance")
 
 
 @pytest.mark.asyncio

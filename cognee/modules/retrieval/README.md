@@ -63,5 +63,5 @@ class flags `supports_session_turn_preparation` / `supports_prompt_preview`.
 
 Supporting folders: `hybrid/` (the hybrid lanes), `context_providers/` (triplet
 context formatting), `entity_extractors/`, `utils/` (completion, evidence, ranking
-helpers), `context_preview.py` (the `only_context` prompt preview), and
+helpers), `only_context_prompt.py` (the full LLM input an `only_context` search returns), and
 `session_aware_completion.py` (the concurrent/sequential session turn).

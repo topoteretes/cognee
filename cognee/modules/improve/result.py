@@ -209,19 +209,37 @@ class ImproveResult(BaseModel):
     # foreground; recorded here in background mode where a raise has nowhere
     # to go).
     error: str | None = None
+    # Session-keyed runs only (SDK-593). On a ``lock_held`` result: True when
+    # this run asked the holder of its sessions for one more pass, so its
+    # newer entries are covered without a retry. On a run that held the lock:
+    # ``rerun_passes`` holds one extra list of stage results per pass the
+    # holder ran on request; ``stages`` stays the first pass.
+    rerun_requested: bool = False
+    rerun_passes: list[list[StageResult]] = Field(default_factory=list)
 
     _task: asyncio.Task | None = PrivateAttr(default=None)
+    _current_pass: list[StageResult] | None = PrivateAttr(default=None)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def status(self) -> ImproveStatus:
         if not self.finished:
             return "running"
-        if self.error or any(stage.status == "errored" for stage in self.stages):
+        if self.error or any(stage.status == "errored" for stage in self.all_stage_results()):
             return "errored"
-        if self.stages and all(stage.status == "skipped" for stage in self.stages):
+        if self.stages and all(stage.status == "skipped" for stage in self.all_stage_results()):
             return "skipped"
         return "completed"
+
+    def all_stage_results(self) -> list[StageResult]:
+        """Every stage result of the run: the first pass, then each rerun pass."""
+        return [*self.stages, *(stage for rerun in self.rerun_passes for stage in rerun)]
+
+    def start_rerun_pass(self) -> None:
+        """Begin recording a further pass; later ``record`` calls land in it."""
+        rerun: list[StageResult] = []
+        self.rerun_passes.append(rerun)
+        self._current_pass = rerun
 
     @property
     def lock_held(self) -> bool:
@@ -241,8 +259,12 @@ class ImproveResult(BaseModel):
         )
 
     def record(self, stage_result: StageResult) -> None:
-        """Append one stage's outcome, nesting the legacy memify return (D4)."""
-        self.stages.append(stage_result)
+        """Append one stage's outcome, nesting the legacy memify return (D4).
+
+        Lands in the current rerun pass when one was started, else in ``stages``.
+        """
+        target = self._current_pass if self._current_pass is not None else self.stages
+        target.append(stage_result)
         if stage_result.stage == LEGACY_MEMIFY_STAGE_NAME:
             self.memify_run = stage_result.raw_run if stage_result.raw_run is not None else {}
 
@@ -253,8 +275,14 @@ class ImproveResult(BaseModel):
         return None
 
     def stage_summary(self) -> str:
-        """``name=status`` pairs, comma-joined — the tracing attribute value."""
-        return ",".join(f"{stage.stage}={stage.status}" for stage in self.stages)
+        """``name=status`` pairs, comma-joined — the tracing attribute value.
+
+        A run that ran extra passes on request appends ``rerun_passes=N``.
+        """
+        summary = ",".join(f"{stage.stage}={stage.status}" for stage in self.stages)
+        if self.rerun_passes:
+            summary += f",rerun_passes={len(self.rerun_passes)}"
+        return summary
 
     def attach_background_task(self, task: asyncio.Task) -> "ImproveResult":
         """Bind the detached task that is filling this result, for ``wait()``.
