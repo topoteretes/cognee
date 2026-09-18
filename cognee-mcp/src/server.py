@@ -361,6 +361,7 @@ async def remember(
     session_id: str | None = None,
     custom_prompt: str | None = None,
     background: bool = False,
+    ontology_key: str | list[str] | None = None,
     self_improvement: bool = True,
 ) -> list:
     """Store data in memory.
@@ -397,6 +398,11 @@ async def remember(
         Session ID. When set, stores in session cache only.
     custom_prompt : str, optional
         Custom prompt for entity extraction (permanent mode only).
+    ontology_key : str or list[str], optional
+        One or more uploaded ontology keys for extraction (permanent mode only).
+        API mode uses ontologies uploaded by the authenticated API user. Local
+        mode uses the default user's ontology store. Omit to keep the configured
+        server ontology.
     background : bool
         Queue permanent ingestion as a background task and return immediately
         instead of waiting for the pipeline. Use when the caller has a request
@@ -470,6 +476,7 @@ async def remember(
                 dataset_name=dataset_name,
                 session_id=None,
                 custom_prompt=custom_prompt,
+                ontology_key=ontology_key,
                 self_improvement=self_improvement,
             ),
             dataset=dataset_name,
@@ -496,6 +503,7 @@ async def remember(
                 dataset_name=dataset_name,
                 session_id=session_id,
                 custom_prompt=custom_prompt,
+                ontology_key=ontology_key,
                 self_improvement=self_improvement,
             )
             status = result.get("status", "completed")
