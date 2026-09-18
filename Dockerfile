@@ -8,7 +8,7 @@
 # Pinned by digest so a compromised :latest tag cannot inject binaries into
 # the shipped image — same digest as scripts/fetch_ladybug_json_extension.sh,
 # which documents how to refresh both together on a ladybug bump.
-FROM ghcr.io/ladybugdb/extension-repo@sha256:180c83fb190e9d6ef8d324850b192db26794ab7cb866a38813a45365f14bd46d AS ladybug-extensions
+FROM ghcr.io/ladybugdb/extension-repo@sha256:6709850d3c5cdaa0a9f60b1d0d4fc04dbe302ac9a25dc7099e74a8f370784eda AS ladybug-extensions
 RUN mkdir -p /bundle && cd /usr/share/nginx/html && \
     for f in v*/linux_*/json/libjson.lbug_extension; do \
         d="/bundle/${f%/json/libjson.lbug_extension}"; \
@@ -85,7 +85,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     done; \
     uv sync "$@" --extra debug --extra aws --extra api --extra postgres --extra neo4j --extra llama-index --extra dlt --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-dev --no-editable
 
-FROM python:3.12-slim-bookworm@sha256:782412e85d0f0984994c290652577d4018aff08145c85b262bb63dc0c7522254
+FROM python:3.14-slim-bookworm@sha256:9ab8d9c8514b44f90cf0029dd42fdd7e9e211e639c8b995304cc04568dee900f
 
 RUN apt-get update && apt-get install -y \
     libpq5 \
