@@ -140,10 +140,14 @@ class DefaultChunkEngine:
         sentence_chunks = []
         for sentence in sentences:
             if len(sentence) > chunk_size:
-                chunks = self.chunk_data_exact(
+                # chunk_data_exact returns (chunks, numbered_chunks); extend with
+                # just the chunk strings. Extending with the whole tuple spliced
+                # the chunk list and the numbered-chunk list in as two elements,
+                # so an over-long sentence produced nested lists instead of strings.
+                exact_chunks, _ = self.chunk_data_exact(
                     data_chunks=[sentence], chunk_size=chunk_size, chunk_overlap=chunk_overlap
                 )
-                sentence_chunks.extend(chunks)
+                sentence_chunks.extend(exact_chunks)
             else:
                 sentence_chunks.append(sentence)
 
