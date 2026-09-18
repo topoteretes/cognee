@@ -7,6 +7,7 @@ itself. No call to the vector store on the happy path.
 """
 
 import importlib
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -128,41 +129,87 @@ async def test_a_store_without_a_width_reader_is_left_alone(store):
     ensure_mod._record_embedding_model.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_lancedb_reads_the_width_from_the_first_vector_table():
+def _lancedb_adapter(tables):
     import pyarrow as pa
 
     class _Table:
-        def __init__(self, schema):
-            self._schema = schema
+        def __init__(self, width):
+            self._schema = (
+                pa.schema([("id", pa.string())])
+                if width is None
+                else pa.schema([("vector", pa.list_(pa.float32(), width))])
+            )
 
         async def schema(self):
             return self._schema
 
-    tables = {
-        "meta": _Table(pa.schema([("id", pa.string())])),
-        "Entity_name": _Table(pa.schema([("vector", pa.list_(pa.float32(), 384))])),
-    }
+    opened = {name: _Table(width) for name, width in tables.items()}
 
     class _Connection:
         async def table_names(self):
-            return list(tables)
+            return list(opened)
 
         async def open_table(self, name):
-            return tables[name]
+            return opened[name]
 
     adapter = LanceDBAdapter.__new__(LanceDBAdapter)
     adapter.get_connection = AsyncMock(return_value=_Connection())
+    return adapter
 
+
+@pytest.mark.asyncio
+async def test_lancedb_reads_the_width_from_the_vector_tables():
+    adapter = _lancedb_adapter({"meta": None, "Entity_name": 384})
     assert await adapter.get_stored_vector_size() == 384
 
-    tables.clear()
-    assert await adapter.get_stored_vector_size() is None
+    assert await _lancedb_adapter({}).get_stored_vector_size() is None
+    assert await _lancedb_adapter({"meta": None}).get_stored_vector_size() is None
+
+
+@pytest.mark.asyncio
+async def test_lancedb_mixed_widths_do_not_depend_on_table_order(caplog):
+    """A store built across a model change holds two widths.
+
+    Whichever is recorded is wrong for some collections, so the answer must at
+    least be the same every time and be reported — not whichever table the
+    store happens to list first.
+    """
+    tables = {"Entity_name": 384, "DocumentChunk_text": 384, "NewType_name": 3072}
+    reversed_tables = dict(reversed(list(tables.items())))
+
+    with caplog.at_level(logging.WARNING):
+        assert await _lancedb_adapter(tables).get_stored_vector_size() == 384
+        assert await _lancedb_adapter(reversed_tables).get_stored_vector_size() == 384
+
+    assert "different vector widths" in caplog.text
+    assert "{384: 2, 3072: 1}" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_lancedb_ties_resolve_to_the_smaller_width():
+    assert await _lancedb_adapter({"a": 3072, "b": 384}).get_stored_vector_size() == 384
+
+
+@pytest.mark.asyncio
+async def test_one_width_logs_nothing(caplog):
+    """The warning must stay rare: a consistent store is the normal case."""
+    with caplog.at_level(logging.WARNING):
+        assert await _lancedb_adapter({"a": 384, "b": 384}).get_stored_vector_size() == 384
+
+    assert caplog.text == ""
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("declared", "expected"), [("vector(1536)", 1536), ("vector", None), (None, None)]
+    ("declared", "expected"),
+    [
+        (["vector(1536)"], 1536),
+        (["vector"], None),
+        ([], None),
+        # Built across a model change: the majority width, whatever the catalog order.
+        (["vector(384)", "vector(3072)", "vector(384)"], 384),
+        (["vector(3072)", "vector(384)", "vector(384)"], 384),
+    ],
 )
 async def test_pgvector_reads_the_width_from_the_catalog(declared, expected):
     # The postgres extra is optional; the OS-matrix unit jobs run without it.
@@ -175,8 +222,8 @@ async def test_pgvector_reads_the_width_from_the_catalog(declared, expected):
     recorded = {}
 
     class _Result:
-        def scalar_one_or_none(self):
-            return declared
+        def scalars(self):
+            return SimpleNamespace(all=lambda: declared)
 
     class _Session:
         async def execute(self, statement, parameters):

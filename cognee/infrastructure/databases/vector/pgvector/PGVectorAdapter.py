@@ -26,6 +26,7 @@ from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..exceptions import CollectionNotFoundError
 from ..models.ScoredResult import ScoredResult
+from ..stored_vector_size import choose_stored_vector_size
 from ..vector_db_interface import VectorDBInterface
 from .serialize_data import serialize_data
 
@@ -258,10 +259,13 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         """Width of the vectors already in this store, or None when nothing is stored yet.
 
         Every table's ``vector`` column is declared ``vector(N)`` with the
-        embedding width that built it, so the first such column in this
-        dataset's schema answers for the store. Read once per dataset by the
-        dataset context to record the width for rows that predate the recorded
+        embedding width that built it. Read once per dataset by the dataset
+        context to record the width for rows that predate the recorded
         embedding model.
+
+        Reads every such column rather than the first: a schema built across an
+        ``EMBEDDING_MODEL`` change holds two widths, and which one gets recorded
+        must not depend on catalog order (see ``choose_stored_vector_size``).
         """
         async with self.get_async_session() as session:
             result = await session.execute(
@@ -270,13 +274,18 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     "JOIN pg_class c ON c.oid = a.attrelid "
                     "JOIN pg_namespace n ON n.oid = c.relnamespace "
                     "WHERE n.nspname = :schema AND a.attname = 'vector' "
-                    "AND NOT a.attisdropped LIMIT 1"
+                    "AND NOT a.attisdropped"
                 ),
                 {"schema": self.schema or "public"},
             )
-            declared_type = result.scalar_one_or_none()
-        match = re.fullmatch(r"vector\((\d+)\)", declared_type or "")
-        return int(match.group(1)) if match else None
+            declared_types = result.scalars().all()
+
+        widths = []
+        for declared_type in declared_types:
+            match = re.fullmatch(r"vector\((\d+)\)", declared_type or "")
+            if match:
+                widths.append(int(match.group(1)))
+        return choose_stored_vector_size(widths, self.name)
 
     async def has_collection(self, collection_name: str) -> bool:
         """

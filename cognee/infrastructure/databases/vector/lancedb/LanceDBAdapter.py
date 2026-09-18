@@ -37,6 +37,7 @@ from cognee.shared.logging_utils import get_logger
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
+from ..stored_vector_size import choose_stored_vector_size
 from ..vector_db_interface import VectorDBInterface
 
 logger = get_logger("LanceDBAdapter")
@@ -392,19 +393,24 @@ class LanceDBAdapter(VectorDBInterface):
         """Width of the vectors already in this store, or None when nothing is stored yet.
 
         Every table's ``vector`` column is a fixed-size list of the embedding
-        width that built it, so the first table with one answers for the store.
-        Read once per dataset by the dataset context to record the width for
-        rows that predate the recorded embedding model.
+        width that built it. Read once per dataset by the dataset context to
+        record the width for rows that predate the recorded embedding model.
+
+        Reads every table rather than stopping at the first: a store built
+        across an ``EMBEDDING_MODEL`` change holds two widths, and which one
+        gets recorded must not depend on listing order (see
+        ``choose_stored_vector_size``).
         """
         connection = await self.get_connection()
+        widths = []
         for table_name in await connection.table_names():
             schema = await (await connection.open_table(table_name)).schema()
             if "vector" not in schema.names:
                 continue
             list_size = getattr(schema.field("vector").type, "list_size", None)
             if isinstance(list_size, int):
-                return list_size
-        return None
+                widths.append(list_size)
+        return choose_stored_vector_size(widths, self.name)
 
     async def create_collection(self, collection_name: str, payload_schema: BaseModel):
         """Create the LanceDB table for `collection_name` if it does not already exist."""
