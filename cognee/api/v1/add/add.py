@@ -1,9 +1,7 @@
 from typing import Any, BinaryIO
-from urllib.parse import urlparse
 from uuid import UUID
 
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
-from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.engine.operations.setup import setup
@@ -29,61 +27,6 @@ from cognee.tasks.ingestion.resolve_dlt_sources import resolve_dlt_sources
 from cognee.tasks.ingestion.utils import materialize_stream_for_background
 
 logger = get_logger()
-
-
-def _add_pipeline_needs_llm(data: Any, preferred_loaders: list | None) -> bool:
-    """Does this add call need a working LLM before it starts?
-
-    Two rules, in order:
-
-    *The run will extract with the local GLiNER model — no.* The checks this
-    drives have nothing to add then: the first-run connection probe would only
-    restate the absent key, and the provider-config warning would claim
-    extraction needs an LLM when this run extracts and embeds locally. Keyless
-    ingestion is a supported mode, so a conservative guess about a file whose
-    loader is not resolved yet must not block it. Media is the one ingestion
-    step that still needs a key, and each media loader raises its own
-    actionable error if one is actually reached (``require_llm_for_media``) —
-    a moment later than the probe, naming the file kind and what works without
-    a key.
-
-    Asking ``resolve_extractor`` rather than "is a key configured" keeps an
-    explicit ``GRAPH_EXTRACTOR`` honoured in both directions: pinned to ``llm``
-    with no key still fails fast here, and pinned to ``gliner_demo`` skips the
-    probe it does not need. It resolves from config alone — ``extractor`` is a
-    cognify argument and never reaches ``add()`` — and raises
-    ``KeylessExtractorNotInstalledError`` when the keyless path is selected
-    without ``gliner2`` installed, which is the right answer at ingestion time:
-    nothing downstream could build a graph.
-
-    *Otherwise, only known plain-text inputs can safely skip the check*: a file
-    whose loader is not resolved yet could still be an image or a recording,
-    whose loaders transcribe through the LLM.
-    """
-    from cognee.modules.cognify.config import (
-        GLINER_DEMO_EXTRACTOR,
-        get_cognify_config,
-        resolve_extractor,
-    )
-
-    if resolve_extractor(None, get_cognify_config()) == GLINER_DEMO_EXTRACTOR:
-        return False
-
-    if preferred_loaders:
-        return True
-
-    data_items = data if isinstance(data, list) else [data]
-    for data_item in data_items:
-        data_item = data_item.data if isinstance(data_item, DataItem) else data_item
-        if not isinstance(data_item, str) or urlparse(data_item).scheme:
-            return True
-        try:
-            resolve_local_path(data_item, must_exist=True)
-        except (FileNotFoundError, OSError, ValueError):
-            pass
-        else:
-            return True
-    return False
 
 
 async def add(
@@ -277,12 +220,17 @@ async def add(
                 transformed[item] = {}
         preferred_loaders = transformed
 
-    # Validate only the ingestion work this call will perform. Obvious direct
-    # text is LLM-free; inputs whose loader is not known yet stay conservative.
+    # add() stages data and makes no LLM call of its own, so it validates the
+    # embedding side of the provider config only. Whether the run needs an LLM
+    # is decided where the LLM is used: remember() and cognify() from their
+    # task lists, and the media loaders -- the one ingestion step that calls
+    # the LLM -- at the moment they would (``require_llm_for_media``). Keyless
+    # ingestion (local GLiNER extractor, local embedder) is a supported mode,
+    # and a guess made here about a file whose loader is not resolved yet was
+    # blocking it.
     from cognee.modules.preflight import validate_provider_config
 
-    add_pipeline_needs_llm = _add_pipeline_needs_llm(data, preferred_loaders)
-    validate_provider_config(needs_llm=add_pipeline_needs_llm)
+    validate_provider_config(needs_llm=False)
 
     await setup()
 
@@ -321,7 +269,7 @@ async def add(
             authorized_dataset.id,
             preferred_loaders,
             importance_weight,
-            needs_llm=add_pipeline_needs_llm,
+            needs_llm=False,
         ),
     ]
 
