@@ -17,6 +17,7 @@ from cognee.exceptions import (
     remediation_for,
 )
 from cognee.infrastructure.llm.exceptions import LLMAPIKeyNotSetError
+from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.tasks.ingestion.exceptions.exceptions import (
     S3FileSystemNotFoundError,
     UnsupportedDBProviderError,
@@ -60,6 +61,10 @@ def test_remediation_for_prefers_own_hint_and_never_repeats():
     foreign = RuntimeError("AuthenticationError: invalid api key")
     assert remediation_for(foreign) == find_remediation(str(foreign))
     assert remediation_for(RuntimeError("unrelated")) is None
+
+
+def test_domain_permission_denial_has_no_llm_remediation():
+    assert remediation_for(PermissionDeniedError(log=False)) is None
 
 
 def test_no_hint_embeds_the_marker_it_is_labelled_with():
