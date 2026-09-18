@@ -1,3 +1,20 @@
+# Official Ladybug extension binaries — this image is the origin content
+# behind extension.ladybugdb.com, so copying from it here means the JSON
+# extension ships in the image and is never downloaded at runtime (see
+# cognee_db_workers/ladybug_extensions/README.md). All published versions are
+# collected (~1.7 MB per version pair) so this stage never needs touching when
+# the ladybug constraint changes; at runtime the loader only reads the
+# directory matching the installed ladybug version.
+# Pinned by digest so a compromised :latest tag cannot inject binaries into
+# the shipped image — same digest as scripts/fetch_ladybug_json_extension.sh,
+# which documents how to refresh both together on a ladybug bump.
+FROM ghcr.io/ladybugdb/extension-repo@sha256:180c83fb190e9d6ef8d324850b192db26794ab7cb866a38813a45365f14bd46d AS ladybug-extensions
+RUN mkdir -p /bundle && cd /usr/share/nginx/html && \
+    for f in v*/linux_*/json/libjson.lbug_extension; do \
+        d="/bundle/${f%/json/libjson.lbug_extension}"; \
+        mkdir -p "$d" && cp "$f" "$d/libjson.lbug_extension"; \
+    done
+
 # Use a Python image with uv pre-installed
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim@sha256:e5b65587bce7de595f299855d7385fe7fca39b8a74baa261ba1b7147afa78e58 AS uv
 
@@ -46,12 +63,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     for extra in ${COGNEE_EXTRAS}; do \
         set -- "$@" --extra "$extra"; \
     done; \
-    uv sync "$@" --extra fastembed --extra debug --extra api --extra postgres --extra neo4j --extra llama-index --extra aws --extra dlt --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-install-project --no-dev --no-editable
+    uv sync "$@" --extra gliner --extra codegraph --extra debug --extra api --extra postgres --extra neo4j --extra llama-index --extra aws --extra dlt --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-install-project --no-dev --no-editable
 
 # Then, add the rest of the project source code and install it
 # Installing separately from its dependencies allows optimal layer caching
 COPY ./cognee /app/cognee
 COPY ./cognee_db_workers /app/cognee_db_workers
+# Bundle the JSON extension for both image arches; the loader picks the file
+# matching the installed ladybug version and runtime platform.
+COPY --from=ladybug-extensions /bundle/ /app/cognee_db_workers/ladybug_extensions/
 # Compatibility shim that re-exports ladybug under the legacy `kuzu`
 # module name. Listed in [tool.hatch.build.targets.wheel] packages, and
 # imported at module load by alembic/versions/b9274c27a25a_kuzu_11_migration.py.
@@ -63,7 +83,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     for extra in ${COGNEE_EXTRAS}; do \
         set -- "$@" --extra "$extra"; \
     done; \
-    uv sync "$@" --extra fastembed --extra debug --extra aws --extra api --extra postgres --extra neo4j --extra llama-index --extra dlt --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-dev --no-editable
+    uv sync "$@" --extra gliner --extra codegraph --extra debug --extra aws --extra api --extra postgres --extra neo4j --extra llama-index --extra dlt --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-dev --no-editable
 
 FROM python:3.12-slim-bookworm@sha256:782412e85d0f0984994c290652577d4018aff08145c85b262bb63dc0c7522254
 

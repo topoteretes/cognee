@@ -1,1 +1,1 @@
-from .exceptions import PipelineRunFailedError, CognifyFailedError
+from .exceptions import PipelineRunFailedError, CognifyFailedError, AbandonedPipelineRunError

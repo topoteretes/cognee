@@ -425,6 +425,37 @@ class TursoAdapter(GraphDBInterface):
                 connections.append((src, edge, tgt))
             return connections
 
+    async def get_top_degree_node_ids(self, top_k: int) -> list[str]:
+        """Rank a bounded physical edge prefix, with the same recency bias as Postgres."""
+        if top_k < 1:
+            raise ValueError("top_k must be >= 1")
+        from cognee.infrastructure.databases.graph.degree_seeds import EDGE_SAMPLE_ROWS
+
+        await self.initialize()
+        async with self.sessionmaker() as session:
+            result = await session.execute(
+                text("""
+                    WITH sampled_edges AS MATERIALIZED (
+                        SELECT source_id, target_id FROM graph_edge LIMIT :sample
+                    )
+                    SELECT node_id FROM (
+                        SELECT source_id AS node_id FROM sampled_edges
+                        UNION ALL
+                        SELECT target_id AS node_id FROM sampled_edges
+                    ) endpoints
+                    GROUP BY node_id ORDER BY count(*) DESC, node_id LIMIT :top_k
+                """),
+                {"sample": EDGE_SAMPLE_ROWS, "top_k": top_k},
+            )
+            seeds = [str(row[0]) for row in result.all()]
+            if len(seeds) < top_k:
+                # Fetch at most top_k ids; at most len(seeds) can overlap.
+                result = await session.execute(
+                    text("SELECT id FROM graph_node LIMIT :top_k"), {"top_k": top_k}
+                )
+                seeds.extend(str(row[0]) for row in result.all() if str(row[0]) not in seeds)
+            return seeds[:top_k]
+
     async def get_graph_data(
         self,
     ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]:

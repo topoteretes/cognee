@@ -150,7 +150,7 @@ async def test_get_completion_without_session(mock_vector_engine):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion_from_context("test query", None, "")
+        completion = await retriever.get_completion_from_context("test query", None, "test context")
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -251,7 +251,7 @@ async def test_get_completion_with_session_no_user_id(mock_vector_engine):
         mock_cache_config.return_value = mock_config
         mock_session_user.get.return_value = None  # No user
 
-        completion = await retriever.get_completion_from_context("test query", None, "")
+        completion = await retriever.get_completion_from_context("test query", None, "test context")
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -286,7 +286,7 @@ async def test_get_completion_with_response_model(mock_vector_engine):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion_from_context("test query", None, None)
+        completion = await retriever.get_completion_from_context("test query", None, "Chunk text")
 
     assert isinstance(completion, list)
     assert len(completion) == 1

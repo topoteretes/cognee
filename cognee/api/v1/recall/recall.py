@@ -26,6 +26,7 @@ from cognee.modules.observability import (
     new_span,
 )
 from cognee.modules.operations import get_current_operation, record_operation
+from cognee.modules.preflight import llm_available
 from cognee.modules.recall.types.RecallResponse import (
     RecallResponse,
     ResponseAgentTraceEntry,
@@ -39,7 +40,7 @@ from cognee.modules.recall.types.RecallResponse import (
 )
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
-from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
+from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -58,7 +59,6 @@ class RecallKwargs(TypedDict, total=False):
     node_name: list[str]
     node_name_filter_operator: str
     only_context: bool
-    context_format: str
     session_id: str
     wide_search_top_k: int
     triplet_distance_penalty: float
@@ -353,7 +353,6 @@ async def recall(
     # unspecified hybrid may defer to GRAPH_COMPLETION, and search history
     # still records the type recall chose, not the deferred one.
     only_context: bool = False,
-    context_format: ContextFormat | str = ContextFormat.CONTEXT,
     session_id: str | None = None,
     context_profile: str = "qa",
     wide_search_top_k: int | None = None,
@@ -395,7 +394,7 @@ async def recall(
         dataset_ids: Dataset UUIDs to search within. Takes precedence over datasets.
         top_k: Maximum results to return (default *15*).
         auto_route: If True and query_type is None, classify the query
-            automatically. If False, fall back to GRAPH_COMPLETION.
+            automatically. If False, fall back to HYBRID_COMPLETION.
         response_model: Pydantic model class for structured completion output.
             Forwarded to the retriever, which validates the LLM answer against
             it; each result then carries the validated payload as a dict in its
@@ -482,7 +481,6 @@ async def recall(
             message=f"Invalid tools_trigger '{tools_trigger}'. Valid values: 'always', 'on_empty'.",
             name="InvalidToolsTriggerError",
         )
-    context_format = ContextFormat.parse(context_format)
     if code_query is not None and "code" not in sources:
         raise CogneeValidationError(
             message=(
@@ -508,7 +506,8 @@ async def recall(
             "top_k": top_k,
             "search_type": str(query_type.value) if query_type else "auto",
             "session_id": session_id or "",
-            "datasets": ",".join(datasets) if datasets else "",
+            # A list, not a joined string: send_telemetry fingerprints each name.
+            "datasets": list(datasets) if datasets else [],
             "dataset_ids": ",".join(str(dataset_id) for dataset_id in dataset_ids or []),
             "include_references": include_references,
             "cognee_version": cognee_version,
@@ -543,7 +542,6 @@ async def recall(
                 system_prompt=system_prompt,
                 node_name=node_name,
                 only_context=only_context,
-                context_format=context_format,
                 session_id=session_id,
                 context_profile=context_profile,
                 verbose=verbose,
@@ -636,6 +634,14 @@ async def recall(
                         result = route_query(query_text)
                         routed_type = result.search_type
                         record_override(routed_type, local_query_type)
+                elif not llm_available(llm_config):
+                    # No usable LLM is configured, so nothing can write a
+                    # completion answer; the default lookup is the vector
+                    # search over chunks. Keyed on LLM availability, not on the
+                    # extractor that built the graph — a gliner_demo-built graph
+                    # with a key present answers completions fine. An explicit
+                    # query_type still selects any search type.
+                    local_query_type = SearchType.CHUNKS
                 elif auto_route:
                     from cognee.api.v1.recall.query_router import route_query
 
@@ -775,7 +781,6 @@ async def recall(
                     node_name=node_name,
                     node_name_filter_operator=node_name_filter_operator,
                     only_context=only_context,
-                    context_format=context_format,
                     session_id=session_id,
                     wide_search_top_k=wide_search_top_k,
                     triplet_distance_penalty=triplet_distance_penalty,
@@ -916,7 +921,9 @@ async def recall(
                 tagged: list[RecallResponse] = []
                 for payload in code_results:
                     completion = getattr(payload, "completion", None)
-                    if isinstance(completion, dict) and completion.get("seed_not_found"):
+                    if getattr(payload, "error", None) or (
+                        isinstance(completion, dict) and completion.get("seed_not_found")
+                    ):
                         # Multi-dataset searches soften per-dataset seed misses
                         # into marker payloads; they carry no facts, so drop
                         # them here for the same reason as the except above.

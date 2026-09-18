@@ -21,7 +21,18 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 
 from cognee.modules.storage.utils import JSONEncoder
+
+try:
+    from cognee.exceptions.remediation import REMEDIATION_MARKER, find_remediation
+except ImportError:  # cognee-mcp pins a released cognee; older cores have no hint table
+    REMEDIATION_MARKER = " Fix: "
+
+    def find_remediation(message: str) -> str | None:
+        return None
+
+
 from cognee.shared.logging_utils import get_log_file_location, get_logger, setup_logging
+from cognee.shared.usage_logger import log_usage
 
 try:
     from .cognee_client import CogneeClient
@@ -56,6 +67,22 @@ registry = ToolRegistry(mcp)
 logger = get_logger()
 
 cognee_client: CogneeClient | None = None
+
+
+def _tool_error_text(prefix: str, error: Exception) -> str:
+    """Render a tool failure for the agent, with a fix hint when one is known.
+
+    ``str()`` of a cognee error already ends in ``Fix: ...``; for anything else
+    (provider auth failures, unreachable endpoints) the shared first-run table
+    supplies the hint, so the agent sees the env var to change, not just a trace.
+    """
+    text = f"{prefix}: {error!s}"
+    if REMEDIATION_MARKER not in text:
+        hint = find_remediation(str(error))
+        if hint:
+            text = f"{text}\nFix: {hint}"
+    return text
+
 
 # Per-dataset error ring buffer (bounded so long-running servers don't accumulate
 # unbounded memory). Each entry is (iso_timestamp, error_message).
@@ -313,13 +340,15 @@ async def remember(
     session_id: str | None = None,
     custom_prompt: str | None = None,
     background: bool = False,
+    self_improvement: bool = True,
 ) -> list:
     """Store data in memory.
 
     Two modes depending on whether session_id is provided:
 
     Without session_id (permanent memory): Runs the full add + cognify
-    pipeline to ingest data and build the knowledge graph.
+    pipeline to ingest data and build the knowledge graph, then the
+    self-improvement loop (improve) unless self_improvement=False.
 
     With session_id (session memory): Stores the data in the session
     cache only. Fast, no entity extraction. Omit session_id when the
@@ -353,6 +382,10 @@ async def remember(
         deadline shorter than ingestion takes. Ignored with session_id, which
         is already fast. Errors surface via cognify_status, not the return
         value.
+    self_improvement : bool
+        Run the improve loop (triplet enrichment and, with sessions, the
+        session bridge) after cognify. Permanent mode only; default True.
+        Pass False for a plain add + cognify ingestion.
     """
     if content_base64 and data:
         return [
@@ -416,6 +449,7 @@ async def remember(
                 dataset_name=dataset_name,
                 session_id=None,
                 custom_prompt=custom_prompt,
+                self_improvement=self_improvement,
             )
         )
         queued = f"'{filename}'" if content_base64 else "text"
@@ -440,6 +474,7 @@ async def remember(
                 dataset_name=dataset_name,
                 session_id=session_id,
                 custom_prompt=custom_prompt,
+                self_improvement=self_improvement,
             )
             status = result.get("status", "completed")
             if session_id:
@@ -453,7 +488,7 @@ async def remember(
                 text = f"Stored permanently in knowledge graph (dataset={dataset_name}, status={status})."
             return [types.TextContent(type="text", text=text)]
         except Exception as e:
-            error_msg = f"Remember failed: {e!s}"
+            error_msg = _tool_error_text("Remember failed", e)
             logger.exception(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
@@ -481,9 +516,15 @@ async def recall(
     query : str
         Natural language query to search for.
     search_type : str, optional
-        Override auto-routing. Options: GRAPH_COMPLETION,
-        GRAPH_COMPLETION_COT, RAG_COMPLETION, CHUNKS, SUMMARIES,
-        TEMPORAL, FEELING_LUCKY, etc.
+        Override auto-routing with one SearchType name. Completion types
+        (answer written by an LLM): HYBRID_COMPLETION (the default when
+        routing is off), GRAPH_COMPLETION, GRAPH_COMPLETION_COT,
+        GRAPH_COMPLETION_CONTEXT_EXTENSION, GRAPH_COMPLETION_DECOMPOSITION,
+        GRAPH_SUMMARY_COMPLETION, RAG_COMPLETION, TRIPLET_COMPLETION,
+        TEMPORAL, AGENTIC_COMPLETION. Retrieval-only types (no LLM):
+        CHUNKS, CHUNKS_LEXICAL, SUMMARIES, SKILLS, CODE. Other: CYPHER,
+        NATURAL_LANGUAGE, CODING_RULES, GRAPH_REPORT, FEELING_LUCKY.
+        An unknown name is rejected with a validation error.
     datasets : str, optional
         Comma-separated dataset names to search within.
     session_id : str, optional
@@ -493,7 +534,7 @@ async def recall(
         falls back to COGNEE_MCP_RECALL_SYSTEM_PROMPT / _FILE if configured
         on the server.
     top_k : int
-        Maximum results to return (default: 10).
+        Maximum results to return (default: 15).
     """
     with redirect_stdout(sys.stderr):
         try:
@@ -514,7 +555,7 @@ async def recall(
                 )
             ]
         except Exception as e:
-            error_msg = f"Recall failed: {e!s}"
+            error_msg = _tool_error_text("Recall failed", e)
             logger.exception(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
@@ -591,9 +632,105 @@ async def forget(
                 text = f"Dataset '{dataset or dataset_id}' deleted (status={status})."
             return [types.TextContent(type="text", text=text)]
         except Exception as e:
-            error_msg = f"Forget failed: {e!s}"
+            error_msg = _tool_error_text("Forget failed", e)
             logger.exception(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
+
+
+@log_usage(function_name="MCP improve", log_type="mcp_tool")
+async def improve(
+    dataset_name: str | None = None,
+    session_ids: str | None = None,
+    node_name: str | None = None,
+    build_global_context_index: bool = False,
+    build_truth_subspace: bool = False,
+) -> list:
+    """Run the self-improvement loop over a dataset and report what each stage did.
+
+    Nine stages run in a fixed order; each first declines work it cannot do
+    under the current settings (no LLM calls) and only then runs:
+    1. feedback_weights        - scored session answers move graph weights
+    2. persist_session_qa      - session Q&A is cognified into the graph
+    3. persist_agent_traces    - tool-call trace feedback is cognified
+    4. extract_agent_context   - pending traces become agent-profile lessons
+    5. distill_sessions        - gated guidance becomes entity-anchored lessons
+    6. update_user_preferences - ratings fold into preference weights
+    7. build_truth_subspace    - opt-in (build_truth_subspace=True)
+    8. triplet_enrichment      - triplet embeddings, when the graph changed
+    9. global_context_index    - opt-in (build_global_context_index=True)
+
+    Stages 1-7 need session_ids and are skipped with `no_session_ids`
+    otherwise. The reply lists every stage with its status (completed,
+    already_completed, skipped, errored) and the skip reason.
+
+    Parameters
+    ----------
+    dataset_name : str, optional
+        Dataset to process. Defaults to the current MCP client's
+        agent-scoped dataset, or "main_dataset" if no client identity is
+        detected.
+    session_ids : str, optional
+        Comma-separated session IDs to bridge into the permanent graph.
+    node_name : str, optional
+        Comma-separated entity names; restricts enrichment to those nodes.
+    build_global_context_index : bool
+        Also build the global context index after enrichment.
+    build_truth_subspace : bool
+        Also build the truth subspace from the sessions' distilled learnings
+        (needs session_ids and a graph backend with truth state).
+    """
+    dataset_name = dataset_name or _agent_scoped_default_dataset()
+    with redirect_stdout(sys.stderr):
+        try:
+            session_list = parse_csv_list(session_ids)
+            node_list = parse_csv_list(node_name)
+            result = await cognee_client.improve(
+                dataset_name=dataset_name,
+                session_ids=session_list,
+                node_name=node_list,
+                build_global_context_index=build_global_context_index,
+                build_truth_subspace=build_truth_subspace,
+            )
+            return [
+                types.TextContent(type="text", text=format_improve_result(result, dataset_name))
+            ]
+        except Exception as e:
+            error_msg = f"Improve failed: {e!s}"
+            logger.exception(error_msg)
+            return [types.TextContent(type="text", text=f"Error: {error_msg}")]
+
+
+def format_improve_result(result, dataset_name: str) -> str:
+    """Summarize an ImproveResult payload (dict from the API or model_dump) per stage."""
+    if not isinstance(result, dict):
+        return f"Improve completed for dataset '{dataset_name}'."
+    # Deliberately NOT cognee.modules.improve.result.stage_detail_text: this
+    # package depends on RELEASED cognee (see pyproject), which may predate
+    # that helper — the same reason this formatter tolerates legacy payloads.
+    # Keep the detail rule (reason; counts; error) in sync with it by hand.
+    status = result.get("status", "completed")
+    stages = result.get("stages") or []
+    lines = [f"Improve {status} for dataset '{dataset_name}'."]
+    if result.get("session_ids"):
+        lines[0] += f" Sessions: {len(result['session_ids'])}."
+    for stage in stages:
+        if not isinstance(stage, dict):
+            continue
+        detail = []
+        if stage.get("reason"):
+            detail.append(str(stage["reason"]))
+        counts = stage.get("counts") or {}
+        if isinstance(counts, dict) and counts:
+            detail.append(", ".join(f"{k}={v}" for k, v in counts.items()))
+        if stage.get("status") == "errored" and stage.get("error"):
+            detail.append(str(stage["error"]))
+        suffix = f" ({'; '.join(detail)})" if detail else ""
+        lines.append(f"- {stage.get('stage', '?')}: {stage.get('status', '?')}{suffix}")
+    if not stages and status == "running":
+        lines.append("The chain is running in the background.")
+    if result.get("error") and status == "errored":
+        lines.append(f"error: {result['error']}")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -842,6 +979,15 @@ async def main():
         "authentication enabled). Can also be set via the COGNEE_API_KEY env var.",
     )
 
+    parser.add_argument(
+        "--api-auth-scheme",
+        choices=["bearer", "x-api-key"],
+        default=os.getenv("COGNEE_API_AUTH_SCHEME"),
+        help="Authentication scheme for API mode: 'bearer' (default, sends Authorization: Bearer <token>) "
+        "or 'x-api-key' (sends X-Api-Key: <token>, required for self-hosted API keys). "
+        "Can also be set via the COGNEE_API_AUTH_SCHEME env var.",
+    )
+
     # Cognee Cloud connection options
     parser.add_argument(
         "--serve-url",
@@ -860,7 +1006,11 @@ async def main():
     args = parser.parse_args()
 
     # Initialize the global CogneeClient
-    cognee_client = CogneeClient(api_url=args.api_url, api_token=args.api_token)
+    cognee_client = CogneeClient(
+        api_url=args.api_url,
+        api_token=args.api_token,
+        api_auth_scheme=args.api_auth_scheme,
+    )
 
     host = args.host
     port = int(args.port)

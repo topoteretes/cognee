@@ -582,10 +582,12 @@ def get_permissions_router() -> APIRouter:
         - **user_id** (UUID): The UUID of the user whose roles to list (find user ids via GET /api/v1/permissions/tenants/{tenant_id}/users)
 
         ## Response
-        Returns a JSON list of roles: [{"id", "name"}].
+        Returns a JSON list of roles scoped to this tenant: [{"id", "name"}].
+        A member with no roles in the tenant receives an empty list.
 
         ## Error Codes
         - **403 Forbidden**: Caller lacks user-management permission in the tenant
+        - **404 Not Found**: User does not exist or is not a member of this tenant
         """
         role_list = await method_get_user_roles(tenant_id=tenant_id, user_id=user_id, user=user)
         return JSONResponse(status_code=200, content=role_list)

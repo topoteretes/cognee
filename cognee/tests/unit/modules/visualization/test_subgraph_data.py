@@ -125,20 +125,26 @@ async def test_resolve_seed_priority_explicit_over_recall_query_degree():
 
 @pytest.mark.asyncio
 async def test_resolve_seed_priority_falls_through_to_degree():
-    # Star graph: "hub" has degree 4, every spoke has degree 1.
-    nodes = [("hub", {})] + [(f"s{i}", {}) for i in range(4)]
-    edges = [("hub", f"s{i}", "rel", {}) for i in range(4)]
+    # The ranking is the adapter's job now, so this asserts the fall-through
+    # and that the adapter is asked — not how it counts. How it counts is
+    # covered by the interface-default test below.
     engine = MagicMock()
-    engine.get_graph_data = AsyncMock(return_value=(nodes, edges))
+    engine.get_top_degree_node_ids = AsyncMock(return_value=["hub"])
+    engine.get_graph_data = AsyncMock(
+        side_effect=AssertionError("seed ranking must not read the whole graph")
+    )
+
     seeds, source = await resolve_seed_node_ids(engine, seed_top_k=1)
+
     assert source == "degree"
     assert seeds == ["hub"]
+    engine.get_top_degree_node_ids.assert_awaited_once_with(1)
 
 
 @pytest.mark.asyncio
 async def test_resolve_seed_none_on_empty_graph():
     engine = MagicMock()
-    engine.get_graph_data = AsyncMock(return_value=([], []))
+    engine.get_top_degree_node_ids = AsyncMock(return_value=[])
     seeds, source = await resolve_seed_node_ids(engine)
     assert (seeds, source) == ([], "none")
 
@@ -241,7 +247,7 @@ async def test_fetch_truncates_oversized_neighborhood():
 @pytest.mark.asyncio
 async def test_fetch_no_seeds_renders_empty():
     engine = MagicMock()
-    engine.get_graph_data = AsyncMock(return_value=([], []))
+    engine.get_top_degree_node_ids = AsyncMock(return_value=[])
     engine.get_neighborhood = AsyncMock()
 
     graph_data = await fetch_visualization_graph_data(engine)
