@@ -13,7 +13,7 @@ from cognee.api.v1.recall.recall import RecallResponse
 from cognee.api.v1.recall.recall_stream import begin_recall_stream
 from cognee.exceptions import CogneeApiError
 from cognee.modules.search.operations import get_history
-from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
+from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -68,15 +68,15 @@ class RecallPayloadDTO(InDTO):
         ),
     )
     top_k: int | None = Field(default=15)
-    only_context: bool = Field(default=False)
-    context_format: ContextFormat = Field(
-        default=ContextFormat.CONTEXT,
-        examples=[ContextFormat.CONTEXT.value],
+    only_context: bool = Field(
+        default=False,
         description=(
-            "Shape of an only_context result. 'context' returns the bare retrieval"
-            " context; 'prompt' returns the full envelope a completion would have"
-            " received — session guidance, conversation history, and the rendered"
-            " user and system prompts. Ignored unless only_context is true."
+            "Return what the LLM would have received instead of its answer. For"
+            " completion search types each item's text is the user prompt (conversation"
+            " history, then question plus retrieval context through the retriever's"
+            " template, then the session guidance block) and its system_prompt field"
+            " carries the retriever's task template. Retrieval-only types return their"
+            " context. No LLM call is made and nothing is written to the session."
         ),
     )
     verbose: bool = Field(default=False)
@@ -235,11 +235,11 @@ def get_recall_router() -> APIRouter:
         - **system_prompt** (Optional[str]): System prompt for completion searches
         - **node_name** (Optional[List[str]]): Filter to specific node sets
         - **top_k** (Optional[int]): Maximum results (default: 15)
-        - **only_context** (bool): Return only the LLM context
-        - **context_format** (str): Shape of an only_context result — "context"
-          (default, the bare retrieval context) or "prompt" (the full envelope a
-          completion would receive: session guidance, conversation history, and the
-          rendered user and system prompts)
+        - **only_context** (bool): Return what the LLM would have received instead of
+          its answer — for completion types each item's text is the user prompt
+          (conversation history, question plus retrieval context, session guidance)
+          and its system_prompt field the retriever's task template; retrieval-only
+          types return their context
         - **verbose** (bool): Verbose output
         - **include_references** (bool): Include source/provenance references in
           completion results (default: true)
@@ -307,7 +307,6 @@ def get_recall_router() -> APIRouter:
                 top_k=payload.top_k,
                 verbose=payload.verbose,
                 only_context=payload.only_context,
-                context_format=payload.context_format,
                 session_id=payload.session_id,
                 scope=payload.scope,
                 context_profile=payload.context_profile,

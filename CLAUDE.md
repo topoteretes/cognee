@@ -430,49 +430,80 @@ Concurrent mode applies only to `GraphCompletionRetriever`,
 automatically. With `AUTO_FEEDBACK=false`
 neither mode analyzes the turn.
 
-#### only_context and `context_format`
+#### Completion prompt layout
 
-`only_context=True` returns the retrieval context instead of an LLM completion. By
-default that is the bare context string and nothing else — no session guidance, no
-conversation history, no rendered prompt — which is less than a real completion
-receives. Pass `context_format="prompt"` to get the full envelope instead:
+Every completion is assembled by one function, `build_completion_prompts` in
+`cognee/modules/retrieval/utils/completion.py`. The **system prompt** is the retriever's
+task template and nothing else: cognee-authored, static per retriever, so it never
+changes between turns. Everything derived from the user goes into the **user prompt**, in
+this order: the conversation history, the rendered question-and-context template, and
+the guidance block last (the `## Active session guidance` block with a session, the
+durable preference block sessionless). The session layer travels as one
+`SessionPrompt(history, guidance)` value, defined next to the builder; `SessionPrompt()`
+is the empty layer and sessionless callers pass `SessionPrompt(guidance=preference_text)`.
+
+The placement was measured across every combination, not chosen by taste. Soft
+preferences ("the user prefers German") are ignored from the system prompt by the
+default model and followed from the user turn; history is only used when it sits next
+to the context the template points at (the user template says "do not use information
+outside the context", so history delivered as system text or as chat turns is refused);
+guidance placed last wins over older turns that asked for something else; and an
+instruction planted in a past answer is obeyed only from the system prompt. Keep those
+four properties when touching the templates.
+
+#### only_context
+
+`only_context=True` returns what the LLM would have received instead of its answer. For
+completion search types that is the two messages a completion sends, kept apart: the
+**user prompt** (conversation history, then the question and the retrieval context
+rendered through the retriever's user template, then the session guidance block) and the
+**system prompt** (the retriever's task template). `search()` returns the user prompt as the result
+and, with `verbose=True`, carries both as `user_prompt_result` / `system_prompt_result`; a
+`recall()` item has the user prompt in `text` and the system prompt in `system_prompt`.
+Both are built by the same code the real completion uses (`build_session_prompt` in
+read-only mode plus `build_completion_prompts`, see
+`cognee/modules/retrieval/only_context_prompt.py`), so they cannot drift from what
+`generate_completion` sends.
 
 ```python
-result = await cognee.recall(
+items = await cognee.recall(
     "why did the migration stall?",
     query_type=SearchType.GRAPH_COMPLETION,  # pin the graph lane — with a bare
     session_id="s1",  # session_id a session hit would
     only_context=True,  # short-circuit it (see recall vs search)
-    context_format="prompt",  # default: "context"
 )
+user_prompt, system_prompt = items[0].text, items[0].system_prompt
 ```
 
-The `"prompt"` shape returns `question`, `context`, `session_context` (the guidance
-block plus conversation history), `user_prompt`, and `system_prompt` — the exact
-strings `generate_completion` would have sent, built by the same code
-(`build_session_prompt` in read-only mode plus `build_completion_prompts`). It makes no
-LLM completion or turn-analysis call, writes nothing to the session, and records no QA
-turn. It does make **one embedding call** — the conversation-history vector recall —
-once per search, shared across the dataset fan-out. With `CACHING=false` the
-`system_prompt` still carries the durable preference block, exactly as the real
-sessionless completion does.
+What it does and does not do: no LLM completion, no turn-analysis call, nothing written
+to the session, no QA turn recorded. It does make **one embedding call** — the
+conversation-history vector recall — once per search, shared across the dataset fan-out,
+and only when a prompt is actually built. With `CACHING=false` the system prompt still
+carries the durable preference block, exactly as the real sessionless completion does.
+Retrievers whose *retrieval* stage calls an LLM (`GRAPH_COMPLETION_COT`,
+`GRAPH_COMPLETION_DECOMPOSITION`, `GRAPH_COMPLETION_CONTEXT_EXTENSION`, `TEMPORAL`'s time
+extraction, `GRAPH_SUMMARY_COMPLETION`'s summaries) still make those calls under
+`only_context`, as they always have; for them the pair is the final prompts over the
+final context.
 
-Search types that never send a single prompt from their template pair report the
-session layer and leave `user_prompt`/`system_prompt` empty: the non-generative types
-(`CHUNKS`, `SUMMARIES`, `CODE`, …) have no template, and `CYPHER` and
-`AGENTIC_COMPLETION` opt out via `supports_prompt_preview = False` (Cypher never
-prompts; the agentic loop answers through other templates). For `recall()`, an empty
-retrieval yields zero items in either format, so the `on_empty` tools fallback still
-fires.
+Where the pair is *not* built and the bare retrieval context comes back instead: the
+non-generative types (`CHUNKS`, `SUMMARIES`, `CODE`, `SKILLS`, …) have no prompt
+template; `CYPHER` and `AGENTIC_COMPLETION` opt out via `supports_prompt_preview = False`
+(Cypher never prompts; the agentic loop answers through other templates); and an empty
+retrieval returns the empty context, never a prompt wrapped around nothing, so "nothing
+found" stays detectable — for `recall()` it yields zero items and the `on_empty` tools
+fallback still fires. The bare context stays reachable for callers that only want that:
+`search(verbose=True)` carries it as `context_result` next to the two prompts.
+`@agent_memory(memory_only_context=True)` reads `context_result`, so an agent's memory
+block never contains cognee's own question framing or answer instructions.
 
-Caveats. `context_format` only affects `only_context` calls. `POST /api/v1/search`
-accepts `session_id`; without one the session layer is the default session's. And the
-preview is knowingly unfaithful in one place: a real sequential turn first rewrites the
-question (`effective_query`), and that rewrite fills `{{ question }}`, drives history
-selection, and ranks the guidance block — concurrent mode also merges a second
-retrieval lane. Producing the rewrite is an LLM call, so the preview uses the raw query
-for all of them: it reports the prompt for the context actually retrieved, not a
-replay of a full turn.
+Caveats. `POST /api/v1/search` accepts `session_id`; without one the session layer is
+the default session's. And the pair is knowingly unfaithful in one place: a real
+sequential turn first rewrites the question (`effective_query`), and that rewrite fills
+`{{ question }}`, drives history selection, and ranks the guidance block — concurrent
+mode also merges a second retrieval lane. Producing the rewrite is an LLM call, so the
+raw query is used for all of them: the pair is the prompts for the context actually
+retrieved, not a replay of a full turn.
 
 ### Memory & Performance Tuning Flags
 

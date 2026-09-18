@@ -8,6 +8,7 @@ from pydantic import WithJsonSchema
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse
 from cognee.api.upload_fields import OptionalUploadFile, drop_blank_uploads
+from cognee.api.v1.exceptions import DocumentUpdateRequiredError
 from cognee.exceptions import CogneeApiError
 from cognee.modules.pipelines.models import PipelineRunErrored
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunInfo
@@ -148,7 +149,10 @@ def get_add_router() -> APIRouter:
         ## Error Codes
         - **400 Bad Request**: Neither datasetId nor datasetName provided, or neither
           data nor raw_data provided
-        - **409 Conflict**: Error during add operation
+        - **409 Conflict**: A file in the request already exists in the dataset with
+          different content. This endpoint never updates a document; send the new
+          version to `PATCH /api/v1/update?data_id=...&dataset_id=...` so the document
+          keeps its id. Re-adding identical content is a no-op, not an error.
         - **403 Forbidden**: User doesn't have permission to add to dataset
 
         ## Notes
@@ -225,6 +229,18 @@ def get_add_router() -> APIRouter:
                     ).model_dump(),
                 )
             return add_run
+        except DocumentUpdateRequiredError as error:
+            # An existing file with new content is an update, which has its own
+            # endpoint; say so with the endpoint rather than failing as a 500.
+            # Before the CogneeApiError re-raise: this one carries an HTTP
+            # wording of its own that the generic handler would not use.
+            return JSONResponse(
+                status_code=status.HTTP_409_CONFLICT,
+                content=ErrorResponse(
+                    error="Document already exists; use the update endpoint",
+                    detail=error.api_message,
+                ).model_dump(),
+            )
         except CogneeApiError:
             raise
         except Exception as error:

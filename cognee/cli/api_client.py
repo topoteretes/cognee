@@ -325,7 +325,6 @@ class CogneeApiClient:
         session_id: str | None = None,
         node_name: list[str] | None = None,
         only_context: bool = False,
-        context_format: str = "context",
         verbose: bool = False,
     ) -> list:
         # search_type=None (the server default) auto-routes the query; with
@@ -335,7 +334,6 @@ class CogneeApiClient:
             "search_type": search_type,
             "top_k": top_k,
             "only_context": only_context,
-            "context_format": context_format,
             "verbose": verbose,
         }
         if datasets:
