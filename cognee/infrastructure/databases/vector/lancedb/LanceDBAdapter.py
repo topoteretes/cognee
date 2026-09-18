@@ -388,6 +388,24 @@ class LanceDBAdapter(VectorDBInterface):
         collection_names = await connection.table_names()
         return collection_name in collection_names
 
+    async def get_stored_vector_size(self) -> int | None:
+        """Width of the vectors already in this store, or None when nothing is stored yet.
+
+        Every table's ``vector`` column is a fixed-size list of the embedding
+        width that built it, so the first table with one answers for the store.
+        Read once per dataset by the dataset context to record the width for
+        rows that predate the recorded embedding model.
+        """
+        connection = await self.get_connection()
+        for table_name in await connection.table_names():
+            schema = await (await connection.open_table(table_name)).schema()
+            if "vector" not in schema.names:
+                continue
+            list_size = getattr(schema.field("vector").type, "list_size", None)
+            if isinstance(list_size, int):
+                return list_size
+        return None
+
     async def create_collection(self, collection_name: str, payload_schema: BaseModel):
         """Create the LanceDB table for `collection_name` if it does not already exist."""
         vector_size = self.embedding_engine.get_vector_size()

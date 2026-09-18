@@ -75,6 +75,11 @@ SAMPLE_ARGUMENTS = {
     "provider": "sample-provider",
     "search_type": "sample-search",
     "status_code": 400,
+    # EmbeddingDimensionMismatchError: the model that built a dataset vs the configured one.
+    "stored_model": "sample-provider/old-model",
+    "stored_dimensions": 384,
+    "configured_model": "sample-provider/new-model",
+    "configured_dimensions": 1536,
     "value": 1,
 }
 

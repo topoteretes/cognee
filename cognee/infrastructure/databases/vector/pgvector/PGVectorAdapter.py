@@ -1,4 +1,5 @@
 import asyncio
+import re
 from typing import Any, get_type_hints
 from uuid import UUID
 
@@ -252,6 +253,30 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             - list[list[float]]: A list of lists of floats representing embedded vectors.
         """
         return await self.embedding_engine.embed_text(data)
+
+    async def get_stored_vector_size(self) -> int | None:
+        """Width of the vectors already in this store, or None when nothing is stored yet.
+
+        Every table's ``vector`` column is declared ``vector(N)`` with the
+        embedding width that built it, so the first such column in this
+        dataset's schema answers for the store. Read once per dataset by the
+        dataset context to record the width for rows that predate the recorded
+        embedding model.
+        """
+        async with self.get_async_session() as session:
+            result = await session.execute(
+                text(
+                    "SELECT format_type(a.atttypid, a.atttypmod) FROM pg_attribute a "
+                    "JOIN pg_class c ON c.oid = a.attrelid "
+                    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE n.nspname = :schema AND a.attname = 'vector' "
+                    "AND NOT a.attisdropped LIMIT 1"
+                ),
+                {"schema": self.schema or "public"},
+            )
+            declared_type = result.scalar_one_or_none()
+        match = re.fullmatch(r"vector\((\d+)\)", declared_type or "")
+        return int(match.group(1)) if match else None
 
     async def has_collection(self, collection_name: str) -> bool:
         """
