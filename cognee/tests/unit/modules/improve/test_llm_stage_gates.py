@@ -9,7 +9,9 @@ gate. The trace-step summary follows the same rule: the deterministic
 fallback, no client.
 """
 
+import ast
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -18,12 +20,17 @@ import pytest
 import cognee.infrastructure.session.get_session_manager  # bind the real submodule
 import cognee.infrastructure.session.session_agent_trace as trace_module
 import cognee.modules.improve.stages as stages_module
+from cognee import __file__ as cognee_package_file
 from cognee.modules.improve.stages import (
     REASON_NO_LLM_CONFIGURED,
     REASON_OPT_IN_DISABLED,
     DistillSessionsStage,
     ExtractAgentContextStage,
     GlobalContextIndexStage,
+)
+from cognee.tests.utils.keyless_gate_targets import (
+    KEYLESS_GATE_IMPORT_EXCLUSIONS,
+    KEYLESS_GATE_PATCH_TARGETS,
 )
 
 # The package re-exports the function under the same name, so a dotted patch
@@ -41,6 +48,24 @@ def _session_manager(available=True, auto_feedback=True):
     manager.is_available = available
     manager.is_auto_feedback_enabled.return_value = auto_feedback
     return manager
+
+
+def test_keyless_gate_fixture_covers_module_level_llm_available_imports():
+    package_root = Path(cognee_package_file).resolve().parent
+    importing_modules = set()
+    for path in package_root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        if any(
+            isinstance(node, ast.ImportFrom)
+            and node.module == "cognee.modules.preflight"
+            and any(alias.name == "llm_available" for alias in node.names)
+            for node in tree.body
+        ):
+            relative = path.relative_to(package_root).with_suffix("")
+            importing_modules.add(".".join(("cognee", *relative.parts)))
+
+    patched_modules = {target.rsplit(".", 1)[0] for target in KEYLESS_GATE_PATCH_TARGETS}
+    assert importing_modules == patched_modules | KEYLESS_GATE_IMPORT_EXCLUSIONS
 
 
 @pytest.mark.parametrize(

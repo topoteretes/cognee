@@ -16,9 +16,12 @@ Tests that never touch the relational database are unaffected.
 
 import asyncio
 import logging
+from contextlib import ExitStack
 from unittest.mock import patch
 
 import pytest
+
+from cognee.tests.utils.keyless_gate_targets import KEYLESS_GATE_PATCH_TARGETS
 
 logger = logging.getLogger(__name__)
 
@@ -53,15 +56,11 @@ def _relational_db_for_unit_tests():
 def _keyless_gates_see_a_usable_llm():
     """Unit tests mock the LLM call itself; the keyless gates must not skip it.
 
-    The per-turn analysis, the trace-step summary and the LLM-only improve
-    stages skip their work when no usable LLM is configured (SDK-753). CI has
-    no key, so without this every test that mocks ``LLMGateway`` and counts on
-    those calls would see them skipped. Tests of the gates themselves patch
-    ``llm_available`` back to false inside.
+    CI has no key, so tests that mock the downstream LLM call would otherwise
+    take the keyless branch. A meta-test keeps this target list synchronized
+    with module-level ``llm_available`` imports.
     """
-    with (
-        patch("cognee.infrastructure.session.feedback_detection.llm_available", return_value=True),
-        patch("cognee.infrastructure.session.session_agent_trace.llm_available", return_value=True),
-        patch("cognee.modules.improve.stages.llm_available", return_value=True),
-    ):
+    with ExitStack() as stack:
+        for target in KEYLESS_GATE_PATCH_TARGETS:
+            stack.enter_context(patch(target, return_value=True))
         yield

@@ -23,6 +23,7 @@ smaller ``fastino/gliner2.5-small-v1`` model if it becomes the default.
 """
 
 import asyncio
+import logging
 import os
 import sys
 from pathlib import Path
@@ -55,6 +56,19 @@ TEXT = (
     "Pierre Curie was a professor at the Sorbonne."
 )
 STRUCTURAL_EDGES = {"contains", "is_part_of", "made_from"}
+
+
+class _LogCapture(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__()
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(self.format(record))
+
+
+LOG_CAPTURE = _LogCapture()
+logging.getLogger().addHandler(LOG_CAPTURE)
 
 
 async def main() -> None:
@@ -144,23 +158,25 @@ async def main() -> None:
     explicit = await cognee.improve(dataset="keyless_remember", session_ids=["keyless_session"])
     assert explicit.status != "errored", explicit
 
-    # An agent trace step: stored with the deterministic summary (no LLM to
-    # write one), persisted by stage 3, and the LLM-only stages decline with
-    # a reason instead of erroring.
+    # Cross the periodic agent-context extraction threshold: every trace gets a
+    # deterministic summary, and the due batch declines before building an LLM
+    # client. Stage 3 then persists the traces while the LLM-only stages skip.
+    from cognee.infrastructure.session.agent_context_extraction import TRACE_EXTRACTION_INTERVAL
     from cognee.memory.entries import TraceEntry
 
-    trace_result = await cognee.remember(
-        TraceEntry(
-            origin_function="search_docs",
-            status="success",
-            method_params={"query": "Bohr model"},
-            method_return_value={"hits": 3},
-            generate_feedback_with_llm=True,
-        ),
-        dataset_name="keyless_remember",
-        session_id="keyless_session",
-    )
-    await trace_result
+    for step in range(TRACE_EXTRACTION_INTERVAL):
+        trace_result = await cognee.remember(
+            TraceEntry(
+                origin_function="search_docs",
+                status="success",
+                method_params={"query": "Bohr model"},
+                method_return_value={"hits": step + 1},
+                generate_feedback_with_llm=True,
+            ),
+            dataset_name="keyless_remember",
+            session_id="keyless_session",
+        )
+        await trace_result
     traced = await cognee.improve(dataset="keyless_remember", session_ids=["keyless_session"])
     traced_stages = {stage.stage: stage for stage in traced.stages}
     assert traced.status != "errored", traced
@@ -179,6 +195,10 @@ async def main() -> None:
     assert recalled and recalled[0].search_type == "CHUNKS", [
         getattr(r, "search_type", None) for r in recalled
     ]
+    missing_key_logs = [
+        message for message in LOG_CAPTURE.messages if "LLMAPIKeyNotSetError" in message
+    ]
+    assert not missing_key_logs, missing_key_logs
     print("keyless e2e: PASS")
 
 
