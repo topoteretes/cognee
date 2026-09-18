@@ -46,6 +46,17 @@ def test_unknown_model_has_no_size_hint(tmp_path, monkeypatch):
     assert (cached, size_hint) == (False, None)
 
 
+def _event_text(record) -> str:
+    """The log line itself, not its repr.
+
+    cognee logs through structlog, so the record carries the event dict and
+    ``getMessage()`` returns that dict's repr — in which a Windows path's
+    backslashes come back escaped (``C:\\Users\\...``). Reading the event
+    keeps these assertions identical on every platform.
+    """
+    return record.msg["event"] if isinstance(record.msg, dict) else record.getMessage()
+
+
 def _engine(monkeypatch, tmp_path):
     monkeypatch.setenv("FASTEMBED_CACHE_PATH", str(tmp_path))
     with (
@@ -63,7 +74,7 @@ def test_engine_announces_a_first_use_download(tmp_path, monkeypatch, caplog):
 
     warnings = [record for record in caplog.records if record.levelno == logging.WARNING]
     assert len(warnings) == 1, [record.getMessage() for record in caplog.records]
-    message = warnings[0].getMessage()
+    message = _event_text(warnings[0])
     assert "Downloading local model BAAI/bge-small-en-v1.5 (about 67 MB)" in message
     assert str(tmp_path) in message and "FASTEMBED_CACHE_PATH" in message
 
@@ -74,4 +85,4 @@ def test_engine_loads_a_cached_model_quietly(tmp_path, monkeypatch, caplog):
         _engine(monkeypatch, tmp_path)
 
     assert not [record for record in caplog.records if record.levelno == logging.WARNING]
-    assert any("Loading local model" in record.getMessage() for record in caplog.records)
+    assert any("Loading local model" in _event_text(record) for record in caplog.records)
