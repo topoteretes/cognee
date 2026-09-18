@@ -12,9 +12,11 @@ concurrency:
   cancel-in-progress: true
 
 # Minimal default permissions (OSSF Scorecard: Token-Permissions).
-# Jobs opt into more (OIDC, attestations) explicitly.
+# The nested basic-tests workflow requires package read access; publishing jobs
+# opt into their additional write scopes explicitly.
 permissions:
   contents: read
+  packages: read
 
 jobs:
   # ── Gate: run core test suites before publishing ────────────────────
