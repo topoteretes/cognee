@@ -592,8 +592,8 @@ def get_datasets_router() -> APIRouter:
         this endpoint returns depending on how it's called.
 
         ## Error Codes
-        - **409 Conflict**: Error retrieving status (e.g. requesting a dataset you don't have
-          read permission for)
+        - **403 Forbidden**: The request owner cannot read every requested dataset
+        - **409 Conflict**: An unexpected error occurred while retrieving status
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
