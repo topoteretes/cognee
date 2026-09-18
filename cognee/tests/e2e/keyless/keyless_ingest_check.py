@@ -13,11 +13,13 @@ disable the keyless rerouting (see ``keyless_local_defaults_apply``).
 
 Run: ``python cognee/tests/e2e/keyless/keyless_ingest_check.py``
 
-TODO: expand this suite — session-scoped ``remember(session_id=...)`` and the
-``improve()`` stages it triggers (SDK-691), the CLI (``cognee-cli remember`` /
-``recall``) and REST default search types once they are keyless-aware
-(SDK-690), and the smaller ``fastino/gliner2.5-small-v1`` model if it becomes
-the default.
+Session memory is covered too: ``remember(session_id=...)`` and the
+``improve()`` bridge it starts must run keyless, since none of its stages calls
+an LLM for plain Q&A entries (SDK-753).
+
+TODO: expand this suite — the CLI (``cognee-cli remember`` / ``recall``) and
+REST default search types once they are keyless-aware (SDK-690), and the
+smaller ``fastino/gliner2.5-small-v1`` model if it becomes the default.
 """
 
 import asyncio
@@ -112,6 +114,34 @@ async def main() -> None:
         top_k=1,
     )
     assert remembered, "remember() data is not searchable"
+
+    # Session memory: the entry lands in the session cache and the background
+    # improve() bridges it into the graph. Its stages build their own pipelines,
+    # which must declare no LLM need, or the setup layer's LLM probe fails the
+    # bridge before any task runs (SDK-753).
+    session_result = await cognee.remember(
+        "Niels Bohr proposed the Bohr model of the atom in 1913 in Copenhagen.",
+        dataset_name="keyless_remember",
+        session_id="keyless_session",
+    )
+    await session_result  # wait for the background bridge
+    bridge = session_result.improve
+    assert bridge is not None and bridge.status != "errored", bridge
+    by_stage = {stage.stage: stage for stage in bridge.stages}
+    assert by_stage["persist_session_qa"].status in ("completed", "already_completed"), by_stage[
+        "persist_session_qa"
+    ]
+    assert not [s for s in bridge.stages if s.status == "errored"], bridge.stages
+    bridged = await cognee.search(
+        "Who proposed the Bohr model?",
+        query_type=SearchType.CHUNKS,
+        datasets=["keyless_remember"],
+        top_k=3,
+    )
+    assert any("Bohr" in str(getattr(r, "result", r)) for r in bridged), bridged
+    # An explicit improve over the same session must not raise either.
+    explicit = await cognee.improve(dataset="keyless_remember", session_ids=["keyless_session"])
+    assert explicit.status != "errored", explicit
 
     # With no usable LLM key, recall() without a query_type answers with CHUNKS.
     recalled = await cognee.recall("Where was Marie Curie born?", datasets=["keyless"], top_k=1)
