@@ -103,6 +103,9 @@ dependencies = [
     "cbor2>=5.8.0",
     "langdetect>=1.0.9",
     "datamodel-code-generator>=0.54.0",
+    # Enola powers the built-in deterministic code-graph route. Keep this pinned:
+    # its snapshot contract and known answers are validated by test_code_graph_e2e.py.
+    "enola-cli==0.4.21",
 ]
 
 [project.optional-dependencies]
@@ -161,12 +164,8 @@ docs = [
     "unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.18.1,<19",
     "nltk>=3.9.3,<4", # TODO: Remove when unstructured is above v0.21.0 as it won't use nltk anymore
 ]
-codegraph = [
-    # The enola binary as a platform wheel; the code-graph route needs nothing else.
-    # This is the only enola version pin; bumping it means re-checking the known
-    # answers in cognee/tests/test_code_graph_e2e.py.
-    "enola-cli==0.4.19",
-]
+# enola-cli is a core dependency. The empty extra keeps `cognee[codegraph]` installable.
+codegraph = []
 evals = [
     "plotly>=6.0.0,<7",
     "gdown>=5.2.0,<6",
@@ -277,6 +276,9 @@ artifacts = ["cognee_db_workers/ladybug_extensions/**/*.lbug_extension"]
 [tool.uv]
 # Note: exclude newer packages that are less than 2 days old
 exclude-newer = "2 days"
+# Enola releases are deliberately pinned and validated against the code-graph
+# known answers. Allow a newly pinned release to resolve during that 2-day window.
+exclude-newer-package = { enola-cli = "0 days" }
 constraint-dependencies = [
     "protobuf>=5.29.6, !=6.30.*, !=6.31.*, !=6.32.*, !=6.33.1, !=6.33.2, !=6.33.3, !=6.33.4", # protobuf 6.33.5 and higher versions + version 5.29.6
     "pyasn1>=0.6.2",
