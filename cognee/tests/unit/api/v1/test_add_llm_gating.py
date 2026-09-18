@@ -1,96 +1,30 @@
-import importlib
-from io import BytesIO
+"""The add pipeline is LLM-free by construction; the default memify pipeline too.
+
+add() stages data and never calls the LLM itself (the media loaders guard the
+one exception at the point of use -- see test_media_loaders_require_llm.py),
+so it validates the provider config with ``needs_llm=False`` and its tasks are
+declared LLM-free. Whether a run needs an LLM is decided by remember() and
+cognify() from their real task lists.
+"""
+
+import inspect
 from types import SimpleNamespace
 
-import pytest
-
-from cognee.api.v1.add.add import _add_pipeline_needs_llm
+from cognee.api.v1.add import add as add_module
 from cognee.memify_pipelines.memify_default_tasks import (
     get_default_memify_enrichment_tasks,
     get_default_memify_extraction_tasks,
 )
 from cognee.modules.pipelines.tasks.task import pipeline_needs_llm
-from cognee.tasks.ingestion.data_item import DataItem
-
-cognify_config_mod = importlib.import_module("cognee.modules.cognify.config")
 
 
-def _pin_extractor(monkeypatch, extractor: str):
-    monkeypatch.setattr(
-        cognify_config_mod, "resolve_extractor", lambda *_args, **_kwargs: extractor
-    )
+def test_add_never_asks_for_the_llm():
+    """No LLM probe and no extractor resolution in add(): both belong to cognify()."""
+    source = inspect.getsource(add_module)
 
-
-@pytest.fixture(autouse=True)
-def llm_extractor(monkeypatch):
-    """The LLM extractor, so each case below tests what the *input* implies.
-
-    Without this the answer is False for everything whenever the environment
-    has no LLM_API_KEY (auto then resolves to gliner_demo), and these cases
-    would silently stop testing anything.
-    """
-    _pin_extractor(monkeypatch, cognify_config_mod.LLM_EXTRACTOR)
-
-
-@pytest.fixture
-def gliner_extractor(monkeypatch):
-    _pin_extractor(monkeypatch, cognify_config_mod.GLINER_DEMO_EXTRACTOR)
-
-
-@pytest.mark.parametrize(
-    ("data", "preferred_loaders", "expected"),
-    [
-        ("Cognee turns documents into memory.", None, False),
-        ([DataItem("Labeled document"), "More text"], None, False),
-        ("https://example.com", None, True),
-        (BytesIO(b"stream"), None, True),
-        ("plain text", {"custom_loader": {}}, True),
-    ],
-)
-def test_add_llm_requirement(data, preferred_loaders, expected):
-    assert _add_pipeline_needs_llm(data, preferred_loaders) is expected
-
-
-def test_add_file_input_keeps_llm_check(tmp_path):
-    media_path = tmp_path / "image.png"
-    media_path.write_bytes(b"not-an-image")
-
-    assert _add_pipeline_needs_llm(str(media_path), preferred_loaders=None) is True
-
-
-@pytest.mark.parametrize(
-    ("data", "preferred_loaders"),
-    [
-        ("https://example.com", None),
-        (BytesIO(b"stream"), None),
-        ("plain text", {"custom_loader": {}}),
-    ],
-)
-def test_keyless_setups_never_require_the_llm(data, preferred_loaders, gliner_extractor):
-    """When the run extracts locally, the checks this gates can only restate the missing key.
-
-    Keyless ingestion (local extractor, local embedder) has to work for the
-    inputs that do not need an LLM, and the conservative "could be media" guess
-    blocked every file upload. A media file that really does need a key fails in
-    its loader instead — see test_media_loaders_require_llm.py.
-    """
-    assert _add_pipeline_needs_llm(data, preferred_loaders) is False
-
-
-def test_keyless_file_upload_does_not_require_the_llm(tmp_path, gliner_extractor):
-    """The reported bug: a .txt upload 422'd before ingestion on a keyless setup."""
-    document = tmp_path / "Natural_language_processing.txt"
-    document.write_text("Natural language processing is a subfield of computer science.")
-
-    assert _add_pipeline_needs_llm(str(document), preferred_loaders=None) is False
-
-
-def test_keyless_media_upload_also_skips_the_check(tmp_path, gliner_extractor):
-    """Even media: the probe cannot report anything the loader will not report better."""
-    media_path = tmp_path / "image.png"
-    media_path.write_bytes(b"not-an-image")
-
-    assert _add_pipeline_needs_llm(str(media_path), preferred_loaders=None) is False
+    assert "validate_provider_config(needs_llm=False)" in source
+    assert "needs_llm=True" not in source
+    assert "resolve_extractor" not in source
 
 
 def test_default_memify_tasks_are_llm_free(monkeypatch):

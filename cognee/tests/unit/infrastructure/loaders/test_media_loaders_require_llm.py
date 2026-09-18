@@ -9,6 +9,7 @@ still works without a key.
 """
 
 import importlib
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -66,16 +67,28 @@ async def test_missing_file_still_reports_the_missing_file(
 
 @pytest.mark.parametrize(("loader_class", "filename", "media"), MEDIA)
 @pytest.mark.asyncio
-async def test_nothing_is_written_before_the_guard(loader_class, filename, media, tmp_path, no_llm):
-    """The guard runs before the loader reads or stores anything."""
+async def test_nothing_is_written_before_the_guard(
+    loader_class, filename, media, tmp_path, no_llm, monkeypatch
+):
+    """The guard runs before the loader reads or stores anything.
+
+    Derived text goes through ``store_derived_text`` into cognee's storage
+    root, never next to the input, so the check is on that call (and on the
+    LLM), not on the input directory.
+    """
+    loader_module = importlib.import_module(loader_class.__module__)
+    store = AsyncMock()
+    monkeypatch.setattr(loader_module, "store_derived_text", store)
+    gateway = MagicMock()
+    monkeypatch.setattr(loader_module, "LLMGateway", gateway)
     media_file = tmp_path / filename
     media_file.write_bytes(b"pretend this is media")
-    before = {path.name for path in tmp_path.iterdir()}
 
     with pytest.raises(LLMAPIKeyNotSetError):
         await loader_class().load(str(media_file))
 
-    assert {path.name for path in tmp_path.iterdir()} == before
+    store.assert_not_awaited()
+    assert not gateway.mock_calls
 
 
 def test_guard_passes_when_an_llm_is_configured(with_llm):
