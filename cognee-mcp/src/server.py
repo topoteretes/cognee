@@ -45,9 +45,23 @@ except ImportError:
     from tool_registry import DEFAULT_TAG, MEMORY_TAG, ToolRegistry
 
 try:
-    from .server_utils import format_recall_results, parse_csv_list, validate_top_k
+    from .server_utils import (
+        RecallState,
+        format_recall_results,
+        parse_csv_list,
+        recall_items,
+        recall_marker_state,
+        validate_top_k,
+    )
 except ImportError:
-    from server_utils import format_recall_results, parse_csv_list, validate_top_k
+    from server_utils import (
+        RecallState,
+        format_recall_results,
+        parse_csv_list,
+        recall_items,
+        recall_marker_state,
+        validate_top_k,
+    )
 
 
 try:
@@ -89,6 +103,9 @@ def _tool_error_text(prefix: str, error: Exception) -> str:
 _TASK_ERROR_HISTORY = 50
 _task_errors: dict[str, deque[tuple[str, str]]] = {}
 _MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+# Total budget for empty-recall diagnostics. get_recall_state derives every hop's
+# timeout from this, so it bounds the work rather than cancelling it mid-flight.
+_RECALL_STATE_TIMEOUT_SECONDS = 5.0
 
 # Strong references to in-flight background tasks. asyncio's event loop only keeps
 # weak references to tasks, so a fire-and-forget task can be GC'd mid-execution if
@@ -96,13 +113,17 @@ _MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 # done_callback removes them on completion. See:
 # https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task
 _background_tasks: set[asyncio.Task] = set()
+_background_task_datasets: dict[asyncio.Task, str] = {}
 
 
-def _track_background(coro) -> asyncio.Task:
+def _track_background(coro, *, dataset: str | None = None) -> asyncio.Task:
     """Spawn a background task and pin it so the event loop won't GC it."""
     task = asyncio.create_task(coro)
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
+    if dataset is not None:
+        _background_task_datasets[task] = dataset
+        task.add_done_callback(lambda done: _background_task_datasets.pop(done, None))
     return task
 
 
@@ -457,7 +478,8 @@ async def remember(
                 custom_prompt=custom_prompt,
                 ontology_key=ontology_key,
                 self_improvement=self_improvement,
-            )
+            ),
+            dataset=dataset_name,
         )
         queued = f"'{filename}'" if content_base64 else "text"
         return [
@@ -543,6 +565,10 @@ async def recall(
         on the server.
     top_k : int
         Maximum results to return (default: 15).
+
+    Returns a one-line memory-hit or empty-state summary followed by the original
+    result text. Status markers do not count as hits. Empty-state checks are
+    best-effort; indexing progress is shown only when available.
     """
     with redirect_stdout(sys.stderr):
         try:
@@ -556,10 +582,41 @@ async def recall(
                 system_prompt=system_prompt,
                 top_k=normalized_top_k,
             )
+            empty_state = recall_marker_state(results)
+            items = recall_items(results)
+            queued = any(
+                not task.done() and (not dataset_list or dataset in dataset_list)
+                for task, dataset in _background_task_datasets.items()
+            )
+            if not items and queued:
+                empty_state = RecallState("indexing")
+            elif not items and empty_state is None:
+                try:
+                    deadline = asyncio.get_running_loop().time() + _RECALL_STATE_TIMEOUT_SECONDS
+                    empty_state = await asyncio.wait_for(
+                        cognee_client.get_recall_state(dataset_list, deadline=deadline),
+                        timeout=_RECALL_STATE_TIMEOUT_SECONDS,
+                    )
+                except Exception:
+                    logger.debug("Recall empty-state diagnostics unavailable", exc_info=True)
+                    empty_state = RecallState("none")
             return [
                 types.TextContent(
                     type="text",
-                    text=format_recall_results(results, json_encoder=JSONEncoder),
+                    text=format_recall_results(
+                        results,
+                        json_encoder=JSONEncoder,
+                        items=items,
+                        empty_state=empty_state,
+                    ),
+                    _meta={
+                        "cognee/memory": {
+                            "count": len(items),
+                            "state": "found"
+                            if items
+                            else (empty_state or RecallState("none")).state,
+                        }
+                    },
                 )
             ]
         except Exception as e:

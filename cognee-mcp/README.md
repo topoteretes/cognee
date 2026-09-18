@@ -521,6 +521,45 @@ The MCP server exposes four tools (three memory tools pinned in `tools/list`, pl
 - **forget**: Delete memory by dataset name or id, a single data item by `data_id`, or delete all owned memory with `everything=True`
 - **cognify_status**: Check the progress of background ingestion started by `remember(background=True)`. Unadvertised by default; discoverable via `search_tools` and callable by name
 
+### Recall result summaries
+
+`recall` (the MCP memory-search tool) starts every successful response with a
+summary, followed by the same result body as before:
+
+```text
+3 memories found (2 from sessions, 1 from project docs)
+[session] ...
+```
+
+The count is the number of returned memory entries, not `top_k`, underlying
+chunks used to synthesize an answer, or system status messages. Source and dataset
+hints use metadata already present in the returned entries; no recency lookup or
+extra LLM call is made.
+
+Empty results distinguish an empty memory graph, indexing in progress, indexing
+failure, and no match. When available, progress is displayed as, for example,
+`still indexing — 12/40 items processed, retry shortly`. These are data items,
+not an inferred chunk count. A graph with no recorded indexing run is reported
+as not yet indexed. If the status check fails or exceeds its two-second budget,
+the summary explicitly says memory status is unavailable. Successful hits do
+not trigger status checks.
+
+The MCP content remains a single `TextContent` block. Text consumers can separate
+line one from the unchanged body with `text.partition("\n")`. Machine consumers
+can read `content[0]._meta["cognee/memory"]`, containing `count` and `state`.
+
+`state` is one of four values, one per action a caller can take:
+
+| state | meaning |
+| --- | --- |
+| `found` | memory contributed; `count` is how many entries |
+| `indexing` | ingestion is still running — retry shortly |
+| `build_failed` | ingestion failed — check `cognify_status` |
+| `none` | nothing to return |
+
+`indexing` additionally carries `completed`/`total` when the pipeline reports
+them. Tool errors retain their existing `Error:` response.
+
 ### Tool surface (`COGNEE_MCP_TOOL_MODE`)
 
 Advertising every tool up front costs agent context and hurts tool-selection accuracy, so by default the server pins a small set in `tools/list` and makes the rest discoverable through FastMCP's built-in `search_tools`. **Unadvertised tools stay callable by name.**

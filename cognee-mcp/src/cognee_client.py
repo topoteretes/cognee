@@ -6,6 +6,7 @@ This module provides a unified interface for interacting with Cognee, supporting
 - API mode: Makes HTTP requests to a running Cognee FastAPI server
 """
 
+import asyncio
 import base64
 import hashlib
 import json
@@ -23,9 +24,9 @@ import httpx
 from cognee.shared.logging_utils import get_logger
 
 try:
-    from .server_utils import normalize_delete_mode
+    from .server_utils import RecallState, classify_recall_state, normalize_delete_mode
 except ImportError:
-    from server_utils import normalize_delete_mode
+    from server_utils import RecallState, classify_recall_state, normalize_delete_mode
 
 try:
     from .retrieval_utils import get_chunk_neighbors_from_graph, get_document_from_graph
@@ -513,9 +514,16 @@ class CogneeClient:
                 status = await get_pipeline_status(dataset_ids, pipeline_name)
                 return status
 
-    async def list_datasets(self) -> list[dict[str, Any]]:
+    async def list_datasets(self, *, timeout: float | None = None) -> list[dict[str, Any]]:
         """
         List all datasets.
+
+        Parameters
+        ----------
+        timeout : float, optional
+            Read timeout for the API call. Defaults to READ_TIMEOUT_SECONDS.
+            Callers working to a deadline pass what is left of their budget --
+            the default is far longer than a diagnostic caller can afford.
 
         Returns
         -------
@@ -529,7 +537,9 @@ class CogneeClient:
             # used to black-hole this call — see CLO-320).
             endpoint = f"{self.api_url}/api/v1/datasets/"
             response = await self.client.get(
-                endpoint, headers=self._get_headers(), timeout=READ_TIMEOUT_SECONDS
+                endpoint,
+                headers=self._get_headers(),
+                timeout=READ_TIMEOUT_SECONDS if timeout is None else timeout,
             )
             response.raise_for_status()
             return response.json()
@@ -745,6 +755,67 @@ class CogneeClient:
                     "dataset_name": dataset_name,
                     "session_id": session_id,
                 }
+
+    async def get_recall_state(
+        self, datasets: list[str] | None = None, *, deadline: float | None = None
+    ) -> RecallState:
+        """Best-effort empty-result diagnostics; never fetch documents or run an LLM.
+
+        Only datasets the caller can read are resolved, and these reads are
+        skipped entirely for successful hits.
+
+        `deadline` is an ``asyncio`` event-loop timestamp. Every hop is bounded
+        by what is left of it, so the sum of the inner timeouts can never exceed
+        the caller's budget: three sequential calls each defaulting to their own
+        timeout (the first to READ_TIMEOUT_SECONDS) meant an outer wait_for was
+        cancelling work rather than bounding it, and in local mode that
+        cancellation also aborted the graph-count cache write, so every later
+        empty recall re-paid the same abandoned traversal.
+        """
+
+        def remaining(minimum: float = 0.2) -> float | None:
+            if deadline is None:
+                return None
+            return max(minimum, deadline - asyncio.get_running_loop().time())
+
+        pipelines = ["add_pipeline", "cognify_pipeline", "code_graph_pipeline"]
+        if self.use_api:
+            hop = remaining()
+            visible = await self.list_datasets(timeout=hop if hop is not None else 2.0)
+            selected = (
+                visible
+                if not datasets
+                else [
+                    d for d in visible if d.get("name") in datasets or str(d.get("id")) in datasets
+                ]
+            )
+            if not selected:
+                return RecallState("none")
+            params = [("dataset", str(d["id"])) for d in selected]
+            params.extend(("pipeline", pipeline) for pipeline in pipelines)
+            response = await self.client.get(
+                f"{self.api_url}/api/v1/datasets/status/progress",
+                params=params,
+                headers=self._get_headers(),
+                timeout=remaining() or 2.0,
+            )
+            response.raise_for_status()
+            return classify_recall_state(response.json())
+
+        from cognee.modules.data.methods import get_authorized_existing_datasets
+        from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_progress
+        from cognee.modules.users.methods import get_default_user
+
+        user = await get_default_user()
+        selected = await get_authorized_existing_datasets(datasets, "read", user)
+        if not selected:
+            return RecallState("none")
+        ids = [dataset.id for dataset in selected]
+        progress = {str(dataset.id): {} for dataset in selected}
+        for pipeline in pipelines:
+            for dataset_id, run in (await get_pipeline_progress(ids, pipeline)).items():
+                progress[str(dataset_id)][pipeline] = run
+        return classify_recall_state(progress)
 
     async def recall(
         self,
