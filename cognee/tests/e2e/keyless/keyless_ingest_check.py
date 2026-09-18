@@ -113,11 +113,14 @@ async def main() -> None:
     )
     assert remembered, "remember() data is not searchable"
 
-    # With no usable LLM key, recall() without a query_type answers with CHUNKS.
+    # With no usable LLM key, recall() without a query_type routes to HYBRID_COMPLETION
+    # run with only_context=True: the prompt an LLM would receive, no completion call.
     recalled = await cognee.recall("Where was Marie Curie born?", datasets=["keyless"], top_k=1)
-    assert recalled and recalled[0].search_type == "CHUNKS", [
+    assert recalled and recalled[0].search_type == "HYBRID_COMPLETION", [
         getattr(r, "search_type", None) for r in recalled
     ]
+    assert "Where was Marie Curie born?" in recalled[0].text, recalled[0].text[:200]
+    assert recalled[0].system_prompt, "only_context items carry the system prompt"
     print("keyless e2e: PASS")
 
 
