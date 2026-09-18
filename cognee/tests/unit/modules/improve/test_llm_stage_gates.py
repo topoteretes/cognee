@@ -26,7 +26,6 @@ from cognee.modules.improve.stages import (
     GlobalContextIndexStage,
 )
 
-
 # The package re-exports the function under the same name, so a dotted patch
 # target resolves to the function unless the submodule was imported first;
 # patch the module object the gate imports from.
