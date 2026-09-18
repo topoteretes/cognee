@@ -17,17 +17,22 @@ spans inside the model.
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
+import time
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.model_download_notice import log_model_load
 
 from .schema import GlinerSchema
 
 logger = get_logger("gliner.extractor")
 
 DEFAULT_MODEL = "fastino/gliner2.5-base-v1"
+# Approximate download sizes, for the first-use notice.
+MODEL_SIZE_HINTS = {DEFAULT_MODEL: "about 750 MB"}
 DEFAULT_THRESHOLD = 0.5
 DEFAULT_BATCH_SIZE = 16
 # Word-level window the runtime scans a long text with; 384 words stays under the
@@ -63,6 +68,20 @@ def require_gliner2() -> None:
         raise GlinerNotInstalledError() from error
 
 
+def hub_model_cached(model_name: str) -> tuple[bool, str]:
+    """Whether the hub model is already in the local cache, and where that cache is.
+
+    A local directory counts as cached. Zero-network: ``try_to_load_from_cache``
+    only looks at the cache on disk, the same one ``from_pretrained`` reads.
+    """
+    from huggingface_hub import constants, try_to_load_from_cache
+
+    if os.path.isdir(model_name):
+        return True, model_name
+    cached = isinstance(try_to_load_from_cache(model_name, "config.json"), str)
+    return cached, constants.HF_HUB_CACHE
+
+
 def load_extractor(model_name: str = DEFAULT_MODEL) -> Any:
     """Load (once) and return the ``gliner2`` extractor for ``model_name``."""
     with _load_lock:
@@ -73,8 +92,18 @@ def load_extractor(model_name: str = DEFAULT_MODEL) -> Any:
         require_gliner2()
         from gliner2 import AutoExtractor
 
-        logger.info("Loading GLiNER model %s", model_name)
+        cached, cache_dir = hub_model_cached(model_name)
+        log_model_load(
+            logger,
+            model=model_name,
+            cached=cached,
+            cache_dir=cache_dir,
+            size_hint=MODEL_SIZE_HINTS.get(model_name),
+            location_var="HF_HOME",
+        )
+        started = time.perf_counter()
         extractor = AutoExtractor.from_pretrained(model_name)
+        logger.info("GLiNER model %s ready in %.1fs", model_name, time.perf_counter() - started)
         _extractors[model_name] = extractor
         return extractor
 
