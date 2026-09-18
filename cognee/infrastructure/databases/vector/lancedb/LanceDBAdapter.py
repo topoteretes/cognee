@@ -21,7 +21,10 @@ from lancedb.pydantic import LanceModel, Vector
 from pydantic import BaseModel
 
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
-from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.exceptions import (
+    CollectionNotFoundError,
+    EmbeddingDimensionMismatchError,
+)
 from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
@@ -413,6 +416,42 @@ class LanceDBAdapter(VectorDBInterface):
         connection = await self.get_connection()
         return await connection.open_table(collection_name)
 
+    async def _assert_embedding_dimensions(self, collection, collection_name: str) -> None:
+        """Refuse an operation whose vectors cannot fit the collection's column.
+
+        A table's ``vector`` column is a fixed-size list, decided when the table
+        was created, so a changed embedding model breaks both writes and
+        queries. LanceDB reports that as an Arrow cast failure naming neither
+        the model nor the dataset (``Vector column 'vector' has variable length
+        vectors``), which reads as data corruption rather than a config change.
+        The two numbers are in hand here, so check them and say so.
+
+        Never fails the operation on its own account: a schema this cannot read
+        (an unexpected column type, an older table layout) falls through to the
+        store's own behaviour, exactly as before.
+        """
+        try:
+            schema = await collection.schema()
+            stored_dimensions = schema.field("vector").type.list_size
+        except Exception:
+            logger.debug(
+                "Could not read the vector width of '%s'; skipping the dimension check.",
+                collection_name,
+                exc_info=True,
+            )
+            return
+
+        configured_dimensions = self.embedding_engine.get_vector_size()
+        if not isinstance(stored_dimensions, int) or stored_dimensions == configured_dimensions:
+            return
+
+        raise EmbeddingDimensionMismatchError(
+            collection_name=collection_name,
+            stored_dimensions=stored_dimensions,
+            configured_dimensions=configured_dimensions,
+            model=getattr(self.embedding_engine, "model", None),
+        )
+
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set with any prior rows."""
         payload_schema = type(data_points[0])
@@ -426,6 +465,10 @@ class LanceDBAdapter(VectorDBInterface):
                     )
 
         collection = await self.get_collection(collection_name)
+
+        # Before the embedding calls: a mismatch cannot be fixed by embedding
+        # this batch, so paying for it first only delays the same failure.
+        await self._assert_embedding_dimensions(collection, collection_name)
 
         data_vectors = await self.embed_data(
             [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
@@ -1071,6 +1114,10 @@ class LanceDBAdapter(VectorDBInterface):
                 query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
 
             collection = await self.get_collection(collection_name)
+
+            # A query vector of the wrong width fails the same way a write
+            # does, so recall gets the same explanation as ingestion.
+            await self._assert_embedding_dimensions(collection, collection_name)
 
             if limit is None:
                 limit = await collection.count_rows()

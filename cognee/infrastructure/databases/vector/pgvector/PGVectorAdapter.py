@@ -1,4 +1,5 @@
 import asyncio
+import re
 from typing import Any, get_type_hints
 from uuid import UUID
 
@@ -23,7 +24,7 @@ from cognee.shared.logging_utils import get_logger
 from ...relational.ModelBase import Base
 from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
-from ..exceptions import CollectionNotFoundError
+from ..exceptions import CollectionNotFoundError, EmbeddingDimensionMismatchError
 from ..models.ScoredResult import ScoredResult
 from ..vector_db_interface import VectorDBInterface
 from .serialize_data import serialize_data
@@ -347,6 +348,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 payload_schema=type(data_points[0]),
             )
 
+        # Before the embedding calls: a mismatch cannot be fixed by embedding
+        # this batch, so paying for it first only delays the same failure.
+        await self._assert_embedding_dimensions(collection_name)
+
         data_vectors = await self.embed_data(
             [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
         )
@@ -474,6 +479,66 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 )
                 for data_point in data_points
             ],
+        )
+
+    _VECTOR_DIMENSIONS_PATTERN = re.compile(r"^vector\((\d+)\)$")
+
+    async def _assert_embedding_dimensions(self, collection_name: str) -> None:
+        """Refuse an operation whose vectors cannot fit the collection's column.
+
+        A ``vector(N)`` column fixes N when the table is created, so a changed
+        embedding model breaks both writes and queries — Postgres answers with
+        "expected N dimensions, not M", naming neither the model nor the
+        dataset. The two numbers are in hand here, so check them and say so.
+
+        Read from the catalog rather than from ``get_table``'s reflection: that
+        cache is only invalidated by ``reset_metadata_cache`` (no production
+        caller), so after a re-index in a long-lived process it would still
+        report the old width and block the very fix this error recommends.
+        ``format_type`` renders the declared type, which keeps this independent
+        of how pgvector encodes its typmod.
+
+        Never fails the operation on its own account: anything unreadable — no
+        such table, an unconstrained ``vector`` column, an older layout — falls
+        through to the store's own behaviour, exactly as before.
+        """
+        try:
+            qualified_name = f'"{collection_name}"'
+            if self.schema:
+                qualified_name = f'"{self.schema}".{qualified_name}'
+
+            async with self.get_async_session() as session:
+                result = await session.execute(
+                    text(
+                        "SELECT format_type(atttypid, atttypmod) FROM pg_attribute "
+                        "WHERE attrelid = to_regclass(:qualified_name) "
+                        "AND attname = 'vector' AND NOT attisdropped"
+                    ),
+                    {"qualified_name": qualified_name},
+                )
+                declared_type = result.scalar_one_or_none()
+
+            match = self._VECTOR_DIMENSIONS_PATTERN.match((declared_type or "").strip())
+            if match is None:
+                return
+            stored_dimensions = int(match.group(1))
+        except Exception:
+            logger.debug(
+                "Could not read the vector width of '%s'; skipping the dimension check.",
+                collection_name,
+                exc_info=True,
+            )
+            return
+
+        configured_dimensions = self.embedding_engine.get_vector_size()
+        if stored_dimensions == configured_dimensions:
+            return
+
+        raise EmbeddingDimensionMismatchError(
+            collection_name=collection_name,
+            stored_dimensions=stored_dimensions,
+            configured_dimensions=configured_dimensions,
+            model=getattr(self.embedding_engine, "model", None),
         )
 
     async def get_table(self, collection_name: str) -> Table:
@@ -616,6 +681,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         # Get PGVectorDataPoint Table from database
         PGVectorDataPoint = await self.get_table(collection_name)
+
+        # A query vector of the wrong width fails the same way a write does,
+        # so recall gets the same explanation as ingestion.
+        await self._assert_embedding_dimensions(collection_name)
 
         if limit is None:
             async with self.get_async_session() as session:
