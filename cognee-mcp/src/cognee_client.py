@@ -600,6 +600,7 @@ class CogneeClient:
         custom_prompt: str | None = None,
         filename: str | None = None,
         content_base64: str | None = None,
+        ontology_key: str | list[str] | None = None,
         self_improvement: bool = True,
     ) -> dict[str, Any]:
         """Store data in memory via remember().
@@ -610,11 +611,20 @@ class CogneeClient:
 
         Pass either `data` (text) or `filename` + `content_base64` (file
         upload), not both. File uploads are permanent-memory only.
+        ontology_key selects one or more uploaded ontologies for permanent
+        extraction; local mode resolves keys for the default user.
         """
         if content_base64 and data:
             raise ValueError("Pass either `data` or `filename` + `content_base64`, not both.")
         if content_base64 and session_id:
             raise ValueError("File uploads (content_base64) do not support session_id.")
+
+        ontology_keys = [ontology_key] if isinstance(ontology_key, str) else ontology_key
+        ontology_keys = [key.strip() for key in (ontology_keys or []) if key.strip()]
+        if ontology_keys and session_id:
+            raise ValueError(
+                "ontology_key is only supported for permanent memory; omit session_id."
+            )
 
         if self.use_api:
             if session_id:
@@ -650,9 +660,11 @@ class CogneeClient:
 
             endpoint = f"{self.api_url}/api/v1/remember"
             files = self._build_upload(data, filename, content_base64)
-            form_data = {"datasetName": dataset_name}
+            form_data: dict[str, Any] = {"datasetName": dataset_name}
             if custom_prompt:
                 form_data["custom_prompt"] = custom_prompt
+            if ontology_keys:
+                form_data["ontology_key"] = ontology_keys
             if not self_improvement:
                 form_data["self_improvement"] = "false"
             response = await self.client.post(
@@ -665,6 +677,33 @@ class CogneeClient:
             return response.json()
         else:
             with redirect_stdout(sys.stderr):
+                ontology_config = None
+                if ontology_keys:
+                    from io import StringIO
+
+                    from cognee.api.v1.ontologies.ontologies import OntologyService
+                    from cognee.modules.engine.operations.setup import setup
+                    from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import (
+                        RDFLibOntologyResolver,
+                    )
+                    from cognee.modules.users.methods import get_default_user
+
+                    # Look the ontology up under the same user the write will use.
+                    # remember() resolves `user` to get_default_user() when it is not
+                    # passed, so resolving it here and NOT pinning it on the call keeps
+                    # one user-resolution path; pinning it only on this branch gave the
+                    # same tool call two, differing on an unrelated argument.
+                    # setup() first -- get_default_user() queries the database, and
+                    # remember() is careful to initialise before resolving a user.
+                    await setup()
+                    user = await get_default_user()
+                    contents = OntologyService().get_ontology_contents(ontology_keys, user)
+                    ontology_config = {
+                        "ontology_resolver": RDFLibOntologyResolver(
+                            ontology_file=[StringIO(content) for content in contents]
+                        )
+                    }
+
                 tmp_dir = None
                 if content_base64:
                     safe_name, raw_bytes = self._decode_upload(filename, content_base64)
@@ -679,6 +718,8 @@ class CogneeClient:
                     "data": remember_data,
                     "dataset_name": dataset_name,
                 }
+                if ontology_config is not None:
+                    kwargs["config"] = {"ontology_config": ontology_config}
                 if session_id:
                     kwargs["session_id"] = session_id
                 if custom_prompt:
