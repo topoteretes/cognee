@@ -103,6 +103,9 @@ dependencies = [
     "cbor2>=5.8.0",
     "langdetect>=1.0.9",
     "datamodel-code-generator>=0.54.0",
+    # Enola powers the built-in deterministic code-graph route. Keep this pinned:
+    # its snapshot contract and known answers are validated by test_code_graph_e2e.py.
+    "enola-cli==0.4.21",
 ]
 
 [project.optional-dependencies]
@@ -161,12 +164,8 @@ docs = [
     "unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.18.1,<19",
     "nltk>=3.9.3,<4", # TODO: Remove when unstructured is above v0.21.0 as it won't use nltk anymore
 ]
-codegraph = [
-    # The enola binary as a platform wheel; the code-graph route needs nothing else.
-    # This is the only enola version pin; bumping it means re-checking the known
-    # answers in cognee/tests/test_code_graph_e2e.py.
-    "enola-cli==0.4.19",
-]
+# enola-cli is a core dependency. The empty extra keeps `cognee[codegraph]` installable.
+codegraph = []
 evals = [
     "plotly>=6.0.0,<7",
     "gdown>=5.2.0,<6",
