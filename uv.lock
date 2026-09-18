@@ -20,6 +20,9 @@ resolution-markers = [
 exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "P2D"
 
+[options.exclude-newer-package]
+enola-cli = { timestamp = "0001-01-01T00:00:00Z", span = "PT0S" }
+
 [manifest]
 constraints = [
     { name = "nltk", specifier = ">=3.9.3" },
@@ -1292,6 +1295,7 @@ dependencies = [
     { name = "cryptography" },
     { name = "datamodel-code-generator" },
     { name = "diskcache" },
+    { name = "enola-cli" },
     { name = "fakeredis", extra = ["lua"] },
     { name = "fastapi" },
     { name = "fastapi-users", extra = ["sqlalchemy"] },
@@ -1348,9 +1352,6 @@ azure = [
 ]
 baml = [
     { name = "baml-py" },
-]
-codegraph = [
-    { name = "enola-cli" },
 ]
 debug = [
     { name = "debugpy" },
@@ -1525,7 +1526,7 @@ requires-dist = [
     { name = "dlt", extras = ["sqlalchemy"], marker = "extra == 'gmail'", specifier = ">=1.9.0,<2" },
     { name = "docling", marker = "extra == 'docling-full'", specifier = ">=2.115,<3" },
     { name = "docling-slim", extras = ["convert-core", "format-pdf", "format-office", "format-html", "format-email", "format-markdown", "format-latex"], marker = "extra == 'docling'", specifier = ">=2.115,<3" },
-    { name = "enola-cli", marker = "extra == 'codegraph'", specifier = "==0.4.19" },
+    { name = "enola-cli", specifier = "==0.4.21" },
     { name = "fakeredis", extras = ["lua"], specifier = ">=2.32.0" },
     { name = "fastapi", specifier = ">=0.116.2,<1.0.0" },
     { name = "fastapi-users", extras = ["sqlalchemy"], specifier = ">=15.0.2" },
@@ -2772,14 +2773,16 @@ wheels = [
 
 [[package]]
 name = "enola-cli"
-version = "0.4.19"
+version = "0.4.21"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b7/33/8b5f3626bddb119d2a0eb65f027b2a910a4ad39a5297796628e0f7b15224/enola_cli-0.4.19-py3-none-macosx_12_0_arm64.whl", hash = "sha256:763a6ded0d57132b64250cb449b25e02be0074d5e2e268504ebcd9d3fb5feb8b", size = 10634498, upload-time = "2026-09-12T15:56:47.362Z" },
-    { url = "https://files.pythonhosted.org/packages/8b/f4/48478c7c0fad0b03977bac445c9c02532959a956cf6c2e33dddcd17af174/enola_cli-0.4.19-py3-none-macosx_12_0_x86_64.whl", hash = "sha256:b1e2615f98528b0d2d6edc8e018026870a4bcf435275aaf8963ed54ea57dfc3a", size = 11113608, upload-time = "2026-09-12T15:56:49.617Z" },
-    { url = "https://files.pythonhosted.org/packages/84/99/93575e4e45348924a37bd7cfcd8a90cd58b13175a00e6e269da3b5281678/enola_cli-0.4.19-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:ba7317a17a984915f24d8a5d87561dc4824bee76554663db4ee6c5018efb431c", size = 10234655, upload-time = "2026-09-12T15:56:51.697Z" },
-    { url = "https://files.pythonhosted.org/packages/17/09/bc95d37c9cff4dfb39999b1497e851d18ba32428285d3c9d2ab89beb6cad/enola_cli-0.4.19-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9f5040382f624a15e46607acaebdf99ef4c4663a54feab0a4013e931509b6235", size = 11100630, upload-time = "2026-09-12T15:56:53.802Z" },
-    { url = "https://files.pythonhosted.org/packages/85/90/0a89dcfd3ccce0c40a4d2b2e40421d37d176c67138bfa3c1bb830377c548/enola_cli-0.4.19-py3-none-win_amd64.whl", hash = "sha256:61a3aaec9b06c5053c7be7086fbbc94446942b874c452cd9f60492366d1e7b99", size = 11297287, upload-time = "2026-09-12T15:56:56.264Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/18/f5419cf63909c1a9d99395c7e880c665d90ead40e0ea065fcd676c4342dd/enola_cli-0.4.21-py3-none-macosx_12_0_arm64.whl", hash = "sha256:fd88b9f98fcac1ecdfd914a6cf361a21c450c51a41b4bd5b5edf862c7637d442", size = 10814485, upload-time = "2026-09-18T16:10:54.417Z" },
+    { url = "https://files.pythonhosted.org/packages/f8/9c/846a526bc3e67a3d4bb55fa3483bcab5ce6b4aa46cc32b9aaeccc19a3b41/enola_cli-0.4.21-py3-none-macosx_12_0_x86_64.whl", hash = "sha256:ac7e0b1616b13b6d84e191920211b2b0e67d1f221a6dd9ffc4dc92aa4cc56ccd", size = 11304277, upload-time = "2026-09-18T16:10:56.55Z" },
+    { url = "https://files.pythonhosted.org/packages/20/8c/08310419eeea21aa63279dd5fdf6c8d937293435849e5801b867f1dd0abe/enola_cli-0.4.21-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:cfe40cf48a7babf2b709aa7474bff3429f4e0488d4c3c0fb434d14461a3c024b", size = 10412718, upload-time = "2026-09-18T16:10:58.53Z" },
+    { url = "https://files.pythonhosted.org/packages/40/92/90bf6e869718fdb0138a931229f837c95e627979900b98090bfebb9b5e9e/enola_cli-0.4.21-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b9564fe748b6093bd19105e0614c94a6505a9b3db8af21073e826cc8b2afeaec", size = 11293226, upload-time = "2026-09-18T16:11:00.847Z" },
+    { url = "https://files.pythonhosted.org/packages/ef/89/4e4d68c6341dd690abe2b31f7bd7009e7776308ef5edfa97dcd9202e9b45/enola_cli-0.4.21-py3-none-musllinux_1_2_aarch64.whl", hash = "sha256:572601e0e73808f2afe282cf36a3ef849f7e843dd1285657424df822e2fcd8be", size = 10414603, upload-time = "2026-09-18T16:11:02.928Z" },
+    { url = "https://files.pythonhosted.org/packages/82/ce/f277403d6c01d9701dfa9c8629949e1233d79d01e52b96141c34bf6aef18/enola_cli-0.4.21-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:3149c11393614820202b9c8bac4ba9de33cf65ea871b6a5c2761ff2175b63b44", size = 11291136, upload-time = "2026-09-18T16:11:05.34Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/eb/b3084f0097fcb7b2f8ce8f0faaa25a43e6dd90be5b6953f022a2b46e5f5f/enola_cli-0.4.21-py3-none-win_amd64.whl", hash = "sha256:9ed2cb542fd2d0c9886724976ae0a953dce1e07d688b8465d0ff37d0e3db18cd", size = 11494858, upload-time = "2026-09-18T16:11:07.467Z" },
 ]
 
 [[package]]
