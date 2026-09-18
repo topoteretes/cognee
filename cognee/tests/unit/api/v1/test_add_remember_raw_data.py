@@ -11,6 +11,7 @@ rejects raw_data together with content_type="skills" or "cogx-archive" because
 those paths never run string inputs through add().
 """
 
+import importlib
 import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -25,8 +26,6 @@ from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.exceptions import LabelCountMismatchError
-
-import importlib
 
 add_pkg = importlib.import_module("cognee.api.v1.add")
 remember_pkg = importlib.import_module("cognee.api.v1.remember")

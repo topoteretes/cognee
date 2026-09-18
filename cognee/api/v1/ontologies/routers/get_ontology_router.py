@@ -1,15 +1,16 @@
 import asyncio
 
-from fastapi import APIRouter, File, Form, Path, UploadFile, Depends, Request
+from fastapi import APIRouter, Depends, File, Form, Path, Request, UploadFile
 from fastapi.responses import JSONResponse
-from typing import Optional, List
 
-from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_authenticated_user
-from cognee.shared.utils import send_telemetry
-from cognee.shared.logging_utils import get_logger
 from cognee import __version__ as cognee_version
-from ..ontologies import OntologyService, DuplicateOntologyKeyError
+from cognee.exceptions import CogneeApiError
+from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import send_telemetry
+
+from ..ontologies import DuplicateOntologyKeyError, OntologyService
 
 logger = get_logger(__name__)
 
@@ -36,7 +37,7 @@ def get_ontology_router() -> APIRouter:
                 "— other extensions are rejected with 400. Exactly one file per request."
             ),
         ),
-        description: Optional[str] = Form(
+        description: str | None = Form(
             None,
             examples=["OWL ontology of medical conditions and treatments"],
             description=(
@@ -111,6 +112,8 @@ def get_ontology_router() -> APIRouter:
         except ValueError as error:
             logger.warning("Ontology upload request failed: %s", error)
             return JSONResponse(status_code=400, content={"error": "Invalid ontology request."})
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Ontology upload failed")
             return JSONResponse(status_code=500, content={"error": "Ontology upload failed."})
@@ -159,6 +162,8 @@ def get_ontology_router() -> APIRouter:
                 status_code=400,
                 content={"error": "Ontology key not found or invalid."},
             )
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Ontology delete failed")
             return JSONResponse(status_code=500, content={"error": "Ontology delete failed."})
@@ -187,6 +192,8 @@ def get_ontology_router() -> APIRouter:
             # list_ontologies reads metadata from disk; run it off the event loop.
             metadata = await asyncio.to_thread(ontology_service.list_ontologies, user)
             return metadata
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Ontology list failed")
             return JSONResponse(status_code=500, content={"error": "Ontology list failed."})

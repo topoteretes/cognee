@@ -6,7 +6,7 @@ mocked completion utils, no graph database, no LLM:
   ``brute_force_triplet_search`` as ``personal_weights``, and an empty map is
   forwarded as ``None`` — byte-identical to an un-personalized run.
 - The sessionless completion passes the preference text as
-  ``conversation_history`` to BOTH arms: ``generate_completion`` for a single
+  ``guidance`` to BOTH arms: ``generate_completion`` for a single
   query and ``generate_completion_batch`` for a query batch.
 
 The scoring math itself (``_personal_distance`` eligibility and the
@@ -14,15 +14,14 @@ multiplicative compose with the feedback blend) is covered in
 ``tests/unit/modules/graph/cognee_graph_test.py``.
 """
 
-from typing import Dict, Tuple
-
 import pytest
 
 import cognee.modules.retrieval.graph_completion_retriever as retriever_module
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.utils.completion import SessionPrompt
 
 
-def _patch_lookup(monkeypatch, result: Tuple[str, Dict[str, float]]):
+def _patch_lookup(monkeypatch, result: tuple[str, dict[str, float]]):
     text, weights = result
 
     async def fake_load_preference_text():
@@ -88,7 +87,7 @@ class TestSessionlessGuidance:
         result = await retriever._generate_completion_without_session("q", None, "ctx")
 
         assert result == ["answer"]
-        assert captured["conversation_history"] == "PREFS"
+        assert captured["session"] == SessionPrompt(guidance="PREFS")
         assert captured["context"] == "ctx"
 
     async def test_preference_text_reaches_batch_arm(self, monkeypatch):
@@ -107,10 +106,10 @@ class TestSessionlessGuidance:
         result = await retriever._generate_completion_without_session(None, ["q1", "q2"], "ctx")
 
         assert result == ["a1", "a2"]
-        assert captured["conversation_history"] == "PREFS"
+        assert captured["session"] == SessionPrompt(guidance="PREFS")
         assert captured["query_batch"] == ["q1", "q2"]
 
-    async def test_empty_preference_text_passes_falsy_history(self, monkeypatch):
+    async def test_empty_preference_text_passes_falsy_guidance(self, monkeypatch):
         _patch_lookup(monkeypatch, ("", {}))
         captured = {}
 
@@ -125,4 +124,4 @@ class TestSessionlessGuidance:
 
         # generate_completion treats a falsy history as "no layer", so the
         # system prompt stays byte-identical to the un-personalized path.
-        assert captured["conversation_history"] == ""
+        assert captured["session"] == SessionPrompt()

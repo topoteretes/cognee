@@ -86,6 +86,7 @@ async def _mock_acreate(text_input, system_prompt, response_model, **kwargs):
 LLMGateway.acreate_structured_output = _mock_acreate
 
 import uvicorn  # noqa: E402
+
 from cognee.api.client import app  # noqa: E402
 
 uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")

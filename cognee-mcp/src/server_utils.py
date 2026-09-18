@@ -3,9 +3,9 @@
 import json
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
-
+from typing import Any
 
 MAX_TOP_K = 100
 COMPLETION_SEARCH_TYPES = {
@@ -26,9 +26,7 @@ class ParsedCognifyData:
 def looks_like_file_path(data: str) -> bool:
     """Return True when a string appears to be a local file path."""
     data = data.strip()
-    return (
-        data.startswith("/") or bool(re.match(r"^[A-Za-z]:\\", data)) or data.startswith("file://")
-    )
+    return data.startswith(("/", "file://")) or bool(re.match(r"^[A-Za-z]:\\", data))
 
 
 def validate_file_path(
@@ -36,14 +34,13 @@ def validate_file_path(
     *,
     path_exists: Callable[[str], bool] = os.path.exists,
     is_running_in_docker: Callable[[], bool] = lambda: False,
-) -> Optional[str]:
+) -> str | None:
     """Validate path-like input and return an MCP-friendly error when invalid."""
     if not looks_like_file_path(data):
         return None
 
     path = data.strip()
-    if path.startswith("file://"):
-        path = path[7:]
+    path = path.removeprefix("file://")
 
     if path_exists(path):
         return None
@@ -61,7 +58,7 @@ def validate_file_path(
     return msg
 
 
-def parse_csv_list(value: Optional[str]) -> Optional[list[str]]:
+def parse_csv_list(value: str | None) -> list[str] | None:
     """Parse an optional comma-separated string into a clean list."""
     if not value:
         return None
@@ -98,7 +95,7 @@ def _model_dump(value: Any) -> Any:
     return value
 
 
-def _json_dumps(value: Any, *, json_encoder: Optional[type[json.JSONEncoder]] = None) -> str:
+def _json_dumps(value: Any, *, json_encoder: type[json.JSONEncoder] | None = None) -> str:
     if json_encoder:
         return json.dumps(_model_dump(value), indent=2, cls=json_encoder)
     return json.dumps(_model_dump(value), indent=2, default=str)
@@ -127,7 +124,7 @@ def _unwrap_results(value: Any) -> Any:
 
 
 def _render_scalar_or_json(
-    value: Any, *, json_encoder: Optional[type[json.JSONEncoder]] = None
+    value: Any, *, json_encoder: type[json.JSONEncoder] | None = None
 ) -> str:
     value = _model_dump(value)
     if isinstance(value, str):
@@ -137,9 +134,7 @@ def _render_scalar_or_json(
     return str(value)
 
 
-def _extract_result_text(
-    value: Any, *, json_encoder: Optional[type[json.JSONEncoder]] = None
-) -> str:
+def _extract_result_text(value: Any, *, json_encoder: type[json.JSONEncoder] | None = None) -> str:
     text = _get_field(
         value,
         "search_result",
@@ -156,7 +151,7 @@ def _extract_result_text(
 
 
 def _format_completion_results(
-    results: Any, *, json_encoder: Optional[type[json.JSONEncoder]] = None
+    results: Any, *, json_encoder: type[json.JSONEncoder] | None = None
 ) -> str:
     results = _unwrap_results(results)
     if not isinstance(results, list):
@@ -190,9 +185,7 @@ def _format_completion_results(
     )
 
 
-def format_recall_results(
-    results: Any, *, json_encoder: Optional[type[json.JSONEncoder]] = None
-) -> str:
+def format_recall_body(results: Any, *, json_encoder: type[json.JSONEncoder] | None = None) -> str:
     """Render recall results, including normalized response envelopes."""
     results = _unwrap_results(results)
     if not results:
@@ -211,3 +204,123 @@ def format_recall_results(
         lines.append(f"{prefix}{rendered}")
 
     return "\n\n".join(lines)
+
+
+@dataclass(frozen=True)
+class RecallState:
+    state: str
+    completed: int | None = None
+    total: int | None = None
+
+
+def recall_items(results: Any) -> list[Any]:
+    """Count returned entries, not requested top_k, graph nodes, or system markers."""
+    results = _unwrap_results(results)
+    items = results if isinstance(results, list) else [results]
+    return [
+        item
+        for item in items
+        if item is not None
+        and item != ""
+        and item != {}
+        and item != []
+        and _get_field(item, "_source", "source") != "system"
+    ]
+
+
+def recall_marker_state(results: Any) -> RecallState | None:
+    results = _unwrap_results(results)
+    for item in results if isinstance(results, list) else [results]:
+        if (
+            _get_field(item, "_source", "source") == "system"
+            and _get_field(item, "status") == "build_failed"
+        ):
+            return RecallState("build_failed")
+    return None
+
+
+def classify_recall_state(progress: dict) -> RecallState:
+    """Classify authorized datasets from an existing pipeline-status response.
+
+    Three outcomes, because a consumer has three actions: retry shortly
+    (``indexing``), go look at why ingestion failed (``build_failed``), or
+    accept that there is nothing (``none``).
+
+    Earlier this also separated ``empty`` / ``not_indexed`` / ``no_match`` /
+    ``unknown``. Those four produced near-identical sentences, and telling them
+    apart was the entire reason for a ``/datasets/graph-summary`` round trip per
+    empty recall -- plus, locally, a full per-dataset graph traversal. The
+    distinction was unreliable anyway: a zero count from an unavailable graph
+    store is not proof of emptiness, so several branches fell back to
+    ``unknown`` regardless.
+    """
+    runs = []
+    for value in progress.values():
+        if "status" in value:
+            runs.append(value)
+        else:
+            runs.extend(value.values())
+    active = [
+        run
+        for run in runs
+        if run.get("status")
+        in (
+            "DATASET_PROCESSING_STARTED",
+            "DATASET_PROCESSING_INITIATED",
+        )
+    ]
+    if active:
+        tick = (active[0].get("progress") or {}) if len(active) == 1 else {}
+        completed, total = tick.get("completed_items"), tick.get("total_items")
+        if type(completed) is int and type(total) is int and 0 <= completed <= total and total > 0:
+            return RecallState("indexing", completed, total)
+        return RecallState("indexing")
+    if any(run.get("status") == "DATASET_PROCESSING_ERRORED" for run in runs):
+        return RecallState("build_failed")
+    return RecallState("none")
+
+
+def format_recall_results(
+    results: Any,
+    *,
+    json_encoder: type[json.JSONEncoder] | None = None,
+    empty_state: RecallState | None = None,
+    items: list[Any] | None = None,
+) -> str:
+    """Add one summary line; preserve the existing body beneath it.
+
+    `items` lets a caller that has already extracted them pass them in.
+    recall() computes them to decide whether to run diagnostics at all, and
+    re-deriving them here walked the same payload a second time.
+    """
+    items = recall_items(results) if items is None else items
+    count = len(items)
+    if count:
+        summary = f"{count} {'memory' if count == 1 else 'memories'} found"
+        sources: dict[str, int] = {}
+        for item in items:
+            dataset = _get_field(item, "dataset_name")
+            source = _get_field(item, "_source", "source")
+            hint = dataset or {"session": "sessions", "graph": "graph"}.get(source, source)
+            if hint:
+                # Metadata must not create another summary line or an unbounded header.
+                hint = " ".join(str(hint).split())[:60]
+                sources[hint] = sources.get(hint, 0) + 1
+        if sources:
+            hints = [f"{n} from {hint}" for hint, n in list(sources.items())[:3]]
+            summary += " (" + ", ".join(hints) + ")"
+    else:
+        state = empty_state or recall_marker_state(results) or RecallState("none")
+        summary = {
+            "indexing": "still indexing — retry shortly",
+            "build_failed": "memory indexing failed — check cognify_status",
+            "none": "no matching memories",
+        }.get(state.state, "no matching memories")
+        if state.state == "indexing" and state.total is not None:
+            summary = (
+                f"still indexing — {state.completed}/{state.total} items processed, retry shortly"
+            )
+    body = (
+        format_recall_body(results, json_encoder=json_encoder) if _unwrap_results(results) else ""
+    )
+    return f"{summary}\n{body}" if body else summary

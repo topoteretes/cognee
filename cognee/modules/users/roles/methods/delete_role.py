@@ -1,17 +1,17 @@
 from uuid import UUID
 
-from sqlalchemy.future import select
 from sqlalchemy import delete
+from sqlalchemy.future import select
 
-from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
-from cognee.modules.users.permissions.methods import has_user_management_permission
+from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.models import (
     Role,
     UserRole,
 )
 from cognee.modules.users.models.ACL import ACL
 from cognee.modules.users.models.Principal import Principal
+from cognee.modules.users.permissions.methods import has_user_management_permission
 
 
 async def delete_role(role_id: UUID, owner_id: UUID):

@@ -15,7 +15,8 @@ sites and chat clients; DOT is for Graphviz tooling.
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any, Iterable, Mapping, Optional
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 DIAGRAM_FORMATS = ("mermaid", "dot")
 
@@ -96,7 +97,7 @@ def render_mermaid(
     edges: Iterable[Mapping[str, Any]],
     *,
     highlight_ids: Iterable[str] = (),
-    title: Optional[str] = None,
+    title: str | None = None,
 ) -> str:
     """A Mermaid ``flowchart LR`` of the given facts and edges.
 
@@ -151,7 +152,7 @@ def render_dot(
     edges: Iterable[Mapping[str, Any]],
     *,
     highlight_ids: Iterable[str] = (),
-    title: Optional[str] = None,
+    title: str | None = None,
 ) -> str:
     """A Graphviz ``digraph`` of the given facts and edges (same grouping as Mermaid)."""
     nodes = list(nodes)
@@ -202,7 +203,7 @@ def render_dot(
 
 def collect_diagram_graph(
     result: Mapping[str, Any],
-) -> Optional[tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]] | None:
     """Extract (nodes, edges, highlight_ids) from any CODE operation result.
 
     Each operation shapes its result differently; this is the one place that
@@ -317,7 +318,7 @@ def render_result_diagram(result: Mapping[str, Any], diagram_format: str) -> dic
     }
 
 
-def _diagram_title(result: Mapping[str, Any]) -> Optional[str]:
+def _diagram_title(result: Mapping[str, Any]) -> str | None:
     operation = str(result.get("operation") or "")
     if operation == "explore" and isinstance(result.get("focus"), Mapping):
         return f"explore: {result['focus'].get('name')}"

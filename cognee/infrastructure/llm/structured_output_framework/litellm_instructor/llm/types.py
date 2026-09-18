@@ -1,10 +1,5 @@
-from pydantic import BaseModel
+"""Re-export of the framework-neutral transcription type for the instructor adapters."""
 
+from cognee.infrastructure.llm.types import TranscriptionReturnType
 
-class TranscriptionReturnType:
-    text: str
-    payload: BaseModel
-
-    def __init__(self, text: str, payload: BaseModel):
-        self.text = text
-        self.payload = payload
+__all__ = ["TranscriptionReturnType"]

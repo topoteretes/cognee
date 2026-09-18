@@ -13,8 +13,9 @@ with optional metadata, so they map cleanly onto COGX's atomic memory record.
 """
 
 import json
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, List, Union
+from typing import Any
 
 from cognee.modules.migration.cogx import (
     COGXMemory,
@@ -32,13 +33,13 @@ class LangMemSource(MemorySource):
 
     def __init__(
         self,
-        data: Union[str, Path, List[Any], Dict[str, Any]],
+        data: str | Path | list[Any] | dict[str, Any],
         mode: str = "re-derive",
     ):
         super().__init__(mode=mode)
         self._data = data
 
-    def _load_raw(self) -> List[Dict[str, Any]]:
+    def _load_raw(self) -> list[dict[str, Any]]:
         data = self._data
         if isinstance(data, (str, Path)):
             data = json.loads(read_export_file(data))

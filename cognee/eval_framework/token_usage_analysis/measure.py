@@ -14,11 +14,11 @@ import os
 
 import litellm
 import tiktoken
+from cost_model import ChunkMeasurement
+
 from cognee.infrastructure.llm.config import get_llm_config
 from cognee.infrastructure.llm.extraction import extract_content_graph, extract_summary
 from cognee.shared.data_models import KnowledgeGraph, SummarizedContent
-
-from cost_model import ChunkMeasurement
 
 FALLBACK_ENCODING = "o200k_base"
 
@@ -81,7 +81,7 @@ def _configure_llm_model(llm_model: str) -> None:
 
 
 def _usage(result) -> tuple[int, int]:
-    """Read (prompt, completion) tokens from an instructor result's raw response.
+    """Read (prompt, completion) tokens from a structured-output result's raw response.
 
     litellm names them prompt_tokens/completion_tokens; the Anthropic client names
     them input_tokens/output_tokens.

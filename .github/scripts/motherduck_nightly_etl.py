@@ -39,10 +39,13 @@ Env:
                            otherwise make them last-writer-wins.
 """
 
+import logging
 import os
 import sys
 
 import duckdb
+
+logger = logging.getLogger(__name__)
 
 MD_TARGET = os.environ.get("MD_TARGET", "ci_analytics.nightly")
 CATALOG, SCHEMA = MD_TARGET.split(".", 1)
@@ -115,6 +118,11 @@ VIEWS = {
             (report ->> '$.failed')::INT                     AS failed,
             (report ->> '$.succeeded')::INT = (report ->> '$.num_runs')::INT AS all_passed,
             report ->> '$.git_sha'                           AS git_sha,
+            -- Historical reports lack these fields; leave them NULL rather
+            -- than guessing (older Rust git_sha values identify the harness).
+            TRY_CAST(report ->> '$.commit_timestamp' AS TIMESTAMPTZ) AS commit_timestamp,
+            report ->> '$.git_repository'                    AS git_repository,
+            report ->> '$.workflow_git_sha'                  AS workflow_git_sha,
             report ->> '$.run_id'                            AS run_id,
             report ->> '$.run_attempt'                       AS run_attempt,
             report ->> '$.event'                             AS event,
@@ -131,7 +139,8 @@ VIEWS = {
     "v_perf_metrics": """
         WITH per_metric AS (
             SELECT r.s3_key, r.run_ts, r.branch, r.series, r.suite, r.sdk, r.store,
-                   r.label, r.mode, r.git_sha, r.all_passed,
+                   r.label, r.mode, r.git_sha, r.commit_timestamp,
+                   r.git_repository, r.workflow_git_sha, r.all_passed,
                    m.metric                            AS metric,
                    raw.report -> '$.stats' -> m.metric AS mstats
             FROM {t}.v_perf_runs r
@@ -139,6 +148,7 @@ VIEWS = {
                  UNNEST(json_keys(raw.report, '$.stats')) AS m(metric)
         )
         SELECT s3_key, run_ts, branch, series, suite, sdk, store, label, mode, git_sha,
+               commit_timestamp, git_repository, workflow_git_sha,
                all_passed, metric, st.stat AS stat, (mstats ->> st.stat)::DOUBLE AS value_s
         FROM per_metric, UNNEST(json_keys(mstats)) AS st(stat)
     """,
@@ -195,7 +205,7 @@ def main() -> int:
         params.insert(3, f"SESSION_TOKEN '{os.environ['AWS_SESSION_TOKEN']}'")
     try:
         con.execute(f"CREATE OR REPLACE SECRET cognee_ci_s3 IN MOTHERDUCK ({', '.join(params)});")
-    except Exception as exc:  # never echo the statement -- it holds the key
+    except duckdb.Error as exc:  # never echo the statement or chain -- both hold the key
         raise RuntimeError(f"failed to register S3 secret: {type(exc).__name__}") from None
     print(f"registered S3 secret for s3://{BUCKET} ({REGION})")
 
@@ -235,6 +245,7 @@ def main() -> int:
             con.execute(f"CREATE OR REPLACE VIEW {TGT}.{name} AS {sql.format(t=TGT)};")
             print(f"view {name}: created")
         except Exception as exc:
+            logger.debug("Ignoring exception in main", exc_info=True)
             failures += 1
             print(f"WARN view {name} failed ({type(exc).__name__}): {str(exc).splitlines()[0]}")
 

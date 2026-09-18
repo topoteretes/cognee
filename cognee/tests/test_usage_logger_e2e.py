@@ -1,14 +1,18 @@
+import asyncio
+import logging
 import os
+
 import pytest
 import pytest_asyncio
-import asyncio
 from fastapi.testclient import TestClient
 
 import cognee
 from cognee.api.client import app
 from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.cache.get_cache_engine import create_cache_engine
-from cognee.modules.users.methods import get_default_user, get_authenticated_user
+from cognee.modules.users.methods import get_authenticated_user, get_default_user
+
+logger = logging.getLogger(__name__)
 
 
 async def _reset_engines_and_prune():
@@ -20,7 +24,7 @@ async def _reset_engines_and_prune():
         if hasattr(vector_engine, "engine") and hasattr(vector_engine.engine, "dispose"):
             await vector_engine.engine.dispose(close=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _reset_engines_and_prune", exc_info=True)
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
@@ -191,7 +195,6 @@ async def test_mcp_tool_logging(e2e_config, mcp_data_setup, cache_engine):
     directly, as this test used to, exercised neither.
     """
     import sys
-    import importlib.util
     from pathlib import Path
 
     mcp_root = Path(__file__).resolve().parents[2] / "cognee-mcp"

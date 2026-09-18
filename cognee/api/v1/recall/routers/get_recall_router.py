@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import List, Optional, Union
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
@@ -9,12 +8,12 @@ from pydantic import Field
 
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO, OutDTO
-from cognee.api.v1.recall.recall import RecallResponse
 from cognee.api.sse import SSE_MEDIA_TYPE, sse_headers, wants_event_stream
+from cognee.api.v1.recall.recall import RecallResponse
 from cognee.api.v1.recall.recall_stream import begin_recall_stream
 from cognee.exceptions import CogneeApiError
 from cognee.modules.search.operations import get_history
-from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
+from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -23,16 +22,20 @@ from cognee.shared.utils import send_telemetry
 
 
 class RecallPayloadDTO(InDTO):
-    # Default is HYBRID_COMPLETION. Pass ``search_type: null`` explicitly
-    # to opt into auto-routing (the new ``cognee.recall`` default).
-    search_type: Optional[SearchType] = Field(
-        default=SearchType.HYBRID_COMPLETION,
+    # Omitted or null means auto-route, matching ``cognee.recall`` and the CLI.
+    # As in the SDK, a null search_type with session_id and no datasets also
+    # lets a session hit short-circuit the graph search; pass a value to pin a
+    # strategy and disable that. See docs/recall-vs-search.md.
+    search_type: SearchType | None = Field(
+        default=None,
         description=(
             "Search strategy, e.g. HYBRID_COMPLETION, GRAPH_COMPLETION, RAG_COMPLETION, CHUNKS. "
-            "Pass null to let cognee auto-route the query to the best strategy."
+            "Omit (or pass null) to let cognee auto-route the query (rule-based, no LLM "
+            "call, HYBRID_COMPLETION fallback; see docs/recall-vs-search.md for the rule "
+            "table). Pass a value to pin one."
         ),
     )
-    datasets: Optional[list[str]] = Field(
+    datasets: list[str] | None = Field(
         default=None,
         examples=[["default_dataset"]],
         description=(
@@ -40,7 +43,7 @@ class RecallPayloadDTO(InDTO):
             "you have read access to."
         ),
     )
-    dataset_ids: Optional[list[UUID]] = Field(
+    dataset_ids: list[UUID] | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -53,10 +56,10 @@ class RecallPayloadDTO(InDTO):
         examples=["What is in the document?"],
         description="The question to answer. Required; there is no default query.",
     )
-    system_prompt: Optional[str] = Field(
+    system_prompt: str | None = Field(
         default="Answer the question using the provided context. Be as brief as possible."
     )
-    node_name: Optional[list[str]] = Field(
+    node_name: list[str] | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -64,16 +67,16 @@ class RecallPayloadDTO(InDTO):
             "/v1/add or /v1/remember). Omit to search all nodes."
         ),
     )
-    top_k: Optional[int] = Field(default=15)
-    only_context: bool = Field(default=False)
-    context_format: ContextFormat = Field(
-        default=ContextFormat.CONTEXT,
-        examples=[ContextFormat.CONTEXT.value],
+    top_k: int | None = Field(default=15)
+    only_context: bool = Field(
+        default=False,
         description=(
-            "Shape of an only_context result. 'context' returns the bare retrieval"
-            " context; 'prompt' returns the full envelope a completion would have"
-            " received — session guidance, conversation history, and the rendered"
-            " user and system prompts. Ignored unless only_context is true."
+            "Return what the LLM would have received instead of its answer. For"
+            " completion search types each item's text is the user prompt (conversation"
+            " history, then question plus retrieval context through the retriever's"
+            " template, then the session guidance block) and its system_prompt field"
+            " carries the retriever's task template. Retrieval-only types return their"
+            " context. No LLM call is made and nothing is written to the session."
         ),
     )
     verbose: bool = Field(default=False)
@@ -81,29 +84,32 @@ class RecallPayloadDTO(InDTO):
         default=False,
         description="Include source/provenance references in completion results.",
     )
-    session_id: Optional[str] = Field(
+    session_id: str | None = Field(
         default=None,
         examples=[None],
         description=(
             "Session whose cached QA and trace entries should be searched. With "
-            "search_type null and no datasets, session hits short-circuit the "
-            "graph search."
+            "search_type omitted the session becomes a search source: alone it "
+            "short-circuits the graph on a hit, alongside datasets both contribute. "
+            "Pinning search_type leaves the graph as the only source."
         ),
     )
-    scope: Optional[Union[str, list[str]]] = Field(
+    scope: str | list[str] | None = Field(
         default=None,
         examples=[None],
         description=(
-            "Which memory sources to include: 'graph', 'session', 'trace', "
-            "'session_context', 'tools', 'code', 'all', 'auto', or a list of these. "
-            "Defaults to 'auto' (session first when session_id is set, else graph). "
+            "Which memory sources to include: 'graph', 'session', 'session_first', "
+            "'trace', 'session_context', 'tools', 'code', 'all', 'auto', or a list of "
+            "these. Defaults to 'auto' (session first when session_id is set, else "
+            "graph). 'session_first' asks for that short-circuit explicitly — a session "
+            "hit answers alone — instead of getting it by omitting search_type. "
             "'tools' and 'code' are explicit opt-in only — never implied by 'auto' or "
             "'all'. 'tools' requires TOOL_CALLS_ENABLED on the server; 'code' runs a "
             "deterministic code-graph query (see code_query) and tags results "
-            "_source='code'."
+            "source='code'."
         ),
     )
-    tool_connections: Optional[list[str]] = Field(
+    tool_connections: list[str] | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -111,7 +117,7 @@ class RecallPayloadDTO(InDTO):
             "Omit to use every connection visible to the caller."
         ),
     )
-    stream: Optional[bool] = Field(
+    stream: bool | None = Field(
         default=None,
         description=(
             "Stream the answer as server-sent events. When omitted, the "
@@ -127,7 +133,7 @@ class RecallPayloadDTO(InDTO):
             "external database only when every other requested source returned nothing."
         ),
     )
-    code_query: Optional[dict] = Field(
+    code_query: dict | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -146,7 +152,7 @@ class RecallPayloadDTO(InDTO):
             "'agent' (tool/workflow). Ignored by other scopes."
         ),
     )
-    response_schema: Optional[dict] = Field(
+    response_schema: dict | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -170,9 +176,13 @@ def get_recall_router() -> APIRouter:
         user: str
         created_at: datetime
         # Null when the recall was not scoped to a single dataset.
-        dataset_id: Optional[UUID] = None
+        dataset_id: UUID | None = None
 
-    @router.get("", response_model=list[RecallHistoryItem])
+    @router.get(
+        "",
+        summary="List the caller's recent recall history",
+        response_model=list[RecallHistoryItem],
+    )
     async def get_recall_history(user: User = Depends(get_authenticated_user)):
         """Get search/recall history for the authenticated user."""
         send_telemetry(
@@ -184,15 +194,21 @@ def get_recall_router() -> APIRouter:
         try:
             history = await get_history(user.id, limit=0)
             return history
-        except Exception as error:
+        except CogneeApiError:
+            raise
+        except Exception:
             logger = get_logger()
-            logger.error("Recall history error: %s", error, exc_info=True)
+            logger.exception("Recall history error")
             return JSONResponse(
                 status_code=500,
                 content={"error": "An error occurred while fetching recall history."},
             )
 
-    @router.post("", response_model=list[RecallResponse])
+    @router.post(
+        "",
+        summary="Recall: query memory with auto-routed search type and session-first lookup",
+        response_model=list[RecallResponse],
+    )
     @log_usage(function_name="POST /v1/recall", log_type="api_endpoint")
     async def recall(
         payload: RecallPayloadDTO,
@@ -209,8 +225,9 @@ def get_recall_router() -> APIRouter:
         Field names are shown camelCased in the schema (e.g. searchType, datasetIds,
         topK); both camelCase and snake_case are accepted.
 
-        - **search_type** (Optional[SearchType]): Type of search to perform
-          (default: HYBRID_COMPLETION). Pass null to enable automatic query routing.
+        - **search_type** (Optional[SearchType]): Type of search to perform. Omit
+          (default: null) to auto-route the query with the rule-based router
+          (HYBRID_COMPLETION fallback); pass a value to pin one.
         - **datasets** (Optional[List[str]]): Dataset names to search within
         - **dataset_ids** (Optional[List[UUID]]): Dataset UUIDs to search within;
           take precedence over dataset names when both are provided
@@ -218,11 +235,11 @@ def get_recall_router() -> APIRouter:
         - **system_prompt** (Optional[str]): System prompt for completion searches
         - **node_name** (Optional[List[str]]): Filter to specific node sets
         - **top_k** (Optional[int]): Maximum results (default: 15)
-        - **only_context** (bool): Return only the LLM context
-        - **context_format** (str): Shape of an only_context result — "context"
-          (default, the bare retrieval context) or "prompt" (the full envelope a
-          completion would receive: session guidance, conversation history, and the
-          rendered user and system prompts)
+        - **only_context** (bool): Return what the LLM would have received instead of
+          its answer — for completion types each item's text is the user prompt
+          (conversation history, question plus retrieval context, session guidance)
+          and its system_prompt field the retriever's task template; retrieval-only
+          types return their context
         - **verbose** (bool): Verbose output
         - **include_references** (bool): Include source/provenance references in
           completion results (default: true)
@@ -231,10 +248,12 @@ def get_recall_router() -> APIRouter:
         - **session_id** (Optional[str]): Session whose cached QA and trace entries
           should be searched
         - **scope** (Optional[str | List[str]]): Memory sources to include: "graph",
-          "session", "trace", "session_context", "tools", "code", "all", "auto", or a
-          list of these (default: "auto" — session first when session_id is set, else
-          graph). "code" is explicit opt-in only and returns deterministic code-graph
-          facts tagged _source="code" (e.g. scope=["graph", "code"])
+          "session", "session_first", "trace", "session_context", "tools", "code",
+          "all", "auto", or a list of these (default: "auto" — session first when
+          session_id is set, else graph). "session_first" requests that short-circuit
+          explicitly rather than by omitting searchType. "code" is explicit opt-in only
+          and returns deterministic code-graph facts tagged source="code"
+          (e.g. scope=["graph", "code"])
         - **code_query** (Optional[dict]): "code" scope only — operation and arguments
           for the code-graph query (same format as /v1/search code_query); omit for
           the default "explore" with the query text as seed
@@ -260,7 +279,7 @@ def get_recall_router() -> APIRouter:
             user,
             additional_properties={
                 "endpoint": "POST /v1/recall",
-                "search_type": str(payload.search_type),
+                "search_type": str(payload.search_type.value) if payload.search_type else "auto",
                 "cognee_version": cognee_version,
             },
         )
@@ -288,7 +307,6 @@ def get_recall_router() -> APIRouter:
                 top_k=payload.top_k,
                 verbose=payload.verbose,
                 only_context=payload.only_context,
-                context_format=payload.context_format,
                 session_id=payload.session_id,
                 scope=payload.scope,
                 context_profile=payload.context_profile,
@@ -340,9 +358,9 @@ def get_recall_router() -> APIRouter:
                     f"{sorted(_VALID_SCOPES)}."
                 },
             )
-        except Exception as error:
+        except Exception:
             logger = get_logger()
-            logger.error("Recall endpoint error: %s", error, exc_info=True)
+            logger.exception("Recall endpoint error")
             return JSONResponse(
                 status_code=409,
                 content={"error": "An error occurred during recall."},

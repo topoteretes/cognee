@@ -1,10 +1,6 @@
 import asyncio
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Optional
 
-from cognee.modules.pipelines.tasks.task import task_summary
-from cognee.infrastructure.engine import DataPoint
-from cognee.infrastructure.databases.unified import get_unified_engine
-from cognee.infrastructure.databases.unified.capabilities import EngineCapability
 from cognee.infrastructure.databases.provenance import (
     EdgeIdentity,
     data_item_id,
@@ -14,22 +10,27 @@ from cognee.infrastructure.databases.provenance.markers import (
     mark_graph_provenance_if_empty,
 )
 from cognee.infrastructure.databases.relational import get_async_session
+from cognee.infrastructure.databases.unified import get_unified_engine
+from cognee.infrastructure.databases.unified.capabilities import EngineCapability
+from cognee.infrastructure.engine import DataPoint
+from cognee.modules.engine.models import Triplet
 from cognee.modules.graph.methods import upsert_edges, upsert_nodes
 from cognee.modules.graph.utils import (
     deduplicate_nodes_and_edges,
     ensure_default_edge_properties,
     get_graph_from_model,
 )
-from .index_data_points import index_data_points
-from .chunk_ownership import collect_chunk_ownership
-from .index_graph_edges import index_graph_edges
-from cognee.modules.engine.models import Triplet
+from cognee.modules.pipelines.tasks.task import task_summary
+from cognee.modules.provenance.edge_evidence.capture import capture_graph_provenance
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage.exceptions import (
     InvalidDataPointsInAddDataPointsError,
 )
-from cognee.modules.provenance.edge_evidence.capture import capture_graph_provenance
+
 from ...modules.engine.utils import generate_node_id
+from .chunk_ownership import collect_chunk_ownership
+from .index_data_points import index_data_points
+from .index_graph_edges import index_graph_edges
 
 if TYPE_CHECKING:
     from cognee.modules.pipelines.models import PipelineContext
@@ -67,12 +68,12 @@ def _group_by_extra_keys(owner_map: dict) -> dict:
 
 @task_summary("Stored {n} data point(s)")
 async def add_data_points(
-    data_points: List[DataPoint],
-    custom_edges: Optional[List] = None,
+    data_points: list[DataPoint],
+    custom_edges: list | None = None,
     embed_triplets: bool = False,
     ctx: Optional["PipelineContext"] = None,
     graph_only: bool = False,
-) -> List[DataPoint]:
+) -> list[DataPoint]:
     """
     Add a batch of data points to the graph database by extracting nodes and edges,
     deduplicating them, and indexing them for retrieval.
@@ -453,7 +454,7 @@ def _extract_embeddable_text_from_datapoint(data_point: DataPoint) -> str:
     return " ".join(embeddable_values) if embeddable_values else ""
 
 
-def _create_triplets_from_graph(nodes: List[DataPoint], edges: List[tuple]) -> List[Triplet]:
+def _create_triplets_from_graph(nodes: list[DataPoint], edges: list[tuple]) -> list[Triplet]:
     """
     Create Triplet objects from graph nodes and edges.
 
@@ -472,7 +473,7 @@ def _create_triplets_from_graph(nodes: List[DataPoint], edges: List[tuple]) -> L
     --------
         - List[Triplet]: List of Triplet objects ready for indexing
     """
-    node_map: Dict[str, DataPoint] = {}
+    node_map: dict[str, DataPoint] = {}
     for node in nodes:
         if hasattr(node, "id"):
             node_id = str(node.id)

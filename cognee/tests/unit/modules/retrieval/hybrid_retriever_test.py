@@ -11,7 +11,6 @@ from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
 from cognee.modules.retrieval.hybrid.results import empty_hybrid_result
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 
-
 QUERY_VECTOR = [0.1, 0.2, 0.3]
 
 
@@ -133,25 +132,33 @@ async def test_empty_neighborhood_does_not_prevent_chunk_search():
 async def test_query_batch_with_session_cache_is_rejected():
     retriever = HybridRetriever()
 
-    with patch.object(retriever, "_use_session_cache", return_value=True):
-        with pytest.raises(QueryValidationError, match="batch queries with session cache"):
-            await retriever.get_retrieved_objects(query_batch=["q"])
+    with (
+        patch.object(retriever, "_use_session_cache", return_value=True),
+        pytest.raises(QueryValidationError, match="batch queries with session cache"),
+    ):
+        await retriever.get_retrieved_objects(query_batch=["q"])
 
 
 @pytest.mark.asyncio
-async def test_empty_graph_returns_empty_channels_without_embedding():
+async def test_empty_graph_raises_no_data_without_embedding():
+    """An empty graph is a state error (404), as for GRAPH_COMPLETION -- hybrid is
+    the default type, so a fresh install must not get a dict of empty channels."""
+    from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+
     unified = _unified()
     unified.graph.is_empty = AsyncMock(return_value=True)
     retriever = HybridRetriever()
 
-    with patch(
-        "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
-        new_callable=AsyncMock,
-        return_value=unified,
+    with (
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+            return_value=unified,
+        ),
+        pytest.raises(NoDataError, match="knowledge graph is empty"),
     ):
-        retrieved = await retriever.get_retrieved_objects(query="q")
+        await retriever.get_retrieved_objects(query="q")
 
-    assert retrieved == empty_hybrid_result()
     unified.vector.embedding_engine.embed_text.assert_not_awaited()
 
 

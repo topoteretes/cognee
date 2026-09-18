@@ -5,7 +5,6 @@ import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 
-
 _MIGRATION_PATH = (
     Path(__file__).resolve().parents[2]
     / "alembic"

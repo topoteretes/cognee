@@ -1,12 +1,11 @@
 """Resolve a CLI --user-id flag into a User object."""
 
-from typing import Optional
 from uuid import UUID
 
 import cognee.cli.echo as fmt
 
 
-async def resolve_cli_user(user_id: Optional[str] = None, strict: bool = False):
+async def resolve_cli_user(user_id: str | None = None, strict: bool = False):
     """Return the User for the given --user-id, or the default user when omitted.
 
     Raises ValueError with a clear message if user_id is not a valid UUID.
@@ -50,8 +49,8 @@ async def resolve_cli_user(user_id: Optional[str] = None, strict: bool = False):
 
 async def _get_default_user_with_recovery():
     """Try get_default_user(); on DatabaseNotCreatedError run migrations and retry."""
-    from cognee.modules.users.methods import get_default_user
     from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+    from cognee.modules.users.methods import get_default_user
 
     try:
         return await get_default_user()

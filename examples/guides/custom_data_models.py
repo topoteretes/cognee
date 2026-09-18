@@ -1,5 +1,15 @@
+"""Define custom DataPoint subclasses and store them with add_data_points, no LLM extraction.
+
+Person nodes are linked through a ``knows`` field as a bare reference, a list, or an
+(Edge, target) tuple carrying a weight and a custom relationship_type. Nothing is printed; inspect
+the graph afterwards.
+
+Run: uv run python examples/guides/custom_data_models.py
+"""
+
 import asyncio
 from typing import Any
+
 from pydantic import SkipValidation
 
 import cognee

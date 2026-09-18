@@ -1,27 +1,26 @@
 import json
+from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
-from fastapi import Form, File, Depends
-from typing import List, Optional, Union, Literal, Annotated
 from pydantic import BaseModel, Field, WithJsonSchema
 
-from cognee.memory import QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry
-from cognee.modules.users.models import User
+from cognee import __version__ as cognee_version
+from cognee.api.upload_fields import OptionalUploadFile, drop_blank_uploads
+from cognee.exceptions import CogneeApiError
+from cognee.memory import FeedbackEntry, QAEntry, SkillRunEntry, TraceEntry
 from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
+from cognee.shared.usage_logger import log_usage
+from cognee.shared.utils import send_telemetry
 from cognee.tasks.ingestion.data_item import (
     pair_labels_with_data,
     parse_external_metadata,
     parse_labels,
 )
-from cognee.shared.utils import send_telemetry
-from cognee.shared.logging_utils import get_logger
-from cognee.shared.usage_logger import log_usage
-from cognee import __version__ as cognee_version
-from cognee.exceptions import CogneeApiError
-from cognee.api.upload_fields import OptionalUploadFile, drop_blank_uploads
 
 logger = get_logger()
 
@@ -92,16 +91,16 @@ async def _import_cogx_archives(
         # and actionable message; the global handler in cognee/api/client.py
         # returns them.
         raise
-    except (ValueError, tarfile.TarError) as error:
+    except (ValueError, tarfile.TarError):
         # Log the detail server-side; the response stays generic so exception
         # text / stack frames are not exposed to the caller (CodeQL py/stack-trace-exposure).
-        logger.error("COGX archive import validation error: %s", error, exc_info=True)
+        logger.exception("COGX archive import validation error")
         return JSONResponse(
             status_code=400,
             content={"error": "Invalid COGX archive."},
         )
-    except Exception as error:
-        logger.error("COGX archive import error: %s", error, exc_info=True)
+    except Exception:
+        logger.exception("COGX archive import error")
         return JSONResponse(
             status_code=409,
             content={"error": "An error occurred during COGX archive import."},
@@ -111,11 +110,15 @@ async def _import_cogx_archives(
 def get_remember_router() -> APIRouter:
     router = APIRouter()
 
-    @router.post("", response_model=dict)
+    @router.post(
+        "",
+        summary="Remember: ingest data and build the knowledge graph (add + cognify + improve)",
+        response_model=dict,
+    )
     @log_usage(function_name="POST /v1/remember", log_type="api_endpoint")
     async def remember(
-        data: List[OptionalUploadFile] = File(default=None),
-        raw_data: Optional[List[EmptyExampleStr]] = Form(
+        data: list[OptionalUploadFile] = File(default=None),
+        raw_data: list[EmptyExampleStr] | None = Form(
             default=None,
             examples=[[]],
             description=(
@@ -132,7 +135,7 @@ def get_remember_router() -> APIRouter:
                 "file uploads."
             ),
         ),
-        labels: Optional[str] = Form(
+        labels: str | None = Form(
             default=None,
             examples=[""],
             description=(
@@ -146,7 +149,7 @@ def get_remember_router() -> APIRouter:
                 "with session_id or content_type."
             ),
         ),
-        external_metadata: Optional[str] = Form(
+        external_metadata: str | None = Form(
             default=None,
             examples=[""],
             description=(
@@ -159,7 +162,7 @@ def get_remember_router() -> APIRouter:
                 "rejected when combined with session_id or content_type."
             ),
         ),
-        datasetName: Optional[str] = Form(
+        datasetName: str | None = Form(
             default=None,
             examples=["default_dataset"],
             description=(
@@ -167,10 +170,10 @@ def get_remember_router() -> APIRouter:
                 "Required unless datasetId is provided."
             ),
         ),
-        datasetId: Union[UUID, Literal[""], None] = Form(default=None, examples=[""]),
+        datasetId: UUID | Literal[""] | None = Form(default=None, examples=[""]),
         # examples=[""] keeps Swagger try-it-out runnable: without an example,
         # Swagger UI auto-generates the literal "string" and submits it.
-        session_id: Optional[str] = Form(
+        session_id: str | None = Form(
             default=None,
             examples=[""],
             description=(
@@ -180,7 +183,7 @@ def get_remember_router() -> APIRouter:
                 "dashboard. Leave empty for a direct add+cognify."
             ),
         ),
-        node_set: Optional[List[EmptyExampleStr]] = Form(
+        node_set: list[EmptyExampleStr] | None = Form(
             default=None,
             examples=[[]],
             description=(
@@ -190,7 +193,7 @@ def get_remember_router() -> APIRouter:
                 "to skip tagging."
             ),
         ),
-        run_in_background: Optional[bool] = Form(
+        run_in_background: bool | None = Form(
             default=False,
             description=(
                 "If true, the request returns immediately (status 'running' with a "
@@ -200,7 +203,15 @@ def get_remember_router() -> APIRouter:
                 "for large files."
             ),
         ),
-        custom_prompt: Optional[str] = Form(
+        self_improvement: bool | None = Form(
+            default=True,
+            description=(
+                "Run the self-improvement loop (improve) after the knowledge graph is built: "
+                "triplet enrichment and, for session-backed data, the session bridge. Set to "
+                "false for a plain add + cognify ingestion. Ignored with session_id."
+            ),
+        ),
+        custom_prompt: str | None = Form(
             default="",
             description=(
                 "Replaces the default entity-extraction prompt used during graph building. "
@@ -209,7 +220,7 @@ def get_remember_router() -> APIRouter:
                 "prompt."
             ),
         ),
-        chunk_size: Optional[int] = Form(
+        chunk_size: int | None = Form(
             default=4096,
             description=(
                 "Maximum tokens per text chunk during ingestion (default: 4096). Each chunk "
@@ -218,14 +229,14 @@ def get_remember_router() -> APIRouter:
                 "finer-grained extraction at higher LLM cost."
             ),
         ),
-        chunks_per_batch: Optional[int] = Form(
+        chunks_per_batch: int | None = Form(
             default=36,
             description=(
                 "Number of chunks processed per cognify task batch (default: 36). Controls "
                 "ingestion parallelism/throughput; rarely needs changing."
             ),
         ),
-        ontology_key: Optional[List[EmptyExampleStr]] = Form(
+        ontology_key: list[EmptyExampleStr] | None = Form(
             default=None,
             examples=[[]],
             description=(
@@ -233,7 +244,7 @@ def get_remember_router() -> APIRouter:
                 "entity extraction. Leave empty to ingest without an ontology."
             ),
         ),
-        graph_model: Optional[str] = Form(
+        graph_model: str | None = Form(
             default=None,
             examples=[""],
             description=(
@@ -244,7 +255,7 @@ def get_remember_router() -> APIRouter:
                 "Invalid JSON or an unconvertible schema is rejected with 400."
             ),
         ),
-        content_type: Optional[str] = Form(
+        content_type: str | None = Form(
             default=None,
             examples=[""],
             description=(
@@ -255,14 +266,14 @@ def get_remember_router() -> APIRouter:
                 "Leave empty for normal ingestion."
             ),
         ),
-        import_mode: Optional[str] = Form(
+        import_mode: str | None = Form(
             default=None,
             examples=[""],
             description=(
                 "COGX archive imports only: 'preserve' (default), 'hybrid', or 're-derive'."
             ),
         ),
-        skills_text: Optional[str] = Form(
+        skills_text: str | None = Form(
             default=None,
             examples=[""],
             description=(
@@ -272,7 +283,7 @@ def get_remember_router() -> APIRouter:
                 "skill_name to control the resulting skill name."
             ),
         ),
-        skill_name: Optional[str] = Form(
+        skill_name: str | None = Form(
             default=None,
             examples=[""],
             description=(
@@ -280,7 +291,7 @@ def get_remember_router() -> APIRouter:
                 "(defaults to 'skill')."
             ),
         ),
-        index_vectors: Optional[bool] = Form(
+        index_vectors: bool | None = Form(
             default=False,
             description=(
                 "content_type='code' only: also embed the extracted code facts so "
@@ -324,6 +335,8 @@ def get_remember_router() -> APIRouter:
           data is ingested directly via add + cognify.
         - **node_set** (Optional[List[str]]): Node identifiers for graph organisation.
         - **run_in_background** (Optional[bool]): Run the cognify step asynchronously (default: False).
+        - **self_improvement** (Optional[bool]): Run the improve loop after cognify
+          (default: True). False gives a plain add + cognify ingestion.
         - **custom_prompt** (Optional[str]): Custom prompt for entity extraction.
         - **chunk_size** (Optional[int]): Maximum tokens per chunk (default: 4096).
         - **chunks_per_batch** (Optional[int]): Chunks per cognify batch.
@@ -414,6 +427,20 @@ def get_remember_router() -> APIRouter:
                 detail=(
                     "labels and external_metadata are only supported for normal ingestion — "
                     "remove session_id and content_type to use them."
+                ),
+            )
+
+        # An ontology grounds entity extraction and the session-cache path never
+        # extracts, so the keys would be accepted and silently ignored. The MCP
+        # client rejects this too, but a direct HTTP caller bypasses that and the
+        # server owns its own invariants. Checked here, beside the labels rule and
+        # outside the try below, which rewraps raised errors as a 409.
+        if session_id and any(key for key in (ontology_key or [])):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "ontology_key is only supported for permanent writes — "
+                    "remove session_id to ground extraction with an ontology."
                 ),
             )
 
@@ -510,8 +537,8 @@ def get_remember_router() -> APIRouter:
                 detail="Provide at least one file in 'data' or one entry in 'raw_data'.",
             )
 
-        from cognee.api.v1.remember import remember as cognee_remember
         from cognee.api.v1.ontologies.ontologies import OntologyService
+        from cognee.api.v1.remember import remember as cognee_remember
         from cognee.shared.graph_model_utils import graph_schema_to_graph_model
 
         # Validate graph_model before the generic try/except so failures
@@ -535,7 +562,7 @@ def get_remember_router() -> APIRouter:
                         "Expected the same dict format as the cognify endpoint, "
                         "including a top-level 'title' key."
                     ),
-                )
+                ) from parse_err
 
         try:
             config_to_use = None
@@ -545,11 +572,12 @@ def get_remember_router() -> APIRouter:
                 ontology_service = OntologyService()
                 ontology_contents = ontology_service.get_ontology_contents(ontology_keys, user)
 
+                from io import StringIO
+
                 from cognee.modules.ontology.ontology_config import Config
                 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import (
                     RDFLibOntologyResolver,
                 )
-                from io import StringIO
 
                 ontology_streams = [StringIO(content) for content in ontology_contents]
                 config_to_use: Config = {
@@ -567,6 +595,7 @@ def get_remember_router() -> APIRouter:
                 dataset_id=datasetId if datasetId else None,
                 node_set=[tag for tag in (node_set or []) if tag] or None,
                 run_in_background=run_in_background or False,
+                self_improvement=self_improvement if self_improvement is not None else True,
                 custom_prompt=custom_prompt or None,
                 chunk_size=chunk_size,
                 chunks_per_batch=chunks_per_batch,
@@ -599,13 +628,13 @@ def get_remember_router() -> APIRouter:
             # the global handler in cognee/api/client.py returns them.
             raise
         except ValueError as error:
-            logger.error("Remember endpoint validation error: %s", error, exc_info=True)
+            logger.exception("Remember endpoint validation error")
             return JSONResponse(
                 status_code=409,
                 content={"error": f"Invalid request data for remember operation: {error}"},
             )
         except Exception as error:
-            logger.error("Remember endpoint error: %s", error, exc_info=True)
+            logger.exception("Remember endpoint error")
             return JSONResponse(
                 status_code=409,
                 content={"error": f"An error occurred during remember: {error}"},
@@ -620,25 +649,29 @@ def get_remember_router() -> APIRouter:
         """
 
         entry: Annotated[
-            Union[QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry],
+            QAEntry | TraceEntry | FeedbackEntry | SkillRunEntry,
             Field(discriminator="type"),
         ]
         dataset_name: str = "main_dataset"
-        dataset_id: Optional[UUID] = Field(
+        dataset_id: UUID | None = Field(
             default=None,
             description=(
                 "UUID of an existing writable dataset. Takes precedence over dataset_name "
                 "and is required to target a shared dataset by ID."
             ),
         )
-        session_id: Optional[str] = Field(
+        session_id: str | None = Field(
             default=None,
             examples=["claude-code-1718000000"],
             description="Required for qa/trace/feedback entries; optional for skill_run entries.",
         )
-        skill_improvement: Optional[dict] = None
+        skill_improvement: dict | None = None
 
-    @router.post("/entry", response_model=dict)
+    @router.post(
+        "/entry",
+        summary="Remember a session entry (QA, trace, feedback) into the session cache",
+        response_model=dict,
+    )
     @log_usage(function_name="POST /v1/remember/entry", log_type="api_endpoint")
     async def remember_entry(
         payload: RememberEntryRequest,
@@ -705,8 +738,8 @@ def get_remember_router() -> APIRouter:
             # Cognee errors carry their own status code and actionable message;
             # the global handler in cognee/api/client.py returns them.
             raise
-        except Exception as error:
-            logger.error("Remember entry endpoint error: %s", error, exc_info=True)
+        except Exception:
+            logger.exception("Remember entry endpoint error")
             return JSONResponse(
                 status_code=409,
                 content={"error": "An error occurred during remember."},

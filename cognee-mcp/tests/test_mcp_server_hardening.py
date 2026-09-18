@@ -12,7 +12,6 @@ from pathlib import Path
 import httpx
 import pytest
 
-
 MCP_ROOT = Path(__file__).resolve().parents[1]  # cognee-mcp/
 if str(MCP_ROOT) not in sys.path:
     sys.path.insert(0, str(MCP_ROOT))
@@ -53,6 +52,52 @@ def test_format_recall_results_handles_normalized_rows():
     assert "[graph] graph answer" in rendered
 
 
+def test_cognee_client_auth_schemes():
+    # 1. Default non-tenant URL -> Bearer token
+    client = CogneeClient(api_url="http://localhost:8000", api_token="secret_key")
+    headers = client._get_headers()
+    assert headers["Authorization"] == "Bearer secret_key"
+    assert "X-Api-Key" not in headers
+
+    # 2. Explicit x-api-key scheme -> X-Api-Key header
+    client_key = CogneeClient(
+        api_url="http://localhost:8000",
+        api_token="secret_key",
+        api_auth_scheme="x-api-key",
+    )
+    headers_key = client_key._get_headers()
+    assert headers_key["X-Api-Key"] == "secret_key"
+    assert "Authorization" not in headers_key
+
+    # 3. Explicit bearer scheme -> Bearer token
+    client_bearer = CogneeClient(
+        api_url="http://localhost:8000",
+        api_token="secret_key",
+        api_auth_scheme="bearer",
+    )
+    headers_bearer = client_bearer._get_headers()
+    assert headers_bearer["Authorization"] == "Bearer secret_key"
+    assert "X-Api-Key" not in headers_bearer
+
+    # 4. Cloud tenant URL -> X-Api-Key + X-Tenant-Id
+    tenant_url = "https://tenant-12345678-1234-1234-1234-123456789abc.cognee.ai"
+    client_cloud = CogneeClient(api_url=tenant_url, api_token="secret_key")
+    headers_cloud = client_cloud._get_headers()
+    assert headers_cloud["X-Api-Key"] == "secret_key"
+    assert headers_cloud["X-Tenant-Id"] == "12345678-1234-1234-1234-123456789abc"
+    assert "Authorization" not in headers_cloud
+
+    # 5. COGNEE_API_AUTH_SCHEME environment variable
+    os.environ["COGNEE_API_AUTH_SCHEME"] = "x-api-key"
+    try:
+        client_env = CogneeClient(api_url="http://localhost:8000", api_token="secret_key")
+        headers_env = client_env._get_headers()
+        assert headers_env["X-Api-Key"] == "secret_key"
+        assert "Authorization" not in headers_env
+    finally:
+        os.environ.pop("COGNEE_API_AUTH_SCHEME", None)
+
+
 # Tools that the MCP server is expected to expose. Kept as named groups so the
 # contract documents intent rather than just enumerating names. The hardening
 # rule is that the LLM-direct memory API stays minimal (V2: remember/recall/
@@ -69,7 +114,7 @@ EXPECTED_TOOLS = MEMORY_API_TOOLS | STATUS_TOOLS
 
 @pytest.mark.asyncio
 async def test_mcp_exposes_only_memory_tools():
-    import src.server as server
+    from src import server
 
     tools = await server.mcp.list_tools()
 
@@ -522,7 +567,7 @@ class RecordingRememberClient:
 @pytest.mark.asyncio
 async def test_mcp_remember_rejects_invalid_payloads(monkeypatch, kwargs, expected_error):
     """Bad argument combinations are refused before any ingestion is attempted."""
-    import src.server as server
+    from src import server
 
     fake_client = RecordingRememberClient()
     monkeypatch.setattr(server, "cognee_client", fake_client)
@@ -537,7 +582,7 @@ async def test_mcp_remember_rejects_invalid_payloads(monkeypatch, kwargs, expect
 @pytest.mark.asyncio
 async def test_mcp_remember_rejects_uploads_over_the_size_limit(monkeypatch):
     """Oversized uploads are rejected client-side rather than posted."""
-    import src.server as server
+    from src import server
 
     fake_client = RecordingRememberClient()
     monkeypatch.setattr(server, "cognee_client", fake_client)
@@ -559,7 +604,7 @@ async def test_mcp_remember_rejects_uploads_over_the_size_limit(monkeypatch):
 @pytest.mark.asyncio
 async def test_mcp_remember_forwards_file_uploads(monkeypatch):
     """The merged tool hands filename + content_base64 straight to the client."""
-    import src.server as server
+    from src import server
 
     fake_client = RecordingRememberClient()
     monkeypatch.setattr(server, "cognee_client", fake_client)
@@ -582,6 +627,8 @@ async def test_mcp_remember_forwards_file_uploads(monkeypatch):
             "dataset_name": "ds",
             "session_id": None,
             "custom_prompt": "extract carefully",
+            "ontology_key": None,
+            "self_improvement": True,
         }
     ]
     # The confirmation names the file and its decoded size, not the base64 length.
@@ -593,7 +640,7 @@ async def test_mcp_remember_forwards_file_uploads(monkeypatch):
 @pytest.mark.asyncio
 async def test_mcp_remember_still_stores_text_and_session_entries(monkeypatch):
     """Absorbing cognify_file left the pre-existing text paths intact."""
-    import src.server as server
+    from src import server
 
     fake_client = RecordingRememberClient()
     monkeypatch.setattr(server, "cognee_client", fake_client)
@@ -612,7 +659,7 @@ async def test_mcp_remember_still_stores_text_and_session_entries(monkeypatch):
 @pytest.mark.asyncio
 async def test_mcp_remember_defaults_dataset_when_caller_omits_it(monkeypatch):
     """Uploads inherit the agent-scoped default dataset, same as text writes."""
-    import src.server as server
+    from src import server
 
     fake_client = RecordingRememberClient()
     monkeypatch.setattr(server, "cognee_client", fake_client)
@@ -626,7 +673,7 @@ async def test_mcp_remember_defaults_dataset_when_caller_omits_it(monkeypatch):
 @pytest.mark.asyncio
 async def test_mcp_remember_reports_client_failures(monkeypatch):
     """Ingestion errors surface as tool errors instead of propagating."""
-    import src.server as server
+    from src import server
 
     class ExplodingClient:
         async def remember(self, **kwargs):
@@ -645,7 +692,7 @@ async def test_mcp_remember_reports_client_failures(monkeypatch):
 @pytest.mark.asyncio
 async def test_mcp_no_longer_exposes_cognify_file():
     """cognify_file was absorbed into remember and must be gone from the surface."""
-    import src.server as server
+    from src import server
 
     tools = await server.mcp.list_tools()
 
@@ -656,7 +703,7 @@ async def test_mcp_no_longer_exposes_cognify_file():
 @pytest.mark.asyncio
 async def test_mcp_remember_advertises_file_upload_parameters():
     """The merged tool's schema is what tells an LLM it can send files."""
-    import src.server as server
+    from src import server
 
     tools = await server.mcp.list_tools()
     remember_tool = next(tool for tool in tools if tool.name == "remember")
@@ -671,7 +718,7 @@ async def test_mcp_remember_advertises_file_upload_parameters():
 
 @pytest.mark.asyncio
 async def test_mcp_recall_forwards_system_prompt(monkeypatch):
-    import src.server as server
+    from src import server
 
     class FakeClient:
         def __init__(self):
@@ -1086,3 +1133,69 @@ def test_path_flag_moves_endpoint_without_clobbering_defaults(transport, explici
     app = server._build_http_app(transport, "127.0.0.1", explicit)
 
     assert _probe(app, transport, path=expected) != 404
+
+
+@pytest.mark.asyncio
+async def test_api_pipeline_status_sends_the_requested_pipeline_name():
+    """The requested pipeline name has to reach the server.
+
+    `GET /api/v1/datasets/status` defaults to cognify_pipeline when `pipeline`
+    is omitted, so dropping the name does not fail loudly — it returns
+    cognify_pipeline's status labelled as whatever the caller asked for.
+    """
+    requests: list[httpx.Request] = []
+    client = await _mock_api_client(requests)
+    dataset_id = "11111111-1111-1111-1111-111111111111"
+
+    try:
+        await client.get_pipeline_status([dataset_id], "add_pipeline")
+    finally:
+        await client.close()
+
+    status_calls = [r for r in requests if r.url.path == "/api/v1/datasets/status"]
+    assert len(status_calls) == 1
+    params = status_calls[0].url.params
+    assert params.get_list("dataset") == [dataset_id]
+    assert params.get_list("pipeline") == ["add_pipeline"], (
+        f"pipeline name was dropped; query was {status_calls[0].url.query!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_pipeline_status_distinguishes_pipelines():
+    """Two different names must produce two different queries.
+
+    The multi-pipeline branch in cognify_status calls this once per name and
+    labels each result with the name it asked for, so identical queries would
+    report one pipeline's status under every name.
+    """
+    requests: list[httpx.Request] = []
+    client = await _mock_api_client(requests)
+    dataset_id = "11111111-1111-1111-1111-111111111111"
+
+    try:
+        await client.get_pipeline_status([dataset_id], "add_pipeline")
+        await client.get_pipeline_status([dataset_id], "code_graph_pipeline")
+    finally:
+        await client.close()
+
+    status_calls = [r for r in requests if r.url.path == "/api/v1/datasets/status"]
+    requested = [name for r in status_calls for name in r.url.params.get_list("pipeline")]
+    assert requested == ["add_pipeline", "code_graph_pipeline"]
+
+
+@pytest.mark.asyncio
+async def test_api_pipeline_status_omits_an_empty_pipeline_name():
+    """No name means the server applies its own default, as before."""
+    requests: list[httpx.Request] = []
+    client = await _mock_api_client(requests)
+    dataset_id = "11111111-1111-1111-1111-111111111111"
+
+    try:
+        await client.get_pipeline_status([dataset_id], "")
+    finally:
+        await client.close()
+
+    status_calls = [r for r in requests if r.url.path == "/api/v1/datasets/status"]
+    assert status_calls[0].url.params.get_list("pipeline") == []
+    assert status_calls[0].url.params.get_list("dataset") == [dataset_id]

@@ -2,23 +2,22 @@ import argparse
 import asyncio
 import json
 
-from cognee.cli.reference import SupportsCliCommand
-from cognee.cli import DEFAULT_DOCS_URL
-from cognee.cli.config import (
-    COMPLETION_SEARCH_TYPES,
-    DEFAULT_SEARCH_TYPE,
-    OUTPUT_FORMAT_CHOICES,
-    SEARCH_TYPE_CHOICES,
-)
 import cognee.cli.echo as fmt
+from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.code_search import (
     add_code_arguments,
     build_code_query,
     handle_diagram_out,
-    print_code_results,
+)
+from cognee.cli.config import (
+    AUTO_QUERY_TYPE,
+    OUTPUT_FORMAT_CHOICES,
+    SEARCH_TYPE_CHOICES,
 )
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 from cognee.cli.hints import hint_recall_empty
+from cognee.cli.recall_output import print_recall_results
+from cognee.cli.reference import SupportsCliCommand
 
 
 class RecallCommand(SupportsCliCommand):
@@ -32,6 +31,10 @@ When --session-id is provided without --datasets or --query-type,
 searches the session cache directly by keyword matching.
 Otherwise, this is a memory-oriented alias for `cognee search`.
 
+Without --query-type the query is auto-routed to a search strategy by a
+rule-based classifier (no LLM call); HYBRID_COMPLETION is the fallback.
+Pass --query-type to pin one. See docs/recall-vs-search.md.
+
 With --query-type CODE, --code-query selects the code-graph operation and
 --diagram / --diagram-out draw the result (Mermaid or Graphviz).
     """
@@ -43,7 +46,7 @@ With --query-type CODE, --code-query selects the code-graph operation and
             "-t",
             choices=SEARCH_TYPE_CHOICES,
             default=None,
-            help="Search mode (default: HYBRID_COMPLETION)",
+            help="Search mode. Omit to auto-route the query; pass a value to pin one.",
         )
         parser.add_argument(
             "--datasets",
@@ -88,11 +91,20 @@ With --query-type CODE, --code-query selects the code-graph operation and
 
             code_query = build_code_query(args, args.query_type)
 
-            # Session-only mode: -s without -d and without explicit -t
+            # `-d` with no names parses to []. recall() keys on
+            # `datasets is not None`, so [] makes it resolve and pin every
+            # readable dataset — and raise DatasetNotFoundError when there are
+            # none — where None skips the lookup and leaves the search unscoped.
+            args.datasets = args.datasets or None
+
+            # Session-only mode: -s without -d and without explicit -t. Only the
+            # echo line differs; recall() decides the sources from the arguments.
             session_only = (
                 args.session_id is not None and not args.datasets and args.query_type is None
             )
-            effective_query_type = args.query_type or DEFAULT_SEARCH_TYPE
+            # No -t means "let the SDK route"; the label is refined from the
+            # results once the resolved search type is known.
+            effective_query_type = args.query_type or AUTO_QUERY_TYPE
 
             if session_only:
                 fmt.echo(f"Searching session '{args.session_id}': '{args.query_text}'")
@@ -110,34 +122,23 @@ With --query-type CODE, --code-query selects the code-graph operation and
                     if args.session_id is not None:
                         session_kwargs["session_id"] = args.session_id
 
-                    if session_only:
-                        # Pass query_type=None to trigger session-only search
-                        results = await cognee.recall(
-                            query_text=args.query_text,
-                            top_k=args.top_k,
-                            **session_kwargs,
-                        )
-                    else:
-                        query_type = SearchType[effective_query_type]
-                        recall_kwargs = {
-                            "query_text": args.query_text,
-                            "query_type": query_type,
-                            "datasets": args.datasets,
-                            "top_k": args.top_k,
-                            "system_prompt_path": (
-                                args.system_prompt or "answer_simple_question.txt"
-                            ),
-                            **session_kwargs,
-                        }
-                        if code_query is not None:
-                            # recall() runs code_query in its dedicated "code"
-                            # lane, which the auto scope never implies.
-                            recall_kwargs["code_query"] = code_query
-                            recall_kwargs["scope"] = ["code"]
-                        results = await cognee.recall(**recall_kwargs)
-                    return results
+                    recall_kwargs = {
+                        "query_text": args.query_text,
+                        "datasets": args.datasets,
+                        "top_k": args.top_k,
+                        "system_prompt_path": (args.system_prompt or "answer_simple_question.txt"),
+                        **session_kwargs,
+                    }
+                    if args.query_type is not None:
+                        recall_kwargs["query_type"] = SearchType[args.query_type]
+                    if code_query is not None:
+                        # recall() runs code_query in its dedicated "code"
+                        # lane, which the auto scope never implies.
+                        recall_kwargs["code_query"] = code_query
+                        recall_kwargs["scope"] = ["code"]
+                    return await cognee.recall(**recall_kwargs)
                 except Exception as e:
-                    raise CliCommandInnerException(f"Failed to recall: {str(e)}") from e
+                    raise CliCommandInnerException(f"Failed to recall: {e!s}") from e
 
             results = asyncio.run(run_recall())
 
@@ -157,46 +158,11 @@ With --query-type CODE, --code-query selects the code-graph operation and
                     hint_recall_empty(hint_dataset)
                     return
 
-                # Detect session results by _source tag
-                is_session = isinstance(results[0], dict) and results[0].get("_source") == "session"
-
-                if is_session:
-                    fmt.echo(f"\nFound {len(results)} session entry(ies):")
-                    fmt.echo("=" * 60)
-                    for i, entry in enumerate(results, 1):
-                        q = entry.get("question", "")
-                        a = entry.get("answer", "")
-                        t = entry.get("time", "")
-                        header = f"[{t}] " if t else ""
-                        if q:
-                            fmt.echo(f"{fmt.bold(f'{header}Q:')} {q}")
-                        if a:
-                            fmt.echo(f"{fmt.bold('A:')} {a}")
-                        if i < len(results):
-                            fmt.echo("-" * 40)
-                else:
-                    fmt.echo(f"\nFound {len(results)} result(s) using {effective_query_type}:")
-                    fmt.echo("=" * 60)
-
-                    if effective_query_type in COMPLETION_SEARCH_TYPES:
-                        for i, result in enumerate(results, 1):
-                            fmt.echo(f"{fmt.bold('Response:')} {result}")
-                            if i < len(results):
-                                fmt.echo("-" * 40)
-                    elif args.query_type == "CHUNKS":
-                        for i, result in enumerate(results, 1):
-                            fmt.echo(f"{fmt.bold(f'Chunk {i}:')} {result}")
-                            fmt.echo()
-                    elif effective_query_type == "CODE" and print_code_results(results):
-                        pass
-                    else:
-                        for i, result in enumerate(results, 1):
-                            fmt.echo(f"{fmt.bold(f'Result {i}:')} {result}")
-                            fmt.echo()
+                print_recall_results(results, effective_query_type)
 
             handle_diagram_out(results, args)
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(f"Error recalling: {str(e)}", error_code=1) from e
+            raise CliCommandException(f"Error recalling: {e!s}", error_code=1) from e

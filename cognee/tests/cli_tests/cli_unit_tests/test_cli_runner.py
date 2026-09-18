@@ -2,9 +2,10 @@
 Test runner and utilities for CLI tests.
 """
 
-import pytest
 import sys
 from pathlib import Path
+
+import pytest
 
 
 def run_cli_tests():

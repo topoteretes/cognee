@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import List
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -36,8 +35,14 @@ class E2EConfig:
     username: str = field(
         default_factory=lambda: os.getenv("COGNEE_DEFAULT_USER", "default_user@example.com")
     )
+    # DEFAULT_USER_PASSWORD is what the server was started with; the default
+    # user has no loginable password unless it is set, so fall back to it
+    # before the historical literal.
     password: str = field(
-        default_factory=lambda: os.getenv("COGNEE_DEFAULT_PASSWORD", "default_password")
+        default_factory=lambda: (
+            os.getenv("COGNEE_DEFAULT_PASSWORD")
+            or os.getenv("DEFAULT_USER_PASSWORD", "default_password")
+        )
     )
 
     # How long to wait for a freshly-started service to report healthy.
@@ -64,7 +69,7 @@ class E2EConfig:
     compose_file: str = field(
         default_factory=lambda: os.getenv("COGNEE_E2E_COMPOSE_FILE", "docker-compose.yml")
     )
-    compose_profiles: List[str] = field(
+    compose_profiles: list[str] = field(
         default_factory=lambda: [
             p.strip()
             for p in os.getenv("COGNEE_E2E_COMPOSE_PROFILES", "postgres,mcp").split(",")
