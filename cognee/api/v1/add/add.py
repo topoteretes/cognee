@@ -36,24 +36,37 @@ def _add_pipeline_needs_llm(data: Any, preferred_loaders: list | None) -> bool:
 
     Two rules, in order:
 
-    *No LLM configured at all — no.* The checks this drives have nothing to add
-    then: the first-run connection probe would only restate the absent key, and
-    the provider-config warning would claim extraction needs an LLM when a
-    keyless run extracts with the local GLiNER model and embeds with the local
-    embedder. Keyless ingestion is a supported mode, so a conservative guess
-    about a file whose loader is not known yet must not block it. Media is the
-    one ingestion step that genuinely needs a key, and each media loader raises
-    its own actionable error if it is actually reached
-    (``require_llm_for_media``) — a moment later than the probe, naming the
-    file kind and what still works without a key.
+    *The run will extract with the local GLiNER model — no.* The checks this
+    drives have nothing to add then: the first-run connection probe would only
+    restate the absent key, and the provider-config warning would claim
+    extraction needs an LLM when this run extracts and embeds locally. Keyless
+    ingestion is a supported mode, so a conservative guess about a file whose
+    loader is not resolved yet must not block it. Media is the one ingestion
+    step that still needs a key, and each media loader raises its own
+    actionable error if one is actually reached (``require_llm_for_media``) —
+    a moment later than the probe, naming the file kind and what works without
+    a key.
+
+    Asking ``resolve_extractor`` rather than "is a key configured" keeps an
+    explicit ``GRAPH_EXTRACTOR`` honoured in both directions: pinned to ``llm``
+    with no key still fails fast here, and pinned to ``gliner_demo`` skips the
+    probe it does not need. It resolves from config alone — ``extractor`` is a
+    cognify argument and never reaches ``add()`` — and raises
+    ``KeylessExtractorNotInstalledError`` when the keyless path is selected
+    without ``gliner2`` installed, which is the right answer at ingestion time:
+    nothing downstream could build a graph.
 
     *Otherwise, only known plain-text inputs can safely skip the check*: a file
     whose loader is not resolved yet could still be an image or a recording,
     whose loaders transcribe through the LLM.
     """
-    from cognee.modules.preflight import llm_available
+    from cognee.modules.cognify.config import (
+        GLINER_DEMO_EXTRACTOR,
+        get_cognify_config,
+        resolve_extractor,
+    )
 
-    if not llm_available():
+    if resolve_extractor(None, get_cognify_config()) == GLINER_DEMO_EXTRACTOR:
         return False
 
     if preferred_loaders:

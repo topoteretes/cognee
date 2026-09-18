@@ -12,22 +12,29 @@ from cognee.memify_pipelines.memify_default_tasks import (
 from cognee.modules.pipelines.tasks.task import pipeline_needs_llm
 from cognee.tasks.ingestion.data_item import DataItem
 
-preflight_mod = importlib.import_module("cognee.modules.preflight")
+cognify_config_mod = importlib.import_module("cognee.modules.cognify.config")
+
+
+def _pin_extractor(monkeypatch, extractor: str):
+    monkeypatch.setattr(
+        cognify_config_mod, "resolve_extractor", lambda *_args, **_kwargs: extractor
+    )
 
 
 @pytest.fixture(autouse=True)
-def with_llm(monkeypatch):
-    """A configured LLM, so each case below tests what the *input* implies.
+def llm_extractor(monkeypatch):
+    """The LLM extractor, so each case below tests what the *input* implies.
 
     Without this the answer is False for everything whenever the environment
-    has no LLM_API_KEY, and these cases would silently stop testing anything.
+    has no LLM_API_KEY (auto then resolves to gliner_demo), and these cases
+    would silently stop testing anything.
     """
-    monkeypatch.setattr(preflight_mod, "llm_available", lambda *_args, **_kwargs: True)
+    _pin_extractor(monkeypatch, cognify_config_mod.LLM_EXTRACTOR)
 
 
 @pytest.fixture
-def no_llm(monkeypatch):
-    monkeypatch.setattr(preflight_mod, "llm_available", lambda *_args, **_kwargs: False)
+def gliner_extractor(monkeypatch):
+    _pin_extractor(monkeypatch, cognify_config_mod.GLINER_DEMO_EXTRACTOR)
 
 
 @pytest.mark.parametrize(
@@ -59,8 +66,8 @@ def test_add_file_input_keeps_llm_check(tmp_path):
         ("plain text", {"custom_loader": {}}),
     ],
 )
-def test_keyless_setups_never_require_the_llm(data, preferred_loaders, no_llm):
-    """With no LLM configured, the checks this gates can only restate the missing key.
+def test_keyless_setups_never_require_the_llm(data, preferred_loaders, gliner_extractor):
+    """When the run extracts locally, the checks this gates can only restate the missing key.
 
     Keyless ingestion (local extractor, local embedder) has to work for the
     inputs that do not need an LLM, and the conservative "could be media" guess
@@ -70,7 +77,7 @@ def test_keyless_setups_never_require_the_llm(data, preferred_loaders, no_llm):
     assert _add_pipeline_needs_llm(data, preferred_loaders) is False
 
 
-def test_keyless_file_upload_does_not_require_the_llm(tmp_path, no_llm):
+def test_keyless_file_upload_does_not_require_the_llm(tmp_path, gliner_extractor):
     """The reported bug: a .txt upload 422'd before ingestion on a keyless setup."""
     document = tmp_path / "Natural_language_processing.txt"
     document.write_text("Natural language processing is a subfield of computer science.")
@@ -78,7 +85,7 @@ def test_keyless_file_upload_does_not_require_the_llm(tmp_path, no_llm):
     assert _add_pipeline_needs_llm(str(document), preferred_loaders=None) is False
 
 
-def test_keyless_media_upload_also_skips_the_check(tmp_path, no_llm):
+def test_keyless_media_upload_also_skips_the_check(tmp_path, gliner_extractor):
     """Even media: the probe cannot report anything the loader will not report better."""
     media_path = tmp_path / "image.png"
     media_path.write_bytes(b"not-an-image")
