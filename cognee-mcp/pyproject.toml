@@ -88,11 +88,11 @@ constraint-dependencies = [
 
 # Note: exclude newer packages that are less than 2 days old
 exclude-newer = "2 days"
-# ...but never for cognee itself. The 2-day window is a supply-chain guard for
-# third-party packages; applying it to our own package meant a release-day
-# `uv lock` silently resolved cognee to the *previous* release, which is how
-# the lock drifted to 1.2.2 while the image was tagged 1.4.1 (issue #4360).
-exclude-newer-package = { cognee = "0 days" }
+# ...but never for cognee itself or its pinned Enola binary. Applying the window
+# to cognee made release-day locks select an older release (issue #4360), while
+# applying it to Enola prevents local cognee source installs until the pin is
+# two days old even though the release is validated before the pin is updated.
+exclude-newer-package = { cognee = "0 days", enola-cli = "0 days" }
 
 [project.scripts]
 cognee = "src:main"

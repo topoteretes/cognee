@@ -20,6 +20,9 @@ resolution-markers = [
 exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "P2D"
 
+[options.exclude-newer-package]
+enola-cli = { timestamp = "0001-01-01T00:00:00Z", span = "PT0S" }
+
 [manifest]
 constraints = [
     { name = "nltk", specifier = ">=3.9.3" },
