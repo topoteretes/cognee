@@ -16,6 +16,7 @@ from cognee.memory.entries import normalize_scope
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.observability import (
+    COGNEE_RECALL_ROUTE_RULE,
     COGNEE_RECALL_SCOPE,
     COGNEE_RECALL_SOURCE,
     COGNEE_RESULT_COUNT,
@@ -39,6 +40,8 @@ from cognee.modules.recall.types.RecallResponse import (
     ResponseToolEntry,
 )
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
+from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
+from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
@@ -49,6 +52,11 @@ logger = get_logger("recall")
 
 # Minimum word length to avoid matching noise words like "a", "I"
 _MIN_WORD_LEN = 2
+
+# Routed types whose empty result means the lane was unavailable — no lexical
+# hits, no rules nodeset — and so is worth retrying as the default. Types the
+# router cannot pick never reach this set: the retry only second-guesses a guess.
+_RETRY_ON_EMPTY = frozenset({SearchType.CHUNKS_LEXICAL, SearchType.CODING_RULES})
 
 
 class RecallKwargs(TypedDict, total=False):
@@ -167,7 +175,7 @@ async def _search_session(
 
     Tokenizes the query and each QA entry (question + context + answer),
     ranks by token overlap, returns the top_k tagged with
-    ``_source: "session"``.
+    ``source="session"``.
     """
     from cognee.infrastructure.session.get_session_manager import get_session_manager
 
@@ -224,7 +232,7 @@ async def _search_trace(
 
     Tokenizes over origin_function, serialized method_params,
     method_return_value, memory_query, memory_context, and
-    session_feedback. Returns top_k tagged with ``_source: "trace"``.
+    session_feedback. Returns top_k tagged with ``source="trace"``.
     """
     import json
 
@@ -379,7 +387,7 @@ async def recall(
     hitting the permanent graph. If no session entries match, falls
     through to the permanent graph search.
 
-    Each result dict includes a ``_source`` key (``"session"`` or
+    Each result includes a ``source`` field (``"session"`` or
     ``"graph"``) so callers can tell where the result came from.
 
     When ``query_type`` is omitted and ``auto_route`` is True (default),
@@ -420,12 +428,12 @@ async def recall(
             ``None`` runs the default ``explore`` operation with the query
             text as seed. Only valid when ``scope`` includes ``"code"``
             (which is never implied by ``"auto"`` or ``"all"``); results are
-            tagged ``_source="code"``. A seed the code graph cannot resolve
+            tagged ``source="code"``. A seed the code graph cannot resolve
             contributes nothing rather than failing the recall.
 
     Returns:
         Search results. When searching session-only, returns a list of
-        matching QA entry dicts with ``_source="session"``.
+        matching QA entries with ``source="session"``.
     """
     from cognee import __version__ as cognee_version
     from cognee.shared.utils import send_telemetry
@@ -459,7 +467,9 @@ async def recall(
     # * no session_id:
     #     graph only.
     #
-    # Explicit ``scope`` values bypass this entirely.
+    # Explicit ``scope`` values bypass this entirely, and each branch above has
+    # one: "session_first" for the short-circuit, ["session", "graph"] for both
+    # contributing, "graph" for graph only. query_type need not be how you ask.
     resolved_scope = normalize_scope(scope)
     if resolved_scope == ["auto"]:
         has_dataset_scope = bool(dataset_ids) or bool(datasets)
@@ -473,8 +483,14 @@ async def recall(
             sources = ["graph"]
             auto_fallthrough = False
     else:
+        # The short-circuit as an explicit request. Without it, omitting
+        # query_type is the only way to ask for that behaviour.
+        auto_fallthrough = "session_first" in resolved_scope
+        if auto_fallthrough:
+            resolved_scope = ["session", "graph"] + [
+                s for s in resolved_scope if s not in ("session_first", "session", "graph")
+            ]
         sources = resolved_scope
-        auto_fallthrough = False
 
     if tools_trigger not in ("always", "on_empty"):
         raise CogneeValidationError(
@@ -626,14 +642,14 @@ async def recall(
 
                 await set_session_user_context_variable(user)
 
-                local_query_type = query_type
-                if local_query_type is not None:
-                    if auto_route:
-                        from cognee.api.v1.recall.query_router import record_override, route_query
+                from cognee.api.v1.recall.query_router import ROUTER_FALLBACK_TYPE, route_query
 
-                        result = route_query(query_text)
-                        routed_type = result.search_type
-                        record_override(routed_type, local_query_type)
+                # Set only when the router chose the type, so the retry below
+                # never second-guesses a pinned type or the no-LLM CHUNKS pick.
+                routed_rule = None
+
+                if query_type is not None:
+                    local_query_type = query_type
                 elif not llm_available(llm_config):
                     # No usable LLM is configured, so nothing can write a
                     # completion answer; the default lookup is the vector
@@ -643,17 +659,15 @@ async def recall(
                     # query_type still selects any search type.
                     local_query_type = SearchType.CHUNKS
                 elif auto_route:
-                    from cognee.api.v1.recall.query_router import route_query
-
-                    result = route_query(query_text)
-                    local_query_type = result.search_type
+                    decision = route_query(query_text)
+                    local_query_type = decision.search_type
+                    routed_rule = decision.rule
                 else:
-                    local_query_type = SearchType.HYBRID_COMPLETION
+                    local_query_type = ROUTER_FALLBACK_TYPE
 
-                span.set_attribute(
-                    COGNEE_SEARCH_TYPE,
-                    str(local_query_type.value) if local_query_type else "unknown",
-                )
+                span.set_attribute(COGNEE_SEARCH_TYPE, local_query_type.value)
+                if routed_rule is not None:
+                    span.set_attribute(COGNEE_RECALL_ROUTE_RULE, routed_rule)
 
                 # Dataset UUIDs take precedence over names, matching /api/v1/search.
                 # String dataset names can only resolve for the current user, and a
@@ -771,28 +785,67 @@ async def recall(
                             )
                         ]
 
-                graph_results = await authorized_search(
-                    query_text=query_text,
-                    query_type=local_query_type,
-                    user=user,
-                    dataset_ids=search_dataset_ids,
-                    system_prompt_path=system_prompt_path,
-                    system_prompt=system_prompt,
-                    top_k=top_k,
-                    node_name=node_name,
-                    node_name_filter_operator=node_name_filter_operator,
-                    only_context=only_context,
-                    session_id=session_id,
-                    wide_search_top_k=wide_search_top_k,
-                    triplet_distance_penalty=triplet_distance_penalty,
-                    feedback_influence=feedback_influence,
-                    retriever_specific_config=retriever_specific_config,
-                    neighborhood_depth=neighborhood_depth,
-                    neighborhood_seed_top_k=neighborhood_seed_top_k,
-                    include_references=include_references,
-                    llm_config=llm_config,
-                    embedding_config=embedding_config,
+                async def _search(search_type: SearchType):
+                    return await authorized_search(
+                        query_text=query_text,
+                        query_type=search_type,
+                        user=user,
+                        dataset_ids=search_dataset_ids,
+                        system_prompt_path=system_prompt_path,
+                        system_prompt=system_prompt,
+                        top_k=top_k,
+                        node_name=node_name,
+                        node_name_filter_operator=node_name_filter_operator,
+                        only_context=only_context,
+                        session_id=session_id,
+                        wide_search_top_k=wide_search_top_k,
+                        triplet_distance_penalty=triplet_distance_penalty,
+                        feedback_influence=feedback_influence,
+                        retriever_specific_config=retriever_specific_config,
+                        neighborhood_depth=neighborhood_depth,
+                        neighborhood_seed_top_k=neighborhood_seed_top_k,
+                        include_references=include_references,
+                        llm_config=llm_config,
+                        embedding_config=embedding_config,
+                    )
+
+                # The router picked something other than the default, so the
+                # default is still untried and may replace this result. Neither a
+                # pinned type nor the default itself is ever second-guessed.
+                routed_guess = (
+                    routed_rule is not None and local_query_type is not ROUTER_FALLBACK_TYPE
                 )
+
+                try:
+                    graph_results = await _search(local_query_type)
+                except (UnsupportedSearchTypeError, SearchTypeNotSupported) as error:
+                    if not routed_guess:
+                        raise
+                    # The backend rejected a routed guess — a deployment-level
+                    # choice, not the caller's; the default always substitutes.
+                    logger.info(
+                        "Rule %s routed to %s, which the backend rejected (%s); retrying as %s.",
+                        routed_rule,
+                        local_query_type.value,
+                        error,
+                        ROUTER_FALLBACK_TYPE.value,
+                    )
+                    local_query_type = ROUTER_FALLBACK_TYPE
+                    graph_results = await _search(local_query_type)
+
+                if routed_guess and not graph_results and local_query_type in _RETRY_ON_EMPTY:
+                    logger.info(
+                        "Rule %s routed to %s, which returned nothing; retrying as %s.",
+                        routed_rule,
+                        local_query_type.value,
+                        ROUTER_FALLBACK_TYPE.value,
+                    )
+                    local_query_type = ROUTER_FALLBACK_TYPE
+                    graph_results = await _search(local_query_type)
+
+                # A fallback above may have changed the type that answered; the
+                # span recorded the routed one before the search ran.
+                span.set_attribute(COGNEE_SEARCH_TYPE, local_query_type.value)
 
                 # /v1/search records every question it answers; recall never did,
                 # because it calls authorized_search() directly and skips the

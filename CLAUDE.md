@@ -150,7 +150,7 @@ Improve & Memify are virtually the same, though. So no reason not to use improve
 
 #### recall() vs search()
 
-`recall()` wraps `search()` — its graph path calls the same authorized search — and adds three things: rule-based query routing when `query_type` is omitted (regex scoring, no LLM call, so auto-routing is free), session memory as a searchable source (`scope` = `graph` / `session` / `trace` / `session_context`; with a bare `session_id` a session hit short-circuits the graph search), and normalized results tagged with a `_source` key. Use `recall()` for ordinary retrieval. Drop to `search()` when you need the agentic extras as first-class parameters (`skills`, `tools`, `max_iter`, `code_query`, `node_type`), raw `SearchResult` objects instead of tagged entries, or a pinned `query_type` with no router in the path. Note `search(session_id=...)` only adds session history to the retrieval context — it never searches the session cache as a source; that is `recall()`-only. Full guide: `docs/recall-vs-search.md`.
+`recall()` wraps `search()` — its graph path calls the same authorized search — and adds three things: rule-based query routing when `query_type` is omitted (an ordered first-match rule table in `cognee/api/v1/recall/query_router.py`, no LLM call, so auto-routing is free; it only ever picks CHUNKS_LEXICAL for a fully quoted phrase, CODING_RULES for an explicit phrase, or the HYBRID_COMPLETION default — never CYPHER, which stays behind an explicit `query_type`, and retries as HYBRID_COMPLETION if a routed type comes up empty), session memory as a searchable source (`scope` = `graph` / `session` / `trace` / `session_context` / `session_first`; with a bare `session_id` a session hit short-circuits the graph search, and `scope="session_first"` asks for that short-circuit explicitly), and normalized results tagged with a `source` key. Use `recall()` for ordinary retrieval. Drop to `search()` when you need the agentic extras as first-class parameters (`skills`, `tools`, `max_iter`, `code_query`, `node_type`), raw `SearchResult` objects instead of tagged entries, or a pinned `query_type` with no router in the path. Note `search(session_id=...)` only adds session history to the retrieval context — it never searches the session cache as a source; that is `recall()`-only. Full guide: `docs/recall-vs-search.md`.
 
 ### Key Architectural Patterns
 
@@ -263,7 +263,7 @@ Key files:
 Available search types (from `cognee/modules/search/types/SearchType.py`), passed as `query_type` to `recall()` or `search()`:
 - **HYBRID_COMPLETION** (default) - Document passages plus entity neighbourhoods, then LLM completion
 - **GRAPH_COMPLETION** - Graph traversal + LLM completion
-- **GRAPH_SUMMARY_COMPLETION** - Uses pre-computed summaries with graph context
+- **GRAPH_SUMMARY_COMPLETION** - Graph traversal plus a second LLM call that summarizes the answer (reads no pre-computed summaries)
 - **GRAPH_COMPLETION_COT** - Chain-of-thought reasoning over graph
 - **GRAPH_COMPLETION_CONTEXT_EXTENSION** - Extended context graph retrieval
 - **TRIPLET_COMPLETION** - Triplet-based (subject-predicate-object) search
@@ -282,7 +282,7 @@ Available search types (from `cognee/modules/search/types/SearchType.py`), passe
 - **CODE** - Deterministic operations over the code graph via `code_query` (no LLM); see "Code Files" below
 - **GRAPH_REPORT** - Graph insight report: hub nodes, cross-node-set connections, edge provenance, suggested questions
 
-`recall()` picks one of these automatically when `query_type` is omitted. The CLI is narrower: `cognee-cli recall --query-type` accepts only the choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES` and defaults to `HYBRID_COMPLETION`; the rest are SDK-only.
+`recall()` picks one of these automatically when `query_type` is omitted; so does `cognee-cli recall` when `--query-type` is omitted, and `POST /api/v1/recall` when `searchType` is omitted or `null` (the default). The CLI's explicit `--query-type` accepts only the choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES`; the rest are SDK-only. Routing rules and bypass options: `docs/recall-vs-search.md`.
 
 Key files:
 - `cognee/api/v1/search/search.py`

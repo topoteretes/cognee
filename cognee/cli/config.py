@@ -50,6 +50,8 @@ SEARCH_TYPE_CHOICES = [
 ]
 
 DEFAULT_SEARCH_TYPE = "HYBRID_COMPLETION"
+# Label for a recall with no -t: the SDK or server picks the type.
+AUTO_QUERY_TYPE = "auto"
 COMPLETION_SEARCH_TYPES = frozenset({"GRAPH_COMPLETION", "HYBRID_COMPLETION", "RAG_COMPLETION"})
 
 # Chunker choices

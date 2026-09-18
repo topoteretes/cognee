@@ -22,13 +22,17 @@ from cognee.shared.utils import send_telemetry
 
 
 class RecallPayloadDTO(InDTO):
-    # Default is HYBRID_COMPLETION. Pass ``search_type: null`` explicitly
-    # to opt into auto-routing (the new ``cognee.recall`` default).
+    # Omitted or null means auto-route, matching ``cognee.recall`` and the CLI.
+    # As in the SDK, a null search_type with session_id and no datasets also
+    # lets a session hit short-circuit the graph search; pass a value to pin a
+    # strategy and disable that. See docs/recall-vs-search.md.
     search_type: SearchType | None = Field(
-        default=SearchType.HYBRID_COMPLETION,
+        default=None,
         description=(
             "Search strategy, e.g. HYBRID_COMPLETION, GRAPH_COMPLETION, RAG_COMPLETION, CHUNKS. "
-            "Pass null to let cognee auto-route the query to the best strategy."
+            "Omit (or pass null) to let cognee auto-route the query (rule-based, no LLM "
+            "call, HYBRID_COMPLETION fallback; see docs/recall-vs-search.md for the rule "
+            "table). Pass a value to pin one."
         ),
     )
     datasets: list[str] | None = Field(
@@ -85,21 +89,24 @@ class RecallPayloadDTO(InDTO):
         examples=[None],
         description=(
             "Session whose cached QA and trace entries should be searched. With "
-            "search_type null and no datasets, session hits short-circuit the "
-            "graph search."
+            "search_type omitted the session becomes a search source: alone it "
+            "short-circuits the graph on a hit, alongside datasets both contribute. "
+            "Pinning search_type leaves the graph as the only source."
         ),
     )
     scope: str | list[str] | None = Field(
         default=None,
         examples=[None],
         description=(
-            "Which memory sources to include: 'graph', 'session', 'trace', "
-            "'session_context', 'tools', 'code', 'all', 'auto', or a list of these. "
-            "Defaults to 'auto' (session first when session_id is set, else graph). "
+            "Which memory sources to include: 'graph', 'session', 'session_first', "
+            "'trace', 'session_context', 'tools', 'code', 'all', 'auto', or a list of "
+            "these. Defaults to 'auto' (session first when session_id is set, else "
+            "graph). 'session_first' asks for that short-circuit explicitly — a session "
+            "hit answers alone — instead of getting it by omitting search_type. "
             "'tools' and 'code' are explicit opt-in only — never implied by 'auto' or "
             "'all'. 'tools' requires TOOL_CALLS_ENABLED on the server; 'code' runs a "
             "deterministic code-graph query (see code_query) and tags results "
-            "_source='code'."
+            "source='code'."
         ),
     )
     tool_connections: list[str] | None = Field(
@@ -218,8 +225,9 @@ def get_recall_router() -> APIRouter:
         Field names are shown camelCased in the schema (e.g. searchType, datasetIds,
         topK); both camelCase and snake_case are accepted.
 
-        - **search_type** (Optional[SearchType]): Type of search to perform
-          (default: HYBRID_COMPLETION). Pass null to enable automatic query routing.
+        - **search_type** (Optional[SearchType]): Type of search to perform. Omit
+          (default: null) to auto-route the query with the rule-based router
+          (HYBRID_COMPLETION fallback); pass a value to pin one.
         - **datasets** (Optional[List[str]]): Dataset names to search within
         - **dataset_ids** (Optional[List[UUID]]): Dataset UUIDs to search within;
           take precedence over dataset names when both are provided
@@ -240,10 +248,12 @@ def get_recall_router() -> APIRouter:
         - **session_id** (Optional[str]): Session whose cached QA and trace entries
           should be searched
         - **scope** (Optional[str | List[str]]): Memory sources to include: "graph",
-          "session", "trace", "session_context", "tools", "code", "all", "auto", or a
-          list of these (default: "auto" — session first when session_id is set, else
-          graph). "code" is explicit opt-in only and returns deterministic code-graph
-          facts tagged _source="code" (e.g. scope=["graph", "code"])
+          "session", "session_first", "trace", "session_context", "tools", "code",
+          "all", "auto", or a list of these (default: "auto" — session first when
+          session_id is set, else graph). "session_first" requests that short-circuit
+          explicitly rather than by omitting searchType. "code" is explicit opt-in only
+          and returns deterministic code-graph facts tagged source="code"
+          (e.g. scope=["graph", "code"])
         - **code_query** (Optional[dict]): "code" scope only — operation and arguments
           for the code-graph query (same format as /v1/search code_query); omit for
           the default "explore" with the query text as seed
@@ -269,7 +279,7 @@ def get_recall_router() -> APIRouter:
             user,
             additional_properties={
                 "endpoint": "POST /v1/recall",
-                "search_type": str(payload.search_type),
+                "search_type": str(payload.search_type.value) if payload.search_type else "auto",
                 "cognee_version": cognee_version,
             },
         )
