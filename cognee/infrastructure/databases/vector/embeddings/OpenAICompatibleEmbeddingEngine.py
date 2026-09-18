@@ -16,7 +16,6 @@ import asyncio
 import logging
 import math
 import os
-from typing import List, Optional
 
 import httpx
 import numpy as np
@@ -29,25 +28,25 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
+from cognee.infrastructure.databases.exceptions import (
+    EmbeddingContextWindowTooSmallError,
+    EmbeddingCredentialsError,
+    EmbeddingException,
+)
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
 )
 from cognee.infrastructure.databases.vector.embeddings.retry_config import (
     embedding_retry_condition,
 )
-from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
-from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     handle_embedding_response,
     sanitize_embedding_text_inputs,
 )
-from cognee.infrastructure.databases.exceptions import (
-    EmbeddingContextWindowTooSmallError,
-    EmbeddingCredentialsError,
-    EmbeddingException,
-)
-from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
+from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
+from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 
 logger = get_logger("OpenAICompatibleEmbeddingEngine")
 
@@ -83,13 +82,13 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
 
     def __init__(
         self,
-        model: Optional[str] = "default",
+        model: str | None = "default",
         dimensions: int = 3072,
         max_completion_tokens: int = 8191,
-        endpoint: Optional[str] = "http://localhost:8080",
-        api_key: Optional[str] = "no-key-required",
+        endpoint: str | None = "http://localhost:8080",
+        api_key: str | None = "no-key-required",
         batch_size: int = 36,
-        input_type: Optional[str] = None,
+        input_type: str | None = None,
     ):
         self.model = model or "default"
         self.dimensions = dimensions
@@ -131,7 +130,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def embed_text(self, text: List[str]) -> List[List[float]]:
+    async def embed_text(self, text: list[str]) -> list[list[float]]:
         """
         Embed a list of text strings into vector representations.
 

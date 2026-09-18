@@ -2,12 +2,12 @@
 
 import os
 from functools import lru_cache
-from pydantic_settings import BaseSettings, SettingsConfigDict
+
 import pydantic
 from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 from cognee.base_config import get_base_config
-from cognee.root_dir import ensure_absolute_path
-from cognee.shared.data_models import KnowledgeGraph
 
 # Single source of truth for Kuzu defaults lives next to the adapter.
 # Imported here so config-side env Fields and the adapter agree.
@@ -15,6 +15,8 @@ from cognee.infrastructure.databases.graph.kuzu.adapter import (
     DEFAULT_KUZU_BUFFER_POOL_SIZE,
     DEFAULT_KUZU_MAX_DB_SIZE,
 )
+from cognee.root_dir import ensure_absolute_path
+from cognee.shared.data_models import KnowledgeGraph
 
 
 class GraphConfig(BaseSettings):

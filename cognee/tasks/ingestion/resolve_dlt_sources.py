@@ -13,7 +13,8 @@ import json
 import os
 import shutil
 import tempfile
-from typing import Any, Callable, List, Optional, Set
+from collections.abc import Callable
+from typing import Any
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 from uuid import UUID
@@ -22,13 +23,13 @@ from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 
+from .config import get_ingestion_config
 from .create_dlt_source import (
+    create_dlt_source_from_connection_string,
     is_connection_string,
     is_csv_path,
     is_csv_upload,
-    create_dlt_source_from_connection_string,
 )
-from .config import get_ingestion_config
 from .data_item import DataItem
 from .dlt_row_data import DltRowData
 from .dlt_utils import document_source_tag
@@ -40,11 +41,62 @@ logger = get_logger("resolve_dlt_sources")
 # free text, not categorical data, and would produce useless one-off nodes.
 
 
+def dlt_manifest_identifier(dataset_name: str, source_name: str) -> str:
+    """The identity a DLT source's manifest is seeded from: (dataset, source name)."""
+    return f"dlt_source:{dataset_name}:{source_name}"
+
+
+def is_dlt_input(item: Any) -> bool:
+    """Whether ``item`` is a dlt resource, source, or source factory."""
+    try:
+        from dlt.extract import DltResource, SourceFactory
+        from dlt.extract.source import DltSource
+    except ImportError:
+        return False
+    return isinstance(item, (DltResource, DltSource, SourceFactory))
+
+
+async def check_dlt_replacement(
+    dlt_item: Any, pinned_id: UUID, dataset_name: str, user: User
+) -> None:
+    """Refuse a dlt source that cannot replace the document ``pinned_id``.
+
+    update()'s full rebuild drops the document's memory and re-adds the
+    replacement pinned to its id, so this runs BEFORE that: a replacement that
+    would not resolve to the same manifest must be refused while the
+    document's memory still exists. A document-tagged source yields one document per
+    row and has no single identity; a relational source under another name
+    resolves to a different manifest, and rebuilding it under the old id
+    would leave the next plain add() of that source minting a second one.
+    """
+    from cognee.exceptions import CogneeValidationError
+
+    if document_source_tag(dlt_item):
+        raise CogneeValidationError(
+            message=(
+                "A document-tagged DLT source yields one document per row, so it cannot "
+                "replace a single document; update() cannot take it. Re-add the source."
+            ),
+            name="DltDocumentSourceNotUpdatable",
+        )
+    source_name = getattr(dlt_item, "name", None) or dataset_name
+    manifest_id = await get_unique_data_id(dlt_manifest_identifier(dataset_name, source_name), user)
+    if manifest_id != pinned_id:
+        raise CogneeValidationError(
+            message=(
+                f"DLT source {source_name!r} resolves to manifest {manifest_id}, not the "
+                f"document {pinned_id} being updated. update() replaces a DLT source under "
+                "the same source name."
+            ),
+            name="DltSourceIdentityMismatch",
+        )
+
+
 async def resolve_dlt_sources(
     data: Any,
     dataset_name: str,
     user: User,
-    dataset_id: UUID = None,
+    dataset_id: UUID | None = None,
     **kwargs,
 ) -> Any:
     """Resolve DLT resources (and auto-detected structured data) into DataItems.
@@ -90,9 +142,9 @@ async def resolve_dlt_sources(
             )
         return data, None
 
-    primary_key = kwargs["primary_key"] if "primary_key" in kwargs else None
-    write_disposition = kwargs["write_disposition"] if "write_disposition" in kwargs else "replace"
-    query = kwargs["query"] if "query" in kwargs else None
+    primary_key = kwargs.get("primary_key", None)
+    write_disposition = kwargs.get("write_disposition", "replace")
+    query = kwargs.get("query", None)
     max_rows_per_table = kwargs.get("max_rows_per_table")
     column_value_columns = kwargs.get("column_value_columns")
 
@@ -107,8 +159,19 @@ async def resolve_dlt_sources(
 
     dlt_items = []
     non_dlt_items = []
+    # update()'s full rebuild re-adds the replacement wrapped in a DataItem
+    # pinned to the manifest's id. Unwrap it here so the source is ingested
+    # like a bare one, and remember the pin to check it against the manifest
+    # identity the source resolves to.
+    pinned_ids: dict[int, UUID] = {}
 
     for item in data_list:
+        if isinstance(item, DataItem) and isinstance(
+            item.data, (DltResource, DltSource, SourceFactory)
+        ):
+            if item.data_id is not None:
+                pinned_ids[id(item.data)] = item.data_id
+            item = item.data
         if isinstance(item, (DltResource, DltSource, SourceFactory)):
             dlt_items.append(item)
         else:
@@ -117,6 +180,13 @@ async def resolve_dlt_sources(
     if not dlt_items:
         # Nothing to expand — return original data unchanged
         return data, None
+
+    # A pinned item must resolve to the manifest it is pinned to; update()
+    # checks this before deleting the document, and it is re-checked here so
+    # a pinned wrapper from any caller is held to the same rule.
+    for dlt_item in dlt_items:
+        if id(dlt_item) in pinned_ids:
+            await check_dlt_replacement(dlt_item, pinned_ids[id(dlt_item)], dataset_name, user)
 
     # A dlt source may opt into the document path (each row → a text document
     # that goes through normal cognify) by declaring a document-source tag;
@@ -134,7 +204,7 @@ async def resolve_dlt_sources(
     # out of the current corpus. write_disposition/primary_key default to
     # "replace"/"id" (see the kwargs resolution above).
     document_data_items: list[DataItem] = []
-    document_fresh_ids: Set[UUID] = set()
+    document_fresh_ids: set[UUID] = set()
     document_source_tags: set[str] = set()
     for dlt_item in document_items:
         source_tag = document_source_tag(dlt_item)
@@ -157,7 +227,7 @@ async def resolve_dlt_sources(
 
     # --- Relational sources: one manifest DataItem per source -----------
     expanded_items: list[DataItem] = []
-    manifest_data_ids: Set[UUID] = set()
+    manifest_data_ids: set[UUID] = set()
     for dlt_item in relational_items:
         rows = await ingest_dlt_source(
             dlt_item,
@@ -219,7 +289,7 @@ async def resolve_dlt_sources(
     do_manifest_cleanup = write_disposition != "append" and bool(manifest_data_ids)
     do_document_cleanup = bool(document_fresh_ids)
 
-    orphan_cleanup: Optional[Callable[[], Any]] = None
+    orphan_cleanup: Callable[[], Any] | None = None
     if do_manifest_cleanup or do_document_cleanup:
 
         async def _cleanup() -> None:
@@ -241,7 +311,7 @@ async def resolve_dlt_sources(
     return result, orphan_cleanup
 
 
-def _normalize_structured_inputs(data_list: list, query: Optional[str]) -> list:
+def _normalize_structured_inputs(data_list: list, query: str | None) -> list:
     """Wrap auto-detected structured inputs in dlt sources.
 
     Connection strings become dlt sql_database sources; everything else
@@ -287,12 +357,12 @@ def _log_structured_inputs_without_dlt(data_list: list) -> None:
 
 
 async def _build_source_manifest_item(
-    rows: List[DltRowData],
+    rows: list[DltRowData],
     source_name: str,
     dataset_name: str,
     user: User,
-    column_value_columns: Optional[dict] = None,
-) -> Optional[DataItem]:
+    column_value_columns: dict | None = None,
+) -> DataItem | None:
     """Build a single manifest DataItem describing a whole DLT source.
 
     Rows are deduplicated by identity (table, pk_value, content_hash) — DLT
@@ -401,7 +471,7 @@ async def _build_source_manifest_item(
     # add(..., incremental_loading=False, data_cache=False). Renaming a source (or dataset)
     # changes this identity and is remove + add — a one-time full rebuild,
     # by design.
-    data_id = await get_unique_data_id(f"dlt_source:{dataset_name}:{source_name}", user)
+    data_id = await get_unique_data_id(dlt_manifest_identifier(dataset_name, source_name), user)
 
     return DataItem(
         data=manifest_text,
@@ -422,7 +492,7 @@ async def _build_source_manifest_item(
 # ---------------------------------------------------------------------------
 
 
-def _dedupe_rows(rows: List[DltRowData], source_name: str) -> dict[tuple, DltRowData]:
+def _dedupe_rows(rows: list[DltRowData], source_name: str) -> dict[tuple, DltRowData]:
     """Deduplicate rows by identity (table, pk_value, content_hash).
 
     DLT child tables can contain rows that are byte-identical once dlt
@@ -448,7 +518,7 @@ def _dedupe_rows(rows: List[DltRowData], source_name: str) -> dict[tuple, DltRow
     return unique_rows
 
 
-def _selected_column_values(dlt_row: DltRowData, selection: Optional[dict]) -> dict:
+def _selected_column_values(dlt_row: DltRowData, selection: dict | None) -> dict:
     """Pick row cells that should become shared ColumnValue graph nodes.
 
     ``selection`` maps table name to a column list; "*" is a wildcard for
@@ -492,7 +562,7 @@ def _dlt_row_identifier(row: DltRowData) -> str:
     return f"dlt:{row.table_name}:{row.primary_key_value}:{row.content_hash}"
 
 
-async def _stable_row_ids(rows: List[DltRowData], user: User, dataset_id: UUID) -> List[UUID]:
+async def _stable_row_ids(rows: list[DltRowData], user: User, dataset_id: UUID) -> list[UUID]:
     """Dataset-scoped stable ids for dlt rows, adopting pre-scoping rows in place.
 
     Ids are derived from (dataset, table, pk, content_hash, user), so the same
@@ -613,7 +683,7 @@ def _build_schema_context_text(dlt_row: DltRowData) -> str:
 def _resolve_fk_references(
     dlt_row: DltRowData,
     row_id_lookup: dict,
-    missing_targets: Optional[list] = None,
+    missing_targets: list | None = None,
 ) -> list:
     """Resolve foreign key columns to target row node ids for graph edge creation.
 
@@ -664,12 +734,12 @@ def _resolve_fk_references(
 async def _delete_dlt_orphans(
     dataset_name: str,
     user: User,
-    fresh_data_ids: Set[UUID],
+    fresh_data_ids: set[UUID],
     # "dlt" stays in the sweep purely as residue cleanup: pre-manifest per-row
     # records are unsupported (classification raises on them), and re-adding a
     # source deletes any that linger.
     sources: tuple[str, ...] = ("dlt", "dlt_source"),
-    manifest_source_names: Optional[Set[str]] = None,
+    manifest_source_names: set[str] | None = None,
 ) -> None:
     """Delete dlt-sourced Data records (and their graph/vector artifacts) that
     are no longer present in the freshly-ingested dlt sources.
@@ -687,13 +757,13 @@ async def _delete_dlt_orphans(
     and re-ingesting one must not delete the others. Legacy per-row records
     (source == "dlt") predate source attribution and are always migrated away.
     """
-    from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+    from cognee.context_global_variables import set_database_global_context_variables
     from cognee.modules.data.methods import get_authorized_existing_datasets
     from cognee.modules.data.methods.delete_data import delete_data
+    from cognee.modules.data.methods.get_dataset_data import get_dataset_data
     from cognee.modules.graph.methods.delete_data_nodes_and_edges import (
         delete_data_nodes_and_edges,
     )
-    from cognee.context_global_variables import set_database_global_context_variables
 
     # Find the dataset — if it doesn't exist yet this is a first ingestion,
     # so there can be no orphans.

@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Dict, List, Optional, Type
+from typing import Any
 
 from cognee.base_config import get_base_config
 from cognee.context_global_variables import session_user
@@ -7,9 +7,12 @@ from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.retrieval.base_retriever import BaseRetriever
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.hybrid.chunks import retrieve_hybrid_chunks, search_collection
 from cognee.modules.retrieval.hybrid.context import (
     extract_context_object_ids as extract_hybrid_object_ids,
+)
+from cognee.modules.retrieval.hybrid.context import (
     format_hybrid_context,
     format_hybrid_context_batch,
 )
@@ -21,9 +24,12 @@ from cognee.modules.retrieval.hybrid.facts import (
 )
 from cognee.modules.retrieval.hybrid.merge import merge_hybrid_results
 from cognee.modules.retrieval.hybrid.references import cite_hybrid_completions
-from cognee.modules.retrieval.hybrid.results import empty_hybrid_result
 from cognee.modules.retrieval.hybrid.truth import build_truth_context
-from cognee.modules.retrieval.utils.completion import generate_completion, generate_completion_batch
+from cognee.modules.retrieval.utils.completion import (
+    SessionPrompt,
+    generate_completion,
+    generate_completion_batch,
+)
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
     load_root_text,
@@ -41,25 +47,29 @@ DEFAULT_HYBRID_LANE_TOP_K = 10
 class HybridRetriever(BaseRetriever):
     """Completion retriever using chunk, entity, and optional global-context channels."""
 
+    # Search is not an LLM gateway: when every channel comes back empty there
+    # is no answer to give (SDK-270 / gh #3728).
+    skip_completion_on_empty_context = True
+
     def __init__(
         self,
-        chunks_top_k: Optional[int] = 5,
-        entities_top_k: Optional[int] = 5,
+        chunks_top_k: int | None = 5,
+        entities_top_k: int | None = 5,
         max_edges_per_entity: int = 10,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
         include_global_context_index: bool = False,
         global_context_index_top_k: int = 3,
-        session_id: Optional[str] = None,
-        response_model: Type = str,
+        session_id: str | None = None,
+        response_model: type = str,
         include_references: bool = False,
         user_prompt_path: str = "hybrid_context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
-        system_prompt: Optional[str] = None,
-        text_summaries_top_k: Optional[int] = None,
+        system_prompt: str | None = None,
+        text_summaries_top_k: int | None = None,
         use_importance_weight: bool = True,
         use_truth_weight: bool = False,
-        facts_top_k: Optional[int] = 5,
+        facts_top_k: int | None = 5,
     ):
         self.chunks_top_k = chunks_top_k if chunks_top_k is not None else 5
         self.entities_top_k = entities_top_k if entities_top_k is not None else 5
@@ -85,16 +95,17 @@ class HybridRetriever(BaseRetriever):
         return bool(user_id and CacheConfig().caching)
 
     async def get_retrieved_objects(
-        self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
+        self, query: str | None = None, query_batch: list[str] | None = None
     ) -> Any:
         validate_retriever_input(query, query_batch, self._use_session_cache())
         self._unified_engine = await get_unified_engine()
         if await self._unified_engine.graph.is_empty():
-            logger.warning("Search attempt on an empty knowledge graph")
-            return (
-                [empty_hybrid_result() for _ in query_batch]
-                if query_batch
-                else empty_hybrid_result()
+            # Same contract as GraphCompletionRetriever (SDK-270 / gh #3728): an
+            # empty graph is a state problem, not a query miss, and this is the
+            # default search type -- it must not answer a fresh install with a
+            # dict of empty channels while every other completion type says 404.
+            raise NoDataError(
+                "The knowledge graph is empty. Ingest data through Cognee before searching."
             )
         if query_batch:
             return list(await asyncio.gather(*[self._retrieve_one(q) for q in query_batch]))
@@ -191,8 +202,8 @@ class HybridRetriever(BaseRetriever):
 
     async def get_context_from_objects(
         self,
-        query: Optional[str] = None,
-        query_batch: Optional[List[str]] = None,
+        query: str | None = None,
+        query_batch: list[str] | None = None,
         retrieved_objects: Any = None,
     ) -> Any:
         if query_batch:
@@ -203,7 +214,7 @@ class HybridRetriever(BaseRetriever):
         global_context = await self._build_global_context_section(query)
         return format_hybrid_context(global_context, retrieved_objects)
 
-    async def _build_global_context_section(self, query: Optional[str]) -> str:
+    async def _build_global_context_section(self, query: str | None) -> str:
         if not self.include_global_context_index or not query:
             return ""
 
@@ -225,13 +236,22 @@ class HybridRetriever(BaseRetriever):
 
     async def get_completion_from_context(
         self,
-        query: Optional[str] = None,
-        query_batch: Optional[List[str]] = None,
+        query: str | None = None,
+        query_batch: list[str] | None = None,
         retrieved_objects: Any = None,
         context: Any = None,
-        effective_query: Optional[str] = None,
+        effective_query: str | None = None,
         turn_preparation=None,
-    ) -> List[Any]:
+    ) -> list[Any]:
+        if self.skip_completion_on_empty_context and not query_batch and not context:
+            # Empty context must not reach the LLM: search is not an LLM
+            # gateway, and the only possible output is a phantom "no context
+            # provided" deflection (SDK-270 / gh #3728). A global-context
+            # prelude counts as real grounding, so this only fires when every
+            # section came back empty.
+            logger.warning("Empty context: skipping LLM completion, returning no results")
+            return []
+
         prompts = {
             "user_prompt_path": self.user_prompt_path,
             "system_prompt_path": self.system_prompt_path,
@@ -258,7 +278,7 @@ class HybridRetriever(BaseRetriever):
             completions = await generate_completion_batch(
                 query_batch=query_batch,
                 context=context,
-                conversation_history=preference_text,
+                session=SessionPrompt(guidance=preference_text),
                 **prompts,
             )
         else:
@@ -267,13 +287,13 @@ class HybridRetriever(BaseRetriever):
                 await generate_completion(
                     query=query,
                     context=context,
-                    conversation_history=preference_text,
+                    session=SessionPrompt(guidance=preference_text),
                     **prompts,
                 )
             ]
         return await self.append_references(completions, retrieved_objects)
 
-    async def append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
+    async def append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
         return cite_hybrid_completions(
             completions,
             retrieved_objects,
@@ -289,12 +309,12 @@ class HybridRetriever(BaseRetriever):
             facts_limit=self.facts_top_k,
         )
 
-    def extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+    def extract_context_object_ids(self, retrieved_objects: Any) -> dict[str, list[str]] | None:
         return extract_hybrid_object_ids(retrieved_objects)
 
     async def get_completion(
-        self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
-    ) -> List[Any]:
+        self, query: str | None = None, query_batch: list[str] | None = None
+    ) -> list[Any]:
         validate_retriever_input(query, query_batch, self._use_session_cache())
 
         retrieved_objects = await self.get_retrieved_objects(query=query, query_batch=query_batch)

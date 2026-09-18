@@ -1,22 +1,23 @@
 import asyncio
 import json
-from typing import Optional, List, Type, Any, Union
+from typing import Any
 
 from pydantic import BaseModel
 
 from cognee.base_config import get_base_config
+from cognee.context_global_variables import session_user
+from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
+from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
-from cognee.modules.retrieval.utils.query_state import QueryState
-from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
-from cognee.shared.logging_utils import get_logger
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import (
+    SessionPrompt,
     batch_llm_completion,
     generate_completion_batch,
 )
-from cognee.infrastructure.session.get_session_manager import get_session_manager
-from cognee.context_global_variables import session_user
-from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
+from cognee.modules.retrieval.utils.query_state import QueryState
+from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
@@ -58,19 +59,19 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         validation_system_prompt_path: str = "cot_validation_system_prompt.txt",
         followup_system_prompt_path: str = "cot_followup_system_prompt.txt",
         followup_user_prompt_path: str = "cot_followup_user_prompt.txt",
-        system_prompt: Optional[str] = None,
-        top_k: Optional[int] = 5,
-        node_type: Optional[Type] = None,
-        node_name: Optional[List[str]] = None,
+        system_prompt: str | None = None,
+        top_k: int | None = 5,
+        node_type: type | None = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
-        wide_search_top_k: Optional[int] = 100,
-        triplet_distance_penalty: Optional[float] = 6.5,
+        wide_search_top_k: int | None = 100,
+        triplet_distance_penalty: float | None = 6.5,
         feedback_influence: float = get_base_config().default_feedback_influence,
         max_iter: int = 4,
-        session_id: Optional[str] = None,
-        response_model: Type = str,
-        neighborhood_depth: Optional[int] = None,
-        neighborhood_seed_top_k: Optional[int] = 10,
+        session_id: str | None = None,
+        response_model: type = str,
+        neighborhood_depth: int | None = None,
+        neighborhood_seed_top_k: int | None = 10,
         include_references: bool = False,
     ):
         super().__init__(
@@ -98,8 +99,8 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         self.max_iter = max_iter
 
     async def get_retrieved_objects(
-        self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
-    ) -> Union[List[Edge], List[List[Edge]]]:
+        self, query: str | None = None, query_batch: list[str] | None = None
+    ) -> list[Edge] | list[list[Edge]]:
         """
         Run chain-of-thought completion with optional structured output.
 
@@ -114,7 +115,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         session_save = self._use_session_cache()
         validate_retriever_input(query, query_batch, session_save)
 
-        conversation_history = ""
+        session = SessionPrompt()
         if session_save:
             user = session_user.get()
             user_id = getattr(user, "id", None)
@@ -127,20 +128,17 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                     last_n=sm.session_history_last_n,
                     include_context=False,
                 )
-                conversation_history = history if isinstance(history, str) else ""
-                # Prepend the active session-context guidance block above the (history-only) CoT
-                # intermediate-round context. Gated + fail-open: never blocks CoT reasoning.
-                block = await self._maybe_active_context_block(sm, str(user_id), query)
-                if block:
-                    conversation_history = (
-                        block + "\n\n" + conversation_history if conversation_history else block
-                    )
+                # The guidance block is gated + fail-open: never blocks CoT reasoning.
+                session = SessionPrompt(
+                    history=history if isinstance(history, str) else "",
+                    guidance=await self._maybe_active_context_block(sm, str(user_id), query),
+                )
 
         # Normalize single query to batch for uniform processing
         effective_batch = [query] if query else query_batch
 
         _completion, context_text, triplets = await self._run_cot_completion(
-            effective_batch, conversation_history, skip_final_completion=True
+            effective_batch, session, skip_final_completion=True
         )
 
         self._cot_final_context = context_text
@@ -149,20 +147,18 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             return triplets[0]
         return triplets
 
-    async def _maybe_active_context_block(self, sm, user_id: str, query: Optional[str]) -> str:
+    async def _maybe_active_context_block(self, sm, user_id: str, query: str | None) -> str:
         """Render the active session-context block for the CoT intermediate rounds.
 
         Gated on caching + auto_feedback. Fully fail-open: returns "" on any error or
         when the layer is disabled, so it can never block chain-of-thought reasoning.
         """
         try:
-            from cognee.infrastructure.databases.cache.config import CacheConfig
             from cognee.infrastructure.session.session_context_builder import (
                 build_active_context_block,
             )
 
-            cache_config = CacheConfig()
-            if not (cache_config.caching and cache_config.auto_feedback):
+            if not sm.is_auto_feedback_enabled():
                 return ""
 
             block, _served_ids = await build_active_context_block(
@@ -173,24 +169,24 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             )
             return block or ""
         except Exception as exc:
-            logger.warning("CoT active session-context block failed: %s", exc)
+            logger.warning("CoT active session-context block failed: %s", exc, exc_info=True)
             return ""
 
     # -- CoT orchestrator --
 
     async def _run_cot_completion(
         self,
-        query_batch: List[str],
-        conversation_history: str = "",
+        query_batch: list[str],
+        session: SessionPrompt | None = None,
         skip_final_completion: bool = False,
-    ) -> tuple[List[Any], List[str], List[List[Edge]]]:
+    ) -> tuple[list[Any], list[str], list[list[Edge]]]:
         """
         Run chain-of-thought completion with optional structured output.
 
         Parameters:
         -----------
             - query_batch: Batch of user queries
-            - conversation_history: Optional conversation history string
+            - session: Optional session layer (history and guidance block)
             - skip_final_completion: If True, do not run _generate_completions on the last
               iteration; return [] for completions (final completion done in get_completion_from_context).
 
@@ -202,13 +198,13 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         """
         states = {q: QueryState() for q in query_batch}
         await self._fetch_initial_triplets_and_context(states)
-        await self._generate_completions(states, conversation_history)
+        await self._generate_completions(states, session)
 
         for reasoning_iteration in range(self.max_iter):
             followup_queries = await self._run_cot_round(states)
             await self._merge_followup_triplets(states, followup_queries)
             if not (skip_final_completion and reasoning_iteration == self.max_iter - 1):
-                await self._generate_completions(states, conversation_history)
+                await self._generate_completions(states, session)
 
         return self._collect_results(states, query_batch, skip_final_completion)
 
@@ -225,7 +221,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             states[q].triplets = triplets
             states[q].context_text = context
 
-    async def _generate_completions(self, states: dict, conversation_history: str):
+    async def _generate_completions(self, states: dict, session: SessionPrompt | None):
         """Generate completions for all queries in parallel."""
         queries = list(states.keys())
         contexts = [states[q].context_text for q in queries]
@@ -236,13 +232,13 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             system_prompt_path=self.system_prompt_path,
             system_prompt=self.system_prompt,
             response_model=self.response_model,
-            conversation_history=conversation_history if conversation_history else None,
+            session=session,
         )
         for q, comp in zip(queries, completions):
             states[q].completion = comp
         logger.info(f"Chain-of-thought: generated completions for {len(queries)} queries")
 
-    async def _run_cot_round(self, states: dict) -> List[str]:
+    async def _run_cot_round(self, states: dict) -> list[str]:
         """Run one CoT round: validate answers, generate follow-up questions."""
         validation_prompts, validation_system = self._build_validation_prompts(states)
         reasoning_batch = await batch_llm_completion(validation_prompts, validation_system)
@@ -285,7 +281,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         )
         return user_prompts, system_prompt
 
-    async def _merge_followup_triplets(self, states: dict, followup_questions: List[str]):
+    async def _merge_followup_triplets(self, states: dict, followup_questions: list[str]):
         """Fetch triplets for follow-up questions and merge with existing state."""
         queries = list(states.keys())
         new_triplets_batch = await self.get_triplets_batch(followup_questions)
@@ -302,9 +298,9 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
     def _collect_results(
         self,
         states: dict,
-        query_batch: List[str],
+        query_batch: list[str],
         skip_final_completion: bool = False,
-    ) -> tuple[List[Any], List[str], List[List[Edge]]]:
+    ) -> tuple[list[Any], list[str], list[list[Edge]]]:
         """Extract final completions, context texts, and triplets from states."""
         completions = [] if skip_final_completion else [states[q].completion for q in query_batch]
         contexts = [states[q].context_text for q in query_batch]
@@ -313,10 +309,10 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
 
     async def get_context_from_objects(
         self,
-        query: Optional[str] = None,
-        query_batch: Optional[List[str]] = None,
+        query: str | None = None,
+        query_batch: list[str] | None = None,
         retrieved_objects=None,
-    ) -> Union[str, List[str]]:
+    ) -> str | list[str]:
         """Return stored CoT final context when set; otherwise delegate to parent."""
         cot_context = getattr(self, "_cot_final_context", None)
         if cot_context is not None:

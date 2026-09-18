@@ -2,21 +2,23 @@
 Tests for individual CLI commands with proper mocking and coroutine handling.
 """
 
-import os
-import pytest
-import sys
 import argparse
 import asyncio
+import os
+import sys
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from uuid import uuid4
-from unittest.mock import patch, MagicMock, AsyncMock, ANY
+
+import pytest
+
 import cognee
 from cognee.cli.commands.add_command import AddCommand
-from cognee.cli.commands.search_command import SearchCommand
-from cognee.cli.commands.recall_command import RecallCommand
 from cognee.cli.commands.cognify_command import CognifyCommand
+from cognee.cli.commands.config_command import ConfigCommand
 from cognee.cli.commands.delete_command import DeleteCommand
 from cognee.cli.commands.forget_command import ForgetCommand
-from cognee.cli.commands.config_command import ConfigCommand
+from cognee.cli.commands.recall_command import RecallCommand
+from cognee.cli.commands.search_command import SearchCommand
 from cognee.cli.exceptions import CliCommandException
 from cognee.modules.data.methods.get_deletion_counts import DeletionCountsPreview
 from cognee.modules.engine.operations.setup import setup
@@ -220,7 +222,7 @@ class TestRecallCommand:
     def test_session_only_when_query_type_is_omitted(self, mock_asyncio_run):
         mock_cognee = MagicMock()
         mock_cognee.recall = AsyncMock(
-            return_value=[{"_source": "session", "question": "q", "answer": "a"}]
+            return_value=[{"source": "session", "question": "q", "answer": "a"}]
         )
 
         with patch.dict(sys.modules, {"cognee": mock_cognee}):
@@ -240,6 +242,89 @@ class TestRecallCommand:
         kwargs = mock_cognee.recall.await_args.kwargs
         assert "query_type" not in kwargs
         assert kwargs["session_id"] == "sess"
+
+    @patch("cognee.cli.commands.recall_command.asyncio.run", side_effect=_mock_run)
+    def test_session_entries_print_as_question_and_answer(self, mock_asyncio_run, capsys):
+        """In-process results are models, not dicts — the branch checked isinstance(dict)."""
+        from cognee.modules.recall.types.RecallResponse import ResponseQAEntry
+
+        mock_cognee = MagicMock()
+        mock_cognee.recall = AsyncMock(
+            return_value=[
+                ResponseQAEntry(
+                    time="2026-01-01T00:00:00+00:00",
+                    question="what did we decide?",
+                    context="",
+                    answer="to ship on Friday",
+                    source="session",
+                )
+            ]
+        )
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = RecallCommand()
+            args = argparse.Namespace(
+                query_text="what did we decide?",
+                query_type=None,
+                datasets=None,
+                top_k=10,
+                system_prompt=None,
+                session_id="sess",
+                output_format="pretty",
+            )
+            command.execute(args)
+
+        out = capsys.readouterr().out
+        assert "session entry(ies)" in out
+        assert "what did we decide?" in out
+        assert "to ship on Friday" in out
+        assert "Result 1:" not in out
+
+    @patch("cognee.cli.commands.recall_command.asyncio.run", side_effect=_mock_run)
+    def test_omitted_query_type_lets_sdk_auto_route(self, mock_asyncio_run):
+        """Without -t (and without -s) the CLI must not pin HYBRID_COMPLETION."""
+        mock_cognee = MagicMock()
+        mock_cognee.recall = AsyncMock(return_value=["answer"])
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = RecallCommand()
+            args = argparse.Namespace(
+                query_text="Summarize the report",
+                query_type=None,
+                datasets=["docs"],
+                top_k=10,
+                system_prompt=None,
+                session_id=None,
+                output_format="pretty",
+            )
+            command.execute(args)
+
+        kwargs = mock_cognee.recall.await_args.kwargs
+        assert "query_type" not in kwargs
+        assert "session_id" not in kwargs
+        assert kwargs["datasets"] == ["docs"]
+
+    @patch("cognee.cli.commands.recall_command.asyncio.run", side_effect=_mock_run)
+    def test_bare_datasets_flag_is_normalized_to_none(self, mock_asyncio_run):
+        """`-d` with no names parses to []; recall() keys on `is not None`, so []
+        would pin every readable dataset instead of leaving the search unscoped."""
+        mock_cognee = MagicMock()
+        mock_cognee.recall = AsyncMock(return_value=["answer"])
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = RecallCommand()
+            args = argparse.Namespace(
+                query_text="Summarize the report",
+                query_type=None,
+                datasets=[],
+                top_k=10,
+                system_prompt=None,
+                session_id=None,
+                output_format="pretty",
+            )
+            command.execute(args)
+
+        assert mock_cognee.recall.await_args.kwargs["datasets"] is None
 
     @patch("cognee.cli.commands.recall_command.asyncio.run", side_effect=_mock_run)
     def test_explicit_hybrid_with_session_is_not_session_only(self, mock_asyncio_run):
@@ -928,7 +1013,13 @@ class TestFeedbackCommand:
     different failures, and both must exit non-zero."""
 
     def _add_args(self, **overrides):
-        base = dict(feedback_action="add", session_id="s1", qa_id="q1", text="good", score=None)
+        base = {
+            "feedback_action": "add",
+            "session_id": "s1",
+            "qa_id": "q1",
+            "text": "good",
+            "score": None,
+        }
         base.update(overrides)
         return argparse.Namespace(**base)
 
@@ -982,11 +1073,14 @@ class TestFeedbackCommand:
         """False from the SDK means "no such entry" (or caching off), not a crash."""
         from cognee.cli.commands.feedback_command import FeedbackCommand
 
-        with patch(
-            "cognee.api.v1.session.add_feedback", new_callable=lambda: AsyncMock(return_value=False)
+        with (
+            patch(
+                "cognee.api.v1.session.add_feedback",
+                new_callable=lambda: AsyncMock(return_value=False),
+            ),
+            pytest.raises(CliCommandException) as exc_info,
         ):
-            with pytest.raises(CliCommandException) as exc_info:
-                FeedbackCommand().execute(self._add_args())
+            FeedbackCommand().execute(self._add_args())
 
         assert exc_info.value.error_code == 1
         assert "no Q&A entry q1 in session s1" in str(exc_info.value)
@@ -998,12 +1092,14 @@ class TestFeedbackCommand:
         from cognee.cli.commands.feedback_command import FeedbackCommand
         from cognee.infrastructure.databases.exceptions import CacheConnectionError
 
-        with patch(
-            "cognee.api.v1.session.add_feedback",
-            new_callable=lambda: AsyncMock(side_effect=CacheConnectionError("redis down")),
+        with (
+            patch(
+                "cognee.api.v1.session.add_feedback",
+                new_callable=lambda: AsyncMock(side_effect=CacheConnectionError("redis down")),
+            ),
+            pytest.raises(CliCommandException) as exc_info,
         ):
-            with pytest.raises(CliCommandException) as exc_info:
-                FeedbackCommand().execute(self._add_args())
+            FeedbackCommand().execute(self._add_args())
 
         assert exc_info.value.error_code == 1
         assert "redis down" in str(exc_info.value)
@@ -1030,12 +1126,14 @@ class TestFeedbackCommand:
     def test_delete_not_found_exits_non_zero(self, _mock_asyncio_run, _mock_resolve):
         from cognee.cli.commands.feedback_command import FeedbackCommand
 
-        with patch(
-            "cognee.api.v1.session.delete_feedback",
-            new_callable=lambda: AsyncMock(return_value=False),
+        with (
+            patch(
+                "cognee.api.v1.session.delete_feedback",
+                new_callable=lambda: AsyncMock(return_value=False),
+            ),
+            pytest.raises(CliCommandException) as exc_info,
         ):
-            with pytest.raises(CliCommandException) as exc_info:
-                FeedbackCommand().execute(self._delete_args())
+            FeedbackCommand().execute(self._delete_args())
 
         assert exc_info.value.error_code == 1
         assert "no Q&A entry q1 in session s1" in str(exc_info.value)
@@ -1047,12 +1145,14 @@ class TestFeedbackCommand:
     ):
         from cognee.cli.commands.feedback_command import FeedbackCommand
 
-        with patch(
-            "cognee.api.v1.session.delete_feedback",
-            new_callable=lambda: AsyncMock(side_effect=RuntimeError("cache exploded")),
+        with (
+            patch(
+                "cognee.api.v1.session.delete_feedback",
+                new_callable=lambda: AsyncMock(side_effect=RuntimeError("cache exploded")),
+            ),
+            pytest.raises(CliCommandException) as exc_info,
         ):
-            with pytest.raises(CliCommandException) as exc_info:
-                FeedbackCommand().execute(self._delete_args())
+            FeedbackCommand().execute(self._delete_args())
 
         assert exc_info.value.error_code == 1
         assert "cache exploded" in str(exc_info.value)

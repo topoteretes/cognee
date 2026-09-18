@@ -1,15 +1,17 @@
+from unittest.mock import AsyncMock
+
 import pytest
+
 from cognee.eval_framework.answer_generation.answer_generation_executor import (
     AnswerGeneratorExecutor,
 )
 from cognee.eval_framework.benchmark_adapters.dummy_adapter import DummyAdapter
-from unittest.mock import AsyncMock
 
 
 @pytest.mark.asyncio
 async def test_answer_generation():
     limit = 1
-    corpus_list, qa_pairs = DummyAdapter().load_corpus(limit=limit)
+    _corpus_list, qa_pairs = DummyAdapter().load_corpus(limit=limit)
 
     mock_retriever = AsyncMock()
     mock_retriever.get_retrieved_objects = AsyncMock(return_value=[])

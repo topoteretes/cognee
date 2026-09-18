@@ -17,7 +17,6 @@ from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionR
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 from cognee.modules.search.types import SearchType
 
-
 MOCK_ANSWER = "Revenue grew 12 percent."
 
 

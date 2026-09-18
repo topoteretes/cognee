@@ -17,7 +17,7 @@ from uuid import uuid4
 
 import pytest
 
-from cognee.api.v1.visualize.visualize import (  # noqa: F401
+from cognee.api.v1.visualize.visualize import (
     build_brains_summary_payload as _build_brains_summary_payload,
 )
 from cognee.modules.data.methods import DatasetGraphCounts

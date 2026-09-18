@@ -18,9 +18,9 @@ import pytest
 # The package __init__ re-exports these functions under the same name as their
 # submodule, so `import a.b.c as x` would bind the function, not the module.
 # Pull the real module objects from sys.modules instead.
-import cognee.modules.graph.methods.delete_data_nodes_and_edges  # noqa: F401
-import cognee.modules.graph.methods.delete_dataset_nodes_and_edges  # noqa: F401
-import cognee.modules.graph.methods.try_delete_data_by_graph_provenance  # noqa: F401
+import cognee.modules.graph.methods.delete_data_nodes_and_edges
+import cognee.modules.graph.methods.delete_dataset_nodes_and_edges
+import cognee.modules.graph.methods.try_delete_data_by_graph_provenance
 from cognee.infrastructure.databases.provenance import make_source_ref_key
 from cognee.infrastructure.databases.unified.provenance_delete_planner import (
     SourceRefRemovalResult,

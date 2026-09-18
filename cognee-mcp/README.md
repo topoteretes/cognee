@@ -144,7 +144,7 @@ If you'd rather run cognee-mcp in a container, you have two options:
       - `postgres` / `postgres-binary` - PostgreSQL database support
       - `neo4j` - Neo4j graph database support
       - `neptune` - AWS Neptune support
-      - `chromadb` - ChromaDB vector store support
+      - `turso` - Turso vector/graph store support
       - `scraping` - Web scraping capabilities
       - `langchain` - LangChain integration
       - `llama-index` - LlamaIndex integration
@@ -153,7 +153,6 @@ If you'd rather run cognee-mcp in a container, you have two options:
       - `mistral` - Mistral models
       - `ollama` / `huggingface` - Local model support
       - `docs` - Document processing
-      - `codegraph` - Code analysis
       - `tracing` - OpenTelemetry tracing
       - `redis` - Redis support
       - And more (see [pyproject.toml](https://github.com/topoteretes/cognee/blob/main/pyproject.toml) for full list)
@@ -253,14 +252,42 @@ docker run \
 
 **Note:** When running in API mode:
 - Database migrations are automatically skipped (API server handles its own DB)
-- Some features are limited (see [API Mode Limitations](#-api-mode))
+- Some features are limited (see [API Mode Limitations](#api-mode))
 
 
 ## 🔗 MCP Client Configuration
 
 After starting your Cognee MCP server with Docker, you need to configure your MCP client to connect to it.
 
-### **SSE Transport Configuration** (Recommended)
+> ### ⚠️ Host/Origin protection (why you might get HTTP 421 or 403)
+>
+> Both the **http** and **sse** transports validate the `Host` and `Origin` headers to
+> block DNS-rebinding attacks, on every bind address including loopback — rebinding
+> targets loopback services specifically, so `127.0.0.1` is not a mitigation.
+>
+> * A `Host` the server does not recognise returns **`421 Misdirected Request`**
+> * An `Origin` it does not recognise returns **`403 Forbidden`**
+>
+> When you bind a non-loopback address (`--host 0.0.0.0`, which is what the Docker
+> entrypoint does), only `localhost` / `127.0.0.1` / `[::1]` are accepted by default, so
+> reaching the server by **LAN IP or a custom hostname returns 421** — the guard working,
+> not a bug.
+>
+> Allow specific hosts (the `:*` port glob is required):
+> ```bash
+> -e MCP_ALLOWED_HOSTS="192.168.1.50:*,myserver.local:*"
+> ```
+> Or turn the guard off entirely (only on a trusted network):
+> ```bash
+> -e MCP_DISABLE_DNS_REBINDING_PROTECTION=true
+> ```
+>
+> **Implementation note.** FastMCP installs this guard on its streamable-http app only —
+> `create_sse_app()` accepts no such option, so the allow-lists were silently dropped for
+> SSE. cognee-mcp mounts the same middleware on the SSE app itself, with the same
+> allow-lists, so both transports behave identically.
+
+### **SSE Transport Configuration** (Legacy — prefer HTTP below; both are guarded)
 
 **Start the server with SSE transport:**
 ```bash
@@ -311,7 +338,7 @@ cognee-sse: http://localhost:8000/sse (SSE) - ✓ Connected
 }
 ```
 
-### **HTTP Transport Configuration** (Alternative)
+### **HTTP Transport Configuration** (Recommended)
 
 **Start the server with HTTP transport:**
 ```bash
@@ -474,7 +501,7 @@ docker run \
 - `API_TOKEN`: Authentication token (optional, required if API has authentication enabled)
 
 **API Mode behavior:**
-The MCP server intentionally exposes only the memory API: `remember`, `recall`, and `forget`.
+The MCP server intentionally exposes only the memory API: `remember`, `recall`, and `forget` (plus the `cognify_status` progress check).
 In API mode these tools call the Cognee API server endpoints directly. Operational helpers such as
 `cognify`, `search`, `list_data`, `delete`, `prune`, `improve`, and document retrieval helpers are
 kept internal and are not exposed as MCP tools.
@@ -486,12 +513,51 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 ### Available Tools
 
-The MCP server exposes three tools:
+The MCP server exposes four tools (three memory tools pinned in `tools/list`, plus `cognify_status`):
 
 - **remember**: Store data in memory. Pass `data` for text, or `filename` + `content_base64` to ingest an uploaded file (up to 10 MB). With `session_id`: fast session cache (text only). Without `session_id`: permanent graph memory
 - **recall**: Search memory with auto-routing. Searches session cache first when `session_id` is provided, then falls through to the permanent graph
 - **forget**: Delete memory by dataset name or id, a single data item by `data_id`, or delete all owned memory with `everything=True`
 - **cognify_status**: Check the progress of background ingestion started by `remember(background=True)`. Unadvertised by default; discoverable via `search_tools` and callable by name
+
+### Recall result summaries
+
+`recall` (the MCP memory-search tool) starts every successful response with a
+summary, followed by the same result body as before:
+
+```text
+3 memories found (2 from sessions, 1 from project docs)
+[session] ...
+```
+
+The count is the number of returned memory entries, not `top_k`, underlying
+chunks used to synthesize an answer, or system status messages. Source and dataset
+hints use metadata already present in the returned entries; no recency lookup or
+extra LLM call is made.
+
+Empty results distinguish an empty memory graph, indexing in progress, indexing
+failure, and no match. When available, progress is displayed as, for example,
+`still indexing — 12/40 items processed, retry shortly`. These are data items,
+not an inferred chunk count. A graph with no recorded indexing run is reported
+as not yet indexed. If the status check fails or exceeds its two-second budget,
+the summary explicitly says memory status is unavailable. Successful hits do
+not trigger status checks.
+
+The MCP content remains a single `TextContent` block. Text consumers can separate
+line one from the unchanged body with `text.partition("\n")`. Machine consumers
+can read `content[0]._meta["cognee/memory"]`, containing `count` and `state`.
+
+`state` is one of four values, one per action a caller can take:
+
+| state | meaning |
+| --- | --- |
+| `found` | memory contributed; `count` is how many entries |
+| `indexing` | ingestion is still running — retry shortly |
+| `build_failed` | ingestion failed — check `cognify_status` |
+| `none` | nothing to return |
+
+`indexing` additionally carries `completed`/`total` when the pipeline reports
+them. Tool errors retain their existing `Error:` response.
 
 ### Tool surface (`COGNEE_MCP_TOOL_MODE`)
 
@@ -524,7 +590,7 @@ So: **write descriptions in the words an agent would use, including both singula
 
 By default, each MCP client gets its own auto-named dataset (e.g. Cursor → `cursor_vscode_memory`, Claude Code → `claude_code_memory`) so different agents don't share memory unintentionally. The dataset is created on demand the first time a client writes to it.
 
-LLM-direct calls to `cognify`, `remember`, `improve`, and `cognify_status` route to the agent-scoped dataset when `dataset_name` is omitted. Pass `dataset_name` explicitly to override (e.g. `dataset_name="main_dataset"` still works).
+`remember` and `cognify_status` route to the agent-scoped dataset when `dataset_name` is omitted (the internal `cognify`/`improve` helpers, which are not exposed as tools, do the same). Pass `dataset_name` explicitly to override (e.g. `dataset_name="main_dataset"` still works).
 
 To disable agent scoping and have all clients share `main_dataset` as the default, set in `.env`:
 
@@ -568,25 +634,68 @@ forget(dataset="main_dataset")
 ```
 
 
+### Select an uploaded ontology for a write
+
+Pass `ontology_key` to `remember` to ground permanent-memory extraction with one
+or more previously uploaded OWL ontologies:
+
+```python
+remember(data="Alice works at Acme.", dataset_name="workspace_a", ontology_key="workspace_a_v2")
+remember(
+    data="Acme develops software.",
+    ontology_key=["organizations", "software"],
+    background=True,
+)
+```
+
+In API mode, upload the ontologies first through `POST /api/v1/ontologies` using
+the same authenticated user as the MCP server. Keys are sent as repeated
+`ontology_key` form fields. In local mode, keys resolve through `OntologyService`
+in the default user's local ontology store; remote uploads are not copied locally.
+Unknown or inaccessible keys fail the write. Background failures are reported by
+`cognify_status`.
+
+Omitting `ontology_key` (or passing an empty list) preserves the configured
+server ontology, including `ONTOLOGY_FILE_PATH`. Ontology selection is only for
+permanent writes: combining a nonempty key with `session_id` returns an error
+because session-cache writes do not perform extraction.
+
 ## Development and Debugging
 
 ### Debugging
 
-To use debugger, run:
-    ```bash
-    mcp dev src/server.py
-    ```
+Use the **`fastmcp`** CLI, not `mcp`. Since the FastMCP 3 migration this server is a
+standalone `fastmcp.FastMCP` instance, which the `mcp` CLI does not recognise —
+`mcp dev src/server.py` fails with *"Ignoring object 'src/server.py:mcp' as it's not a
+valid server object"*.
 
-Open inspector with timeout passed:
-    ```
-    http://localhost:5173?timeout=120000
-    ```
+Inspect the server without launching anything (fast sanity check — name, version, tool count):
 
-To apply new changes while developing cognee you need to do:
+```bash
+uv run fastmcp inspect src/server.py:mcp
+```
 
-1. Update dependencies in cognee folder if needed
-2. `uv sync --dev --all-extras --reinstall`
-3. `mcp dev src/server.py`
+Run it against the MCP Inspector UI:
+
+```bash
+uv run fastmcp dev src/server.py:mcp
+```
+
+Open the inspector with a longer timeout — cognee's first call can be slow while the
+databases initialise:
+
+```
+http://localhost:5173?timeout=120000
+```
+
+To apply new changes while developing cognee:
+
+1. Update dependencies in the cognee folder if needed
+2. `uv sync --group dev --reinstall`
+3. `uv run fastmcp dev src/server.py:mcp`
+
+> The `:mcp` suffix names the server object in the file. Without it the CLI has to guess,
+> and the guess is not reliable across FastMCP versions.
 
 ### Development
 
@@ -594,14 +703,22 @@ In order to use local cognee:
 
 1. Uncomment the following line in the cognee-mcp [`pyproject.toml`](pyproject.toml) file and set the cognee root path.
     ```
-    #"cognee[postgres,codegraph,gemini,huggingface,docs,neo4j] @ file:/Users/<username>/Desktop/cognee"
+    #"cognee[postgres-binary,docs,neo4j] @ file:/path/to/your/cognee"
     ```
-    Remember to replace `file:/Users/<username>/Desktop/cognee` with your actual cognee root path.
+    Replace `/path/to/your/cognee` with the absolute path to your cognee checkout, and
+    comment out the released `"cognee[...]>=1.5.0,<2.0.0"` line directly below it —
+    otherwise both requirements apply and uv resolves the published package instead.
 
 2. Install dependencies with uv in the mcp folder
     ```
     uv sync --reinstall
     ```
+
+    Re-run this after every change to the local cognee checkout.
+
+> **Note:** editing that line modifies the tracked `pyproject.toml` and rewrites
+> `uv.lock` with a machine-local absolute path. Revert both before committing —
+> `git checkout -- pyproject.toml uv.lock` — or the path leaks into the repo.
 
 ## Code of Conduct
 

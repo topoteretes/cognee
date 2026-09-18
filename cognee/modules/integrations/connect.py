@@ -9,7 +9,6 @@ see :mod:`cognee.api.v1.integrations.routers.get_integrations_router`, whose
 callback endpoint calls this for whichever provider is in the URL.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from cognee.modules.integrations.base import OAuthIntegration
@@ -22,7 +21,7 @@ async def complete_installation(
     *,
     code: str,
     user_id: UUID,
-    callback_params: Optional[dict[str, str]] = None,
+    callback_params: dict[str, str] | None = None,
 ) -> IntegrationCredential:
     """Exchange ``code`` for tokens and persist the resulting credential.
 

@@ -1,42 +1,70 @@
 import asyncio
-import os
 import logging
 import math
-from typing import List, Optional
+import os
+import tempfile
+from pathlib import Path
+
 import numpy as np
 
 try:
     from fastembed import TextEmbedding
 except ImportError:
     raise ImportError(
-        "fastembed is required for FastembedEmbeddingEngine but is not installed. "
-        "Install it with: pip install 'cognee[fastembed]'"
+        "fastembed is required for FastembedEmbeddingEngine but is not importable; it is a "
+        "core cognee dependency. Reinstall it with: pip install fastembed"
     )
 
 import litellm
 from tenacity import (
+    before_sleep_log,
     retry,
+    retry_if_not_exception_type,
     stop_after_delay,
     wait_exponential_jitter,
-    retry_if_not_exception_type,
-    before_sleep_log,
 )
 
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions import (
     EmbeddingContextWindowTooSmallError,
     EmbeddingException,
 )
-from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
-from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.vector.embeddings.utils import (
-    sanitize_embedding_text_inputs,
     handle_embedding_response,
+    sanitize_embedding_text_inputs,
 )
+from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
+from cognee.shared.logging_utils import get_logger
+from cognee.shared.model_download_notice import log_model_load
+from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 
 litellm.set_verbose = False
 logger = get_logger("FastembedEmbeddingEngine")
+
+
+def fastembed_model_cached(model: str) -> tuple[bool, str, str | None]:
+    """Whether fastembed already holds ``model`` locally, its cache dir, and a size hint.
+
+    fastembed resolves its cache the same way: ``FASTEMBED_CACHE_PATH`` or
+    ``fastembed_cache`` under the system temp dir. A model downloaded from the
+    hub lives under ``models--<repo>``; one fetched from fastembed's own
+    bucket under ``fast-<name>``. Zero-network; unknown models report a
+    download with no size.
+    """
+    cache_dir = Path(
+        os.getenv("FASTEMBED_CACHE_PATH", os.path.join(tempfile.gettempdir(), "fastembed_cache"))
+    )
+    description = next(
+        (entry for entry in TextEmbedding.list_supported_models() if entry.get("model") == model),
+        None,
+    )
+    size_gb = (description or {}).get("size_in_GB")
+    size_hint = f"about {round(size_gb * 1000)} MB" if size_gb else None
+    hub_repo = ((description or {}).get("sources") or {}).get("hf")
+    candidates = [cache_dir / f"fast-{model.split('/')[-1]}"]
+    if hub_repo:
+        candidates.append(cache_dir / f"models--{hub_repo.replace('/', '--')}")
+    return any(path.exists() for path in candidates), str(cache_dir), size_hint
 
 
 class FastembedEmbeddingEngine(EmbeddingEngine):
@@ -65,8 +93,8 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
 
     def __init__(
         self,
-        model: Optional[str] = "openai/text-embedding-3-large",
-        dimensions: Optional[int] = 3072,
+        model: str | None = "openai/text-embedding-3-large",
+        dimensions: int | None = 3072,
         max_completion_tokens: int = 512,
         batch_size: int = 100,
     ):
@@ -75,7 +103,15 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         self.max_completion_tokens = max_completion_tokens
         self.tokenizer = self.get_tokenizer()
         self.batch_size = batch_size
-        # self.retry_count = 0
+        cached, cache_dir, size_hint = fastembed_model_cached(model)
+        log_model_load(
+            logger,
+            model=model,
+            cached=cached,
+            cache_dir=cache_dir,
+            size_hint=size_hint,
+            location_var="FASTEMBED_CACHE_PATH",
+        )
         self.embedding_model = TextEmbedding(model_name=model)
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
@@ -96,7 +132,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def embed_text(self, text: List[str]) -> List[List[float]]:
+    async def embed_text(self, text: list[str]) -> list[list[float]]:
         """
         Embed the given text into numerical vectors.
 
@@ -168,7 +204,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
 
                 return handle_embedding_response(original_texts, embeddings, self.dimensions)
 
-            logger.error(f"Embedding error in FastembedEmbeddingEngine: {str(error)}")
+            logger.error(f"Embedding error in FastembedEmbeddingEngine: {error!s}")
             raise EmbeddingException(
                 f"Failed to index data points using model {self.model}"
             ) from error

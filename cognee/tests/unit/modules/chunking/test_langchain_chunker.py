@@ -21,9 +21,9 @@ import pytest
 
 pytest.importorskip("langchain_text_splitters")
 
-from cognee.modules.chunking.LangchainChunker import LangchainChunker  # noqa: E402
-from cognee.modules.chunking.models.DocumentChunk import DocumentChunk  # noqa: E402
-from cognee.modules.data.processing.document_types import Document  # noqa: E402
+from cognee.modules.chunking.LangchainChunker import LangchainChunker
+from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.data.processing.document_types import Document
 
 
 class _WordCountTokenizer:
@@ -109,9 +109,11 @@ async def test_read_raises_for_chunks_over_max_chunk_size():
     # max_chunk_size, which must raise instead of yielding oversized chunks
     chunker = LangchainChunker(document, max_chunk_size=3, get_text=get_text, chunk_size=1000)
 
-    with patch(
-        "cognee.modules.chunking.LangchainChunker.get_vector_engine_async",
-        new=AsyncMock(return_value=_mock_vector_engine()),
+    with (
+        patch(
+            "cognee.modules.chunking.LangchainChunker.get_vector_engine_async",
+            new=AsyncMock(return_value=_mock_vector_engine()),
+        ),
+        pytest.raises(ValueError, match="larger than the maximum"),
     ):
-        with pytest.raises(ValueError, match="larger than the maximum"):
-            [chunk async for chunk in chunker.read()]
+        [chunk async for chunk in chunker.read()]

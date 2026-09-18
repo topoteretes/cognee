@@ -11,18 +11,17 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
+from cognee.infrastructure.llm.config import get_llm_config
+from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
 from cognee.infrastructure.llm.retry_config import (
     llm_retry_condition,
     llm_retry_stop_condition,
 )
-
-from cognee.infrastructure.llm.config import get_llm_config
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
-    get_instructor_mode,
-)
-from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, is_budget_exhausted_error
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
 )
 from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
@@ -52,6 +51,8 @@ class AnthropicAdapter(GenericAPIAdapter):
         api_key: str,
         model: str,
         max_completion_tokens: int,
+        transcription_model: str | None = None,
+        image_transcribe_model: str | None = None,
         instructor_mode: str | None = None,
         llm_args: dict[str, Any] | None = None,
     ) -> None:
@@ -62,6 +63,8 @@ class AnthropicAdapter(GenericAPIAdapter):
             model=model,
             max_completion_tokens=max_completion_tokens,
             name="Anthropic",
+            transcription_model=transcription_model,
+            image_transcribe_model=image_transcribe_model,
             llm_args=llm_args,
         )
         self.llm_args: dict[str, Any] = llm_args or {}
@@ -123,6 +126,6 @@ class AnthropicAdapter(GenericAPIAdapter):
                     **merged_kwargs,
                 )
         except Exception as e:
-            if is_budget_exhausted_error(e):
-                raise LLMPaymentRequiredError() from e
+            # Same detail-carrying message as the other adapters.
+            raise_if_budget_exhausted(e)
             raise

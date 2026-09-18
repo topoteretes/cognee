@@ -13,8 +13,9 @@ typed parts; only text parts are imported.
 """
 
 import json
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, List, Union
+from typing import Any
 
 from cognee.modules.migration.cogx import (
     COGXDocument,
@@ -28,7 +29,7 @@ from cognee.modules.migration.cogx import (
 from cognee.modules.migration.sources.base import MemorySource, read_export_file
 
 
-def _first_list(container: Dict[str, Any], *keys: str) -> List[Dict[str, Any]]:
+def _first_list(container: dict[str, Any], *keys: str) -> list[dict[str, Any]]:
     """Return the records under the first alias that carries any.
 
     An agent file may emit several aliases for the same collection and fill
@@ -44,7 +45,7 @@ def _first_list(container: Dict[str, Any], *keys: str) -> List[Dict[str, Any]]:
     return []
 
 
-def _message_text(message: Dict[str, Any]) -> str:
+def _message_text(message: dict[str, Any]) -> str:
     """Return the text of a message, from ``content`` or the ``text`` alias.
 
     ``content`` is optional in the message schema, and a serializer that keeps
@@ -71,11 +72,11 @@ def _message_text(message: Dict[str, Any]) -> str:
 class LettaSource(MemorySource):
     source_system = "letta"
 
-    def __init__(self, data: Union[str, Path, Dict[str, Any]], mode: str = "re-derive"):
+    def __init__(self, data: str | Path | dict[str, Any], mode: str = "re-derive"):
         super().__init__(mode=mode)
         self._data = data
 
-    def _load_raw(self) -> Dict[str, Any]:
+    def _load_raw(self) -> dict[str, Any]:
         data = self._data
         if isinstance(data, (str, Path)):
             data = json.loads(read_export_file(data))

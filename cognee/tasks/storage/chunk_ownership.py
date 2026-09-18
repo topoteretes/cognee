@@ -26,7 +26,6 @@ its FIRST owner (so its provenance stamp folds into the same atomic
 statement), and the remaining owners are attached afterwards.
 """
 
-from typing import Dict, List, Tuple
 from uuid import UUID
 
 from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
@@ -35,16 +34,16 @@ from cognee.modules.data.processing.document_types import Document
 from cognee.modules.engine.models import NodeSet
 from cognee.modules.graph.utils.get_graph_from_model import get_graph_from_model
 
-EdgeKey = Tuple[str, str, str]
+EdgeKey = tuple[str, str, str]
 
 
 class ChunkOwnership:
     """node id / edge identity -> ordered owning chunk ref keys."""
 
     def __init__(self) -> None:
-        self.node_owners: Dict[str, List[str]] = {}
-        self.edge_owners: Dict[EdgeKey, List[str]] = {}
-        self.chunk_ref_keys: List[str] = []
+        self.node_owners: dict[str, list[str]] = {}
+        self.edge_owners: dict[EdgeKey, list[str]] = {}
+        self.chunk_ref_keys: list[str] = []
 
     @property
     def has_chunks(self) -> bool:
@@ -130,7 +129,7 @@ def _scoped_root(root):
     return root
 
 
-def _chunks_of(root) -> List[DataPoint]:
+def _chunks_of(root) -> list[DataPoint]:
     """The ORIGINAL chunk objects a root is built from (they carry the record)."""
     if _is_chunk(root):
         return [root]
@@ -141,7 +140,7 @@ def _chunks_of(root) -> List[DataPoint]:
 
 
 async def collect_chunk_ownership(
-    data_points: List[DataPoint],
+    data_points: list[DataPoint],
     dataset_id: UUID,
     data_id: UUID,
 ) -> ChunkOwnership:

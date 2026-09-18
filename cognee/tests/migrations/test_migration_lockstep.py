@@ -41,8 +41,8 @@ from cognee.modules.data.methods.get_dataset_databases import get_dataset_databa
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.graph.models import Edge, Node
-from cognee.modules.migrations.versions.namespace_entity_type_node_ids import build_id_remap
 from cognee.modules.migrations.runner import run_database_migrations
+from cognee.modules.migrations.versions.namespace_entity_type_node_ids import build_id_remap
 
 TEXT = """
 Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem Ipsum has been the

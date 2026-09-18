@@ -4,9 +4,9 @@ from typing import Any
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
-from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
-from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
+from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface, LoaderResult
 from cognee.infrastructure.loaders.store_derived_text import store_derived_text
+from cognee.infrastructure.loaders.utils.require_llm import require_llm_for_media
 
 
 class AudioLoader(LoaderInterface):
@@ -61,9 +61,9 @@ class AudioLoader(LoaderInterface):
         Returns:
             True if file can be handled, False otherwise
         """
-        if extension in self.supported_extensions and mime_type in self.supported_mime_types:
-            return True
-        return False
+        return bool(
+            extension in self.supported_extensions and mime_type in self.supported_mime_types
+        )
 
     async def load(self, file_path: str, **kwargs: Any) -> "str | LoaderResult":
         """
@@ -82,6 +82,8 @@ class AudioLoader(LoaderInterface):
         """
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
+
+        require_llm_for_media("Audio", "cognee transcribes audio with the LLM before indexing it")
 
         with open(file_path, "rb") as f:
             file_metadata = await get_file_metadata(f)

@@ -1,11 +1,29 @@
 from fastapi import status
+
 from cognee.shared.logging_utils import get_logger
+
+from .remediation import REMEDIATION_MARKER
 
 logger = get_logger()
 
 
 class CogneeApiError(Exception):
-    """Base exception class"""
+    """Root of the cognee exception hierarchy.
+
+    Every error cognee raises on purpose derives from this class and carries:
+
+    * ``message`` -- what went wrong, for humans and agents;
+    * ``name`` -- the error class name, appended to REST ``detail`` as ``[Name]``;
+    * ``status_code`` -- the HTTP status the REST layer answers with;
+    * ``remediation`` -- optional, what to change to make the error go away (an env var
+      to set, an extra to install, a call to make first). ``str(exc)`` appends it as
+      ``Fix: ...`` so it survives every transport (CLI, REST ``remediation`` key, MCP
+      tool text). Errors without one fall back to the substring table in
+      ``cognee.exceptions.remediation.find_remediation``.
+
+    Subclasses must call ``super().__init__`` (enforced by
+    ``cognee/tests/unit/exceptions/test_cognee_error_contract.py``).
+    """
 
     def __init__(
         self,
@@ -14,10 +32,12 @@ class CogneeApiError(Exception):
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         log=True,
         log_level="ERROR",
+        remediation: str | None = None,
     ):
         self.message = message
         self.name = name
         self.status_code = status_code
+        self.remediation = remediation
 
         # Automatically log the exception details
         if log and (log_level == "ERROR"):
@@ -32,7 +52,10 @@ class CogneeApiError(Exception):
         super().__init__(self.message, self.name)
 
     def __str__(self):
-        return f"{self.name}: {self.message} (Status code: {self.status_code})"
+        text = f"{self.name}: {self.message} (Status code: {self.status_code})"
+        if self.remediation:
+            text = f"{text}{REMEDIATION_MARKER}{self.remediation}"
+        return text
 
 
 class CogneeSystemError(CogneeApiError):
@@ -45,8 +68,9 @@ class CogneeSystemError(CogneeApiError):
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         log=True,
         log_level="ERROR",
+        remediation: str | None = None,
     ):
-        super().__init__(message, name, status_code, log, log_level)
+        super().__init__(message, name, status_code, log, log_level, remediation=remediation)
 
 
 class CogneeValidationError(CogneeApiError):
@@ -59,8 +83,9 @@ class CogneeValidationError(CogneeApiError):
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         log=True,
         log_level="ERROR",
+        remediation: str | None = None,
     ):
-        super().__init__(message, name, status_code, log, log_level)
+        super().__init__(message, name, status_code, log, log_level, remediation=remediation)
 
 
 class CogneeConfigurationError(CogneeApiError):
@@ -73,8 +98,9 @@ class CogneeConfigurationError(CogneeApiError):
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         log=True,
         log_level="ERROR",
+        remediation: str | None = None,
     ):
-        super().__init__(message, name, status_code, log, log_level)
+        super().__init__(message, name, status_code, log, log_level, remediation=remediation)
 
 
 class CogneeTransientError(CogneeApiError):
@@ -87,5 +113,6 @@ class CogneeTransientError(CogneeApiError):
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         log=True,
         log_level="ERROR",
+        remediation: str | None = None,
     ):
-        super().__init__(message, name, status_code, log, log_level)
+        super().__init__(message, name, status_code, log, log_level, remediation=remediation)

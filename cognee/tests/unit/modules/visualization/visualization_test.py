@@ -1,4 +1,5 @@
 import pytest
+
 from cognee.modules.visualization.cognee_network_visualization import (
     cognee_network_visualization,
 )
@@ -127,6 +128,8 @@ async def test_create_cognee_style_network_with_logo(tmp_path):
     # Reads preprocessor.stage / edge_class to build a "Source" chain and
     # a "Provenance" section that only shows when any field is set.
     assert "inspectorOverviewLine" in html_output
+    # EntityType membership: incoming Entity → is_a → EntityType (not outgoing structural).
+    assert 'srcNode.type==="Entity"' in html_output
     assert "inspectorSection" in html_output
     assert "inspector-section-body" in html_output
     assert 'data-toggle="provenance"' in html_output or "provenance" in html_output
@@ -250,3 +253,37 @@ async def test_schema_tab_renders_schema_nodes_without_explicit_schema(tmp_path)
     # `window._renderSchemaGraph` so the tab-switch handler keeps working.
     assert "buildSchemaModel" in html_output
     assert "window._renderSchemaGraph" in html_output
+
+
+def test_operation_layer_keeps_two_effects_on_one_type_when_properties_differ():
+    """Regression: the dedupe key was (effect, type_name), so a second
+    "modifies" effect on the same type was dropped - which silently discarded
+    consolidate_entity_descriptions' is_a.edge_text row entirely."""
+    from cognee.modules.visualization.preprocessor import build_operation_layer
+
+    schema_graph = {
+        "nodes": [
+            {
+                "id": "type:Entity",
+                "name": "Entity",
+                "type": "GraphNodeType",
+                "source_pipeline": None,
+            },
+            {
+                "id": "type:EntityType",
+                "name": "EntityType",
+                "type": "GraphNodeType",
+                "source_pipeline": None,
+            },
+        ]
+    }
+    build_operation_layer(schema_graph, [], [])
+
+    properties = {
+        (link["target"], link["property"])
+        for link in schema_graph["operation_links"]
+        if link["source"] == "op:consolidate_entity_descriptions"
+    }
+    assert ("type:Entity", "description") in properties
+    assert ("type:EntityType", "description") in properties
+    assert ("type:Entity", "is_a.edge_text") in properties
