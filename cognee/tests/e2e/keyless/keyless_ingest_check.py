@@ -38,7 +38,8 @@ ROOT.mkdir(exist_ok=True)
 os.chdir(ROOT)  # pydantic-settings reads a cwd-relative .env; there is none here
 os.environ["DATA_ROOT_DIRECTORY"] = str(ROOT / "data")
 os.environ["SYSTEM_ROOT_DIRECTORY"] = str(ROOT / "system")
-os.environ["AUTO_FEEDBACK"] = "false"  # the per-turn feedback analysis is an LLM call
+# AUTO_FEEDBACK stays at its default: the per-turn analysis and the LLM-only improve
+# stages skip on their own when no usable LLM is configured (SDK-753).
 os.environ["TELEMETRY_DISABLED"] = "1"
 
 import dotenv  # noqa: E402
@@ -142,6 +143,36 @@ async def main() -> None:
     # An explicit improve over the same session must not raise either.
     explicit = await cognee.improve(dataset="keyless_remember", session_ids=["keyless_session"])
     assert explicit.status != "errored", explicit
+
+    # An agent trace step: stored with the deterministic summary (no LLM to
+    # write one), persisted by stage 3, and the LLM-only stages decline with
+    # a reason instead of erroring.
+    from cognee.memory.entries import TraceEntry
+
+    trace_result = await cognee.remember(
+        TraceEntry(
+            origin_function="search_docs",
+            status="success",
+            method_params={"query": "Bohr model"},
+            method_return_value={"hits": 3},
+            generate_feedback_with_llm=True,
+        ),
+        dataset_name="keyless_remember",
+        session_id="keyless_session",
+    )
+    await trace_result
+    traced = await cognee.improve(dataset="keyless_remember", session_ids=["keyless_session"])
+    traced_stages = {stage.stage: stage for stage in traced.stages}
+    assert traced.status != "errored", traced
+    assert not [s for s in traced.stages if s.status == "errored"], traced.stages
+    assert traced_stages["persist_agent_traces"].status in ("completed", "already_completed"), (
+        traced_stages["persist_agent_traces"]
+    )
+    for llm_stage in ("extract_agent_context", "distill_sessions"):
+        assert (traced_stages[llm_stage].status, traced_stages[llm_stage].reason) == (
+            "skipped",
+            "no_llm_configured",
+        ), traced_stages[llm_stage]
 
     # With no usable LLM key, recall() without a query_type answers with CHUNKS.
     recalled = await cognee.recall("Where was Marie Curie born?", datasets=["keyless"], top_k=1)

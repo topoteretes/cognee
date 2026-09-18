@@ -120,7 +120,11 @@ async def improve(
 
     Every stage but the last two is session-fed and is skipped with
     ``no_session_ids`` when no ``session_ids`` were given. Stages named in
-    ``IMPROVE_STAGES_DISABLED`` are skipped with ``disabled_by_config``. A run
+    ``IMPROVE_STAGES_DISABLED`` are skipped with ``disabled_by_config``. The
+    stages that draft text with an LLM (``extract_agent_context``,
+    ``distill_sessions``, ``global_context_index``) are skipped with
+    ``no_llm_configured`` when no usable LLM is configured, so a keyless
+    install still bridges sessions and traces into the graph. A run
     that loses the improve lock — another run is already touching the same
     sessions or dataset — returns a result whose every stage is
     ``skipped: lock_held``. A failure in ``persist_session_qa`` stops the run

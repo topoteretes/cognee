@@ -22,13 +22,6 @@ from cognee.infrastructure.session.session_context_models import (
 )
 
 
-@pytest.fixture(autouse=True)
-def _llm_configured():
-    """These tests mock the LLM call itself; the keyless gate must not skip it."""
-    with patch.object(feedback_detection_module, "llm_available", return_value=True):
-        yield
-
-
 class TestDetectFeedback:
     """Tests for detect_feedback."""
 

@@ -24,13 +24,6 @@ from cognee.infrastructure.session.session_concurrent_turn import (
 from cognee.modules.retrieval.utils.completion import SessionPrompt
 
 
-@pytest.fixture(autouse=True)
-def _llm_configured():
-    """The turn analysis is mocked at the LLM call; the keyless gate must not skip it."""
-    with patch("cognee.infrastructure.session.feedback_detection.llm_available", return_value=True):
-        yield
-
-
 @pytest.mark.asyncio
 async def test_snapshot_loads_history_guidance_and_previous_served_context():
     manager = MagicMock()

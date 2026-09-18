@@ -16,6 +16,7 @@ Tests that never touch the relational database are unaffected.
 
 import asyncio
 import logging
+from unittest.mock import patch
 
 import pytest
 
@@ -46,3 +47,16 @@ def _relational_db_for_unit_tests():
     )
 
     create_relational_engine.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _turn_analysis_sees_a_usable_llm():
+    """Unit tests mock the LLM call itself; the keyless gate must not skip it.
+
+    ``analyze_turn_for_session_context`` skips the per-turn analysis when no
+    usable LLM is configured (SDK-753). CI has no key, so without this every
+    test that mocks ``LLMGateway`` and counts on the analysis running would
+    see it skipped. Tests of the gate itself patch ``llm_available`` inside.
+    """
+    with patch("cognee.infrastructure.session.feedback_detection.llm_available", return_value=True):
+        yield
