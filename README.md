@@ -5,7 +5,7 @@
 
   <br />
 
-  <p>Cognee - The Open-Source AI Memory Platform for Agents</p>
+  <p>Cognee - The Free Open-Source AI Memory Platform for Agents</p>
 
   <p align="center">
   <a href="https://www.youtube.com/watch?v=8hmqS2Y5RVQ&t=13s">Demo</a>
@@ -39,9 +39,9 @@
   </a>
 </p>
 
-  <p>Cognee is the open-source AI memory platform that gives AI agents persistent long-term memory across sessions. Turn documents, code, and conversations into a self-hosted knowledge graph your agents can search and reuse.</p>
+  <p>Cognee is a free open-source AI memory platform that gives AI agents persistent long-term memory across sessions. Turn documents, code, and conversations into a self-hosted knowledge graph your agents can search and reuse.</p>
 
-  <p><strong>Start locally without an LLM or an OpenAI or Anthropic API key.</strong> Build memory from text with local extraction and embedding models. Add a local or hosted LLM when you want generated answers.</p>
+  <p><strong>Start locally for free without an OpenAI or Anthropic API key.</strong> Build memory from text with local extraction and embedding models. Add a local or hosted LLM when you want more functionality or reach out to us for a production-ready small model pipeline.</p>
 
   <p align="center">
   🌐 This README is also available in:<br />
@@ -73,7 +73,7 @@
 
 | I want to… | Start here |
 | --- | --- |
-| Build memory from my own text without an LLM | [Local Python quickstart](#run-locally-without-an-llm) |
+| Build memory without an LLM | [Local Python quickstart](#run-locally-without-an-llm) |
 | Explore a prebuilt graph without downloading models | [Bundled demo](#explore-the-bundled-demo) |
 | Generate answers with a local or hosted LLM | [Optional LLM setup](#optional-add-an-llm) |
 | Give an existing agent memory | [Plugins and MCP](#connect-your-agent) |
@@ -82,29 +82,36 @@
 
 ## Quickstart
 
-Requires **Python 3.10–3.14**. [Cognee v1.6.0](https://github.com/topoteretes/cognee/releases/tag/v1.6.0) supports building and searching text memory without a generative LLM or a cloud API key.
+Requires **Python 3.10–3.14**.
 
-<a id="try-it-without-an-api-key"></a>
+Requires **Python 3.10–3.14**.
+
+You can install Cognee with **pip**, **uv**, or your preferred Python package manager.
+
+```bash
+uv pip install "cognee[gliner]"
+```
+
+### Optional: Configure the LLM
+```python
+import os
+
+os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
+```
+Alternatively, create a `.env` file using our [template](https://github.com/topoteretes/cognee/blob/main/.env.template).
+
+The default uses OpenAI for language models and embeddings. Processing and generated answers make provider calls. See [installation](https://docs.cognee.ai/getting-started/installation), [other providers](https://docs.cognee.ai/setup-configuration/llm-providers), or [local Ollama models](https://docs.cognee.ai/guides/local-ollama) for other setups.
+
+
+
+
 
 ### Run locally without an LLM
 
-In a fresh Python environment, install Cognee with the local extraction extra:
 
-```bash
-pip install --upgrade "cognee[gliner]"
-```
+In step 1, you did "cognee[gliner]" install.
 
-You can also use `uv pip install --upgrade "cognee[gliner]"` in an activated environment.
-
-Leave `LLM_API_KEY` and `EMBEDDING_*` settings unset in both your shell and `.env`, with no other LLM provider configured. Cognee automatically uses:
-
-- **Local graph extraction:** the GLiNER demo model (`fastino/gliner2.5-base-v1`) extracts entities and relationships from text.
-- **Local embeddings:** FastEmbed runs `BAAI/bge-small-en-v1.5` for semantic search.
-- **Retrieval without generation:** `recall()` returns matching text chunks, ready for your application or agent to use.
-
-The first run needs internet access to download the models (approximately **750 MB** for GLiNER and **67 MB** for embeddings); inference runs locally. No Ollama server is needed for this path.
-
-Save this as `quickstart.py` and run `python quickstart.py`:
+Save this as `quickstart.py` and run `python quickstart.py` if you are feeling old school, or tell your LLM to do it:
 
 ```python
 import asyncio
@@ -139,9 +146,11 @@ cognee-cli remember "Marie Curie was born in Warsaw." -d local_quickstart
 cognee-cli recall "Where was Marie Curie born?" -d local_quickstart
 ```
 
-Text ingestion, retrieval, and session storage work without an LLM. LLM-dependent improvement stages skip automatically. Generated answers and media processing that requires a vision or transcription model need additional provider configuration.
+Text ingestion, retrieval, and session storage work without an LLM. LLM-dependent improvement stages skip automatically.
 
-> **GLiNER demo:** The open-source extractor is free to use and demonstrates Cognee's enterprise GLiNER extraction. The production-grade version with higher accuracy and broader label coverage is a licensed product. Contact [social@cognee.ai](mailto:social@cognee.ai) for details.
+Generated answers and media processing that requires a vision or transcription model need additional LLM configuration.
+
+
 
 ### Explore the bundled demo
 
