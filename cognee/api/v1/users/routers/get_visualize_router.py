@@ -450,7 +450,10 @@ def get_visualize_router() -> APIRouter:
           empty when the data was ingested without node sets
         - **node_count** (int): nodes in the dataset's graph as of its latest
           cognify run — the whole graph, not only entity nodes, and 0 for a
-          dataset that has never been cognified
+          dataset that has never been cognified. A 0 also stands in for a graph
+          that could not be read; this payload cannot distinguish the two, so
+          use `GET /datasets/graph-summary` and its `computedAt` when that
+          matters
         - **node_set_colors** (dict[str, str]): node set colors from the same
           rule `/brains` uses. Same rule and same node sets give the same
           colors, but the two endpoints can be looking at different node
