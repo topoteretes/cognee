@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import select
@@ -29,6 +30,14 @@ async def log_pipeline_run_progress(
     same row from different sessions) — last write wins, no locking. That's
     fine for a display-only "how far along are we" signal; it only risks a
     slightly stale snapshot between ticks, never a growing table.
+
+    The same UPDATE stamps ``last_heartbeat_at``. A tick only happens because
+    the run did something, so the timestamp means "was alive at least this
+    recently" — which is what separates a working run from a dead one, and
+    what the row's age cannot say. Riding the existing write is the point:
+    liveness costs no extra write, no extra row, and no timer. What it buys
+    is bounded by how often the caller ticks; see the column's comment on
+    PipelineRun for the shapes it does not cover.
     """
     db_engine = get_relational_engine()
 
@@ -53,6 +62,7 @@ async def log_pipeline_run_progress(
             run_info = dict(pipeline_run.run_info or {})
             run_info["progress"] = progress
             pipeline_run.run_info = run_info
+            pipeline_run.last_heartbeat_at = datetime.now(timezone.utc)
             session.add(pipeline_run)
         else:
             # No STARTED row found. In today's only caller (run_tasks.py) this
@@ -104,6 +114,7 @@ async def log_pipeline_run_progress(
                 status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
                 dataset_id=dataset_id,
                 run_info={"data": None, "progress": progress},
+                last_heartbeat_at=datetime.now(timezone.utc),
             )
             session.add(pipeline_run)
 
