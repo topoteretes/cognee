@@ -159,40 +159,52 @@ async def search(
         },
     )
 
-    with new_span("cognee.search.authorize") as span:
-        span.set_attribute(COGNEE_SEARCH_TYPE, query_type.value)
-        span.set_attribute(COGNEE_SEARCH_QUERY, query_text[:500])
-        span.set_attribute("cognee.search.top_k", top_k)
-        span.set_attribute(
-            "cognee.search.dataset_count",
-            len(dataset_ids) if dataset_ids else 0,
-        )
+    try:
+        with new_span("cognee.search.authorize") as span:
+            span.set_attribute(COGNEE_SEARCH_TYPE, query_type.value)
+            span.set_attribute(COGNEE_SEARCH_QUERY, query_text[:500])
+            span.set_attribute("cognee.search.top_k", top_k)
+            span.set_attribute(
+                "cognee.search.dataset_count",
+                len(dataset_ids) if dataset_ids else 0,
+            )
 
-        search_results = await authorized_search(
-            query_type=query_type,
-            query_text=query_text,
-            user=user,
-            dataset_ids=dataset_ids,
-            system_prompt_path=system_prompt_path,
-            system_prompt=system_prompt,
-            top_k=top_k,
-            node_type=node_type,
-            node_name=node_name,
-            node_name_filter_operator=node_name_filter_operator,
-            only_context=only_context,
-            session_id=session_id,
-            wide_search_top_k=wide_search_top_k,
-            triplet_distance_penalty=triplet_distance_penalty,
-            feedback_influence=feedback_influence,
-            retriever_specific_config=retriever_specific_config,
-            neighborhood_depth=neighborhood_depth,
-            neighborhood_seed_top_k=neighborhood_seed_top_k,
-            include_references=include_references,
-            llm_config=llm_config,
-            embedding_config=embedding_config,
-        )
+            search_results = await authorized_search(
+                query_type=query_type,
+                query_text=query_text,
+                user=user,
+                dataset_ids=dataset_ids,
+                system_prompt_path=system_prompt_path,
+                system_prompt=system_prompt,
+                top_k=top_k,
+                node_type=node_type,
+                node_name=node_name,
+                node_name_filter_operator=node_name_filter_operator,
+                only_context=only_context,
+                session_id=session_id,
+                wide_search_top_k=wide_search_top_k,
+                triplet_distance_penalty=triplet_distance_penalty,
+                feedback_influence=feedback_influence,
+                retriever_specific_config=retriever_specific_config,
+                neighborhood_depth=neighborhood_depth,
+                neighborhood_seed_top_k=neighborhood_seed_top_k,
+                include_references=include_references,
+                llm_config=llm_config,
+                embedding_config=embedding_config,
+            )
 
-        span.set_attribute("cognee.search.result_count", len(search_results))
+            span.set_attribute("cognee.search.result_count", len(search_results))
+    except Exception as error:
+        send_telemetry(
+            "cognee.search EXECUTION ERRORED",
+            user,
+            additional_properties={
+                "cognee_version": cognee_version,
+                "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
+                "error_type": type(error).__name__,
+            },
+        )
+        raise
 
     send_telemetry(
         "cognee.search EXECUTION COMPLETED",
