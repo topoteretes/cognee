@@ -26,6 +26,22 @@ STATUS_ACTIVE = "active"
 STATUS_REVOKED = "revoked"
 
 
+class _Unset:
+    """Marker for an argument :func:`upsert_credential` was not given.
+
+    ``None`` is a meaningful value for both ``workspace_id`` (no workspace
+    owns this row) and ``provider_metadata`` (nothing stored), so "not
+    supplied" has to be distinguishable from it. Without that distinction
+    every caller that leaves one out silently clears what is already there.
+    """
+
+    def __repr__(self) -> str:
+        return "UNSET"
+
+
+UNSET = _Unset()
+
+
 class CrossUserConflictError(Exception):
     """A different owner already holds an active connection for this external account.
 
@@ -45,11 +61,11 @@ async def upsert_credential(
     user_id: UUID,
     provider_account_id: str,
     token_payload: dict[str, Any],
-    workspace_id: UUID | None = None,
+    workspace_id: UUID | None | _Unset = UNSET,
     account_label: str | None = None,
     auth_type: str = "oauth2",
     scopes: str | None = None,
-    provider_metadata: dict[str, Any] | None = None,
+    provider_metadata: dict[str, Any] | None | _Unset = UNSET,
     token_expires_at: datetime | None = None,
 ) -> IntegrationCredential:
     """Insert or replace the credential for a ``(provider, provider_account_id)``.
@@ -62,13 +78,46 @@ async def upsert_credential(
     connection — the original owner must disconnect (or the account be
     revoked) first.
 
-    ``workspace_id`` is optional and defaults to ``None``, which reproduces
-    the original single-user contract exactly: ``user_id`` is the owner, and
-    conflicts are compared on it. Pass ``workspace_id`` when several users
-    share one connection (a cognee-hosted multi-user workspace, or a
-    downstream layer's own tenant concept) — it then becomes the owner/
-    conflict key instead, while ``user_id`` still records who connected it.
+    ``workspace_id`` is optional. Omitted, it reproduces the original
+    single-user contract exactly: ``user_id`` is the owner, conflicts are
+    compared on it, and whatever the row already carries is left untouched.
+    Pass ``workspace_id`` when several users share one connection (a
+    cognee-hosted multi-user workspace, or a downstream layer's own tenant
+    concept) and it becomes the owner/conflict key instead, while ``user_id``
+    still records who connected it.
+
+    ``provider_metadata`` is **merged** into what is stored rather than
+    swapping for it. Providers rebuild their whole metadata dict from each
+    token response, so every key they own is refreshed either way; what
+    merging protects is the keys that cannot be re-derived from that response
+    because they were written separately through
+    :func:`update_provider_metadata` (today: Slack's channel allowlist).
+    Replacing instead of merging meant a plain reconnect through
+    :mod:`cognee.modules.integrations.connect` dropped them silently, and an
+    empty Slack allowlist reads as "every channel allowed".
+
+    Three consequences of merging worth knowing, none of them accidental.
+    Neither ``None`` nor ``{}`` clears the stored metadata, so this function
+    cannot empty it at all — unlike ``workspace_id``, where an explicit
+    ``None`` still means "no workspace owns this". Keys an adapter stops
+    emitting now survive, so an adapter that builds its dict conditionally
+    has to write the key with a null rather than leave it out. And a revoked
+    row is reused rather than replaced (see below), so a new owner connecting
+    a previously-connected account inherits its metadata, which for the
+    allowlist means starting restricted rather than open.
+
+    The other optional arguments (``account_label``, ``auth_type``,
+    ``scopes``, ``token_expires_at``) are still assigned unconditionally: a
+    caller that omits one clears it. That is the pre-existing contract and
+    every current caller passes what it needs, but do not read "omitted means
+    untouched" as applying to them.
     """
+    # Resolved before the conflict check so that an omitted workspace_id is
+    # read as "this caller does not deal in workspaces" (the original
+    # user-owned contract) rather than as an explicit None, while still
+    # leaving any stored workspace_id alone further down.
+    conflict_workspace_id = None if isinstance(workspace_id, _Unset) else workspace_id
+
     ciphertext, nonce, encryption_version, key_id = encrypt_credentials(token_payload)
 
     engine = get_relational_engine()
@@ -83,9 +132,9 @@ async def upsert_credential(
 
         if credential is not None and credential.status == STATUS_ACTIVE:
             existing_owner = (
-                credential.workspace_id if workspace_id is not None else credential.user_id
+                credential.workspace_id if conflict_workspace_id is not None else credential.user_id
             )
-            new_owner = workspace_id if workspace_id is not None else user_id
+            new_owner = conflict_workspace_id if conflict_workspace_id is not None else user_id
             if existing_owner != new_owner:
                 logger.warning(
                     "Refused %s reconnect: account %s already active for owner %s, not %s",
@@ -103,11 +152,20 @@ async def upsert_credential(
             db.add(credential)
 
         credential.user_id = user_id
-        credential.workspace_id = workspace_id
+        if not isinstance(workspace_id, _Unset):
+            credential.workspace_id = workspace_id
         credential.account_label = account_label
         credential.auth_type = auth_type
         credential.scopes = scopes
-        credential.provider_metadata = provider_metadata
+        if not isinstance(provider_metadata, _Unset):
+            # Best-effort under concurrency: this read-modify-write and
+            # update_provider_metadata's both run unlocked in separate
+            # transactions, so a reconnect racing a settings write can still
+            # lose one of them. Both windows are a single statement wide.
+            credential.provider_metadata = {
+                **(credential.provider_metadata or {}),
+                **(provider_metadata or {}),
+            }
         credential.ciphertext = ciphertext
         credential.nonce = nonce
         credential.encryption_version = encryption_version

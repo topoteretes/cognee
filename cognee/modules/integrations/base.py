@@ -102,6 +102,13 @@ class OAuthIntegration(ABC):
         else (display/routing data such as a bot user id) goes in
         ``provider_metadata``, which is stored in the clear. Never put secret
         material in ``provider_metadata``.
+
+        ``provider_metadata`` is **merged** into whatever the row already
+        holds, not swapped for it, so that settings written outside the OAuth
+        flow (Slack's channel allowlist) survive a reconnect. Two rules follow
+        for an adapter: build the dict unconditionally, writing a key with a
+        null value rather than leaving it out, since an omitted key keeps its
+        stored value; and do not expect to clear the metadata from here.
         """
 
     @abstractmethod
