@@ -75,7 +75,7 @@
 | --- | --- |
 | Build memory without an LLM | [Local Python quickstart](#run-locally-without-an-llm) |
 | Explore a prebuilt graph without downloading models | [Bundled demo](#explore-the-bundled-demo) |
-| Generate answers with a local or hosted LLM | [Optional LLM setup](#optional-add-an-llm) |
+| Generate answers with a local or hosted LLM | [Optional LLM setup](#optional-configure-the-llm) |
 | Give an existing agent memory | [Plugins and MCP](#connect-your-agent) |
 | Run Cognee on my infrastructure | [Deployment options](#deploy-cognee) |
 | Use a managed service | [Cognee Cloud](https://docs.cognee.ai/cognee-cloud/overview) |
@@ -84,7 +84,6 @@
 
 Requires **Python 3.10–3.14**.
 
-Requires **Python 3.10–3.14**.
 
 You can install Cognee with **pip**, **uv**, or your preferred Python package manager.
 
@@ -162,18 +161,7 @@ cognee-cli demo
 
 This command works with the base `pip install cognee` package. It loads bundled sample data and runs keyword search without an API key. Use the local quickstart above to build a graph from your own text.
 
-### Optional: add an LLM
 
-For generated answers and LLM-based enrichment, configure [local models with Ollama](https://docs.cognee.ai/guides/local-ollama) or a [hosted provider such as OpenAI or Anthropic](https://docs.cognee.ai/setup-configuration/llm-providers). OpenAI and Anthropic are optional.
-
-Configure embeddings separately when adding an LLM. To keep using the local dataset above, retain its embedding model with these `.env` settings:
-
-```dotenv
-EMBEDDING_PROVIDER=fastembed
-EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
-```
-
-Setting only `LLM_API_KEY` selects the OpenAI defaults for both LLM calls and embeddings. Changing the embedding model requires re-ingesting your data into a new dataset. See the [configuration template](.env.template) and [installation guide](https://docs.cognee.ai/getting-started/installation) for more options.
 
 ## How Cognee works
 
