@@ -59,6 +59,24 @@ class TelemetryAggregateExtractTest(unittest.TestCase):
         columns = [column[0] for column in result.description]
         return [dict(zip(columns, row)) for row in result.fetchall()]
 
+    def test_search_errors_are_included_in_execution_outcomes(self):
+        for outcome in ("STARTED", "COMPLETED", "STARTED", "ERRORED"):
+            self.connection.execute(
+                """INSERT INTO analytics.main.pipeline_events VALUES
+                   (current_date, ?, '1.6.0', '{}', 'deployment-a', NULL, NULL)""",
+                [f"cognee.search EXECUTION {outcome}"],
+            )
+
+        result = self.connection.execute(self.extract.QUERIES["sdk_exec_outcomes_daily"])
+        columns = [column[0] for column in result.description]
+        rows = [dict(zip(columns, row)) for row in result.fetchall()]
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["operation"], "search")
+        self.assertEqual(rows[0]["started"], 2)
+        self.assertEqual(rows[0]["completed"], 1)
+        self.assertEqual(rows[0]["errored"], 1)
+
     def test_redacts_identifiers_in_provider_dimensions(self):
         for value in (
             "custom/person@example.com",
