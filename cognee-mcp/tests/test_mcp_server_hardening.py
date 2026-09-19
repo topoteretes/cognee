@@ -98,6 +98,66 @@ def test_cognee_client_auth_schemes():
         os.environ.pop("COGNEE_API_AUTH_SCHEME", None)
 
 
+# A self-hosted backend with auth on accepts server-issued API keys only on the
+# X-Api-Key transport; the Bearer transport is JWT-only (issue #5023).
+_SELF_HOSTED_API_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+
+def _self_hosted_backend(requests: list[httpx.Request]):
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.headers.get("X-Api-Key") != _SELF_HOSTED_API_KEY:
+            return httpx.Response(401, json={"detail": "Unauthorized"})
+        if request.url.path == "/api/v1/datasets/":
+            return httpx.Response(200, json=[{"name": "notes"}])
+        return httpx.Response(200, json=[{"answer": "graph answer"}])
+
+    return handler
+
+
+async def _self_hosted_client(requests: list[httpx.Request], **kwargs) -> CogneeClient:
+    """API-mode client against the mock self-hosted backend, keeping its response hooks."""
+    client = CogneeClient(api_url="http://localhost:8000", api_token=_SELF_HOSTED_API_KEY, **kwargs)
+    hooks = client.client.event_hooks
+    await client.client.aclose()
+    client.client = httpx.AsyncClient(
+        transport=httpx.MockTransport(_self_hosted_backend(requests)), event_hooks=hooks
+    )
+    return client
+
+
+@pytest.mark.asyncio
+async def test_cognee_client_x_api_key_scheme_recalls_from_self_hosted_backend():
+    requests: list[httpx.Request] = []
+    client = await _self_hosted_client(requests, api_auth_scheme="x-api-key")
+
+    try:
+        result = await client.recall("what did we decide?", top_k=3)
+    finally:
+        await client.close()
+
+    assert result == [{"answer": "graph answer"}]
+    # An unscoped recall lists datasets first, then searches them.
+    assert [r.url.path for r in requests] == ["/api/v1/datasets/", "/api/v1/recall"]
+    assert all("Authorization" not in r.headers for r in requests)
+    assert json.loads(requests[1].content)["datasets"] == ["notes"]
+
+
+@pytest.mark.asyncio
+async def test_cognee_client_default_scheme_401_hints_at_x_api_key(caplog):
+    requests: list[httpx.Request] = []
+    client = await _self_hosted_client(requests)
+
+    try:
+        with pytest.raises(httpx.HTTPStatusError):
+            await client.recall("what did we decide?", top_k=3)
+    finally:
+        await client.close()
+
+    assert requests[0].headers["Authorization"] == f"Bearer {_SELF_HOSTED_API_KEY}"
+    assert "--api-auth-scheme x-api-key" in caplog.text
+
+
 # Tools that the MCP server is expected to expose. Kept as named groups so the
 # contract documents intent rather than just enumerating names. The hardening
 # rule is that the LLM-direct memory API stays minimal (V2: remember/recall/

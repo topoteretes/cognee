@@ -1040,8 +1040,10 @@ async def main():
     parser.add_argument(
         "--api-token",
         default=os.getenv("COGNEE_API_KEY"),
-        help="Authentication token for the API, sent as X-Api-Key (required if the API has "
-        "authentication enabled). Can also be set via the COGNEE_API_KEY env var.",
+        help="Authentication token for the API (required if the API has authentication "
+        "enabled). Sent as Authorization: Bearer unless --api-auth-scheme says otherwise; "
+        "a server-issued API key needs --api-auth-scheme x-api-key. "
+        "Can also be set via the COGNEE_API_KEY env var.",
     )
 
     parser.add_argument(

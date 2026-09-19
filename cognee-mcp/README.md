@@ -249,6 +249,7 @@ docker run \
 **Environment variables for API mode:**
 - `API_URL`: URL of the running Cognee API server
 - `API_TOKEN`: Authentication token (optional, required if API has authentication enabled)
+- `COGNEE_API_AUTH_SCHEME`: `bearer` (default, `Authorization: Bearer`) or `x-api-key` (`X-Api-Key`). Set `x-api-key` when `API_TOKEN` is a server-issued API key rather than a login JWT.
 
 **Note:** When running in API mode:
 - Database migrations are automatically skipped (API server handles its own DB)
@@ -495,10 +496,17 @@ docker run \
 **Command-line arguments for API mode:**
 - `--api-url`: Base URL of the running Cognee FastAPI server (e.g., `http://localhost:8000`)
 - `--api-token`: Authentication token for the API (optional, required if API has authentication enabled)
+- `--api-auth-scheme`: How the token is sent: `bearer` (default, `Authorization: Bearer`, for a login JWT from `POST /api/v1/auth/login`) or `x-api-key` (`X-Api-Key`, for a server-issued API key from `POST /api/v1/auth/api-keys`). Also `COGNEE_API_AUTH_SCHEME`.
+
+A self-hosted server with authentication enabled only accepts API keys as `X-Api-Key`, so pass `--api-auth-scheme x-api-key` with an API key or every call fails with 401:
+```bash
+python src/server.py --api-url http://localhost:8000 --api-token YOUR_API_KEY --api-auth-scheme x-api-key
+```
 
 **Docker environment variables for API mode:**
 - `API_URL`: Base URL of the running Cognee FastAPI server
 - `API_TOKEN`: Authentication token (optional, required if API has authentication enabled)
+- `COGNEE_API_AUTH_SCHEME`: `bearer` (default) or `x-api-key`; set `x-api-key` when `API_TOKEN` is a server-issued API key
 
 **API Mode behavior:**
 The MCP server intentionally exposes only the memory API: `remember`, `recall`, and `forget` (plus the `cognify_status` progress check).
