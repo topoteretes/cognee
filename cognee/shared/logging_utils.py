@@ -19,13 +19,16 @@ def _get_cognee_version() -> str:
     import importlib.metadata as _meta
     from contextlib import suppress
 
-    with suppress(FileNotFoundError, StopIteration):
+    with suppress(FileNotFoundError, StopIteration, IndexError, OSError):
         _pyproject = Path(__file__).parent.parent.parent / "pyproject.toml"
-        with open(_pyproject, encoding="utf-8") as f:
-            _ver = (
-                next(line for line in f if line.startswith("version")).split("=")[1].strip("'\"\n ")
-            )
-            return f"{_ver}-local"
+        if _pyproject.is_file():
+            with open(_pyproject, encoding="utf-8") as f:
+                for line in f:
+                    stripped = line.strip()
+                    if stripped.startswith("version") and "=" in stripped:
+                        _ver = stripped.split("=", 1)[1].strip("'\"\n ")
+                        if _ver:
+                            return f"{_ver}-local"
     try:
         return _meta.version("cognee")
     except _meta.PackageNotFoundError:
