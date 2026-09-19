@@ -3101,6 +3101,9 @@ class LadybugAdapter(GraphDBInterface):
         if not primary_ids:
             return [], []
 
+        if node_name_filter_operator not in ("OR", "AND"):
+            raise ValueError("node_name_filter_operator must be 'OR' or 'AND'")
+
         if node_name_filter_operator == "OR":
             neighbor_query = """
                 MATCH (n:Node)-[:EDGE]-(nbr:Node)
@@ -3144,6 +3147,7 @@ class LadybugAdapter(GraphDBInterface):
             UNWIND $ids AS wanted
             MATCH (a:Node)-[r:EDGE]-(b:Node)
             WHERE a.id = wanted
+                AND a.id < b.id
             RETURN a.id, b.id, r.relationship_name, r.properties
         """
         edge_rows = await self.query(edges_query, {"ids": all_ids})
