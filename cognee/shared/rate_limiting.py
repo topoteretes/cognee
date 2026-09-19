@@ -81,3 +81,15 @@ def embedding_rate_limiter_context_manager():
             embedding_config.embedding_rate_limit_interval,
         )
     return _embedding_rate_limiter
+
+
+def reset_rate_limiters() -> None:
+    """Reset cached rate limiter singletons.
+
+    Allows tests and dynamic configuration updates to rebind limiter capacities
+    to updated environment settings.
+    """
+    global _llm_rate_limiter, _embedding_rate_limiter
+    _llm_rate_limiter = None
+    _embedding_rate_limiter = None
+
