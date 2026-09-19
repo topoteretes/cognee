@@ -29,6 +29,11 @@ async def consolidate_entities_pipeline(
     name_match: bool = True,
     top_k: int = 10,
     allow_cross_type: bool = False,
+    judge: bool = False,
+    judge_protected_types: bool = False,
+    judge_batch_size: int = 12,
+    judge_concurrency: int = 4,
+    judge_max_cluster_size: int = 25,
     user: User | None = None,
     dataset: str = DEFAULT_DATASET_NAME,
     run_in_background: bool = False,
@@ -44,6 +49,13 @@ async def consolidate_entities_pipeline(
         top_k: Max neighbors considered per entity during similarity clustering.
         allow_cross_type: When True, allow merging entities of different
             EntityTypes (off by default for safety).
+        judge: Confirm every candidate pair with the LLM (both names and
+            descriptions) and merge only the pairs it confirms.
+        judge_protected_types: Judge protect_node_types instead of skipping them.
+        judge_batch_size: Candidate pairs per LLM call.
+        judge_concurrency: Concurrent LLM calls.
+        judge_max_cluster_size: Clusters larger than this are skipped by the
+            judge rather than compared pairwise.
         user: Acting user; the default user is used when omitted.
         dataset: Dataset name (or id) whose graph to consolidate.
         run_in_background: Forwarded to ``memify``.
@@ -88,6 +100,11 @@ async def consolidate_entities_pipeline(
         "name_match": name_match,
         "top_k": top_k,
         "allow_cross_type": allow_cross_type,
+        "judge": judge,
+        "judge_protected_types": judge_protected_types,
+        "judge_batch_size": judge_batch_size,
+        "judge_concurrency": judge_concurrency,
+        "judge_max_cluster_size": judge_max_cluster_size,
     }
 
     extraction_tasks = [Task(detect_entity_duplicates, config=config)]
