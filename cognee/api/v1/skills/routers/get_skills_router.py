@@ -222,6 +222,8 @@ def get_skills_router() -> APIRouter:
             return JSONResponse(
                 status_code=403, content={"error": "Not authorized for this dataset"}
             )
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("list skills failed")
             return JSONResponse(status_code=409, content={"error": "Failed to list skills"})
@@ -260,6 +262,8 @@ def get_skills_router() -> APIRouter:
             return JSONResponse(
                 status_code=403, content={"error": "Not authorized for this dataset"}
             )
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("get skill failed")
             return JSONResponse(status_code=409, content={"error": "Failed to fetch skill"})
@@ -298,6 +302,8 @@ def get_skills_router() -> APIRouter:
             return JSONResponse(
                 status_code=403, content={"error": "Not authorized for this dataset"}
             )
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("delete skill failed")
             return JSONResponse(status_code=409, content={"error": "Failed to delete skill"})

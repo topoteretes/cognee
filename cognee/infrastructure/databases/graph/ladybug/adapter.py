@@ -538,36 +538,31 @@ class LadybugAdapter(GraphDBInterface):
             self.connection = Connection(self.db)
 
             try:
-                self.connection.execute("LOAD EXTENSION JSON;")
+                # Tries the by-name load first (static builds / already
+                # installed), then the binary bundled with cognee, and only
+                # then the classic INSTALL-from-remote-repo download.
+                from cognee_db_workers._kuzu_helpers import load_json_extension
+
+                load_json_extension(self.connection.execute)
                 logger.info("Loaded JSON extension")
-            except Exception:
-                # LOAD failed — the extension is not installed for this
-                # connection's extension dir (the throwaway pre-install above can
-                # miss it when offline, or when it cached to a different path).
-                # Try installing + loading directly on the real connection before
-                # giving up. INSTALL is idempotent and a no-op when already cached.
-                logger.debug(
-                    "Ignoring exception in LadybugAdapter._initialize_connection", exc_info=True
+            except Exception as e:
+                # Surface loudly: queries that use JSON (recall, temporal
+                # search) will otherwise fail later with a cryptic Binder
+                # error. This usually means no bundled binary for this
+                # ladybug version/platform and no network access to download
+                # the extension at startup. (load_json_extension's ladder
+                # already retried the classic INSTALL + LOAD on this
+                # connection as its last rung, so no extra retry here.)
+                logger.warning(
+                    "Could not load the Kuzu/Ladybug JSON extension (%s). "
+                    "Graph queries that use JSON (e.g. recall, temporal search) will "
+                    "fail with 'Extension: json ... has not been installed'. Populate "
+                    "cognee_db_workers/ladybug_extensions/ (see its README), ensure the "
+                    "process has network access at startup, or run `INSTALL json; LOAD "
+                    "json;` once against the database.",
+                    e,
+                    exc_info=True,
                 )
-                try:
-                    self.connection.execute("INSTALL JSON;")
-                    self.connection.execute("LOAD EXTENSION JSON;")
-                    logger.info("Installed and loaded JSON extension")
-                except Exception as e:
-                    # Surface loudly: queries that use JSON (recall, temporal
-                    # search) will otherwise fail later with a cryptic Binder
-                    # error. This usually means no network access to download the
-                    # extension at startup.
-                    logger.warning(
-                        "Could not install/load the Kuzu/Ladybug JSON extension (%s). "
-                        "Graph queries that use JSON (e.g. recall, temporal search) will "
-                        "fail with 'Extension: json ... has not been installed'. Ensure the "
-                        "process has network access at startup to download the extension, "
-                        "pre-install it in your image, or run `INSTALL json; LOAD json;` "
-                        "once against the database.",
-                        e,
-                        exc_info=True,
-                    )
 
             self._ensure_schema()
             logger.debug("Ladybug database initialized successfully")
@@ -2849,6 +2844,12 @@ class LadybugAdapter(GraphDBInterface):
 
     # Graph-wide Operations
 
+    async def get_top_degree_node_ids(self, top_k: int) -> list[str]:
+        """Rank a bounded edge sample in the store; include isolated nodes."""
+        from cognee.infrastructure.databases.graph.degree_seeds import cypher_degree_seeds
+
+        return await cypher_degree_seeds(self, top_k, typed=True)
+
     async def get_graph_data(
         self,
     ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]:
@@ -2918,22 +2919,6 @@ class LadybugAdapter(GraphDBInterface):
                                 f"Failed to parse edge properties for {source_id}->{target_id}"
                             )
                     formatted_edges.append((source_id, target_id, rel_type, props))
-
-            if formatted_nodes and not formatted_edges:
-                logger.debug("No edges found, creating self-referential edges for nodes")
-                for node_id, _ in formatted_nodes:
-                    formatted_edges.append(
-                        (
-                            node_id,
-                            node_id,
-                            "SELF",
-                            {
-                                "relationship_name": "SELF",
-                                "relationship_type": "SELF",
-                                "vector_distance": 0.0,
-                            },
-                        )
-                    )
 
             retrieval_time = time.time() - start_time
             logger.info(

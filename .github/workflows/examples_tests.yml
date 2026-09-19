@@ -120,7 +120,7 @@ jobs:
           LLM_API_KEY: "mock-not-used"
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_API_KEY: "mock-not-used"
-        run: uv run python cognee/tests/utils/run_mocked.py ./examples/demos/feedback/feedback_score_shifting_example.py
+        run: uv run python cognee/tests/utils/run_mocked.py --replay cognee/tests/utils/mock_ingestion/replays/feedback_score_shifting.json ./examples/demos/feedback/feedback_score_shifting_example.py
 
   test-agentic-reasoning:
     name: Run Agentic Reasoning Tests
@@ -142,7 +142,7 @@ jobs:
           LLM_API_KEY: "mock-not-used"
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_API_KEY: "mock-not-used"
-        run: uv run python cognee/tests/utils/run_mocked.py ./examples/demos/agentic/agentic_reasoning_procurement_example.py
+        run: uv run python cognee/tests/utils/run_mocked.py --replay cognee/tests/utils/mock_ingestion/replays/agentic_reasoning_procurement.json ./examples/demos/agentic/agentic_reasoning_procurement_example.py
 
   test-memify:
     name: Run Memify Example
@@ -284,8 +284,7 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
-          # codegraph (in the default base set) is declared conflicting with
-          # docling-full, so this job installs only what the test needs.
+          # Keep this heavyweight integration job limited to what it tests.
           base-extras: ''
           extra-dependencies: 'docling-full'
 

@@ -13,6 +13,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models import Data
@@ -134,6 +135,26 @@ async def mark_data_processed(data_id: UUID, dataset_id: UUID) -> None:
         await session.commit()
 
 
+async def reset_data_pipeline_status(data_id: UUID, dataset_id: UUID) -> None:
+    """Forget every pipeline's completion stamp for this document in this dataset.
+
+    A pinned re-add then ingests the document again instead of skipping it as
+    already added, and cognify processes it instead of skipping it as done.
+    """
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        data_point = (
+            await session.execute(select(Data).filter(Data.id == data_id))
+        ).scalar_one_or_none()
+        if data_point is None or not data_point.pipeline_status:
+            return
+        for pipeline_status in data_point.pipeline_status.values():
+            pipeline_status.pop(str(dataset_id), None)
+        flag_modified(data_point, "pipeline_status")
+        await session.merge(data_point)
+        await session.commit()
+
+
 async def is_data_processed(data_id: UUID, dataset_id: UUID) -> bool:
     """Whether the cognify-completion stamp is already on the row."""
     db_engine = get_relational_engine()
@@ -143,5 +164,8 @@ async def is_data_processed(data_id: UUID, dataset_id: UUID) -> bool:
         ).scalar_one_or_none()
         if data_point is None:
             return False
-        status = (data_point.pipeline_status or {}).get(COGNIFY_PIPELINE_NAME, {})
-        return status.get(str(dataset_id)) == _completed_status()
+        # Same deferred import as _completed_status, same cycle reason.
+        from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed
+
+        status = (data_point.pipeline_status or {}).get(COGNIFY_PIPELINE_NAME) or {}
+        return is_data_item_completed(status.get(str(dataset_id)))

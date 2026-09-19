@@ -1,4 +1,5 @@
 import asyncio
+import re
 from typing import Any, get_type_hints
 from uuid import UUID
 
@@ -25,6 +26,7 @@ from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..exceptions import CollectionNotFoundError
 from ..models.ScoredResult import ScoredResult
+from ..stored_vector_size import choose_stored_vector_size
 from ..vector_db_interface import VectorDBInterface
 from .serialize_data import serialize_data
 
@@ -252,6 +254,38 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             - list[list[float]]: A list of lists of floats representing embedded vectors.
         """
         return await self.embedding_engine.embed_text(data)
+
+    async def get_stored_vector_size(self) -> int | None:
+        """Width of the vectors already in this store, or None when nothing is stored yet.
+
+        Every table's ``vector`` column is declared ``vector(N)`` with the
+        embedding width that built it. Read once per dataset by the dataset
+        context to record the width for rows that predate the recorded
+        embedding model.
+
+        Reads every such column rather than the first: a schema built across an
+        ``EMBEDDING_MODEL`` change holds two widths, and which one gets recorded
+        must not depend on catalog order (see ``choose_stored_vector_size``).
+        """
+        async with self.get_async_session() as session:
+            result = await session.execute(
+                text(
+                    "SELECT format_type(a.atttypid, a.atttypmod) FROM pg_attribute a "
+                    "JOIN pg_class c ON c.oid = a.attrelid "
+                    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE n.nspname = :schema AND a.attname = 'vector' "
+                    "AND NOT a.attisdropped"
+                ),
+                {"schema": self.schema or "public"},
+            )
+            declared_types = result.scalars().all()
+
+        widths = []
+        for declared_type in declared_types:
+            match = re.fullmatch(r"vector\((\d+)\)", declared_type or "")
+            if match:
+                widths.append(int(match.group(1)))
+        return choose_stored_vector_size(widths, self.name)
 
     async def has_collection(self, collection_name: str) -> bool:
         """
@@ -573,6 +607,28 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 ScoredResult(id=parse_id(result.id), payload=result.payload, score=0)
                 for result in unique_results
             ]
+
+    async def score_by_ids(
+        self, collection_name: str, data_point_ids: list[str], query_vector: list[float]
+    ) -> list[ScoredResult]:
+        ids = list(dict.fromkeys(str(point_id) for point_id in data_point_ids))
+        if not ids:
+            return []
+        table = await self.get_table(collection_name)
+        scores = []
+        async with self.get_async_session() as session:
+            for start in range(0, len(ids), QUERY_BATCH_SIZE):
+                batch = ids[start : start + QUERY_BATCH_SIZE]
+                rows = await session.execute(
+                    select(
+                        table.c.id, table.c.vector.cosine_distance(query_vector).label("distance")
+                    ).where(table.c.id.in_(batch))
+                )
+                scores.extend(
+                    ScoredResult(id=parse_id(str(row.id)), score=float(row.distance), payload=None)
+                    for row in rows.all()
+                )
+        return scores
 
     async def search(
         self,

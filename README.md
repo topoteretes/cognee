@@ -93,6 +93,15 @@ uv pip install cognee
 cognee-cli demo
 ```
 
+With no `LLM_API_KEY` set at all, `remember` and `cognify` build the graph with the local
+GLiNER demo extractor and embed with a local model (`pip install "cognee[gliner]"`), and
+`recall` answers with the matching chunks.
+
+> **Demo:** The GLiNER extractor shipped in open source is a demo of cognee's enterprise
+> GLiNER extraction. It is free to use, but the production-grade version — higher accuracy
+> and broader label coverage — is available as a licensed product. Write to us at
+> social@cognee.ai to explore the options.
+
 
 ### Step 2: Configure the LLM
 ```python
@@ -206,7 +215,7 @@ The UI launcher requires Node.js/npm; Docker is needed for its MCP service. See 
 
 ## Explore examples
 
-- [Build a small Company Brain from text, code, and session lessons](examples/demos/company_brain_demo.py).
+- [Build a small Company Brain from text, code, and session lessons](examples/demos/company_brain/company_brain_demo.py).
 - [Import memory from Mem0, Letta, Zep, or Graphiti](https://docs.cognee.ai/examples/migrate-memory-systems) using the COGX exchange format.
 - [Run with local Ollama models](https://docs.cognee.ai/guides/local-ollama), including a local embedding model.
 - [Visualize your knowledge graph](https://docs.cognee.ai/guides/graph-visualization) and inspect its connections.

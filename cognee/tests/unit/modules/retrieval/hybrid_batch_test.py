@@ -63,17 +63,22 @@ async def test_query_batch_returns_aligned_results_contexts_and_completions():
 
 
 @pytest.mark.asyncio
-async def test_empty_graph_query_batch_returns_empty_shapes():
+async def test_empty_graph_query_batch_raises_no_data():
+    """A batch on an empty graph is the same state error as a single query."""
+    from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+
     unified = _unified()
     unified.graph.is_empty = AsyncMock(return_value=True)
     retriever = HybridRetriever()
 
-    with patch(
-        "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
-        new_callable=AsyncMock,
-        return_value=unified,
+    with (
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+            return_value=unified,
+        ),
+        pytest.raises(NoDataError),
     ):
-        retrieved = await retriever.get_retrieved_objects(query_batch=["q1", "q2"])
+        await retriever.get_retrieved_objects(query_batch=["q1", "q2"])
 
-    assert retrieved == [empty_hybrid_result(), empty_hybrid_result()]
     unified.vector.embedding_engine.embed_text.assert_not_awaited()

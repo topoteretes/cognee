@@ -1,6 +1,6 @@
 """E2E test: code ingestion -> enola code graph -> SearchType.CODE (SDK-395).
 
-Runs the REAL enola binary (pinned release, auto-installed on first use) over
+Runs the REAL enola binary (the enola-cli wheel included with cognee) over
 a small pinned repository that ships with the test suite, against the default
 embedded databases (Ladybug graph + SQLite), with NO LLM or embedding
 configuration. It covers what the unit tests in tests/unit/tasks/code_graph
@@ -27,6 +27,7 @@ ingestion because enola writes its .enola/ snapshot into the scanned tree.
 """
 
 import asyncio
+import importlib.metadata
 import json
 import os
 import pathlib
@@ -40,7 +41,10 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.retrieval.code_retriever import CODE_NODE_TYPES
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.code_graph import ENOLA_PINNED_VERSION
+
+# The enola version cognee runs is the enola-cli wheel pinned in pyproject.toml;
+# the known answers below are pinned to it.
+ENOLA_PINNED_VERSION = importlib.metadata.version("enola-cli")
 
 logger = get_logger()
 
@@ -52,9 +56,12 @@ COGNIFY_DATASET = "code_graph_e2e_cognify"
 
 # --- Known answers, pinned to the fixture + ENOLA_PINNED_VERSION ------------
 # If enola is bumped and these change, update them deliberately. Last
-# re-verified against enola 0.4.12 (which additionally emits the README as
-# document/section symbols, an `extraction` coverage fact, and the
-# pyproject's declared package as `pkg:pypi/requests`).
+# re-verified against enola 0.4.19: it emits the README as document/section
+# symbols, an `extraction` coverage fact, the pyproject's declared package as
+# `pkg:pypi/requests`, and (since 0.4.14) a module-level `module-edge:` dependency
+# fact per resolved package import. File-level import facts such as
+# `main -> inventory.store` now carry the imported file path as their target and
+# no resolved module id; the resolved `imports` edge lives on the module-edge fact.
 
 EXPECTED_MODULES = {".", "inventory"}
 
@@ -216,9 +223,10 @@ def _assert_typed_code_graph(nodes: dict, edges: list, repo_name: str) -> None:
     )
 
     imports = {(name_of[s], name_of[t]) for s, t, rel, _ in edges if rel == "imports"}
-    # enola resolves this import's target to the top-level package module.
-    assert ("main -> inventory.store", "inventory") in imports, (
-        f"Missing 'imports' edge from 'main -> inventory.store' to module 'inventory'; "
+    # enola resolves the package import from main.py to the top-level module
+    # `inventory` on a module-level dependency fact (see the known-answers note).
+    assert ("module-edge: . -> inventory", "inventory") in imports, (
+        f"Missing 'imports' edge from 'module-edge: . -> inventory' to module 'inventory'; "
         f"imports present: {sorted(imports)}"
     )
 
