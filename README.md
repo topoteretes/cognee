@@ -21,7 +21,6 @@
   <a href="https://github.com/topoteretes/cognee-community">Community Plugins & Add-ons</a>
   </p>
 
-
   <p>
   <a href="https://GitHub.com/topoteretes/cognee/network/"><img src="https://img.shields.io/github/forks/topoteretes/cognee.svg?style=social&amp;label=Fork&amp;maxAge=2592000" alt="GitHub forks"></a>
   <a href="https://github.com/topoteretes/cognee"><img src="https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social&amp;label=Star&amp;maxAge=2592000" alt="GitHub stars"></a>
@@ -65,25 +64,24 @@
 
 ## When to use Cognee
 
-- **Build a Company Brain.** Bring documentation, conversations, tickets, code, and agent work into shared memory. Help your team and agents connect a decision to the discussion and implementation behind it. [Explore Company Brain](https://www.cognee.ai/company-brain).
-- **Give agents memory across runs.** Retain project context, past decisions, fixes, and learned rules. Distill useful session lessons into durable knowledge that another session can retrieve. [Connect your agent](#connect-your-agent).
-- **Ground agents in your domain.** Structure memory around the entities and relationships your application needs, with custom data models and ontologies. [Explore ontologies](https://docs.cognee.ai/guides/ontology-support).
+* **Build a Company Brain.** Bring documentation, conversations, tickets, code, and agent work into shared memory. Help your team and agents connect a decision to the discussion and implementation behind it. [Explore Company Brain](https://www.cognee.ai/company-brain).
+* **Give agents memory across runs.** Retain project context, past decisions, fixes, and learned rules. Distill useful session lessons into durable knowledge that another session can retrieve. [Connect your agent](#connect-your-agent).
+* **Ground agents in your domain.** Structure memory around the entities and relationships your application needs, with custom data models and ontologies. [Explore ontologies](https://docs.cognee.ai/guides/ontology-support).
 
 ## Choose your starting point
 
-| I want to… | Start here |
-| --- | --- |
-| Build memory without an LLM | [Local Python quickstart](#run-locally-without-an-llm) |
-| Explore a prebuilt graph without downloading models | [Bundled demo](#explore-the-bundled-demo) |
-| Generate answers with a local or hosted LLM | [Optional LLM setup](#optional-configure-the-llm) |
-| Give an existing agent memory | [Plugins and MCP](#connect-your-agent) |
-| Run Cognee on my infrastructure | [Deployment options](#deploy-cognee) |
-| Use a managed service | [Cognee Cloud](https://docs.cognee.ai/cognee-cloud/overview) |
+| I want to…                                          | Start here                                                   |
+| --------------------------------------------------- | ------------------------------------------------------------ |
+| Build memory without an LLM                         | [Local Python quickstart](#run-locally-without-an-llm)       |
+| Explore a prebuilt graph without downloading models | [Bundled demo](#explore-the-bundled-demo)                    |
+| Generate answers with a local or hosted LLM         | [Optional LLM setup](#optional-configure-the-llm)            |
+| Give an existing agent memory                       | [Plugins and MCP](#connect-your-agent)                       |
+| Run Cognee on my infrastructure                     | [Deployment options](#deploy-cognee)                         |
+| Use a managed service                               | [Cognee Cloud](https://docs.cognee.ai/cognee-cloud/overview) |
 
 ## Quickstart
 
 Requires **Python 3.10–3.14**.
-
 
 You can install Cognee with **pip**, **uv**, or your preferred Python package manager.
 
@@ -92,21 +90,18 @@ uv pip install "cognee[gliner]"
 ```
 
 ### Optional: Configure the LLM
+
 ```python
 import os
 
 os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
 ```
+
 Alternatively, create a `.env` file using our [template](https://github.com/topoteretes/cognee/blob/main/.env.template).
 
 The default uses OpenAI for language models and embeddings. Processing and generated answers make provider calls. See [installation](https://docs.cognee.ai/getting-started/installation), [other providers](https://docs.cognee.ai/setup-configuration/llm-providers), or [local Ollama models](https://docs.cognee.ai/guides/local-ollama) for other setups.
 
-
-
-
-
 ### Run locally without an LLM
-
 
 In step 1, you did "cognee[gliner]" install.
 
@@ -149,8 +144,6 @@ Text ingestion, retrieval, and session storage work without an LLM. LLM-dependen
 
 Generated answers and media processing that requires a vision or transcription model need additional LLM configuration.
 
-
-
 ### Explore the bundled demo
 
 To explore a prebuilt graph without downloading extraction or embedding models:
@@ -160,8 +153,6 @@ cognee-cli demo
 ```
 
 This command works with the base `pip install cognee` package. It loads bundled sample data and runs keyword search without an API key. Use the local quickstart above to build a graph from your own text.
-
-
 
 ## How Cognee works
 
@@ -177,14 +168,32 @@ At query time, retrieval selects relevant graph, vector, or code context. Your a
   <img src="assets/recall.svg" alt="Recall retrieves a document fact, a code symbol, and a learned release rule for an agent's next task" width="100%">
 </p>
 
-| Operation | What it does | Learn more |
-| --- | --- | --- |
-| `remember` | Store content or code in permanent memory, or in a session when a session ID is supplied. | [Store memory](https://docs.cognee.ai/core-concepts/main-operations/remember) |
-| `recall` | Retrieve context and answers, using automatic routing or a chosen search strategy. | [Query memory](https://docs.cognee.ai/core-concepts/main-operations/recall) |
-| `improve` | Enrich memory, apply feedback, and bridge session knowledge into the graph. | [Improve memory](https://docs.cognee.ai/core-concepts/main-operations/improve) |
-| `forget` | Remove a specific item or dataset. | [Delete memory](https://docs.cognee.ai/core-concepts/main-operations/forget) |
+| Operation  | What it does                                                                              | Learn more                                                                     |
+| ---------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `remember` | Store content or code in permanent memory, or in a session when a session ID is supplied. | [Store memory](https://docs.cognee.ai/core-concepts/main-operations/remember)  |
+| `recall`   | Retrieve context and answers, using automatic routing or a chosen search strategy.        | [Query memory](https://docs.cognee.ai/core-concepts/main-operations/recall)    |
+| `improve`  | Enrich memory, apply feedback, and bridge session knowledge into the graph.               | [Improve memory](https://docs.cognee.ai/core-concepts/main-operations/improve) |
+| `forget`   | Remove a specific item or dataset.                                                        | [Delete memory](https://docs.cognee.ai/core-concepts/main-operations/forget)   |
 
 Explore the [architecture](https://docs.cognee.ai/core-concepts/architecture) and [session lifecycle](https://docs.cognee.ai/core-concepts/sessions-and-caching).
+
+## Data provenance and conflict handling
+
+Cognee can structure extracted information using custom data models and ontologies, but the open-source version does not currently provide strict ontology validation. Ontology support can guide how information is represented, but it does not reject entities or relationships that fall outside the defined ontology.
+
+### Provenance and source traceability
+
+The open-source version does not currently provide end-to-end tracing from a returned chunk or fact back to the original source bytes. Retrieved information can be inspected as part of the memory and retrieval workflow, but source-byte-level provenance is not currently available as an open-source feature.
+
+### Conflict resolution
+
+Conflict resolution in the open-source version is simplified and opt-in. Advanced conflict-resolution capabilities are not currently part of the open-source release.
+
+### Time and validity
+
+Cognee supports time-related information such as event dates and record creation or update timestamps. However, the open-source version does not currently provide a separate model for distinguishing real-world validity from database creation or update time.
+
+For the current open-source behavior and supported capabilities, refer to the [documentation](https://docs.cognee.ai/).
 
 ## Connect your agent
 
@@ -198,6 +207,7 @@ claude plugin install cognee-memory@cognee
 or Codex plugin
 
 Make sure to enable hooks:
+
 ```bash
 # ~/.codex/config.toml
 [features]
@@ -211,15 +221,15 @@ codex plugin add cognee@cognee
 
 Follow the [plugin setup guide](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code) to configure local or remote memory.
 
-| Interface | Start here |
-| --- | --- |
-| Claude Code memory plugin | [Install and configure the plugin](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code) |
-| OpenClaw memory plugin | [Install `@cognee/cognee-openclaw`](https://www.npmjs.com/package/@cognee/cognee-openclaw) |
-| Cursor, Cline, and other MCP clients | [Cognee MCP guide](https://docs.cognee.ai/cognee-mcp/mcp-overview) and [server README](cognee-mcp/README.md) |
-| Python applications | [Python API reference](https://docs.cognee.ai/python-api) |
-| TypeScript applications | [TypeScript SDK](https://docs.cognee.ai/typescript/getting-started) |
-| Rust applications | [Cognee-RS](https://github.com/topoteretes/cognee-rs) |
-| Applications using HTTP | [REST API reference](https://docs.cognee.ai/api-reference/introduction) |
+| Interface                            | Start here                                                                                                                |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code memory plugin            | [Install and configure the plugin](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code) |
+| OpenClaw memory plugin               | [Install `@cognee/cognee-openclaw`](https://www.npmjs.com/package/@cognee/cognee-openclaw)                                |
+| Cursor, Cline, and other MCP clients | [Cognee MCP guide](https://docs.cognee.ai/cognee-mcp/mcp-overview) and [server README](cognee-mcp/README.md)              |
+| Python applications                  | [Python API reference](https://docs.cognee.ai/python-api)                                                                 |
+| TypeScript applications              | [TypeScript SDK](https://docs.cognee.ai/typescript/getting-started)                                                       |
+| Rust applications                    | [Cognee-RS](https://github.com/topoteretes/cognee-rs)                                                                     |
+| Applications using HTTP              | [REST API reference](https://docs.cognee.ai/api-reference/introduction)                                                   |
 
 Browse the [integrations repository](https://github.com/topoteretes/cognee-integrations) for agent frameworks, plugins, and source connectors. Each guide describes its setup and memory capture behavior.
 
@@ -233,13 +243,13 @@ The UI launcher requires Node.js/npm; Docker is needed for its MCP service. See 
 
 ## Explore examples
 
-- [Build a small Company Brain from text, code, and session lessons](examples/demos/company_brain/company_brain_demo.py).
-- [Import memory from Mem0, Letta, Zep, or Graphiti](https://docs.cognee.ai/examples/migrate-memory-systems) using the COGX exchange format.
-- [Run with local Ollama models](https://docs.cognee.ai/guides/local-ollama), including a local embedding model.
-- [Visualize your knowledge graph](https://docs.cognee.ai/guides/graph-visualization) and inspect its connections.
-- [Browse runnable examples](examples/README.md) for ingestion, sessions, feedback, and custom pipelines.
-- [Run the prebuilt API with Docker Compose](docs/minimal-docker-compose.md) or use the [deployment templates](distributed/deploy/README.md).
-- [Explore community adapters and add-ons](https://github.com/topoteretes/cognee-community).
+* [Build a small Company Brain from text, code, and session lessons](examples/demos/company_brain/company_brain_demo.py).
+* [Import memory from Mem0, Letta, Zep, or Graphiti](https://docs.cognee.ai/examples/migrate-memory-systems) using the COGX exchange format.
+* [Run with local Ollama models](https://docs.cognee.ai/guides/local-ollama), including a local embedding model.
+* [Visualize your knowledge graph](https://docs.cognee.ai/guides/graph-visualization) and inspect its connections.
+* [Browse runnable examples](examples/README.md) for ingestion, sessions, feedback, and custom pipelines.
+* [Run the prebuilt API with Docker Compose](docs/minimal-docker-compose.md) or use the [deployment templates](distributed/deploy/README.md).
+* [Explore community adapters and add-ons](https://github.com/topoteretes/cognee-community).
 
 <a id="run-with-docker"></a>
 
@@ -269,10 +279,10 @@ Graph memory traditionally means operating a stack — a graph database for rela
 
 The [BEAM evaluation](cognee/eval_framework/beam/REPORT.md) measures conversational memory using synthetic long-context conversations and an LLM judge. The reported runs use Cognee's memory components with benchmark-specific data formatting, prompts, and retrieval configuration.
 
-| BEAM context | Reported score (0–1) | Scope |
-| --- | --- | --- |
-| 100K tokens | **0.79** | Fixed hybrid retrieval; four evaluation rounds over 20 questions from one held-out conversation. |
-| 10M tokens | **0.67** | Exploratory result; question-type routing selected and scored on the same question set, averaged over five rounds. |
+| BEAM context | Reported score (0–1) | Scope                                                                                                              |
+| ------------ | -------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| 100K tokens  | **0.79**             | Fixed hybrid retrieval; four evaluation rounds over 20 questions from one held-out conversation.                   |
+| 10M tokens   | **0.67**             | Exploratory result; question-type routing selected and scored on the same question set, averaged over five rounds. |
 
 The two settings use different conversations, ingestion models, and retrieval-selection procedures. Read the [methodology, models, limitations, and reproduction instructions](cognee/eval_framework/beam/REPORT.md) before comparing these scores with other systems. The report also documents the remaining reproduction gap for the distributed 10M ingestion.
 
@@ -282,14 +292,14 @@ For the research behind Cognee's graph/LLM interface, see [Optimizing the Interf
 
 [![Watch Demo](https://img.youtube.com/vi/8hmqS2Y5RVQ/maxresdefault.jpg)](https://www.youtube.com/watch?v=8hmqS2Y5RVQ&t=13s)
 
-- **[v1.6.0 — Keyless workflows & pipeline reliability](https://github.com/topoteretes/cognee/releases/tag/v1.6.0)** (September 18, 2026): build and search text memory with local models and no cloud LLM key.
-- Local model downloads are announced on first use, and LLM-dependent improvement stages skip when no LLM is configured.
-- Pipeline recovery preserves completed documents after crashes, and datasets track their embedding model to prevent mismatches.
-
+* **[v1.6.0 — Keyless workflows & pipeline reliability](https://github.com/topoteretes/cognee/releases/tag/v1.6.0)** (September 18, 2026): build and search text memory with local models and no cloud LLM key.
+* Local model downloads are announced on first use, and LLM-dependent improvement stages skip when no LLM is configured.
+* Pipeline recovery preserves completed documents after crashes, and datasets track their embedding model to prevent mismatches.
 
 ## Community & Support
 
 ### Contributing
+
 We welcome contributions from the community! Your input helps make Cognee better for everyone. See [`CONTRIBUTING.md`](CONTRIBUTING.md) to get started.
 
 ### Code of Conduct
