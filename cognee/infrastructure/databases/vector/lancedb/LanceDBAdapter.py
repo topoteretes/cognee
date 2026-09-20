@@ -481,11 +481,12 @@ class LanceDBAdapter(VectorDBInterface):
             # Keep the default retention window: another reader may still use
             # a recent version. The subprocess proxy exposes the same defaults.
             await optimize()
-        except Exception as exc:  # noqa: BLE001 - compaction is an optimization, not correctness
+        except Exception as exc:
             logger.warning(
                 "Periodic compaction skipped for collection '%s': %s",
                 collection_name,
                 exc,
+                exc_info=True,
             )
 
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
