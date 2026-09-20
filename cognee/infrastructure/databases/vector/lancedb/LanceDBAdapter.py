@@ -3,7 +3,6 @@ import copy
 import inspect
 import threading
 import types
-from datetime import timedelta
 from collections import OrderedDict
 from enum import Enum
 from os import path
@@ -461,10 +460,9 @@ class LanceDBAdapter(VectorDBInterface):
         compaction already used after re-keying in
         `cognee/modules/migrations/versions/_vector_rekey.py`.
 
-        Compaction is hygiene, not correctness: any failure -- including
-        subprocess-proxy handles that don't expose `optimize` -- is
-        swallowed so it can never fail, or slow down the caller's view of,
-        the write that already succeeded.
+        Maintenance runs after the write and uses LanceDB's default retention
+        window so recent snapshots remain readable. A failed optimization is
+        logged without failing the write that already succeeded.
         """
         interval = get_vectordb_config().vector_db_compaction_write_interval
         if interval <= 0:
@@ -480,12 +478,9 @@ class LanceDBAdapter(VectorDBInterface):
             return
 
         try:
-            # cleanup_older_than=timedelta(seconds=0) forces immediate
-            # removal of old fragment files. Without it, optimize() merges
-            # fragments but keeps the old ones on disk under LanceDB's
-            # default retention window -- which defeats the point here,
-            # since the goal is to actually shrink storage now.
-            await optimize(cleanup_older_than=timedelta(seconds=0))
+            # Keep the default retention window: another reader may still use
+            # a recent version. The subprocess proxy exposes the same defaults.
+            await optimize()
         except Exception as exc:  # noqa: BLE001 - compaction is an optimization, not correctness
             logger.warning(
                 "Periodic compaction skipped for collection '%s': %s",

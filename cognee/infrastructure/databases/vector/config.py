@@ -121,7 +121,6 @@ class VectorConfig(BaseSettings):
             "vector_db_password": self.vector_db_password,
             "vector_db_host": self.vector_db_host,
             "vector_db_subprocess_enabled": self.vector_db_subprocess_enabled,
-            "vector_db_compaction_write_interval": self.vector_db_compaction_write_interval,
         }
 
 
