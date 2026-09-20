@@ -51,7 +51,11 @@ dependencies = [
     "rdflib>=7.1.4,<7.2.0",
     "pypdf>=6.6.2,<7.0.0",
     "jinja2>=3.1.3,<4",
-    "lancedb>=0.24.3,<1.0.0",  # 0.24.2 bundles lance 0.32.0 whose list-column decoder panics on tables with deletion vectors
+    # 0.24.2 bundles lance 0.32.0 whose list-column decoder panics on tables with
+    # deletion vectors. 0.39.0 dropped win_amd64 wheels (macos/linux only), which
+    # makes `uv sync --frozen` fail on Windows. Cap below 0.39 until Windows
+    # wheels are published again.
+    "lancedb>=0.24.3,<0.39.0",
     "nbformat>=5.7.0,<6.0.0",
     "alembic>=1.13.3,<2",
     "limits>=4.4.1,<6",

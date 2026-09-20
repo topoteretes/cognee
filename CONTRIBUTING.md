@@ -64,9 +64,29 @@ Looking for a place to start? Try filtering for [good first issues](https://gith
 ## 2. 🛠️ Development Setup
 
 ### Required tools
-* [Python](https://www.python.org/downloads/)
-* [uv](https://docs.astral.sh/uv/getting-started/installation/)
+* [Python](https://www.python.org/downloads/) 3.10–3.14
+* [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.12 or newer (`pyproject.toml` uses `exclude-newer = "2 days"`, which older uv versions cannot parse)
 * pre-commit: `uv run pip install pre-commit && pre-commit install`
+
+On Windows, `uv sync --frozen` needs a lockfile that includes `win_amd64` wheels. If sync fails on `lancedb` with “doesn't have a source distribution or wheel for the current platform”, you are on a lockfile that pinned a LanceDB release without Windows wheels — pull the latest `dev` or cap `lancedb` below that release.
+
+To run a local LLM without an OpenAI key, start [Ollama in Docker](https://hub.docker.com/r/ollama/ollama) and point Cognee at it (do not use the `/v1` suffix with the default `litellm_native` framework):
+
+```powershell
+docker run -d --name ollama --restart unless-stopped -p 11434:11434 -v ollama:/root/.ollama ollama/ollama
+docker exec ollama ollama pull llama3.2:3b
+```
+
+```dotenv
+LLM_API_KEY="ollama"
+LLM_PROVIDER="ollama"
+LLM_MODEL="llama3.2:3b"
+LLM_ENDPOINT="http://localhost:11434"
+EMBEDDING_PROVIDER="fastembed"
+ENABLE_BACKEND_ACCESS_CONTROL=false
+AUTO_FEEDBACK=false
+COGNEE_SKIP_CONNECTION_TEST=true
+```
 
 ### Fork and Clone
 
@@ -134,7 +154,7 @@ Copy `.env.template` to `.env` and provide your OPENAI_API_KEY as LLM_API_KEY
 Make sure to run ```shell uv sync ``` in the root cloned folder or set up a virtual environment to run cognee
 
 ```shell
-uv run python examples/guides/simple_cognee_example.py
+uv run python examples/demos/simple_cognee_example.py
 ```
 
 ## 4. 📤 Submitting Changes
