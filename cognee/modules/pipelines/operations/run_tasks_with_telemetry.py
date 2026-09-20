@@ -50,13 +50,16 @@ async def run_tasks_with_telemetry(
             }
             | config,
         )
-    except (Exception, asyncio.CancelledError, GeneratorExit):
+    except (Exception, asyncio.CancelledError, GeneratorExit) as exc:
         # Cancellation and early generator closure inherit from BaseException.
         # Report the interrupted item, then preserve cancellation/close semantics.
-        logger.exception(
-            "Pipeline run errored: `%s`\n",
-            pipeline_name,
-        )
+        if isinstance(exc, Exception):
+            logger.exception(
+                "Pipeline run errored: `%s`\n",
+                pipeline_name,
+            )
+        else:
+            logger.info("Pipeline run interrupted: `%s`", pipeline_name)
         send_telemetry(
             "Pipeline Run Errored",
             user,

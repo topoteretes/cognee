@@ -20,6 +20,13 @@ def telemetry(monkeypatch):
     return emit
 
 
+@pytest.fixture
+def pipeline_logger(monkeypatch):
+    logger = Mock()
+    monkeypatch.setattr(telemetry_module, "logger", logger)
+    return logger
+
+
 def _run():
     return telemetry_module.run_tasks_with_telemetry(
         tasks=[], data=[], user=SimpleNamespace(tenant_id=None), pipeline_name="test_pipeline"
@@ -44,7 +51,9 @@ async def test_completed_pipeline_emits_one_terminal_event(monkeypatch, telemetr
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("yield_first", [False, True])
-async def test_failed_pipeline_preserves_exception(monkeypatch, telemetry, yield_first):
+async def test_failed_pipeline_preserves_exception(
+    monkeypatch, telemetry, pipeline_logger, yield_first
+):
     error = ValueError("task failed")
 
     async def run_base(*args):
@@ -58,10 +67,13 @@ async def test_failed_pipeline_preserves_exception(monkeypatch, telemetry, yield
             pass
     assert exc_info.value is error
     assert _events(telemetry) == ["Pipeline Run Started", "Pipeline Run Errored"]
+    pipeline_logger.exception.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_cancelled_consumer_emits_error_and_still_cancels(monkeypatch, telemetry):
+async def test_cancelled_consumer_emits_error_and_still_cancels(
+    monkeypatch, telemetry, pipeline_logger
+):
     started = asyncio.Event()
     finished = asyncio.Event()
 
@@ -86,10 +98,12 @@ async def test_cancelled_consumer_emits_error_and_still_cancels(monkeypatch, tel
     assert consumer.cancelled()
     assert finished.is_set()
     assert _events(telemetry) == ["Pipeline Run Started", "Pipeline Run Errored"]
+    pipeline_logger.exception.assert_not_called()
+    pipeline_logger.info.assert_any_call("Pipeline run interrupted: `%s`", "test_pipeline")
 
 
 @pytest.mark.asyncio
-async def test_closing_partial_pipeline_emits_error_once(monkeypatch, telemetry):
+async def test_closing_partial_pipeline_emits_error_once(monkeypatch, telemetry, pipeline_logger):
     finished = asyncio.Event()
 
     async def run_base(*args):
@@ -106,6 +120,8 @@ async def test_closing_partial_pipeline_emits_error_once(monkeypatch, telemetry)
     await pipeline.aclose()
     assert finished.is_set()
     assert _events(telemetry) == ["Pipeline Run Started", "Pipeline Run Errored"]
+    pipeline_logger.exception.assert_not_called()
+    pipeline_logger.info.assert_any_call("Pipeline run interrupted: `%s`", "test_pipeline")
 
 
 @pytest.mark.asyncio
