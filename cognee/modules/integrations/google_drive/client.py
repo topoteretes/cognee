@@ -220,6 +220,11 @@ async def _authorized_text(
     memory for everything Drive sent. Truncation can cut a multi-byte
     character in half, which is what ``errors="replace"`` is for.
 
+    The last chunk is sliced to the ceiling rather than appended and then
+    noticed. Checking after the append lets the read overshoot by almost a
+    whole chunk, which turns a stated ceiling into an approximate one and
+    makes the constant a lie about the worst case.
+
     Errors name the operation and status but never the file id: ids appear in
     shareable URLs, and this runs where every failure is logged.
     """
@@ -236,14 +241,16 @@ async def _authorized_text(
             raise RuntimeError(f"Google {operation} failed: HTTP {response.status}")
 
         async for chunk in response.content.iter_chunked(_CHUNK_BYTES):
-            chunks.append(chunk)
-            received += len(chunk)
-            if received >= MAX_FILE_BYTES:
+            remaining = MAX_FILE_BYTES - received
+            if len(chunk) >= remaining:
+                chunks.append(chunk[:remaining])
                 logger.info(
                     "Google %s stopped at the %d byte ceiling; the file is indexed truncated",
                     operation,
                     MAX_FILE_BYTES,
                 )
                 break
+            chunks.append(chunk)
+            received += len(chunk)
 
     return b"".join(chunks).decode("utf-8", errors="replace")

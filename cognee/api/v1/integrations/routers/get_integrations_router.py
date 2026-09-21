@@ -265,18 +265,39 @@ async def _rotate_agent_api_key(agent_user: User, plugin_key: str) -> str:
 # navigation from the provider needs, and requires the API and the app to
 # share a registrable domain; on a deployment where they do not, this needs
 # SameSite=None and Secure instead.
+#
+# The cookie holds a bounded list rather than one value, because two tabs on
+# the *same* provider is ordinary: a second authorize would otherwise
+# overwrite the first tab's nonce and the first callback would be refused as
+# a forgery. Nonces are retired one at a time, only once matched, so neither
+# a finished install nor a bogus callback can cancel the tabs still pending.
 _INSTALL_NONCE_COOKIE_PREFIX = "cognee_oauth_nonce_"
 _INSTALL_NONCE_PATH = "/api/v1/integrations"
+_MAX_PENDING_INSTALL_NONCES = 5
+# Not in the urlsafe-base64 alphabet a nonce is drawn from, so it cannot occur
+# inside one, and needs no cookie quoting.
+_INSTALL_NONCE_SEPARATOR = "."
 
 
 def _install_nonce_cookie(provider: str) -> str:
     return f"{_INSTALL_NONCE_COOKIE_PREFIX}{provider}"
 
 
-def _set_install_nonce(response: Response, request: Request, provider: str, nonce: str) -> None:
+def _pending_install_nonces(request: Request, provider: str) -> list[str]:
+    raw = request.cookies.get(_install_nonce_cookie(provider)) or ""
+    return [value for value in raw.split(_INSTALL_NONCE_SEPARATOR) if value]
+
+
+def _write_install_nonces(
+    response: Response, request: Request, provider: str, nonces: list[str]
+) -> None:
+    if not nonces:
+        response.delete_cookie(_install_nonce_cookie(provider), path=_INSTALL_NONCE_PATH)
+        return
+
     response.set_cookie(
         _install_nonce_cookie(provider),
-        nonce,
+        _INSTALL_NONCE_SEPARATOR.join(nonces),
         max_age=DEFAULT_STATE_TTL_SECONDS,
         httponly=True,
         samesite="lax",
@@ -287,16 +308,41 @@ def _set_install_nonce(response: Response, request: Request, provider: str, nonc
     )
 
 
+def _set_install_nonce(response: Response, request: Request, provider: str, nonce: str) -> None:
+    """Add one pending install to this provider's cookie, newest first.
+
+    Capped so the cookie cannot grow without bound; past the cap the oldest
+    pending install is forgotten and its callback is refused, which is the
+    right trade against a header a caller can inflate at will.
+    """
+    pending = [nonce, *_pending_install_nonces(request, provider)]
+    _write_install_nonces(response, request, provider, pending[:_MAX_PENDING_INSTALL_NONCES])
+
+
 def _install_nonce_matches(request: Request, provider: str, nonce: str) -> bool:
-    presented = request.cookies.get(_install_nonce_cookie(provider))
-    if not presented or not nonce:
+    if not nonce:
         return False
-    return hmac.compare_digest(presented, nonce)
+    return any(
+        hmac.compare_digest(presented, nonce)
+        for presented in _pending_install_nonces(request, provider)
+    )
 
 
-def _clear_install_nonce(response: Response, provider: str) -> Response:
-    """Drop the nonce once its install is over, however it ended."""
-    response.delete_cookie(_install_nonce_cookie(provider), path=_INSTALL_NONCE_PATH)
+def _retire_install_nonce(
+    response: Response, request: Request, provider: str, nonce: str
+) -> Response:
+    """Drop one finished install, leaving the tabs still waiting untouched.
+
+    Only ever called for a nonce that matched. A callback that did not match
+    leaves the cookie alone: clearing it there would let one forged or stale
+    redirect cancel every install the user has open.
+    """
+    remaining = [
+        presented
+        for presented in _pending_install_nonces(request, provider)
+        if not hmac.compare_digest(presented, nonce)
+    ]
+    _write_install_nonces(response, request, provider, remaining)
     return response
 
 
@@ -574,16 +620,18 @@ def get_integrations_router():
                 # (or the provider rejected the request) — not a fault, just
                 # an aborted install.
                 span.set_attribute("cognee.integrations.outcome", "cancelled")
-                return _clear_install_nonce(_frontend_redirect(integration, "cancelled"), provider)
+                # The cookie is left as it is: this path never learned which
+                # nonce the aborted install held, and the user's other tabs
+                # are still waiting on theirs. Unused nonces expire with the
+                # cookie's own max-age.
+                return _frontend_redirect(integration, "cancelled")
 
             fields = validate_state(
                 state, signing_secret=integration.state_signing_secret(), field_count=2
             )
             if not isinstance(fields, tuple):
                 span.set_attribute("cognee.integrations.outcome", "error_invalid_state")
-                return _clear_install_nonce(
-                    _frontend_redirect(integration, "error_invalid_state"), provider
-                )
+                return _frontend_redirect(integration, "error_invalid_state")
 
             user_id_field, nonce = fields
             if not _install_nonce_matches(request, provider, nonce):
@@ -596,16 +644,17 @@ def get_integrations_router():
                     "%s callback arrived without a matching install nonce; refusing", provider
                 )
                 span.set_attribute("cognee.integrations.outcome", "error_invalid_state")
-                return _clear_install_nonce(
-                    _frontend_redirect(integration, "error_invalid_state"), provider
-                )
+                # Nothing is retired here. This callback never proved it owns
+                # any pending install, so letting it empty the cookie would
+                # hand anyone a way to cancel every install the user has open.
+                return _frontend_redirect(integration, "error_invalid_state")
 
             try:
                 user_id = UUID(user_id_field)
             except ValueError:
                 span.set_attribute("cognee.integrations.outcome", "error_invalid_state")
-                return _clear_install_nonce(
-                    _frontend_redirect(integration, "error_invalid_state"), provider
+                return _retire_install_nonce(
+                    _frontend_redirect(integration, "error_invalid_state"), request, provider, nonce
                 )
 
             try:
@@ -623,15 +672,21 @@ def get_integrations_router():
                 # rather than silently reassign it (see upsert_credential).
                 logger.warning("%s account already connected elsewhere; user %s", provider, user_id)
                 span.set_attribute("cognee.integrations.outcome", "error_already_connected")
-                return _clear_install_nonce(
-                    _frontend_redirect(integration, "error_already_connected"), provider
+                return _retire_install_nonce(
+                    _frontend_redirect(integration, "error_already_connected"),
+                    request,
+                    provider,
+                    nonce,
                 )
             except Exception:  # any exchange/parse failure must redirect, not 500
                 # Full trace server-side; the browser only learns that it failed.
                 logger.exception("%s OAuth exchange failed for user %s", provider, user_id)
                 span.set_attribute("cognee.integrations.outcome", "error_exchange_failed")
-                return _clear_install_nonce(
-                    _frontend_redirect(integration, "error_exchange_failed"), provider
+                return _retire_install_nonce(
+                    _frontend_redirect(integration, "error_exchange_failed"),
+                    request,
+                    provider,
+                    nonce,
                 )
 
             logger.info(
@@ -647,7 +702,9 @@ def get_integrations_router():
                 description=f"{provider} on_installed hook",
             )
             span.set_attribute("cognee.integrations.outcome", "connected")
-            return _clear_install_nonce(_frontend_redirect(integration, "connected"), provider)
+            return _retire_install_nonce(
+                _frontend_redirect(integration, "connected"), request, provider, nonce
+            )
 
     @integrations_router.post("/{provider}/events", include_in_schema=False)
     async def provider_events(provider: str, request: Request):

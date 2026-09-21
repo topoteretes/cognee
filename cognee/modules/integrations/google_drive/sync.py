@@ -32,10 +32,6 @@ logger = logging.getLogger(__name__)
 
 GOOGLE_DRIVE_DATASET_PREFIX = "google_drive"
 
-# Spelled out rather than imported from the adapter, which imports this module
-# for its post-install hook.
-GOOGLE_DRIVE_PROVIDER = "google_drive"
-
 # Google-native types carry no bytes; each is exported in the text form that
 # keeps the most meaning. Anything not listed here is downloaded as-is when
 # it is already text, and skipped otherwise.
@@ -132,21 +128,41 @@ async def sync_drive(
     Runs to completion; callers are already off the request path (the
     post-install hook runs detached), so there is nothing to hand off to.
 
-    One ``remember()`` call for the whole batch rather than one per file: a
-    single pipeline run over a list is far cheaper than two hundred, and it
-    keeps a slow account from holding the ingestion path open all day.
-
     Nothing re-runs this sync: Drive registers no webhook verifier and the
     repo has no scheduler, so whatever one pass collects is what the account
     gets. That is why a listing failure partway through keeps the pages that
     already worked instead of raising, and why the outcome is stamped on the
     credential rather than only logged.
+
+    The stamp is the whole point of this wrapper. Minting a token, resolving
+    the owner and running the ingestion can all raise, and the only caller is
+    a detached task that logs and moves on, so an escaping exception would
+    leave the connection reading as healthy with nothing having been indexed.
     """
     # Imported here, not at module top: this module is reached at API startup
     # through the adapter's registration, and cognee's package root is
     # heavyweight.
-    from cognee.api.v1.remember.remember import remember as cognee_remember
     from cognee.modules.integrations.credentials import record_sync_result
+
+    try:
+        status = await _collect_and_remember(credential, file_limit)
+    except Exception:
+        await record_sync_result(credential, status=SYNC_STATUS_DEGRADED)
+        # Re-raised so the detached task still logs the traceback; the stamp
+        # records that it happened, it does not stand in for the log.
+        raise
+
+    await record_sync_result(credential, status=status)
+
+
+async def _collect_and_remember(credential: IntegrationCredential, file_limit: int) -> str:
+    """Walk the Drive, ingest what it renders, and report the sync status.
+
+    One ``remember()`` call for the whole batch rather than one per file: a
+    single pipeline run over a list is far cheaper than two hundred, and it
+    keeps a slow account from holding the ingestion path open all day.
+    """
+    from cognee.api.v1.remember.remember import remember as cognee_remember
     from cognee.modules.integrations.google_drive.adapter import access_token_for
     from cognee.modules.users.methods import get_user
 
@@ -230,10 +246,7 @@ async def sync_drive(
             failed,
             listing_failed,
         )
-        await record_sync_result(
-            GOOGLE_DRIVE_PROVIDER, credential.provider_account_id, status=status
-        )
-        return
+        return status
 
     owner = await get_user(credential.user_id)
     dataset_name = _dataset_name(credential)
@@ -266,4 +279,4 @@ async def sync_drive(
             getattr(result, "error", None),
         )
 
-    await record_sync_result(GOOGLE_DRIVE_PROVIDER, credential.provider_account_id, status=status)
+    return status

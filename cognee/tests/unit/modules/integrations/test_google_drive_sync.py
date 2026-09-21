@@ -293,3 +293,53 @@ async def test_an_empty_account_is_still_stamped():
 
     mocks.remember.assert_not_awaited()
     mocks.record.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_failing_ingestion_still_stamps_degraded():
+    # The only caller is a detached task that logs and moves on, so an
+    # exception escaping unstamped leaves a connection reading as healthy
+    # with nothing indexed.
+    stack, mocks = patched_sync([_TEXT])
+    mocks.remember.side_effect = RuntimeError("pipeline blew up")
+
+    with stack, pytest.raises(RuntimeError):
+        await sync_drive(make_credential())
+
+    mocks.record.assert_awaited_once()
+    assert mocks.record.await_args.kwargs["status"] == sync_module.SYNC_STATUS_DEGRADED
+
+
+@pytest.mark.asyncio
+async def test_a_token_that_cannot_be_minted_still_stamps_degraded():
+    # Same contract one step earlier: the failure can happen before a single
+    # file is listed.
+    stack, mocks = patched_sync([_TEXT])
+    with (
+        stack,
+        patch(
+            "cognee.modules.integrations.google_drive.adapter.access_token_for",
+            AsyncMock(side_effect=RuntimeError("holds no refresh token")),
+        ),
+        pytest.raises(RuntimeError),
+    ):
+        await sync_drive(make_credential())
+
+    mocks.remember.assert_not_awaited()
+    assert mocks.record.await_args.kwargs["status"] == sync_module.SYNC_STATUS_DEGRADED
+
+
+@pytest.mark.asyncio
+async def test_an_owner_that_cannot_be_resolved_still_stamps_degraded():
+    stack, mocks = patched_sync([_TEXT])
+    with (
+        stack,
+        patch(
+            "cognee.modules.users.methods.get_user",
+            AsyncMock(side_effect=RuntimeError("deleted user")),
+        ),
+        pytest.raises(RuntimeError),
+    ):
+        await sync_drive(make_credential())
+
+    assert mocks.record.await_args.kwargs["status"] == sync_module.SYNC_STATUS_DEGRADED

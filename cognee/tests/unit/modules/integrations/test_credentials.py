@@ -201,3 +201,96 @@ async def test_update_provider_metadata_returns_none_for_unknown_account():
 
     assert updated is None
     session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_record_sync_result_stamps_the_connection_it_ran_for():
+    from cognee.modules.integrations.credentials import record_sync_result
+
+    existing = make_existing(USER_A, STATUS_ACTIVE)
+    existing.provider = PROVIDER
+    existing.provider_account_id = ACCOUNT_ID
+    session = make_session(existing)
+
+    with patch(
+        "cognee.modules.integrations.credentials.get_relational_engine",
+        return_value=make_engine(session),
+    ):
+        stamped = await record_sync_result(existing, status="ok")
+
+    assert stamped is existing
+    assert existing.sync_status == "ok"
+    assert existing.last_synced_at is not None
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_sync_that_outlived_its_install_does_not_stamp_the_new_owner():
+    # Syncs run detached and upsert_credential reuses the row for a
+    # (provider, account) rather than replacing it. So A disconnects, B
+    # connects the same Google account, and A's sync finishes last: without
+    # the owner check B would be told their Drive had just synced.
+    from cognee.modules.integrations.credentials import record_sync_result
+
+    ran_for = make_existing(USER_A, STATUS_ACTIVE)
+    ran_for.provider = PROVIDER
+    ran_for.provider_account_id = ACCOUNT_ID
+
+    now_owned_by_b = make_existing(USER_B, STATUS_ACTIVE)
+    now_owned_by_b.sync_status = None
+    session = make_session(now_owned_by_b)
+
+    with patch(
+        "cognee.modules.integrations.credentials.get_relational_engine",
+        return_value=make_engine(session),
+    ):
+        stamped = await record_sync_result(ran_for, status="ok")
+
+    assert stamped is None
+    assert now_owned_by_b.sync_status is None
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_sync_finishing_after_a_disconnect_does_not_stamp_a_revoked_row():
+    from cognee.modules.integrations.credentials import record_sync_result
+
+    ran_for = make_existing(USER_A, STATUS_ACTIVE)
+    ran_for.provider = PROVIDER
+    ran_for.provider_account_id = ACCOUNT_ID
+
+    disconnected = make_existing(USER_A, STATUS_REVOKED)
+    disconnected.sync_status = None
+    session = make_session(disconnected)
+
+    with patch(
+        "cognee.modules.integrations.credentials.get_relational_engine",
+        return_value=make_engine(session),
+    ):
+        stamped = await record_sync_result(ran_for, status="ok")
+
+    assert stamped is None
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_token_refresh_mid_sync_does_not_block_the_stamp():
+    # The owner check must not be so strict that the ordinary path trips it:
+    # refreshing a token rewrites the row but keeps the same owner.
+    from cognee.modules.integrations.credentials import record_sync_result
+
+    ran_for = make_existing(USER_A, STATUS_ACTIVE)
+    ran_for.provider = PROVIDER
+    ran_for.provider_account_id = ACCOUNT_ID
+
+    after_refresh = make_existing(USER_A, STATUS_ACTIVE)
+    session = make_session(after_refresh)
+
+    with patch(
+        "cognee.modules.integrations.credentials.get_relational_engine",
+        return_value=make_engine(session),
+    ):
+        stamped = await record_sync_result(ran_for, status="degraded")
+
+    assert stamped is after_refresh
+    assert after_refresh.sync_status == "degraded"

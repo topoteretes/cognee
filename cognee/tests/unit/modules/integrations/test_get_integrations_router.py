@@ -280,3 +280,111 @@ def test_disconnect_with_no_active_credential_reports_false(client):
     ):
         response = client.delete("/api/v1/integrations/fake/connection")
     assert response.json() == {"disconnected": False}
+
+
+def _installed():
+    """Patch the exchange out, the way every other callback test here does.
+
+    These tests are about the nonce cookie, not about storage. Letting them
+    reach the real credential store makes them depend on what earlier tests
+    left in the local database, which shows up as an already-connected
+    conflict on the second run rather than on the first.
+    """
+    return patch.object(
+        _router_module,
+        "complete_installation",
+        new=AsyncMock(return_value=type("C", (), {"provider_account_id": "ACC1"})()),
+    )
+
+
+def test_two_tabs_on_one_provider_both_complete(client):
+    # Two installs of the same provider open at once is ordinary. A cookie
+    # holding a single nonce would have the second authorize overwrite the
+    # first, and the first tab's callback would be refused as a forgery.
+    first_state = start_install(client)
+    second_state = start_install(client)
+
+    with _installed():
+        # The older tab finishes first, out of order.
+        first = client.get(
+            f"/api/v1/integrations/fake/callback?code=abc&state={first_state}",
+            follow_redirects=False,
+        )
+        second = client.get(
+            f"/api/v1/integrations/fake/callback?code=abc&state={second_state}",
+            follow_redirects=False,
+        )
+
+    assert "fake=connected" in first.headers["location"]
+    assert "fake=connected" in second.headers["location"]
+
+
+def test_a_finished_install_does_not_cancel_the_tabs_still_waiting(client):
+    first_state = start_install(client)
+    start_install(client)
+
+    with _installed():
+        client.get(
+            f"/api/v1/integrations/fake/callback?code=abc&state={first_state}",
+            follow_redirects=False,
+        )
+
+    # The completed install retired its own nonce and left the other alone.
+    remaining = client.cookies.get("cognee_oauth_nonce_fake")
+    assert remaining
+    assert first_state.split(":")[1] not in remaining
+
+
+def test_a_callback_whose_nonce_is_unknown_leaves_the_other_tabs_alone(client):
+    # Clearing the whole cookie when the nonce check fails would hand anyone a
+    # way to cancel every install a user has open by replaying one stale or
+    # relayed redirect. The state below is authentic and well-formed, which is
+    # what makes it reach the nonce check at all rather than being thrown out
+    # earlier as unparseable.
+    stale_state = start_install(client)
+    client.cookies.clear()
+
+    open_state = start_install(client)
+    start_install(client)
+    before = client.cookies.get("cognee_oauth_nonce_fake")
+
+    refused = client.get(
+        f"/api/v1/integrations/fake/callback?code=abc&state={stale_state}", follow_redirects=False
+    )
+    assert "fake=error_invalid_state" in refused.headers["location"]
+    assert client.cookies.get("cognee_oauth_nonce_fake") == before
+
+    # Both tabs that were genuinely waiting still complete.
+    with _installed():
+        response = client.get(
+            f"/api/v1/integrations/fake/callback?code=abc&state={open_state}",
+            follow_redirects=False,
+        )
+    assert "fake=connected" in response.headers["location"]
+
+
+def test_an_unparseable_state_leaves_the_other_tabs_alone(client):
+    # The other branch that must not clear: a state that never even parses
+    # says nothing about which install, if any, it belongs to.
+    start_install(client)
+    before = client.cookies.get("cognee_oauth_nonce_fake")
+
+    refused = client.get(
+        "/api/v1/integrations/fake/callback?code=abc&state=forged:1:deadbeef",
+        follow_redirects=False,
+    )
+    assert "fake=error_invalid_state" in refused.headers["location"]
+    assert client.cookies.get("cognee_oauth_nonce_fake") == before
+
+
+def test_the_pending_install_list_is_capped(client):
+    from cognee.api.v1.integrations.routers.get_integrations_router import (
+        _INSTALL_NONCE_SEPARATOR,
+        _MAX_PENDING_INSTALL_NONCES,
+    )
+
+    for _ in range(_MAX_PENDING_INSTALL_NONCES + 3):
+        start_install(client)
+
+    pending = client.cookies.get("cognee_oauth_nonce_fake")
+    assert len(pending.split(_INSTALL_NONCE_SEPARATOR)) == _MAX_PENDING_INSTALL_NONCES

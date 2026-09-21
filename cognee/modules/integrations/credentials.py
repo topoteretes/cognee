@@ -270,15 +270,27 @@ async def update_provider_metadata(
 
 
 async def record_sync_result(
-    provider: str, provider_account_id: str, *, status: str
+    credential: IntegrationCredential, *, status: str
 ) -> IntegrationCredential | None:
-    """Stamp when a connector last synced an account and how it went.
+    """Stamp when a connector last synced a connection and how it went.
 
     ``last_synced_at`` and ``sync_status`` have existed on the row since the
     table was created and nothing wrote them, which left a failed or partial
     sync invisible: the connection still read as healthy while its memory was
     empty. A connector that has no webhook to self-heal on has no other way to
     say so, which is why it stamps the outcome here.
+
+    Takes the connection the sync actually ran for rather than an external
+    account id, and re-checks it before writing. Syncs run detached and can
+    outlive the install that started them, while
+    :func:`upsert_credential` **reuses** the row for a
+    ``(provider, provider_account_id)`` rather than replacing it. So a stamp
+    addressed to the account alone would land on whoever holds that account
+    now: disconnect, someone else connects the same Google account, the old
+    owner's sync finishes last, and the new owner is told their Drive just
+    synced. The row is written only while it is still active and still owned
+    by the same user; a token refresh mid-sync keeps both, so the ordinary
+    path is unaffected.
 
     ``status`` is the vocabulary the integrations UI already renders,
     ``"ok"`` or ``"degraded"``. Deliberately separate from
@@ -287,6 +299,8 @@ async def record_sync_result(
     the caller is a detached background task and a failed stamp must never
     take down a sync that otherwise worked.
     """
+    provider = credential.provider
+    provider_account_id = credential.provider_account_id
     try:
         # Inside the guard, not above it: acquiring the engine is itself a
         # thing that can raise, and an escape there would take down a sync
@@ -299,15 +313,27 @@ async def record_sync_result(
                     IntegrationCredential.provider_account_id == provider_account_id,
                 )
             )
-            credential = result.scalar_one_or_none()
-            if credential is None:
+            current = result.scalar_one_or_none()
+            if current is None:
                 return None
 
-            credential.last_synced_at = datetime.now(timezone.utc)
-            credential.sync_status = status
+            if current.status != STATUS_ACTIVE or current.user_id != credential.user_id:
+                logger.info(
+                    "Discarding a %s sync result for account %s: the connection it ran for "
+                    "is gone (status %s, owner %s, was %s)",
+                    provider,
+                    provider_account_id,
+                    current.status,
+                    current.user_id,
+                    credential.user_id,
+                )
+                return None
+
+            current.last_synced_at = datetime.now(timezone.utc)
+            current.sync_status = status
             await db.commit()
-            await db.refresh(credential)
-            return credential
+            await db.refresh(current)
+            return current
     except Exception:
         logger.exception(
             "Recording the sync result for %s account %s failed", provider, provider_account_id
