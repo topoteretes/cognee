@@ -243,12 +243,13 @@ class DataPoint(BaseModel):
 
             The value of the embeddable data, or None if not found.
         """
-        if (
-            data_point.metadata
-            and len(data_point.metadata["index_fields"]) > 0
-            and hasattr(data_point, data_point.metadata["index_fields"][0])
-        ):
-            attribute = getattr(data_point, data_point.metadata["index_fields"][0])
+        # ``.get``, not ``metadata["index_fields"]``: subclasses redeclare the
+        # field as a plain ``dict`` (see the adapters' IndexSchema), so the key
+        # the TypedDict marks as required is not guaranteed at runtime.
+        index_fields = data_point.metadata.get("index_fields") or []
+
+        if index_fields and hasattr(data_point, index_fields[0]):
+            attribute = getattr(data_point, index_fields[0])
 
             if isinstance(attribute, str):
                 return attribute.strip()
@@ -273,12 +274,9 @@ class DataPoint(BaseModel):
 
             A list of embeddable property values, or an empty list if none exist.
         """
-        if data_point.metadata and len(data_point.metadata["index_fields"]) > 0:
-            return [
-                getattr(data_point, field, None) for field in data_point.metadata["index_fields"]
-            ]
+        index_fields = data_point.metadata.get("index_fields") or []
 
-        return []
+        return [getattr(data_point, field, None) for field in index_fields]
 
     @classmethod
     def get_embeddable_property_names(cls, data_point: "DataPoint") -> list[str]:

@@ -56,11 +56,11 @@ await cognee.remember(
 # Query: recall picks a search strategy automatically (rule-based, no LLM call)
 results = await cognee.recall("What are the key insights?", datasets=["main"])
 for r in results:
-    print(r["_source"], r)  # each result is tagged "graph" / "session" / ...
+    print(r.source, r)  # each result is tagged "graph" / "session" / ...
 ```
 
 `remember()` runs `add()` + `cognify()` and then `improve()` underneath. `recall()` wraps
-`search()` and adds routing, session memory as a source, and `_source`-tagged results.
+`search()` and adds routing, session memory as a source, and `source`-tagged results.
 
 ## Default guidance
 
@@ -82,7 +82,7 @@ When helping with Cognee:
 7. Recommend advanced features only when they match the task:
    - `session_id` for fast short-term memory and conversation continuity
    - `graph_model=` for schema-shaped extraction, `DataPoint` types for direct insertion
-   - `extractor="gliner"` for LLM-free graph extraction
+   - `extractor="gliner_demo"` for LLM-free graph extraction
    - custom pipelines for non-default task orchestration
    - feedback loops for retrieval improvement
    - visualization tools for graph inspection
@@ -139,7 +139,7 @@ await cognee.remember(
     run_in_background=True,  # return immediately; poll the pipeline status
     chunk_size=1024,
     custom_prompt="Extract companies, products, and partnerships.",
-    extractor="gliner",  # LLM-free extraction; needs cognee[gliner]
+    extractor="gliner_demo",  # LLM-free extraction; needs cognee[gliner]
     dry_run=True,  # estimate LLM tokens/cost without ingesting
 )
 await cognee.remember("./my_repo", dataset_name="code")  # code graph, no LLM

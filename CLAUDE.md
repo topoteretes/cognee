@@ -48,9 +48,9 @@ pre-commit install
 - **baml** - BAML structured output
 - **dlt** - Data load tool (dlt) integration
 - **docling** - Docling document processing, slim profile without torch (office/HTML/email/markdown/LaTeX formats)
-- **docling-full** - Full docling install with torch-based ML models (adds PDF/image conversion through docling; conflicts with **codegraph** due to tree-sitter pins)
-- **codegraph** - Code graph extraction
-- **gliner** - LLM-free graph extraction + summaries via GLiNER2 (`cognee.tasks.graph.gliner.get_gliner_tasks`)
+- **docling-full** - Full docling install with torch-based ML models (adds PDF/image conversion through docling)
+- **codegraph** - Compatibility alias; code graph extraction and Enola are included by default
+- **gliner** - GLiNER demo: LLM-free graph extraction + summaries via GLiNER2 (`cognee.tasks.graph.gliner_demo.get_gliner_demo_tasks`)
 - **evals** - Evaluation tools
 - **deepeval** - DeepEval testing framework
 - **posthog** - PostHog analytics
@@ -150,7 +150,7 @@ Improve & Memify are virtually the same, though. So no reason not to use improve
 
 #### recall() vs search()
 
-`recall()` wraps `search()` — its graph path calls the same authorized search — and adds three things: rule-based query routing when `query_type` is omitted (regex scoring, no LLM call, so auto-routing is free), session memory as a searchable source (`scope` = `graph` / `session` / `trace` / `session_context`; with a bare `session_id` a session hit short-circuits the graph search), and normalized results tagged with a `_source` key. Use `recall()` for ordinary retrieval. Drop to `search()` when you need the agentic extras as first-class parameters (`skills`, `tools`, `max_iter`, `code_query`, `node_type`), raw `SearchResult` objects instead of tagged entries, or a pinned `query_type` with no router in the path. Note `search(session_id=...)` only adds session history to the retrieval context — it never searches the session cache as a source; that is `recall()`-only. Full guide: `docs/recall-vs-search.md`.
+`recall()` wraps `search()` — its graph path calls the same authorized search — and adds three things: rule-based query routing when `query_type` is omitted (an ordered first-match rule table in `cognee/api/v1/recall/query_router.py`, no LLM call, so auto-routing is free; it only ever picks CHUNKS_LEXICAL for a fully quoted phrase, CODING_RULES for an explicit phrase, or the HYBRID_COMPLETION default — never CYPHER, which stays behind an explicit `query_type`, and retries as HYBRID_COMPLETION if a routed type comes up empty), session memory as a searchable source (`scope` = `graph` / `session` / `trace` / `session_context` / `session_first`; with a bare `session_id` a session hit short-circuits the graph search, and `scope="session_first"` asks for that short-circuit explicitly), and normalized results tagged with a `source` key. Use `recall()` for ordinary retrieval. Drop to `search()` when you need the agentic extras as first-class parameters (`skills`, `tools`, `max_iter`, `code_query`, `node_type`), raw `SearchResult` objects instead of tagged entries, or a pinned `query_type` with no router in the path. Note `search(session_id=...)` only adds session history to the retrieval context — it never searches the session cache as a source; that is `recall()`-only. Full guide: `docs/recall-vs-search.md`.
 
 ### Key Architectural Patterns
 
@@ -226,7 +226,7 @@ Key files: `cognee/api/v1/remember/remember.py`, `cognee/api/v1/recall/recall.py
 
 Each stage is a gate plus a call into existing code plus a result mapping — it never owns retries or ordering. `gate()` runs before any LLM or embedding cost and returns a skip reason (`no_session_ids`, `backend_unsupported`, `triplet_embedding_disabled`, `opt_in_disabled`, `personalization_disabled`, `disabled_by_config`, …). `run()` returns a `StageResult` whose `status` reuses `PipelineRunInfo`'s vocabulary — `completed`, `already_completed` (nothing new since the stage's watermark), `errored` — plus `skipped`. Only `persist_session_qa` is `fatal=True`; every other failure is recorded as `errored` and the run continues.
 
-The run resolves the dataset once and hands every stage a frozen `ImproveRunInputs` (user, resolved dataset id, session ids, `ImproveConfig`, adapter `GraphCapabilities`). It claims one improve lock keyed to the run — every session id given (scoped by user id) plus `dataset:<id>`, so improves for one dataset serialize — and holds it until the last stage finishes, background included; a lost claim returns an `ImproveResult` whose stages are all `skipped: lock_held` (never `{}`). `run_in_background=True` runs all stages in one anchored task; await it with `await result.wait()`. `ImproveResult` is what every surface returns: SDK, `POST /api/v1/improve` (`response_model`), the CLI (one line per stage), and `RememberResult.improve` / `.improve_error` (MCP reaches improve only through `remember`'s `self_improvement` — `improve` is deliberately not an advertised MCP tool; the tool set is pinned to remember/recall/forget/cognify_status) (an improve failure after a successful cognify no longer marks the remember as errored). Triplet enrichment reports `already_completed` when `pipeline_runs` shows no write pipeline for the dataset since the last completed enrichment — the watermark is the improve row's stage-8 stamp, so a run whose stage 8 was skipped never gates a later one (a `node_name`-scoped run bypasses the check); the improve operation row that carries the stamp is written when the run finishes — deferred to the background task in background mode — with a failed outcome when any stage errored (so a retry is never gated off) and a `noop` outcome when nothing ran — a lost lock claim or an all-skipped run — so a no-op call never advances the watermark. Feedback-weight application records applied element ids per QA row so a deleted node no longer causes the same feedback to be re-applied on every run; trace persistence and distillation carry watermarks like Q&A persistence already did.
+The run resolves the dataset once and hands every stage a frozen `ImproveRunInputs` (user, resolved dataset id, session ids, `ImproveConfig`, adapter `GraphCapabilities`). It claims one improve lock keyed to the run — every session id given (scoped by user id) plus `dataset:<id>`, so improves for one dataset serialize — and holds it until the last stage finishes, background included; a lost claim returns an `ImproveResult` whose stages are all `skipped: lock_held` (never `{}`). A session-keyed run that loses the claim to a run holding one of its sessions asks that holder for one more pass (`rerun_requested=True` on the loser's result); the holder runs the stages again before releasing — cheap, every stage is watermark-gated — and reports the extra passes in `rerun_passes` (bounded by `IMPROVE_MAX_RERUN_PASSES`, 3). Dataset-only runs do not take part, so a burst of `remember()` calls on one dataset still collapses into one enrichment. `run_in_background=True` runs all stages in one anchored task; await it with `await result.wait()`. `ImproveResult` is what every surface returns: SDK, `POST /api/v1/improve` (`response_model`), the CLI (one line per stage), and `RememberResult.improve` / `.improve_error` (MCP reaches improve only through `remember`'s `self_improvement` — `improve` is deliberately not an advertised MCP tool; the tool set is pinned to remember/recall/forget/cognify_status) (an improve failure after a successful cognify no longer marks the remember as errored). Triplet enrichment reports `already_completed` when `pipeline_runs` shows no write pipeline for the dataset since the last completed enrichment — the watermark is the improve row's stage-8 stamp, so a run whose stage 8 was skipped never gates a later one (a `node_name`-scoped run bypasses the check); the improve operation row that carries the stamp is written when the run finishes — deferred to the background task in background mode — with a failed outcome when any stage errored (so a retry is never gated off) and a `noop` outcome when nothing ran — a lost lock claim or an all-skipped run — so a no-op call never advances the watermark. Feedback-weight application records applied element ids per QA row so a deleted node no longer causes the same feedback to be re-applied on every run; trace persistence and distillation carry watermarks like Q&A persistence already did.
 
 Settings the loop owns live in `ImproveConfig` (env prefix `IMPROVE_`): `IMPROVE_AUTO_ENABLED` (default true; false turns off the automatic improve after `remember()`), `IMPROVE_DEBOUNCE_ENTRIES` / `IMPROVE_DEBOUNCE_SECONDS` (session-path auto-improve fires only after that many new entries or that much time; seconds alone is time-only — the entries default of 1 steps aside — and there is no timer, so the check runs on each `remember()`), `IMPROVE_STAGES_DISABLED` (csv of stage names), `IMPROVE_FEEDBACK_ALPHA` (learning rate, default 0.1). Shared knobs stay with their owners: `triplet_embedding` (cognify), `CACHING` / `AUTO_FEEDBACK` (cache layer), `PERSONALIZATION_ENABLED`, `DEFAULT_FEEDBACK_INFLUENCE`. `cognee.wait_for_background_tasks()` drains background improves before a script exits; the API server drains them on shutdown. Frequency weights were removed (no adapter implemented them and nothing read them).
 
@@ -263,7 +263,7 @@ Key files:
 Available search types (from `cognee/modules/search/types/SearchType.py`), passed as `query_type` to `recall()` or `search()`:
 - **HYBRID_COMPLETION** (default) - Document passages plus entity neighbourhoods, then LLM completion
 - **GRAPH_COMPLETION** - Graph traversal + LLM completion
-- **GRAPH_SUMMARY_COMPLETION** - Uses pre-computed summaries with graph context
+- **GRAPH_SUMMARY_COMPLETION** - Graph traversal plus a second LLM call that summarizes the answer (reads no pre-computed summaries)
 - **GRAPH_COMPLETION_COT** - Chain-of-thought reasoning over graph
 - **GRAPH_COMPLETION_CONTEXT_EXTENSION** - Extended context graph retrieval
 - **TRIPLET_COMPLETION** - Triplet-based (subject-predicate-object) search
@@ -282,7 +282,7 @@ Available search types (from `cognee/modules/search/types/SearchType.py`), passe
 - **CODE** - Deterministic operations over the code graph via `code_query` (no LLM); see "Code Files" below
 - **GRAPH_REPORT** - Graph insight report: hub nodes, cross-node-set connections, edge provenance, suggested questions
 
-`recall()` picks one of these automatically when `query_type` is omitted. The CLI is narrower: `cognee-cli recall --query-type` accepts only the choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES` and defaults to `HYBRID_COMPLETION`; the rest are SDK-only.
+`recall()` picks one of these automatically when `query_type` is omitted; so does `cognee-cli recall` when `--query-type` is omitted, and `POST /api/v1/recall` when `searchType` is omitted or `null` (the default). The CLI's explicit `--query-type` accepts only the choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES`; the rest are SDK-only. Routing rules and bypass options: `docs/recall-vs-search.md`.
 
 Key files:
 - `cognee/api/v1/search/search.py`
@@ -326,6 +326,8 @@ LLM_MODEL="openai/gpt-5.6-luna"  # Default model
 ```
 
 **Important**: If you configure only LLM or only embeddings, the other defaults to OpenAI. Ensure you have a working OpenAI API key, or configure both to avoid unexpected defaults.
+
+**No key at all** is also a working setup: with no LLM and no embedding credentials configured, cognify extracts the graph with the local GLiNER demo model (`pip install "cognee[gliner]"`; see "LLM-free Graph Extraction (GLiNER demo)" below) and embeds with the local fastembed model (a core dependency); models download on first use (a warning names the model, its size and the cache location while that happens; `HF_HOME` and `FASTEMBED_CACHE_PATH` move the caches), and `recall()` without a `query_type` answers with `CHUNKS`. The switch is per half — `GRAPH_EXTRACTOR=auto` (default) resolves on the LLM key, embeddings resolve on "nothing configured and no LLM key" — so setting any credential or any embedding setting takes that half back to the configured provider. The env vars that disable the preflight (`COGNEE_SKIP_PREFLIGHT`, `COGNEE_SKIP_CONNECTION_TEST`, `MOCK_EMBEDDING`) also disable this rerouting (`keyless_local_defaults_apply()`): a mocked or deliberately partial config is honoured, not replaced. See "LLM-free Graph Extraction (GLiNER)" below.
 
 Default databases (no extra setup needed):
 - **Relational**: SQLite (metadata and state storage)
@@ -428,49 +430,80 @@ Concurrent mode applies only to `GraphCompletionRetriever`,
 automatically. With `AUTO_FEEDBACK=false`
 neither mode analyzes the turn.
 
-#### only_context and `context_format`
+#### Completion prompt layout
 
-`only_context=True` returns the retrieval context instead of an LLM completion. By
-default that is the bare context string and nothing else — no session guidance, no
-conversation history, no rendered prompt — which is less than a real completion
-receives. Pass `context_format="prompt"` to get the full envelope instead:
+Every completion is assembled by one function, `build_completion_prompts` in
+`cognee/modules/retrieval/utils/completion.py`. The **system prompt** is the retriever's
+task template and nothing else: cognee-authored, static per retriever, so it never
+changes between turns. Everything derived from the user goes into the **user prompt**, in
+this order: the conversation history, the rendered question-and-context template, and
+the guidance block last (the `## Active session guidance` block with a session, the
+durable preference block sessionless). The session layer travels as one
+`SessionPrompt(history, guidance)` value, defined next to the builder; `SessionPrompt()`
+is the empty layer and sessionless callers pass `SessionPrompt(guidance=preference_text)`.
+
+The placement was measured across every combination, not chosen by taste. Soft
+preferences ("the user prefers German") are ignored from the system prompt by the
+default model and followed from the user turn; history is only used when it sits next
+to the context the template points at (the user template says "do not use information
+outside the context", so history delivered as system text or as chat turns is refused);
+guidance placed last wins over older turns that asked for something else; and an
+instruction planted in a past answer is obeyed only from the system prompt. Keep those
+four properties when touching the templates.
+
+#### only_context
+
+`only_context=True` returns what the LLM would have received instead of its answer. For
+completion search types that is the two messages a completion sends, kept apart: the
+**user prompt** (conversation history, then the question and the retrieval context
+rendered through the retriever's user template, then the session guidance block) and the
+**system prompt** (the retriever's task template). `search()` returns the user prompt as the result
+and, with `verbose=True`, carries both as `user_prompt_result` / `system_prompt_result`; a
+`recall()` item has the user prompt in `text` and the system prompt in `system_prompt`.
+Both are built by the same code the real completion uses (`build_session_prompt` in
+read-only mode plus `build_completion_prompts`, see
+`cognee/modules/retrieval/only_context_prompt.py`), so they cannot drift from what
+`generate_completion` sends.
 
 ```python
-result = await cognee.recall(
+items = await cognee.recall(
     "why did the migration stall?",
     query_type=SearchType.GRAPH_COMPLETION,  # pin the graph lane — with a bare
     session_id="s1",  # session_id a session hit would
     only_context=True,  # short-circuit it (see recall vs search)
-    context_format="prompt",  # default: "context"
 )
+user_prompt, system_prompt = items[0].text, items[0].system_prompt
 ```
 
-The `"prompt"` shape returns `question`, `context`, `session_context` (the guidance
-block plus conversation history), `user_prompt`, and `system_prompt` — the exact
-strings `generate_completion` would have sent, built by the same code
-(`build_session_prompt` in read-only mode plus `build_completion_prompts`). It makes no
-LLM completion or turn-analysis call, writes nothing to the session, and records no QA
-turn. It does make **one embedding call** — the conversation-history vector recall —
-once per search, shared across the dataset fan-out. With `CACHING=false` the
-`system_prompt` still carries the durable preference block, exactly as the real
-sessionless completion does.
+What it does and does not do: no LLM completion, no turn-analysis call, nothing written
+to the session, no QA turn recorded. It does make **one embedding call** — the
+conversation-history vector recall — once per search, shared across the dataset fan-out,
+and only when a prompt is actually built. With `CACHING=false` the system prompt still
+carries the durable preference block, exactly as the real sessionless completion does.
+Retrievers whose *retrieval* stage calls an LLM (`GRAPH_COMPLETION_COT`,
+`GRAPH_COMPLETION_DECOMPOSITION`, `GRAPH_COMPLETION_CONTEXT_EXTENSION`, `TEMPORAL`'s time
+extraction, `GRAPH_SUMMARY_COMPLETION`'s summaries) still make those calls under
+`only_context`, as they always have; for them the pair is the final prompts over the
+final context.
 
-Search types that never send a single prompt from their template pair report the
-session layer and leave `user_prompt`/`system_prompt` empty: the non-generative types
-(`CHUNKS`, `SUMMARIES`, `CODE`, …) have no template, and `CYPHER` and
-`AGENTIC_COMPLETION` opt out via `supports_prompt_preview = False` (Cypher never
-prompts; the agentic loop answers through other templates). For `recall()`, an empty
-retrieval yields zero items in either format, so the `on_empty` tools fallback still
-fires.
+Where the pair is *not* built and the bare retrieval context comes back instead: the
+non-generative types (`CHUNKS`, `SUMMARIES`, `CODE`, `SKILLS`, …) have no prompt
+template; `CYPHER` and `AGENTIC_COMPLETION` opt out via `supports_prompt_preview = False`
+(Cypher never prompts; the agentic loop answers through other templates); and an empty
+retrieval returns the empty context, never a prompt wrapped around nothing, so "nothing
+found" stays detectable — for `recall()` it yields zero items and the `on_empty` tools
+fallback still fires. The bare context stays reachable for callers that only want that:
+`search(verbose=True)` carries it as `context_result` next to the two prompts.
+`@agent_memory(memory_only_context=True)` reads `context_result`, so an agent's memory
+block never contains cognee's own question framing or answer instructions.
 
-Caveats. `context_format` only affects `only_context` calls. `POST /api/v1/search`
-accepts `session_id`; without one the session layer is the default session's. And the
-preview is knowingly unfaithful in one place: a real sequential turn first rewrites the
-question (`effective_query`), and that rewrite fills `{{ question }}`, drives history
-selection, and ranks the guidance block — concurrent mode also merges a second
-retrieval lane. Producing the rewrite is an LLM call, so the preview uses the raw query
-for all of them: it reports the prompt for the context actually retrieved, not a
-replay of a full turn.
+Caveats. `POST /api/v1/search` accepts `session_id`; without one the session layer is
+the default session's. And the pair is knowingly unfaithful in one place: a real
+sequential turn first rewrites the question (`effective_query`), and that rewrite fills
+`{{ question }}`, drives history selection, and ranks the guidance block — concurrent
+mode also merges a second retrieval lane. Producing the rewrite is an LLM call, so the
+raw query is used for all of them: the pair is the prompts for the context actually
+retrieved, not a replay of a full turn.
 
 ### Memory & Performance Tuning Flags
 
@@ -523,7 +556,7 @@ LLM_API_KEY="your_anthropic_api_key"
 ```bash
 LLM_PROVIDER="ollama"
 LLM_MODEL="llama3.1:8b"
-LLM_ENDPOINT="http://localhost:11434/v1"
+LLM_ENDPOINT="http://localhost:11434"  # bare host; /v1 only with the instructor framework
 LLM_API_KEY="ollama"
 EMBEDDING_PROVIDER="ollama"
 EMBEDDING_MODEL="nomic-embed-text:latest"
@@ -669,7 +702,7 @@ this rule applies only to internal PRs.
 Tests are organized in `cognee/tests/` (layout, credentials per folder, and how to run without API keys: `cognee/tests/README.md`; `pytest` with no path collects only this tree):
 - `unit/` - Unit tests for individual modules
 - `integration/` - Full pipeline integration tests
-- `e2e/` - Full-stack end-to-end suites run per backend in CI (e.g. `e2e/incremental_update/` runs on LadybugDB + LanceDB, Postgres graph + PGVector, and Neo4j + LanceDB)
+- `e2e/` - Full-stack end-to-end suites run per backend in CI (e.g. `e2e/incremental_update/` runs on LadybugDB + LanceDB, Postgres graph + PGVector, and Neo4j + LanceDB; `e2e/keyless/` proves ingestion with no LLM key on real local models, core deps + `cognee[gliner]` only)
 - `cli_tests/` - CLI command tests
 - `tasks/` - Task-specific tests
 
@@ -794,14 +827,24 @@ Opt-in LLM check that runs as the last `cognify()` task (default **off**). After
 - **Applies to `remember()` too** — and to session memory bridged back by `improve()` — since those build their graphs through `cognify()`. The exception is `remember(content_type="code")`, which runs the separate code-graph pipeline.
 - **Scope / limitations**: only the 1-hop neighbourhood of the touched entities is compared; structural edges (`contains`, `is_part_of`, `made_from`, `exists_in`, `contradicts`) and edges with an unnamed endpoint are skipped; the temporal cognify path is not covered.
 
-### LLM-free Graph Extraction (GLiNER)
-Opt-in replacement for the default `cognify()` task list (default **llm**, unchanged). `GRAPH_EXTRACTOR=gliner` or `cognify(extractor="gliner")` / `remember(extractor="gliner")` (explicit argument wins over the env setting) selects the dedicated GLiNER2 pipeline in `cognee/tasks/graph/gliner/`: one batched local-model pass per chunk batch builds the `KnowledgeGraph` **and** a deterministic two-line `TextSummary` (kept edges as `head rel tail`, then `type: names`). No `extract_content_graph` / `extract_summary` calls; embeddings in `add_data_points` still run.
+### LLM-free Graph Extraction (GLiNER demo)
+
+> **Demo:** The open-source GLiNER extractor (`gliner_demo`) is a demo of cognee's
+> enterprise GLiNER extraction, like `postgres_demo` is the demo graph backend. It is free
+> to use and needs no LLM key; the production-grade version (higher accuracy, broader label
+> coverage) is available with a cognee enterprise licence. The first run with it logs that
+> notice once per process.
+>
+> Interested in the production-grade GLiNER extraction? Write to us at social@cognee.ai
+> to explore the options.
+
+Replacement for the LLM extract-and-summarize step of the default `cognify()` task list. `GRAPH_EXTRACTOR` defaults to **auto**: the LLM path when a usable LLM key is configured (`llm_available()`), the GLiNER demo when none is — so a fresh install with no credentials ingests on local models, and the moment `LLM_API_KEY` is set the pipeline is the LLM one, unchanged. `GRAPH_EXTRACTOR=gliner_demo` / `llm`, or `cognify(extractor=...)` / `remember(extractor=...)` (explicit argument wins over the env setting) pin one regardless of credentials. Resolution happens once, in `resolve_extractor()` (`cognee/modules/cognify/config.py`); with no key and `gliner2` missing it raises `KeylessExtractorNotInstalledError` with the install hint before any work starts. The GLiNER pipeline in `cognee/tasks/graph/gliner_demo/` runs one batched local-model pass per chunk batch that builds the `KnowledgeGraph` **and** a deterministic two-line `TextSummary` (kept edges as `head rel tail`, then `type: names`). No `extract_content_graph` / `extract_summary` calls; embeddings in `add_data_points` still run — on keyless setups via the fastembed default (`resolve_embedding_defaults()` in `cognee/infrastructure/databases/vector/embeddings/config.py`: no embedding setting configured + no usable LLM key → `fastembed` / `BAAI/bge-small-en-v1.5`, vector size read from fastembed's model registry; `KeylessEmbedderNotInstalledError` when `fastembed` is missing).
 
 - **Install**: `pip install "cognee[gliner]"` (pulls torch; `fastino/gliner2.5-base-v1`, ~800 MB, downloads on first use). Missing package → `GlinerNotInstalledError` with the install hint.
-- **Schema** (closed, resolved per document before chunk extraction): caller `entity_types`/`relation_types` → else OWL classes / object properties of `ONTOLOGY_FILE_PATH` (snake_case of `rdfs:label` or local name, `rdfs:comment` as description) → else the frozen `LABEL_BANK`/`RELATION_BANK`, filtered by one GLiNER pass over a bounded document sketch. Capped at 20 per kind. Explicit labels are only reachable through `get_gliner_tasks(...)` + `run_custom_pipeline(pipeline_name="cognify_pipeline")`.
-- **LLM-free mode side effects**: a pipeline with no LLM task (the gliner extractor with contradiction detection off) skips the first-run LLM connection probe but still probes embeddings, per capability — an LLM-free run never marks the LLM check done for later LLM runs. Separately, `recall()` with no `query_type` defaults to `CHUNKS` when no usable LLM key is configured (keyed on LLM availability, not on the extractor; explicit `query_type` is always honoured). `COGNEE_SKIP_CONNECTION_TEST` stays `false` by default.
-- **Constraints**: generic `KnowledgeGraph` only (custom `graph_model` raises), `custom_prompt` ignored, no CLI/HTTP flag (set the env var); `extractor="gliner"` raises with `temporal_cognify=True`, with `dry_run=True`, and while connected to a remote instance. Long chunks are scanned with overlapping 384-word windows (`batch_extract_long`); schema discovery instead uses one plain pass over a sketch capped at 12,000 characters and 3,000 whitespace tokens. Relation endpoints are matched to entity spans by exact normalized name, then unambiguous containment; unresolved pairs are dropped and counted (`GlinerRunStats`).
-- **Demo**: `examples/guides/gliner_llm_free_cognify.py`. Unit tests: `cognee/tests/unit/tasks/graph/test_gliner_tasks.py`.
+- **Schema** (closed, resolved per document before chunk extraction): caller `entity_types`/`relation_types` → else OWL classes / object properties of `ONTOLOGY_FILE_PATH` (snake_case of `rdfs:label` or local name, `rdfs:comment` as description) → else the frozen `LABEL_BANK`/`RELATION_BANK`, filtered by one GLiNER pass over a bounded document sketch. Capped at 20 per kind. Explicit labels are only reachable through `get_gliner_demo_tasks(...)` + `run_custom_pipeline(pipeline_name="cognify_pipeline")`.
+- **LLM-free mode side effects**: a pipeline with no LLM task (the gliner_demo extractor with contradiction detection off) skips the first-run LLM connection probe but still probes embeddings, per capability — an LLM-free run never marks the LLM check done for later LLM runs. In `improve()`, the text-drafting stages `extract_agent_context`, `distill_sessions`, and `global_context_index` skip with `no_llm_configured`; session and trace persistence still run. Separately, `recall()` with no `query_type` defaults to `CHUNKS` when no usable LLM key is configured (keyed on LLM availability, not on the extractor; explicit `query_type` is always honoured). `COGNEE_SKIP_CONNECTION_TEST` stays `false` by default.
+- **Constraints**: generic `KnowledgeGraph` only (custom `graph_model` raises), `custom_prompt` ignored, no CLI/HTTP flag (set the env var); `extractor="gliner_demo"` raises with `temporal_cognify=True`, with `dry_run=True`, and while connected to a remote instance. Long chunks are scanned with overlapping 384-word windows (`batch_extract_long`); schema discovery instead uses one plain pass over a sketch capped at 12,000 characters and 3,000 whitespace tokens. Relation endpoints are matched to entity spans by exact normalized name, then unambiguous containment; unresolved pairs are dropped and counted (`GlinerRunStats`).
+- **Demo**: `examples/guides/gliner_demo_llm_free_cognify.py`. Unit tests: `cognee/tests/unit/tasks/graph/test_gliner_demo_tasks.py`.
 
 ### Skills (Procedural Memory)
 Dataset-scoped `SKILL.md` playbooks agents can discover, load on demand, execute, and improve from run history.
@@ -817,7 +860,7 @@ Supported code files (`.py`, `.go`, `.ts`, `.java`, `.rs`, … — the extension
 
 - **Search**: code is searchable through `SearchType.CODE` only (deterministic graph operations via `code_query`: `query_facts`, `explore`, `traverse`, `find_path`, `impact_analysis`, `insights`, `architecture`, `delta`). Completion/chunk search types (`GRAPH_COMPLETION`, `CHUNKS`, `RAG_COMPLETION`) do not cover code — the route produces no chunks and no embeddings.
 - **Diagrams**: add `"diagram": "mermaid"` (or `"dot"`, or `True`) to any `code_query` and the result carries a `diagram` block with deterministic diagram source (nodes shaped by kind, one subgraph per repository, seeds/focus/path highlighted). `{"operation": "architecture"}` is the module-level overview — symbol-to-symbol edges are rolled up into counted module-to-module edges, routes/storage/services hang off their modules — and it draws itself as Mermaid by default. Renderer: `cognee/modules/retrieval/code_graph_diagram.py`; no LLM, no network. Same option over REST (`code_query` on `POST /api/v1/search` and `/api/v1/recall` with `scope=["code"]`) and the CLI: `cognee-cli search "" -t CODE --code-query '{"operation": "architecture"}' --diagram-out arch.html` (`.html` renders Mermaid in a browser, `.svg/.png/.pdf` run Graphviz on DOT, other extensions get raw source; `--diagram mermaid|dot` prints the source in a fenced block).
-- **enola version**: pinned (with per-platform SHA-256) in `cognee/tasks/code_graph/install_enola.py` and auto-installed to `~/.cognee/bin` on first use (`ENOLA_AUTO_INSTALL=false` opts out; `ENOLA_PATH` always wins). Cognee reads enola's documented snapshot contract (`facts.jsonl`, `insights.json`, `receipt.json`; `format_version` 1) and rejects a receipt with a format version it does not understand. Fact ids and resolved relation `target_id`s from the writer are used when present; explainer findings become `CodeInsight` nodes with `evidences` edges; the receipt's provenance/quality block is stamped on the `CodeRepository` node and reported by the `delta` operation. Bumping the pin means re-pinning the checksums and re-checking the known answers in `cognee/tests/test_code_graph_e2e.py`.
+- **enola version**: installed by default as the pinned `enola-cli` wheel, which puts the binary in the environment's scripts directory; `ENOLA_PATH` always wins. A missing binary raises `EnolaNotInstalledError` with a reinstall hint — nothing is downloaded at runtime. The version pin lives only in `pyproject.toml`. Cognee reads enola's documented snapshot contract (`facts.jsonl`, `insights.json`, `receipt.json`; `format_version` 1) and rejects a receipt with a format version it does not understand. Fact ids and resolved relation `target_id`s from the writer are used when present; explainer findings become `CodeInsight` nodes with `evidences` edges; the receipt's provenance/quality block is stamped on the `CodeRepository` node and reported by the `delta` operation. Bumping the pin means re-checking the known answers in `cognee/tests/test_code_graph_e2e.py`.
 - **Opt-out per add**: `preferred_loaders={"text_loader": {}}` treats a code file as a plain document (chunking + LLM extraction).
 - **Whole repositories**: a local code-project directory or a GitHub/GitLab repository URL passed to `add()`/`remember()` (API: the `raw_data` form field) resolves to ONE `code_repo` manifest that cognify runs through the CODE_REPO route — a single enola pass with cross-file edges, plus the repo's documents as ordinary items. Remote URLs are shallow-cloned under `COGNEE_REPOS_DIR` (default `~/.cognee/repos`). `remember(content_type="code")` builds the same graph without the add step. The CODE route is per-file.
 

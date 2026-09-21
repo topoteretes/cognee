@@ -49,6 +49,25 @@ def test_gate_negation_suppresses_match():
     assert not result.fired
 
 
+@pytest.mark.parametrize(
+    "query",
+    [
+        "don't walk me through it",
+        "doesn't need a playbook",
+        "I can't set up the cluster",
+    ],
+)
+def test_gate_negation_suppresses_contractions(query):
+    """``n't`` is a suffix, not a word.
+
+    Spelled inside the alternation group as ``\bn't\b`` it never matches: there
+    is no word boundary between the "o" and the "n" of "don't", so every
+    contraction slipped past the suppression and fired the gate. It has to be
+    its own alternative outside the group, which is what _NEGATION does.
+    """
+    assert not should_search_skills(query).fired
+
+
 def test_gate_result_carries_score_and_matches():
     result = should_search_skills("how do I deploy to staging")
     assert result.score >= 3.0

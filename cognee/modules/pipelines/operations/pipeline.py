@@ -1,4 +1,3 @@
-import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 from uuid import UUID
@@ -9,9 +8,6 @@ from cognee.infrastructure.locks import get_dataset_lock, held_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.layers import validate_pipeline_tasks
-from cognee.modules.pipelines.layers.check_pipeline_run_qualification import (
-    check_pipeline_run_qualification,
-)
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
@@ -24,8 +20,6 @@ from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("cognee.pipeline")
-
-update_status_lock = asyncio.Lock()
 
 # Per-dataset locks (shared with delete operations via cognee.infrastructure.locks)
 # so concurrent runs on the SAME dataset are serialized: a run waits until any
@@ -62,7 +56,6 @@ async def run_pipeline(
     datasets: str | list[str] | list[UUID] | None = None,
     user: User | None = None,
     pipeline_name: str = "custom_pipeline",
-    use_pipeline_cache: bool = False,
     vector_db_config: dict | None = None,
     graph_db_config: dict | None = None,
     incremental_loading: bool = False,
@@ -109,7 +102,6 @@ async def run_pipeline(
             tasks=tasks,
             data=data,
             pipeline_name=pipeline_name,
-            use_pipeline_cache=use_pipeline_cache,
             incremental_loading=incremental_loading,
             data_per_batch=data_per_batch,
             rollback_handler=rollback_handler,
@@ -126,7 +118,6 @@ async def run_pipeline_per_dataset(
     tasks: list[Task] | Callable[[Any], list[Task]] | None = None,
     data: list[Data] | None = None,
     pipeline_name: str = "custom_pipeline",
-    use_pipeline_cache=False,
     incremental_loading=False,
     data_per_batch: int = 20,
     rollback_handler: Callable[..., Awaitable[None]] | None = None,
@@ -139,18 +130,9 @@ async def run_pipeline_per_dataset(
     async def _run_body():
         body_data = data if data else await get_dataset_data(dataset_id=dataset.id)
 
-        if use_pipeline_cache:
-            # Caching path: if this dataset's pipeline is already running or has
-            # already completed, return that status instead of re-processing.
-            # When caching is disabled the run always proceeds — concurrent runs
-            # are kept safe by the per-dataset lock, not by this check.
-            process_pipeline_status = await check_pipeline_run_qualification(
-                dataset, body_data, pipeline_name
-            )
-            if process_pipeline_status:
-                yield process_pipeline_status
-                return
-
+        # The run always proceeds. Concurrent runs on one dataset are serialized
+        # by the per-dataset lock, and already-processed documents are skipped
+        # per item by incremental loading, not by this dataset's run history.
         pipeline_run = run_tasks(
             tasks,
             dataset.id,

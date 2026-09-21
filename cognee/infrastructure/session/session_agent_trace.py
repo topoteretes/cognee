@@ -19,6 +19,7 @@ from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.session.feedback_models import AgentTraceFeedbackSummary
 from cognee.modules.agent_memory.sanitization import sanitize_value
+from cognee.modules.preflight import llm_available
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("session_agent_trace")
@@ -59,6 +60,10 @@ async def generate_agent_trace_feedback(
     )
 
     if method_return_value is None:
+        return fallback_feedback
+    if not llm_available():
+        # Keyless setups have nothing to summarize with; the fallback line is
+        # the answer, without building an LLM client that raises and logs.
         return fallback_feedback
 
     try:

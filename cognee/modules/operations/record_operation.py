@@ -27,6 +27,8 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID, uuid4
 
+from sqlalchemy.exc import OperationalError
+
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.shared.logging_utils import get_logger
 
@@ -126,17 +128,19 @@ class OperationContext:
         """Override the outcome recorded for a body that exits cleanly."""
         self.outcome = outcome
 
-    def merge_run_info(self, run_info: dict) -> None:
+    def merge_run_info(self, run_info: dict, *, allow_overwrite: bool = False) -> None:
         """Merge a payload into the row's ``run_info`` column, append-style.
 
         Writers namespace their entries by key (improve stages stamp under
         their stage name), so a merge never drops an earlier writer's entry.
         Overwriting an existing key is legal (last writer wins) but logged:
-        it means two writers chose the same namespace.
+        it means two writers chose the same namespace — unless the caller
+        says the overwrite is intended (``allow_overwrite``: an improve rerun
+        pass refreshing its own stage's stamp).
         """
         existing = self.run_info or {}
         clobbered = [key for key in run_info if key in existing and existing[key] != run_info[key]]
-        if clobbered:
+        if clobbered and not allow_overwrite:
             logger.warning(
                 "record_operation: run_info keys overwritten on %s record: %s",
                 self.operation_name,
@@ -242,6 +246,18 @@ async def record_operation(
                     await _write_operation_row(
                         context, context.started_at, outcome.value, error_class, error_message
                     )
+                except OperationalError as write_error:
+                    # An unreachable relational store is an expected state
+                    # around the operations that manage the store itself:
+                    # prune deletes the database the ledger lives in, and
+                    # nothing exists before setup() — the quickstart examples
+                    # hit both. A warning with a traceback made every example
+                    # run look broken, so the skipped write logs at debug.
+                    logger.debug(
+                        "record_operation: skipping %s record, relational store unavailable (%s)",
+                        operation_name,
+                        write_error,
+                    )
                 except Exception as write_error:
                     logger.warning(
                         "record_operation: failed to persist %s record (%s)",
@@ -272,6 +288,14 @@ async def finish_operation(context: OperationContext, error: BaseException | Non
     try:
         await _write_operation_row(
             context, context.started_at, outcome.value, error_class, error_message
+        )
+    except OperationalError as write_error:
+        # Store unavailable: expected around prune / before setup(), see the
+        # matching handler in record_operation.
+        logger.debug(
+            "record_operation: skipping %s record, relational store unavailable (%s)",
+            context.operation_name,
+            write_error,
         )
     except Exception as write_error:
         logger.warning(

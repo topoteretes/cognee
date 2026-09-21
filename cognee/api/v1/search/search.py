@@ -29,7 +29,7 @@ from cognee.modules.observability import (
 )
 from cognee.modules.operations import record_operation
 from cognee.modules.search.methods import search as search_function
-from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
+from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -54,7 +54,6 @@ async def search(
     # unspecified hybrid may defer to GRAPH_COMPLETION, and this return value
     # does not include the effective type.
     only_context: bool = False,
-    context_format: ContextFormat | str = ContextFormat.CONTEXT,
     session_id: str | None = None,
     wide_search_top_k: int | None = None,
     triplet_distance_penalty: float | None = None,
@@ -226,7 +225,6 @@ async def search(
         - GRAPH_DATABASE_PROVIDER: Must match what was used during cognify
 
     """
-    context_format = ContextFormat.parse(context_format)
     if neighborhood_depth is not None and (
         not isinstance(neighborhood_depth, int) or neighborhood_depth < 1
     ):
@@ -271,7 +269,6 @@ async def search(
             top_k=top_k,
             node_name=node_name,
             only_context=only_context,
-            context_format=context_format,
             verbose=verbose,
             include_references=include_references,
             code_query=code_query,
@@ -329,9 +326,13 @@ async def search(
 
             await set_session_user_context_variable(user)
 
-            # Transform string based datasets to UUID - String based datasets can only be found for current user
+            # Transform string based datasets to UUID - String based datasets can only be found for
+            # current user. Strict: a name that resolves to nothing fails the request instead of
+            # being dropped from the scope, the same contract dataset_ids has always had.
             if datasets is not None and all(isinstance(dataset, str) for dataset in datasets):
-                datasets = await get_authorized_existing_datasets(datasets, "read", user)
+                datasets = await get_authorized_existing_datasets(
+                    datasets, "read", user, strict=True
+                )
                 datasets = [dataset.id for dataset in datasets]
                 if not datasets:
                     raise DatasetNotFoundError(message="No datasets found.")
@@ -383,7 +384,6 @@ async def search(
                 node_name=node_name,
                 node_name_filter_operator=normalized_node_name_filter_operator,
                 only_context=only_context,
-                context_format=context_format,
                 session_id=session_id,
                 wide_search_top_k=wide_search_top_k,
                 triplet_distance_penalty=triplet_distance_penalty,

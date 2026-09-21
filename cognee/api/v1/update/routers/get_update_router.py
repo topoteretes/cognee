@@ -1,18 +1,16 @@
-from typing import Annotated, Literal
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, Query, status
 from fastapi import UploadFile as UF
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, WithJsonSchema
+from pydantic import WithJsonSchema
 
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse
+from cognee.api.v1.update.result import UpdateResult
 from cognee.exceptions import CogneeApiError
-from cognee.modules.pipelines.models.PipelineRunInfo import (
-    PipelineRunErrored,
-    PipelineRunInfo,
-)
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -25,26 +23,22 @@ UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"}
 logger = get_logger()
 
 
-class IncrementalUpdateResponse(BaseModel):
-    status: Literal["incremental", "unchanged"]
-    regions: int
-    deleted_chunks: int
-    added_chunks: int
-    reused_chunks: int
-    kept_chunks: int
-    reindexed_chunks: int
-
-
 def get_update_router() -> APIRouter:
     router = APIRouter()
 
     @router.patch(
         "",
-        response_model=IncrementalUpdateResponse | dict[UUID, PipelineRunInfo],
+        response_model=UpdateResult,
         responses={
             403: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
-            500: {"model": ErrorResponse},
+            500: {
+                "model": UpdateResult | ErrorResponse,
+                "description": (
+                    "The rebuild's cognify run errored (an UpdateResult with status "
+                    '"failed", naming the error) or an unexpected error occurred.'
+                ),
+            },
         },
     )
     async def update(
@@ -78,7 +72,7 @@ def get_update_router() -> APIRouter:
             default=True,
             description=(
                 "Diff the new content against the stored text and re-ingest only the "
-                "affected chunks. Falls back to the full delete + re-add + cognify flow "
+                "affected chunks. Falls back to the full rebuild (memory dropped, row refreshed) "
                 "when chunk-level preconditions are not met."
             ),
         ),
@@ -101,17 +95,30 @@ def get_update_router() -> APIRouter:
                  by the edit instead of re-ingesting the whole document.
 
         ## Response
-        With chunk_level_diff, a summary of the incremental operation (same keys for
-        either status):
-        `{"status": "incremental" | "unchanged", "regions": n, "deleted_chunks": n,
-        "added_chunks": n, "reused_chunks": n, "kept_chunks": n, "reindexed_chunks": n}`.
-        When the full flow runs (chunk_level_diff disabled, or its preconditions not met),
-        pipeline run information for the delete + re-add + cognify operation.
+        One body on every path (`UpdateResult`), a superset of the chunk-level summary
+        returned before:
+        - **status**: `"incremental"` (chunks replaced), `"unchanged"` (no content change),
+          `"full_rebuild"` (memory dropped and rebuilt from the new content) or `"failed"` (the rebuild's
+          cognify run errored; `error` says why, and the call can be retried).
+        - **regions**, **deleted_chunks**, **added_chunks**, **reused_chunks**,
+          **kept_chunks**, **reindexed_chunks**, **total_chunks**: the chunk-level
+          counters; `null` on a rebuild, which has no diff.
+        - **data_id**, **dataset_id**: the document, the handle to retry with.
+        - **duration_seconds**: wall-clock time of the update.
+        - **pipeline_run_id**: the run to inspect; `null` for a no-op.
+        - **fallback**: set on every rebuild; its `reason` names why the chunk-level path
+          did not run (`disabled`, `unsupported_metadata`, `custom_extraction_config`,
+          `per_call_db_config`, `unsupported_backend`, `unsupported_chunker`,
+          `no_baseline`, `chunks_not_tiling`, `unreadable_text`) and `detail` says it in
+          a sentence.
+        - **error**: `error_class` and `message` when `status` is `"failed"`.
 
         ## Error Codes
         - **422 Unprocessable Entity**: data_id or dataset_id missing or not a valid UUID
         - **403 Forbidden**: User lacks write permission on the dataset
-        - **500 Internal Server Error**: Pipeline run errored or an unexpected error occurred during the update
+        - **404 Not Found**: data_id resolves to no document in the dataset
+        - **500 Internal Server Error**: the rebuild's cognify run errored (body is the
+          `UpdateResult` with status `"failed"`) or an unexpected error occurred
 
         ## Notes
         - Chunk-level updates keep unaffected chunks, their entities, and their summaries
@@ -132,7 +139,7 @@ def get_update_router() -> APIRouter:
         from cognee.api.v1.update import update as cognee_update
 
         try:
-            update_run = await cognee_update(
+            result = await cognee_update(
                 data_id=data_id,
                 data=data,
                 dataset_id=dataset_id,
@@ -141,27 +148,14 @@ def get_update_router() -> APIRouter:
                 chunk_level_diff=chunk_level_diff,
             )
 
-            # Chunk-level path returns its own summary dict, no pipeline runs.
-            if isinstance(update_run, dict) and "status" in update_run:
-                return update_run
-
-            # If any cognify run errored return JSONResponse with proper error status code
-            if any(isinstance(v, PipelineRunErrored) for v in update_run.values()):
-                first_err = next(
-                    (v for v in update_run.values() if isinstance(v, PipelineRunErrored)), None
-                )
-                detail = getattr(first_err, "error", None) if first_err else None
-                if not detail:
-                    detail = str(first_err) if first_err else "Pipeline run errored"
-
+            if result["status"] == "failed":
+                # Same body as a success, so the client can read the error and
+                # retry this document; the status code still says it failed.
                 return JSONResponse(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    content=ErrorResponse(
-                        error="Pipeline run errored",
-                        detail=detail,
-                    ).model_dump(),
+                    content=jsonable_encoder(result),
                 )
-            return update_run
+            return result
 
         except CogneeApiError:
             # Typed API errors (e.g. UpdateTargetNotFoundError -> 404) carry

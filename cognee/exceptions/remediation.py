@@ -61,7 +61,7 @@ _TABLE: tuple[tuple[tuple[str, ...], str], ...] = (
         ),
     ),
     (
-        ("permissiondeniederror", "insufficient_quota", "billing"),
+        ("litellm.permissiondeniederror", "insufficient_quota", "billing"),
         (
             "The LLM provider accepted the key but denied the request. "
             "Confirm the account has active billing and quota, or switch "

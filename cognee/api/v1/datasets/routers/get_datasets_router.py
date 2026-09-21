@@ -14,6 +14,7 @@ from cognee import datasets
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.api.v1.datasets.dto import DataDTO
 from cognee.api.v1.exceptions import DataNotFoundError
+from cognee.exceptions import CogneeApiError
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import (
     get_authorized_existing_datasets,
@@ -602,8 +603,8 @@ def get_datasets_router() -> APIRouter:
         this endpoint returns depending on how it's called.
 
         ## Error Codes
-        - **409 Conflict**: Error retrieving status (e.g. requesting a dataset you don't have
-          read permission for)
+        - **403 Forbidden**: The request owner cannot read every requested dataset
+        - **409 Conflict**: An unexpected error occurred while retrieving status
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
@@ -628,6 +629,8 @@ def get_datasets_router() -> APIRouter:
             )
 
             return datasets_statuses
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Error retrieving dataset statuses")
             return JSONResponse(
@@ -696,6 +699,8 @@ def get_datasets_router() -> APIRouter:
             )
 
             return datasets_progress
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Error retrieving dataset progress")
             return JSONResponse(
@@ -763,6 +768,8 @@ def get_datasets_router() -> APIRouter:
                 return []
 
             counts = await get_datasets_graph_counts(authorized_datasets)
+        except CogneeApiError:
+            raise
         except Exception:
             # Same posture as GET /statuses above and the sibling
             # GET /visualize/brains-summary: a poll that fails transiently is a
@@ -1056,6 +1063,8 @@ def get_datasets_router() -> APIRouter:
 
         try:
             return await get_dataset_processing_status(dataset[0].id, pipeline_name=pipeline)
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Error retrieving dataset processing status")
             return JSONResponse(

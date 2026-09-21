@@ -271,6 +271,13 @@ async def _retrieve_and_answer(
         elif isinstance(context, list):
             span.set_attribute("cognee.retrieval.context_items", len(context))
 
+    if getattr(retriever, "skip_completion_on_empty_context", False) and not context:
+        # Same contract as get_completion_from_context (SDK-270 / gh #3728):
+        # an empty retrieval context must not reach the LLM. None tells the
+        # caller no answer was generated, so no QA turn gets recorded.
+        logger.warning("Empty context: skipping LLM completion, returning no results")
+        return retrieved_objects, context, None
+
     with new_span("cognee.retrieval.get_completion") as span:
         span.set_attribute("cognee.retrieval.retriever", retriever_class)
         answer = await complete_turn(
@@ -341,6 +348,12 @@ async def run_concurrent_session_turn(
             if should_answer
             else acknowledgement_for_turn(analysis.response_to_user)
         )
+
+        if generated_answer is None:
+            # Empty-context skip in the answer lane: no answer was generated,
+            # so there is no QA turn to record — mirroring the sequential
+            # path, where the guard fires before the session completion runs.
+            return retrieved_objects, context, []
 
         await commit_turn(
             session_manager,
