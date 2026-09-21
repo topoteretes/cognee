@@ -6,6 +6,7 @@ which is the only thing standing between a multi-gigabyte Drive file and the
 process memory.
 """
 
+import logging
 from unittest.mock import patch
 
 import pytest
@@ -106,3 +107,36 @@ async def test_a_non_200_names_the_operation_and_status_only():
     assert "403" in message
     # The file id appears in shareable URLs and every failure here is logged.
     assert "file-1" not in message
+
+
+@pytest.mark.asyncio
+async def test_a_file_ending_exactly_at_the_ceiling_is_not_logged_as_truncated(caplog):
+    # A chunk that lands exactly on the ceiling with nothing behind it is a
+    # complete file, not a truncated one. A `len(chunk) >= remaining` check
+    # cannot tell the two apart and used to log this case as truncated too.
+    chunk = 100_000  # divides MAX_FILE_BYTES evenly, so a chunk can land
+    # exactly on the boundary instead of only near it.
+    with (
+        _patched(total_bytes=client.MAX_FILE_BYTES, chunk_size=chunk),
+        caplog.at_level(logging.INFO),
+    ):
+        text = await client.download_file("ya29.token", "file-1")
+
+    assert len(text.encode("utf-8")) == client.MAX_FILE_BYTES
+    assert "truncated" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_file_landing_exactly_on_the_ceiling_with_more_behind_it_is_logged(caplog):
+    # The genuinely ambiguous case: a chunk fills exactly to the ceiling, and
+    # only the next pull from the stream proves there was more data all
+    # along. This is what the extra loop iteration exists to resolve.
+    chunk = 100_000
+    with (
+        _patched(total_bytes=client.MAX_FILE_BYTES + chunk, chunk_size=chunk),
+        caplog.at_level(logging.INFO),
+    ):
+        text = await client.download_file("ya29.token", "file-1")
+
+    assert len(text.encode("utf-8")) == client.MAX_FILE_BYTES
+    assert "truncated" in caplog.text

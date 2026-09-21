@@ -289,8 +289,15 @@ async def record_sync_result(
     now: disconnect, someone else connects the same Google account, the old
     owner's sync finishes last, and the new owner is told their Drive just
     synced. The row is written only while it is still active and still owned
-    by the same user; a token refresh mid-sync keeps both, so the ordinary
-    path is unaffected.
+    by the same owner (``workspace_id`` when set, ``user_id`` otherwise —
+    the same resolution :func:`upsert_credential` uses); a token refresh
+    mid-sync keeps both, so the ordinary path is unaffected.
+
+    Not closed by this check: the **same** owner disconnecting and
+    reconnecting the same account can still have a stale sync from the old
+    install stamp the new one. Nothing distinguishes one install of an
+    account from the next without a generation column, which this table
+    does not have.
 
     ``status`` is the vocabulary the integrations UI already renders,
     ``"ok"`` or ``"degraded"``. Deliberately separate from
@@ -299,12 +306,22 @@ async def record_sync_result(
     the caller is a detached background task and a failed stamp must never
     take down a sync that otherwise worked.
     """
-    provider = credential.provider
-    provider_account_id = credential.provider_account_id
     try:
-        # Inside the guard, not above it: acquiring the engine is itself a
-        # thing that can raise, and an escape there would take down a sync
-        # that had already succeeded.
+        # Read from the object inside the guard, not above it: this can run
+        # from inside an ``except`` block (see ``sync_drive``), and anything
+        # raising here — even attribute access on a detached instance — must
+        # not replace the traceback that is already in flight.
+        provider = credential.provider
+        provider_account_id = credential.provider_account_id
+        # Mirrors upsert_credential's owner resolution exactly: workspace_id
+        # is the owner when the caller set one, user_id otherwise. Comparing
+        # user_id alone would miss the same misattribution on the dimension
+        # this check is supposed to cover — a workspace-scoped connection
+        # reconnected under a different workspace by the same human.
+        ran_for_owner = (
+            credential.workspace_id if credential.workspace_id is not None else credential.user_id
+        )
+
         engine = get_relational_engine()
         async with engine.get_async_session() as db:
             result = await db.execute(
@@ -317,15 +334,18 @@ async def record_sync_result(
             if current is None:
                 return None
 
-            if current.status != STATUS_ACTIVE or current.user_id != credential.user_id:
+            current_owner = (
+                current.workspace_id if current.workspace_id is not None else current.user_id
+            )
+            if current.status != STATUS_ACTIVE or current_owner != ran_for_owner:
                 logger.info(
                     "Discarding a %s sync result for account %s: the connection it ran for "
                     "is gone (status %s, owner %s, was %s)",
                     provider,
                     provider_account_id,
                     current.status,
-                    current.user_id,
-                    credential.user_id,
+                    current_owner,
+                    ran_for_owner,
                 )
                 return None
 

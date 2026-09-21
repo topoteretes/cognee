@@ -242,7 +242,22 @@ async def _authorized_text(
 
         async for chunk in response.content.iter_chunked(_CHUNK_BYTES):
             remaining = MAX_FILE_BYTES - received
-            if len(chunk) >= remaining:
+            if remaining <= 0:
+                # Landed exactly on the ceiling on a previous chunk, and the
+                # stream still had more waiting. A chunk that lands exactly
+                # on the boundary looks identical to a file that legitimately
+                # ends there until this next pull proves otherwise — that is
+                # what the extra iteration is for.
+                logger.info(
+                    "Google %s stopped at the %d byte ceiling; the file is indexed truncated",
+                    operation,
+                    MAX_FILE_BYTES,
+                )
+                break
+            if len(chunk) > remaining:
+                # This chunk itself carries bytes past the ceiling, so there
+                # is no ambiguity: truncation is certain without waiting for
+                # another pull.
                 chunks.append(chunk[:remaining])
                 logger.info(
                     "Google %s stopped at the %d byte ceiling; the file is indexed truncated",

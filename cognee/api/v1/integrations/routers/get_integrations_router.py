@@ -138,6 +138,12 @@ class ConnectionStatusDTO(OutDTO):
     account_label: str | None = None
     provider_account_id: str | None = None
     connected_at: datetime | None = None
+    # "ok" | "degraded" | None (never synced, or the provider doesn't stamp
+    # this yet). Written by connectors that have no webhook to self-heal on —
+    # see record_sync_result — so a connection can read as connected while
+    # its last sync failed or came back partial.
+    sync_status: str | None = None
+    last_synced_at: datetime | None = None
 
 
 class DisconnectResultDTO(OutDTO):
@@ -157,6 +163,8 @@ class IntegrationStatusItemDTO(OutDTO):
     account_label: str | None = None
     provider_account_id: str | None = None
     connected_at: datetime | None = None
+    sync_status: str | None = None
+    last_synced_at: datetime | None = None
 
 
 class PluginStatusItemDTO(OutDTO):
@@ -260,44 +268,57 @@ async def _rotate_agent_api_key(agent_user: User, plugin_key: str) -> str:
 # so a relayed authorize link completed by somebody else is refused instead of
 # attaching their provider account to the account that started the flow.
 #
-# One cookie per provider, so connecting two providers in two tabs does not
-# have one overwrite the other. SameSite=Lax is what a top-level GET
-# navigation from the provider needs, and requires the API and the app to
-# share a registrable domain; on a deployment where they do not, this needs
-# SameSite=None and Secure instead.
+# One cookie per *install*, not one shared cookie per provider: two tabs on
+# the same provider (a double-click, a second tab) each call authorize once
+# and each gets their own cookie in a single Set-Cookie, so there is no
+# shared value for a second write to race and no read-modify-write for two
+# concurrent authorize calls to lose one nonce to the other. The nonce itself
+# is part of the cookie name, so setting one is one atomic operation with
+# nothing to merge.
 #
-# The cookie holds a bounded list rather than one value, because two tabs on
-# the *same* provider is ordinary: a second authorize would otherwise
-# overwrite the first tab's nonce and the first callback would be refused as
-# a forgery. Nonces are retired one at a time, only once matched, so neither
-# a finished install nor a bogus callback can cancel the tabs still pending.
+# SameSite=Lax is what a top-level GET navigation from the provider needs,
+# and requires the API and the app to share a registrable domain; on a
+# deployment where they do not, this needs SameSite=None and Secure instead.
+#
+# Each cookie expires on its own after DEFAULT_STATE_TTL_SECONDS, the same
+# window the state itself is valid for, so an abandoned install's cookie
+# cleans itself up without anything having to track or cap how many are
+# outstanding — the previous single-cookie design needed a cap because one
+# cookie's value could grow without bound; this design has no shared value
+# to grow.
 _INSTALL_NONCE_COOKIE_PREFIX = "cognee_oauth_nonce_"
 _INSTALL_NONCE_PATH = "/api/v1/integrations"
-_MAX_PENDING_INSTALL_NONCES = 5
-# Not in the urlsafe-base64 alphabet a nonce is drawn from, so it cannot occur
-# inside one, and needs no cookie quoting.
-_INSTALL_NONCE_SEPARATOR = "."
 
 
-def _install_nonce_cookie(provider: str) -> str:
-    return f"{_INSTALL_NONCE_COOKIE_PREFIX}{provider}"
+def _install_nonce_cookie_name(provider: str, nonce: str) -> str:
+    return f"{_INSTALL_NONCE_COOKIE_PREFIX}{provider}_{nonce}"
+
+
+def _install_nonce_cookie_prefix(provider: str) -> str:
+    return f"{_INSTALL_NONCE_COOKIE_PREFIX}{provider}_"
 
 
 def _pending_install_nonces(request: Request, provider: str) -> list[str]:
-    raw = request.cookies.get(_install_nonce_cookie(provider)) or ""
-    return [value for value in raw.split(_INSTALL_NONCE_SEPARATOR) if value]
+    """Every nonce this browser currently holds a pending install for."""
+    prefix = _install_nonce_cookie_prefix(provider)
+    return [
+        name[len(prefix) :]
+        for name in request.cookies
+        if name.startswith(prefix)
+        # isascii() before any of these ever reaches hmac.compare_digest,
+        # which raises TypeError on a non-ASCII str rather than returning
+        # False. A cookie name is attacker-influenceable (a sibling
+        # subdomain, a network position on plain http), and filtering here
+        # means every caller inherits the guard instead of each needing
+        # its own.
+        and name[len(prefix) :].isascii()
+    ]
 
 
-def _write_install_nonces(
-    response: Response, request: Request, provider: str, nonces: list[str]
-) -> None:
-    if not nonces:
-        response.delete_cookie(_install_nonce_cookie(provider), path=_INSTALL_NONCE_PATH)
-        return
-
+def _set_install_nonce(response: Response, request: Request, provider: str, nonce: str) -> None:
     response.set_cookie(
-        _install_nonce_cookie(provider),
-        _INSTALL_NONCE_SEPARATOR.join(nonces),
+        _install_nonce_cookie_name(provider, nonce),
+        "1",
         max_age=DEFAULT_STATE_TTL_SECONDS,
         httponly=True,
         samesite="lax",
@@ -306,17 +327,6 @@ def _write_install_nonces(
         secure=request.url.scheme == "https",
         path=_INSTALL_NONCE_PATH,
     )
-
-
-def _set_install_nonce(response: Response, request: Request, provider: str, nonce: str) -> None:
-    """Add one pending install to this provider's cookie, newest first.
-
-    Capped so the cookie cannot grow without bound; past the cap the oldest
-    pending install is forgotten and its callback is refused, which is the
-    right trade against a header a caller can inflate at will.
-    """
-    pending = [nonce, *_pending_install_nonces(request, provider)]
-    _write_install_nonces(response, request, provider, pending[:_MAX_PENDING_INSTALL_NONCES])
 
 
 def _install_nonce_matches(request: Request, provider: str, nonce: str) -> bool:
@@ -334,15 +344,10 @@ def _retire_install_nonce(
     """Drop one finished install, leaving the tabs still waiting untouched.
 
     Only ever called for a nonce that matched. A callback that did not match
-    leaves the cookie alone: clearing it there would let one forged or stale
-    redirect cancel every install the user has open.
+    leaves every cookie alone: clearing one there would let one forged or
+    stale redirect cancel an install the user still has open.
     """
-    remaining = [
-        presented
-        for presented in _pending_install_nonces(request, provider)
-        if not hmac.compare_digest(presented, nonce)
-    ]
-    _write_install_nonces(response, request, provider, remaining)
+    response.delete_cookie(_install_nonce_cookie_name(provider, nonce), path=_INSTALL_NONCE_PATH)
     return response
 
 
@@ -406,6 +411,8 @@ def get_integrations_router():
                         account_label=credential.account_label if credential else None,
                         provider_account_id=credential.provider_account_id if credential else None,
                         connected_at=as_utc(credential.created_at) if credential else None,
+                        sync_status=credential.sync_status if credential else None,
+                        last_synced_at=as_utc(credential.last_synced_at) if credential else None,
                     )
                 )
 
@@ -760,6 +767,8 @@ def get_integrations_router():
             account_label=credential.account_label,
             provider_account_id=credential.provider_account_id,
             connected_at=as_utc(credential.created_at),
+            sync_status=credential.sync_status,
+            last_synced_at=as_utc(credential.last_synced_at),
         )
 
     @integrations_router.delete("/{provider}/connection")

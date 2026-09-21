@@ -277,6 +277,14 @@ async def test_a_sync_finishing_after_a_disconnect_does_not_stamp_a_revoked_row(
 async def test_a_token_refresh_mid_sync_does_not_block_the_stamp():
     # The owner check must not be so strict that the ordinary path trips it:
     # refreshing a token rewrites the row but keeps the same owner.
+    #
+    # This setup is indistinguishable from the same owner disconnecting and
+    # reconnecting the same account, which is the gap record_sync_result's
+    # own docstring names as still open — both are (USER_A, ACTIVE) to
+    # (USER_A, ACTIVE) with no generation column to tell them apart. This
+    # test only pins that the refresh case is accepted; it is not a claim
+    # that the reconnect case is correctly rejected, because nothing here
+    # can express that distinction yet.
     from cognee.modules.integrations.credentials import record_sync_result
 
     ran_for = make_existing(USER_A, STATUS_ACTIVE)
@@ -294,3 +302,56 @@ async def test_a_token_refresh_mid_sync_does_not_block_the_stamp():
 
     assert stamped is after_refresh
     assert after_refresh.sync_status == "degraded"
+
+
+@pytest.mark.asyncio
+async def test_a_sync_that_outlived_a_workspace_reconnect_does_not_stamp_the_new_workspace():
+    # The owner check has to mirror upsert_credential's own owner
+    # resolution, not just user_id: when workspace_id is set it is the
+    # owner, the same way a workspace-scoped reconnect is judged. A check
+    # that only compared user_id would miss the same misattribution on this
+    # dimension — the same human reconnecting the same account under a
+    # different workspace.
+    from cognee.modules.integrations.credentials import record_sync_result
+
+    ran_for = make_existing(USER_A, STATUS_ACTIVE, workspace_id=WORKSPACE_A)
+    ran_for.provider = PROVIDER
+    ran_for.provider_account_id = ACCOUNT_ID
+
+    now_under_workspace_b = make_existing(USER_A, STATUS_ACTIVE, workspace_id=WORKSPACE_B)
+    now_under_workspace_b.sync_status = None
+    session = make_session(now_under_workspace_b)
+
+    with patch(
+        "cognee.modules.integrations.credentials.get_relational_engine",
+        return_value=make_engine(session),
+    ):
+        stamped = await record_sync_result(ran_for, status="ok")
+
+    assert stamped is None
+    assert now_under_workspace_b.sync_status is None
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_sync_still_stamps_a_row_that_switched_from_user_owned_to_workspace_owned():
+    # The mirror image of the check above, to prove it is symmetric rather
+    # than only ever refusing: nothing about the owner actually changed here
+    # (no workspace_id before or after), so the stamp must still land.
+    from cognee.modules.integrations.credentials import record_sync_result
+
+    ran_for = make_existing(USER_A, STATUS_ACTIVE)
+    ran_for.provider = PROVIDER
+    ran_for.provider_account_id = ACCOUNT_ID
+
+    unchanged = make_existing(USER_A, STATUS_ACTIVE)
+    session = make_session(unchanged)
+
+    with patch(
+        "cognee.modules.integrations.credentials.get_relational_engine",
+        return_value=make_engine(session),
+    ):
+        stamped = await record_sync_result(ran_for, status="ok")
+
+    assert stamped is unchanged
+    assert unchanged.sync_status == "ok"
