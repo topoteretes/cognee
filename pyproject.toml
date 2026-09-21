@@ -295,6 +295,10 @@ constraint-dependencies = [
     # use 1.16.1+ so the wheel-only release sync succeeds. Pulled
     # transitively via pandas / scikit-learn / fastembed.
     "scipy>=1.16.1 ; python_version >= '3.14'",
+    # lancedb 0.39.0 publishes no win_amd64 wheel and no sdist, so a lock that
+    # resolves it cannot sync on Windows. Keep the lock on 0.38.x until Windows
+    # wheels return. Resolver-only: `pip install cognee` is not constrained.
+    "lancedb<0.39",
 ]
 [tool.pytest.ini_options]
 # `pytest` with no path collects only the library test tree; cognee-mcp has its

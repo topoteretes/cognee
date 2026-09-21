@@ -25,6 +25,7 @@ enola-cli = { timestamp = "0001-01-01T00:00:00Z", span = "PT0S" }
 
 [manifest]
 constraints = [
+    { name = "lancedb", specifier = "<0.39" },
     { name = "nltk", specifier = ">=3.9.3" },
     { name = "protobuf", specifier = ">=5.29.6,!=6.30.*,!=6.31.*,!=6.32.*,!=6.33.1,!=6.33.2,!=6.33.3,!=6.33.4" },
     { name = "pyasn1", specifier = ">=0.6.2" },
