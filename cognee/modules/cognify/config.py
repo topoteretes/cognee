@@ -2,6 +2,7 @@ import importlib.util
 import os
 from functools import lru_cache
 
+from fastapi import status
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.exceptions import CogneeConfigurationError
@@ -77,16 +78,52 @@ def _log_gliner_demo_notice_once() -> None:
 
 
 class KeylessExtractorNotInstalledError(CogneeConfigurationError):
-    """No LLM key is configured and the local extractor's package is missing."""
+    """No LLM key is configured and the local extractor's package is missing.
+
+    A 422, not a 500: the deployment is missing an extra or a key, which the
+    caller fixes — the same class of problem as ``LLMAPIKeyNotSetError``. On
+    1.6.0's GA day seven deployments hit this as a 500 and two never got a
+    pipeline to run.
+    """
 
     def __init__(self):
         super().__init__(
             "No LLM API key is configured, so cognify would extract the graph with the "
-            "local GLiNER demo model, but the `gliner2` package is not installed. Either "
-            'install it with: pip install "cognee[gliner]" or set LLM_API_KEY to extract '
-            "with an LLM.",
+            "local GLiNER demo model, but the `gliner2` package is not installed.",
             "KeylessExtractorNotInstalledError",
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            remediation=(
+                'Install it with: pip install "cognee[gliner]" — or set LLM_API_KEY to '
+                "extract with an LLM."
+            ),
         )
+
+
+def _requested_extractor(value: str | None, config: CognifyConfig) -> str:
+    """The extractor setting as asked for: argument over env, aliases applied."""
+    extractor = (value or config.graph_extractor or AUTO_EXTRACTOR).strip().lower()
+    return EXTRACTOR_ALIASES.get(extractor, extractor)
+
+
+def resolve_extractor_name(
+    value: str | None, config: CognifyConfig, llm_configured: bool | None = None
+) -> str:
+    """Resolve the extractor setting without side effects.
+
+    ``auto`` is decided here (``llm`` with a usable key, ``gliner_demo``
+    without), but nothing is validated, installed or logged: the result may
+    be a value outside ``EXTRACTORS``. ``resolve_extractor`` adds the checks a
+    cognify run needs; the telemetry settings payload reads this one so that
+    reporting the extractor can never raise.
+    """
+    extractor = _requested_extractor(value, config)
+    if extractor == AUTO_EXTRACTOR:
+        if llm_configured is None:
+            from cognee.modules.preflight import keyless_local_defaults_apply
+
+            llm_configured = not keyless_local_defaults_apply()
+        extractor = LLM_EXTRACTOR if llm_configured else GLINER_DEMO_EXTRACTOR
+    return extractor
 
 
 def resolve_extractor(
@@ -103,20 +140,21 @@ def resolve_extractor(
     config). Resolving to the demo extractor logs the enterprise notice once
     per process.
 
-    This is the ONLY place the extractor setting is read. Callers resolve once,
-    up front, and pass the resolved value (or values derived from it) onward —
-    no downstream code re-reads the config.
+    This is the ONLY place the extractor setting is read for a run
+    (``resolve_extractor_name`` is its side-effect-free half). Callers resolve
+    once, up front, and pass the resolved value (or values derived from it)
+    onward — no downstream code re-reads the config.
     """
-    extractor = (value or config.graph_extractor or AUTO_EXTRACTOR).strip().lower()
-    extractor = EXTRACTOR_ALIASES.get(extractor, extractor)
-    if extractor == AUTO_EXTRACTOR:
-        if llm_configured is None:
-            from cognee.modules.preflight import keyless_local_defaults_apply
-
-            llm_configured = not keyless_local_defaults_apply()
-        extractor = LLM_EXTRACTOR if llm_configured else GLINER_DEMO_EXTRACTOR
-        if extractor == GLINER_DEMO_EXTRACTOR and importlib.util.find_spec("gliner2") is None:
-            raise KeylessExtractorNotInstalledError()
+    requested = _requested_extractor(value, config)
+    extractor = resolve_extractor_name(value, config, llm_configured)
+    if (
+        requested == AUTO_EXTRACTOR
+        and extractor == GLINER_DEMO_EXTRACTOR
+        and importlib.util.find_spec("gliner2") is None
+    ):
+        # Only the keyless default raises this; an explicit ``gliner`` without
+        # the package fails later with GlinerNotInstalledError, as before.
+        raise KeylessExtractorNotInstalledError()
     if extractor not in EXTRACTORS:
         raise ValueError(
             f"Unknown extractor {extractor!r}; expected one of "

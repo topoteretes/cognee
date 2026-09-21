@@ -215,3 +215,57 @@ async def test_one_failure_does_not_stop_the_others(monkeypatch):
     await recovery_module.recover_stale_pipeline_runs_on_startup()
 
     assert [kw["pipeline_name"] for name, kw in calls if name == "error"] == ["add_pipeline"]
+
+
+def _capture_telemetry(monkeypatch):
+    """Record every telemetry event recovery emits; settings are stubbed so the
+    test needs no provider configuration."""
+    import cognee.modules.pipelines.operations.run_tasks_with_telemetry as telemetry_module
+
+    events = []
+    monkeypatch.setattr(
+        recovery_module,
+        "send_telemetry",
+        lambda name, user=None, additional_properties=None, **_: events.append(
+            (name, user, additional_properties)
+        ),
+    )
+    monkeypatch.setattr(
+        telemetry_module, "get_current_settings", lambda: {"llm": {"provider": "openai"}}
+    )
+    return events
+
+
+@pytest.mark.asyncio
+async def test_closing_an_abandoned_run_emits_the_terminal_event_its_process_never_sent(
+    monkeypatch,
+):
+    run = _run("cognify_pipeline")
+    events = _capture_telemetry(monkeypatch)
+    _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)})
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    ((name, user, properties),) = events
+    assert name == "Pipeline Run Errored"
+    # Joins to the Started event the dead process sent, in the shape it sent it:
+    # pipeline_name is the pipeline id there too.
+    assert properties["pipeline_run_id"] == str(run.pipeline_run_id)
+    assert properties["pipeline_name"] == str(run.pipeline_id)
+    assert properties["exception_type"] == "AbandonedPipelineRunError"
+    assert properties["recovered_at_startup"] is True
+    assert properties["tenant_id"] == str(run.tenant_id)
+    assert properties["llm"] == {"provider": "openai"}
+    assert user.id == run.user_id
+    assert user.tenant_id == run.tenant_id
+
+
+@pytest.mark.asyncio
+async def test_a_run_left_started_after_a_failed_rollback_emits_nothing(monkeypatch):
+    run = _run("cognify_pipeline")
+    events = _capture_telemetry(monkeypatch)
+    _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)}, rollback_fails=True)
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    assert events == []

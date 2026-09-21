@@ -23,4 +23,6 @@ RUN echo "test-machine" > /app/.anon_id
 
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONPATH=/app
+# Telemetry deployment kind (cognee.shared.utils.get_install_kind); see SDK-775.
+ENV COGNEE_INSTALL_KIND=docker
 ENV PYTHONUNBUFFERED=1

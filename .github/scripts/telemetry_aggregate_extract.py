@@ -8,7 +8,8 @@ Hard rules enforced here:
 - Only the queries below run; every SELECT lists explicit output columns.
 - Free-text / PII-bearing fields are NEVER selected: search_query,
   system_prompt, dataset names, raw properties, tenant ids, endpoints'
-  query strings, error text.
+  query strings, error text. Error events contribute only ``exception_type``,
+  a Python class name, allowlisted to identifier characters.
 - Identity columns (user_id, api_key_hash, anonymous_id, persistent_id)
   are used ONLY inside COUNT(DISTINCT ...); their values are never emitted.
 - Identifier-bearing provider/model settings are bucketed as 'redacted'
@@ -91,6 +92,23 @@ _IDENT = (
 _ORIGIN = "coalesce(json_extract_string(properties, '$.telemetry_origin'), 'unknown')"
 # Normalized version: strip the -local suffix so builds compare cleanly.
 _VERSION = "coalesce(regexp_replace(cognee_version, '-local$', ''), 'unknown')"
+# How the deployment is installed: the explicit ``install_kind`` enum every
+# event carries since SDK-775 (docker / git / package). Older rows only have the
+# -local version suffix, which means "pyproject.toml adjacent" — true for git
+# checkouts AND the official Docker image — so they are labelled for exactly
+# what the suffix proves, not read as "self-hosted".
+_INSTALL_KIND = (
+    "coalesce(json_extract_string(properties, '$.install_kind'), "
+    "CASE WHEN cognee_version LIKE '%-local' THEN 'git-or-docker' ELSE 'package' END)"
+)
+# Pipeline error class (``exception_type``): a Python class name. Anything that
+# is not one identifier is bucketed, so an unexpected value cannot stop the export.
+_EXCEPTION_TYPE = (
+    "CASE WHEN regexp_matches(json_extract_string(properties, '$.exception_type'), "
+    "'^[A-Za-z_][A-Za-z0-9_]*$') THEN json_extract_string(properties, '$.exception_type') "
+    "WHEN json_extract_string(properties, '$.exception_type') IS NULL THEN 'unknown' "
+    "ELSE 'redacted' END"
+)
 
 _EVENTS_SQL = "(" + ",".join(f"'{e}'" for e in EVENT_ALLOWLIST) + ")"
 _BASE_FILTER = (
@@ -103,12 +121,23 @@ QUERIES: dict[str, str] = {
     "daily_event_volumes": f"""
         SELECT ingestion_date AS day, tracking_event, {_VERSION} AS version,
                {_ORIGIN} AS origin,
-               (cognee_version LIKE '%-local') AS self_hosted,
+               {_INSTALL_KIND} AS install_kind,
                count(*) AS events,
                count(DISTINCT {_IDENT}) AS distinct_identities
         FROM analytics.main.pipeline_events
         WHERE {_BASE_FILTER}
         GROUP BY ALL ORDER BY day, tracking_event
+    """,
+    # Which error classes end pipeline runs, by day and version (SDK-775). The
+    # class name is the only thing an Errored event says about its error.
+    "pipeline_error_types_daily": f"""
+        SELECT ingestion_date AS day, {_VERSION} AS version,
+               {_EXCEPTION_TYPE} AS exception_type,
+               count(*) AS errors,
+               count(DISTINCT {_IDENT}) AS distinct_identities
+        FROM analytics.main.pipeline_events
+        WHERE {_BASE_FILTER} AND tracking_event = 'Pipeline Run Errored'
+        GROUP BY ALL ORDER BY day, errors DESC
     """,
     # Graph-build pipeline health by day and version.
     "pipeline_outcomes_daily": f"""
@@ -150,6 +179,9 @@ QUERIES: dict[str, str] = {
         SELECT ingestion_date AS day,
                {_provider_dimension("llm.provider")} AS llm_provider,
                {_provider_dimension("llm.model", max_length=60)} AS llm_model,
+               {_provider_dimension("embedding.provider")} AS embedding_provider,
+               {_provider_dimension("embedding.model", max_length=60)} AS embedding_model,
+               {_provider_dimension("graph_extractor")} AS graph_extractor,
                {_provider_dimension("graph.provider")} AS graph_provider,
                {_provider_dimension("vector.provider")} AS vector_provider,
                {_provider_dimension("relational.provider")} AS relational_provider,
@@ -172,7 +204,7 @@ QUERIES: dict[str, str] = {
     # Version lifecycle within the window (adoption/abandonment).
     "version_lifecycle": f"""
         SELECT {_VERSION} AS version,
-               (cognee_version LIKE '%-local') AS self_hosted,
+               {_INSTALL_KIND} AS install_kind,
                min(ingestion_date) AS first_seen,
                max(ingestion_date) AS last_seen,
                count(*) AS events,

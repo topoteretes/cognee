@@ -7,6 +7,7 @@ import pathlib
 import socketserver
 import ssl
 from datetime import datetime, timezone
+from functools import lru_cache
 from threading import Thread
 from typing import Any
 from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
@@ -14,6 +15,7 @@ from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 import aiohttp
 
 from cognee.shared.logging_utils import get_logger
+from cognee.version import is_source_checkout
 
 logger = get_logger()
 
@@ -133,6 +135,43 @@ def get_persistent_id() -> str:
 # row can tell an id from a fingerprint, since both are UUID-shaped.
 TELEMETRY_SANITIZED_PROPERTIES = ["url", "session_id", "session_ids", "datasets"]
 TELEMETRY_FINGERPRINT_PREFIX = "fp:"
+
+# How this cognee is deployed, sent with every event as ``install_kind``. A closed
+# enum: ``docker`` (our images set COGNEE_INSTALL_KIND; any container carries
+# /.dockerenv), ``git`` (imported from a source tree), ``package`` (installed from
+# PyPI). Replaces reading the deployment kind off the ``-local`` version suffix,
+# which the official Docker image carries too (see ``cognee.version``).
+INSTALL_KIND_ENV = "COGNEE_INSTALL_KIND"
+INSTALL_KINDS = ("docker", "git", "package")
+_CONTAINER_MARKER = "/.dockerenv"
+
+
+@lru_cache(maxsize=1)
+def get_install_kind() -> str:
+    """Resolve the deployment kind once per process; never raises."""
+    explicit = os.getenv(INSTALL_KIND_ENV, "").strip().lower()
+    if explicit in INSTALL_KINDS:
+        return explicit
+    if explicit:
+        logger.debug("Ignoring unknown %s=%r", INSTALL_KIND_ENV, explicit)
+    if os.path.exists(_CONTAINER_MARKER):
+        return "docker"
+    if is_source_checkout():
+        return "git"
+    return "package"
+
+
+def telemetry_exception_type(error: BaseException) -> str:
+    """The class name telemetry records for ``error`` — never its message.
+
+    Messages interpolate user content (dataset names, paths, prompt fragments),
+    so error events carry the type only, the same rule the API layer applies in
+    ``cognee.api.exception_telemetry``. A ``PipelineRunFailedError`` wraps the
+    item error that actually broke as ``first_error``; report that root cause,
+    as the run record does.
+    """
+    root = getattr(error, "first_error", None) or error
+    return type(root).__name__
 
 
 def _fingerprint(value: str) -> str:
@@ -434,6 +473,7 @@ def send_telemetry(
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
             "telemetry_origin": telemetry_origin,
+            "install_kind": get_install_kind(),
             **additional_properties,
         },
     }

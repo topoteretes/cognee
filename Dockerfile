@@ -120,6 +120,8 @@ RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 ENV PATH="/app/.venv/bin:$PATH"
 
 ENV PYTHONPATH=/app
+# Telemetry deployment kind (cognee.shared.utils.get_install_kind); see SDK-775.
+ENV COGNEE_INSTALL_KIND=docker
 # ENV LOG_LEVEL=ERROR
 ENV PYTHONUNBUFFERED=1
 # Writable HOME for the non-root user (~/.cognee logs, tool caches).

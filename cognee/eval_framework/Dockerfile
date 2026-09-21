@@ -2,6 +2,8 @@ FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim@sha256:4f5d923c9dcea037f57bda
 
 # Set environment variables
 ENV PYTHONPATH=/app
+# Telemetry deployment kind (cognee.shared.utils.get_install_kind); see SDK-775.
+ENV COGNEE_INSTALL_KIND=docker
 ENV SKIP_MIGRATIONS=true
 # uv sync installs into /app/.venv (unlike the old poetry setup, which installed
 # into the system interpreter) — put it on PATH so plain `python` finds the deps.
