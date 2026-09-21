@@ -197,13 +197,17 @@ class GoogleDriveIntegration(OAuthIntegration):
                 "refresh_token": refresh_token,
             },
             token_expires_at=_expires_at(refreshed.get("expires_in")),
-            # These three are still assigned unconditionally by
-            # upsert_credential, so leaving them out would clear them on every
-            # rotation, which for this connector is hourly. provider_metadata
-            # and workspace_id are the two that survive omission.
+            # Every one of these is assigned unconditionally by
+            # upsert_credential, so anything left out is cleared, on a path
+            # that runs hourly. provider_metadata matters most: the account's
+            # email lives there and the dataset name is derived from it, so
+            # dropping it would send the next sync to a different dataset and
+            # split the account's memory in two.
             account_label=credential.account_label,
             auth_type=credential.auth_type,
             scopes=refreshed.get("scope") or credential.scopes,
+            provider_metadata=credential.provider_metadata,
+            workspace_id=credential.workspace_id,
         )
 
     async def revoke_remote(self, credential: IntegrationCredential) -> None:

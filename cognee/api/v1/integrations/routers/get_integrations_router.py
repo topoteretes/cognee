@@ -3,13 +3,17 @@ registered provider, dispatched generically on ``{provider}``.
 
 Route roles differ sharply in their auth model, which is the point:
 
-* ``POST /{provider}/authorize`` — authenticated. Minting the signed OAuth
-  state is the permission gate for the whole install; the callback trusts
-  the state alone.
+* ``POST /{provider}/authorize`` — authenticated. It mints the signed OAuth
+  state and sets the install-nonce cookie the callback checks against.
 * ``GET /{provider}/callback`` — necessarily unauthenticated (the browser
-  arrives from the provider's site without a session header). A valid,
-  unexpired state is the only credential, and it was only ever issued to the
-  connecting user.
+  arrives from the provider's site without a session header). Two things
+  authenticate it, and both are needed: a valid, unexpired state, and the
+  nonce cookie from the browser that started the install. The state alone is
+  not enough, because it travels in a URL that can be handed to somebody
+  else: it says an install was started by some user, not that this browser
+  belongs to that user. Completing a relayed authorize URL would otherwise
+  attach the consenting person's provider account to whoever started the
+  flow. See ``_set_install_nonce``.
 * ``GET/DELETE /{provider}/connection`` — authenticated; a user only ever
   sees or disconnects their own connection (credentials are user-scoped, not
   shared across a tenant/org).
@@ -34,12 +38,14 @@ provider name.
 """
 
 import asyncio
+import hmac
 import logging
+import secrets
 from datetime import datetime, timezone
 from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from fastapi_users.exceptions import UserAlreadyExists
 from sqlalchemy.exc import IntegrityError
@@ -61,7 +67,11 @@ from cognee.modules.integrations.credentials import (
     list_active_credentials_for_user,
     revoke_credential_by_account,
 )
-from cognee.modules.integrations.oauth_flow import make_state, validate_state
+from cognee.modules.integrations.oauth_flow import (
+    DEFAULT_STATE_TTL_SECONDS,
+    make_state,
+    validate_state,
+)
 from cognee.modules.integrations.plugin_status import (
     PluginStatusRow,
     as_utc,
@@ -241,6 +251,53 @@ async def _rotate_agent_api_key(agent_user: User, plugin_key: str) -> str:
     for old_key in old_keys:
         await delete_api_key(agent_user, old_key.id)
     return new_key.api_key
+
+
+# The state proves an install was started by some cognee user; it does not
+# prove the browser completing it belongs to that user, because the state
+# travels in a URL anyone can be handed. This cookie is what binds the two:
+# it is set on the authenticated authorize call and compared at the callback,
+# so a relayed authorize link completed by somebody else is refused instead of
+# attaching their provider account to the account that started the flow.
+#
+# One cookie per provider, so connecting two providers in two tabs does not
+# have one overwrite the other. SameSite=Lax is what a top-level GET
+# navigation from the provider needs, and requires the API and the app to
+# share a registrable domain; on a deployment where they do not, this needs
+# SameSite=None and Secure instead.
+_INSTALL_NONCE_COOKIE_PREFIX = "cognee_oauth_nonce_"
+_INSTALL_NONCE_PATH = "/api/v1/integrations"
+
+
+def _install_nonce_cookie(provider: str) -> str:
+    return f"{_INSTALL_NONCE_COOKIE_PREFIX}{provider}"
+
+
+def _set_install_nonce(response: Response, request: Request, provider: str, nonce: str) -> None:
+    response.set_cookie(
+        _install_nonce_cookie(provider),
+        nonce,
+        max_age=DEFAULT_STATE_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+        # Not hardcoded: a local http deployment would silently never receive
+        # the cookie back, turning every connect into an invalid-state error.
+        secure=request.url.scheme == "https",
+        path=_INSTALL_NONCE_PATH,
+    )
+
+
+def _install_nonce_matches(request: Request, provider: str, nonce: str) -> bool:
+    presented = request.cookies.get(_install_nonce_cookie(provider))
+    if not presented or not nonce:
+        return False
+    return hmac.compare_digest(presented, nonce)
+
+
+def _clear_install_nonce(response: Response, provider: str) -> Response:
+    """Drop the nonce once its install is over, however it ended."""
+    response.delete_cookie(_install_nonce_cookie(provider), path=_INSTALL_NONCE_PATH)
+    return response
 
 
 def _frontend_redirect(integration: OAuthIntegration, outcome: str) -> RedirectResponse:
@@ -465,9 +522,16 @@ def get_integrations_router():
 
     @integrations_router.post("/{provider}/authorize")
     async def authorize(
-        provider: str, user: User = Depends(get_authenticated_user)
+        provider: str,
+        request: Request,
+        response: Response,
+        user: User = Depends(get_authenticated_user),
     ) -> AuthorizeUrlDTO:
         """Mint the provider's authorize URL for the requesting user.
+
+        Also sets the nonce cookie the callback checks. The state alone says
+        which user *started* an install; the cookie is what says the browser
+        finishing it is the same one. See :func:`_set_install_nonce`.
 
         ## Path Parameters
         - **provider** (str): Key of a registered OAuth provider (see GET
@@ -477,8 +541,13 @@ def get_integrations_router():
             span.set_attribute("cognee.integrations.provider", provider)
             integration = _integration_or_404(provider)
             try:
-                state = make_state(user.id, signing_secret=integration.state_signing_secret())
-                return AuthorizeUrlDTO(authorize_url=integration.authorize_url(state))
+                nonce = secrets.token_urlsafe(32)
+                state = make_state(
+                    user.id, nonce, signing_secret=integration.state_signing_secret()
+                )
+                authorize_url = integration.authorize_url(state)
+                _set_install_nonce(response, request, provider, nonce)
+                return AuthorizeUrlDTO(authorize_url=authorize_url)
             except RuntimeError:
                 # A provider's require()-style settings guard raises when its
                 # client id/secret/signing key aren't configured — a
@@ -505,12 +574,39 @@ def get_integrations_router():
                 # (or the provider rejected the request) — not a fault, just
                 # an aborted install.
                 span.set_attribute("cognee.integrations.outcome", "cancelled")
-                return _frontend_redirect(integration, "cancelled")
+                return _clear_install_nonce(_frontend_redirect(integration, "cancelled"), provider)
 
-            user_id = validate_state(state, signing_secret=integration.state_signing_secret())
-            if user_id is None:
+            fields = validate_state(
+                state, signing_secret=integration.state_signing_secret(), field_count=2
+            )
+            if not isinstance(fields, tuple):
                 span.set_attribute("cognee.integrations.outcome", "error_invalid_state")
-                return _frontend_redirect(integration, "error_invalid_state")
+                return _clear_install_nonce(
+                    _frontend_redirect(integration, "error_invalid_state"), provider
+                )
+
+            user_id_field, nonce = fields
+            if not _install_nonce_matches(request, provider, nonce):
+                # The state is authentic but this is not the browser that
+                # asked for it. Without this check anyone with a cognee
+                # account could mint an authorize URL, hand it to someone
+                # else, and have that person's provider account land on the
+                # attacker's cognee user. See _set_install_nonce.
+                logger.warning(
+                    "%s callback arrived without a matching install nonce; refusing", provider
+                )
+                span.set_attribute("cognee.integrations.outcome", "error_invalid_state")
+                return _clear_install_nonce(
+                    _frontend_redirect(integration, "error_invalid_state"), provider
+                )
+
+            try:
+                user_id = UUID(user_id_field)
+            except ValueError:
+                span.set_attribute("cognee.integrations.outcome", "error_invalid_state")
+                return _clear_install_nonce(
+                    _frontend_redirect(integration, "error_invalid_state"), provider
+                )
 
             try:
                 credential = await complete_installation(
@@ -527,12 +623,16 @@ def get_integrations_router():
                 # rather than silently reassign it (see upsert_credential).
                 logger.warning("%s account already connected elsewhere; user %s", provider, user_id)
                 span.set_attribute("cognee.integrations.outcome", "error_already_connected")
-                return _frontend_redirect(integration, "error_already_connected")
+                return _clear_install_nonce(
+                    _frontend_redirect(integration, "error_already_connected"), provider
+                )
             except Exception:  # any exchange/parse failure must redirect, not 500
                 # Full trace server-side; the browser only learns that it failed.
                 logger.exception("%s OAuth exchange failed for user %s", provider, user_id)
                 span.set_attribute("cognee.integrations.outcome", "error_exchange_failed")
-                return _frontend_redirect(integration, "error_exchange_failed")
+                return _clear_install_nonce(
+                    _frontend_redirect(integration, "error_exchange_failed"), provider
+                )
 
             logger.info(
                 "%s account %s connected to user %s",
@@ -547,7 +647,7 @@ def get_integrations_router():
                 description=f"{provider} on_installed hook",
             )
             span.set_attribute("cognee.integrations.outcome", "connected")
-            return _frontend_redirect(integration, "connected")
+            return _clear_install_nonce(_frontend_redirect(integration, "connected"), provider)
 
     @integrations_router.post("/{provider}/events", include_in_schema=False)
     async def provider_events(provider: str, request: Request):

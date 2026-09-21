@@ -83,10 +83,59 @@ def test_unknown_provider_404s_on_every_route(client):
     assert client.delete("/api/v1/integrations/notreal/connection").status_code == 404
 
 
+def start_install(client, provider: str = "fake") -> str:
+    """Run the real authorize call and return the state it minted.
+
+    Hand-minting a state skips the nonce cookie the callback now requires,
+    which is exactly the check under test elsewhere in this file: a state on
+    its own no longer completes an install. Going through authorize leaves the
+    cookie in the TestClient's jar, the way a browser would carry it.
+    """
+    response = client.post(f"/api/v1/integrations/{provider}/authorize")
+    assert response.status_code == 200
+    return response.json()["authorizeUrl"].split("state=", 1)[1]
+
+
 def test_authorize_returns_the_integrations_own_url(client):
     response = client.post("/api/v1/integrations/fake/authorize")
     assert response.status_code == 200
     assert response.json()["authorizeUrl"].startswith("https://fake.example/authorize?state=")
+
+
+def test_authorize_binds_the_install_to_the_browser_that_started_it(client):
+    response = client.post("/api/v1/integrations/fake/authorize")
+    cookie = response.cookies.get("cognee_oauth_nonce_fake")
+    assert cookie
+    # httponly and the path restriction keep it off every unrelated request
+    # and out of reach of page scripts.
+    set_cookie = response.headers["set-cookie"].lower()
+    assert "httponly" in set_cookie
+    assert "samesite=lax" in set_cookie
+    assert "path=/api/v1/integrations" in set_cookie
+
+
+def test_callback_without_the_install_cookie_is_refused(client):
+    # The attack this closes: A calls authorize, hands the consent URL to B,
+    # B completes it in B's own browser. The state is authentic, but it is not
+    # B's install, and without this check B's provider account would land on
+    # A's cognee user.
+    state = start_install(client)
+    client.cookies.clear()
+
+    response = client.get(
+        f"/api/v1/integrations/fake/callback?code=abc&state={state}", follow_redirects=False
+    )
+    assert "fake=error_invalid_state" in response.headers["location"]
+
+
+def test_callback_with_a_foreign_install_cookie_is_refused(client):
+    state = start_install(client)
+    client.cookies.set("cognee_oauth_nonce_fake", "someone-elses-nonce")
+
+    response = client.get(
+        f"/api/v1/integrations/fake/callback?code=abc&state={state}", follow_redirects=False
+    )
+    assert "fake=error_invalid_state" in response.headers["location"]
 
 
 def test_authorize_surfaces_missing_config_as_503(client):
@@ -130,9 +179,7 @@ def test_callback_surfaces_missing_frontend_url_as_503_not_a_raw_crash(client):
 
 
 def test_callback_success_redirects_connected(client):
-    from cognee.modules.integrations.oauth_flow import make_state
-
-    state = make_state(USER_ID, signing_secret="fake-secret")
+    state = start_install(client)
     with patch.object(
         _router_module,
         "complete_installation",
@@ -145,9 +192,7 @@ def test_callback_success_redirects_connected(client):
 
 
 def test_callback_cross_user_conflict_redirects_already_connected(client):
-    from cognee.modules.integrations.oauth_flow import make_state
-
-    state = make_state(USER_ID, signing_secret="fake-secret")
+    state = start_install(client)
     with patch.object(
         _router_module,
         "complete_installation",
@@ -160,9 +205,7 @@ def test_callback_cross_user_conflict_redirects_already_connected(client):
 
 
 def test_callback_unexpected_error_redirects_exchange_failed(client):
-    from cognee.modules.integrations.oauth_flow import make_state
-
-    state = make_state(USER_ID, signing_secret="fake-secret")
+    state = start_install(client)
     with patch.object(
         _router_module,
         "complete_installation",

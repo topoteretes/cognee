@@ -269,6 +269,52 @@ async def update_provider_metadata(
         return credential
 
 
+async def record_sync_result(
+    provider: str, provider_account_id: str, *, status: str
+) -> IntegrationCredential | None:
+    """Stamp when a connector last synced an account and how it went.
+
+    ``last_synced_at`` and ``sync_status`` have existed on the row since the
+    table was created and nothing wrote them, which left a failed or partial
+    sync invisible: the connection still read as healthy while its memory was
+    empty. A connector that has no webhook to self-heal on has no other way to
+    say so, which is why it stamps the outcome here.
+
+    ``status`` is the vocabulary the integrations UI already renders,
+    ``"ok"`` or ``"degraded"``. Deliberately separate from
+    :func:`upsert_credential`, which re-encrypts the whole token payload: a
+    sync result has nothing to do with the token. Best-effort by contract —
+    the caller is a detached background task and a failed stamp must never
+    take down a sync that otherwise worked.
+    """
+    try:
+        # Inside the guard, not above it: acquiring the engine is itself a
+        # thing that can raise, and an escape there would take down a sync
+        # that had already succeeded.
+        engine = get_relational_engine()
+        async with engine.get_async_session() as db:
+            result = await db.execute(
+                select(IntegrationCredential).where(
+                    IntegrationCredential.provider == provider,
+                    IntegrationCredential.provider_account_id == provider_account_id,
+                )
+            )
+            credential = result.scalar_one_or_none()
+            if credential is None:
+                return None
+
+            credential.last_synced_at = datetime.now(timezone.utc)
+            credential.sync_status = status
+            await db.commit()
+            await db.refresh(credential)
+            return credential
+    except Exception:
+        logger.exception(
+            "Recording the sync result for %s account %s failed", provider, provider_account_id
+        )
+        return None
+
+
 def decrypt_token_payload(credential: IntegrationCredential) -> dict[str, Any]:
     """Decrypt a credential's token payload — call only at provider-API time."""
     return decrypt_credentials(

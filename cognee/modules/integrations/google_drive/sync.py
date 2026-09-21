@@ -22,6 +22,7 @@ with per-document ACLs, not with this connector.
 
 import logging
 import re
+from hashlib import sha256
 from typing import Any
 
 from cognee.modules.integrations.google_drive import client
@@ -30,6 +31,10 @@ from cognee.modules.integrations.models.IntegrationCredential import Integration
 logger = logging.getLogger(__name__)
 
 GOOGLE_DRIVE_DATASET_PREFIX = "google_drive"
+
+# Spelled out rather than imported from the adapter, which imports this module
+# for its post-install hook.
+GOOGLE_DRIVE_PROVIDER = "google_drive"
 
 # Google-native types carry no bytes; each is exported in the text form that
 # keeps the most meaning. Anything not listed here is downloaded as-is when
@@ -45,20 +50,42 @@ _EXPORT_AS = {
 _DOWNLOADABLE_PREFIXES = ("text/",)
 _DOWNLOADABLE_TYPES = {"application/json", "application/xml"}
 
-# A first pass indexes the most recently touched files rather than everything:
-# the access token lives about an hour, and an unbounded first sync on a large
-# Drive would outlive it partway through.
+# A first pass indexes the most recently touched files rather than everything.
+# This counts rendered documents only, so on its own it bounds nothing: a Drive
+# full of images never reaches it. _MAX_PAGES is what actually ends the walk.
 _DEFAULT_FILE_LIMIT = 200
+
+# The real bound on the listing walk. Every page costs one request whatever it
+# contains, so capping pages caps the sync regardless of how much of the Drive
+# this connector can render, and it also ends a listing whose page token never
+# advances. 50 pages is 5000 files at Drive's page size.
+_MAX_PAGES = 50
 
 # Guards against one pathological export (a spreadsheet with a hundred
 # thousand rows) dominating an account's whole memory.
 _MAX_CHARS_PER_FILE = 200_000
 
+SYNC_STATUS_OK = "ok"
+SYNC_STATUS_DEGRADED = "degraded"
 
-def dataset_name_for_account(email: str) -> str:
-    """The one dataset a connected account's files land in."""
+
+def dataset_name_for_account(email: str, account_id: str = "") -> str:
+    """The one dataset a connected account's files land in.
+
+    The email is slugged for readability but is not unique on its own: Gmail
+    treats dots as insignificant, and the slug folds dots, plus signs and
+    hyphens into the same underscore, so ``john.doe@`` and ``john_doe@`` are
+    two different Google accounts that render identically. A digest of the
+    account id (the Google subject, which is what the credential is keyed on)
+    disambiguates them. A digest rather than a slice of the id itself, because
+    Google subjects are long numbers sharing a prefix, so any truncation is a
+    collision waiting for the two accounts that differ outside the window.
+    """
     slug = re.sub(r"[^A-Za-z0-9_]+", "_", email or "").strip("_").lower()
-    return f"{GOOGLE_DRIVE_DATASET_PREFIX}_{slug or 'account'}"
+    name = f"{GOOGLE_DRIVE_DATASET_PREFIX}_{slug or 'account'}"
+    if not account_id:
+        return name
+    return f"{name}_{sha256(account_id.encode()).hexdigest()[:10]}"
 
 
 def format_file(file: dict[str, Any], content: str) -> str:
@@ -93,8 +120,8 @@ async def _read_file(access_token: str, file: dict[str, Any]) -> str | None:
 
 
 def _dataset_name(credential: IntegrationCredential) -> str:
-    email = (credential.provider_metadata or {}).get("email") or str(credential.provider_account_id)
-    return dataset_name_for_account(email)
+    email = (credential.provider_metadata or {}).get("email") or ""
+    return dataset_name_for_account(email, str(credential.provider_account_id))
 
 
 async def sync_drive(
@@ -108,11 +135,18 @@ async def sync_drive(
     One ``remember()`` call for the whole batch rather than one per file: a
     single pipeline run over a list is far cheaper than two hundred, and it
     keeps a slow account from holding the ingestion path open all day.
+
+    Nothing re-runs this sync: Drive registers no webhook verifier and the
+    repo has no scheduler, so whatever one pass collects is what the account
+    gets. That is why a listing failure partway through keeps the pages that
+    already worked instead of raising, and why the outcome is stamped on the
+    credential rather than only logged.
     """
     # Imported here, not at module top: this module is reached at API startup
     # through the adapter's registration, and cognee's package root is
     # heavyweight.
     from cognee.api.v1.remember.remember import remember as cognee_remember
+    from cognee.modules.integrations.credentials import record_sync_result
     from cognee.modules.integrations.google_drive.adapter import access_token_for
     from cognee.modules.users.methods import get_user
 
@@ -121,16 +155,32 @@ async def sync_drive(
     documents: list[str] = []
     skipped = 0
     failed = 0
+    scanned = 0
+    listing_failed = False
+    truncated = False
     page_token: str | None = None
 
-    while len(documents) < file_limit:
-        page = await client.list_files(access_token, page_token)
-        files = page.get("files") or []
-        if not files:
+    for page_number in range(_MAX_PAGES):
+        try:
+            page = await client.list_files(access_token, page_token)
+        except Exception:
+            # Keep what the earlier pages produced. Raising here would throw
+            # away every document already collected, and since nothing retries
+            # this sync the account would be left permanently empty.
+            listing_failed = True
+            logger.exception(
+                "Google Drive listing for account %s failed on page %d; "
+                "keeping the %d documents collected so far",
+                credential.provider_account_id,
+                page_number + 1,
+                len(documents),
+            )
             break
 
-        for file in files:
+        for file in page.get("files") or []:
+            scanned += 1
             if len(documents) >= file_limit:
+                truncated = True
                 break
             try:
                 content = await _read_file(access_token, file)
@@ -149,16 +199,39 @@ async def sync_drive(
                 continue
             documents.append(format_file(file, content[:_MAX_CHARS_PER_FILE]))
 
+        # Only an absent page token ends the walk. Drive filters by permission
+        # after cutting a page, so a page of items this account cannot see
+        # comes back empty with a live token, and treating that as the end
+        # silently indexes a prefix of the Drive (or nothing at all).
         page_token = page.get("nextPageToken")
         if not page_token:
             break
+        if len(documents) >= file_limit:
+            truncated = True
+            break
+    else:
+        truncated = True
+        logger.info(
+            "Google Drive listing for account %s stopped at the %d-page cap",
+            credential.provider_account_id,
+            _MAX_PAGES,
+        )
+
+    partial = listing_failed or truncated or failed > 0
+    status = SYNC_STATUS_DEGRADED if partial else SYNC_STATUS_OK
 
     if not documents:
         logger.info(
-            "Google Drive account %s has no readable files to sync (%d skipped, %d failed)",
+            "Google Drive account %s synced no documents (%d scanned, %d unsupported, "
+            "%d failed, listing_failed=%s)",
             credential.provider_account_id,
+            scanned,
             skipped,
             failed,
+            listing_failed,
+        )
+        await record_sync_result(
+            GOOGLE_DRIVE_PROVIDER, credential.provider_account_id, status=status
         )
         return
 
@@ -167,12 +240,14 @@ async def sync_drive(
 
     logger.info(
         "Syncing %d Google Drive files for account %s into dataset %s "
-        "(%d skipped as unreadable, %d failed)",
+        "(%d scanned, %d unsupported, %d failed, listing_failed=%s)",
         len(documents),
         credential.provider_account_id,
         dataset_name,
+        scanned,
         skipped,
         failed,
+        listing_failed,
     )
     result = await cognee_remember(
         documents,
@@ -184,8 +259,11 @@ async def sync_drive(
         self_improvement=False,
     )
     if getattr(result, "status", None) == "errored":
+        status = SYNC_STATUS_DEGRADED
         logger.warning(
             "Google Drive sync for account %s finished with errors: %s",
             credential.provider_account_id,
             getattr(result, "error", None),
         )
+
+    await record_sync_result(GOOGLE_DRIVE_PROVIDER, credential.provider_account_id, status=status)

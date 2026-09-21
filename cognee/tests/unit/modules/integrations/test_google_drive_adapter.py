@@ -60,6 +60,8 @@ def make_credential(**overrides):
         auth_type="oauth2",
         scopes="openid email drive.readonly",
         token_expires_at=None,
+        provider_metadata={"email": "goran@topoteretes.com"},
+        workspace_id=None,
     )
     for key, value in overrides.items():
         setattr(credential, key, value)
@@ -141,8 +143,11 @@ def test_parse_installation_survives_a_missing_refresh_token():
 
 
 @pytest.mark.asyncio
-async def test_refresh_carries_forward_the_fields_upsert_would_otherwise_clear():
-    credential = make_credential()
+async def test_refresh_carries_forward_every_field_upsert_would_otherwise_clear():
+    credential = make_credential(
+        provider_metadata={"email": "goran@topoteretes.com", "account_type": "workspace"},
+        workspace_id="workspace-1",
+    )
     with (
         patch.object(
             adapter_module,
@@ -159,15 +164,15 @@ async def test_refresh_carries_forward_the_fields_upsert_would_otherwise_clear()
         await GoogleDriveIntegration().refresh(credential)
 
     written = upsert.await_args.kwargs
-    # account_label, auth_type and scopes are still assigned unconditionally
-    # by upsert_credential, so omitting them would wipe them on every hourly
-    # rotation. provider_metadata and workspace_id survive omission, which is
-    # why they are deliberately absent here.
+    # upsert_credential assigns every one of these unconditionally, so any of
+    # them left out is cleared on a path that runs hourly. provider_metadata
+    # is the one that hurts: the dataset name is derived from the email it
+    # holds, so losing it sends the next sync to a different dataset.
     assert written["account_label"] == credential.account_label
     assert written["auth_type"] == credential.auth_type
     assert written["scopes"] == credential.scopes
-    assert "provider_metadata" not in written
-    assert "workspace_id" not in written
+    assert written["provider_metadata"] == credential.provider_metadata
+    assert written["workspace_id"] == credential.workspace_id
     # Google issues no new refresh token, so the stored one is carried over.
     assert written["token_payload"] == {
         "access_token": "ya29.new",

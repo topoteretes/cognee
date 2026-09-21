@@ -30,6 +30,14 @@ DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files"
 
 _TIMEOUT = aiohttp.ClientTimeout(total=60)
 
+# Hard ceiling on what one file may pull into memory. Drive holds whatever
+# anyone put there, including multi-gigabyte exports, and the caller's own
+# character trim happens only after the bytes have already arrived — so the
+# stop has to be here, mid-stream, not downstream.
+MAX_FILE_BYTES = 1_000_000
+
+_CHUNK_BYTES = 64 * 1024
+
 
 class GoogleAuthError(RuntimeError):
     """A token exchange or refresh Google rejected.
@@ -207,9 +215,17 @@ async def _authorized_text(
 ) -> str:
     """Fetch a file body as text, replacing bytes that are not valid UTF-8.
 
+    Read in chunks and abandoned at :data:`MAX_FILE_BYTES` rather than pulled
+    in whole: a caller that trims the result afterwards has already paid the
+    memory for everything Drive sent. Truncation can cut a multi-byte
+    character in half, which is what ``errors="replace"`` is for.
+
     Errors name the operation and status but never the file id: ids appear in
     shareable URLs, and this runs where every failure is logged.
     """
+    chunks: list[bytes] = []
+    received = 0
+
     async with (
         aiohttp.ClientSession(timeout=_TIMEOUT) as session,
         session.get(
@@ -218,6 +234,16 @@ async def _authorized_text(
     ):
         if response.status != 200:
             raise RuntimeError(f"Google {operation} failed: HTTP {response.status}")
-        raw = await response.read()
 
-    return raw.decode("utf-8", errors="replace")
+        async for chunk in response.content.iter_chunked(_CHUNK_BYTES):
+            chunks.append(chunk)
+            received += len(chunk)
+            if received >= MAX_FILE_BYTES:
+                logger.info(
+                    "Google %s stopped at the %d byte ceiling; the file is indexed truncated",
+                    operation,
+                    MAX_FILE_BYTES,
+                )
+                break
+
+    return b"".join(chunks).decode("utf-8", errors="replace")
