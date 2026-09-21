@@ -193,6 +193,14 @@ def get_remember_router() -> APIRouter:
                 "to skip tagging."
             ),
         ),
+        self_improvement: bool | None = Form(
+            default=None,
+            description=(
+                "False skips automatic improvement after ingestion, or the background "
+                "graph bridge for session text. Ingestion/session storage still runs. "
+                "Omit to preserve the core default (currently true)."
+            ),
+        ),
         run_in_background: bool | None = Form(
             default=False,
             description=(
@@ -201,14 +209,6 @@ def get_remember_router() -> APIRouter:
                 "poll GET /v1/datasets/status to track completion. If false, the request "
                 "blocks until the knowledge graph is fully built, which can take minutes "
                 "for large files."
-            ),
-        ),
-        self_improvement: bool | None = Form(
-            default=True,
-            description=(
-                "Run the self-improvement loop (improve) after the knowledge graph is built: "
-                "triplet enrichment and, for session-backed data, the session bridge. Set to "
-                "false for a plain add + cognify ingestion. Ignored with session_id."
             ),
         ),
         custom_prompt: str | None = Form(
@@ -537,6 +537,12 @@ def get_remember_router() -> APIRouter:
                 detail="Provide at least one file in 'data' or one entry in 'raw_data'.",
             )
 
+        # Multipart uploads historically forwarded the core default explicitly;
+        # raw_data requests preserve omission so the core remember() default
+        # remains authoritative for that path.
+        if self_improvement is None and data and not raw_data:
+            self_improvement = True
+
         from cognee.api.v1.ontologies.ontologies import OntologyService
         from cognee.api.v1.remember import remember as cognee_remember
         from cognee.shared.graph_model_utils import graph_schema_to_graph_model
@@ -595,7 +601,7 @@ def get_remember_router() -> APIRouter:
                 dataset_id=datasetId if datasetId else None,
                 node_set=[tag for tag in (node_set or []) if tag] or None,
                 run_in_background=run_in_background or False,
-                self_improvement=self_improvement if self_improvement is not None else True,
+                **({"self_improvement": self_improvement} if self_improvement is not None else {}),
                 custom_prompt=custom_prompt or None,
                 chunk_size=chunk_size,
                 chunks_per_batch=chunks_per_batch,
@@ -665,6 +671,14 @@ def get_remember_router() -> APIRouter:
             examples=["claude-code-1718000000"],
             description="Required for qa/trace/feedback entries; optional for skill_run entries.",
         )
+        self_improvement: bool | None = Field(
+            default=None,
+            description=(
+                "Forwarded to remember for compatibility. Typed session entries do not "
+                "run automatic graph improvement, regardless of this value. "
+                "This does not control explicit skill_improvement."
+            ),
+        )
         skill_improvement: dict | None = None
 
     @router.post(
@@ -721,6 +735,11 @@ def get_remember_router() -> APIRouter:
                 session_id=payload.session_id,
                 user=user,
                 skill_improvement=payload.skill_improvement,
+                **(
+                    {"self_improvement": payload.self_improvement}
+                    if payload.self_improvement is not None
+                    else {}
+                ),
             )
             return jsonable_encoder(result.to_dict())
         except ValueError as error:
