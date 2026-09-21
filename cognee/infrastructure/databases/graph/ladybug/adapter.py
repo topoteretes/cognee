@@ -2844,6 +2844,12 @@ class LadybugAdapter(GraphDBInterface):
 
     # Graph-wide Operations
 
+    async def get_top_degree_node_ids(self, top_k: int) -> list[str]:
+        """Rank a bounded edge sample in the store; include isolated nodes."""
+        from cognee.infrastructure.databases.graph.degree_seeds import cypher_degree_seeds
+
+        return await cypher_degree_seeds(self, top_k, typed=True)
+
     async def get_graph_data(
         self,
     ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]:
@@ -2913,22 +2919,6 @@ class LadybugAdapter(GraphDBInterface):
                                 f"Failed to parse edge properties for {source_id}->{target_id}"
                             )
                     formatted_edges.append((source_id, target_id, rel_type, props))
-
-            if formatted_nodes and not formatted_edges:
-                logger.debug("No edges found, creating self-referential edges for nodes")
-                for node_id, _ in formatted_nodes:
-                    formatted_edges.append(
-                        (
-                            node_id,
-                            node_id,
-                            "SELF",
-                            {
-                                "relationship_name": "SELF",
-                                "relationship_type": "SELF",
-                                "vector_distance": 0.0,
-                            },
-                        )
-                    )
 
             retrieval_time = time.time() - start_time
             logger.info(

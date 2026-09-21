@@ -13,6 +13,10 @@ first ingestion as an opaque downstream failure:
    ``get_native_client``) is unmet, so every completion call would raise
    ``LLMAPIKeyNotSetError`` after ingestion work has already started.
 
+Nothing configured at all is not a trap: cognify then extracts with the local
+GLiNER model and embeds with the local fastembed model (``resolve_extractor``
+and ``resolve_embedding_defaults``), so no provider call is made.
+
 ``check_provider_config`` is a pure function over the two config objects so
 it can be unit-tested and reused by ``cognee-cli doctor``;
 ``validate_provider_config`` is the cheap, once-per-process hot-path wrapper
@@ -29,7 +33,6 @@ from cognee.exceptions import CogneeConfigurationError
 # Mirrors get_native_client._NO_API_KEY_PROVIDERS: Bedrock authenticates with
 # AWS credentials and llama.cpp runs locally.
 _NO_API_KEY_LLM_PROVIDERS = {"bedrock", "llama_cpp"}
-_DEFAULT_EMBEDDING_MODEL = "openai/text-embedding-3-large"
 
 # Env vars that disable the preflight. COGNEE_SKIP_CONNECTION_TEST and
 # MOCK_EMBEDDING are honored because environments that set them (CI, offline
@@ -75,23 +78,26 @@ def check_provider_config(
 
         embedding_config = get_embedding_context_config()
 
+    from cognee.infrastructure.databases.vector.embeddings.config import (
+        DEFAULT_EMBEDDING_MODEL,
+        embedding_settings_configured,
+    )
+
     problems: list[str] = []
 
     llm_provider = (llm_config.llm_provider or "").lower()
     llm_key = (llm_config.llm_api_key or "").strip()
-    embedding_provider = (embedding_config.embedding_provider or "").lower()
-    embedding_key = (embedding_config.embedding_api_key or "").strip()
-    embedding_model = embedding_config.embedding_model or ""
-    embedding_endpoint = embedding_config.embedding_endpoint
+    embeddings_configured = embedding_settings_configured(embedding_config)
 
-    embeddings_untouched = (
-        embedding_provider == "openai"
-        and embedding_model == _DEFAULT_EMBEDDING_MODEL
-        and not embedding_key
-        and not embedding_endpoint
-    )
-
-    if embeddings_untouched and llm_provider not in ("", "openai"):
+    # With no embedding setting configured and no usable LLM key, embeddings
+    # run on the local fastembed default (``resolve_embedding_defaults``), so
+    # no key of any provider reaches the OpenAI endpoint — the trap only
+    # exists once a non-OpenAI key would be reused.
+    if (
+        not embeddings_configured
+        and llm_provider not in ("", "openai")
+        and llm_available(llm_config)
+    ):
         if llm_provider == "custom":
             key_consequence = (
                 "with LLM_PROVIDER='custom' no API key at all would be sent to the "
@@ -104,7 +110,7 @@ def check_provider_config(
             )
         problems.append(
             "Embeddings are not configured and would silently default to OpenAI "
-            f"('{_DEFAULT_EMBEDDING_MODEL}') while LLM_PROVIDER='{llm_provider}': "
+            f"('{DEFAULT_EMBEDDING_MODEL}') while LLM_PROVIDER='{llm_provider}': "
             f"{key_consequence}, so the first ingestion would fail with an "
             "authentication error minutes later. Fix: set EMBEDDING_PROVIDER, "
             "EMBEDDING_MODEL and EMBEDDING_API_KEY for your embedding service "
@@ -112,7 +118,7 @@ def check_provider_config(
             "OpenAI EMBEDDING_API_KEY to keep the default embedder."
         )
 
-    if not embeddings_untouched and _llm_requires_api_key(llm_config) and not llm_key and needs_llm:
+    if embeddings_configured and _llm_requires_api_key(llm_config) and not llm_key and needs_llm:
         problems.append(
             "Embedding settings are configured but LLM_API_KEY is not set "
             f"(LLM_PROVIDER='{llm_provider or 'openai'}' requires one). Entity "
@@ -156,6 +162,20 @@ def llm_available(llm_config=None) -> bool:
 
 def _skip_preflight() -> bool:
     return any(os.getenv(var, "").lower() in ("true", "1", "yes") for var in _SKIP_ENV_VARS)
+
+
+def keyless_local_defaults_apply(llm_config=None) -> bool:
+    """True when ingestion should run on local models: no usable LLM key, and
+    the preflight is not disabled.
+
+    The same env vars that disable the preflight (``COGNEE_SKIP_PREFLIGHT``,
+    ``COGNEE_SKIP_CONNECTION_TEST``, ``MOCK_EMBEDDING``) also disable this
+    rerouting: they mean the caller runs with deliberately partial or fake
+    provider config (CI with a mocked LLM, offline runs), and that config must
+    be honoured, not replaced. ``resolve_extractor`` and
+    ``resolve_embedding_defaults`` both key off this one rule.
+    """
+    return not _skip_preflight() and not llm_available(llm_config)
 
 
 def _already_validated(needs_llm: bool) -> bool:

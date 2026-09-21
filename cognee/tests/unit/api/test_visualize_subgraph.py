@@ -141,12 +141,16 @@ async def test_no_seed_falls_back_to_degree(tmp_path):
     full_graph = _chain_graph(20)
     subgraph = ([full_graph[0][i] for i in (9, 10, 11)], [full_graph[1][9], full_graph[1][10]])
     engine = MagicMock()
-    engine.get_graph_data = AsyncMock(return_value=full_graph)
+    engine.get_top_degree_node_ids = AsyncMock(return_value=["10"])
+    engine.get_graph_data = AsyncMock(
+        side_effect=AssertionError("degree seeds must not load the full graph")
+    )
     engine.get_neighborhood = AsyncMock(return_value=subgraph)
 
     html = await _visualize(engine, tmp_path)
 
     node_ids, _ = _rendered_ids_and_edges(html)
     assert node_ids == {"9", "10", "11"}
-    engine.get_graph_data.assert_awaited_once()  # degree fallback loads the graph
-    engine.get_neighborhood.assert_awaited_once()
+    engine.get_top_degree_node_ids.assert_awaited_once_with(10)
+    engine.get_graph_data.assert_not_awaited()
+    engine.get_neighborhood.assert_awaited_once_with(node_ids=["10"], depth=2)

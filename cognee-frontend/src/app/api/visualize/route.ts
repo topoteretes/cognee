@@ -18,12 +18,22 @@ export async function GET(request: NextRequest) {
   if (apiKey) headers["x-api-key"] = apiKey;
 
   // If no auth available from headers, try to login as default user server-side
+  // Server-side default-user login, used only when the browser sent no
+  // credentials at all. DEFAULT_USER_PASSWORD is the configured password;
+  // the literal is the local dev-stack value (`cognee-cli -ui`, docker-compose.yml),
+  // kept so deployments created before SDK-549 keep working. Against a server
+  // whose default user has no password this attempt simply fails and the
+  // request is forwarded unauthenticated, exactly as it would with no fallback.
+  const defaultUserPassword = process.env.DEFAULT_USER_PASSWORD || "default_password";
   if (!cookie && !authHeader && !apiKey) {
     try {
       const loginResp = await fetch(`${localApiUrl}/api/v1/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: "username=default_user@example.com&password=default_password",
+        body: new URLSearchParams({
+          username: process.env.DEFAULT_USER_EMAIL || "default_user@example.com",
+          password: defaultUserPassword,
+        }).toString(),
       });
       if (loginResp.ok) {
         const data = await loginResp.json();

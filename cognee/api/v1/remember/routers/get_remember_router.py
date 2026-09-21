@@ -110,7 +110,11 @@ async def _import_cogx_archives(
 def get_remember_router() -> APIRouter:
     router = APIRouter()
 
-    @router.post("", response_model=dict)
+    @router.post(
+        "",
+        summary="Remember: ingest data and build the knowledge graph (add + cognify + improve)",
+        response_model=dict,
+    )
     @log_usage(function_name="POST /v1/remember", log_type="api_endpoint")
     async def remember(
         data: list[OptionalUploadFile] = File(default=None),
@@ -331,6 +335,8 @@ def get_remember_router() -> APIRouter:
           data is ingested directly via add + cognify.
         - **node_set** (Optional[List[str]]): Node identifiers for graph organisation.
         - **run_in_background** (Optional[bool]): Run the cognify step asynchronously (default: False).
+        - **self_improvement** (Optional[bool]): Run the improve loop after cognify
+          (default: True). False gives a plain add + cognify ingestion.
         - **custom_prompt** (Optional[str]): Custom prompt for entity extraction.
         - **chunk_size** (Optional[int]): Maximum tokens per chunk (default: 4096).
         - **chunks_per_batch** (Optional[int]): Chunks per cognify batch.
@@ -421,6 +427,20 @@ def get_remember_router() -> APIRouter:
                 detail=(
                     "labels and external_metadata are only supported for normal ingestion — "
                     "remove session_id and content_type to use them."
+                ),
+            )
+
+        # An ontology grounds entity extraction and the session-cache path never
+        # extracts, so the keys would be accepted and silently ignored. The MCP
+        # client rejects this too, but a direct HTTP caller bypasses that and the
+        # server owns its own invariants. Checked here, beside the labels rule and
+        # outside the try below, which rewraps raised errors as a 409.
+        if session_id and any(key for key in (ontology_key or [])):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "ontology_key is only supported for permanent writes — "
+                    "remove session_id to ground extraction with an ontology."
                 ),
             )
 
@@ -516,6 +536,12 @@ def get_remember_router() -> APIRouter:
                 status_code=400,
                 detail="Provide at least one file in 'data' or one entry in 'raw_data'.",
             )
+
+        # Multipart uploads historically forwarded the core default explicitly;
+        # raw_data requests preserve omission so the core remember() default
+        # remains authoritative for that path.
+        if self_improvement is None and data and not raw_data:
+            self_improvement = True
 
         from cognee.api.v1.ontologies.ontologies import OntologyService
         from cognee.api.v1.remember import remember as cognee_remember
@@ -655,7 +681,11 @@ def get_remember_router() -> APIRouter:
         )
         skill_improvement: dict | None = None
 
-    @router.post("/entry", response_model=dict)
+    @router.post(
+        "/entry",
+        summary="Remember a session entry (QA, trace, feedback) into the session cache",
+        response_model=dict,
+    )
     @log_usage(function_name="POST /v1/remember/entry", log_type="api_endpoint")
     async def remember_entry(
         payload: RememberEntryRequest,

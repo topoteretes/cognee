@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "1.5.4"
+version = "1.6.0"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -26,7 +26,8 @@ dependencies = [
     # GHSA-4xgf-cpjx-pc3j: 2.12.0–2.14.1 vulnerable, fixed in 2.14.2. Exclude the
     # vulnerable range rather than capping, so the patched 2.14.2+ is adopted once
     # it clears the `exclude-newer` window (it was <2 days old at time of writing).
-    "pydantic-settings>=2.2.1,!=2.12.*,!=2.13.*,!=2.14.0,!=2.14.1,<3",
+    # >=2.7.0: NoDecode (cognee/modules/improve/config.py) first shipped there.
+    "pydantic-settings>=2.7.0,!=2.12.*,!=2.13.*,!=2.14.0,!=2.14.1,<3",
     "typing_extensions>=4.12.2,<5.0.0",
     "numpy>=1.26.4, <=4.0.0",
     "sqlalchemy>=2.0.39,<3.0.0",
@@ -58,6 +59,15 @@ dependencies = [
     "starlette>=0.48",
     "python-multipart>=0.0.22,<1.0.0",
     "fastapi-users[sqlalchemy]>=15.0.2",
+    # Local CPU embeddings (onnxruntime, ~65 MB): the embedder cognee runs on when no
+    # LLM key and no EMBEDDING_* settings are configured, so a bare install can ingest.
+    "fastembed<=0.8.0",
+    # onnxruntime 1.23.2 only ships wheels through cp313; cp314 wheels start
+    # at onnxruntime 1.24.1. Split by python_version so existing 3.10–3.13
+    # users keep the pinned version and 3.14 picks up the first cp314-capable
+    # release.
+    "onnxruntime<=1.23.2 ; python_version < '3.14'",
+    "onnxruntime>=1.24.1 ; python_version >= '3.14'",
     "structlog>=25.2.0,<26",
     "pympler>=1.1,<2.0.0",
     "pylance>=0.22.0,<=0.36.0",
@@ -93,6 +103,9 @@ dependencies = [
     "cbor2>=5.8.0",
     "langdetect>=1.0.9",
     "datamodel-code-generator>=0.54.0",
+    # Enola powers the built-in deterministic code-graph route. Keep this pinned:
+    # its snapshot contract and known answers are validated by test_code_graph_e2e.py.
+    "enola-cli==0.4.21",
 ]
 
 [project.optional-dependencies]
@@ -111,15 +124,8 @@ scraping = [
     "APScheduler>=3.10.0,<=3.11.0"
 ]
 
-fastembed = [
-    "fastembed<=0.8.0",
-    # onnxruntime 1.23.2 only ships wheels through cp313; cp314 wheels start
-    # at onnxruntime 1.24.1. Split by python_version so existing 3.10–3.13
-    # users keep the pinned version and 3.14 picks up the first cp314-capable
-    # release.
-    "onnxruntime<=1.23.2 ; python_version < '3.14'",
-    "onnxruntime>=1.24.1 ; python_version >= '3.14'",
-]
+# fastembed is a core dependency. The empty extra keeps `cognee[fastembed]` installable.
+fastembed = []
 
 neo4j = ["neo4j>=5.28.0,<6"]
 neptune = ["langchain_aws>=0.2.22"]
@@ -158,10 +164,8 @@ docs = [
     "unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.18.1,<19",
     "nltk>=3.9.3,<4", # TODO: Remove when unstructured is above v0.21.0 as it won't use nltk anymore
 ]
-codegraph = [
-    "fastembed<=0.8.0 ; python_version < '3.14'",
-    "transformers>=4.46.3,<6",
-]
+# enola-cli is a core dependency. The empty extra keeps `cognee[codegraph]` installable.
+codegraph = []
 evals = [
     "plotly>=6.0.0,<7",
     "gdown>=5.2.0,<6",
@@ -223,7 +227,7 @@ docling = [
     "docling-slim[convert-core,format-pdf,format-office,format-html,format-email,format-markdown,format-latex]>=2.115,<3",
 ]
 docling-full = ["docling>=2.115,<3", "transformers>=4.55"]
-# LLM-free graph extraction and summaries with GLiNER2 (cognee/tasks/graph/gliner).
+# GLiNER demo: LLM-free graph extraction and summaries (cognee/tasks/graph/gliner_demo).
 # Pulls torch; protobuf + sentencepiece are needed by the DeBERTa tokenizer fallback.
 gliner = ["gliner2[local]>=2.0.0,<3", "protobuf>=5.29.6", "sentencepiece>=0.2.0"]
 rapidocr = ["rapidocr-onnxruntime>=1.3.0,<2"]
@@ -244,6 +248,11 @@ requires = ["hatchling==1.32.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build]
+# The bundled Ladybug JSON extension binaries are gitignored (built or
+# fetched at release time — see cognee_db_workers/ladybug_extensions/README.md).
+# Include them in both the sdist and wheel because `uv build` builds the wheel
+# from the sdist.
+artifacts = ["cognee_db_workers/ladybug_extensions/**/*.lbug_extension"]
 exclude = [
   "/bin",
   "/dist",
@@ -264,14 +273,13 @@ exclude = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["cognee", "cognee_db_workers", "kuzu"]
-# The bundled Ladybug JSON extension binaries are gitignored (built or
-# fetched at release time — see cognee_db_workers/ladybug_extensions/README.md);
-# hatchling excludes gitignored files unless listed here.
-artifacts = ["cognee_db_workers/ladybug_extensions/**/*.lbug_extension"]
 
 [tool.uv]
 # Note: exclude newer packages that are less than 2 days old
 exclude-newer = "2 days"
+# Enola releases are deliberately pinned and validated against the code-graph
+# known answers. Allow a newly pinned release to resolve during that 2-day window.
+exclude-newer-package = { enola-cli = "0 days" }
 constraint-dependencies = [
     "protobuf>=5.29.6, !=6.30.*, !=6.31.*, !=6.32.*, !=6.33.1, !=6.33.2, !=6.33.3, !=6.33.4", # protobuf 6.33.5 and higher versions + version 5.29.6
     "pyasn1>=0.6.2",
@@ -287,6 +295,13 @@ constraint-dependencies = [
     # use 1.16.1+ so the wheel-only release sync succeeds. Pulled
     # transitively via pandas / scikit-learn / fastembed.
     "scipy>=1.16.1 ; python_version >= '3.14'",
+]
+[tool.pytest.ini_options]
+# `pytest` with no path collects only the library test tree; cognee-mcp has its
+# own pyproject and suite. See cognee/tests/README.md for layout and credentials.
+testpaths = ["cognee/tests"]
+markers = [
+    "deployment: smoke tests against a deployed cognee instance (cognee/tests/deployment/)",
 ]
 
 [tool.ruff]

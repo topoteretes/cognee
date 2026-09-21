@@ -7,6 +7,7 @@ from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.retrieval.base_retriever import BaseRetriever
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.hybrid.chunks import retrieve_hybrid_chunks, search_collection
 from cognee.modules.retrieval.hybrid.context import (
     extract_context_object_ids as extract_hybrid_object_ids,
@@ -23,9 +24,12 @@ from cognee.modules.retrieval.hybrid.facts import (
 )
 from cognee.modules.retrieval.hybrid.merge import merge_hybrid_results
 from cognee.modules.retrieval.hybrid.references import cite_hybrid_completions
-from cognee.modules.retrieval.hybrid.results import empty_hybrid_result
 from cognee.modules.retrieval.hybrid.truth import build_truth_context
-from cognee.modules.retrieval.utils.completion import generate_completion, generate_completion_batch
+from cognee.modules.retrieval.utils.completion import (
+    SessionPrompt,
+    generate_completion,
+    generate_completion_batch,
+)
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
     load_root_text,
@@ -42,6 +46,10 @@ DEFAULT_HYBRID_LANE_TOP_K = 10
 
 class HybridRetriever(BaseRetriever):
     """Completion retriever using chunk, entity, and optional global-context channels."""
+
+    # Search is not an LLM gateway: when every channel comes back empty there
+    # is no answer to give (SDK-270 / gh #3728).
+    skip_completion_on_empty_context = True
 
     def __init__(
         self,
@@ -92,11 +100,12 @@ class HybridRetriever(BaseRetriever):
         validate_retriever_input(query, query_batch, self._use_session_cache())
         self._unified_engine = await get_unified_engine()
         if await self._unified_engine.graph.is_empty():
-            logger.warning("Search attempt on an empty knowledge graph")
-            return (
-                [empty_hybrid_result() for _ in query_batch]
-                if query_batch
-                else empty_hybrid_result()
+            # Same contract as GraphCompletionRetriever (SDK-270 / gh #3728): an
+            # empty graph is a state problem, not a query miss, and this is the
+            # default search type -- it must not answer a fresh install with a
+            # dict of empty channels while every other completion type says 404.
+            raise NoDataError(
+                "The knowledge graph is empty. Ingest data through Cognee before searching."
             )
         if query_batch:
             return list(await asyncio.gather(*[self._retrieve_one(q) for q in query_batch]))
@@ -234,6 +243,15 @@ class HybridRetriever(BaseRetriever):
         effective_query: str | None = None,
         turn_preparation=None,
     ) -> list[Any]:
+        if self.skip_completion_on_empty_context and not query_batch and not context:
+            # Empty context must not reach the LLM: search is not an LLM
+            # gateway, and the only possible output is a phantom "no context
+            # provided" deflection (SDK-270 / gh #3728). A global-context
+            # prelude counts as real grounding, so this only fires when every
+            # section came back empty.
+            logger.warning("Empty context: skipping LLM completion, returning no results")
+            return []
+
         prompts = {
             "user_prompt_path": self.user_prompt_path,
             "system_prompt_path": self.system_prompt_path,
@@ -260,7 +278,7 @@ class HybridRetriever(BaseRetriever):
             completions = await generate_completion_batch(
                 query_batch=query_batch,
                 context=context,
-                conversation_history=preference_text,
+                session=SessionPrompt(guidance=preference_text),
                 **prompts,
             )
         else:
@@ -269,7 +287,7 @@ class HybridRetriever(BaseRetriever):
                 await generate_completion(
                     query=query,
                     context=context,
-                    conversation_history=preference_text,
+                    session=SessionPrompt(guidance=preference_text),
                     **prompts,
                 )
             ]
