@@ -8,7 +8,7 @@
 # cognee-frontend/src/modules/config/runtimeConfig.ts for how that is wired.
 
 # ---------------------------------------------------------------- deps ------
-FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS deps
+FROM node:26-alpine@sha256:dbaa92e5758cbbcf85d65d5403fdb530fe3442cbe8c6dbfb7ef23365450d5070 AS deps
 WORKDIR /app
 
 # Next's native toolchain (@tailwindcss/oxide, lightningcss) expects glibc
@@ -21,7 +21,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 # ------------------------------------------------------------- builder ------
-FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS builder
+FROM node:26-alpine@sha256:dbaa92e5758cbbcf85d65d5403fdb530fe3442cbe8c6dbfb7ef23365450d5070 AS builder
 WORKDIR /app
 
 RUN apk add --no-cache libc6-compat
@@ -40,7 +40,7 @@ RUN npm run build
 # Hot-reloading server for contributors: `docker compose --profile ui-dev up`.
 # Never published. `runner` is the last stage, so it stays the default target
 # and BuildKit skips this one entirely unless it is asked for by name.
-FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS dev
+FROM node:26-alpine@sha256:dbaa92e5758cbbcf85d65d5403fdb530fe3442cbe8c6dbfb7ef23365450d5070 AS dev
 WORKDIR /app
 
 RUN apk add --no-cache libc6-compat
@@ -55,7 +55,7 @@ EXPOSE 3000
 CMD ["npm", "run", "dev"]
 
 # -------------------------------------------------------------- runner ------
-FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS runner
+FROM node:26-alpine@sha256:dbaa92e5758cbbcf85d65d5403fdb530fe3442cbe8c6dbfb7ef23365450d5070 AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
