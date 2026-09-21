@@ -16,6 +16,9 @@ from cognee.infrastructure.databases.utils import (
     get_graph_dataset_database_handler,
     get_vector_dataset_database_handler,
 )
+from cognee.infrastructure.databases.utils.ensure_embedding_model_matches import (
+    clear_embedding_model_records,
+)
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
 from cognee.modules.operations import record_operation
@@ -50,6 +53,9 @@ async def prune_vector_databases():
         for dataset_database in dataset_databases:
             handler = get_vector_dataset_database_handler(dataset_database)
             await handler["handler_instance"].delete_dataset(dataset_database)
+        # The rows outlive the vectors they described; drop the recorded
+        # embedding model so the next use does not report a false mismatch.
+        await clear_embedding_model_records()
     except (OperationalError, ProgrammingError, EntityNotFoundError) as e:
         logger.debug(
             "Skipping pruning of vector DB. Error when accessing dataset_database table: %s",

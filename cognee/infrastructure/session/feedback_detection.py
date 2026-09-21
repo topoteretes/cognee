@@ -4,6 +4,7 @@ from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
+from cognee.modules.preflight import llm_available
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("feedback_detection")
@@ -73,6 +74,12 @@ async def analyze_turn_for_session_context(
     the main completion flow is never blocked.
     """
     if not (user_message and str(user_message).strip()):
+        return SessionTurnAnalysis()
+    if not llm_available():
+        # Keyless setups (the GLiNER + fastembed defaults) answer with CHUNKS
+        # and cannot analyze a turn; skip quietly instead of building an LLM
+        # client that raises and logs a traceback on every recall.
+        logger.debug("Feedback detection: no usable LLM configured, skipping turn analysis")
         return SessionTurnAnalysis()
 
     try:

@@ -153,7 +153,6 @@ If you'd rather run cognee-mcp in a container, you have two options:
       - `mistral` - Mistral models
       - `ollama` / `huggingface` - Local model support
       - `docs` - Document processing
-      - `codegraph` - Code analysis
       - `tracing` - OpenTelemetry tracing
       - `redis` - Redis support
       - And more (see [pyproject.toml](https://github.com/topoteretes/cognee/blob/main/pyproject.toml) for full list)
@@ -521,6 +520,45 @@ The MCP server exposes four tools (three memory tools pinned in `tools/list`, pl
 - **forget**: Delete memory by dataset name or id, a single data item by `data_id`, or delete all owned memory with `everything=True`
 - **cognify_status**: Check the progress of background ingestion started by `remember(background=True)`. Unadvertised by default; discoverable via `search_tools` and callable by name
 
+### Recall result summaries
+
+`recall` (the MCP memory-search tool) starts every successful response with a
+summary, followed by the same result body as before:
+
+```text
+3 memories found (2 from sessions, 1 from project docs)
+[session] ...
+```
+
+The count is the number of returned memory entries, not `top_k`, underlying
+chunks used to synthesize an answer, or system status messages. Source and dataset
+hints use metadata already present in the returned entries; no recency lookup or
+extra LLM call is made.
+
+Empty results distinguish an empty memory graph, indexing in progress, indexing
+failure, and no match. When available, progress is displayed as, for example,
+`still indexing — 12/40 items processed, retry shortly`. These are data items,
+not an inferred chunk count. A graph with no recorded indexing run is reported
+as not yet indexed. If the status check fails or exceeds its two-second budget,
+the summary explicitly says memory status is unavailable. Successful hits do
+not trigger status checks.
+
+The MCP content remains a single `TextContent` block. Text consumers can separate
+line one from the unchanged body with `text.partition("\n")`. Machine consumers
+can read `content[0]._meta["cognee/memory"]`, containing `count` and `state`.
+
+`state` is one of four values, one per action a caller can take:
+
+| state | meaning |
+| --- | --- |
+| `found` | memory contributed; `count` is how many entries |
+| `indexing` | ingestion is still running — retry shortly |
+| `build_failed` | ingestion failed — check `cognify_status` |
+| `none` | nothing to return |
+
+`indexing` additionally carries `completed`/`total` when the pipeline reports
+them. Tool errors retain their existing `Error:` response.
+
 ### Tool surface (`COGNEE_MCP_TOOL_MODE`)
 
 Advertising every tool up front costs agent context and hurts tool-selection accuracy, so by default the server pins a small set in `tools/list` and makes the rest discoverable through FastMCP's built-in `search_tools`. **Unadvertised tools stay callable by name.**
@@ -595,6 +633,32 @@ recall(query="What changed in the MCP server?", session_id="agent-session-1")
 forget(dataset="main_dataset")
 ```
 
+
+### Select an uploaded ontology for a write
+
+Pass `ontology_key` to `remember` to ground permanent-memory extraction with one
+or more previously uploaded OWL ontologies:
+
+```python
+remember(data="Alice works at Acme.", dataset_name="workspace_a", ontology_key="workspace_a_v2")
+remember(
+    data="Acme develops software.",
+    ontology_key=["organizations", "software"],
+    background=True,
+)
+```
+
+In API mode, upload the ontologies first through `POST /api/v1/ontologies` using
+the same authenticated user as the MCP server. Keys are sent as repeated
+`ontology_key` form fields. In local mode, keys resolve through `OntologyService`
+in the default user's local ontology store; remote uploads are not copied locally.
+Unknown or inaccessible keys fail the write. Background failures are reported by
+`cognify_status`.
+
+Omitting `ontology_key` (or passing an empty list) preserves the configured
+server ontology, including `ONTOLOGY_FILE_PATH`. Ontology selection is only for
+permanent writes: combining a nonempty key with `session_id` returns an error
+because session-cache writes do not perform extraction.
 
 ## Development and Debugging
 

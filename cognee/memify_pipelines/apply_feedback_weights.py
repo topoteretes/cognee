@@ -55,9 +55,14 @@ async def apply_feedback_weights_pipeline(
             log=False,
         )
 
-    extraction_tasks = [Task(extract_feedback_qas, session_ids=session_ids)]
+    extraction_tasks = [Task(extract_feedback_qas, session_ids=session_ids, needs_llm=False)]
     enrichment_tasks = [
-        Task(apply_feedback_weights, alpha=alpha, task_config={"batch_size": batch_size})
+        Task(
+            apply_feedback_weights,
+            alpha=alpha,
+            task_config={"batch_size": batch_size},
+            needs_llm=False,
+        )
     ]
 
     # No set_database_global_context_variables scope around memify: the pipeline

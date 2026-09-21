@@ -75,6 +75,11 @@ SAMPLE_ARGUMENTS = {
     "provider": "sample-provider",
     "search_type": "sample-search",
     "status_code": 400,
+    # EmbeddingDimensionMismatchError: the model that built a dataset vs the configured one.
+    "stored_model": "sample-provider/old-model",
+    "stored_dimensions": 384,
+    "configured_model": "sample-provider/new-model",
+    "configured_dimensions": 1536,
     "value": 1,
 }
 
@@ -207,7 +212,7 @@ def _import_family_modules():
         try:
             importlib.import_module(_module_name(path))
         except Exception:
-            # Modules behind optional extras (codegraph, scraping, neptune, ...)
+            # Modules behind optional extras (scraping, neptune, ...)
             # may not import in a minimal environment. The static test above
             # already covers them; here we simply skip what we cannot load.
             logger.debug("Skipping item after error in _import_family_modules", exc_info=True)

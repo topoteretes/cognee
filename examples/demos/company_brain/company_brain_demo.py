@@ -6,7 +6,7 @@
     python examples/demos/company_brain/company_brain_demo.py --recall-only
 
 Requires an LLM and embedding provider for text, session learning, and answers.
-Code extraction uses Enola (downloaded automatically on first use) and embeds the
+Code extraction uses the Enola CLI included with cognee and embeds the
 extracted symbols, so it needs an embedding provider but makes no LLM calls. The
 tiny code fixture and default storage live beside this script under
 .cognee-readme-demo.

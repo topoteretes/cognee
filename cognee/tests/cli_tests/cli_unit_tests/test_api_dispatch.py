@@ -133,6 +133,114 @@ class TestDispatchRouting:
         }
 
 
+class TestRecallDispatch:
+    def _client(self, MockClient, results):
+        mock_instance = MagicMock()
+        mock_instance.recall.return_value = results
+        MockClient.return_value.__enter__ = MagicMock(return_value=mock_instance)
+        MockClient.return_value.__exit__ = MagicMock(return_value=False)
+        return mock_instance
+
+    def _args(self, **overrides):
+        base = {
+            "api_url": "http://localhost:8000",
+            "command": "recall",
+            "user_id": None,
+            "query_text": "Summarize the report",
+            "query_type": None,
+            "datasets": ["docs"],
+            "top_k": 10,
+            "system_prompt": None,
+            "session_id": None,
+            "output_format": "pretty",
+        }
+        base.update(overrides)
+        return argparse.Namespace(**base)
+
+    @patch("cognee.cli.api_dispatch.CogneeApiClient")
+    def test_omitted_query_type_lets_server_auto_route(self, MockClient, capsys):
+        """Without -t the remote path must not pin HYBRID_COMPLETION; it prints
+        the type the server actually ran."""
+        mock_instance = self._client(
+            MockClient,
+            [{"search_type": "GRAPH_SUMMARY_COMPLETION", "text": "answer", "source": "graph"}],
+        )
+
+        dispatch(self._args())
+
+        assert mock_instance.recall.call_args.kwargs["search_type"] is None
+        assert "using GRAPH_SUMMARY_COMPLETION" in capsys.readouterr().out
+
+    @patch("cognee.cli.api_dispatch.CogneeApiClient")
+    def test_bare_datasets_flag_is_normalized_to_none(self, MockClient):
+        """`-d` with no names parses to []; both lanes must send None so the
+        server leaves the search unscoped instead of pinning every dataset."""
+        mock_instance = self._client(MockClient, ["answer"])
+
+        dispatch(self._args(datasets=[]))
+
+        assert mock_instance.recall.call_args.kwargs["datasets"] is None
+
+    @patch("cognee.cli.api_dispatch.CogneeApiClient")
+    def test_explicit_query_type_is_forwarded(self, MockClient):
+        mock_instance = self._client(MockClient, ["answer"])
+
+        dispatch(self._args(query_type="CHUNKS"))
+
+        assert mock_instance.recall.call_args.kwargs["search_type"] == "CHUNKS"
+
+    @patch("cognee.cli.api_dispatch.CogneeApiClient")
+    def test_session_entries_print_as_question_and_answer(self, MockClient, capsys):
+        """The wire tag is "source"; the branch used to look for "_source"."""
+        self._client(
+            MockClient,
+            [
+                {
+                    "source": "session",
+                    "time": "2026-01-01T00:00:00+00:00",
+                    "question": "what did we decide?",
+                    "answer": "to ship on Friday",
+                }
+            ],
+        )
+
+        dispatch(self._args(session_id="s1"))
+
+        out = capsys.readouterr().out
+        assert "session entry(ies)" in out
+        assert "what did we decide?" in out
+        assert "to ship on Friday" in out
+        assert "Result 1:" not in out
+
+    @patch("cognee.cli.api_dispatch.CogneeApiClient")
+    def test_mixed_sources_print_both_blocks(self, MockClient, capsys):
+        """session_id + datasets + no -t lets session and graph both contribute.
+
+        The printer used to branch on results[0], so one leading session entry
+        rendered the graph results as blank Q&A rows and the answer vanished.
+        """
+        self._client(
+            MockClient,
+            [
+                {"source": "session", "question": "refund policy?", "answer": "30 days"},
+                {
+                    "source": "graph",
+                    "search_type": "HYBRID_COMPLETION",
+                    "text": "Shipping takes 5 days.",
+                },
+            ],
+        )
+
+        dispatch(self._args(session_id="s1", datasets=["proj"]))
+
+        out = capsys.readouterr().out
+        assert "Found 1 session entry(ies)" in out
+        assert "refund policy?" in out
+        # The graph half must survive, under its own accurate header.
+        assert "Found 1 result(s) using HYBRID_COMPLETION" in out
+        assert "Shipping takes 5 days." in out
+
+
 class TestUserIdHeader:
     @patch("cognee.cli.api_dispatch.CogneeApiClient")
     def test_user_id_passed_as_header(self, MockClient):
