@@ -8,6 +8,8 @@ import EmptyDocIcon from "@/ui/elements/EmptyDocIcon";
 import type { BrainUploadStage } from "@/modules/ingestion/useBrainUpload";
 import type { UploadProgress } from "@/modules/ingestion/uploadProgress";
 import UploadProgressBar from "./UploadProgressBar";
+import ScrollLoader from "./ScrollLoader";
+import { MAX_RENDERED_ROWS } from "@/modules/datasets/maxRenderedRows";
 import DocumentList, { type DocRow } from "./DocumentList";
 
 // The Documents column of the brains finder: hidden file input, drag-and-drop,
@@ -20,6 +22,9 @@ export default function DocumentsPanel<T extends DocRow>({
   docsLoading,
   docsError,
   docs,
+  hasMore,
+  onLoadMore,
+  total,
   processing,
   isUploading,
   uploadStage,
@@ -38,6 +43,9 @@ export default function DocumentsPanel<T extends DocRow>({
   docsLoading: boolean;
   docsError: boolean;
   docs: T[];
+  hasMore?: boolean;
+  onLoadMore?: () => void;
+  total?: number;
   processing: boolean;
   isUploading: boolean;
   uploadStage: BrainUploadStage;
@@ -53,6 +61,8 @@ export default function DocumentsPanel<T extends DocRow>({
   onRetryBuild: () => void;
   onRetryDocs: () => void;
 }): ReactElement {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const displayedCount = total != null && total >= 0 ? total : docs.length;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -88,7 +98,7 @@ export default function DocumentsPanel<T extends DocRow>({
               <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.55)", letterSpacing: "0.08em", textTransform: "uppercase" }}>{selectedName}</span>
               <span style={{ fontSize: 11, color: "rgba(255,255,255,0.2)" }}>·</span>
               <span style={{ fontSize: 11, color: "rgba(237,236,234,0.35)", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                {docsLoading ? <SkeletonBar width={36} height={8} /> : processing ? "processing" : <>{docs.length} doc{docs.length !== 1 ? "s" : ""}</>}
+                {docsLoading ? <SkeletonBar width={36} height={8} /> : processing ? "processing" : <>{displayedCount} doc{displayedCount !== 1 ? "s" : ""}</>}
               </span>
               <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
                 <button onClick={() => fileInputRef.current?.click()} className="hover:bg-[#5A0ED6] cursor-pointer" style={{ background: "#6510F4", color: "#fff", border: "none", borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 500, cursor: "pointer" }}>Add files</button>
@@ -124,13 +134,13 @@ export default function DocumentsPanel<T extends DocRow>({
         )}
 
         {/* Content */}
-        <div style={{ flex: 1, overflowY: "auto" }}>
+        <div ref={scrollRef} style={{ flex: 1, overflowY: "auto" }}>
           {!selectedId ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 8 }}>
               <svg width="32" height="32" viewBox="0 0 32 32" fill="none"><path d="M4 8a2 2 0 012-2h6l2 3h12a2 2 0 012 2v13a2 2 0 01-2 2H6a2 2 0 01-2-2V8z" stroke="rgba(237,236,234,0.2)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
               <span style={{ fontSize: 13, color: "rgba(237,236,234,0.35)" }}>Select a brain</span>
             </div>
-          ) : docsLoading ? (
+          ) : docsLoading && docs.length === 0 ? (
             <PageLoading name="Files" />
           ) : docsError && docs.length === 0 ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 10 }}>
@@ -153,6 +163,11 @@ export default function DocumentsPanel<T extends DocRow>({
             </div>
           ) : (
             <DocumentList docs={docs} onDelete={onDeleteDoc} />
+          )}
+          {selectedId && docs.length > 0 && onLoadMore && (
+            <ScrollLoader loaded={docs.length} total={total != null && total >= 0 ? total : null}
+              hasMore={hasMore} maxLoaded={MAX_RENDERED_ROWS} busy={docsLoading}
+              error={docsError} onLoadMore={onLoadMore} rootRef={scrollRef} compact />
           )}
         </div>
       </div>

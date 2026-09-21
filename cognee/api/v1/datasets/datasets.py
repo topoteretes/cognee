@@ -154,7 +154,7 @@ class datasets:
 
         dataset = await get_authorized_dataset(user, dataset_id)
 
-        return await get_dataset_data(dataset.id)
+        return await get_dataset_data(dataset.id, order_by="created_at")
 
     @staticmethod
     async def has_data(dataset_id: str, user: User | None = None) -> bool:
