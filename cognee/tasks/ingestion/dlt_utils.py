@@ -10,6 +10,10 @@ import json
 # own nature rather than the shared engine hard-coding connector names.
 DOCUMENT_SOURCE_ATTR = "cognee_document_source"
 
+# Community/cloud hosts can refuse unsafe older cores before ingestion starts.
+# Version 1 scopes cleanup by staging table and handles a confirmed empty table.
+DOCUMENT_SYNC_VERSION = 1
+
 
 def document_source_tag(item) -> str | None:
     """Return the document-source tag a dlt source opted into, else ``None``."""

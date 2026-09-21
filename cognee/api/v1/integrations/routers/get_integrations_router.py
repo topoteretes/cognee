@@ -48,9 +48,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from fastapi_users.exceptions import UserAlreadyExists
+from pydantic import Field
 from sqlalchemy.exc import IntegrityError
 
-from cognee.api.DTO import OutDTO
+from cognee.api.DTO import InDTO, OutDTO
 from cognee.modules.agents.create_agent import create_agent
 from cognee.modules.agents.list_agents import list_agents
 from cognee.modules.agents.registry import (
@@ -66,6 +67,7 @@ from cognee.modules.integrations.credentials import (
     get_active_credential_for_user,
     list_active_credentials_for_user,
     revoke_credential_by_account,
+    update_provider_metadata,
 )
 from cognee.modules.integrations.oauth_flow import (
     DEFAULT_STATE_TTL_SECONDS,
@@ -144,10 +146,36 @@ class ConnectionStatusDTO(OutDTO):
     # its last sync failed or came back partial.
     sync_status: str | None = None
     last_synced_at: datetime | None = None
+    sync_counts: dict[str, int] | None = None
 
 
 class DisconnectResultDTO(OutDTO):
     disconnected: bool
+
+
+class IntegrationResourceDTO(OutDTO):
+    id: str
+    name: str
+    description: str | None = None
+    attributes: dict = Field(default_factory=dict)
+    selected: bool = False
+
+
+class IntegrationResourceListDTO(OutDTO):
+    resources: list[IntegrationResourceDTO]
+    selected: list[str] | None = None
+
+
+class IntegrationResourceSelectionPayload(InDTO):
+    resource_ids: list[str] | None = None
+
+
+class IntegrationResourceSelectionResultDTO(OutDTO):
+    selected: list[str] | None = None
+
+
+class IntegrationSyncResultDTO(OutDTO):
+    accepted: bool
 
 
 class PluginProvisionDTO(OutDTO):
@@ -165,6 +193,7 @@ class IntegrationStatusItemDTO(OutDTO):
     connected_at: datetime | None = None
     sync_status: str | None = None
     last_synced_at: datetime | None = None
+    sync_counts: dict[str, int] | None = None
 
 
 class PluginStatusItemDTO(OutDTO):
@@ -413,6 +442,11 @@ def get_integrations_router():
                         connected_at=as_utc(credential.created_at) if credential else None,
                         sync_status=credential.sync_status if credential else None,
                         last_synced_at=as_utc(credential.last_synced_at) if credential else None,
+                        sync_counts=(getattr(credential, "provider_metadata", None) or {}).get(
+                            "last_sync_counts"
+                        )
+                        if credential
+                        else None,
                     )
                 )
 
@@ -769,11 +803,109 @@ def get_integrations_router():
             connected_at=as_utc(credential.created_at),
             sync_status=credential.sync_status,
             last_synced_at=as_utc(credential.last_synced_at),
+            sync_counts=(getattr(credential, "provider_metadata", None) or {}).get(
+                "last_sync_counts"
+            ),
         )
+
+    @integrations_router.get("/{provider}/resources")
+    @integrations_router.get("/{provider}/folders")
+    @integrations_router.get("/{provider}/labels")
+    async def integration_resources(
+        provider: str, user: User = Depends(get_authenticated_user)
+    ) -> IntegrationResourceListDTO:
+        """List selectable resources for a connected integration.
+
+        ``/folders`` and ``/labels`` are readable aliases for SDK callers that
+        want provider vocabulary; ``/resources`` is the stable generic path.
+        The returned selection is three-state: ``null`` means all resources,
+        an empty list means none, and a non-empty list is an allowlist.
+        """
+        integration = _integration_or_404(provider)
+        if integration.resource_selection_key is None:
+            raise HTTPException(status_code=404, detail=f"{provider} has no selectable resources")
+        credential = await get_active_credential_for_user(user.id, integration.provider)
+        if credential is None:
+            raise HTTPException(status_code=404, detail=f"{provider} is not connected")
+        try:
+            resources = await integration.list_resources(credential)
+        except Exception:
+            logger.exception("Could not list %s resources for user %s", provider, user.id)
+            raise HTTPException(status_code=502, detail=f"Could not list {provider} resources")
+        if resources is None:
+            raise HTTPException(status_code=404, detail=f"{provider} has no selectable resources")
+
+        metadata = credential.provider_metadata or {}
+        raw_selected = metadata.get(integration.resource_selection_key)
+        selected = (
+            None
+            if raw_selected is None
+            else [str(resource_id) for resource_id in raw_selected]
+            if isinstance(raw_selected, list)
+            else None
+        )
+        selected_set = set(selected or []) if selected is not None else None
+        return IntegrationResourceListDTO(
+            resources=[
+                IntegrationResourceDTO(
+                    id=str(resource["id"]),
+                    name=str(resource.get("name") or resource["id"]),
+                    description=resource.get("description"),
+                    attributes=resource.get("attributes") or {},
+                    selected=selected_set is None or str(resource["id"]) in selected_set,
+                )
+                for resource in resources
+            ],
+            selected=selected,
+        )
+
+    @integrations_router.put("/{provider}/resources")
+    @integrations_router.put("/{provider}/folders")
+    @integrations_router.put("/{provider}/labels")
+    async def set_integration_resources(
+        provider: str,
+        payload: IntegrationResourceSelectionPayload,
+        user: User = Depends(get_authenticated_user),
+    ) -> IntegrationResourceSelectionResultDTO:
+        """Persist a full resource selection for a connected integration."""
+        integration = _integration_or_404(provider)
+        selection_key = integration.resource_selection_key
+        if selection_key is None:
+            raise HTTPException(status_code=404, detail=f"{provider} has no selectable resources")
+        credential = await get_active_credential_for_user(user.id, integration.provider)
+        if credential is None:
+            raise HTTPException(status_code=404, detail=f"{provider} is not connected")
+        resource_ids = None
+        if payload.resource_ids is not None:
+            resource_ids = list(
+                dict.fromkeys(str(resource_id) for resource_id in payload.resource_ids)
+            )
+        updated = await update_provider_metadata(
+            provider,
+            credential.provider_account_id,
+            {selection_key: resource_ids},
+        )
+        return IntegrationResourceSelectionResultDTO(
+            selected=(updated.provider_metadata or {}).get(selection_key)
+        )
+
+    @integrations_router.post("/{provider}/sync")
+    async def sync_integration(
+        provider: str, user: User = Depends(get_authenticated_user)
+    ) -> IntegrationSyncResultDTO:
+        """Start a provider sync without changing its stored selection."""
+        integration = _integration_or_404(provider)
+        credential = await get_active_credential_for_user(user.id, integration.provider)
+        if credential is None:
+            raise HTTPException(status_code=404, detail=f"{provider} is not connected")
+        _spawn_background(integration.sync_now(credential), description=f"{provider} manual sync")
+        return IntegrationSyncResultDTO(accepted=True)
 
     @integrations_router.delete("/{provider}/connection")
     async def disconnect(
-        provider: str, user: User = Depends(get_authenticated_user)
+        provider: str,
+        delete_data: bool = False,
+        user: User = Depends(get_authenticated_user),
     ) -> DisconnectResultDTO:
         """Disconnect the account connected by the requesting user.
 
@@ -795,6 +927,15 @@ def get_integrations_router():
             if credential is None or credential.provider_account_id is None:
                 return DisconnectResultDTO(disconnected=False)
 
+            dataset_name = None
+            if delete_data:
+                dataset_name = integration.dataset_name(credential)
+                if not dataset_name:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"{provider} does not expose a deletable dataset",
+                    )
+
             try:
                 await integration.revoke_remote(credential)
             except Exception:  # a remote-revoke failure must never block disconnect
@@ -805,6 +946,23 @@ def get_integrations_router():
                 )
 
             await revoke_credential_by_account(integration.provider, credential.provider_account_id)
+            if delete_data:
+                try:
+                    from cognee.api.v1.forget.forget import forget
+
+                    await forget(dataset=dataset_name, user=user)
+                except HTTPException:
+                    raise
+                except Exception:
+                    logger.exception(
+                        "Could not delete %s dataset %s during disconnect",
+                        provider,
+                        dataset_name,
+                    )
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"{provider} disconnected, but its data could not be deleted",
+                    )
             return DisconnectResultDTO(disconnected=True)
 
     return integrations_router

@@ -61,6 +61,7 @@ _REFRESH_MARGIN = timedelta(minutes=5)
 class GoogleDriveIntegration(OAuthIntegration):
     provider = "google_drive"
     settings_cls = GoogleDriveSettings
+    resource_selection_key = "selected_folder_ids"
 
     def authorize_url(self, state: str) -> str:
         params = {
@@ -152,6 +153,77 @@ class GoogleDriveIntegration(OAuthIntegration):
         from cognee.modules.integrations.google_drive.sync import sync_drive
 
         await sync_drive(credential)
+
+    async def sync_now(self, credential: IntegrationCredential) -> None:
+        from cognee.modules.integrations.google_drive.sync import sync_drive
+
+        await sync_drive(credential)
+
+    async def list_resources(self, credential: IntegrationCredential) -> list[dict[str, Any]]:
+        token = await access_token_for(credential)
+        resources = [
+            {
+                "id": "root",
+                "name": "My Drive",
+                "description": "Files in the account root, including nested folders",
+                "attributes": {"mime_type": "application/vnd.google-apps.folder", "root": True},
+            }
+        ]
+        resource_ids = {"root"}
+        drive_page_token = None
+        while True:
+            page = await client.list_drives(token, drive_page_token)
+            for drive in page.get("drives", []) or []:
+                drive_id = str(drive.get("id") or "")
+                if not drive_id or drive_id in resource_ids:
+                    continue
+                resource_ids.add(drive_id)
+                resources.append(
+                    {
+                        "id": drive_id,
+                        "name": str(drive.get("name") or "Shared drive"),
+                        "description": "Files in this shared drive",
+                        "attributes": {
+                            "mime_type": "application/vnd.google-apps.folder",
+                            "shared_drive": True,
+                            "root": True,
+                        },
+                    }
+                )
+            drive_page_token = page.get("nextPageToken")
+            if not drive_page_token:
+                break
+
+        page_token = None
+        while True:
+            page = await client.list_folders(token, page_token)
+            for folder in page.get("files", []) or []:
+                folder_id = str(folder.get("id") or "")
+                if not folder_id or folder_id in resource_ids:
+                    continue
+                resource_ids.add(folder_id)
+                resources.append(
+                    {
+                        "id": folder_id,
+                        "name": str(folder.get("name") or "Untitled folder"),
+                        "description": None,
+                        "attributes": {
+                            "mime_type": folder.get("mimeType"),
+                            "drive_id": folder.get("driveId"),
+                        },
+                    }
+                )
+            page_token = page.get("nextPageToken")
+            if not page_token:
+                return resources
+
+    def dataset_name(self, credential: IntegrationCredential) -> str:
+        from cognee.modules.integrations.google_drive.sync import dataset_name_for_account
+
+        metadata = credential.provider_metadata or {}
+        return dataset_name_for_account(
+            str(metadata.get("email") or ""), str(credential.provider_account_id)
+        )
 
     async def refresh(self, credential: IntegrationCredential) -> None:
         """Rotate the access token in place.

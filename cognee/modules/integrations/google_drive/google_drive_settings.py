@@ -1,9 +1,10 @@
 from pydantic_settings import SettingsConfigDict
 
-from cognee.modules.integrations.base import IntegrationSettings
+from cognee.modules.integrations.google.google_settings import GoogleSettings
+from cognee.modules.integrations.google.google_settings import require as _require
 
 
-class GoogleDriveSettings(IntegrationSettings):
+class GoogleDriveSettings(GoogleSettings):
     """Configuration for the Google Drive integration.
 
     One Google Cloud OAuth client is used by every connecting account; these
@@ -41,8 +42,4 @@ def require(field_name: str) -> str:
     credentials or a state signed with an empty key — both would fail in
     confusing, downstream ways instead of naming the actual problem.
     """
-    value = getattr(google_drive_settings, field_name)
-    if not value:
-        env_name = f"GOOGLE_DRIVE_{field_name.upper()}"
-        raise RuntimeError(f"{env_name} is not configured")
-    return value
+    return _require(google_drive_settings, field_name, "GOOGLE_DRIVE_")

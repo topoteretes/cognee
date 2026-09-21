@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 # /api/v1/integrations/{provider}/events routes), so the registration imports
 # are explicit here.
 import cognee.modules.integrations.github
+import cognee.modules.integrations.gmail
 import cognee.modules.integrations.google_drive
 import cognee.modules.integrations.linear
 from cognee.api.exception_telemetry import send_api_exception_telemetry

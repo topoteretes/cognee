@@ -12,7 +12,7 @@ from cognee.infrastructure.databases.postgres.admin import create_pg_database_if
 from cognee.infrastructure.databases.relational.config import get_relational_config
 from cognee.modules.data.models import Data
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.ingestion.dlt_row_data import DltRowData
+from cognee.tasks.ingestion.dlt_row_data import DltRowData, DltRows
 from cognee.tasks.ingestion.exceptions.exceptions import (
     DLTIngestionError,
     InvalidDLTArgumentError,
@@ -41,7 +41,7 @@ async def ingest_dlt_source(
     primary_key: str | None = None,
     write_disposition: str = "replace",
     max_rows_per_table: int | None = None,
-) -> list[DltRowData]:
+) -> DltRows:
     """
     Ingests a dlt (re)source by running the dlt pipeline on it.
     Returns a list of DltRowData, one per row in the ingested tables.
@@ -176,7 +176,7 @@ async def ingest_dlt_source(
             message=f"Failed to read rows from DLT database '{dlt_db_name}': {e}"
         ) from e
 
-    return row_data_list
+    return DltRows(row_data_list, loaded_tables=filtered_schema)
 
 
 async def _extract_dlt_schema(

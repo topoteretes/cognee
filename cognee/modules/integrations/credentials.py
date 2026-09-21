@@ -328,7 +328,13 @@ async def update_provider_metadata(
 
 
 async def record_sync_result(
-    credential: IntegrationCredential, *, status: str
+    credential: IntegrationCredential,
+    *,
+    status: str,
+    scanned: int | None = None,
+    skipped: int | None = None,
+    failed: int | None = None,
+    counts: dict[str, int] | None = None,
 ) -> IntegrationCredential | None:
     """Stamp when a connector last synced a connection and how it went.
 
@@ -409,6 +415,16 @@ async def record_sync_result(
 
             current.last_synced_at = datetime.now(timezone.utc)
             current.sync_status = status
+            if counts is not None or any(value is not None for value in (scanned, skipped, failed)):
+                current.provider_metadata = {
+                    **(current.provider_metadata or {}),
+                    "last_sync_counts": {
+                        "scanned": scanned if scanned is not None else 0,
+                        "skipped": skipped if skipped is not None else 0,
+                        "failed": failed if failed is not None else 0,
+                        **(counts or {}),
+                    },
+                }
             await db.commit()
             await db.refresh(current)
             return current

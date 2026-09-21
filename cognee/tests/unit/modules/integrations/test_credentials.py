@@ -342,6 +342,23 @@ async def test_record_sync_result_stamps_the_connection_it_ran_for():
 
 
 @pytest.mark.asyncio
+async def test_sync_counts_preserve_file_skip_reasons():
+    from cognee.modules.integrations.credentials import record_sync_result
+
+    existing = make_existing(USER_A, STATUS_ACTIVE)
+    existing.provider = PROVIDER
+    existing.provider_account_id = ACCOUNT_ID
+    session = make_session(existing)
+    counts = {"scanned": 8, "skipped": 3, "failed": 0, "skipped_unsupported_type": 3}
+    with patch(
+        "cognee.modules.integrations.credentials.get_relational_engine",
+        return_value=make_engine(session),
+    ):
+        await record_sync_result(existing, status="ok", counts=counts)
+    assert existing.provider_metadata["last_sync_counts"] == counts
+
+
+@pytest.mark.asyncio
 async def test_a_sync_that_outlived_its_install_does_not_stamp_the_new_owner():
     # Syncs run detached and upsert_credential reuses the row for a
     # (provider, account) rather than replacing it. So A disconnects, B
