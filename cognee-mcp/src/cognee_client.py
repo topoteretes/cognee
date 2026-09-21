@@ -611,13 +611,13 @@ class CogneeClient:
         filename: str | None = None,
         content_base64: str | None = None,
         ontology_key: str | list[str] | None = None,
-        self_improvement: bool | None = None,
+        self_improvement: bool = True,
     ) -> dict[str, Any]:
         """Store data in memory via remember().
 
         With session_id: direct mode may bridge cache entries to the graph;
         self_improvement=False disables that bridge. API typed entries stay
-        cache-only for every value. Omission preserves the core default.
+        cache-only for every value.
         Without session_id: full add + cognify pipeline (permanent), followed
         by the improve loop unless ``self_improvement`` is False.
 
@@ -662,8 +662,8 @@ class CogneeClient:
                     "dataset_name": dataset_name,
                     "session_id": session_id,
                 }
-                if self_improvement is not None:
-                    payload["self_improvement"] = self_improvement
+                if not self_improvement:
+                    payload["self_improvement"] = False
                 response = await self.client.post(
                     endpoint,
                     json=payload,
@@ -675,12 +675,12 @@ class CogneeClient:
             endpoint = f"{self.api_url}/api/v1/remember"
             files = self._build_upload(data, filename, content_base64)
             form_data: dict[str, Any] = {"datasetName": dataset_name}
-            if self_improvement is not None:
-                form_data["self_improvement"] = str(self_improvement).lower()
             if custom_prompt:
                 form_data["custom_prompt"] = custom_prompt
             if ontology_keys:
                 form_data["ontology_key"] = ontology_keys
+            if not self_improvement:
+                form_data["self_improvement"] = "false"
             response = await self.client.post(
                 endpoint,
                 files=files,
@@ -734,12 +734,12 @@ class CogneeClient:
                 }
                 if ontology_config is not None:
                     kwargs["config"] = {"ontology_config": ontology_config}
-                if self_improvement is not None:
-                    kwargs["self_improvement"] = self_improvement
                 if session_id:
                     kwargs["session_id"] = session_id
                 if custom_prompt:
                     kwargs["custom_prompt"] = custom_prompt
+                if not self_improvement:
+                    kwargs["self_improvement"] = False
 
                 try:
                     result = await self.cognee.remember(**kwargs)

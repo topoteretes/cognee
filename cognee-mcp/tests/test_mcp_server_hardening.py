@@ -628,6 +628,7 @@ async def test_mcp_remember_forwards_file_uploads(monkeypatch):
             "session_id": None,
             "custom_prompt": "extract carefully",
             "ontology_key": None,
+            "self_improvement": True,
         }
     ]
     # The confirmation names the file and its decoded size, not the base64 length.
@@ -1198,24 +1199,15 @@ async def test_remember_self_improvement_end_to_end(
                 for part in message.iter_parts()
             }
             assert received["data"] == "memory"
-        if flag is None:
-            assert "self_improvement" not in received
-        else:
-            expected = str(flag).lower() if use_api and not session_id else flag
+        if flag is False:
+            # Only an opt-out is propagated; True and omission both leave the
+            # core default in charge, so neither reaches the wire.
+            expected = "false" if use_api and not session_id else False
             assert received["self_improvement"] == expected
+        else:
+            assert "self_improvement" not in received
     finally:
         await client.close()
-
-
-@pytest.mark.asyncio
-async def test_remember_advertises_optional_self_improvement():
-    server = importlib.import_module("src.server")
-    tools = await server.mcp.list_tools()
-    tool = next(tool for tool in tools if tool.name == "remember")
-    schema = tool.parameters["properties"]["self_improvement"]
-    assert {"type": "boolean"} in schema["anyOf"]
-    assert schema["default"] is None
-    assert "self_improvement" not in tool.parameters.get("required", [])
 
 
 @pytest.mark.asyncio

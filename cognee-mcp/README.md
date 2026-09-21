@@ -639,9 +639,9 @@ recall(query="What changed in the MCP server?", session_id="agent-session-1")
 forget(dataset="main_dataset")
 ```
 
-`self_improvement` is optional. Omission (or `null`) preserves the core default,
-currently `True`; explicit `False` is forwarded unchanged. In permanent mode,
-`False` disables automatic improvement without skipping ingestion or graph building.
+`self_improvement` defaults to `True`; only an explicit `False` is forwarded, so
+`True` leaves the core default in charge. In permanent mode, `False` disables
+automatic improvement without skipping ingestion or graph building.
 In **direct session mode**, it disables the automatic session-to-graph bridge while
 still storing the session entry. In **API session mode**, MCP uses typed QA entries,
 which stay in the session cache for all flag values; the flag does not enable a

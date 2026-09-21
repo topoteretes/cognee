@@ -362,7 +362,7 @@ async def remember(
     custom_prompt: str | None = None,
     background: bool = False,
     ontology_key: str | list[str] | None = None,
-    self_improvement: bool | None = None,
+    self_improvement: bool = True,
 ) -> list:
     """Store data in memory.
 
@@ -400,11 +400,11 @@ async def remember(
         unless self_improvement is False.
     custom_prompt : str, optional
         Custom prompt for entity extraction (permanent mode only).
-    self_improvement : bool, optional
+    self_improvement : bool
         False skips automatic improvement after permanent ingestion; add and
         cognify still run. In direct session mode, False disables the background
         session-to-graph bridge. API session entries are cache-only regardless
-        of this flag. Omit to retain the core default (currently True).
+        of this flag. Default True.
     ontology_key : str or list[str], optional
         One or more uploaded ontology keys for extraction (permanent mode only).
         API mode uses ontologies uploaded by the authenticated API user. Local
@@ -455,8 +455,6 @@ async def remember(
 
     dataset_name = dataset_name or _agent_scoped_default_dataset()
 
-    improvement_kwargs = {} if self_improvement is None else {"self_improvement": self_improvement}
-
     # Permanent-memory ingestion runs add + cognify (+ improve), which routinely
     # outruns an MCP host's per-request deadline — the same constraint the
     # cognify tool documents as "background process launched due to MCP timeout
@@ -481,8 +479,8 @@ async def remember(
                 dataset_name=dataset_name,
                 session_id=None,
                 custom_prompt=custom_prompt,
-                **improvement_kwargs,
                 ontology_key=ontology_key,
+                self_improvement=self_improvement,
             ),
             dataset=dataset_name,
         )
@@ -508,8 +506,8 @@ async def remember(
                 dataset_name=dataset_name,
                 session_id=session_id,
                 custom_prompt=custom_prompt,
-                **improvement_kwargs,
                 ontology_key=ontology_key,
+                self_improvement=self_improvement,
             )
             status = result.get("status", "completed")
             if session_id:
