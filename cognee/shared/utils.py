@@ -135,6 +135,10 @@ def get_persistent_id() -> str:
 # row can tell an id from a fingerprint, since both are UUID-shaped.
 TELEMETRY_SANITIZED_PROPERTIES = ["url", "session_id", "session_ids", "datasets"]
 TELEMETRY_FINGERPRINT_PREFIX = "fp:"
+# Single dataset identifiers (remember/forget send ``dataset_name``, push/export
+# ``dataset``): a dataset *id* passes through, a dataset *name* leaves as
+# ``fp:`` + fingerprint — the rule the ``datasets`` list already follows.
+TELEMETRY_DATASET_NAME_PROPERTIES = ["dataset_name", "dataset"]
 
 # How this cognee is deployed, sent with every event as ``install_kind``. A closed
 # enum: ``docker`` (our images set COGNEE_INSTALL_KIND; any container carries
@@ -186,17 +190,37 @@ def _is_uuid(value: str) -> bool:
     return True
 
 
+def _mask_dataset_name(value: Any) -> Any:
+    """A dataset id passes through; a dataset name leaves as ``fp:`` + fingerprint.
+
+    Ids are not content. Names are user-chosen and descriptive, so only a marked
+    fingerprint leaves the process. Empty strings stay empty (``forget`` sends
+    ``""`` for "no dataset"), and non-strings are untouched.
+    """
+    if isinstance(value, str) and value and not _is_uuid(value):
+        return TELEMETRY_FINGERPRINT_PREFIX + _fingerprint(value)
+    return value
+
+
 def _sanitize_nested_properties(obj: Any, property_names: list[str]) -> Any:
     """
     Recursively replaces any property whose key matches one of `property_names`
     (e.g., ['url', 'path']) in a nested dict or list with a uuid5 hash
     of its string value, or of each string element when the value is a list.
+    Keys in ``TELEMETRY_DATASET_NAME_PROPERTIES`` get the dataset rule
+    (``_mask_dataset_name``) whether the value is a string or a list.
     Returns a new sanitized copy.
     """
     if isinstance(obj, dict):
         new_obj = {}
         for k, v in obj.items():
-            if k in property_names and isinstance(v, str):
+            if k in TELEMETRY_DATASET_NAME_PROPERTIES:
+                new_obj[k] = (
+                    [_mask_dataset_name(item) for item in v]
+                    if isinstance(v, list)
+                    else _mask_dataset_name(v)
+                )
+            elif k in property_names and isinstance(v, str):
                 new_obj[k] = _fingerprint(v)
             elif k in property_names and isinstance(v, list):
                 new_obj[k] = [
