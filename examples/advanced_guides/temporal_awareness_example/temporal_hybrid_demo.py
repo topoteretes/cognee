@@ -158,7 +158,6 @@ async def ingest(data_paths: list[Path]):
         dataset=DATASET,
         pipeline_name="cognify_pipeline",
         run_in_background=False,
-        use_pipeline_cache=False,
     )
     dataset = next(
         item for item in await cognee.datasets.list_datasets(user) if item.name == DATASET
