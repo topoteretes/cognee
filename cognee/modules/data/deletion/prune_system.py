@@ -21,6 +21,7 @@ from cognee.infrastructure.databases.utils.ensure_embedding_model_matches import
 )
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
+from cognee.infrastructure.databases.vector.exceptions import SharedDatabasePruneError
 from cognee.modules.operations import record_operation
 from cognee.modules.users.models import DatasetDatabase
 from cognee.shared.cache import delete_cache
@@ -77,7 +78,15 @@ async def prune_system(graph=True, vector=True, metadata=True, cache=True):
 
         if vector and not backend_access_control_enabled():
             vector_engine = await get_vector_engine_async()
-            await vector_engine.prune()
+            try:
+                await vector_engine.prune()
+            except SharedDatabasePruneError:
+                if not metadata:
+                    raise
+                logger.info(
+                    "Skipping separate PGVector prune because the relational database "
+                    "will be deleted by metadata pruning."
+                )
         elif vector and backend_access_control_enabled():
             await prune_vector_databases()
 
