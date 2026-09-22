@@ -97,6 +97,18 @@ To use different LLM providers / database configurations, and for more info chec
 > "MCP sampling" section of the .env template.
 
 
+## Document processing
+
+MCP includes Cognee's slim `docling` extra by default, without Torch or
+Unstructured. It converts DOCX, PPTX, XLSX, ODT, EPUB, HTML and email documents.
+RTF and legacy Office formats (DOC, PPT, XLS) additionally require LibreOffice
+on the host. Plain PDF text extraction still uses Cognee's default PyPDF loader;
+Docling's model-based PDF/image conversion requires `cognee[docling-full]`.
+
+The optional `cognee[docs]` extra retains Unstructured processing without
+Pandoc-dependent converters. Use `cognee[docling]` for ODT, EPUB and RTF instead.
+Org and reStructuredText conversion are not provided by these Cognee loaders.
+
 ## 🐳 Docker Usage
 
 If you'd rather run cognee-mcp in a container, you have two options:
@@ -152,7 +164,9 @@ If you'd rather run cognee-mcp in a container, you have two options:
       - `groq` - Groq models
       - `mistral` - Mistral models
       - `ollama` / `huggingface` - Local model support
-      - `docs` - Document processing
+      - `docling` - Slim document processing (included by default)
+      - `docling-full` - Docling's model-based PDF/image processing
+      - `docs` - Optional Unstructured document processing
       - `tracing` - OpenTelemetry tracing
       - `redis` - Redis support
       - And more (see [pyproject.toml](https://github.com/topoteretes/cognee/blob/main/pyproject.toml) for full list)
@@ -717,7 +731,7 @@ In order to use local cognee:
 
 1. Uncomment the following line in the cognee-mcp [`pyproject.toml`](pyproject.toml) file and set the cognee root path.
     ```
-    #"cognee[postgres-binary,docs,neo4j] @ file:/path/to/your/cognee"
+    #"cognee[postgres-binary,docling,neo4j] @ file:/path/to/your/cognee"
     ```
     Replace `/path/to/your/cognee` with the absolute path to your cognee checkout, and
     comment out the released `"cognee[...]>=1.5.0,<2.0.0"` line directly below it —

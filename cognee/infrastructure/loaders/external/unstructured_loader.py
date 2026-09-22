@@ -20,7 +20,7 @@ class UnstructuredLoader(LoaderInterface):
     """
     Document loader using the unstructured library.
 
-    Handles various document formats including docx, pptx, xlsx, odt, etc.
+    Handles document formats that do not require Pandoc, including docx, pptx and xlsx.
     Uses the unstructured library's auto-partition functionality.
     """
 
@@ -31,19 +31,16 @@ class UnstructuredLoader(LoaderInterface):
         return [
             "docx",
             "doc",
-            "odt",  # Word documents
             "xlsx",
             "xls",
             "ods",  # Spreadsheets
             "pptx",
             "ppt",
             "odp",  # Presentations
-            "rtf",
             "html",
             "htm",  # Rich text and HTML
             "eml",
             "msg",  # Email formats
-            "epub",  # eBooks
         ]
 
     @property
@@ -51,17 +48,14 @@ class UnstructuredLoader(LoaderInterface):
         return [
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # docx
             "application/msword",  # doc
-            "application/vnd.oasis.opendocument.text",  # odt
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",  # xlsx
             "application/vnd.ms-excel",  # xls
             "application/vnd.oasis.opendocument.spreadsheet",  # ods
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",  # pptx
             "application/vnd.ms-powerpoint",  # ppt
             "application/vnd.oasis.opendocument.presentation",  # odp
-            "application/rtf",  # rtf
             "text/html",  # html
             "message/rfc822",  # eml
-            "application/epub+zip",  # epub
         ]
 
     def can_handle(self, extension: str, mime_type: str) -> bool:

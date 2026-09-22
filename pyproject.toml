@@ -161,7 +161,8 @@ docs = [
     "lxml>=5,<6 ; python_version >= '3.13' and python_version < '3.14'",
     # cp314 wheels start at lxml 6.0.1.
     "lxml>=6.0.1,<7 ; python_version >= '3.14'",
-    "unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.18.1,<19",
+    # Keep document partitioning independent of Pandoc-based converters.
+    "unstructured[csv, doc, docx, md, ppt, pptx, tsv, xlsx, pdf]>=0.18.1,<19",
     "nltk>=3.9.3,<4", # TODO: Remove when unstructured is above v0.21.0 as it won't use nltk anymore
 ]
 # enola-cli is a core dependency. The empty extra keeps `cognee[codegraph]` installable.
@@ -226,7 +227,7 @@ tracing = [
 # PDF/image conversion through docling needs the ML pipeline: install the
 # `docling-full` extra for that (cognee's default PDF path uses pypdf either way).
 docling = [
-    "docling-slim[convert-core,format-pdf,format-office,format-html,format-email,format-markdown,format-latex]>=2.115,<3",
+    "docling-slim[convert-core,format-pdf,format-office,format-opendocument,format-html,format-email,format-markdown,format-latex]>=2.115,<3",
 ]
 docling-full = ["docling>=2.115,<3", "transformers>=4.55"]
 # GLiNER demo: LLM-free graph extraction and summaries (cognee/tasks/graph/gliner_demo).
