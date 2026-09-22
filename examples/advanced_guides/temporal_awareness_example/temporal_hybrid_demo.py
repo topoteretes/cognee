@@ -149,8 +149,17 @@ async def ingest(data_paths: list[Path]):
         if task.executable.__name__ in PIPELINE_TASKS
     ]
     store_index = next(
-        index for index, task in enumerate(tasks) if task.executable.__name__ == "add_data_points"
+        (
+            index
+            for index, task in enumerate(tasks)
+            if task.executable.__name__ == "add_data_points"
+        ),
+        None,
     )
+    if store_index is None:
+        raise RuntimeError(
+            "add_data_points missing from default cognify tasks; update PIPELINE_TASKS"
+        )
     tasks.insert(store_index, Task(promote_timestamps_task, needs_llm=False))
     await cognee.run_custom_pipeline(
         tasks=tasks,

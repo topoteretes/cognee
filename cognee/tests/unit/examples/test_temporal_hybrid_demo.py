@@ -85,7 +85,7 @@ def test_timestamp_bounds_invalid_and_overflow():
 
     with pytest.raises(ValueError):
         timestamp_bounds("1940s")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Unsupported"):
         timestamp_bounds("9999")
 
 
@@ -211,6 +211,7 @@ def test_promote_timestamps_skips_and_is_repeatable():
     document = _document()
     valid = _entity("1950-03", "timestamp")
     unparseable = _entity("1940s", "Timestamp")
+    overflow = _entity("9999", "Timestamp")
     outgoing = _entity("2000", "Timestamp")
     recorded = _entity("2001", "Timestamp")
     denormalized = _entity("23 March 1947", "Timestamp")
@@ -224,6 +225,7 @@ def test_promote_timestamps_skips_and_is_repeatable():
             (Edge(relationship_type="contains"), outgoing),
             (Edge(relationship_type="contains"), recorded),
             (Edge(relationship_type="contains"), denormalized),
+            (Edge(relationship_type="contains"), overflow),
         ],
         produced=[(str(recorded.id), str(person.id), "related_to")],
     )
@@ -237,6 +239,7 @@ def test_promote_timestamps_skips_and_is_repeatable():
     assert isinstance(chunk.contains[4][1], Timestamp)
     assert chunk.contains[4][1].timestamp_str == "1947-03-23"
     assert chunk.contains[4][1].id == denormalized.id
+    assert chunk.contains[5][1] is overflow
 
     first = chunk.contains[0][1]
     promote_timestamps([chunk])

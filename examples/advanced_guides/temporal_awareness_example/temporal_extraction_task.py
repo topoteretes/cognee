@@ -32,6 +32,8 @@ def timestamp_bounds(text: str) -> tuple[str, datetime, datetime]:
         raise ValueError(f"Unsupported timestamp: {text!r}")
 
     year = int(match.group(1))
+    if year > 9998:  # the exclusive upper bound needs year + 1
+        raise ValueError(f"Unsupported timestamp: {text!r}")
     month = int(match.group(2)) if match.lastindex >= 2 else 1
     day = int(match.group(3)) if match.lastindex >= 3 else 1
     hour = int(match.group(4)) if match.lastindex >= 4 else 0
@@ -51,6 +53,24 @@ def timestamp_bounds(text: str) -> tuple[str, datetime, datetime]:
     else:
         upper = lower + timedelta(seconds=1)
     return normalized, lower, upper
+
+
+def _candidate_bounds(name: str) -> tuple[str, datetime, datetime] | None:
+    """Strict formats first, then the dateparser fallback; None when neither parses."""
+    try:
+        return timestamp_bounds(name)
+    except ValueError:
+        pass
+    fallback = normalize_absolute_date(name)
+    if fallback is None:
+        return None
+    try:
+        return timestamp_bounds(fallback)
+    except ValueError:
+        logger.warning(
+            "Fallback yielded unsupported timestamp value=%s fallback=%s", name, fallback
+        )
+        return None
 
 
 def _contained_target(item):
@@ -113,18 +133,15 @@ def promote_timestamps(data_chunks: list[DocumentChunk]) -> None:
                 entity.name,
             )
             continue
-        try:
-            normalized, lower, _upper = timestamp_bounds(entity.name)
-        except ValueError:
-            fallback = normalize_absolute_date(entity.name)
-            if fallback is None:
-                logger.warning(
-                    "Skipping timestamp promotion id=%s value=%s reason=unparseable",
-                    entity_id,
-                    entity.name,
-                )
-                continue
-            normalized, lower, _upper = timestamp_bounds(fallback)
+        bounds = _candidate_bounds(entity.name)
+        if bounds is None:
+            logger.warning(
+                "Skipping timestamp promotion id=%s value=%s reason=unparseable",
+                entity_id,
+                entity.name,
+            )
+            continue
+        normalized, lower, _upper = bounds
         replacements[entity_id] = _to_timestamp(entity, normalized, lower)
 
     # DocumentChunk.contains does not declare Timestamp; the in-place list
