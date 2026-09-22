@@ -1,4 +1,4 @@
-"""Sync Gmail through the community connector's history and tombstone path."""
+"""Sync Gmail through the SDK connector's history and tombstone path."""
 
 import re
 from hashlib import sha256
@@ -30,7 +30,7 @@ async def sync_gmail(credential: IntegrationCredential) -> None:
 
     counts = {"scanned": 0, "skipped": 0, "failed": 0}
     try:
-        status, counts = await _community_sync(credential, counts)
+        status, counts = await _sync_source(credential, counts)
     except Exception:
         counts["failed"] = max(1, counts["failed"])
         await record_sync_result(credential, status=SYNC_STATUS_DEGRADED, counts=counts)
@@ -38,7 +38,7 @@ async def sync_gmail(credential: IntegrationCredential) -> None:
     await record_sync_result(credential, status=status, counts=counts)
 
 
-async def _community_sync(
+async def _sync_source(
     credential: IntegrationCredential, counts: dict[str, int]
 ) -> tuple[str, dict[str, int]]:
     from cognee.api.v1.remember.remember import remember

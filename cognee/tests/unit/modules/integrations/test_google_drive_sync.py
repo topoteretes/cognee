@@ -1,4 +1,4 @@
-"""Drive sync delegates extraction and incremental state to the community source."""
+"""Drive sync delegates extraction and incremental state to the SDK source."""
 
 from contextlib import ExitStack
 from hashlib import sha256

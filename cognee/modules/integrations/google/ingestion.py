@@ -1,4 +1,4 @@
-"""Lazy loading for Google community sources used by the SDK integrations."""
+"""SDK-owned Google sources used by the OAuth integrations."""
 
 from collections.abc import Callable
 from importlib import import_module
@@ -6,21 +6,14 @@ from typing import Any
 
 
 def source_factory(provider: str) -> Callable[..., Any]:
-    module_name, factory_name, package = {
+    module_name, factory_name = {
         "google_drive": (
-            "cognee_community_connector_google_drive",
+            "cognee.tasks.ingestion.connectors.google_drive",
             "google_drive_source",
-            "google-drive",
         ),
-        "gmail": ("cognee_community_connector_gmail", "gmail_source", "gmail"),
+        "gmail": ("cognee.tasks.ingestion.connectors.gmail", "gmail_source"),
     }[provider]
-    try:
-        return getattr(import_module(module_name), factory_name)
-    except ImportError as error:
-        raise RuntimeError(
-            f"{provider} sync requires cognee-community-connector-{package}. "
-            "Install the community connector with its dependencies before syncing."
-        ) from error
+    return getattr(import_module(module_name), factory_name)
 
 
 def build_service(provider: str, access_token: str) -> Any:
@@ -33,7 +26,7 @@ def build_service(provider: str, access_token: str) -> Any:
 
 
 def source_counts(source: Any) -> dict[str, int]:
-    """Read count-only diagnostics published by the community source."""
+    """Read count-only diagnostics published by the SDK source."""
     raw = getattr(source, "cognee_sync_stats", None)
     if not isinstance(raw, dict):
         return {}

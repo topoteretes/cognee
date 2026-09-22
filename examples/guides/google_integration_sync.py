@@ -3,14 +3,9 @@
 Prerequisites:
   * A running Cognee API and a Google account connected through browser OAuth.
   * COGNEE_API_TOKEN set to the connected Cognee user's bearer token.
-  * The matching community connector installed in the API environment. During
-    development, install from a cognee-community checkout containing the Google
-    cloud-credentials changes (run from the cognee repository):
-      uv pip install -e ../cognee-community/packages/connector/google-drive
-      uv pip install -e ../cognee-community/packages/connector/gmail
-    The gmail/google-drive extras alone do not install these source packages.
-  * Core and connectors must be updated together. The connectors require
-    DOCUMENT_SYNC_VERSION >= 1 (table-scoped cleanup, including final deletion).
+  * Google extras installed in the API environment: pip install 'cognee[gmail,google-drive]'.
+    Both connectors ship in the SDK; no community package is required.
+    From this checkout: uv sync --extra api --extra gmail --extra google-drive.
 
 Configure the API with GOOGLE_DRIVE_* or GOOGLE_GMAIL_* settings: CLIENT_ID,
 CLIENT_SECRET, REDIRECT_URI, STATE_SECRET, FRONTEND_BASE_URL. Also configure

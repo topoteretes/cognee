@@ -1,6 +1,6 @@
-"""Sync Drive through the community source's incremental, deletion-aware path.
+"""Sync Drive through the SDK source's incremental, deletion-aware path.
 
-Core owns OAuth, resource selection and dataset ownership. The community
+Core owns OAuth, resource selection and dataset ownership. The bundled
 connector owns listing, document extraction, cursors and delete tombstones.
 """
 
@@ -37,7 +37,7 @@ async def sync_drive(credential: IntegrationCredential) -> None:
 
     counts = {"scanned": 0, "skipped": 0, "failed": 0}
     try:
-        status, counts = await _community_sync(credential, counts)
+        status, counts = await _sync_source(credential, counts)
     except Exception:
         counts["failed"] = max(1, counts["failed"])
         await record_sync_result(credential, status=SYNC_STATUS_DEGRADED, counts=counts)
@@ -45,7 +45,7 @@ async def sync_drive(credential: IntegrationCredential) -> None:
     await record_sync_result(credential, status=status, counts=counts)
 
 
-async def _community_sync(
+async def _sync_source(
     credential: IntegrationCredential, counts: dict[str, int]
 ) -> tuple[str, dict[str, int]]:
     from cognee.api.v1.remember.remember import remember

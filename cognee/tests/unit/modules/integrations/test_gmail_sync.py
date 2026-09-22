@@ -1,4 +1,4 @@
-"""Gmail ingestion uses community DLT state and preserves the user's scope."""
+"""Gmail ingestion uses SDK DLT state and preserves the user's scope."""
 
 from contextlib import ExitStack
 from types import SimpleNamespace
@@ -40,7 +40,7 @@ def credential(**metadata):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("labels", [None, ["INBOX"], ["INBOX", "Label_1"]])
-async def test_community_source_receives_the_exact_scope(labels, sync_mocks):
+async def test_sdk_source_receives_the_exact_scope(labels, sync_mocks):
     await sync_module.sync_gmail(credential(selected_label_ids=labels))
     sync_mocks.source.assert_called_once_with(label_ids=labels, service="service")
     sync_mocks.remember.assert_awaited_once_with(
