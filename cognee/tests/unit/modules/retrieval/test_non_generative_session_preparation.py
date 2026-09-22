@@ -54,6 +54,25 @@ def test_generative_retrievers_still_opt_in():
     assert CompletionRetriever.supports_session_turn_preparation is True
 
 
+# Real coroutines, not AsyncMock: the runner asks whether the completion method
+# accepts `effective_query`/`turn_preparation` via inspect.signature, and on Python
+# 3.10 -- the minimum this project supports -- signature() on a bare AsyncMock raises
+# "TypeError: 'Mock' object is not subscriptable". It only started working in 3.11.
+# The keyword-only tail mirrors what the real methods accept, so the runner takes the
+# same branch it takes in production. Nothing here is asserted on; `prepare` is the
+# mock under test and is never introspected.
+async def _stub_retrieved_objects(self, query=None, **kwargs):
+    return []
+
+
+async def _stub_context(self, query=None, retrieved_objects=None, **kwargs):
+    return ""
+
+
+async def _stub_completion(self, query=None, retrieved_objects=None, context=None, **kwargs):
+    return []
+
+
 async def _search_with(retriever, search_type):
     """Run a real search through `get_retriever_output`, stubbing only I/O.
 
@@ -65,9 +84,9 @@ async def _search_with(retriever, search_type):
     )
     with (
         patch.object(type(retriever), "prepare_session_turn_for_retrieval", prepare),
-        patch.object(type(retriever), "get_retrieved_objects", AsyncMock(return_value=[])),
-        patch.object(type(retriever), "get_context_from_objects", AsyncMock(return_value="")),
-        patch.object(type(retriever), "get_completion_from_context", AsyncMock(return_value=[])),
+        patch.object(type(retriever), "get_retrieved_objects", _stub_retrieved_objects),
+        patch.object(type(retriever), "get_context_from_objects", _stub_context),
+        patch.object(type(retriever), "get_completion_from_context", _stub_completion),
         patch.object(
             get_retriever_output_module,
             "get_graph_engine",
