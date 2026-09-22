@@ -7,14 +7,16 @@ from cognee.infrastructure.databases.graph.get_graph_engine import (
     create_graph_engine,
     graph_engine_cache,
 )
+from cognee.infrastructure.databases.turso.files import database_file_paths
 from cognee.modules.users.models import DatasetDatabase, User
 
 
 class TursoGraphDatasetDatabaseHandler:
-    """Handler for per-dataset Turso/libSQL graph databases.
+    """Handler for per-dataset Turso graph databases.
 
-    Each dataset gets its own libSQL file under the system databases directory, so
-    the existing multi-user permission system isolates datasets by file.
+    Each dataset gets its own Turso database file under the system databases
+    directory, so the existing multi-user permission system isolates datasets by
+    file.
     """
 
     @classmethod
@@ -66,7 +68,7 @@ class TursoGraphDatasetDatabaseHandler:
     async def resolve_dataset_connection_info(
         cls, dataset_database: DatasetDatabase
     ) -> DatasetDatabase:
-        # A local libSQL file has no connection credentials to resolve.
+        # A local Turso database file has no connection credentials to resolve.
         return dataset_database
 
     @classmethod
@@ -87,14 +89,10 @@ class TursoGraphDatasetDatabaseHandler:
         if graph_db_name:
             await graph_engine_cache.aevict_for_database(graph_db_name)
 
-        # Remove the dataset's libSQL file and its WAL-mode companions. This
-        # adapter runs PRAGMA journal_mode=WAL, so SQLite keeps write-ahead-log
-        # state in "<file>-wal"/"<file>-shm" until a clean close checkpoints
-        # them into the main file -- leaving them behind risks stale data
-        # surviving under a same-name recreate.
-        if dataset_url and os.path.isabs(dataset_url) and os.path.exists(dataset_url):
-            os.remove(dataset_url)
-            for suffix in ("-wal", "-shm"):
-                companion_path = dataset_url + suffix
-                if os.path.exists(companion_path):
-                    os.remove(companion_path)
+        # Remove the dataset's database file and the engine's companions
+        # (-wal/-shm in WAL mode, -log in MVCC mode). Leaving them behind risks
+        # stale data surviving under a same-name recreate.
+        if dataset_url and os.path.isabs(dataset_url):
+            for path in database_file_paths(dataset_url):
+                if os.path.exists(path):
+                    os.remove(path)

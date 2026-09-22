@@ -5,7 +5,7 @@ delete_dataset covers:
 - eviction is by database name (aevict_for_database), matching the generic
   key ensure_graph_memory_cleared's get_graph_engine() resolves, instead of
   the old narrower exact-key evict() that could miss the live cache entry
-- the dataset's libSQL file and its WAL-mode companions (-wal/-shm) are
+- the dataset's database file and its engine companions (-wal/-shm/-log) are
   removed
 - a dataset with no graph_database_name never calls the cache at all
   (nothing to evict by)

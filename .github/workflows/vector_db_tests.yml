@@ -177,17 +177,47 @@ jobs:
           python-version: ${{ inputs.python-version }}
           extra-dependencies: "turso"
 
-      # Adapter behavior against a real embedded libSQL DB (no LLM needed).
-      - name: Run Turso adapter unit tests
+      # Adapter behavior against the real Turso rewrite engine (pyturso), no LLM
+      # needed: shared dialect/config, relational (incl. the Alembic chain),
+      # graph-as-tables, vector, the per-dataset handlers, and concurrent writes
+      # from independent connections in both journal modes (wal and mvcc).
+      - name: Run Turso adapter tests (relational, graph, vector, concurrency)
         env:
           ENV: 'dev'
-        run: uv run pytest cognee/tests/unit/infrastructure/databases/vector/test_turso_adapter.py -v
+        run: >-
+          uv run pytest -v
+          cognee/tests/unit/infrastructure/databases/turso_backend
+          cognee/tests/unit/infrastructure/databases/relational/test_turso_adapter.py
+          cognee/tests/unit/infrastructure/databases/relational/test_create_relational_engine.py
+          cognee/tests/unit/infrastructure/databases/graph/test_turso_graph_dataset_database_handler.py
+          cognee/tests/unit/infrastructure/databases/vector/test_turso_adapter.py
+          cognee/tests/e2e/turso/test_turso_adapter.py
+          cognee/tests/e2e/turso/test_concurrent_writes.py
 
       # Full search-type e2e suite, run against Turso via VECTOR_DB_PROVIDER.
       - name: Run Turso search tests
         env:
           ENV: 'dev'
           DATABASE_MAX_LRU_CACHE_SIZE: 1
+          VECTOR_DB_PROVIDER: turso
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        run: uv run pytest cognee/tests/test_search_db.py -v --log-level=INFO
+
+      # The same suite with every layer on Turso: relational + graph-as-tables +
+      # vector all run on the rewrite engine (the local integration SDK-664 ships).
+      - name: Run Turso all-layers search tests
+        env:
+          ENV: 'dev'
+          DATABASE_MAX_LRU_CACHE_SIZE: 1
+          DB_PROVIDER: turso
+          GRAPH_DATABASE_PROVIDER: turso
           VECTOR_DB_PROVIDER: turso
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
@@ -216,7 +246,7 @@ jobs:
           python-version: ${{ inputs.python-version }}
           extra-dependencies: "turso"
 
-      # Per-dataset libSQL files isolate users; proves the dataset handler +
+      # Per-dataset Turso database files isolate users; proves the dataset handler +
       # permission system work with Turso under backend access control.
       - name: Run Turso permissions tests
         env:

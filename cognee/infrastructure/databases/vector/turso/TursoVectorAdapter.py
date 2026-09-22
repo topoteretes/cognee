@@ -1,4 +1,20 @@
-"""Vector-database adapter backed by Turso / libSQL."""
+"""Vector-database adapter backed by Turso, the Rust rewrite of SQLite (``pyturso``).
+
+One table per collection: ``(id TEXT PRIMARY KEY, payload TEXT, vector F32_BLOB(n))``.
+Similarity search is an exact ``vector_distance_cos`` scan ordered by distance; the
+engine has no ``libsql_vector_idx`` / ``vector_top_k`` approximate index.
+
+Engine constraints that shape the SQL here: no scalar subquery inside
+``ON CONFLICT DO UPDATE SET`` (so ``belongs_to_set`` merges happen in Python before
+a plain upsert), and no bind parameter inside a nested ``json_each`` subquery (so
+tag removal rewrites payloads in Python and writes them back with plain binds).
+
+Concurrency: one synchronous driver connection per adapter, used only inside
+``asyncio.to_thread`` under ``self._connection_lock``. That lock is load-bearing —
+a pyturso connection used from two threads at once aborts the process. Under
+``TURSO_JOURNAL_MODE=mvcc`` writes run as ``BEGIN CONCURRENT`` and retry on
+``Write-write conflict``.
+"""
 
 import asyncio
 import json
@@ -7,6 +23,12 @@ from typing import Any
 from uuid import UUID
 
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
+from cognee.infrastructure.databases.turso import (
+    begin_statement,
+    connect_pragmas,
+    get_turso_config,
+    retry_on_conflict,
+)
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.shared.logging_utils import get_logger
@@ -41,8 +63,17 @@ class IndexSchema(DataPoint):
 
 
 def _is_remote_url(url: str) -> bool:
-    """True when ``url`` points at a libSQL server rather than a local file."""
+    """True when ``url`` points at a Turso server rather than a local file."""
     return url.startswith(("libsql://", "http://", "https://", "ws://", "wss://"))
+
+
+def _union_tags(*tag_lists) -> list[str]:
+    """Order-preserving union of ``belongs_to_set`` lists (None-safe)."""
+    merged: dict[str, None] = {}
+    for tags in tag_lists:
+        for tag in tags or []:
+            merged.setdefault(tag, None)
+    return list(merged)
 
 
 def _vector_literal(vector: list[float]) -> str:
@@ -51,7 +82,7 @@ def _vector_literal(vector: list[float]) -> str:
 
 
 class TursoVectorAdapter(VectorDBInterface):
-    """Vector-database adapter backed by Turso / libSQL; implements VectorDBInterface."""
+    """Vector-database adapter backed by the Turso rewrite engine; implements VectorDBInterface."""
 
     name = "Turso"
 
@@ -62,18 +93,27 @@ class TursoVectorAdapter(VectorDBInterface):
         embedding_engine: EmbeddingEngine,
         database_name: str | None = None,
     ):
+        if _is_remote_url(url):
+            raise OSError(
+                "Remote Turso databases are not supported by the Turso vector backend in this "
+                f"version (VECTOR_DB_URL={url!r}). Point VECTOR_DB_URL at a local database "
+                "file path instead."
+            )
         self.url = url
         self.api_key = api_key
         self.embedding_engine = embedding_engine
         self.database_name = database_name
+        self.turso_config = get_turso_config()
 
-        # One lock serializes access to the shared sync libSQL connection. It
+        # One lock serializes access to the shared sync Turso connection. It
         # is a threading.Lock (not an asyncio.Lock) held inside the
         # asyncio.to_thread worker: this adapter is cached process-globally, so
         # a loop-bound asyncio.Lock would raise "bound to a different event
         # loop" the moment a second event loop (e.g. a later asyncio.run)
         # contends it. A threading.Lock is loop-agnostic — the same reason
-        # LanceDBAdapter uses one for its lifecycle state.
+        # LanceDBAdapter uses one for its lifecycle state. It is also what keeps
+        # the process alive: pyturso aborts on truly concurrent use of one
+        # connection, so every driver call below runs with this lock held.
         self._connection_lock = threading.Lock()
 
         # Reflected collection names; refreshed lazily by has_collection().
@@ -83,27 +123,25 @@ class TursoVectorAdapter(VectorDBInterface):
     # ------------------------------------------------------------------ #
     # Connection + low-level execution.
     #
-    # libsql-experimental is sync but is the only client with native vector
-    # support in embedded mode, so DB calls run via asyncio.to_thread. The sync
-    # client is touched only here (and in _run / _run_many), keeping the async
-    # contract easy to re-align to a native-async client later.
+    # The sync pyturso DB-API connection runs via asyncio.to_thread. It is
+    # touched only here (and in the _run* helpers), keeping the async contract
+    # easy to re-align to turso.aio later.
     # ------------------------------------------------------------------ #
     def _get_connection(self):
-        """Lazily open the libSQL connection (embedded file or remote server)."""
+        """Lazily open the Turso connection to the local database file."""
         if self._connection is not None:
             return self._connection
 
-        import libsql_experimental as libsql
+        import turso
 
-        if _is_remote_url(self.url):
-            self._connection = libsql.connect(
-                database=self.url,
-                auth_token=self.api_key or "",
-                check_same_thread=False,
-            )
-        else:
-            self._connection = libsql.connect(self.url, check_same_thread=False)
-
+        config = self.turso_config
+        # mvcc: driver autocommit so _run controls BEGIN CONCURRENT / COMMIT itself.
+        connect_kwargs = {"isolation_level": None} if config.concurrent_writes else {}
+        connection = turso.connect(self.url, **connect_kwargs)
+        for statement in connect_pragmas(config):
+            # Step the PRAGMA: pyturso runs a statement when its cursor is read.
+            connection.execute(statement).fetchall()
+        self._connection = connection
         return self._connection
 
     def _run(
@@ -113,15 +151,57 @@ class TursoVectorAdapter(VectorDBInterface):
         *,
         fetch: bool = False,
         commit: bool = False,
+        ddl: bool = False,
     ):
         """Run one statement synchronously. Called only inside asyncio.to_thread."""
         with self._connection_lock:
             connection = self._get_connection()
-            cursor = connection.execute(sql, tuple(params) if params else ())
-            rows = cursor.fetchall() if fetch else None
-            if commit:
-                connection.commit()
-            return rows
+            begin = begin_statement(self.turso_config, ddl=ddl) if commit else None
+            if begin:
+                connection.execute(begin)
+            try:
+                cursor = connection.execute(sql, tuple(params) if params else ())
+                rows = cursor.fetchall() if fetch else None
+                if commit:
+                    self._commit(connection, begin)
+                return rows
+            except Exception:
+                if begin:
+                    self._rollback(connection)
+                raise
+
+    def _commit(self, connection, begin: str | None) -> None:
+        # With an explicit BEGIN (mvcc) the connection is in driver autocommit and
+        # COMMIT must be a statement; otherwise the driver's own transaction ends
+        # with commit().
+        if begin:
+            connection.execute("COMMIT")
+        else:
+            connection.commit()
+
+    @staticmethod
+    def _rollback(connection) -> None:
+        # A write conflict aborts the MVCC transaction on the engine side already;
+        # the ROLLBACK then reports "no transaction is active", which is fine.
+        try:
+            connection.execute("ROLLBACK")
+        except Exception:  # nothing to recover; the caller re-raises the cause
+            logger.debug("Turso rollback after a failed write", exc_info=True)
+
+    def _run_write(self, statements: list[tuple[str, tuple]]) -> None:
+        """Execute ``statements`` inside one committed transaction (sync, locked)."""
+        with self._connection_lock:
+            connection = self._get_connection()
+            begin = begin_statement(self.turso_config)
+            if begin:
+                connection.execute(begin)
+            try:
+                for sql, params in statements:
+                    connection.execute(sql, params)
+                self._commit(connection, begin)
+            except Exception:
+                self._rollback(connection)
+                raise
 
     async def _execute(
         self,
@@ -130,8 +210,12 @@ class TursoVectorAdapter(VectorDBInterface):
         *,
         fetch: bool = False,
         commit: bool = False,
+        ddl: bool = False,
     ):
-        return await asyncio.to_thread(self._run, sql, params, fetch=fetch, commit=commit)
+        def run():
+            return asyncio.to_thread(self._run, sql, params, fetch=fetch, commit=commit, ddl=ddl)
+
+        return await retry_on_conflict(run) if commit else await run()
 
     # ------------------------------------------------------------------ #
     # Embedding
@@ -148,8 +232,11 @@ class TursoVectorAdapter(VectorDBInterface):
         if collection_name in self._known_collections:
             return True
 
+        # The engine stores quoted identifiers lowercased in sqlite_master (stock
+        # SQLite keeps their case), so compare case-insensitively; name resolution
+        # in FROM clauses is case-insensitive either way.
         rows = await self._execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND lower(name) = lower(?)",
             [collection_name],
             fetch=True,
         )
@@ -159,7 +246,7 @@ class TursoVectorAdapter(VectorDBInterface):
         return exists
 
     async def create_collection(self, collection_name: str, payload_schema=None):
-        """Create the libSQL table for ``collection_name`` if it does not exist."""
+        """Create the table for ``collection_name`` if it does not exist."""
         vector_size = self.embedding_engine.get_vector_size()
 
         if not await self.has_collection(collection_name):
@@ -167,8 +254,15 @@ class TursoVectorAdapter(VectorDBInterface):
                 f'CREATE TABLE IF NOT EXISTS "{collection_name}" '
                 f"(id TEXT PRIMARY KEY, payload TEXT, vector F32_BLOB({vector_size}))",
                 commit=True,
+                ddl=True,
             )
             self._known_collections.add(collection_name)
+
+    async def _is_collection(self, table_name: str) -> bool:
+        """True when ``table_name`` has the vector-collection columns."""
+        rows = await self._execute(f'PRAGMA table_info("{table_name}")', fetch=True)
+        columns = {row[1] for row in rows or []}
+        return {"id", "payload", "vector"} <= columns
 
     async def get_table_names(self) -> list[str]:
         """Return every table name in the database (used by prune / detag / tests)."""
@@ -193,46 +287,60 @@ class TursoVectorAdapter(VectorDBInterface):
             [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
         )
 
-        # One INSERT ... ON CONFLICT(id) DO UPDATE per row, all in one
-        # transaction. libSQL reads its own uncommitted writes, so duplicate ids
-        # within a single batch merge in SQL exactly like cross-call upserts do:
-        # the last row's payload wins, the stored and incoming belongs_to_set
-        # arrays are unioned (keeping the existing vector), so a tag present on
-        # only one duplicate is never dropped. (PGVector needs a separate
-        # in-Python dedup pass only because it sends the whole batch as a single
-        # multi-row VALUES statement, which cannot touch the same id twice.)
-        insert_sql = (
-            f'INSERT INTO "{collection_name}" (id, payload, vector) '
-            f"VALUES (?, ?, vector32(?)) "
-            f"ON CONFLICT(id) DO UPDATE SET payload = json_set("
-            f"  excluded.payload, '$.belongs_to_set',"
-            f"  (SELECT json_group_array(value) FROM ("
-            f'    SELECT value FROM json_each(json_extract("{collection_name}".payload, '
-            f"'$.belongs_to_set'))"
-            f"    UNION"
-            f"    SELECT value FROM json_each(json_extract(excluded.payload, '$.belongs_to_set'))"
-            f"  ))"
-            f")"
-        )
+        # Same id twice in one batch: the last payload wins and the tags are
+        # unioned, so a tag present on only one duplicate is never dropped
+        # (PGVector does this dedup in Python too).
+        rows: dict[str, dict[str, Any]] = {}
+        for index, data_point in enumerate(data_points):
+            row_id = str(data_point.id)
+            payload = serialize_data(data_point.model_dump())
+            previous = rows.get(row_id)
+            if previous is not None:
+                payload["belongs_to_set"] = _union_tags(
+                    previous["payload"].get("belongs_to_set"), payload.get("belongs_to_set")
+                )
+            rows[row_id] = {"payload": payload, "vector": _vector_literal(data_vectors[index])}
 
-        params = [
-            [
-                str(data_point.id),
-                json.dumps(serialize_data(data_point.model_dump())),
-                _vector_literal(data_vectors[index]),
-            ]
-            for index, data_point in enumerate(data_points)
-        ]
+        await retry_on_conflict(lambda: asyncio.to_thread(self._upsert_rows, collection_name, rows))
 
-        await asyncio.to_thread(self._run_many, insert_sql, params)
+    def _upsert_rows(self, collection_name: str, rows: dict[str, dict[str, Any]]) -> None:
+        """Upsert ``rows`` in one transaction, merging ``belongs_to_set`` with stored rows.
 
-    def _run_many(self, sql: str, params: list[list[Any]]):
-        """Execute one write per row inside a single committed transaction."""
+        The engine rejects a scalar subquery inside ``ON CONFLICT DO UPDATE SET``, so
+        the stored tag arrays are read first and unioned here; the upsert itself
+        then only assigns ``excluded.payload``. As in PGVector, a conflicting row
+        keeps its stored vector.
+        """
         with self._connection_lock:
             connection = self._get_connection()
-            for row in params:
-                connection.execute(sql, tuple(row))
-            connection.commit()
+            begin = begin_statement(self.turso_config)
+            if begin:
+                connection.execute(begin)
+            try:
+                existing = connection.execute(
+                    f"SELECT id, json_extract(payload, '$.belongs_to_set') FROM \"{collection_name}\" "
+                    f"WHERE id IN (SELECT value FROM json_each(?))",
+                    (json.dumps(list(rows)),),
+                ).fetchall()
+                for row_id, stored_tags in existing:
+                    payload = rows[row_id]["payload"]
+                    payload["belongs_to_set"] = _union_tags(
+                        json.loads(stored_tags) if stored_tags else None,
+                        payload.get("belongs_to_set"),
+                    )
+                insert_sql = (
+                    f'INSERT INTO "{collection_name}" (id, payload, vector) '
+                    f"VALUES (?, ?, vector32(?)) "
+                    f"ON CONFLICT(id) DO UPDATE SET payload = excluded.payload"
+                )
+                for row_id, row in rows.items():
+                    connection.execute(
+                        insert_sql, (row_id, json.dumps(row["payload"]), row["vector"])
+                    )
+                self._commit(connection, begin)
+            except Exception:
+                self._rollback(connection)
+                raise
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         """Create the index collection (table) for the given name/property pair."""
@@ -477,9 +585,10 @@ class TursoVectorAdapter(VectorDBInterface):
     ) -> None:
         """Strip ``tags`` from belongs_to_set arrays and delete rows left empty.
 
-        cognee vector collections follow the ``{PascalCaseType}_{field}``
-        naming convention and coexist with snake_case relational tables, so
-        only PascalCase-named tables are touched.
+        Only tables with the collection schema (``id, payload, vector``) are
+        touched. The engine reports table names lowercased in ``sqlite_master``,
+        so the PascalCase naming convention cannot be used to tell collections
+        from relational tables the way the PGVector adapter does.
         """
         if not tags:
             return
@@ -487,7 +596,7 @@ class TursoVectorAdapter(VectorDBInterface):
             return
 
         candidate_tables = [
-            name for name in await self.get_table_names() if name and name[0].isupper()
+            name for name in await self.get_table_names() if await self._is_collection(name)
         ]
 
         tags_json = json.dumps(list(tags))
@@ -502,12 +611,12 @@ class TursoVectorAdapter(VectorDBInterface):
                 scope_params = list(node_ids_list)
 
             # Capture the rows that actually contain one of the removed tags
-            # FIRST. The UPDATE + delete-when-empty must only touch these rows,
+            # FIRST. Only these rows are rewritten or deleted-when-empty,
             # otherwise a row that was already stored with an empty
             # belongs_to_set (e.g. an untagged index row) would be deleted as
             # collateral on any unrelated tag removal. Mirrors PGVector.
             select_sql = (
-                f'SELECT id FROM "{table_name}" '
+                f'SELECT id, payload FROM "{table_name}" '
                 f"WHERE json_type(payload, '$.belongs_to_set') = 'array' "
                 f"AND EXISTS (SELECT 1 FROM json_each(payload, '$.belongs_to_set') je "
                 f"WHERE je.value IN (SELECT value FROM json_each(?))){id_scope}"
@@ -523,29 +632,35 @@ class TursoVectorAdapter(VectorDBInterface):
                 )
                 continue
 
-            target_ids = [row[0] for row in rows or []]
-            if not target_ids:
+            if not rows:
                 continue
 
-            id_placeholders = ",".join("?" for _ in target_ids)
-            # Strip the tags from exactly those rows.
-            update_sql = (
-                f"UPDATE \"{table_name}\" SET payload = json_set(payload, '$.belongs_to_set', ("
-                f"  SELECT json_group_array(value) FROM json_each(payload, '$.belongs_to_set')"
-                f"  WHERE value NOT IN (SELECT value FROM json_each(?))"
-                f")) WHERE id IN ({id_placeholders})"
-            )
-            # Delete only the captured rows that are now empty.
-            delete_sql = (
-                f'DELETE FROM "{table_name}" WHERE id IN ({id_placeholders}) '
-                f"AND json_array_length(payload, '$.belongs_to_set') = 0"
-            )
+            # The engine cannot bind a parameter inside the nested json_each()
+            # a SQL-side rewrite needs, so filter the arrays here and write the
+            # payloads back with plain binds: UPDATE the survivors, DELETE the
+            # rows whose array became empty, all in one transaction.
+            tag_set = set(tags)
+            statements: list[tuple[str, tuple]] = []
+            for row_id, payload_text in rows:
+                payload = json.loads(payload_text) if payload_text else {}
+                remaining = [tag for tag in payload.get("belongs_to_set", []) if tag not in tag_set]
+                if remaining:
+                    payload["belongs_to_set"] = remaining
+                    statements.append(
+                        (
+                            f'UPDATE "{table_name}" SET payload = ? WHERE id = ?',
+                            (json.dumps(payload), row_id),
+                        )
+                    )
+                else:
+                    statements.append((f'DELETE FROM "{table_name}" WHERE id = ?', (row_id,)))
             # A write failure once we know the table is a real collection is a
             # genuine error: surface it at warning rather than hiding it at
             # debug, but keep going so one table can't abort the rest.
             try:
-                await self._execute(update_sql, [tags_json] + target_ids, commit=True)
-                await self._execute(delete_sql, target_ids, commit=True)
+                await retry_on_conflict(
+                    lambda statements=statements: asyncio.to_thread(self._run_write, statements)
+                )
             except Exception as error:  # surface, but continue other tables
                 logger.warning(
                     "remove_belongs_to_set_tags failed to update '%s': %s",
@@ -559,7 +674,7 @@ class TursoVectorAdapter(VectorDBInterface):
     async def prune(self):
         """Drop every collection table and reset cached reflection state."""
         for table_name in await self.get_table_names():
-            await self._execute(f'DROP TABLE IF EXISTS "{table_name}"', commit=True)
+            await self._execute(f'DROP TABLE IF EXISTS "{table_name}"', commit=True, ddl=True)
         self._known_collections.clear()
 
     async def run_migrations(self):
@@ -571,7 +686,7 @@ class TursoVectorAdapter(VectorDBInterface):
         self._known_collections.clear()
 
     async def close(self) -> None:
-        """Close the libSQL connection. Driven by closing_lru_cache on eviction."""
+        """Close the Turso connection. Driven by closing_lru_cache on eviction."""
         await asyncio.to_thread(self._close)
 
     def _close(self) -> None:

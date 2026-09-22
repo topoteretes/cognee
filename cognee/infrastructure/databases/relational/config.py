@@ -22,10 +22,12 @@ class RelationalConfig(BaseSettings):
     db_provider: str = "sqlite"
     database_connect_args: str | None = None
     pool_args: str | None = None
-    # Turso (libSQL) specific settings. Only used when db_provider == "turso".
-    # db_turso_url: remote Turso database URL (e.g. "libsql://<db>.turso.io").
-    #   Leave unset for a purely local/embedded libSQL file (uses db_path/db_name).
-    # db_turso_auth_token: auth token for the remote Turso database.
+    # Turso settings. Only read when db_provider == "turso", which is a local
+    # database file (db_path/db_name) on the Turso rewrite engine (pyturso).
+    # db_turso_url / db_turso_auth_token describe a remote Turso database; remote
+    # mode is not supported in this version and setting either is a hard error
+    # (create_relational_engine) rather than a silent local fallback. Engine-wide
+    # knobs (journal mode, timeouts) live in TursoConfig (TURSO_* env vars).
     db_turso_url: str | None = None
     db_turso_auth_token: str | None = None
 

@@ -317,7 +317,7 @@ async def test_turso_native_seed_selection(tmp_path):
 
     from cognee.infrastructure.databases.graph.turso.adapter import TursoAdapter
 
-    adapter = TursoAdapter(f"sqlite+aiosqlite:///{tmp_path / 'seed-test.db'}")
+    adapter = TursoAdapter(database_path=str(tmp_path / "seed-test.db"))
     adapter.get_graph_data = AsyncMock(side_effect=AssertionError("unexpected full graph read"))
     try:
         assert await adapter.get_top_degree_node_ids(5) == []
