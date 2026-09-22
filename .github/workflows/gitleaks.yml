@@ -18,4 +18,4 @@ jobs:
           go-version: stable
           cache: false
       - run: go install github.com/zricethezav/gitleaks/v8@latest
-      - run: gitleaks detect --source . --log-opts="-1" -v
+      - run: gitleaks dir --source . -v
