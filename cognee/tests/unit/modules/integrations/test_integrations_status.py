@@ -133,6 +133,7 @@ def test_registered_provider_without_credential_reports_disconnected(client):
             "connectedAt": None,
             "syncStatus": None,
             "lastSyncedAt": None,
+            "syncCounts": None,
         }
     ]
 
@@ -151,6 +152,10 @@ def test_connected_provider_exposes_display_fields_and_no_token_material(client)
         nonce=b"secret-nonce",
         encryption_version=1,
         key_id="k1",
+        provider_metadata={
+            "last_sync_counts": {"scanned": 7, "skipped": 2, "failed": 0},
+            "refresh_token": "private-metadata-must-not-be-serialized",
+        },
     )
     with (
         patch.object(
@@ -170,6 +175,7 @@ def test_connected_provider_exposes_display_fields_and_no_token_material(client)
     # offset-less ISO string gets parsed as local time by JS Date.
     assert row["connectedAt"] in ("2026-08-01T12:00:00Z", "2026-08-01T12:00:00+00:00")
     assert row["syncStatus"] == "ok"
+    assert row["syncCounts"] == {"scanned": 7, "skipped": 2, "failed": 0}
     assert row["lastSyncedAt"] in ("2026-08-01T12:05:00Z", "2026-08-01T12:05:00+00:00")
     # Whitelist, not blacklist: the serialized row is exactly the display
     # fields — nothing token-shaped can leak through renames.
@@ -181,6 +187,7 @@ def test_connected_provider_exposes_display_fields_and_no_token_material(client)
         "connectedAt",
         "syncStatus",
         "lastSyncedAt",
+        "syncCounts",
     }
     body_text = response.text.lower()
     for forbidden in ("ciphertext", "nonce", "token", "apikey", "api_key"):

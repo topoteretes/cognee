@@ -1,6 +1,7 @@
 """Gmail ingestion uses SDK DLT state and preserves the user's scope."""
 
 from contextlib import ExitStack
+from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -22,7 +23,9 @@ def sync_mocks():
             patch.object(sync_module.ingestion, "source_factory", return_value=mocks.source),
             patch.object(sync_module.ingestion, "build_service", return_value="service"),
             patch("cognee.modules.integrations.gmail.adapter.access_token_for", mocks.token),
-            patch("cognee.api.v1.remember.remember.remember", mocks.remember),
+            patch.object(
+                import_module("cognee.api.v1.remember.remember"), "remember", mocks.remember
+            ),
             patch("cognee.modules.integrations.credentials.record_sync_result", mocks.record),
             patch("cognee.modules.users.methods.get_user", AsyncMock(return_value="owner")),
         ):

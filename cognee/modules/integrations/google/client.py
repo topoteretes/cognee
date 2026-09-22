@@ -1,5 +1,6 @@
 """Small async client for Google OAuth and OpenID Connect endpoints."""
 
+import asyncio
 import logging
 from typing import Any
 
@@ -29,7 +30,8 @@ async def _token_request(operation: str, payload: dict[str, str]) -> dict[str, A
         status = response.status
         try:
             body: dict[str, Any] = await response.json()
-        except Exception:  # noqa: BLE001 - response bodies must not enter errors
+        except (aiohttp.ClientError, ValueError, asyncio.TimeoutError):
+            # Preserve a stable error without exposing response bodies or tokens.
             raise GoogleAuthError(operation, f"http_{status}") from None
 
     error = body.get("error")

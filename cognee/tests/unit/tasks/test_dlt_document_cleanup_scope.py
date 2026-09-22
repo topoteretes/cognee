@@ -70,18 +70,25 @@ async def test_empty_table_cleanup_retains_other_tables_and_unscoped_legacy_rows
             "cognee.modules.data.methods.get_authorized_existing_datasets",
             new=AsyncMock(return_value=[dataset]),
         ),
-        patch(
-            "cognee.modules.data.methods.get_dataset_data.get_dataset_data",
+        patch.object(
+            importlib.import_module("cognee.modules.data.methods.get_dataset_data"),
+            "get_dataset_data",
             new=AsyncMock(return_value=[owned, other, legacy]),
         ),
         patch("cognee.context_global_variables.set_database_global_context_variables", context),
-        patch(
-            "cognee.modules.graph.methods.delete_data_nodes_and_edges.delete_data_nodes_and_edges",
+        patch.object(
+            importlib.import_module("cognee.modules.graph.methods.delete_data_nodes_and_edges"),
+            "delete_data_nodes_and_edges",
             new=AsyncMock(return_value=SimpleNamespace(node_ids=[], edge_ids=[])),
         ),
-        patch("cognee.modules.data.methods.delete_data.delete_data", new=AsyncMock()) as delete,
-        patch(
-            "cognee.modules.session_lifecycle.invalidate_sessions.invalidate_sessions_for_deleted_data",
+        patch.object(
+            importlib.import_module("cognee.modules.data.methods.delete_data"),
+            "delete_data",
+            new=AsyncMock(),
+        ) as delete,
+        patch.object(
+            importlib.import_module("cognee.modules.session_lifecycle.invalidate_sessions"),
+            "invalidate_sessions_for_deleted_data",
             new=AsyncMock(),
         ),
     ):

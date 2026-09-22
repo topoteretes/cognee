@@ -2,6 +2,7 @@
 
 from contextlib import ExitStack
 from hashlib import sha256
+from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -48,7 +49,9 @@ def sync_mocks():
             patch.object(sync_module.ingestion, "build_service", return_value="service"),
             patch.object(sync_module.client, "list_drives", mocks.drives),
             patch("cognee.modules.integrations.google_drive.adapter.access_token_for", mocks.token),
-            patch("cognee.api.v1.remember.remember.remember", mocks.remember),
+            patch.object(
+                import_module("cognee.api.v1.remember.remember"), "remember", mocks.remember
+            ),
             patch("cognee.modules.integrations.credentials.record_sync_result", mocks.record),
             patch("cognee.modules.users.methods.get_user", AsyncMock(return_value="owner")),
         ):
