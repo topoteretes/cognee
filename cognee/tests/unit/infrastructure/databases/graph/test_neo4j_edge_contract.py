@@ -63,6 +63,29 @@ async def test_has_edges_matches_on_id_property_not_internal_id():
 
 
 @pytest.mark.asyncio
+async def test_get_edges_preserves_stored_relationship_direction():
+    """An undirected lookup must still report the relationship's true endpoints."""
+    adapter = _make_adapter()
+    adapter.query = AsyncMock(
+        return_value=[
+            {
+                "source_id": "node-b",
+                "target_id": "node-a",
+                "relationship_name": "reports_to",
+            }
+        ]
+    )
+
+    edges = await adapter.get_edges("node-a")
+
+    assert edges == [("node-b", "node-a", {"relationship_name": "reports_to"})]
+    query = adapter.query.await_args.args[0]
+    assert "startNode(r).id AS source_id" in query
+    assert "endNode(r).id AS target_id" in query
+    assert "type(r) AS relationship_name" in query
+
+
+@pytest.mark.asyncio
 async def test_get_connections_preserves_edge_properties():
     """get_connections must merge the relationship's properties into the edge
     dict (as the postgres/ladybug/neptune adapters do), not reduce it to just
