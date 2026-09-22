@@ -110,6 +110,7 @@ Each script names the simpler guide it builds on and states what it adds.
 | [`session_distillation_demo.py`](advanced_guides/session_distillation_demo.py) | `guides/session_distillation.py` | Eight-message session, hybrid recall, post-distillation verification |
 | [`global_context_index_smoke_demo.py`](advanced_guides/global_context_index_smoke_demo.py) | `guides/global_context_index.py` + `guides/global_context_index_recall.py` | 12-turn fixture, three-question sweep, pass/fail verdict |
 | [`temporal_awareness_example/`](advanced_guides/temporal_awareness_example/) | `guides/temporal_recall.py` | Real biography documents instead of inline text |
+| [`temporal_awareness_example/temporal_hybrid_demo.py`](advanced_guides/temporal_awareness_example/temporal_hybrid_demo.py) | `guides/temporal_recall.py` | Custom timestamp promotion task and direct temporal hybrid retrieval |
 | [`ontology_reference_vocabulary/`](advanced_guides/ontology_reference_vocabulary/) | `guides/ontology_quickstart.py` | Bundled OWL + texts as a constraining vocabulary |
 | [`simple_document_qa/`](advanced_guides/simple_document_qa/) | `guides/simple_cognee_example.py` | Q&A over a real 150 KB document |
 | [`truth_centroid_slots_demo.py`](advanced_guides/truth_centroid_slots_demo.py) | `guides/truth_subspace_reranking.py` | Centroid slots, epochs, and rebuilds behind truth-subspace reranking |
