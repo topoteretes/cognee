@@ -1,21 +1,26 @@
 name: gitleaks
+
 on:
   pull_request:
   push:
     branches:
       - dev
       - main
+
+permissions:
+  contents: read
+
 jobs:
   scan:
     name: gitleaks
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-go@v5
-        with:
-          go-version: stable
-          cache: false
-      - run: go install github.com/zricethezav/gitleaks/v8@latest
-      - run: gitleaks dir -v -c .gitleaks.toml .
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            | tar xz -C /usr/local/bin gitleaks
+      - name: Run gitleaks
+        run: gitleaks dir -v --redact -c .gitleaks.toml .
