@@ -2148,8 +2148,11 @@ class LadybugAdapter(GraphDBInterface):
               tuple contains (source_node, relationship_name, target_node), with source_node and
               target_node as dictionaries of node properties.
         """
+        # Report the real stored direction: outgoing and incoming edges are
+        # matched with two directed passes and the edge's own start/end nodes
+        # are returned in order, so incoming edges are not flipped (#4967).
         query_str = """
-        MATCH (n:Node)-[r]-(m:Node)
+        MATCH (n:Node)-[r:EDGE]->(m:Node)
         WHERE n.id = $node_id
         RETURN {
             id: n.id,
@@ -2163,6 +2166,22 @@ class LadybugAdapter(GraphDBInterface):
             name: m.name,
             type: m.type,
             properties: m.properties
+        }
+        UNION ALL
+        MATCH (n:Node)<-[r:EDGE]-(m:Node)
+        WHERE n.id = $node_id
+        RETURN {
+            id: m.id,
+            name: m.name,
+            type: m.type,
+            properties: m.properties
+        },
+        r.relationship_name,
+        {
+            id: n.id,
+            name: n.name,
+            type: n.type,
+            properties: n.properties
         }
         """
         try:

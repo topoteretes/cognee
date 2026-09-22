@@ -943,12 +943,15 @@ class NeptuneGraphDB(GraphDBInterface):
         """
         try:
             # Query to get all edges connected to the node (both incoming and outgoing)
+            # Report the real stored direction: source/target come from the
+            # relationship's own start/end nodes, not from the matched node,
+            # so incoming edges are not flipped (#4967).
             query = f"""
             MATCH (n:{self._GRAPH_NODE_LABEL})-[r]-(m:{self._GRAPH_NODE_LABEL})
             WHERE id(n) = $node_id
             RETURN
-                id(n) AS source_id,
-                id(m) AS target_id,
+                id(startNode(r)) AS source_id,
+                id(endNode(r)) AS target_id,
                 type(r) AS relationship_name,
                 properties(r) AS properties
             """
