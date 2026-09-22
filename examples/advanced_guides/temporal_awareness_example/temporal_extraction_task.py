@@ -1,6 +1,8 @@
 import re
 from datetime import datetime, timedelta, timezone
 
+from temporal_dateparser_hints import normalize_absolute_date
+
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.engine.models import Entity, Timestamp
@@ -114,12 +116,15 @@ def promote_timestamps(data_chunks: list[DocumentChunk]) -> None:
         try:
             normalized, lower, _upper = timestamp_bounds(entity.name)
         except ValueError:
-            logger.warning(
-                "Skipping timestamp promotion id=%s value=%s reason=unparseable",
-                entity_id,
-                entity.name,
-            )
-            continue
+            fallback = normalize_absolute_date(entity.name)
+            if fallback is None:
+                logger.warning(
+                    "Skipping timestamp promotion id=%s value=%s reason=unparseable",
+                    entity_id,
+                    entity.name,
+                )
+                continue
+            normalized, lower, _upper = timestamp_bounds(fallback)
         replacements[entity_id] = _to_timestamp(entity, normalized, lower)
 
     # DocumentChunk.contains does not declare Timestamp; the in-place list

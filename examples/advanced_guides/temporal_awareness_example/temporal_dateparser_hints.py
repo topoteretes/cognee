@@ -5,6 +5,9 @@ that spring") are resolved against a rolling per-document base — the last date
 with a stated year seen earlier in the document — and appended to the system
 prompt as normalization hints, so the LLM names Timestamp nodes with absolute
 dates instead of guessing. The chunk text itself is never modified.
+
+Also the promotion-time safety net: ``normalize_absolute_date`` turns candidate
+names the strict timestamp formats refuse ("23 March 1947") into accepted shapes.
 """
 
 import asyncio
@@ -34,6 +37,14 @@ _SETTINGS = {
     "TIMEZONE": "UTC",
     "TO_TIMEZONE": "UTC",
 }
+# Absolute dates only: "four weeks later" must not resolve against today, and
+# "March" alone must not inherit the current year.
+_ABSOLUTE_SETTINGS = {
+    "PARSERS": ["absolute-time"],
+    "REQUIRE_PARTS": ["year"],
+    "PREFER_DAY_OF_MONTH": "first",
+    "RETURN_TIME_AS_PERIOD": True,
+}
 
 
 def _require_dateparser():
@@ -54,6 +65,20 @@ def _looks_like_date_reference(text: str) -> bool:
 def _format_date(value, period: str) -> str:
     formats = {"time": "%Y-%m-%d %H:%M:%S", "day": "%Y-%m-%d", "month": "%Y-%m", "year": "%Y"}
     return value.strftime(formats.get(period, "%Y-%m-%d"))
+
+
+def normalize_absolute_date(text: str) -> str | None:
+    """Normalize a date expression to the timestamp shapes promotion accepts.
+
+    "23 March 1947" becomes "1947-03-23" and "March 1947" becomes "1947-03":
+    the output precision follows dateparser's own period detection, so a month
+    name never fabricates a day. Relative or year-less expressions return None.
+    """
+    DateDataParser, _search_dates = _require_dateparser()
+    date_data = DateDataParser(languages=["en"], settings=_ABSOLUTE_SETTINGS).get_date_data(text)
+    if date_data.date_obj is None:
+        return None
+    return _format_date(date_data.date_obj, date_data.period)
 
 
 def hint_lines(text: str, base):

@@ -202,6 +202,7 @@ def test_promote_timestamps_round_trip():
 
 @pytest.mark.usefixtures("example_imports")
 def test_promote_timestamps_skips_and_is_repeatable():
+    pytest.importorskip("dateparser")
     from temporal_extraction_task import promote_timestamps
 
     from cognee.infrastructure.engine.models.Edge import Edge
@@ -212,6 +213,7 @@ def test_promote_timestamps_skips_and_is_repeatable():
     unparseable = _entity("1940s", "Timestamp")
     outgoing = _entity("2000", "Timestamp")
     recorded = _entity("2001", "Timestamp")
+    denormalized = _entity("23 March 1947", "Timestamp")
     person = _entity("Ada")
     outgoing.relations = [(Edge(relationship_type="related_to"), person)]
     chunk = _chunk(
@@ -221,6 +223,7 @@ def test_promote_timestamps_skips_and_is_repeatable():
             (Edge(relationship_type="contains"), unparseable),
             (Edge(relationship_type="contains"), outgoing),
             (Edge(relationship_type="contains"), recorded),
+            (Edge(relationship_type="contains"), denormalized),
         ],
         produced=[(str(recorded.id), str(person.id), "related_to")],
     )
@@ -231,6 +234,9 @@ def test_promote_timestamps_skips_and_is_repeatable():
     assert chunk.contains[1][1] is unparseable
     assert chunk.contains[2][1] is outgoing
     assert chunk.contains[3][1] is recorded
+    assert isinstance(chunk.contains[4][1], Timestamp)
+    assert chunk.contains[4][1].timestamp_str == "1947-03-23"
+    assert chunk.contains[4][1].id == denormalized.id
 
     first = chunk.contains[0][1]
     promote_timestamps([chunk])
@@ -239,6 +245,27 @@ def test_promote_timestamps_skips_and_is_repeatable():
     empty = _chunk(document, [(Edge(relationship_type="contains"), person)])
     promote_timestamps([empty])
     assert empty.contains[0][1] is person
+
+
+@pytest.mark.usefixtures("example_imports")
+@pytest.mark.parametrize(
+    ("name", "normalized"),
+    [
+        ("23 March 1947", "1947-03-23"),
+        ("March 1947", "1947-03"),
+        ("April 27, 1791", "1791-04-27"),
+        ("05:32 on 27 April 1986", "1986-04-27 05:32:00"),
+        ("the 1950s", None),
+        ("spring of 1943", None),
+        ("four weeks later", None),
+        ("that spring", None),
+    ],
+)
+def test_normalize_absolute_date(name, normalized):
+    pytest.importorskip("dateparser")
+    from temporal_dateparser_hints import normalize_absolute_date
+
+    assert normalize_absolute_date(name) == normalized
 
 
 @pytest.mark.usefixtures("example_imports")

@@ -29,8 +29,9 @@ Install `dateparser`, or run the demo with `uv run --with dateparser`. Partial d
 ("of 27 April") are resolved against the last stated date earlier in the document and
 appended to the extraction prompt as normalization hints. Only spans anchored to a
 month name, a time of day, or a relative word ("four weeks later") are hinted —
-scores, ordinals, and bare durations are dropped. The extraction hook raises with an
-install hint when dateparser is missing.
+scores, ordinals, and bare durations are dropped. dateparser also normalizes
+timestamp names the LLM left unnormalized before promotion. The extraction hook and
+the promotion fallback raise with an install hint when dateparser is missing.
 
 ### Run
 
@@ -56,7 +57,11 @@ candidates that were left as ordinary entities (unparseable names or outgoing ed
 
 ### Limitations
 
-- Timestamp names must be `YYYY`, `YYYY-MM`, `YYYY-MM-DD`, or `YYYY-MM-DD HH:MM:SS`.
+- Timestamp names must be `YYYY`, `YYYY-MM`, `YYYY-MM-DD`, or `YYYY-MM-DD HH:MM:SS`;
+  other absolute dates ("23 March 1947") are normalized by a dateparser fallback at
+  promotion time, at the precision the name states. Year-less or relative names still
+  skip — and a skipped candidate leaves its chunk invisible to the time filter, since
+  eligibility needs a matching timestamp in the chunk.
   A closed period needs one owner with one `begins_at` and one `ends_at` in the same
   chunk. That is why the demo chunks on blank lines (`RegexChunker`): one section per
   chunk keeps a period's owner and bounds together, and keeps the per-chunk time
