@@ -29,10 +29,6 @@ from pathlib import Path
 
 import dotenv
 
-SEARCH_ORDER = (
-    "the working directory and its parents, then the cognee package directory and its parents"
-)
-
 _loaded = False
 _resolved: str | None = None
 
@@ -90,10 +86,5 @@ def load_env_file() -> str | None:
 def describe_resolution(path: str | None) -> str:
     """One log line saying which file was loaded, or that none was."""
     if path:
-        return (
-            f"Loaded settings from {path}; its values take precedence over preset "
-            f"environment variables (searched {SEARCH_ORDER})."
-        )
-    return (
-        f"No .env file found (searched {SEARCH_ORDER}); using process environment variables only."
-    )
+        return f"Loaded settings from {path}; its values take precedence over preset environment variables."
+    return "No .env file found; using process environment variables only."

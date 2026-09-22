@@ -124,7 +124,6 @@ def test_the_log_line_names_the_file_and_the_precedence(tmp_path):
 
     assert str(tmp_path / ".env") in message
     assert "take precedence over preset environment variables" in message
-    assert "working directory" in message and "package directory" in message
 
 
 def test_a_deleted_working_directory_does_not_break_import(monkeypatch, tmp_path):
