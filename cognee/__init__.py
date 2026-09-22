@@ -21,15 +21,18 @@ from cognee.version import get_cognee_version
 #       there will be circular import issues
 __version__ = get_cognee_version()
 
-# Load environment variable settings has to be before setting up logging for LOG_LEVEL value
-import dotenv
+# The .env must be loaded before logging is configured, because LOG_LEVEL comes
+# from it. One resolver for the whole process — see cognee.shared.env_file for
+# the search order (working directory first, then the package's own tree).
+from cognee.shared.env_file import load_env_file, describe_resolution
 
-dotenv.load_dotenv(override=True)
+_env_file = load_env_file()
 
 # NOTE: Log level can be set with the LOG_LEVEL env variable
 from cognee.shared.logging_utils import setup_logging
 
 logger = setup_logging()
+logger.info(describe_resolution(_env_file))
 
 # ---------------------------------------------------------------------------
 # V1 API
