@@ -140,3 +140,17 @@ async def test_a_file_landing_exactly_on_the_ceiling_with_more_behind_it_is_logg
 
     assert len(text.encode("utf-8")) == client.MAX_FILE_BYTES
     assert "truncated" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_shared_drive_listing_uses_only_fields_in_the_drive_resource():
+    from unittest.mock import AsyncMock
+
+    get = AsyncMock(return_value={"drives": [{"id": "shared", "name": "Team"}]})
+    with patch.object(client, "_authorized_get", get):
+        result = await client.list_drives("token", "page-2")
+    params = get.await_args.args[3]
+    assert "organizerCount" not in params["fields"]
+    assert "memberCount" not in params["fields"]
+    assert params["pageToken"] == "page-2"
+    assert result["drives"][0]["id"] == "shared"

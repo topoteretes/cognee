@@ -252,7 +252,7 @@ def _list_message_ids(
                 pageToken=page_token,
             )
         )
-        response = request.execute()
+        response = request.execute(num_retries=6)
         for ref in response.get("messages", []) or []:
             yield ref["id"]
             fetched += 1
@@ -276,7 +276,12 @@ def _get_message(service: Any, message_id: str, stats: dict[str, int] | None = N
         stats = {}
     stats["scanned"] = stats.get("scanned", 0) + 1
     try:
-        return service.users().messages().get(userId="me", id=message_id, format="full").execute()
+        return (
+            service.users()
+            .messages()
+            .get(userId="me", id=message_id, format="full")
+            .execute(num_retries=6)
+        )
     except Exception as exc:
         # Trust only the structured HTTP status: str(exc) embeds the request
         # URL, and a hex message id can spuriously contain "404"/"410".
@@ -292,7 +297,7 @@ def _get_message(service: Any, message_id: str, stats: dict[str, int] | None = N
 def _mailbox_history_id(service: Any) -> str | None:
     """Return the mailbox-wide ``historyId`` used as the incremental baseline."""
     try:
-        profile = service.users().getProfile(userId="me").execute()
+        profile = service.users().getProfile(userId="me").execute(num_retries=6)
         history_id = profile.get("historyId")
         return str(history_id) if history_id is not None else None
     except Exception as exc:  # pragma: no cover - network dependent
@@ -373,7 +378,7 @@ def incremental_fetch(
                     labelId=(label_ids[0] if label_ids else None),
                     pageToken=page_token,
                 )
-                .execute()
+                .execute(num_retries=6)
             )
         except Exception as exc:
             # A 404 means the cursor expired — recover with a full backfill.

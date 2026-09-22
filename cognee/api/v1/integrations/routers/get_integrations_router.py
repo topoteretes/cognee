@@ -137,6 +137,8 @@ class AuthorizeUrlDTO(OutDTO):
 
 class ConnectionStatusDTO(OutDTO):
     connected: bool
+    dataset_id: str | None = None
+    stored_items: int | None = None
     account_label: str | None = None
     provider_account_id: str | None = None
     connected_at: datetime | None = None
@@ -795,13 +797,27 @@ def get_integrations_router():
         if credential is None:
             return ConnectionStatusDTO(connected=False)
 
+        from cognee.modules.integrations.google.ingestion import dataset_summary, sync_is_running
+
+        dataset_id, stored_items = None, None
+        if provider in {"google_drive", "gmail"}:
+            dataset_id, stored_items = await dataset_summary(
+                credential, integration.dataset_name(credential)
+            )
+
         # Token material stays server-side; the frontend only needs display state.
         return ConnectionStatusDTO(
             connected=True,
+            dataset_id=dataset_id,
+            stored_items=stored_items,
             account_label=credential.account_label,
             provider_account_id=credential.provider_account_id,
             connected_at=as_utc(credential.created_at),
-            sync_status=credential.sync_status,
+            sync_status=(
+                "syncing"
+                if sync_is_running(provider, credential.provider_account_id)
+                else credential.sync_status
+            ),
             last_synced_at=as_utc(credential.last_synced_at),
             sync_counts=(getattr(credential, "provider_metadata", None) or {}).get(
                 "last_sync_counts"

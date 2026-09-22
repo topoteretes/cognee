@@ -112,6 +112,7 @@ def test_parse_installation_keys_on_the_subject_and_marks_a_workspace_account():
     assert installation.account_label == "goran@topoteretes.com"
     assert installation.provider_metadata["account_type"] == "workspace"
     assert installation.provider_metadata["hosted_domain"] == "topoteretes.com"
+    assert installation.provider_metadata["selected_folder_ids"] == []
     # Secret material stays out of the cleartext half.
     assert set(installation.token_payload) == {"access_token", "refresh_token"}
     assert "access_token" not in installation.provider_metadata

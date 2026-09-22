@@ -11,6 +11,8 @@ import type { ChannelSummary } from "./useConnectorChannels";
 
 interface DataSourceCardProps {
   cfg: TeamConnectorCfg;
+  healthText?: string;
+  needsReconnect?: boolean;
   /** Undefined until the connection status has been fetched. */
   state: TeamConnectionState | undefined;
   /** Undefined until the channel list has been read; only set when connected. */
@@ -43,7 +45,7 @@ function ctaFor(props: DataSourceCardProps, state: TeamConnectionState): Cta | n
     // A degraded connection (CLO-389) is authorized but not working, so the
     // card leads with the fix instead of "Manage" — the actual reconnect lives
     // in the modal, next to the explanation of what it does and does not touch.
-    return state.syncStatus === "degraded"
+    return state.syncStatus === "degraded" && props.needsReconnect !== false
       ? { label: "Reconnect", variant: "primary", onClick: props.onManageClick }
       : { label: "Manage", variant: "neutral", onClick: props.onManageClick };
   }
@@ -68,7 +70,7 @@ export default function DataSourceCard(props: DataSourceCardProps): ReactElement
           <ConnectorLogo logo={cfg.logo} initials={cfg.initials} color={cfg.color} size={40} />
           <span className="truncate font-sans text-[16px] font-medium text-[var(--color-cognee-fg,#EDECEA)]">{cfg.name}</span>
         </div>
-        <ConnectorStatusBadge status={state?.status} syncStatus={state?.syncStatus} />
+        <ConnectorStatusBadge status={state?.status} syncStatus={state?.syncStatus} needsReconnect={props.needsReconnect} />
       </div>
 
       <p className="m-0 text-[13px] text-[var(--color-cognee-fg,#EDECEA)]/55">{cfg.description}</p>
@@ -80,7 +82,7 @@ export default function DataSourceCard(props: DataSourceCardProps): ReactElement
               Workspace <strong className="font-semibold text-[var(--color-cognee-fg,#EDECEA)]">{state.workspaceName}</strong>
             </p>
           )}
-          <ChannelHealthLine summary={channels} lastSyncedAt={state?.lastSyncedAt} />
+          {props.healthText !== undefined ? <p className="m-0 text-[12px] text-[var(--color-cognee-fg,#EDECEA)]/55">{props.healthText}</p> : <ChannelHealthLine summary={channels} lastSyncedAt={state?.lastSyncedAt} />}
         </div>
       )}
 
@@ -89,7 +91,7 @@ export default function DataSourceCard(props: DataSourceCardProps): ReactElement
       )}
 
       {/* "Needs reconnect" on its own says what to press, not what happened. */}
-      {isConnected && state?.syncStatus === "degraded" && (
+      {isConnected && state?.syncStatus === "degraded" && props.needsReconnect !== false && (
         <p className="m-0 text-[12px] text-[var(--color-cognee-warning,#F59E0B)]">
           {cfg.name} stopped accepting this connection.
         </p>

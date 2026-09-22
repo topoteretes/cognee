@@ -91,9 +91,8 @@ class GoogleGmailIntegration(OAuthIntegration):
         return require("frontend_base_url")
 
     async def on_installed(self, credential: IntegrationCredential) -> None:
-        from cognee.modules.integrations.gmail.sync import sync_gmail
-
-        await sync_gmail(credential)
+        """Connecting updates authorization only; sync starts via the Refresh action."""
+        return
 
     async def sync_now(self, credential: IntegrationCredential) -> None:
         from cognee.modules.integrations.gmail.sync import sync_gmail

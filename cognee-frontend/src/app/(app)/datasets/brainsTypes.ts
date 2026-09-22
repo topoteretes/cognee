@@ -1,4 +1,5 @@
 import type { DatasetProcessingStatus } from "@/modules/datasets/pollDatasetStatus";
+import type { DatasetProcessing } from "@/modules/datasets/useDatasetProcessing";
 import { INSUFFICIENT_CREDITS_REASON } from "@/modules/datasets/datasetStatusDetail";
 import type { BrainUploadStage } from "@/modules/ingestion/useBrainUpload";
 import type { UploadProgress } from "@/modules/ingestion/uploadProgress";
@@ -12,6 +13,7 @@ export interface DatasetRaw {
 }
 
 export interface FileEntry {
+  completed?: boolean;
   id: string;
   name: string;
   extension?: string;
@@ -29,6 +31,7 @@ export type DisplayStatus =
   | "loading";
 
 export interface Dataset extends DatasetRaw {
+  processingCounts?: DatasetProcessing;
   documents: number;
   status: DisplayStatus;
 }
@@ -49,6 +52,9 @@ export function mapProcessingStatus(
 }
 
 export interface UseBrainsDataResult {
+  processingCounts?: DatasetProcessing;
+  processingCountsError: boolean;
+  refreshProcessingCounts: () => void;
   isLoading: boolean;
   datasets: Dataset[];
   datasetsError: boolean;

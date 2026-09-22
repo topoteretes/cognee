@@ -66,7 +66,7 @@ async def list_folders(access_token: str, page_token: str | None = None) -> dict
 async def list_drives(access_token: str, page_token: str | None = None) -> dict[str, Any]:
     """Return one page of shared drives visible to the connected account."""
     params = {
-        "fields": "nextPageToken, drives(id,name,hidden,organizerCount,memberCount)",
+        "fields": "nextPageToken, drives(id,name)",
         "pageSize": "100",
     }
     if page_token:

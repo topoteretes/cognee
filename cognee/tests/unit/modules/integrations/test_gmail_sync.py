@@ -104,3 +104,37 @@ async def test_partial_counts_survive_a_failed_message_fetch(sync_mocks):
     with pytest.raises(RuntimeError, match="fetch failed"):
         await sync_module.sync_gmail(credential(selected_label_ids=["INBOX"]))
     assert sync_mocks.record.await_args.kwargs["counts"] == counts
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_is_reported_without_provider_error_text(sync_mocks):
+    sync_mocks.remember.side_effect = RuntimeError("Quota exceeded: private message URL")
+    with pytest.raises(RuntimeError):
+        await sync_module.sync_gmail(credential(selected_label_ids=["INBOX"]))
+    assert sync_mocks.record.await_args.kwargs["counts"]["failed_rate_limit"] == 1
+    assert "private" not in str(sync_mocks.record.await_args.kwargs)
+
+
+@pytest.mark.asyncio
+async def test_duplicate_sync_does_not_race_the_account_cursor(sync_mocks):
+    import asyncio
+
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def remember(*args, **kwargs):
+        entered.set()
+        await release.wait()
+        return SimpleNamespace(status="completed")
+
+    sync_mocks.remember.side_effect = remember
+    account = credential(selected_label_ids=["INBOX"])
+    task = asyncio.create_task(sync_module.sync_gmail(account))
+    await entered.wait()
+    try:
+        assert sync_module.ingestion.sync_is_running("gmail", "subject")
+        await sync_module.sync_gmail(account)
+        assert sync_mocks.remember.await_count == 1
+    finally:
+        release.set()
+        await task
+    assert not sync_module.ingestion.sync_is_running("gmail", "subject")

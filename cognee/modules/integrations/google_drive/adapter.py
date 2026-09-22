@@ -130,6 +130,9 @@ class GoogleDriveIntegration(OAuthIntegration):
                 "hosted_domain": hosted_domain,
                 "account_type": "workspace" if hosted_domain else "personal",
                 "scope": token_response.get("scope"),
+                # A new connection must opt into a scope before importing data.
+                # complete_installation preserves existing choices on reconnect.
+                "selected_folder_ids": [],
             },
             account_label=userinfo.get("email"),
             scopes=token_response.get("scope"),
@@ -144,15 +147,8 @@ class GoogleDriveIntegration(OAuthIntegration):
         return require("frontend_base_url")
 
     async def on_installed(self, credential: IntegrationCredential) -> None:
-        """Index the account's Drive once, right after connecting.
-
-        Google offers no signed webhook on this path and cognee runs no
-        durable scheduler, so this initial pass is what the account's memory
-        is built from until someone asks for a re-sync.
-        """
-        from cognee.modules.integrations.google_drive.sync import sync_drive
-
-        await sync_drive(credential)
+        """Connecting updates authorization only; sync starts via the Refresh action."""
+        return
 
     async def sync_now(self, credential: IntegrationCredential) -> None:
         from cognee.modules.integrations.google_drive.sync import sync_drive

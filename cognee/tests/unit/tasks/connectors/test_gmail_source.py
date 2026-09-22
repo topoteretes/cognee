@@ -65,7 +65,7 @@ class _Request:
     def __init__(self, result):
         self._result = result
 
-    def execute(self):
+    def execute(self, num_retries=0):
         if isinstance(self._result, Exception):
             raise self._result
         return self._result

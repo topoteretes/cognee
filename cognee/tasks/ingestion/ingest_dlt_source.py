@@ -121,13 +121,30 @@ async def ingest_dlt_source(
                 message=f"DLT pipeline execution failed for dataset '{original_dataset_name}': {e}"
             ) from e
 
+        # An incremental source can emit no rows (or only update its cursor),
+        # so its load package need not contain a table job. Its previously
+        # staged documents still need reconciling into Cognee: a failed
+        # cognify or a removed local item must be recoverable without editing
+        # the remote file. Scope by the CURRENT resource, never the pipeline's
+        # whole accumulated schema, which can also contain Gmail/other folders.
+        from cognee.tasks.ingestion.dlt_utils import document_source_tag
+
+        retained_tables: set[str] = set()
+        if document_source_tag(dlt_source):
+            resources = getattr(dlt_source, "resources", None)
+            resource_names = set(resources.selected) if resources is not None else {dlt_source.name}
+            retained_tables = {
+                name
+                for name, table in pipeline.default_schema.tables.items()
+                if table.get("resource") in resource_names and not table.get("parent")
+            }
+
     # Scope the read-back to the tables this source actually loaded. The
     # staging DB is shared per dataset, so it can still hold tables from other
     # sources ingested earlier; reading those would leak rows across sources.
-    # The package's completed jobs name exactly the tables this load wrote;
-    # the schema can't be used here — dlt persists it in pipeline state, so it
-    # accumulates tables across runs and sources.
-    loaded_tables: set = set()
+    # Completed jobs identify tables written this time; document sources also
+    # reconcile their own retained tables on a zero-change run (above).
+    loaded_tables: set = set(retained_tables)
     if load_info is not None:
         for package in load_info.load_packages:
             for job in package.jobs.get("completed_jobs", []):

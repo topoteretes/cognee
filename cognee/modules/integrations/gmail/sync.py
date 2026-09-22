@@ -26,16 +26,7 @@ def _dataset_name(credential: IntegrationCredential) -> str:
 
 async def sync_gmail(credential: IntegrationCredential) -> None:
     """Run an initial or manual sync and record its outcome."""
-    from cognee.modules.integrations.credentials import record_sync_result
-
-    counts = {"scanned": 0, "skipped": 0, "failed": 0}
-    try:
-        status, counts = await _sync_source(credential, counts)
-    except Exception:
-        counts["failed"] = max(1, counts["failed"])
-        await record_sync_result(credential, status=SYNC_STATUS_DEGRADED, counts=counts)
-        raise
-    await record_sync_result(credential, status=status, counts=counts)
+    await ingestion.run_sync("gmail", credential, _sync_source)
 
 
 async def _sync_source(
