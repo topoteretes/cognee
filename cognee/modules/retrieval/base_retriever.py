@@ -31,6 +31,14 @@ class BaseRetriever(ABC):
     # other templates, opt out so a preview does not invent a prompt for them.
     supports_prompt_preview = True
 
+    # When True, an empty retrieval context returns an empty result instead of
+    # calling the LLM: a model asked to answer from nothing can only produce a
+    # phantom "no context provided" deflection, which callers cannot tell apart
+    # from a real answer (SDK-270 / gh #3728). Retrievers whose completion can
+    # legitimately answer without retrieval context (e.g. tool-driven agentic
+    # flows) must leave this False.
+    skip_completion_on_empty_context = False
+
     @abstractmethod
     async def get_retrieved_objects(self, query: str | None, query_batch: str | None) -> Any:
         """

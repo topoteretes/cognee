@@ -6,6 +6,9 @@ from sqlalchemy.exc import IntegrityError
 
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.databases.utils.ensure_embedding_model_matches import (
+    embedding_model_record,
+)
 from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.modules.data.methods import get_unique_dataset_id
 from cognee.modules.migrations.migration import head_revision
@@ -111,6 +114,15 @@ async def get_or_create_dataset_database(
         # its dataset_database row and be re-attached (e.g. Neo4j CREATE DATABASE
         # IF NOT EXISTS), this row would wrongly skip migrations on populated
         # data — handle that case explicitly if/when that lifecycle is supported.
+        # Record the embedding model that will build this dataset's vectors, so
+        # a later model change is caught at the dataset context instead of
+        # inside the vector store (see ensure_embedding_model_matches). Resolved
+        # exactly as get_embedding_engine resolves it, so the record is the width
+        # the store's vector column gets (see embedding_model_record).
+        vector_config_dict["vector_database_connection_info"] = {
+            **vector_config_dict.get("vector_database_connection_info", {}),
+            **embedding_model_record(),
+        }
         record = DatasetDatabase(
             owner_id=owner.id,
             dataset_id=dataset_id,

@@ -122,17 +122,50 @@ def get_persistent_id() -> str:
         return get_anonymous_id()
 
 
+# Property keys hashed (uuid5 fingerprint) in every telemetry event's
+# additional_properties before they leave the process. session_id/session_ids
+# and dataset names are user-chosen and may carry meaning; only a fingerprint
+# may leave — the one place enforcing what remember/improve previously hashed
+# by hand. A key holding a list is hashed element by element, so per-dataset
+# activity can still be grouped without the name. Elements that are UUIDs are
+# ids, not content, and pass through (the datasets status events put dataset
+# ids under the same key); fingerprinted elements carry the "fp:" prefix so a
+# row can tell an id from a fingerprint, since both are UUID-shaped.
+TELEMETRY_SANITIZED_PROPERTIES = ["url", "session_id", "session_ids", "datasets"]
+TELEMETRY_FINGERPRINT_PREFIX = "fp:"
+
+
+def _fingerprint(value: str) -> str:
+    return str(uuid5(NAMESPACE_OID, value))
+
+
+def _is_uuid(value: str) -> bool:
+    try:
+        UUID(value)
+    except ValueError:
+        return False
+    return True
+
+
 def _sanitize_nested_properties(obj: Any, property_names: list[str]) -> Any:
     """
     Recursively replaces any property whose key matches one of `property_names`
     (e.g., ['url', 'path']) in a nested dict or list with a uuid5 hash
-    of its string value. Returns a new sanitized copy.
+    of its string value, or of each string element when the value is a list.
+    Returns a new sanitized copy.
     """
     if isinstance(obj, dict):
         new_obj = {}
         for k, v in obj.items():
             if k in property_names and isinstance(v, str):
-                new_obj[k] = str(uuid5(NAMESPACE_OID, v))
+                new_obj[k] = _fingerprint(v)
+            elif k in property_names and isinstance(v, list):
+                new_obj[k] = [
+                    TELEMETRY_FINGERPRINT_PREFIX + _fingerprint(item)
+                    if isinstance(item, str) and not _is_uuid(item)
+                    else item
+                    for item in v
+                ]
             else:
                 new_obj[k] = _sanitize_nested_properties(v, property_names)
         return new_obj
@@ -371,7 +404,7 @@ def send_telemetry(
     if env in ["test", "dev"]:
         return
     additional_properties = _sanitize_nested_properties(
-        obj=additional_properties, property_names=["url"]
+        obj=additional_properties, property_names=TELEMETRY_SANITIZED_PROPERTIES
     )
     resolved_user_id, tenant_id = _resolve_identity(user if user is not None else user_id)
     anonymous_id = str(get_anonymous_id())

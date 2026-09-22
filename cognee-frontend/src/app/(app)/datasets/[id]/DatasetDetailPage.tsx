@@ -2,13 +2,15 @@
 
 import { captureException, recordUploadSuccess, recordUploadFailure } from "@/utils/monitoring";
 import { isInsufficientCreditsError } from "@/utils/insufficientCredits";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
 import PageLoading from "@/ui/elements/PageLoading";
-import getDatasetData from "@/modules/datasets/getDatasetData";
+import ScrollLoader from "../partials/ScrollLoader";
+import { MAX_RENDERED_ROWS } from "@/modules/datasets/maxRenderedRows";
+import useDatasetDataPages from "@/modules/datasets/useDatasetDataPages";
 import deleteDatasetData from "@/modules/datasets/deleteDatasetData";
 import deleteDataset from "@/modules/datasets/deleteDataset";
 import { useBrainUpload } from "@/modules/ingestion/useBrainUpload";
@@ -99,9 +101,21 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
   const { datasets: contextDatasets } = useFilter();
   const [datasetName, setDatasetName] = useState<string>(datasetId);
   const [, setLastSynced] = useState<string | null>(null);
-  const [files, setFiles] = useState<FileEntry[]>([]);
-  const [filesError, setFilesError] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const {
+    data: rawFiles, setData: setFiles, error: filesError, loading,
+    total: filesTotal, hasMore, load: loadFilePage, loadMore,
+  } = useDatasetDataPages<FileEntry & {
+    rawDataLocation?: string; originalExtension?: string; original_extension?: string;
+    originalMimeType?: string; original_mime_type?: string; dataSize?: number; size_bytes?: number; file_size?: number;
+  }>(cogniInstance, MAX_RENDERED_ROWS);
+  const files = useMemo(() => rawFiles.map(d => ({
+    id: d.id,
+    name: d.name || d.rawDataLocation?.split("/").pop() || d.id,
+    extension: d.originalExtension || d.original_extension || d.extension,
+    mimeType: d.originalMimeType || d.original_mime_type || d.mimeType,
+    size: d.dataSize ?? d.size ?? d.size_bytes ?? d.file_size,
+    createdAt: d.createdAt,
+  })), [rawFiles]);
   // data id → session id parsed from the memory blob ("Session ID: <id>"
   // header written by the session→graph bridge), or null when none found.
   const [memorySessionIds, setMemorySessionIds] = useState<Record<string, string | null>>({});
@@ -422,26 +436,8 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
   }
 
   const loadFiles = useCallback(async () => {
-    if (!cogniInstance) return;
-    try {
-      const data = await getDatasetData(datasetId, cogniInstance);
-      setFiles(Array.isArray(data) ? data.map((d: FileEntry & { rawDataLocation?: string; originalExtension?: string; original_extension?: string; originalMimeType?: string; original_mime_type?: string; size_bytes?: number; file_size?: number }) => ({
-        id: d.id,
-        name: d.name || d.rawDataLocation?.split("/").pop() || d.id,
-        extension: d.originalExtension || d.original_extension || d.extension,
-        mimeType: d.originalMimeType || d.original_mime_type || d.mimeType,
-        size: d.size ?? d.size_bytes ?? d.file_size,
-        createdAt: d.createdAt,
-      })) : []);
-      setFilesError(false);
-    } catch {
-      // Don't blank the list into a fake "empty" state — surface the load
-      // failure so the user knows their files aren't gone, just unreachable.
-      setFilesError(true);
-    } finally {
-      setLoading(false);
-    }
-  }, [cogniInstance, datasetId]);
+    await loadFilePage(datasetId);
+  }, [loadFilePage, datasetId]);
 
   // Resolves the dataset's display name from FilterContext's shared datasets
   // list, which loads asynchronously and may still be empty on the first
@@ -689,7 +685,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
 
   const filtered = search ? files.filter((f) => f.name.toLowerCase().includes(search.toLowerCase())) : files;
 
-  if (loading || isInitializing) {
+  if ((loading && files.length === 0) || isInitializing) {
     return <><TrackPageView page="Dataset Detail" additionalProperties={{ dataset_id: datasetId }} /><PageLoading name="Files" /></>;
   }
 
@@ -719,7 +715,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
             )}
           </div>
           <span style={{ fontSize: 14, color: "rgba(237,236,234,0.55)", display: "flex", alignItems: "center", gap: 6 }}>
-            {files.length} documents
+            {filesTotal === null ? `${files.length.toLocaleString()} loaded` : filesTotal.toLocaleString()} documents
             {datasetStatus === "processing" || processing ? (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "#6510F4", fontWeight: 500 }}>
                 · <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6510F4" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg>
@@ -904,7 +900,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="rgba(237,236,234,0.35)" strokeWidth="1.5" /><path d="M10.5 10.5L14 14" stroke="rgba(237,236,234,0.35)" strokeWidth="1.5" strokeLinecap="round" /></svg>
         <input
           type="text" value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search files..."
+          placeholder={hasMore ? "Search loaded files..." : "Search files..."}
           style={{ flex: 1, border: "none", outline: "none", fontSize: 14, color: "#EDECEA", background: "transparent", fontFamily: "inherit" }}
         />
         {search && <button onClick={() => setSearch("")} className="cursor-pointer" style={{ background: "none", border: "none", color: "rgba(237,236,234,0.35)", fontSize: 14 }}>&#10005;</button>}
@@ -1011,6 +1007,11 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
         onRetry={loadFiles}
         deletingId={deletingFileId}
       />
+      {files.length > 0 && (
+        <ScrollLoader loaded={files.length} total={filesTotal} hasMore={hasMore}
+          maxLoaded={MAX_RENDERED_ROWS} busy={loading} error={filesError}
+          onLoadMore={loadMore} noun="files" autoLoad={!search} />
+      )}
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>

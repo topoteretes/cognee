@@ -9,8 +9,8 @@ Covers the deterministic pieces only — no graph database, no LLM, no cache:
   stored weight), and ContextVar memoization shared across both views.
 - ``load_active_preference_lines``: raw newest-first lines for the session
   guidance block, with no render header.
-- ``compose_session_prompt``: the guidance block is the only guidance layer —
-  preference lines have no separate layer of their own.
+- ``build_session_prompt``'s ``SessionPrompt``: the guidance block is the only
+  guidance layer — preference lines have no separate layer of their own.
 """
 
 import asyncio
@@ -21,7 +21,7 @@ import pytest
 
 import cognee.modules.user_preferences.lookup as lookup_module
 from cognee.context_global_variables import current_dataset_id, session_user
-from cognee.infrastructure.session.session_turn import compose_session_prompt
+from cognee.modules.retrieval.utils.completion import SessionPrompt
 from cognee.modules.user_preferences.constants import PREFERENCE_RENDER_HEADER
 from cognee.modules.user_preferences.lookup import (
     load_active_preference_lines,
@@ -278,11 +278,8 @@ class TestLoadActivePreferenceLines:
         assert await load_active_preference_lines() == []
 
 
-class TestComposeSessionPromptHasNoPreferenceLayer:
+class TestSessionPromptHasNoPreferenceLayer:
     def test_guidance_block_is_the_only_guidance_layer(self):
         # Preference lines live inside the guidance block (the builder owns
-        # rendering and sizing); compose only layers block ahead of history.
-        assert compose_session_prompt("BLOCK", "HISTORY") == "BLOCK\n\nHISTORY"
-
-    def test_empty_block_leaves_history_untouched(self):
-        assert compose_session_prompt("", "HISTORY") == "HISTORY"
+        # rendering and sizing); the session layer is exactly that block plus history.
+        assert SessionPrompt._fields == ("history", "guidance")

@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from cognee.base_config import get_base_config
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.session.feedback_detection import analyze_turn_for_session_context
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
@@ -27,6 +26,7 @@ from cognee.infrastructure.session.session_embeddings import (
     search_session_qa_ids,
 )
 from cognee.modules.retrieval.utils.completion import (
+    SessionPrompt,
     generate_session_completion_with_optional_summary,
 )
 from cognee.modules.user_preferences import load_active_preference_lines
@@ -45,23 +45,6 @@ class SessionTurnPreparation:
     analysis: SessionTurnAnalysis | None = None
     accepted_context_ids: list[str] = field(default_factory=list)
     previous_qa_id: str | None = None
-
-
-def compose_session_prompt(
-    active_context_block: str,
-    conversation_history: str,
-) -> str:
-    """Assemble the session prompt from the guidance block and history.
-
-    Empty layers are skipped. The guidance block is the single owner of every
-    guidance line — durable preference lines are merged into its ``Preferences``
-    section by the session-context builder, never layered as a second block —
-    and it sits ahead of the conversation history.
-    """
-    prompt = conversation_history
-    if active_context_block:
-        prompt = active_context_block + "\n\n" + prompt
-    return prompt
 
 
 async def load_preference_lines_safe() -> list[str]:
@@ -184,7 +167,7 @@ async def generate_session_answer(
 
     Returns ``(answer, context_to_store, served_context_ids)``.
     """
-    conversation_history, served_ids = await build_session_prompt(
+    session, served_ids = await build_session_prompt(
         session_manager,
         user_id=user_id,
         session_id=session_id,
@@ -198,7 +181,7 @@ async def generate_session_answer(
     ) = await generate_session_completion_with_optional_summary(
         query=answer_query,
         context=context,
-        conversation_history=conversation_history,
+        session=session,
         user_prompt_path=user_prompt_path,
         system_prompt_path=system_prompt_path,
         system_prompt=system_prompt,
@@ -216,8 +199,8 @@ async def build_session_prompt(
     query: str,
     history: str | None = None,
     stamp_served: bool = True,
-) -> tuple[str, list[str]]:
-    """Assemble the session layer of a completion prompt: guidance block, then history.
+) -> tuple[SessionPrompt, list[str]]:
+    """Assemble the session layer of a completion prompt: history and guidance block.
 
     The single owner of this assembly. The sequential answer path calls it as-is; an
     ``only_context`` preview calls it with ``stamp_served=False`` so it reads the same
@@ -226,7 +209,9 @@ async def build_session_prompt(
 
     ``history`` lets a caller that has already loaded the conversation (once across a
     dataset fan-out) skip the second read; ``None`` loads it here. Returns
-    ``(prompt, served_ids)``.
+    ``(SessionPrompt, served_ids)``. The guidance block is the single owner of every
+    guidance line: durable preference lines are merged into its ``Preferences`` section
+    by the session-context builder, never layered as a second block.
     """
     conversation_history = (
         history
@@ -256,7 +241,7 @@ async def build_session_prompt(
         # through the same owner, budgets, and block shape.
         active_context_block = render_preference_block(preference_lines)
 
-    return compose_session_prompt(active_context_block, conversation_history), served_ids
+    return SessionPrompt(history=conversation_history, guidance=active_context_block), served_ids
 
 
 async def build_active_context_block_safe(
@@ -377,14 +362,11 @@ async def apply_session_turn_analysis(
     served_ids: list[str],
 ) -> list[str]:
     """Persist turn evidence, apply candidate updates, and bump helpful/harmful counters."""
-    # A rating is only evidence when there is a previous turn it can refer to,
-    # and only worth persisting when preference personalization can ever
-    # consume it — with the flag off, a rating-only turn must save nothing.
-    previous_answer_rating = (
-        analysis.previous_answer_rating
-        if previous_qa_id and get_base_config().personalization_enabled
-        else None
-    )
+    # A rating is only evidence when there is a previous turn it can refer to.
+    # It is persisted whenever the analysis produced one: the row is the
+    # signal, and which consumers read it (personalization, feedback weights)
+    # is decided where they run, not here.
+    previous_answer_rating = analysis.previous_answer_rating if previous_qa_id else None
     if (
         not analysis.candidate_context_updates
         and not analysis.served_context_ratings

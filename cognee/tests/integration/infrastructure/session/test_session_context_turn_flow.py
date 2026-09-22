@@ -74,13 +74,47 @@ def _config(*, auto_feedback: bool = True):
     return cfg
 
 
+class _CacheConfigPatch:
+    """One handle over both fresh-CacheConfig read sites.
+
+    ``session_manager`` reads it for the caching gate; the auto-feedback gate
+    lives in ``feedback_detection`` (session_manager delegates to it), so a
+    patch on one namespace alone leaves the other gate reading the live env.
+    Setting ``return_value`` fans out to both.
+    """
+
+    _TARGETS = (
+        "cognee.infrastructure.session.session_manager.CacheConfig",
+        "cognee.infrastructure.session.feedback_detection.CacheConfig",
+    )
+
+    def __enter__(self):
+        self._patchers = [patch(target) for target in self._TARGETS]
+        self._mocks = [patcher.start() for patcher in self._patchers]
+        return self
+
+    def __exit__(self, *exc_info):
+        for patcher in self._patchers:
+            patcher.stop()
+        return False
+
+    @property
+    def return_value(self):
+        return self._mocks[0].return_value
+
+    @return_value.setter
+    def return_value(self, value):
+        for mock in self._mocks:
+            mock.return_value = value
+
+
 def _patches(completion_return, analysis_return=None):
-    """Patch session_user, CacheConfig, turn analysis, and completion."""
+    """Patch session_user, CacheConfig (both read sites), turn analysis, and completion."""
     user = MagicMock()
     user.id = "owner-1"  # non-UUID -> skips track_session_usage + session_records side effects
 
     mock_user = patch("cognee.infrastructure.session.session_manager.session_user")
-    mock_cfg = patch("cognee.infrastructure.session.session_manager.CacheConfig")
+    mock_cfg = _CacheConfigPatch()
     mock_analyze = patch(
         "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
         new_callable=AsyncMock,
@@ -131,8 +165,7 @@ async def test_first_turn_no_block_empty_served_ids(session_manager):
 
     assert result == "Answer one"
     assert ma.call_args.kwargs["served_context"] == []
-    history = mg.call_args.kwargs["conversation_history"]
-    assert "## Active session guidance" not in history
+    assert mg.call_args.kwargs["session"].guidance == ""
 
     entries = await session_manager.get_session(user_id="owner-1", session_id="s1")
     assert len(entries) == 1
@@ -161,10 +194,10 @@ async def test_non_feedback_block_prepended_and_served_ids_recorded(session_mana
         )
 
     assert result == "Answer two"
-    history = mg.call_args.kwargs["conversation_history"]
-    assert "## Active session guidance" in history
-    assert "Background knowledge from the knowledge graph" not in history
-    assert "Always answer in metric units." in history
+    guidance = mg.call_args.kwargs["session"].guidance
+    assert "## Active session guidance" in guidance
+    assert "Background knowledge from the knowledge graph" not in guidance
+    assert "Always answer in metric units." in guidance
 
     entries = await session_manager.get_session(user_id="owner-1", session_id="s1")
     new_qa = entries[-1]
@@ -419,8 +452,7 @@ async def test_layer_disabled_when_auto_feedback_off(session_manager):
             system_prompt_path="sys.txt",
         )
 
-    history = mg.call_args.kwargs["conversation_history"]
-    assert "## Active session guidance" not in history
+    assert mg.call_args.kwargs["session"].guidance == ""
     ma.assert_not_called()
 
     entries = await session_manager.get_session(user_id="owner-1", session_id="s1")

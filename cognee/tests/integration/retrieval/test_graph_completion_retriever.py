@@ -7,6 +7,7 @@ import pytest_asyncio
 
 import cognee
 from cognee.low_level import DataPoint, setup
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.tasks.storage import add_data_points
 
@@ -262,14 +263,13 @@ async def test_graph_completion_context_complex(setup_test_environment_complex):
 
 @pytest.mark.asyncio
 async def test_get_graph_completion_context_on_empty_graph(setup_test_environment_empty):
-    """Integration test: verify GraphCompletionRetriever handles empty graph correctly."""
+    """Integration test: an empty graph is a state error (NoDataError -> 404 over the
+    API), raised before any retrieval or LLM work, not a quiet empty context
+    (SDK-270 / gh #3728)."""
     retriever = GraphCompletionRetriever()
-    query = "Who works at Figma?"
 
-    triplets = await retriever.get_retrieved_objects(query)
-
-    context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
-    assert context == "", "Context should be empty on an empty graph"
+    with pytest.raises(NoDataError, match="knowledge graph is empty"):
+        await retriever.get_retrieved_objects("Who works at Figma?")
 
 
 @pytest.mark.asyncio
@@ -327,17 +327,13 @@ async def test_graph_completion_batch_queries_context_complex(setup_test_environ
 async def test_get_graph_completion_batch_queries_context_on_empty_graph(
     setup_test_environment_empty,
 ):
-    """Integration test: verify GraphCompletionRetriever handles empty graph correctly for multiple queries."""
+    """Integration test: batch queries on an empty graph raise the same NoDataError
+    as a single query (SDK-270 / gh #3728)."""
     retriever = GraphCompletionRetriever()
     query_batch = ["Who works at Canva?", "Who works at Figma?"]
 
-    triplets = await retriever.get_retrieved_objects(query_batch=query_batch)
-
-    context = await retriever.get_context_from_objects(
-        query_batch=query_batch, retrieved_objects=triplets
-    )
-    assert len(context) == 2, "Should return results for each query"
-    assert context[0] == "" and context[1] == "", "Context should be empty on an empty graph"
+    with pytest.raises(NoDataError, match="knowledge graph is empty"):
+        await retriever.get_retrieved_objects(query_batch=query_batch)
 
 
 @pytest.mark.asyncio
