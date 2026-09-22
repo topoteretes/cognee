@@ -1297,13 +1297,19 @@ class Neo4jAdapter(GraphDBInterface):
         """
         query = f"""
         MATCH (n: `{BASE_LABEL}`{{id: $node_id}})-[r]-(m)
-        RETURN n, r, m
+        RETURN startNode(r).id AS source_id,
+               endNode(r).id AS target_id,
+               type(r) AS relationship_name
         """
 
         results = await self.query(query, {"node_id": node_id})
 
         return [
-            (result["n"]["id"], result["m"]["id"], {"relationship_name": result["r"][1]})
+            (
+                result["source_id"],
+                result["target_id"],
+                {"relationship_name": result["relationship_name"]},
+            )
             for result in results
         ]
 
