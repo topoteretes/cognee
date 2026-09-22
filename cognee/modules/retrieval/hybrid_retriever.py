@@ -149,6 +149,7 @@ class HybridRetriever(BaseRetriever):
                 current_truth_epoch=truth.current_truth_epoch,
                 personal_weights=personal_weights,
                 personal_influence=get_base_config().personalization_influence,
+                graph_engine=self._unified_engine.graph,
             ),
             self._retrieve_entities_and_facts(query, query_vector),
         )
