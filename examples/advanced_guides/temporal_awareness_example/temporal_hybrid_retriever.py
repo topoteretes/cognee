@@ -55,7 +55,8 @@ class TemporalHybridRetriever(HybridRetriever):
     async def _index(self) -> dict:
         if self._temporal_index is None:
             graph = await get_graph_engine()
-            self._temporal_index = build_temporal_index(*await graph.get_graph_data())
+            nodes, edges = await graph.get_graph_data()
+            self._temporal_index = build_temporal_index(nodes, edges)
         return self._temporal_index
 
     async def get_retrieved_objects(self, query=None, query_batch=None) -> dict:
