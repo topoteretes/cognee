@@ -9,10 +9,12 @@ of its stores on it, as local database files:
 | Relational | `DB_PROVIDER=turso` | users, datasets, pipeline runs, ACLs | `cognee/infrastructure/databases/relational/sqlalchemy/TursoAdapter.py` |
 | Graph | `GRAPH_DATABASE_PROVIDER=turso` | graph-as-tables (`graph_node`, `graph_edge`) | `cognee/infrastructure/databases/graph/turso/adapter.py` |
 | Vector | `VECTOR_DB_PROVIDER=turso` | one table per collection, `F32_BLOB` embeddings | `cognee/infrastructure/databases/vector/turso/TursoVectorAdapter.py` |
+| Session cache | `CACHE_BACKEND=turso` | session Q&A, traces, context, usage logs (`cache.db`) | `cognee/infrastructure/databases/cache/sql/SqlCacheAdapter.py` |
 
 The layers are independent: any one of them can be Turso while the others stay on their defaults.
-The session cache (`CACHE_BACKEND`, default `sqlite`) is a separate store and keeps running on
-stock SQLite; it is not part of this integration.
+The session cache mirrors the `sqlite` backend exactly (a `cache.db` next to the relational
+database, same tables and upserts) and only swaps the driver; it is not switched automatically
+with `DB_PROVIDER`, so set `CACHE_BACKEND=turso` explicitly, as with `postgres`.
 All three share `cognee/infrastructure/databases/turso/`: the SQLAlchemy dialect
 (`sqlite+cognee_turso://`), the `TURSO_*` settings, the transaction/retry policy and the
 file-cleanup rule.
@@ -34,10 +36,11 @@ process on the neighborhood query cognee used, so cognee stays on 0.7.x and avoi
 ```bash
 pip install cognee"[turso]"          # or: uv pip install -e ".[turso]"
 
-# .env — pick any subset of the three
+# .env — pick any subset
 DB_PROVIDER=turso
 GRAPH_DATABASE_PROVIDER=turso
 VECTOR_DB_PROVIDER=turso
+CACHE_BACKEND=turso
 LLM_API_KEY=...                       # cognify needs an LLM as usual
 ```
 
@@ -92,7 +95,8 @@ Constraints of the mode:
   creation and migrations inside `exclusive_transaction()`, which switches the statement.
 - The database file gains a `-log` companion and is no longer readable by stock `sqlite3`
   (cognee's dataset cleanup removes `-wal`, `-shm` and `-log`). Switching a file back to `wal`
-  restores SQLite compatibility.
+  restores SQLite compatibility. This also means migration `c3d5e7f9a1b2`, which heals a
+  standalone `cache.db` through stdlib `sqlite3`, only works on a `wal`-mode cache file.
 - Plain `BEGIN` writers still serialize with `database is locked`, so mixing tools that do not use
   `BEGIN CONCURRENT` gains nothing.
 - MVCC is experimental upstream. The default stays `wal`.
@@ -110,11 +114,13 @@ pytest cognee/tests/unit/infrastructure/databases/turso_backend \
        cognee/tests/unit/infrastructure/databases/relational/test_create_relational_engine.py \
        cognee/tests/unit/infrastructure/databases/graph/test_turso_graph_dataset_database_handler.py \
        cognee/tests/unit/infrastructure/databases/vector/test_turso_adapter.py \
+       cognee/tests/unit/infrastructure/databases/cache/test_sql_cache_turso.py \
+       cognee/tests/unit/infrastructure/databases/cache/test_sql_adapter_crud.py \
        cognee/tests/e2e/turso/test_turso_adapter.py \
        cognee/tests/e2e/turso/test_concurrent_writes.py
 
 # Full search suite with every layer on Turso (needs LLM + embedding keys)
-DB_PROVIDER=turso GRAPH_DATABASE_PROVIDER=turso VECTOR_DB_PROVIDER=turso \
+DB_PROVIDER=turso GRAPH_DATABASE_PROVIDER=turso VECTOR_DB_PROVIDER=turso CACHE_BACKEND=turso \
   pytest cognee/tests/test_search_db.py -v
 ```
 

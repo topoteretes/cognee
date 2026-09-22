@@ -122,8 +122,20 @@ REPRODUCTIONS: list[tuple[str, Callable]] = [
 ]
 
 
+# What a reproduction may raise: the driver's DB-API errors, SQLAlchemy's
+# wrappers, the AttributeError of the upstream dialect bug, or this script's
+# own assertions about engine behaviour.
+def _reproduction_errors() -> tuple[type[BaseException], ...]:
+    import turso
+    from sqlalchemy.exc import SQLAlchemyError
+
+    return (turso.Error, SQLAlchemyError, AttributeError, AssertionError)
+
+
 def main() -> None:
     import turso
+
+    expected_errors = _reproduction_errors()
 
     print(
         f"pyturso {importlib.metadata.version('pyturso')} | turso_version() = "
@@ -132,7 +144,7 @@ def main() -> None:
     for name, reproduction in REPRODUCTIONS:
         try:
             reproduction()
-        except Exception as error:  # noqa: BLE001 - the point is to print the engine's error
+        except expected_errors as error:
             print(f"GAP  {name}: {type(error).__name__}: {str(error).splitlines()[0][:110]}")
         else:
             print(f"OK   {name}")

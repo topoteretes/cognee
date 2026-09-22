@@ -127,7 +127,8 @@ graph and vector databases. Backend support (source of truth:
   Analytics and community adapters (unless they register a handler via
   `use_dataset_database_handler()`).
 - Relational (SQLite/Postgres/Turso) is always a single shared DB (users, ACLs, registry).
-- Turso: all three layers can run on the Turso rewrite engine (`pyturso`, local files only);
+- Turso: the three layers and the session cache (`CACHE_BACKEND=turso`) can run on the Turso
+  rewrite engine (`pyturso`, local files only);
   setup, journal modes and engine limits are in `docs/turso-local.md`.
 
 Both graph and vector must be supported, or cognee raises `EnvironmentError` — an

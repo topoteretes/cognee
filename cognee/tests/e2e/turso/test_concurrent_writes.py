@@ -171,7 +171,8 @@ def test_threads_with_independent_connections(tmp_path, journal_mode):
                 connection.execute(_begin(journal_mode))
                 connection.execute("INSERT INTO hits VALUES (?, ?)", (index, n))
                 connection.execute("COMMIT")
-        except Exception as error:  # noqa: BLE001 - collected for the assertion below
+        # Collected, not raised: the assertion below reports every worker's error.
+        except turso.Error as error:
             errors.append(f"{type(error).__name__}: {error}")
         finally:
             connection.close()

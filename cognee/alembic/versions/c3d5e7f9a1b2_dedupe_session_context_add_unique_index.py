@@ -93,7 +93,7 @@ def standalone_sqlite_cache_path(alembic_conn) -> str | None:
     from cognee.infrastructure.databases.exceptions import CacheConnectionError
 
     cache_config = get_cache_config()
-    if cache_config.cache_backend not in ("sqlite", "postgres"):
+    if cache_config.cache_backend not in ("sqlite", "turso", "postgres"):
         return None
 
     try:

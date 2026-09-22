@@ -394,7 +394,8 @@ GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 > us at social@cognee.ai to explore the options.
 
 #### Turso (all three layers)
-`DB_PROVIDER=turso`, `GRAPH_DATABASE_PROVIDER=turso` and `VECTOR_DB_PROVIDER=turso` each run on the
+`DB_PROVIDER=turso`, `GRAPH_DATABASE_PROVIDER=turso`, `VECTOR_DB_PROVIDER=turso` and
+`CACHE_BACKEND=turso` (the session cache's `cache.db`, same layout as the sqlite backend) each run on the
 Turso rewrite engine (`pyturso`, `pip install cognee"[turso]"`) through one shared dialect,
 `sqlite+cognee_turso://` (`cognee/infrastructure/databases/turso/`). Local database files only:
 remote Turso settings (`DB_TURSO_URL`, `GRAPH_DATABASE_KEY`, a `libsql://` vector URL) are a hard
@@ -409,9 +410,9 @@ add → cognify → search example live there too.
 
 #### Session Cache
 ```bash
-# Session/conversation cache backend: sqlite (default), postgres, redis, fs, tapes
+# Session/conversation cache backend: sqlite (default), turso, postgres, redis, fs, tapes
 CACHE_BACKEND=sqlite
-# Optional explicit SQLAlchemy URL for sqlite/postgres cache backends (overrides defaults)
+# Optional explicit SQLAlchemy URL for sqlite/turso/postgres cache backends (overrides defaults)
 CACHE_DB_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 # Session-search execution mode: concurrent (default) or sequential
 SESSION_SEARCH_MODE=concurrent

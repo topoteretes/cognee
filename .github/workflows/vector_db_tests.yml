@@ -191,6 +191,8 @@ jobs:
           cognee/tests/unit/infrastructure/databases/relational/test_create_relational_engine.py
           cognee/tests/unit/infrastructure/databases/graph/test_turso_graph_dataset_database_handler.py
           cognee/tests/unit/infrastructure/databases/vector/test_turso_adapter.py
+          cognee/tests/unit/infrastructure/databases/cache/test_sql_cache_turso.py
+          cognee/tests/unit/infrastructure/databases/cache/test_sql_adapter_crud.py
           cognee/tests/e2e/turso/test_turso_adapter.py
           cognee/tests/e2e/turso/test_concurrent_writes.py
 
@@ -211,7 +213,7 @@ jobs:
         run: uv run pytest cognee/tests/test_search_db.py -v --log-level=INFO
 
       # The same suite with every layer on Turso: relational + graph-as-tables +
-      # vector all run on the rewrite engine (the local integration SDK-664 ships).
+      # vector + session cache all run on the rewrite engine (the local integration SDK-664 ships).
       - name: Run Turso all-layers search tests
         env:
           ENV: 'dev'
@@ -219,6 +221,7 @@ jobs:
           DB_PROVIDER: turso
           GRAPH_DATABASE_PROVIDER: turso
           VECTOR_DB_PROVIDER: turso
+          CACHE_BACKEND: turso
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
