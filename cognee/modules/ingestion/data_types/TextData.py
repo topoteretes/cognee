@@ -1,21 +1,24 @@
 import hashlib
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import BinaryIO
 
 from .IngestionData import IngestionData
 
 
-def create_text_data(data: str) -> "TextData":
-    return TextData(data)
+def create_text_data(data: str, name: str | None = None) -> "TextData":
+    return TextData(data, name)
 
 
 class TextData(IngestionData):
     data: str = None
     metadata: dict = None
+    name: str | None = None
 
-    def __init__(self, data: BinaryIO) -> None:
+    def __init__(self, data: str, name: str | None = None) -> None:
         self.data = data
+        # A caller-chosen file name. Without one the text is stored under its
+        # content hash, which is stable for dedup but meaningless to a reader.
+        self.name = name
 
     def get_identifier(self) -> str:
         metadata = self.get_metadata()
@@ -44,7 +47,7 @@ class TextData(IngestionData):
 
         data_contents = self.data.encode("utf-8")
         hash_contents = hashlib.md5(data_contents).hexdigest()
-        self.metadata["name"] = "text_" + hash_contents + ".txt"
+        self.metadata["name"] = self.name or ("text_" + hash_contents + ".txt")
         self.metadata["content_hash"] = hash_contents
         # Describe the payload the same way reading the stored ".txt" back would
         # (``guess_file_type`` resolves a .txt extension to exactly this type).

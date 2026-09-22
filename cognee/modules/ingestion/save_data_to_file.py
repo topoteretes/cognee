@@ -68,7 +68,10 @@ async def save_data_to_file_detailed(
     data_root_directory = storage_config["data_root_directory"]
 
     classified_data = classify(data, filename)
-    is_text = isinstance(classified_data, TextData)
+    # Only nameless text keeps the flat content-addressed key; text stored
+    # under a caller's name is keyed like a file, so two payloads that share
+    # a name cannot overwrite each other.
+    is_text = isinstance(classified_data, TextData) and classified_data.name is None
 
     file_metadata = await classified_data.aget_metadata()
 

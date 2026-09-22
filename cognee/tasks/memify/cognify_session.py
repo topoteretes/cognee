@@ -1,3 +1,5 @@
+import re
+from datetime import datetime, timezone
 from uuid import UUID
 
 import cognee
@@ -11,8 +13,25 @@ from cognee.modules.improve.constants import USER_SESSIONS_NODE_SET
 from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.ingestion.data_item import DataItem
 
 logger = get_logger("cognify_session")
+
+SESSION_MEMORY_FILE_TAG = "session-memory"
+_UNSAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def session_memory_filename(session_id: str, synced_at: datetime | None = None) -> str:
+    """``<utc time>_session-memory_<session id>.txt`` for a persisted session window.
+
+    Under the content-hash default (``text_<md5>.txt``) a dataset's file list
+    could not say which session a document came from or when it was bridged;
+    the name now carries both, and the tag lets readers pick these files out.
+    Characters a file system or URL would choke on are folded to ``-``.
+    """
+    moment = (synced_at or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    safe_session_id = _UNSAFE_FILENAME_CHARS.sub("-", session_id).strip("-") or "session"
+    return f"{moment:%Y-%m-%dT%H-%M-%SZ}_{SESSION_MEMORY_FILE_TAG}_{safe_session_id}.txt"
 
 
 async def cognify_session(
@@ -60,7 +79,7 @@ async def cognify_session(
             )
 
             await cognee.add(
-                window.text,
+                DataItem(data=window.text, name=session_memory_filename(window.session_id)),
                 dataset_id=dataset_id,
                 node_set=[USER_SESSIONS_NODE_SET],
                 user=user,

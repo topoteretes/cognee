@@ -130,6 +130,10 @@ async def save_data_item_to_storage_detailed(
         return await save_data_to_file_detailed(data_item)
 
     if isinstance(data_item, DataItem):
+        if data_item.name and isinstance(data_item.data, str):
+            # A named item is text by declaration: the caller chose the file
+            # name, so the string is content to store, never a path to open.
+            return await save_data_to_file_detailed(data_item.data, filename=data_item.name)
         # If instance is DataItem use the underlying data
         return await save_data_item_to_storage_detailed(data_item.data)
 

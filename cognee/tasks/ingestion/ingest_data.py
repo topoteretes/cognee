@@ -202,7 +202,6 @@ async def ingest_data(
         )
         _loop1_start = _time.monotonic()
         for data_item in data:
-            underlying_data = data_item.data if isinstance(data_item, DataItem) else data_item
             item_data_id = data_item.data_id if isinstance(data_item, DataItem) else None
             source_uri = _source_uri_from_input(data_item)
 
@@ -212,7 +211,9 @@ async def ingest_data(
             # its (I/O-free) save resolves to.
             carried = find_carried_source(ctx, data_item=data_item)
             if carried is None:
-                stored = await save_data_item_to_storage_detailed(underlying_data)
+                # The DataItem itself, not its payload: a text item may carry
+                # the file name it should be stored under.
+                stored = await save_data_item_to_storage_detailed(data_item)
                 carried = find_carried_source(ctx, file_path=stored.file_path) or stored
 
             original_file_path = carried.file_path
@@ -320,13 +321,11 @@ async def ingest_data(
         for data_item in data:
             # Support for DataItem (custom label + data + optional data_id / external_metadata)
             current_label = None
-            underlying_data = data_item
             item_data_id = None
             item_external_metadata = None
             item_system_metadata = None
 
             if isinstance(data_item, DataItem):
-                underlying_data = data_item.data
                 current_label = data_item.label
                 item_data_id = data_item.data_id
                 item_external_metadata = data_item.external_metadata

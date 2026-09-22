@@ -5,6 +5,7 @@ import pytest
 
 from cognee.exceptions import CogneeSystemError, CogneeValidationError
 from cognee.infrastructure.session.session_persist_watermark import SessionPersistWindow
+from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.memify.cognify_session import cognify_session
 
 # Get the actual module object (not the function) for patching
@@ -18,6 +19,22 @@ def _window(text: str, persisted_qa_count: int = 1) -> SessionPersistWindow:
         text=text,
         persisted_qa_count=persisted_qa_count,
     )
+
+
+def _assert_added_as_named_text(mock_add, window: SessionPersistWindow, *, dataset_id, user):
+    """cognee.add receives the window as a DataItem carrying a session-memory
+    file name, so the dataset's file list can say which session it came from."""
+    mock_add.assert_called_once()
+    args, kwargs = mock_add.call_args
+    (item,) = args
+    assert isinstance(item, DataItem)
+    assert item.data == window.text
+    assert item.name.endswith(f"_session-memory_{window.session_id}.txt")
+    assert kwargs == {
+        "dataset_id": dataset_id,
+        "node_set": ["user_sessions_from_cache"],
+        "user": user,
+    }
 
 
 def _mock_session_manager():
@@ -43,12 +60,7 @@ async def test_cognify_session_success():
     ):
         await cognify_session(window, dataset_id="123")
 
-        mock_add.assert_called_once_with(
-            window.text,
-            dataset_id="123",
-            node_set=["user_sessions_from_cache"],
-            user=None,
-        )
+        _assert_added_as_named_text(mock_add, window, dataset_id="123", user=None)
         mock_cognify.assert_called_once_with(datasets=["123"], user=None, raise_on_error=False)
         # Watermark advanced after successful cognify.
         mock_sm.update_session_context_entry.assert_called_once()
@@ -199,12 +211,7 @@ async def test_cognify_session_with_special_characters():
     ):
         await cognify_session(window, dataset_id="123")
 
-        mock_add.assert_called_once_with(
-            window.text,
-            dataset_id="123",
-            node_set=["user_sessions_from_cache"],
-            user=None,
-        )
+        _assert_added_as_named_text(mock_add, window, dataset_id="123", user=None)
         mock_cognify.assert_called_once_with(datasets=["123"], user=None, raise_on_error=False)
 
 
@@ -224,10 +231,5 @@ async def test_cognify_session_passes_user_to_add_and_cognify():
     ):
         await cognify_session(window, dataset_id="123", user=user)
 
-        mock_add.assert_called_once_with(
-            window.text,
-            dataset_id="123",
-            node_set=["user_sessions_from_cache"],
-            user=user,
-        )
+        _assert_added_as_named_text(mock_add, window, dataset_id="123", user=user)
         mock_cognify.assert_called_once_with(datasets=["123"], user=user, raise_on_error=False)

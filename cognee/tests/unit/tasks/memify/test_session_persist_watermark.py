@@ -218,8 +218,9 @@ async def test_multi_run_completeness_without_reingestion(user, manager, monkeyp
     user_id = str(user.id)
     ingested_texts: list[str] = []
 
-    async def fake_add(text, *args, **kwargs):
-        ingested_texts.append(text)
+    async def fake_add(item, *args, **kwargs):
+        # cognify_session hands add() a named DataItem; the text is its payload.
+        ingested_texts.append(item.data)
 
     async def fake_cognify(*args, **kwargs):
         return None

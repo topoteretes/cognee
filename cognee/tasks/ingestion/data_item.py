@@ -20,6 +20,10 @@ class DataItem:
     # Data.system_metadata — never merged with user external_metadata.
     system_metadata: dict | None = field(default=None)
     data_id: UUID | None = None
+    # File name to store raw text ``data`` under, instead of the content-hash
+    # default (``text_<md5>.txt``). Ignored for files, paths and URLs, which
+    # keep their own names.
+    name: str | None = None
 
 
 def parse_labels(labels: str | None) -> list[str | None] | None:
