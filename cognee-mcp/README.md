@@ -153,7 +153,6 @@ If you'd rather run cognee-mcp in a container, you have two options:
       - `mistral` - Mistral models
       - `ollama` / `huggingface` - Local model support
       - `docs` - Document processing
-      - `codegraph` - Code analysis
       - `tracing` - OpenTelemetry tracing
       - `redis` - Redis support
       - And more (see [pyproject.toml](https://github.com/topoteretes/cognee/blob/main/pyproject.toml) for full list)
@@ -502,7 +501,7 @@ docker run \
 - `API_TOKEN`: Authentication token (optional, required if API has authentication enabled)
 
 **API Mode behavior:**
-The MCP server intentionally exposes only the memory API: `remember`, `recall`, and `forget`.
+The MCP server intentionally exposes only the memory API: `remember`, `recall`, and `forget` (plus the `cognify_status` progress check).
 In API mode these tools call the Cognee API server endpoints directly. Operational helpers such as
 `cognify`, `search`, `list_data`, `delete`, `prune`, `improve`, and document retrieval helpers are
 kept internal and are not exposed as MCP tools.
@@ -514,12 +513,51 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 ### Available Tools
 
-The MCP server exposes three tools:
+The MCP server exposes four tools (three memory tools pinned in `tools/list`, plus `cognify_status`):
 
 - **remember**: Store data in memory. Pass `data` for text, or `filename` + `content_base64` to ingest an uploaded file (up to 10 MB). With `session_id`: fast session cache (text only). Without `session_id`: permanent graph memory
 - **recall**: Search memory with auto-routing. Searches session cache first when `session_id` is provided, then falls through to the permanent graph
 - **forget**: Delete memory by dataset name or id, a single data item by `data_id`, or delete all owned memory with `everything=True`
 - **cognify_status**: Check the progress of background ingestion started by `remember(background=True)`. Unadvertised by default; discoverable via `search_tools` and callable by name
+
+### Recall result summaries
+
+`recall` (the MCP memory-search tool) starts every successful response with a
+summary, followed by the same result body as before:
+
+```text
+3 memories found (2 from sessions, 1 from project docs)
+[session] ...
+```
+
+The count is the number of returned memory entries, not `top_k`, underlying
+chunks used to synthesize an answer, or system status messages. Source and dataset
+hints use metadata already present in the returned entries; no recency lookup or
+extra LLM call is made.
+
+Empty results distinguish an empty memory graph, indexing in progress, indexing
+failure, and no match. When available, progress is displayed as, for example,
+`still indexing — 12/40 items processed, retry shortly`. These are data items,
+not an inferred chunk count. A graph with no recorded indexing run is reported
+as not yet indexed. If the status check fails or exceeds its two-second budget,
+the summary explicitly says memory status is unavailable. Successful hits do
+not trigger status checks.
+
+The MCP content remains a single `TextContent` block. Text consumers can separate
+line one from the unchanged body with `text.partition("\n")`. Machine consumers
+can read `content[0]._meta["cognee/memory"]`, containing `count` and `state`.
+
+`state` is one of four values, one per action a caller can take:
+
+| state | meaning |
+| --- | --- |
+| `found` | memory contributed; `count` is how many entries |
+| `indexing` | ingestion is still running — retry shortly |
+| `build_failed` | ingestion failed — check `cognify_status` |
+| `none` | nothing to return |
+
+`indexing` additionally carries `completed`/`total` when the pipeline reports
+them. Tool errors retain their existing `Error:` response.
 
 ### Tool surface (`COGNEE_MCP_TOOL_MODE`)
 
@@ -552,7 +590,7 @@ So: **write descriptions in the words an agent would use, including both singula
 
 By default, each MCP client gets its own auto-named dataset (e.g. Cursor → `cursor_vscode_memory`, Claude Code → `claude_code_memory`) so different agents don't share memory unintentionally. The dataset is created on demand the first time a client writes to it.
 
-LLM-direct calls to `cognify`, `remember`, `improve`, and `cognify_status` route to the agent-scoped dataset when `dataset_name` is omitted. Pass `dataset_name` explicitly to override (e.g. `dataset_name="main_dataset"` still works).
+`remember` and `cognify_status` route to the agent-scoped dataset when `dataset_name` is omitted (the internal `cognify`/`improve` helpers, which are not exposed as tools, do the same). Pass `dataset_name` explicitly to override (e.g. `dataset_name="main_dataset"` still works).
 
 To disable agent scoping and have all clients share `main_dataset` as the default, set in `.env`:
 
@@ -585,8 +623,14 @@ rm -rf "$DATA_ROOT/.cognee_system" "$DATA_ROOT/.data_storage"
 # Store permanent memory
 remember(data="Cognee MCP now exposes a focused memory API.", dataset_name="main_dataset")
 
-# Store session memory
-remember(data="Temporary working note", session_id="agent-session-1")
+# Store permanent memory without the automatic improve stage (add + cognify still run)
+remember(data="A new fact", dataset_name="main_dataset", self_improvement=False)
+
+# The opt-out also applies to file uploads and background=True ingestion
+remember(data="A new fact", self_improvement=False, background=True)
+
+# Store session memory without a background graph bridge in direct mode
+remember(data="Temporary working note", session_id="agent-session-1", self_improvement=False)
 
 # Recall from memory
 recall(query="What changed in the MCP server?", session_id="agent-session-1")
@@ -595,6 +639,40 @@ recall(query="What changed in the MCP server?", session_id="agent-session-1")
 forget(dataset="main_dataset")
 ```
 
+`self_improvement` defaults to `True`; only an explicit `False` is forwarded, so
+`True` leaves the core default in charge. In permanent mode, `False` disables
+automatic improvement without skipping ingestion or graph building.
+In **direct session mode**, it disables the automatic session-to-graph bridge while
+still storing the session entry. In **API session mode**, MCP uses typed QA entries,
+which stay in the session cache for all flag values; the flag does not enable a
+graph bridge there. It does not control separately requested skill improvement.
+
+
+### Select an uploaded ontology for a write
+
+Pass `ontology_key` to `remember` to ground permanent-memory extraction with one
+or more previously uploaded OWL ontologies:
+
+```python
+remember(data="Alice works at Acme.", dataset_name="workspace_a", ontology_key="workspace_a_v2")
+remember(
+    data="Acme develops software.",
+    ontology_key=["organizations", "software"],
+    background=True,
+)
+```
+
+In API mode, upload the ontologies first through `POST /api/v1/ontologies` using
+the same authenticated user as the MCP server. Keys are sent as repeated
+`ontology_key` form fields. In local mode, keys resolve through `OntologyService`
+in the default user's local ontology store; remote uploads are not copied locally.
+Unknown or inaccessible keys fail the write. Background failures are reported by
+`cognify_status`.
+
+Omitting `ontology_key` (or passing an empty list) preserves the configured
+server ontology, including `ONTOLOGY_FILE_PATH`. Ontology selection is only for
+permanent writes: combining a nonempty key with `session_id` returns an error
+because session-cache writes do not perform extraction.
 
 ## Development and Debugging
 

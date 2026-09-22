@@ -27,17 +27,30 @@ class MetaData(TypedDict):
 # Updated DataPoint model with versioning and new fields
 class DataPoint(BaseModel):
     """
-    Model representing a data point with versioning and metadata support.
+    Base class for every graph node cognee stores.
 
-    Public methods include:
-    - get_embeddable_data
-    - get_embeddable_properties
-    - get_embeddable_property_names
-    - update_version
-    - to_json
-    - from_json
-    - to_dict
-    - from_dict
+    Subclass it with plain pydantic fields. A field holding another ``DataPoint`` (or a
+    list of them) becomes an edge named after the field when the tree is written to the
+    graph; scalar fields become node properties.
+
+    The ``metadata`` dict is the storage contract:
+
+    * ``index_fields``: field names to embed. Each gets its own vector collection
+      ``<TypeName>_<field>``; the first one is what ``get_embeddable_data`` returns.
+      Declare with ``Annotated[str, Embeddable()]`` or list them explicitly.
+    * ``identity_fields``: fields whose values derive the node id (``uuid5``), so the same
+      real-world thing maps to the same node on every ingestion and graph writes merge.
+      A subclass without them gets a random id and can never be merged.
+      Declare with ``Annotated[str, Dedup()]`` or list them explicitly. Exactly one is
+      required for ``Edge[...]`` endpoints and ``FromIdentity`` references.
+    * ``transparent`` (optional): the node is unwrapped when written -- its edges attach
+      to its children instead (see ``modules.graph.utils.unwrap_transparent_nodes``).
+
+    Declaring ``metadata`` explicitly on a subclass disables the ``Annotated``
+    derivation for that class. ``type`` is set from the class name automatically;
+    ``version``/``updated_at`` track edits (``update_version``). Markers live in
+    ``FieldAnnotations.py``; the typed-edge and identity-reference forms are documented
+    in ``cognee/shared/llm_graph_model.py``.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -230,12 +243,13 @@ class DataPoint(BaseModel):
 
             The value of the embeddable data, or None if not found.
         """
-        if (
-            data_point.metadata
-            and len(data_point.metadata["index_fields"]) > 0
-            and hasattr(data_point, data_point.metadata["index_fields"][0])
-        ):
-            attribute = getattr(data_point, data_point.metadata["index_fields"][0])
+        # ``.get``, not ``metadata["index_fields"]``: subclasses redeclare the
+        # field as a plain ``dict`` (see the adapters' IndexSchema), so the key
+        # the TypedDict marks as required is not guaranteed at runtime.
+        index_fields = data_point.metadata.get("index_fields") or []
+
+        if index_fields and hasattr(data_point, index_fields[0]):
+            attribute = getattr(data_point, index_fields[0])
 
             if isinstance(attribute, str):
                 return attribute.strip()
@@ -260,12 +274,9 @@ class DataPoint(BaseModel):
 
             A list of embeddable property values, or an empty list if none exist.
         """
-        if data_point.metadata and len(data_point.metadata["index_fields"]) > 0:
-            return [
-                getattr(data_point, field, None) for field in data_point.metadata["index_fields"]
-            ]
+        index_fields = data_point.metadata.get("index_fields") or []
 
-        return []
+        return [getattr(data_point, field, None) for field in index_fields]
 
     @classmethod
     def get_embeddable_property_names(cls, data_point: "DataPoint") -> list[str]:

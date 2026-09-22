@@ -1,0 +1,141 @@
+"""First-run error remediation table, shared by the CLI, the REST API and the MCP server.
+
+Two mechanisms feed a hint to the user or agent:
+
+* An exception can carry its own ``remediation`` (``CogneeApiError(remediation=...)``);
+  ``str(exc)`` then ends with ``Fix: ...`` on every transport for free.
+* For errors that originate outside cognee (litellm auth failures, connection errors)
+  ``find_remediation(str(exc))`` matches the message against the table below.
+
+Consumers: ``cognee/cli/_cognee.py`` (prints the hint under the error), the
+``CogneeApiError`` handler in ``cognee/api/client.py`` (adds a ``remediation`` key to the
+JSON body), and the tool error paths in ``cognee-mcp/src/server.py``.
+
+The failure modes that show up most often on a clean install are:
+
+1. **Invalid API key** — key is set but rejected upstream (401).
+2. **Key rejected for permission / quota** — provider accepts the key but
+   denies the request (403, or an exhausted-quota / billing error).
+3. **Missing API key** — user has not set ``LLM_API_KEY`` at all.
+4. **Unreachable custom endpoint** — user pointed ``EMBEDDING_ENDPOINT`` or
+   ``LLM_ENDPOINT`` at a URL that resolves but does not respond.
+5. **Wrong ontology path** — ``--ontology-file`` argument does not exist.
+
+Each of these otherwise triggers a raw stack trace from deep in the pipeline.
+This module lifts a short, prescriptive hint next to the error so the user
+or agent knows the exact env var or flag to fix without reading the trace.
+
+Matching is by case-insensitive substring on the stringified error rather
+than exception-type checks: many of these failures reach the CLI wrapped in
+``CliCommandException`` with a stringified inner error, so ``isinstance``
+would miss the real class. Keeping the match on substrings also lets a new
+failure mode land as one table row with no import-graph work. Needles are
+anchored on the words that appear in the *raised* message (verified against
+the runtime error text), not on env-var spellings a message may not contain.
+"""
+
+from __future__ import annotations
+
+# ``CogneeApiError.__str__`` appends its own remediation after this marker. Call sites
+# that print ``str(exc)`` check for it so a hint is never shown twice.
+#
+# Invariant: no hint cognee produces may itself contain this marker -- a hint that did
+# would both read as "Fix: ... Fix: ..." once a consumer labels it, and make the
+# "already hinted" check above fire on its own output. Enforced by
+# ``cognee/tests/unit/exceptions/test_remediation_field.py``. (A *foreign* message that
+# happens to contain " Fix: " still suppresses the table lookup; that is the intended
+# trade -- it means some other layer already told the user what to do.)
+REMEDIATION_MARKER = " Fix: "
+
+# Ordering matters: the first match wins, so narrower patterns come first.
+# An invalid key ("authenticationerror") beats the generic missing-key row.
+# Each entry is (needles, hint); the hint fires when any needle is a
+# case-insensitive substring of the error message.
+_TABLE: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        ("authenticationerror", "invalid api key", "incorrect api key"),
+        (
+            "The LLM provider rejected the API key. Set LLM_API_KEY in "
+            "your .env to a valid key for the LLM_PROVIDER you configured "
+            "(default provider: openai)."
+        ),
+    ),
+    (
+        ("litellm.permissiondeniederror", "insufficient_quota", "billing"),
+        (
+            "The LLM provider accepted the key but denied the request. "
+            "Confirm the account has active billing and quota, or switch "
+            "LLM_PROVIDER/LLM_MODEL to one your account can use."
+        ),
+    ),
+    (
+        # Real error: LLMAPIKeyNotSetError("LLM API key is not set.").
+        ("llmapikeynotset", "api key is not set", "no api key"),
+        (
+            "LLM_API_KEY is not set. Copy .env.template to .env and "
+            "populate LLM_API_KEY. Cognee defaults to the OpenAI provider "
+            "so an OpenAI key is the simplest starting point."
+        ),
+    ),
+    (
+        # Real raised messages: "Cannot connect to embedding endpoint. Check
+        # EMBEDDING_ENDPOINT." and "Embedding request timed out. Check
+        # EMBEDDING_ENDPOINT connectivity."
+        ("embedding_endpoint", "cannot connect to embedding", "embedding request timed out"),
+        (
+            "The configured EMBEDDING_ENDPOINT is not reachable. Verify the "
+            "URL, that the host is running, and that the port is open. "
+            "Unset EMBEDDING_ENDPOINT to fall back to the provider default."
+        ),
+    ),
+    (
+        ("ontology file not found",),
+        (
+            "The --ontology-file path does not exist. Pass an absolute "
+            "path to an .owl / .ttl file, or drop the flag to use the built-in "
+            "resolver."
+        ),
+    ),
+    (
+        # Real error: ProviderConfigMismatchError raised by the config
+        # preflight in add()/remember(); its message names the exact env vars.
+        ("providerconfigmismatch", "silently default to openai"),
+        (
+            "The LLM and embedding provider settings are inconsistent. Run "
+            "`cognee-cli doctor` for a full diagnosis, or set the env vars named "
+            "in the error above."
+        ),
+    ),
+)
+
+
+def find_remediation(message: str) -> str | None:
+    """Return the hint for the first matching pattern, or ``None``.
+
+    Deliberately tolerant of a ``None`` or empty message so callers can
+    hand off whatever they got from ``str(ex)`` without pre-validation.
+    """
+    if not message:
+        return None
+    haystack = message.lower()
+    for needles, hint in _TABLE:
+        if any(needle in haystack for needle in needles):
+            return hint
+    return None
+
+
+def remediation_for(error: BaseException) -> str | None:
+    """Return the hint for an exception, or ``None``.
+
+    Prefers the exception's own ``remediation`` attribute (``CogneeApiError``); otherwise
+    consults the substring table -- unless ``str(error)`` already carries a ``Fix:`` (a
+    cognee error re-wrapped by another layer), in which case the hint is already in the
+    message and ``None`` is returned so it is not repeated.
+    """
+    own = getattr(error, "remediation", None)
+    if own:
+        return own
+    text = str(error)
+    if REMEDIATION_MARKER in text:
+        return None
+    return find_remediation(text)

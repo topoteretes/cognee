@@ -67,7 +67,7 @@ def _fastembed_hf_repo(model: str | None) -> str | None:
         return None
 
     try:
-        from fastembed import TextEmbedding  # ty:ignore[unresolved-import]
+        from fastembed import TextEmbedding
 
         supported = TextEmbedding.list_supported_models()
     except Exception:

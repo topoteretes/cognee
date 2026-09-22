@@ -1,3 +1,12 @@
+"""Build the global context index with improve(build_global_context_index=True), then extend it.
+
+Six facts are remembered and indexed; the TextSummary count, bucket summaries and root summary are
+printed, then one more fact is remembered and improve() runs again to show the incremental update.
+
+Requires: LLM_API_KEY.
+Run: uv run python examples/guides/global_context_index.py
+"""
+
 import asyncio
 
 import cognee

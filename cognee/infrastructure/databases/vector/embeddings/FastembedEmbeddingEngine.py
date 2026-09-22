@@ -2,6 +2,8 @@ import asyncio
 import logging
 import math
 import os
+import tempfile
+from pathlib import Path
 
 import numpy as np
 
@@ -9,8 +11,8 @@ try:
     from fastembed import TextEmbedding
 except ImportError:
     raise ImportError(
-        "fastembed is required for FastembedEmbeddingEngine but is not installed. "
-        "Install it with: pip install 'cognee[fastembed]'"
+        "fastembed is required for FastembedEmbeddingEngine but is not importable; it is a "
+        "core cognee dependency. Reinstall it with: pip install fastembed"
     )
 
 import litellm
@@ -33,10 +35,36 @@ from cognee.infrastructure.databases.vector.embeddings.utils import (
 )
 from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.model_download_notice import log_model_load
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 
 litellm.set_verbose = False
 logger = get_logger("FastembedEmbeddingEngine")
+
+
+def fastembed_model_cached(model: str) -> tuple[bool, str, str | None]:
+    """Whether fastembed already holds ``model`` locally, its cache dir, and a size hint.
+
+    fastembed resolves its cache the same way: ``FASTEMBED_CACHE_PATH`` or
+    ``fastembed_cache`` under the system temp dir. A model downloaded from the
+    hub lives under ``models--<repo>``; one fetched from fastembed's own
+    bucket under ``fast-<name>``. Zero-network; unknown models report a
+    download with no size.
+    """
+    cache_dir = Path(
+        os.getenv("FASTEMBED_CACHE_PATH", os.path.join(tempfile.gettempdir(), "fastembed_cache"))
+    )
+    description = next(
+        (entry for entry in TextEmbedding.list_supported_models() if entry.get("model") == model),
+        None,
+    )
+    size_gb = (description or {}).get("size_in_GB")
+    size_hint = f"about {round(size_gb * 1000)} MB" if size_gb else None
+    hub_repo = ((description or {}).get("sources") or {}).get("hf")
+    candidates = [cache_dir / f"fast-{model.split('/')[-1]}"]
+    if hub_repo:
+        candidates.append(cache_dir / f"models--{hub_repo.replace('/', '--')}")
+    return any(path.exists() for path in candidates), str(cache_dir), size_hint
 
 
 class FastembedEmbeddingEngine(EmbeddingEngine):
@@ -75,7 +103,15 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         self.max_completion_tokens = max_completion_tokens
         self.tokenizer = self.get_tokenizer()
         self.batch_size = batch_size
-        # self.retry_count = 0
+        cached, cache_dir, size_hint = fastembed_model_cached(model)
+        log_model_load(
+            logger,
+            model=model,
+            cached=cached,
+            cache_dir=cache_dir,
+            size_hint=size_hint,
+            location_var="FASTEMBED_CACHE_PATH",
+        )
         self.embedding_model = TextEmbedding(model_name=model)
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false")

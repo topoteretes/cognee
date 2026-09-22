@@ -220,3 +220,10 @@ rendered.yaml
 
 # enola code-graph snapshots (written into any repository enola scans)
 .enola/
+
+# PR body files written by CI workflows (spec_extras_sync, router_docstring_sync); not repo content
+pr_body.md
+
+# Scratch data/system dirs written by the keyless e2e script
+cognee/tests/e2e/keyless/.keyless_run/
+cognee/tests/e2e/keyless/.crash_run/

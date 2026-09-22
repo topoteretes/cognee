@@ -3,6 +3,7 @@ from functools import lru_cache
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from cognee.exceptions import CogneeConfigurationError
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("embedding_config")
@@ -14,6 +15,31 @@ logger = get_logger("embedding_config")
 # Keep it for back-compat (the OpenAI default model still resolves to this via
 # litellm), but log a warning when we hit it without a real lookup.
 _FALLBACK_DIMENSIONS = 3072
+
+DEFAULT_EMBEDDING_PROVIDER = "openai"
+DEFAULT_EMBEDDING_MODEL = "openai/text-embedding-3-large"
+
+# What embeddings run on when nothing is configured and no usable LLM key
+# exists to reuse for the OpenAI default: a local CPU model (`fastembed`
+# extra), matching the local GLiNER extractor cognify picks in that state.
+# bge-small is the smallest download in the fastembed registry (67 MB) that
+# is a real retrieval model; its vector size is read from the registry so
+# the model is the only thing to change here.
+DEFAULT_LOCAL_EMBEDDING_PROVIDER = "fastembed"
+DEFAULT_LOCAL_EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
+
+
+class KeylessEmbedderNotInstalledError(CogneeConfigurationError):
+    """No LLM key is configured and the local embedder's package is missing."""
+
+    def __init__(self):
+        super().__init__(
+            "No LLM API key is configured, so embeddings would run on the local fastembed "
+            f"model {DEFAULT_LOCAL_EMBEDDING_MODEL}, but the `fastembed` package (a cognee "
+            "dependency) is not importable. Reinstall it with: pip install fastembed, or set "
+            "LLM_API_KEY to embed with the OpenAI default.",
+            "KeylessEmbedderNotInstalledError",
+        )
 
 
 def _resolve_embedding_dimensions(provider: str | None, model: str | None) -> int | None:
@@ -68,8 +94,8 @@ class EmbeddingConfig(BaseSettings):
     - to_dict: Serialize the configuration settings to a dictionary.
     """
 
-    embedding_provider: str | None = "openai"
-    embedding_model: str | None = "openai/text-embedding-3-large"
+    embedding_provider: str | None = DEFAULT_EMBEDDING_PROVIDER
+    embedding_model: str | None = DEFAULT_EMBEDDING_MODEL
     # Resolved in model_post_init when not set explicitly. Was hard-defaulted
     # to 3072, which silently broke every non-OpenAI-text-embedding-3-large
     # embedder by causing a Vector(3072) / 384-dim (etc.) mismatch on first
@@ -124,11 +150,7 @@ class EmbeddingConfig(BaseSettings):
                 )
                 self.embedding_dimensions = _FALLBACK_DIMENSIONS
 
-        if (
-            not self.embedding_batch_size
-            and self.embedding_provider.lower() == "openai"
-            or not self.embedding_batch_size
-        ):
+        if not self.embedding_batch_size:
             self.embedding_batch_size = 36
 
     def to_dict(self) -> dict:
@@ -156,6 +178,46 @@ class EmbeddingConfig(BaseSettings):
             "embedding_rate_limit_requests": self.embedding_rate_limit_requests,
             "embedding_rate_limit_interval": self.embedding_rate_limit_interval,
         }
+
+
+def embedding_settings_configured(config) -> bool:
+    """True when any embedding setting was configured: provider, model, key or
+    endpoint differs from the stock OpenAI default.
+
+    Value-based on purpose: settings arrive from env vars, kwargs and
+    ``cognee.config.set_embedding_*`` alike, and only the values tell the
+    cases apart. The preflight and the engine factory share this predicate.
+    """
+    return not (
+        (config.embedding_provider or "").lower() == DEFAULT_EMBEDDING_PROVIDER
+        and (config.embedding_model or "") == DEFAULT_EMBEDDING_MODEL
+        and not (config.embedding_api_key or "").strip()
+        and not config.embedding_endpoint
+    )
+
+
+def resolve_embedding_defaults(config, llm_config) -> tuple[str | None, str | None, int | None]:
+    """Return the ``(provider, model, dimensions)`` the embedding engine runs with.
+
+    The OpenAI default embedder only works because ``LLM_API_KEY`` is reused
+    for it. With no embedding setting configured and no usable LLM key, that
+    default cannot run, so embeddings go to the local fastembed model instead — the
+    embedding half of keyless ingestion (``resolve_extractor`` is the graph
+    half). Any configured embedding setting, a usable LLM key, or a disabled
+    preflight (``keyless_local_defaults_apply``) keeps the config exactly as
+    given.
+    """
+    from cognee.modules.preflight import keyless_local_defaults_apply
+
+    if not embedding_settings_configured(config) and keyless_local_defaults_apply(llm_config):
+        dimensions = _resolve_embedding_dimensions(
+            DEFAULT_LOCAL_EMBEDDING_PROVIDER, DEFAULT_LOCAL_EMBEDDING_MODEL
+        )
+        if dimensions is None:
+            # The registry lookup only fails when fastembed itself is absent.
+            raise KeylessEmbedderNotInstalledError()
+        return DEFAULT_LOCAL_EMBEDDING_PROVIDER, DEFAULT_LOCAL_EMBEDDING_MODEL, dimensions
+    return config.embedding_provider, config.embedding_model, config.embedding_dimensions
 
 
 @lru_cache

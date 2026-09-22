@@ -56,6 +56,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         endpoint: str | None = None,
         api_version: str | None = None,
         transcription_model: str | None = None,
+        image_transcribe_model: str | None = None,
         instructor_mode: str | None = None,
         streaming: bool = False,
         fallback_model: str | None = None,
@@ -71,6 +72,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
                 endpoint=endpoint,
                 api_version=api_version,
                 transcription_model=transcription_model,
+                image_transcribe_model=image_transcribe_model,
                 instructor_mode=instructor_mode,
                 streaming=streaming,
                 fallback_model=fallback_model,
@@ -86,6 +88,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
                 endpoint=endpoint,
                 api_version=api_version,
                 transcription_model=transcription_model,
+                image_transcribe_model=image_transcribe_model,
                 instructor_mode=instructor_mode,
                 streaming=streaming,
                 fallback_model=fallback_model,
@@ -109,6 +112,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         endpoint: str | None,
         api_version: str | None,
         transcription_model: str | None,
+        image_transcribe_model: str | None,
         instructor_mode: str | None,
         streaming: bool,
         fallback_model: str | None,
@@ -150,7 +154,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         self.endpoint = endpoint
         self.max_completion_tokens = max_completion_tokens
         self.transcription_model = transcription_model or model
-        self.image_transcribe_model = model
+        self.image_transcribe_model = image_transcribe_model or model
         self.fallback_model = fallback_model
         self.fallback_api_key = fallback_api_key
         self.fallback_endpoint = fallback_endpoint

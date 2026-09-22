@@ -180,7 +180,15 @@ class LLMAPIKeyNotSetError(CogneeValidationError):
     """
 
     def __init__(self, message: str = "LLM API key is not set.") -> None:
-        super().__init__(message=message, name="LLMAPIKeyNotSetError")
+        super().__init__(
+            message=message,
+            name="LLMAPIKeyNotSetError",
+            remediation=(
+                "Set LLM_API_KEY in your .env (copy .env.template to start). Cognee defaults "
+                "to the OpenAI provider; set LLM_PROVIDER and LLM_MODEL as well to use another "
+                "provider, and configure EMBEDDING_* too or embeddings fall back to OpenAI."
+            ),
+        )
 
 
 class UnsupportedLLMProviderError(CogneeValidationError):
