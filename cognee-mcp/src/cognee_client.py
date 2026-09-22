@@ -615,7 +615,9 @@ class CogneeClient:
     ) -> dict[str, Any]:
         """Store data in memory via remember().
 
-        With session_id: stores in session cache only (fast).
+        With session_id: direct mode may bridge cache entries to the graph;
+        self_improvement=False disables that bridge. API typed entries stay
+        cache-only for every value.
         Without session_id: full add + cognify pipeline (permanent), followed
         by the improve loop unless ``self_improvement`` is False.
 
@@ -660,6 +662,8 @@ class CogneeClient:
                     "dataset_name": dataset_name,
                     "session_id": session_id,
                 }
+                if not self_improvement:
+                    payload["self_improvement"] = False
                 response = await self.client.post(
                     endpoint,
                     json=payload,
