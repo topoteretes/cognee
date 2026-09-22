@@ -46,6 +46,12 @@ answer = await cognee.search(
 Re-running `remember(...)` with the same dataset syncs only the delta and forgets any
 mail removed from Gmail. See `examples/guides/gmail.py` for the full two-sync demo.
 
+Deletion propagation requires a successful foreground sync (the default).
+`cognee.add(..., run_in_background=True)` skips orphan cleanup to preserve existing
+memory if the detached ingestion fails. To purge deletions already staged by a
+background run, the affected source tables must be loaded again in the foreground;
+a no-change incremental retry alone does not guarantee reconciliation.
+
 Changing `label_ids` starts a backfill for the new selection, including messages
 that predate the previous sync. Reordering the same labels keeps the incremental
 cursor. Changing the selection does not purge previously indexed mail; use

@@ -46,6 +46,12 @@ See `examples/guides/google_drive.py` for the full flow.
 
 ## How sync + forget-on-delete work
 
+Deletion propagation requires a successful foreground sync (the default).
+`cognee.add(..., run_in_background=True)` skips orphan cleanup to preserve existing
+memory if the detached ingestion fails. To purge deletions already staged by a
+background run, the affected source tables must be loaded again in the foreground;
+a no-change incremental retry alone does not guarantee reconciliation.
+
 Incremental sync uses the Drive Changes API page token (persisted in dlt's per-resource state):
 the first run captures a start token + does a full folder listing; later runs emit only
 added/changed files plus hard-delete tombstones for removed/trashed files. Deletes are emitted
