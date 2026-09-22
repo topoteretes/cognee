@@ -28,26 +28,14 @@ from sqlalchemy.dialects import registry
 from sqlalchemy.dialects.sqlite.aiosqlite import SQLiteDialect_aiosqlite
 
 from .compiler import CogneeTursoCompiler
+from .runtime import INSTALL_HINT
 
 DIALECT_NAME = "sqlite"
 DRIVER_NAME = "cognee_turso"
-INSTALL_HINT = (
-    "Turso dependencies are not installed. Install them with "
-    "'pip install cognee\"[turso]\"' to use the Turso backends."
-)
 
 # Connect arguments the SQLite/aiosqlite code paths pass that turso.aio.connect
 # does not accept. Dropped rather than forwarded so both branches share one config.
 _UNSUPPORTED_CONNECT_ARGS = ("timeout", "check_same_thread", "uri", "detect_types")
-
-
-def require_turso():
-    """Import and return the ``turso`` module, or raise a cognee-worded ImportError."""
-    try:
-        import turso
-    except ImportError as error:
-        raise ImportError(INSTALL_HINT) from error
-    return turso
 
 
 try:

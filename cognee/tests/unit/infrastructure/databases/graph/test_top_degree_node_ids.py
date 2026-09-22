@@ -313,6 +313,7 @@ async def test_cypher_limits_edges_before_aggregating(typed):
 
 @pytest.mark.asyncio
 async def test_turso_native_seed_selection(tmp_path):
+    pytest.importorskip("turso", reason="pyturso not installed")
     from types import SimpleNamespace
 
     from cognee.infrastructure.databases.graph.turso.adapter import TursoAdapter

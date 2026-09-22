@@ -19,7 +19,7 @@ try:
     from cognee.infrastructure.engine import DataPoint
 
     HAS_TURSO = True
-except ModuleNotFoundError:
+except ImportError:
     HAS_TURSO = False
 
 

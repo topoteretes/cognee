@@ -6,7 +6,7 @@ package: one SQLAlchemy dialect (``sqlite+cognee_turso://``), one settings class
 """
 
 from .config import TursoConfig, get_turso_config
-from .dialect import INSTALL_HINT, is_turso_url, register_dialect, require_turso, turso_url
+from .runtime import INSTALL_HINT, require_turso
 from .files import DATABASE_COMPANION_SUFFIXES, database_file_paths, remove_database_files
 from .transactions import (
     apply_pragmas,
@@ -20,6 +20,39 @@ from .transactions import (
     is_retryable_conflict,
     retry_on_conflict,
 )
+
+DIALECT_NAME = "sqlite"
+DRIVER_NAME = "cognee_turso"
+_URL_PREFIX = f"{DIALECT_NAME}+{DRIVER_NAME}://"
+
+
+# The dialect module imports pyturso at load time. This package is reached from
+# cognee's core import path (the dataset-handler registry imports the Turso
+# handlers), so the dialect is loaded lazily: installations without the turso
+# extra must import cognee, and only fail when a Turso engine is actually built.
+
+
+def register_dialect() -> None:
+    """Make ``sqlite+cognee_turso://`` resolvable by ``create_async_engine``. Idempotent."""
+    from .dialect import register_dialect as _register
+
+    _register()
+
+
+def turso_url(database_path: str) -> str:
+    """Return the SQLAlchemy URL for a local Turso database file (or ``:memory:``).
+
+    Registers the dialect as a side effect so callers can hand the URL straight to
+    ``create_async_engine``. An absolute path yields ``sqlite+cognee_turso:////abs``,
+    the same four-slash shape the SQLite branch produces.
+    """
+    register_dialect()
+    return f"{_URL_PREFIX}/{database_path}"
+
+
+def is_turso_url(connection_string: str) -> bool:
+    return connection_string.startswith(_URL_PREFIX)
+
 
 __all__ = [
     "DATABASE_COMPANION_SUFFIXES",

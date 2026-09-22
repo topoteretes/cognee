@@ -289,6 +289,7 @@ async def test_delete_dataset_evicts_before_removing_file(monkeypatch, tmp_path)
 
 
 async def test_create_dataset_opens_a_real_graph(tmp_path):
+    pytest.importorskip("turso", reason="pyturso not installed")
     """The other half of COG-6491: cleanup was the visible failure, but the
     same value also builds the connection string, interpolated into
     "sqlite+aiosqlite:///". Nothing else here lets the real engine run, so
