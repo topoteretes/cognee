@@ -131,8 +131,10 @@ and appends hits with `source="skills"`. Disable with
   collection is missing. `wide_search_top_k` and `triplet_distance_penalty`
   with hybrid raise `InvalidHybridSearchConfig`; pin
   `GRAPH_COMPLETION` to use them.
-- **`SKILLS` and `AGENTIC_COMPLETION` need exactly one dataset**, or they
-  raise.
+- **`SKILLS` and `AGENTIC_COMPLETION` need exactly one dataset.** `SKILLS`
+  raises otherwise, from both `recall()` and `search()`. For
+  `AGENTIC_COMPLETION` only `search()` checks it up front, so call it through
+  `search()` with one dataset.
 - **`code_query` without `scope="code"` raises**, and `scope="tools"` also
   needs `TOOL_CALLS_ENABLED=true`.
 - **Latency.** Completion types make one LLM call; with a session and
