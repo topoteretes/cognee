@@ -80,6 +80,8 @@ def test_config_declares_no_shared_knobs():
         "debounce_seconds",
         "stages_disabled",
         "feedback_alpha",
+        "ontology_proposals_enabled",
+        "ontology_proposals_min_occurrences",
     }
     for shared in ("triplet_embedding", "caching", "auto_feedback", "personalization_enabled"):
         assert shared not in fields

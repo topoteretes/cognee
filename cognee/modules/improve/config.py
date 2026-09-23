@@ -40,6 +40,12 @@ class ImproveConfig(BaseSettings):
     # ``disabled_by_config``. Read as a comma-separated string.
     stages_disabled: Annotated[list[str], NoDecode] = []
     feedback_alpha: float = DEFAULT_FEEDBACK_ALPHA
+    # Stage 10 (``ontology_proposals``): draft mapping / definition_conflict /
+    # ontology_extension proposals for a human to ratify. Off = skipped with
+    # ``opt_in_disabled``. ``min_occurrences`` is how many entities must share an
+    # ungrounded EntityType before it is proposed as an ontology extension.
+    ontology_proposals_enabled: bool = True
+    ontology_proposals_min_occurrences: int = 3
 
     model_config = SettingsConfigDict(env_prefix="IMPROVE_", env_file=".env", extra="ignore")
 

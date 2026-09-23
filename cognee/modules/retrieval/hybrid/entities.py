@@ -1,3 +1,4 @@
+import json
 from typing import Any
 from uuid import UUID
 
@@ -285,14 +286,20 @@ def _edge_bullets_from_connections(
     return edges[:max_edges]
 
 
-def _edge_sort_key(edge: dict, edge_ranks: dict[str, int]) -> tuple[int, int]:
-    """Pinned type edges first, then query-ranked edges, then legacy graph order."""
+def _edge_sort_key(edge: dict, edge_ranks: dict[str, int]) -> tuple[int, int, int]:
+    """Pinned type edges first, then query-ranked edges, then legacy graph order.
+
+    Within each group an edge from an authoritative source (a ``realizes`` edge
+    stamped ``authoritative`` by schema alignment) sorts before the others, so when
+    several tables realize one concept the system of record survives the edge cap.
+    """
+    authority = 0 if edge.get("authoritative") else 1
     if _is_type_edge(edge):
-        return (0, 0)
+        return (0, 0, authority)
     rank = edge_ranks.get(edge.get("edge_type_id"))
     if rank is None:
-        return (2, 0)
-    return (1, rank)
+        return (2, 0, authority)
+    return (1, rank, authority)
 
 
 def _unpack_connection(connection: Any) -> tuple[dict, dict, dict] | None:
@@ -308,11 +315,25 @@ def _edge_bullet(source: dict, edge: dict, target: dict) -> dict | None:
     source_label = _node_label(source)
     target_label = _node_label(target)
     relationship = display_value(edge.get("relationship_name"))
+    properties = _edge_properties(edge)
     text = first_display_value(edge.get("edge_text"), _nested_edge_text(edge))
     if not text and source_label and relationship and target_label:
         text = f"{source_label} -- {relationship} -- {target_label}"
     if not text:
         return None
+
+    authoritative = bool(properties.get("authoritative"))
+    owner = display_value(properties.get("owner"))
+    if authoritative or owner:
+        qualifiers = [
+            part
+            for part in (
+                "authoritative source" if authoritative else "",
+                f"owner: {owner}" if owner else "",
+            )
+            if part
+        ]
+        text = f"{text} ({', '.join(qualifiers)})"
 
     return {
         "text": text,
@@ -322,8 +343,21 @@ def _edge_bullet(source: dict, edge: dict, target: dict) -> dict | None:
         "relationship": relationship,
         "target_id": display_value(target.get("id")),
         "edge_type_id": connection_edge_type_id(edge),
-        "edge_object_id": display_value((edge.get("properties") or {}).get("edge_object_id")),
+        "edge_object_id": display_value(properties.get("edge_object_id")),
+        "authoritative": authoritative,
+        "owner": owner or None,
     }
+
+
+def _edge_properties(edge: dict) -> dict:
+    """The edge's property map, whether it arrived as a dict or the stored JSON string."""
+    properties = edge.get("properties") or {}
+    if isinstance(properties, str):
+        try:
+            properties = json.loads(properties)
+        except ValueError:
+            return {}
+    return properties if isinstance(properties, dict) else {}
 
 
 def _edge_dedupe_key(edge: dict) -> tuple[str, str, str] | None:

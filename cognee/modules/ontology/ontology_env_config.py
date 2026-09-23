@@ -31,6 +31,36 @@ def normalize_ontology_mode(mode: "str | None") -> str:
     return normalized_mode
 
 
+def parse_authoritative_sources(raw: "str | dict | None") -> dict:
+    """Accept the env string (JSON object or ``table[=owner]`` csv) or an already-built dict.
+
+    Never raises: a value that cannot be parsed is logged and treated as empty, so a
+    typo in an env var cannot break ingestion.
+    """
+    if not raw:
+        return {}
+    if isinstance(raw, dict):
+        return dict(raw)
+    text = str(raw).strip()
+    if text.startswith("{"):
+        import json
+
+        try:
+            parsed = json.loads(text)
+        except ValueError:
+            logger.warning("ONTOLOGY_AUTHORITATIVE_SOURCES is not valid JSON; ignoring it.")
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    sources: dict = {}
+    for entry in text.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        table, _, owner = entry.partition("=")
+        sources[table.strip()] = {"authoritative": True, "owner": owner.strip() or None}
+    return sources
+
+
 class OntologyEnvConfig(BaseSettings):
     """
     Represents the configuration for ontology handling, including parameters for
@@ -45,6 +75,7 @@ class OntologyEnvConfig(BaseSettings):
     - ontology_file_path
     - ontology_mode
     - ontology_query_grounding
+    - ontology_authoritative_sources
     - model_config
     """
 
@@ -56,6 +87,11 @@ class OntologyEnvConfig(BaseSettings):
     # terms against the ontology, pin the matched nodes as seeds and tell the LLM what
     # each term means. Only active when ontology_file_path is set.
     ontology_query_grounding: bool = True
+    # Which schema tables are the system of record for the concept they realize.
+    # Either a JSON object ({"crm.customers": {"owner": "sales-ops"}, "orders": true})
+    # or a comma list of ``table`` / ``table=owner`` entries. Per-call
+    # ``ontology_config["authoritative_sources"]`` overrides it.
+    ontology_authoritative_sources: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow", populate_by_name=True)
 
@@ -63,6 +99,10 @@ class OntologyEnvConfig(BaseSettings):
     @classmethod
     def _normalize_ontology_mode(cls, value) -> str:
         return normalize_ontology_mode(value)
+
+    def authoritative_sources(self) -> dict:
+        """Parse ``ontology_authoritative_sources`` into the per-call dict shape."""
+        return parse_authoritative_sources(self.ontology_authoritative_sources)
 
     def to_dict(self) -> dict:
         """

@@ -479,3 +479,67 @@ class GlobalContextIndexStage(BaseStage):
         )
         logger.info("improve: global context index updated")
         return StageResult.from_pipeline_run(self.name, result)
+
+
+class OntologyProposalsStage(BaseStage):
+    """Stage 10: draft governed-model proposals for a human to ratify.
+
+    Reads the graph (schema tables without a ``realizes`` edge, unresolved
+    ``contradicts`` edges, ungrounded ``EntityType`` nodes used often) and writes
+    ``OntologyProposal`` nodes — nothing else changes until someone applies one
+    through ``cognee.modules.proposals`` / ``/api/v1/proposals/ontology``. Runs
+    last: it reads what enrichment produced. The LLM is used only for the
+    ``mapping`` leftovers the heuristics could not place, and only when one is
+    configured; without an LLM the stage still runs the heuristic detectors.
+    """
+
+    name = "ontology_proposals"
+
+    def gate(self, inputs: ImproveRunInputs) -> str | None:
+        if not inputs.config.ontology_proposals_enabled:
+            return REASON_OPT_IN_DISABLED
+        return None
+
+    async def run(self, inputs: ImproveRunInputs) -> StageResult:
+        from cognee.context_global_variables import set_database_global_context_variables
+        from cognee.modules.ontology.get_default_ontology_resolver import (
+            get_configured_ontology_resolver,
+        )
+        from cognee.modules.proposals import (
+            generate_ontology_proposals,
+            load_proposals,
+            save_proposals,
+        )
+
+        try:
+            resolver = get_configured_ontology_resolver()
+        except Exception as error:  # a broken ontology must not fail the improve run
+            logger.warning("improve: ontology resolver unavailable: %s", error, exc_info=True)
+            resolver = None
+
+        owner_id = getattr(inputs.dataset, "owner_id", None) or getattr(inputs.user, "id", None)
+        async with set_database_global_context_variables(inputs.dataset_id, owner_id):
+            existing = await load_proposals(inputs.dataset_id)
+            proposals = await generate_ontology_proposals(
+                inputs.dataset_id,
+                resolver=resolver,
+                existing_ids={proposal.proposal_id for proposal in existing},
+                use_llm=llm_available(),
+                min_occurrences=inputs.config.ontology_proposals_min_occurrences,
+            )
+            if proposals:
+                await save_proposals(proposals, user=inputs.user, dataset=inputs.dataset)
+
+        by_kind = {}
+        for proposal in proposals:
+            by_kind[proposal.kind] = by_kind.get(proposal.kind, 0) + 1
+        logger.info(
+            "improve: %d ontology proposal(s) drafted (%s)",
+            len(proposals),
+            ", ".join(f"{kind}={count}" for kind, count in sorted(by_kind.items())) or "none",
+        )
+        if not proposals:
+            return StageResult(
+                stage=self.name, status="already_completed", reason="no_new_findings"
+            )
+        return StageResult.completed(self.name, proposals=len(proposals), **by_kind)

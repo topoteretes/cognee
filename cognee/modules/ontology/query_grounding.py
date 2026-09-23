@@ -19,11 +19,11 @@ exactly as it did before.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 
 from cognee.modules.engine.models import Entity, EntityType
+from cognee.modules.ontology import term_matching
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.shared.logging_utils import get_logger
@@ -46,24 +46,9 @@ DEFAULT_MAX_NGRAM = 3
 _MAX_CANDIDATE_TERMS = 60
 _MAX_PARENTS = 4
 _MAX_RELATIONS = 5
-_MIN_TOKEN_LENGTH = 3
-
-# Short function-word list: enough to keep "the", "our", "which" out of fuzzy matching
-# without pulling in a stopword dependency. Words inside an n-gram are kept ("line of
-# credit"), only n-gram boundaries and bare unigrams are filtered.
-_STOPWORDS = frozenset(
-    """
-    a an the and or but if then else of for to in on at by with from as into onto about
-    over under between within without across after before during through this that these
-    those there here what which who whom whose when where why how is are was were be been
-    being am do does did done have has had having will would shall should can could may
-    might must our your their its his her my me we you they them us it i he she not no yes
-    all any each every some many much more most few less least own same other such than too
-    very just also only ever never now new old up down out off so
-    """.split()  # noqa: SIM905 — a word list reads better than 130 quoted literals
-)
-
-_TOKEN_PATTERN = re.compile(r"[a-z0-9]+(?:['\-][a-z0-9]+)*")
+_MIN_TOKEN_LENGTH = term_matching._MIN_TOKEN_LENGTH
+_STOPWORDS = term_matching.STOPWORDS
+_TOKEN_PATTERN = term_matching.TOKEN_PATTERN
 
 
 @dataclass(frozen=True)
@@ -157,28 +142,8 @@ def extract_candidate_terms(query: str, max_ngram: int = DEFAULT_MAX_NGRAM) -> l
     return candidates
 
 
-def _normalize_key(name: str) -> str:
-    return name.lower().replace(" ", "_").strip()
-
-
-def _multiword_match_is_sound(term: str, matched_name: str) -> bool:
-    """Reject fuzzy matches where a multi-word term drags in an unrelated word.
-
-    The resolver's 80% cutoff is tuned for single names ("customers" vs "customer").
-    On n-grams it also accepts "enterprise customer acme" for ``EnterpriseCustomer``,
-    which would swallow the "acme" token and hide the individual it names. So every
-    content word of a multi-word term must appear in the matched name (plural
-    stripped); single words keep the resolver's own judgement.
-    """
-    tokens = [token for token in term.split("_") if token not in _STOPWORDS]
-    if len(tokens) <= 1:
-        return True
-    compact_name = _normalize_key(matched_name).replace("_", "").replace("-", "")
-    for token in tokens:
-        stem = token[:-1] if token.endswith("s") and len(token) > _MIN_TOKEN_LENGTH else token
-        if stem not in compact_name:
-            return False
-    return True
+_normalize_key = term_matching.normalize_key
+_multiword_match_is_sound = term_matching.multiword_match_is_sound
 
 
 # ``is_a`` targets that say nothing about the business: the OWL meta-classes the

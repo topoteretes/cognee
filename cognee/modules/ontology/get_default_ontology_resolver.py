@@ -61,6 +61,22 @@ def get_configured_ontology_mode(config: Config | None = None) -> str:
     return get_ontology_env_config().ontology_mode
 
 
+def get_configured_authoritative_sources(config: Config | None = None) -> dict:
+    """Resolve the authoritative-source map: per-call ``ontology_config`` first, then env.
+
+    Always a dict keyed by table name (see ``OntologyConfig.authoritative_sources``);
+    empty when nothing is configured.
+    """
+    from cognee.modules.ontology.ontology_env_config import parse_authoritative_sources
+
+    if config is not None:
+        ontology_config = config.get("ontology_config")
+        if isinstance(ontology_config, dict) and ontology_config.get("authoritative_sources"):
+            return parse_authoritative_sources(ontology_config["authoritative_sources"])
+
+    return get_ontology_env_config().authoritative_sources()
+
+
 def get_ontology_resolver_from_env(
     ontology_resolver: str = "", matching_strategy: str = "", ontology_file_path: str = ""
 ) -> BaseOntologyResolver:

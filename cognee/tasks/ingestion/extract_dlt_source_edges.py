@@ -24,6 +24,7 @@ def _get_source_document(data_point: DataPoint):
 async def extract_dlt_source_edges(
     data_points: list[DataPoint],
     ctx: Optional["PipelineContext"] = None,
+    ontology_config: dict | None = None,
 ) -> list[DataPoint]:
     """Create graph edges and schema nodes from a DLT source manifest.
 
@@ -103,6 +104,7 @@ async def extract_dlt_source_edges(
         row_records,
         ctx,
         emitted_value_node_ids=emitted_value_node_ids,
+        ontology_config=ontology_config,
     )
 
     emitted_schema_docs.update(newly_emitted_doc_ids)

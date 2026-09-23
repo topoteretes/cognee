@@ -21,6 +21,7 @@ EXPECTED_ORDER = [
     "build_truth_subspace",
     "triplet_enrichment",
     "global_context_index",
+    "ontology_proposals",
 ]
 
 
@@ -28,7 +29,7 @@ def _position(name: str) -> int:
     return stage_names().index(name)
 
 
-def test_registry_lists_the_nine_stages_in_plan_order():
+def test_registry_lists_the_ten_stages_in_plan_order():
     """The registry list is the single declaration of the order (no ``after`` mirror)."""
     assert stage_names(DEFAULT_STAGES) == EXPECTED_ORDER
 
@@ -55,6 +56,7 @@ def test_session_fed_stages_and_graph_stages():
     needs = {stage.name: stage.needs_sessions for stage in DEFAULT_STAGES}
     assert needs["triplet_enrichment"] is False
     assert needs["global_context_index"] is False
+    assert needs["ontology_proposals"] is False
     assert all(needs[name] for name in EXPECTED_ORDER[:7])
 
 

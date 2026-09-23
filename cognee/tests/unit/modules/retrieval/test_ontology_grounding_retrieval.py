@@ -356,3 +356,45 @@ async def test_hybrid_result_has_no_grounding_key_when_nothing_matches():
         result = await retriever._retrieve_one("hello there")
 
     assert "ontology_grounding" not in result
+
+
+# --- authoritative sources in the entity lane ---------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_authoritative_realizes_edges_survive_the_edge_cap_and_say_so():
+    from cognee.modules.retrieval.hybrid.entities import build_entities
+
+    customer_id = str(EntityType.id_for("Customer"))
+    tables = {f"legacy-{index}": f"legacy_{index}.customer" for index in range(4)}
+    tables["crm"] = "crm.customers"
+    nodes = [(customer_id, {"name": "customer", "type": "EntityType"})] + [
+        (node_id, {"name": name, "type": "SchemaTable"}) for node_id, name in tables.items()
+    ]
+    edges = [
+        (
+            node_id,
+            customer_id,
+            "realizes",
+            {
+                "relationship_name": "realizes",
+                "authoritative": node_id == "crm",
+                "owner": "sales-ops" if node_id == "crm" else None,
+            },
+        )
+        for node_id in tables
+    ]
+    graph_engine = MagicMock()
+    graph_engine.get_neighborhood = AsyncMock(return_value=(nodes, edges))
+    hit = ScoredResult(
+        id=UUID(customer_id), score=0.0, payload={"name": "customer", "type": "EntityType"}
+    )
+
+    entities, _ = await build_entities(graph_engine, [hit], max_edges_per_entity=2)
+
+    bullets = entities[0]["edges"]
+    assert len(bullets) == 2
+    assert bullets[0]["source"] == "crm.customers"
+    assert bullets[0]["authoritative"] is True and bullets[0]["owner"] == "sales-ops"
+    assert bullets[0]["text"].endswith("(authoritative source, owner: sales-ops)")
+    assert bullets[1]["authoritative"] is False
