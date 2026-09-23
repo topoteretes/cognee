@@ -1,8 +1,16 @@
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from typing import Any
 from uuid import UUID
 
 from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
+from cognee.infrastructure.databases.graph.bounded_neighborhood import (
+    DEFAULT_NEIGHBORHOOD_CHUNK_SIZE,
+    chunk_members,
+    order_members,
+    unique_node_ids,
+    validate_bounded_neighborhood_args,
+)
 from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
     EdgeIdentity,
@@ -22,6 +30,7 @@ Node = tuple[str, NodeData]  # (node_id, properties)
 
 
 _warned_degree_fallbacks: set[type] = set()
+_warned_neighborhood_fallbacks: set[type] = set()
 
 
 class GraphDBInterface(ABC):
@@ -621,6 +630,72 @@ class GraphDBInterface(ABC):
 
         ranked = sorted(degree.items(), key=lambda item: item[1], reverse=True)
         return [node_id for node_id, _ in ranked[:top_k]]
+
+    async def iter_bounded_neighborhood(
+        self,
+        node_ids: list[str],
+        depth: int,
+        max_nodes: int,
+        chunk_size: int = DEFAULT_NEIGHBORHOOD_CHUNK_SIZE,
+        property_keys: list[str] | None = None,
+    ) -> AsyncIterator[tuple[list[Node], list[EdgeData]]]:
+        """The neighbourhood of ``node_ids``, capped at ``max_nodes``, in chunks.
+
+        This is what a graph view reads. ``get_neighborhood`` returns everything
+        within ``depth`` hops, and the default view seeds from the
+        highest-degree nodes: two hops from a hub reach almost the whole graph.
+        On a 13959-node / 33488-edge dataset that meant reading every node with
+        its full properties to draw 1000, and at 20k nodes a single response is
+        over 100 MB.
+
+        **Membership.** At most ``max_nodes`` nodes: the seeds in the given
+        order, then nodes by hop distance. Which nodes of the last admitted hop
+        are kept is the adapter's choice. Native adapters share the budget
+        round robin over the frontier, so one hub cannot take all of it. A seed
+        that is not in the graph takes no slot.
+
+        **Chunks.** Nodes arrive in membership order, at most ``chunk_size`` per
+        chunk. Every edge between two members is yielded exactly once, in the
+        chunk holding its later endpoint, so no chunk refers to a node the
+        caller has not received yet.
+
+        **Consistency.** Membership is decided once, before the first chunk.
+        Content is read per chunk: a node deleted in between is skipped along
+        with its edges, and a node created in between is not included.
+
+        **Properties.** ``property_keys=None`` returns every property. A list
+        returns only those keys, plus ``name`` and ``type``.
+
+        ``depth``, ``max_nodes`` and ``chunk_size`` must be positive and are
+        checked before anything is read.
+
+        Deliberately NOT abstract, for the same reason as
+        ``get_top_degree_node_ids``: a community adapter keeps working. The
+        default honours the whole contract except the bound on the read. It
+        calls ``get_neighborhood``, so the store still returns the full
+        ``depth``-hop neighbourhood, and the cap is applied in Python.
+        Overriding adapters should stop the traversal once they hold
+        ``max_nodes`` ids and read node content one chunk at a time.
+        """
+        validate_bounded_neighborhood_args(depth, max_nodes, chunk_size)
+        seed_ids = unique_node_ids(node_ids)
+        if not seed_ids:
+            return
+
+        adapter_type = type(self)
+        if adapter_type not in _warned_neighborhood_fallbacks:
+            _warned_neighborhood_fallbacks.add(adapter_type)
+            logger.warning(
+                "%s has no native iter_bounded_neighborhood; reading the whole %d-hop "
+                "neighbourhood to keep %d nodes. This is O(neighbourhood) in memory.",
+                adapter_type.__name__,
+                depth,
+                max_nodes,
+            )
+        nodes, edges = await self.get_neighborhood(node_ids=seed_ids, depth=depth)
+        members = order_members(nodes, edges, seed_ids, max_nodes)
+        for chunk in chunk_members(members, edges, chunk_size, property_keys):
+            yield chunk
 
     @abstractmethod
     async def get_graph_metrics(self, include_optional: bool = False) -> dict[str, Any]:
