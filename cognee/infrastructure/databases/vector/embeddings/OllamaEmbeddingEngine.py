@@ -25,11 +25,14 @@ from cognee.infrastructure.databases.vector.embeddings.utils import (
 )
 from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
 from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
+from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 from cognee.shared.utils import create_secure_ssl_context
 
 logger = get_logger("OllamaEmbeddingEngine")
+
+observe = get_observe()
 
 
 class OllamaEmbeddingEngine(EmbeddingEngine):
@@ -82,6 +85,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             enable_mocking = str(enable_mocking).lower()
         self.mock = enable_mocking in ("true", "1", "yes")
 
+    @observe(as_type="embeddings")
     async def embed_text(self, text: list[str]) -> list[list[float]]:
         """
         Generate embedding vectors for a list of text prompts.
