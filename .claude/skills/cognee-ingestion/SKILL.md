@@ -155,8 +155,10 @@ It cannot be combined with a custom `graph_model`, `temporal_cognify`,
   `"skills"` needs an explicit dataset.
 - **Session mode needs `CACHING=true`**, and `extractor` cannot be combined
   with `session_id`.
-- **Remote mode.** After `cognee.serve(url)`, calls go to the server;
-  `extractor` and `session_ids` raise there.
+- **Remote mode.** After `cognee.serve(url)`, calls go to the server:
+  `extractor` and `session_ids` raise, and other options the client does not
+  forward (including `graph_model`, `node_set`, and ontology `config`) are
+  dropped without an error.
 - **Every remember runs `improve()`** unless `self_improvement=False` or
   `IMPROVE_AUTO_ENABLED=false`. In scripts, call
   `await cognee.wait_for_background_tasks()` before exiting.
