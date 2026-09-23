@@ -27,6 +27,11 @@ class CognifyConfig(BaseSettings):
     # "llm" / "gliner_demo" pin one regardless of credentials. The GLiNER demo
     # requires the `gliner` extra and makes no LLM call.
     graph_extractor: str = "auto"
+    # Runtime for the GLiNER demo extractor's neural pieces (env: GLINER_BACKEND):
+    # "torch" (default) runs gliner2 as shipped; "onnx" runs its encoder, boundary
+    # head and relation scorer on ONNX Runtime from a one-time export
+    # (python -m cognee.tasks.graph.gliner_demo.onnx.export).
+    gliner_backend: str = "torch"
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def to_dict(self) -> dict:
@@ -40,6 +45,7 @@ class CognifyConfig(BaseSettings):
             "contradiction_max_facts": self.contradiction_max_facts,
             "provenance_tracking": self.provenance_tracking,
             "graph_extractor": self.graph_extractor,
+            "gliner_backend": self.gliner_backend,
         }
 
 

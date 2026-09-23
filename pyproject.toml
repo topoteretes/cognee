@@ -235,7 +235,15 @@ docling = [
 docling-full = ["docling>=2.115,<3", "transformers>=4.55"]
 # GLiNER demo: LLM-free graph extraction and summaries (cognee/tasks/graph/gliner_demo).
 # Pulls torch; protobuf + sentencepiece are needed by the DeBERTa tokenizer fallback.
-gliner = ["gliner2[local]>=2.0.0,<3", "protobuf>=5.29.6", "sentencepiece>=0.2.0"]
+# onnx + onnxscript export the model for the ONNX Runtime backend
+# (python -m cognee.tasks.graph.gliner_demo.onnx.export; GLINER_BACKEND=onnx).
+gliner = [
+    "gliner2[local]>=2.0.0,<3",
+    "protobuf>=5.29.6",
+    "sentencepiece>=0.2.0",
+    "onnx>=1.18,<2",
+    "onnxscript>=0.5,<1",
+]
 rapidocr = ["rapidocr-onnxruntime>=1.3.0,<2"]
 
 [project.urls]

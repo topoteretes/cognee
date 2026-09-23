@@ -82,10 +82,29 @@ def hub_model_cached(model_name: str) -> tuple[bool, str]:
     return cached, constants.HF_HUB_CACHE
 
 
+GLINER_BACKENDS = ("torch", "onnx")
+
+
+def resolve_gliner_backend() -> str:
+    """``torch`` or ``onnx`` from ``GLINER_BACKEND``; anything else is an error."""
+    from cognee.modules.cognify.config import get_cognify_config
+
+    backend = (get_cognify_config().gliner_backend or "torch").strip().lower()
+    if backend not in GLINER_BACKENDS:
+        raise ValueError(f"Unknown GLINER_BACKEND {backend!r}; expected one of {GLINER_BACKENDS}")
+    return backend
+
+
 def load_extractor(model_name: str = DEFAULT_MODEL) -> Any:
-    """Load (once) and return the ``gliner2`` extractor for ``model_name``."""
+    """Load (once) and return the ``gliner2`` extractor for ``model_name``.
+
+    With ``GLINER_BACKEND=onnx`` the extractor's encoder, boundary head and
+    relation scorer run on ONNX Runtime (``gliner_demo/onnx``); tokenization,
+    batching and decoding stay gliner2's own either way.
+    """
+    backend = resolve_gliner_backend()
     with _load_lock:
-        extractor = _extractors.get(model_name)
+        extractor = _extractors.get((model_name, backend))
         if extractor is not None:
             return extractor
 
@@ -103,8 +122,17 @@ def load_extractor(model_name: str = DEFAULT_MODEL) -> Any:
         )
         started = time.perf_counter()
         extractor = AutoExtractor.from_pretrained(model_name)
-        logger.info("GLiNER model %s ready in %.1fs", model_name, time.perf_counter() - started)
-        _extractors[model_name] = extractor
+        if backend == "onnx":
+            from .onnx.runtime import attach_onnx_backend
+
+            attach_onnx_backend(extractor, model_name)
+        logger.info(
+            "GLiNER model %s ready in %.1fs (%s backend)",
+            model_name,
+            time.perf_counter() - started,
+            backend,
+        )
+        _extractors[(model_name, backend)] = extractor
         return extractor
 
 
