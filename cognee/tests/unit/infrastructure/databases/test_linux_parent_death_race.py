@@ -169,7 +169,7 @@ def _proc_identity(pid: int):
     field N is at index ``N - 3``: state -> 0, starttime -> 19.
     """
     try:
-        with open("/proc/%d/stat" % pid, "rb") as fh:
+        with open(f"/proc/{pid}/stat", "rb") as fh:
             raw = fh.read()
     except (FileNotFoundError, ProcessLookupError, PermissionError):
         return None
@@ -231,7 +231,7 @@ class _LineReader:
     """
 
     def __init__(self, proc: subprocess.Popen):
-        self._q: "_queue.Queue[str]" = _queue.Queue()
+        self._q: _queue.Queue[str] = _queue.Queue()
         self._proc = proc
         self._t = threading.Thread(target=self._pump, daemon=True)
         self._t.start()
@@ -240,7 +240,7 @@ class _LineReader:
         try:
             for line in self._proc.stdout:
                 self._q.put(line.strip())
-        except Exception:
+        except (OSError, ValueError):
             pass
 
     def next_line(self, timeout: float = 30.0) -> str:

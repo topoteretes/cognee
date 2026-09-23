@@ -307,6 +307,7 @@ def set_pdeathsig() -> bool:
             except Exception:
                 # Readback itself failed -- cannot confirm. Prefer the fallback
                 # watchdog over an unverified claim of protection.
+                logger.debug("PR_GET_PDEATHSIG readback failed", exc_info=True)
                 rc = -1
         # A seccomp/AppArmor profile that blocks PR_SET_PDEATHSIG (or any other
         # prctl failure) was previously COMPLETELY silent: the caller just saw
@@ -322,7 +323,7 @@ def set_pdeathsig() -> bool:
                 file=sys.__stderr__ or sys.stderr,
                 flush=True,
             )
-        except Exception:
+        except (OSError, ValueError):
             pass
         return False
     except Exception:
@@ -330,7 +331,7 @@ def set_pdeathsig() -> bool:
         return False
 
 
-def get_original_parent_pid() -> Optional[int]:
+def get_original_parent_pid() -> int | None:
     """Return the launching process's PID, or ``None`` outside an mp child.
 
     Under forkserver, ``os.getppid()`` identifies the fork server instead.
@@ -344,11 +345,12 @@ def get_original_parent_pid() -> Optional[int]:
             return None
         pid = parent.pid
     except Exception:
+        logger.debug("Could not get original parent PID", exc_info=True)
         return None
     return pid if isinstance(pid, int) and pid > 0 else None
 
 
-def _parent_pid_exited(pid: Optional[int]) -> bool:
+def _parent_pid_exited(pid: int | None) -> bool:
     """Independently confirm that the launching PID has exited.
 
     A missing process or a Linux zombie confirms death. A live or reused PID,
@@ -381,7 +383,7 @@ def _parent_pid_exited(pid: Optional[int]) -> bool:
     return False
 
 
-def _parent_sentinel_alive() -> Optional[bool]:
+def _parent_sentinel_alive() -> bool | None:
     """Return True for a live parent, False for confirmed death, else None.
 
     The multiprocessing sentinel tracks the launching process even under
@@ -411,10 +413,11 @@ def _parent_sentinel_alive() -> Optional[bool]:
                 return None
         return False
     except Exception:
+        logger.debug("Could not check parent sentinel", exc_info=True)
         return None
 
 
-def parent_already_exited(original_ppid: Optional[int]) -> bool:
+def parent_already_exited(original_ppid: int | None) -> bool:
     """Check for parent death before protection was armed (POSIX only).
 
     PR_SET_PDEATHSIG is not retroactive. Call this AFTER arming it (or starting
