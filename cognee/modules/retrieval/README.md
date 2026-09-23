@@ -25,7 +25,7 @@ together.
 | `SKILLS` | `SkillsRetriever` | `skills_retriever.py` | no | Metadata-only skill discovery; exactly one dataset |
 | `CODE` | `CodeRetriever` | `code_retriever.py` | no | Deterministic code-graph operations via `code_query` |
 | `CODING_RULES` | `CodingRulesRetriever` | `coding_rules_retriever.py` | no | Returns stored coding rules |
-| `CYPHER` | `CypherSearchRetriever` | `cypher_search_retriever.py` | no | Raw Cypher; needs `ALLOW_CYPHER_QUERY=true` |
+| `CYPHER` | `CypherSearchRetriever` | `cypher_search_retriever.py` | no | Raw Cypher; enabled by default, disabled by `ALLOW_CYPHER_QUERY=false` |
 | `NATURAL_LANGUAGE` | `NaturalLanguageRetriever` | `natural_language_retriever.py` | yes | LLM writes Cypher, then runs it; same `ALLOW_CYPHER_QUERY` gate |
 | `GRAPH_REPORT` | `GraphReportRetriever` | `graph_report_retriever.py` | partly | Hubs, cross-node-set edges, provenance split, LLM-suggested questions |
 | `FEELING_LUCKY` | — | `search/operations/select_search_type.py` | — | An LLM picks one of the types above, then that retriever runs |
@@ -57,8 +57,8 @@ class flags `supports_session_turn_preparation` / `supports_prompt_preview`.
    constructor kwargs it needs.
 3. Add a row to the table above and a `*_test.py` in `cognee/tests/unit/modules/retrieval/`.
 4. If it should be reachable from the CLI, add it to `SEARCH_TYPE_CHOICES` in
-   `cognee/cli/config.py`; if `recall()` should route to it, add a scoring rule to
-   `cognee/api/v1/recall/query_router.py` (`cognee/modules/recall/` is session
+   `cognee/cli/config.py`; if `recall()` should route to it, add a regex rule to the
+   ordered, first-match-wins table in `cognee/api/v1/recall/query_router.py` (`cognee/modules/recall/` is session
    recall, not the router).
 
 Supporting folders: `hybrid/` (the hybrid lanes), `context_providers/` (triplet

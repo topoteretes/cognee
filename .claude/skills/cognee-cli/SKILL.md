@@ -8,7 +8,7 @@ description: Use when the user wants to drive cognee from the terminal with cogn
 `cognee-cli` ships with the package (entry point in `cognee/cli/_cognee.py`;
 each command lives in `cognee/cli/commands/`). Every command has
 `--help` for its flags, but only a few (`memify`, `eval`, `serve`, `push`,
-`migrate`) include usage examples — for the memory commands use the examples
+`upgrade`) include usage examples — for the memory commands use the examples
 in this file. Needs `LLM_API_KEY` configured, same as the SDK.
 
 ## Core flow
@@ -29,8 +29,9 @@ hood); `--background`/`-b` runs the cognify stage in the background, and
 `--datasets`/`-d`, `--top-k`/`-k` (default 10), and `--session-id`/`-s`.
 
 `forget` targets `--dataset`, `--dataset-id`, `--data-id` (needs a dataset), or
-`--everything`/`--all` — one unified command covering what `delete`, `prune`,
-and `empty_dataset` used to do separately.
+`--everything`/`--all` — one unified command replacing the older `delete` and
+empty-dataset paths. `--memory-only` (with a dataset) drops the graph and
+vectors but keeps the raw files, so the data can be rebuilt.
 
 > **`forget --all` does not ask for confirmation.** It deletes every dataset
 > immediately, even on a non-interactive stdin. The legacy `delete --all`
@@ -96,17 +97,35 @@ cognee-cli -ui                               # launch API server + UI (see cogne
 cognee-cli serve --url http://localhost:8000 # connect CLI/SDK to a running instance
 ```
 
-## Relational DB migrations (Alembic)
+## Database migrations
+
+cognee has two migration chains: the relational schema (Alembic, in
+`cognee/alembic/`) and the graph/vector data chain (slugs registered in
+`cognee/modules/migrations/registry.py`). Both run automatically — at API
+server startup and on the first write (`remember`, `add`, `cognify`,
+`improve`, …) in an SDK/CLI process — unless `ENABLE_AUTO_MIGRATIONS=false`.
+So you rarely need these commands; they are for inspecting state, disabled
+auto-migration, and rollbacks. There is no `migrate` command.
 
 ```bash
-cognee-cli upgrade        # apply migrations
-cognee-cli downgrade
-cognee-cli history
-cognee-cli current
+cognee-cli current                    # stamped revision per database (per dataset
+                                      # with access control on)
+cognee-cli history                    # the data-migration chain, newest first
+cognee-cli upgrade                    # relational to head, then data chain to head
+cognee-cli upgrade <slug>             # data chain up to and including <slug>
+cognee-cli upgrade --alembic <rev>    # pin the relational (Alembic) target
+cognee-cli downgrade <slug|base>      # REWRITES DATA; revision is required,
+                                      # prompts unless --force; --dataset <uuid>
+                                      # (repeatable) limits it
+cognee-cli stamp <head|base|slug>     # set the stored revision WITHOUT running
+                                      # anything (repairs drifted bookkeeping)
 ```
 
-Typically needed after version upgrades when the server refuses to start on
-an old schema.
+The positional revision is always a **data-chain slug**; the relational
+target goes through `--alembic`. `downgrade` leaves the relational schema
+alone unless you pass `--alembic`. `upgrade` runs even when
+`ENABLE_AUTO_MIGRATIONS=false`. `--alembic-path` (or `COGNEE_ALEMBIC_PATH`)
+points at a custom Alembic scripts directory.
 
 ## Gotchas
 

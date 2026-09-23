@@ -11,9 +11,18 @@ description: Use when working with cognee's permission system — understanding 
 
 - `true` (default): multi-tenant mode. Every API call requires auth, every
   dataset operation is permission-checked, and each user+dataset pair gets
-  isolated graph/vector/relational databases (tracked in the
-  `DatasetDatabase` model, supported backends: Kuzu, LanceDB, SQLite,
-  Postgres).
+  its own **graph and vector** databases, tracked in the `DatasetDatabase`
+  model. The relational database (users, ACLs, the dataset-database
+  registry) is never isolated — one shared DB holds it. Isolation only works
+  on backends with a dataset-database handler; the registry is
+  `cognee/infrastructure/databases/dataset_database_handler/supported_dataset_database_handlers.py`
+  and the backend matrix is in CLAUDE.md ("Multi-Tenant Access Control").
+  If either the graph or the vector backend has no handler (e.g. Neptune,
+  Neptune Analytics, most community vector adapters), cognee raises an
+  `EnvironmentError`/`OSError` naming it (`multi_user_support_possible()` in
+  `cognee/context_global_variables.py`) — a hard error, never a silent
+  fallback to shared databases. Fix it by switching backends or setting
+  `ENABLE_BACKEND_ACCESS_CONTROL=false`.
 - `false`: single-user mode. Permission checks short-circuit to allowed,
   there is no per-dataset isolation, and **every user's operations resolve
   to the same shared databases and datasets**. Authentication is a separate
@@ -55,24 +64,12 @@ Everything reduces to one relation — **a grant**: *principal* × *permission*
    `share` on the target datasets, then any principal (user, role, or
    tenant) can be granted any permission. Revocation mirrors this
    (`authorized_revoke_permission_on_datasets.py`).
-3. **Capabilities — tenant-scoped grants of actions, not data** (landing
-   via PR #4302, currently in review): a new `principal_capabilities`
-   table, keyed on `(principal, tenant, capability)`. Where an ACL row
-   grants access to *a dataset*, a capability grants *an action inside a
-   tenant* — the first one being `manage_users`. The catalog of capability
-   names is code (`CAPABILITY_TYPES` in `permission_types.py`), not a
-   database table, "because the code is what gives each name meaning";
-   only the assignment of a capability to a principal is data. `tenant_id`
-   is stored on every row because a user can belong to multiple tenants:
-   it pins each grant to the user's membership in one specific tenant, so
-   holding a capability in one tenant never carries over to the same
-   user's other tenants. Resolution
-   (`get_effective_capabilities(user, tenant)`) returns the union of what
-   the tenant grants all of its members, what the user's roles in that
-   tenant grant, and what the user was granted personally — there is no
-   deny in the model, resolution is gated on actual tenant membership, and
-   the tenant owner short-circuits as holding every capability.
-   Grant/revoke endpoints ride the permissions router.
+> **Not merged yet — capabilities (PR #4302).** A planned
+> `principal_capabilities` table would grant tenant-scoped *actions* (the
+> first being `manage_users`) instead of dataset access. None of it is on
+> `dev`: there is no `PrincipalCapability` model, `CAPABILITY_TYPES`
+> catalog, or `get_effective_capabilities()`. Do not write code against it
+> until it lands.
 
 ## Where permissions are enforced
 
@@ -84,10 +81,10 @@ entrypoint resolves names/IDs through it with the permission it needs:
 |---|---|---|
 | `add` / `cognify` / `remember` | `write` | dataset resolution before the pipeline runs |
 | `search` / `recall` / visualize | `read` | dataset resolution; retrieval is restricted to documents of readable datasets |
-| `delete` / prune of a dataset | `delete` | `datasets.py` resolves with `"delete"` |
+| `forget` / `delete` / empty a dataset | `delete` | `datasets.py` resolves with `"delete"` |
 | grant/revoke for others | `share` | `authorized_give/revoke_permission_on_datasets` |
 
-Two behaviors worth knowing:
+One behavior worth knowing:
 
 - **Denied reads return empty results, not 403.** A search against a
   dataset you cannot read yields `[]` — deliberate, to avoid leaking which
@@ -98,14 +95,12 @@ Two behaviors worth knowing:
 
 - **User management** (listing tenant users, assigning/removing roles,
   adding/removing users) is allowed for the **tenant owner** always, and
-  today for members of roles named in `USER_MANAGEMENT_ALLOWED_ROLE_NAMES`
-  (currently `{"admin"}`, `permissions/permission_types.py`). That
+  for members of roles named in `USER_MANAGEMENT_ALLOWED_ROLE_NAMES`
+  (currently `{"admin"}`, `permissions/permission_types.py`; checked in
+  `permissions/methods/has_user_management_permission.py`). That
   name-matching is a known footgun — any customer group that happens to be
-  called "admin" gets user management — and PR #4302 replaces it: the
-  check becomes "does the requester hold the `manage_users` capability in
-  this tenant" (owner always passes), with the role-name match kept only
-  as a deprecated fallback so tenants upgrading from the old check don't
-  lose user management until their `admin` role is granted the capability.
+  called "admin" gets user management. The unmerged capabilities work
+  (above) is meant to replace it with a `manage_users` capability.
 - **Role visibility**: members of a role can see the role itself and their
   co-members; anyone with user-management permission sees all
   (`tenants/methods/get_users_in_role.py`). Lookups are tenant-scoped — a
@@ -155,8 +150,7 @@ than query it.
 ## Key files map
 
 - Models: `cognee/modules/users/models/` — `ACL`, `Principal`, `Permission`,
-  `Role`, `Tenant`, `UserRole`, `UserTenant`, `DatasetDatabase` (and
-  `PrincipalCapability` once #4302 lands)
+  `Role`, `Tenant`, `UserRole`, `UserTenant`, `DatasetDatabase`
 - Methods: `cognee/modules/users/permissions/methods/` — grant/revoke,
   checks, dataset resolution, document filtering
 - Enforcement chokepoint: `cognee/modules/data/methods/`

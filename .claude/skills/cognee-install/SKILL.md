@@ -82,7 +82,7 @@ The `add()` / `cognify()` / `search()` / `memify()` primitives still exist and
 are what `remember`/`recall`/`improve` call underneath — reach for them when you
 need to drive a stage in isolation (e.g. custom pipeline tasks), not for
 ordinary ingestion. `cognee.delete` is formally deprecated (since 0.3.9);
-`forget()` is the v1 replacement, unifying the old delete/prune/empty_dataset
+`forget()` is the v1 replacement, unifying the old delete/empty_dataset
 paths behind one call. When to use `recall()` versus the low-level `search()`
 is covered in `docs/recall-vs-search.md`.
 
