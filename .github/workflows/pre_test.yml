@@ -33,6 +33,9 @@ jobs:
   # This installs every extra and scans the native programs packages bundle.
   # Python 3.13 on purpose: pypandoc-binary is only installed on 3.13+ (on
   # 3.11 uv picks the plain pypandoc wrapper, which ships no binary).
+  # The result depends only on the resolved dependencies, so the install and
+  # scan run only when they (or the check itself) change. With no base to
+  # compare against (workflow_dispatch, a new branch), it always runs.
   bundled-program-licenses:
     name: Bundled Program Licenses
     runs-on: ubuntu-22.04
@@ -40,14 +43,31 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        with:
+          fetch-depth: 0
+
+      - name: Detect dependency changes
+        id: deps
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -n "$BASE" ] && git diff --quiet "$BASE" HEAD -- uv.lock pyproject.toml scripts/check_bundled_program_licenses.py; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Dependencies unchanged; skipping the bundled program scan."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Install uv
+        if: steps.deps.outputs.changed == 'true'
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
         with:
           enable-cache: true
 
       - name: Install every extra on Python 3.13
+        if: steps.deps.outputs.changed == 'true'
         run: uv sync --locked --all-extras --no-install-project --python 3.13
 
       - name: Check bundled programs for copyleft licenses
+        if: steps.deps.outputs.changed == 'true'
         run: uv run --no-sync python scripts/check_bundled_program_licenses.py

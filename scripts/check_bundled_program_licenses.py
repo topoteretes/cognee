@@ -6,10 +6,13 @@ whose terms are GPL, with no pandoc license file beside it. Metadata-based
 license checks report MIT and pass.
 
 This reads the installed environment instead. For every file an installed
-distribution records, it keeps the native executables (ELF, Mach-O or PE,
-with the executable bit set) and scans their bytes for the copyleft notices a
-program embeds. Python extension modules and shared libraries are skipped:
-they are built from the package's own source.
+distribution records, it keeps the native binaries (ELF, Mach-O or PE) and
+scans their bytes for the copyleft notices a program embeds. The executable
+bit is not required: some packages ``chmod`` their bundled tool at first use.
+A package's own extension modules and shared libraries are skipped, since
+they are built from its source. Libraries that auditwheel, delocate or
+delvewheel vendor into ``<pkg>.libs/`` or ``.dylibs/`` are third-party code
+and are scanned.
 
 Run it with the interpreter of the environment to check:
 
@@ -25,6 +28,7 @@ from pathlib import Path
 COPYLEFT = {
     b"GNU AFFERO GENERAL PUBLIC LICENSE": "AGPL",
     b"GNU LESSER GENERAL PUBLIC LICENSE": "LGPL",
+    b"GNU LIBRARY GENERAL PUBLIC LICENSE": "LGPL",  # LGPL v2.0 title
     b"GNU GENERAL PUBLIC LICENSE": "GPL",
 }
 
@@ -50,11 +54,17 @@ REVIEWED: dict[str, str] = {}
 CHUNK = 1 << 20
 
 
+def is_vendored_library_dir(name: str) -> bool:
+    """Directories where wheel-repair tools copy third-party libraries."""
+    return name.endswith(".libs") or name == ".dylibs"
+
+
 def is_native_program(path: Path) -> bool:
-    """Keep executable native binaries that are not libraries."""
-    if not path.is_file() or path.is_symlink() or not path.stat().st_mode & 0o111:
+    """Keep native binaries, except the package's own libraries."""
+    if not path.is_file() or path.is_symlink():
         return False
-    if path.name.endswith(LIBRARY_SUFFIXES) or ".so." in path.name:
+    is_library = path.name.endswith(LIBRARY_SUFFIXES) or ".so." in path.name
+    if is_library and not is_vendored_library_dir(path.parent.name):
         return False
     with path.open("rb") as handle:
         return handle.read(4).startswith(NATIVE)
