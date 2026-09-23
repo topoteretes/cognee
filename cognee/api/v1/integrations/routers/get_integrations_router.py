@@ -322,11 +322,13 @@ _INSTALL_NONCE_PATH = "/api/v1/integrations"
 
 
 def _install_nonce_cookie_name(provider: str, nonce: str) -> str:
-    return f"{_INSTALL_NONCE_COOKIE_PREFIX}{provider}_{nonce}"
+    safe_provider = quote(provider, safe="")
+    return f"{_INSTALL_NONCE_COOKIE_PREFIX}{safe_provider}_{nonce}"
 
 
 def _install_nonce_cookie_prefix(provider: str) -> str:
-    return f"{_INSTALL_NONCE_COOKIE_PREFIX}{provider}_"
+    safe_provider = quote(provider, safe="")
+    return f"{_INSTALL_NONCE_COOKIE_PREFIX}{safe_provider}_"
 
 
 def _pending_install_nonces(request: Request, provider: str) -> list[str]:
