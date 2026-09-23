@@ -41,6 +41,7 @@ def test_is_dlt_sourced_only_true_for_dlt_source():
 
 def test_build_document_data_item_tags_a_non_dlt_source():
     row = SimpleNamespace(
+        table_name="notion_pages",
         row_data={
             "id": "p1",
             "url": "https://example.com/p1",
@@ -58,6 +59,7 @@ def test_build_document_data_item_tags_a_non_dlt_source():
     assert is_dlt_sourced(item.system_metadata) is False
     assert item.system_metadata["url"] == "https://example.com/p1"
     assert item.system_metadata["external_id"] == "p1"
+    assert item.system_metadata["table_name"] == "notion_pages"
     assert item.data_id == data_id
     # title becomes an H1 prefixed to the content body.
     assert item.data.startswith("# My Page")
@@ -66,6 +68,7 @@ def test_build_document_data_item_tags_a_non_dlt_source():
 
 def test_build_document_data_item_without_title_is_just_content():
     row = SimpleNamespace(
+        table_name="wiki_pages",
         row_data={"id": "x", "content": "plain body"},
         content_hash="h",
     )

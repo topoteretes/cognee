@@ -16,6 +16,7 @@ jest.mock("@/ui/layout/FilterContext", () => ({
 jest.mock("@/modules/datasets/getDatasets", () => ({ __esModule: true, default: async () => mockDatasets }));
 jest.mock("@/modules/datasets/deleteDatasetData", () => ({ __esModule: true, default: jest.fn() }));
 jest.mock("@/modules/datasets/useDatasetStatuses", () => ({ useDatasetStatuses: () => ({ statusDetails: mockStatuses }) }));
+jest.mock("@/modules/datasets/useDatasetProcessing", () => ({ useDatasetProcessing: () => ({ data: undefined, isError: false, refetch: jest.fn() }) }));
 jest.mock("@/modules/configuration/userConfiguration", () => ({ loadGraphModelsConfig: async () => ({}) }));
 jest.mock("@/modules/ingestion/useBrainUpload", () => ({ useBrainUpload: () => ({}) }));
 jest.mock("@/modules/billing/useLowBalanceUploadWarning", () => ({ useLowBalanceUploadWarning: () => ({}) }));
