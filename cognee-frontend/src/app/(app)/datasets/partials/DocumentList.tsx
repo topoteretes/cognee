@@ -4,8 +4,10 @@ import type { ReactElement } from "react";
 import FileIcon, { getExtMeta } from "@/ui/elements/FileIcon";
 import { decodeFilename, formatDate, formatFileSize } from "@/utils/fileFormat";
 import { capRows, MAX_RENDERED_ROWS } from "@/modules/datasets/maxRenderedRows";
+import ProcessingBadge from "./ProcessingBadge";
 
 export interface DocRow {
+  completed?: boolean;
   id: string;
   name: string;
   extension?: string;
@@ -36,6 +38,7 @@ export default function DocumentList<T extends DocRow>({
             <FileIcon {...meta} />
             <span style={{ flex: 1, fontSize: 13, color: "#EDECEA", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</span>
             <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+              <ProcessingBadge completed={doc.completed} />
               <span style={{ fontSize: 11, color: "rgba(237,236,234,0.55)", fontWeight: 500, minWidth: 32, textAlign: "right" }}>{meta.label}</span>
               <span style={{ fontSize: 11, color: "rgba(237,236,234,0.35)", minWidth: 52, textAlign: "right" }}>{formatFileSize(doc.size ?? doc.dataSize)}</span>
               <span style={{ fontSize: 11, color: "rgba(237,236,234,0.35)", minWidth: 80, textAlign: "right", whiteSpace: "nowrap" }}>{formatDate(doc.createdAt)}</span>

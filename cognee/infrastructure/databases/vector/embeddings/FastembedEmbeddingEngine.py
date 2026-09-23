@@ -34,12 +34,15 @@ from cognee.infrastructure.databases.vector.embeddings.utils import (
     sanitize_embedding_text_inputs,
 )
 from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
+from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.model_download_notice import log_model_load
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 
 litellm.set_verbose = False
 logger = get_logger("FastembedEmbeddingEngine")
+
+observe = get_observe()
 
 
 def fastembed_model_cached(model: str) -> tuple[bool, str, str | None]:
@@ -119,6 +122,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             enable_mocking = str(enable_mocking).lower()
         self.mock = enable_mocking in ("true", "1", "yes")
 
+    @observe(as_type="embeddings")
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(8, 128),

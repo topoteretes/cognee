@@ -84,6 +84,9 @@ class OAuthIntegration(ABC):
 
     provider: ClassVar[str]
     settings_cls: ClassVar[type[IntegrationSettings]]
+    # Optional provider metadata key used by the generic resource picker.
+    # ``None`` means this provider has no selectable sub-resources.
+    resource_selection_key: ClassVar[str | None] = None
 
     @abstractmethod
     def authorize_url(self, state: str) -> str:
@@ -102,6 +105,13 @@ class OAuthIntegration(ABC):
         else (display/routing data such as a bot user id) goes in
         ``provider_metadata``, which is stored in the clear. Never put secret
         material in ``provider_metadata``.
+
+        ``provider_metadata`` is **merged** into whatever the row already
+        holds, not swapped for it, so that settings written outside the OAuth
+        flow (Slack's channel allowlist) survive a reconnect. Two rules follow
+        for an adapter: build the dict unconditionally, writing a key with a
+        null value rather than leaving it out, since an omitted key keeps its
+        stored value; and do not expect to clear the metadata from here.
         """
 
     @abstractmethod
@@ -157,6 +167,26 @@ class OAuthIntegration(ABC):
         break the install redirect.
         """
         return
+
+    async def sync_now(self, credential: IntegrationCredential) -> None:
+        """Run a user-requested sync, when the provider supports one.
+
+        The default is deliberately a no-op: not every OAuth provider has a
+        sync implementation yet, and a generic route must not invent one.
+        Providers with a durable or manually-triggered sync override this
+        method and the same hook can later be called by a scheduler.
+        """
+        return
+
+    async def list_resources(
+        self, credential: IntegrationCredential
+    ) -> list[dict[str, Any]] | None:
+        """Return provider resources for a generic picker, or ``None``."""
+        return None
+
+    def dataset_name(self, credential: IntegrationCredential) -> str | None:
+        """Return the provider dataset to delete on an opted-in disconnect."""
+        return None
 
     async def revoke_remote(self, credential: IntegrationCredential) -> None:
         """Best-effort remote token revoke, called on disconnect.
