@@ -82,6 +82,9 @@ class IndexSchema(DataPoint):
     chunk_index: int | None = None
     source_chunk_id: str | None = None
     importance_weight: float | None = 0.5
+    # Document external_metadata as JSON text, copied onto chunks at ingest so
+    # hybrid retrieval can surface allowlisted keys straight from the payload.
+    external_metadata: str | None = None
 
     metadata: dict = {"index_fields": ["text"]}
     belongs_to_set: list[str] = []
@@ -1446,6 +1449,7 @@ class LanceDBAdapter(VectorDBInterface):
                     chunk_index=getattr(data_point, "chunk_index", None),
                     source_chunk_id=getattr(data_point, "source_chunk_id", None),
                     importance_weight=getattr(data_point, "importance_weight", None),
+                    external_metadata=getattr(data_point, "external_metadata", None),
                     belongs_to_set=(data_point.belongs_to_set or []),
                 )
                 for data_point in data_points
