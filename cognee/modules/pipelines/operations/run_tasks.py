@@ -235,7 +235,9 @@ async def run_tasks(
                     if isinstance(result, BaseException):
                         raise result
 
-                # Separate successes from unhandled exceptions
+                # Separate successes from unhandled exceptions. Every exception was
+                # re-raised above, so the BaseException branch below is unreachable;
+                # the block exists for the result-dict path (PipelineRunErrored).
                 results = []
                 first_item_error: BaseException | None = None
                 for i, result in enumerate(gathered):

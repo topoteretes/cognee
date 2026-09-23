@@ -1,6 +1,7 @@
 """``install_kind`` on every telemetry event, and the exception-type rule (SDK-775)."""
 
-from typing import Any, Coroutine
+from collections.abc import Coroutine
+from typing import Any
 
 import pytest
 
