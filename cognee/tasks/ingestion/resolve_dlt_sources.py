@@ -205,10 +205,9 @@ async def resolve_dlt_sources(
     # "replace"/"id" (see the kwargs resolution above).
     document_data_items: list[DataItem] = []
     document_fresh_ids: set[UUID] = set()
-    document_source_tags: set[str] = set()
+    document_scopes: set[tuple[str, str]] = set()
     for dlt_item in document_items:
         source_tag = document_source_tag(dlt_item)
-        document_source_tags.add(source_tag)
         rows = await ingest_dlt_source(
             dlt_item,
             dataset_name,
@@ -216,6 +215,8 @@ async def resolve_dlt_sources(
             write_disposition=write_disposition,
             max_rows_per_table=0,
         )
+        loaded_tables = getattr(rows, "loaded_tables", {row.table_name for row in rows})
+        document_scopes.update((source_tag, table) for table in loaded_tables)
         # Dataset-scoped ids with the pre-scoping adoption probe: rows are
         # dataset-scoped with id as primary key, so a dataset-free
         # derivation would pin the same id when one source loads into two
@@ -282,12 +283,12 @@ async def resolve_dlt_sources(
     # cleaned separately so an append relational run never treats document rows
     # as orphans, or vice versa.
     #
-    # Both paths skip cleanup when their fresh set is empty: an empty read-back
-    # cannot be distinguished from a failed/misconfigured sync, and treating it
-    # as "everything is an orphan" would wipe the whole corpus. Leaving stale
-    # rows for one cycle is the safe failure mode.
+    # Document cleanup is scoped to successfully loaded/read tables. A table
+    # emptied by tombstones must forget its final document; an incremental run
+    # with no load jobs has no such evidence and must not delete anything.
+    # Relational manifests retain their conservative empty-read behavior.
     do_manifest_cleanup = write_disposition != "append" and bool(manifest_data_ids)
-    do_document_cleanup = bool(document_fresh_ids)
+    do_document_cleanup = bool(document_scopes)
 
     orphan_cleanup: Callable[[], Any] | None = None
     if do_manifest_cleanup or do_document_cleanup:
@@ -302,7 +303,11 @@ async def resolve_dlt_sources(
                 )
             if do_document_cleanup:
                 await _delete_dlt_orphans(
-                    dataset_name, user, document_fresh_ids, sources=tuple(document_source_tags)
+                    dataset_name,
+                    user,
+                    document_fresh_ids,
+                    sources=tuple({source for source, _ in document_scopes}),
+                    document_scopes=document_scopes,
                 )
 
         orphan_cleanup = _cleanup
@@ -611,7 +616,11 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
     content = _clean(row_data.get("content"))
     text = f"# {title}\n\n{content}".strip() if title else content
 
-    system_metadata = {"source": source_tag, "title": title or None}
+    system_metadata = {
+        "source": source_tag,
+        "title": title or None,
+        "table_name": row.table_name,
+    }
     if row_data.get("url"):
         system_metadata["url"] = row_data["url"]
     if row_data.get("id"):
@@ -740,6 +749,7 @@ async def _delete_dlt_orphans(
     # source deletes any that linger.
     sources: tuple[str, ...] = ("dlt", "dlt_source"),
     manifest_source_names: set[str] | None = None,
+    document_scopes: set[tuple[str, str]] | None = None,
 ) -> None:
     """Delete dlt-sourced Data records (and their graph/vector artifacts) that
     are no longer present in the freshly-ingested dlt sources.
@@ -756,6 +766,11 @@ async def _delete_dlt_orphans(
     candidates to those source names — a dataset can hold several DLT sources,
     and re-ingesting one must not delete the others. Legacy per-row records
     (source == "dlt") predate source attribution and are always migrated away.
+
+    Document scopes pair the provider tag with its staging table, so syncing
+    one selected Drive folder cannot sweep another folder's documents. Legacy
+    documents without a table stamp are retained: their owning scope cannot be
+    proved, and deleting another source's data is worse than retaining residue.
     """
     from cognee.context_global_variables import set_database_global_context_variables
     from cognee.modules.data.methods import get_authorized_existing_datasets
@@ -785,6 +800,8 @@ async def _delete_dlt_orphans(
             continue
         source = meta.get("source")
         if source not in sources:
+            continue
+        if document_scopes is not None and (source, meta.get("table_name")) not in document_scopes:
             continue
         if (
             source == "dlt_source"

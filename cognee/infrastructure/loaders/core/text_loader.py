@@ -3,6 +3,7 @@ from typing import Any
 
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
+from cognee.infrastructure.loaders.exceptions import UnreadableFileContentError
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface, LoaderResult
 from cognee.infrastructure.loaders.store_derived_text import store_derived_text
 
@@ -66,7 +67,7 @@ class TextLoader(LoaderInterface):
 
         Raises:
             FileNotFoundError: If file doesn't exist
-            UnicodeDecodeError: If file cannot be decoded with specified encoding
+            UnreadableFileContentError: If the bytes are not text in this encoding
             OSError: If file cannot be read
         """
         if not os.path.exists(file_path):
@@ -77,8 +78,21 @@ class TextLoader(LoaderInterface):
         # Name ingested file of current loader based on original file content hash
         storage_file_name = "text_" + file_metadata["content_hash"] + ".txt"
 
-        with open(file_path, encoding=encoding) as f:
-            content = f.read()
+        try:
+            with open(file_path, encoding=encoding) as f:
+                content = f.read()
+        except UnicodeDecodeError as error:
+            # This loader is the content-detection fallback, so a binary file
+            # whose bytes the sniffer reads as text/plain (a .dmg, an archive)
+            # lands here. Refuse it by media type instead of letting the
+            # decode error escape as an untyped 500.
+            raise UnreadableFileContentError(
+                f"'{os.path.basename(file_path)}' cannot be read as text: decoding it as "
+                f"{encoding} failed ({error.reason} at byte {error.start}). Its content was "
+                "detected as plain text, but the bytes are binary, so no cognee loader can "
+                f"read this file. Supported text extensions: {', '.join(self.supported_extensions)}; "
+                "PDFs and office documents need their own loader (the `docling` extra)."
+            ) from error
 
         if not kwargs.get("persist", True):
             return content

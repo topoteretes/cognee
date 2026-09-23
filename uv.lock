@@ -1295,6 +1295,7 @@ dependencies = [
     { name = "cryptography" },
     { name = "datamodel-code-generator" },
     { name = "diskcache" },
+    { name = "dlt", extra = ["sqlalchemy"] },
     { name = "enola-cli" },
     { name = "fakeredis", extra = ["lua"] },
     { name = "fastapi" },
@@ -1320,6 +1321,7 @@ dependencies = [
     { name = "onnxruntime", version = "1.23.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
     { name = "onnxruntime", version = "1.30.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
     { name = "openai" },
+    { name = "pandas" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pylance" },
@@ -1361,6 +1363,7 @@ deepeval = [
 ]
 dev = [
     { name = "coverage" },
+    { name = "dateparser" },
     { name = "deptry" },
     { name = "gitpython" },
     { name = "mkdocs-material" },
@@ -1376,10 +1379,6 @@ dev = [
     { name = "ruff" },
     { name = "tweepy" },
     { name = "ty" },
-]
-dlt = [
-    { name = "dlt", extra = ["sqlalchemy"] },
-    { name = "pandas" },
 ]
 docling = [
     { name = "docling-slim", extra = ["convert-core", "format-email", "format-html", "format-latex", "format-markdown", "format-office", "format-pdf"] },
@@ -1412,11 +1411,14 @@ gliner = [
     { name = "sentencepiece" },
 ]
 gmail = [
-    { name = "dlt", extra = ["sqlalchemy"] },
     { name = "google-api-python-client" },
     { name = "google-auth" },
     { name = "google-auth-oauthlib" },
-    { name = "pandas" },
+]
+google-drive = [
+    { name = "google-api-python-client" },
+    { name = "google-auth" },
+    { name = "google-auth-oauthlib" },
 ]
 groq = [
     { name = "groq" },
@@ -1492,6 +1494,7 @@ turso = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "dateparser" },
     { name = "httpx" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -1518,12 +1521,12 @@ requires-dist = [
     { name = "coverage", marker = "extra == 'dev'", specifier = ">=7.3.2,<8" },
     { name = "cryptography", specifier = ">=43.0.0,<51" },
     { name = "datamodel-code-generator", specifier = ">=0.54.0" },
+    { name = "dateparser", marker = "extra == 'dev'", specifier = ">=1.2,<2" },
     { name = "debugpy", marker = "extra == 'debug'", specifier = ">=1.8.9,<2.0.0" },
     { name = "deepeval", marker = "extra == 'deepeval'", specifier = ">=3.0.1,<4" },
     { name = "deptry", marker = "extra == 'dev'", specifier = ">=0.20.0,<0.21" },
     { name = "diskcache", specifier = ">=5.6.3" },
-    { name = "dlt", extras = ["sqlalchemy"], marker = "extra == 'dlt'", specifier = ">=1.9.0,<2" },
-    { name = "dlt", extras = ["sqlalchemy"], marker = "extra == 'gmail'", specifier = ">=1.9.0,<2" },
+    { name = "dlt", extras = ["sqlalchemy"], specifier = ">=1.9.0,<2" },
     { name = "docling", marker = "extra == 'docling-full'", specifier = ">=2.115,<3" },
     { name = "docling-slim", extras = ["convert-core", "format-pdf", "format-office", "format-html", "format-email", "format-markdown", "format-latex"], marker = "extra == 'docling'", specifier = ">=2.115,<3" },
     { name = "enola-cli", specifier = "==0.4.21" },
@@ -1537,8 +1540,11 @@ requires-dist = [
     { name = "gitpython", marker = "extra == 'dev'", specifier = ">=3.1.43,<4" },
     { name = "gliner2", extras = ["local"], marker = "extra == 'gliner'", specifier = ">=2.0.0,<3" },
     { name = "google-api-python-client", marker = "extra == 'gmail'", specifier = ">=2.100.0,<3" },
+    { name = "google-api-python-client", marker = "extra == 'google-drive'", specifier = ">=2.100.0,<3" },
     { name = "google-auth", marker = "extra == 'gmail'", specifier = ">=2.23.0,<3" },
+    { name = "google-auth", marker = "extra == 'google-drive'", specifier = ">=2.23.0,<3" },
     { name = "google-auth-oauthlib", marker = "extra == 'gmail'", specifier = ">=1.1.0,<2" },
+    { name = "google-auth-oauthlib", marker = "extra == 'google-drive'", specifier = ">=1.1.0,<2" },
     { name = "groq", marker = "extra == 'groq'", specifier = ">=0.8.0,<1.0.0" },
     { name = "gunicorn", specifier = ">=20.1.0,<24" },
     { name = "instructor", specifier = ">=1.9.1,<1.15.3" },
@@ -1583,9 +1589,8 @@ requires-dist = [
     { name = "opentelemetry-exporter-otlp-proto-grpc", marker = "extra == 'tracing'", specifier = ">=1.20.0,<2" },
     { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'tracing'", specifier = ">=1.20.0,<2" },
     { name = "opentelemetry-sdk", marker = "extra == 'tracing'", specifier = ">=1.20.0,<2" },
-    { name = "pandas", marker = "extra == 'dlt'", specifier = ">=2.2.2,<3.0.0" },
+    { name = "pandas", specifier = ">=2.2.2,<3.0.0" },
     { name = "pandas", marker = "extra == 'evals'", specifier = ">=2.2.2,<3.0.0" },
-    { name = "pandas", marker = "extra == 'gmail'", specifier = ">=2.2.2,<3.0.0" },
     { name = "pgvector", marker = "extra == 'postgres'", specifier = ">=0.3.5,<0.4" },
     { name = "pgvector", marker = "extra == 'postgres-binary'", specifier = ">=0.3.5,<0.4" },
     { name = "playwright", marker = "extra == 'scraping'", specifier = ">=1.9.0" },
@@ -1633,10 +1638,11 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.34.0,<1.0.0" },
     { name = "websockets", specifier = ">=15.0.1,<16.0.0" },
 ]
-provides-extras = ["api", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "turso", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "aws", "dlt", "gmail", "baml", "dev", "debug", "redis", "tracing", "docling", "docling-full", "gliner", "rapidocr"]
+provides-extras = ["api", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "turso", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "aws", "dlt", "gmail", "google-drive", "baml", "dev", "debug", "redis", "tracing", "docling", "docling-full", "gliner", "rapidocr"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "dateparser", specifier = ">=1.2,<2" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "pytest", specifier = ">=7.4.4" },
     { name = "pytest-asyncio", specifier = ">=0.21.2" },
@@ -2280,6 +2286,21 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/4a/21/82e94fe764c27e3764870eed81839c2c3c2779936637e4cbecef943aa2fd/datamodel_code_generator-0.82.0.tar.gz", hash = "sha256:ceb08a32a4358c74f92c47220e149041d03dc6470443ba9d0f3d9d406f38c5a3", size = 2941392, upload-time = "2026-09-16T08:57:43.626Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cd/3d/6c824b706e8b9be8dfd3e6f5024439b0880efeb71ae826326a60077624f3/datamodel_code_generator-0.82.0-py3-none-any.whl", hash = "sha256:e7a73068aa2f16d34907a09607fb7eb241f29ee1dcd9b2af2fdeb586ba6a8091", size = 724246, upload-time = "2026-09-16T08:57:41.728Z" },
+]
+
+[[package]]
+name = "dateparser"
+version = "1.4.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "python-dateutil" },
+    { name = "pytz" },
+    { name = "regex" },
+    { name = "tzlocal" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c7/5d/bd21ba1519b6b1e222b29878301d2e1fb928e890dc7d085fa4222ac5671b/dateparser-1.4.3.tar.gz", hash = "sha256:bab8c43a746266e68142f4926e69438ce551441aa88e54e78bb6410bf3ee7000", size = 362152, upload-time = "2026-09-03T10:07:54.545Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/30/5f/63f927b5ffd1cc2c030fc2bd362bf920890e8806cf42f701198de5b3f9c7/dateparser-1.4.3-py3-none-any.whl", hash = "sha256:cbce86c64e0cea5c54c84c015d34c903d46c51bfad50632bf2f05a6141d10c05", size = 322384, upload-time = "2026-09-03T10:07:52.913Z" },
 ]
 
 [[package]]
