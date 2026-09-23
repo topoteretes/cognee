@@ -1,5 +1,8 @@
 from typing import Any
+from uuid import UUID
 
+from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
+from cognee.modules.ontology.query_grounding import ONTOLOGY_CLASS_CATEGORY, QueryGrounding
 from cognee.modules.retrieval.hybrid.chunks import search_collection
 from cognee.modules.retrieval.hybrid.facts import connection_edge_type_id
 from cognee.modules.retrieval.hybrid.results import (
@@ -38,6 +41,44 @@ async def search_entities(
             "Entity_name search failed; continuing without entities: %s", error, exc_info=True
         )
         return []
+
+
+def pin_grounded_entities(entity_hits: list[Any], grounding: QueryGrounding) -> list[Any]:
+    """Put the ontology nodes a query resolved to at the head of the entity hits.
+
+    Each grounded concept becomes an exact-score hit (0.0) carrying the payload the
+    entity formatter reads (``name``, ``description``, ``type``); a node the vector
+    search already returned is moved up rather than duplicated. The list grows by at
+    most the number of grounded concepts, so the entity budget is not squeezed.
+    """
+    if not grounding:
+        return entity_hits
+
+    pinned: list[Any] = []
+    pinned_ids: set[str] = set()
+    for concept in grounding.concepts:
+        if concept.node_id in pinned_ids:
+            continue
+        pinned_ids.add(concept.node_id)
+        if concept.category == ONTOLOGY_CLASS_CATEGORY:
+            concept_type = "ontology class"
+        else:
+            concept_type = concept.parents[0] if concept.parents else "ontology individual"
+        pinned.append(
+            ScoredResult(
+                id=UUID(concept.node_id),
+                score=0.0,
+                payload={
+                    "id": concept.node_id,
+                    "name": concept.canonical_name,
+                    "description": concept.describe(),
+                    "type": concept_type,
+                },
+            )
+        )
+
+    remaining = [hit for hit in entity_hits or [] if result_id(hit) not in pinned_ids]
+    return pinned + remaining
 
 
 async def build_entities(

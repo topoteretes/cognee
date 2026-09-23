@@ -6,6 +6,11 @@ from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
+from cognee.modules.ontology.query_grounding import (
+    QueryGrounding,
+    ground_query_with_configured_ontology,
+)
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.hybrid.chunks import retrieve_hybrid_chunks, search_collection
@@ -16,7 +21,11 @@ from cognee.modules.retrieval.hybrid.context import (
     format_hybrid_context,
     format_hybrid_context_batch,
 )
-from cognee.modules.retrieval.hybrid.entities import build_entities, search_entities
+from cognee.modules.retrieval.hybrid.entities import (
+    build_entities,
+    pin_grounded_entities,
+    search_entities,
+)
 from cognee.modules.retrieval.hybrid.facts import (
     edge_rank_by_id,
     resolve_facts_top_k,
@@ -70,6 +79,8 @@ class HybridRetriever(BaseRetriever):
         use_importance_weight: bool = True,
         use_truth_weight: bool = False,
         facts_top_k: int | None = 5,
+        ontology_grounding: bool | None = None,
+        ontology_resolver: BaseOntologyResolver | None = None,
     ):
         self.chunks_top_k = chunks_top_k if chunks_top_k is not None else 5
         self.entities_top_k = entities_top_k if entities_top_k is not None else 5
@@ -88,6 +99,18 @@ class HybridRetriever(BaseRetriever):
         self.use_importance_weight = use_importance_weight
         self.use_truth_weight = use_truth_weight
         self.facts_top_k = facts_top_k if facts_top_k is not None else 5
+        # Same contract as GraphCompletionRetriever: None follows
+        # ONTOLOGY_QUERY_GROUNDING, an explicit resolver overrides the configured one.
+        self.ontology_grounding = ontology_grounding
+        self.ontology_resolver = ontology_resolver
+
+    def ground_query(self, query: str | None) -> QueryGrounding:
+        """Resolve the query's terms against the ontology; empty when none is configured."""
+        return ground_query_with_configured_ontology(
+            query,
+            resolver=self.ontology_resolver,
+            enabled=self.ontology_grounding,
+        )
 
     def _use_session_cache(self) -> bool:
         user = session_user.get()
@@ -132,6 +155,7 @@ class HybridRetriever(BaseRetriever):
         # and fails open: flag off, no node, or any error yields {}, keeping
         # ranking byte-identical to an un-personalized run.
         personal_weights = await load_preference_weights()
+        grounding = self.ground_query(query)
 
         chunk_objects, (entities, facts) = await asyncio.gather(
             retrieve_hybrid_chunks(
@@ -150,11 +174,17 @@ class HybridRetriever(BaseRetriever):
                 personal_weights=personal_weights,
                 personal_influence=get_base_config().personalization_influence,
             ),
-            self._retrieve_entities_and_facts(query, query_vector),
+            self._retrieve_entities_and_facts(query, query_vector, grounding),
         )
-        return {**chunk_objects, "entities": entities, "facts": facts}
+        result = {**chunk_objects, "entities": entities, "facts": facts}
+        grounding_block = grounding.to_context_block()
+        if grounding_block:
+            result["ontology_grounding"] = grounding_block
+        return result
 
-    async def _retrieve_entities_and_facts(self, query: str, query_vector: list[float]) -> tuple:
+    async def _retrieve_entities_and_facts(
+        self, query: str, query_vector: list[float], grounding: QueryGrounding | None = None
+    ) -> tuple:
         """Entity lane, run concurrently with the chunk lane so the graph round trip for
         edge bullets overlaps the chunk pipeline's ranking and summary loading."""
         max_ranked_bullets = self.entities_top_k * max(0, self.max_edges_per_entity)
@@ -178,6 +208,11 @@ class HybridRetriever(BaseRetriever):
                 query_vector=query_vector,
             ),
         )
+        if grounding:
+            # Ontology concepts the query names lead the entity lane: their 1-hop
+            # neighbourhood (instances of a class, relations of an individual) is
+            # what "this customer" or "exposure" means in the business model.
+            entity_hits = pin_grounded_entities(entity_hits, grounding)
         entities, reachable_ids = await build_entities(
             self._unified_engine.graph,
             entity_hits,
