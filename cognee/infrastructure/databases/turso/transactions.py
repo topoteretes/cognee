@@ -36,8 +36,19 @@ T = TypeVar("T")
 
 _exclusive_ddl: ContextVar[bool] = ContextVar("cognee_turso_exclusive_ddl", default=False)
 
-# Substrings of the driver messages that mean "retry the whole transaction".
-_RETRYABLE_MARKERS = ("write-write conflict", "conflict", "busy", "database is locked")
+# The engine's own messages for a transient write collision, matched exactly (lowercased):
+#   "Write-write conflict"  -- mvcc: two BEGIN CONCURRENT transactions wrote the same row
+#   "database is locked"    -- wal: a writer outlived busy_timeout waiting for the write lock
+#   "busy" / "busy snapshot" -- the engine's Busy / BusySnapshot errors on lock or snapshot contention
+# Deliberately not a substring match on "conflict": ON CONFLICT clause errors and
+# constraint failures are deterministic and must fail immediately.
+_RETRYABLE_MESSAGES = (
+    "write-write conflict",
+    "database is locked",
+    "database is busy",
+    "busy snapshot",
+    "transaction error: busy",
+)
 
 
 def connect_pragmas(config: TursoConfig | None = None, *, foreign_keys: bool = False) -> list[str]:
@@ -131,9 +142,14 @@ async def exclusive_transaction() -> AsyncIterator[None]:
 
 
 def is_retryable_conflict(error: BaseException) -> bool:
-    """True for the engine errors that a fresh attempt of the same transaction may clear."""
+    """True for the engine errors that a fresh attempt of the same transaction may clear.
+
+    Matches the engine's exact contention messages (SQLAlchemy wraps the driver
+    error, so the check runs on the message text). Deterministic failures such as
+    constraint violations or misconfigured transaction modes are never retried.
+    """
     message = str(error).lower()
-    return any(marker in message for marker in _RETRYABLE_MARKERS)
+    return any(known in message for known in _RETRYABLE_MESSAGES)
 
 
 async def retry_on_conflict(

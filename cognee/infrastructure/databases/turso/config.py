@@ -47,13 +47,6 @@ class TursoConfig(BaseSettings):
     def concurrent_writes(self) -> bool:
         return self.turso_journal_mode == "mvcc"
 
-    def to_dict(self) -> dict:
-        return {
-            "turso_journal_mode": self.turso_journal_mode,
-            "turso_busy_timeout_ms": self.turso_busy_timeout_ms,
-            "turso_conflict_retries": self.turso_conflict_retries,
-        }
-
 
 @lru_cache
 def get_turso_config() -> TursoConfig:

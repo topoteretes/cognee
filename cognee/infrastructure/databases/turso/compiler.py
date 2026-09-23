@@ -22,8 +22,20 @@ arrives through an OUTER join keeps the outer join type, so
 ``a LEFT OUTER JOIN (b JOIN c ON bc) ON ab`` becomes
 ``a LEFT OUTER JOIN b ON ab LEFT OUTER JOIN c ON bc``, which is equivalent whenever
 the inner join is total (every ``b`` has its ``c``), the case for joined-table
-inheritance and for association tables under foreign-key integrity. FULL OUTER
-joins are left to the stock renderer (SQLite has none).
+inheritance and for association tables under foreign-key integrity. If a ``b`` row
+has no ``c`` (broken integrity), the original yields NULLs for both and the flattened
+form yields ``b`` with NULL ``c`` columns; the ORM drops such rows because the
+entity's primary key is NULL, so loaded collections are unaffected.
+
+Only the shapes verified against cognee's ORM are rewritten; anything else raises
+``CompileError`` instead of silently changing results:
+
+* a nested group may contain inner joins only (the outer edge, if any, is the
+  top-level join that introduces the group);
+* every OUTER step must receive at least one predicate — an unconstrained
+  ``LEFT OUTER JOIN ... ON 1 = 1`` would multiply rows.
+
+FULL OUTER joins are left to the stock renderer (SQLite has none).
 """
 
 from __future__ import annotations
@@ -32,6 +44,7 @@ import itertools
 from typing import Any
 
 from sqlalchemy.dialects.sqlite.base import SQLiteCompiler
+from sqlalchemy.exc import CompileError
 from sqlalchemy.sql import operators
 from sqlalchemy.sql.elements import BooleanClauseList, ClauseElement
 from sqlalchemy.sql.selectable import FromGrouping, Join
@@ -62,17 +75,22 @@ class CogneeTursoCompiler(SQLiteCompiler):
         steps: list[tuple[Any, bool]] = []  # (from object, arrives through an outer join)
         predicates: list[ClauseElement] = []
 
-        def walk(node, outer: bool) -> None:
+        def walk(node, outer: bool, nested: bool) -> None:
             node = _unwrap(node)
             if isinstance(node, Join) and not node.full:
-                walk(node.left, outer)
-                walk(node.right, outer or node.isouter)
+                if nested and node.isouter:
+                    raise CompileError(
+                        "Turso: cannot flatten a nested OUTER join; the engine rejects "
+                        "parenthesized joins and only nested INNER joins are rewritten."
+                    )
+                walk(node.left, outer, nested)
+                walk(node.right, outer or node.isouter, nested)
                 predicates.extend(_predicates(node.onclause))
             else:
                 steps.append((node, outer))
 
-        walk(join.left, False)
-        walk(join.right, join.isouter)
+        walk(join.left, False, nested=False)
+        walk(join.right, join.isouter, nested=True)
         predicates.extend(_predicates(join.onclause))
 
         available: set[int] = set()
@@ -127,8 +145,13 @@ class CogneeTursoCompiler(SQLiteCompiler):
                     clause._compiler_dispatch(self, from_linter=from_linter, **kwargs)
                     for clause in on_clauses
                 )
+            elif outer:
+                raise CompileError(
+                    "Turso: cannot flatten this join; an OUTER step would have no ON "
+                    "predicate and would multiply rows."
+                )
             else:
-                on_sql = "1 = 1"
+                on_sql = "1 = 1"  # exact for inner joins: the predicates land later
             if from_linter:
                 from_linter.edges.update(
                     itertools.product(previous._from_objects, from_object._from_objects)

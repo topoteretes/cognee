@@ -1,7 +1,7 @@
 # Running cognee on Turso (local)
 
 Turso is a rewrite of SQLite in Rust that keeps the SQLite file format and SQL dialect and adds
-multi-version concurrency control (MVCC) and vector distance functions. cognee can run all three
+multi-version concurrency control (MVCC) and vector distance functions. cognee can run all four
 of its stores on it, as local database files:
 
 | Layer | Provider setting | What it stores | Adapter |
@@ -11,7 +11,7 @@ of its stores on it, as local database files:
 | Vector | `VECTOR_DB_PROVIDER=turso` | one table per collection, `F32_BLOB` embeddings | `cognee/infrastructure/databases/vector/turso/TursoVectorAdapter.py` |
 | Session cache | `CACHE_BACKEND=turso` | session Q&A, traces, context, usage logs (`cache.db`) | `cognee/infrastructure/databases/cache/sql/SqlCacheAdapter.py` |
 
-The layers are independent: any one of them can be Turso while the others stay on their defaults.
+The four layers are independent: any one of them can be Turso while the others stay on their defaults.
 The session cache mirrors the `sqlite` backend exactly (a `cache.db` next to the relational
 database, same tables and upserts) and only swaps the driver; it is not switched automatically
 with `DB_PROVIDER`, so set `CACHE_BACKEND=turso` explicitly, as with `postgres`.
@@ -95,8 +95,8 @@ Constraints of the mode:
   creation and migrations inside `exclusive_transaction()`, which switches the statement.
 - The database file gains a `-log` companion and is no longer readable by stock `sqlite3`
   (cognee's dataset cleanup removes `-wal`, `-shm` and `-log`). Switching a file back to `wal`
-  restores SQLite compatibility. This also means migration `c3d5e7f9a1b2`, which heals a
-  standalone `cache.db` through stdlib `sqlite3`, only works on a `wal`-mode cache file.
+  restores SQLite compatibility. Migration `c3d5e7f9a1b2`, which heals a standalone `cache.db`,
+  opens a Turso cache through pyturso for this reason.
 - Plain `BEGIN` writers still serialize with `database is locked`, so mixing tools that do not use
   `BEGIN CONCURRENT` gains nothing.
 - MVCC is experimental upstream. The default stays `wal`.
@@ -144,8 +144,9 @@ that silently ran on SQLite would fail.
 
 ## Upstream findings
 
-Each of these has a minimal reproduction in `cognee/tests/e2e/turso/turso_compat_repros.py`
-(run it directly to print the current status against the installed `pyturso`).
+Each finding is filed upstream with a minimal reproduction and linked from SDK-664. When a
+finding is fixed in a released `pyturso`, the matching workaround (noted in the table above) can
+be retired.
 
 1. `sqlite+aioturso` dialect fails on SQLAlchemy 2.0.4x+: `'AsyncAdapt_turso_dbapi' object has no
    attribute 'has_stop'`. cognee's dialect sets it.

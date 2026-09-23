@@ -83,7 +83,9 @@ def create_relational_engine(
             raise OSError(
                 "Remote Turso databases are not supported by the local Turso backend in this "
                 "version (DB_TURSO_URL / DB_TURSO_AUTH_TOKEN are set). Unset them to use a "
-                "local Turso database file under DB_PATH, or pick another DB_PROVIDER."
+                "local Turso database file under DB_PATH, or pick another DB_PROVIDER. These "
+                "settings are deprecated leftovers of the former libSQL replica adapter and "
+                "will be removed in a future release."
             )
 
         from .sqlalchemy.TursoAdapter import TursoAdapter

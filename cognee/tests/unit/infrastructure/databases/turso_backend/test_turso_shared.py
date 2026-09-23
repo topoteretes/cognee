@@ -88,11 +88,35 @@ class TestTransactionHelpers:
         assert begin_statement(mvcc) == "BEGIN CONCURRENT"
         assert begin_statement(mvcc, ddl=True) == "BEGIN"
 
-    def test_is_retryable_conflict(self):
-        assert is_retryable_conflict(RuntimeError("Write-write conflict"))
-        assert is_retryable_conflict(RuntimeError("database is locked"))
-        assert is_retryable_conflict(RuntimeError("Transaction error: busy"))
-        assert not is_retryable_conflict(RuntimeError("no such table: t"))
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "Write-write conflict",
+            "(turso.lib.DatabaseError) Write-write conflict",
+            "database is locked",
+            "(turso.lib.OperationalError) database is locked",
+            "Transaction error: busy",
+            "Busy snapshot",
+        ],
+    )
+    def test_is_retryable_conflict_matches_engine_contention_messages(self, message):
+        assert is_retryable_conflict(RuntimeError(message))
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "no such table: t",
+            "UNIQUE constraint failed: graph_node.id",
+            "FOREIGN KEY constraint failed",
+            "Parse error: ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint",
+            "Transaction error: Concurrent transaction mode is only supported when MVCC is enabled",
+            "Transaction error: cannot commit - no transaction is active",
+            "conflicting declarations",
+        ],
+    )
+    def test_is_retryable_conflict_rejects_deterministic_errors(self, message):
+        """A generic 'conflict' substring is not enough: these must fail immediately."""
+        assert not is_retryable_conflict(RuntimeError(message))
 
     def test_retry_on_conflict_retries_then_succeeds(self):
         calls = {"n": 0}
@@ -244,6 +268,79 @@ class TestDialect:
         assert "JOIN (" not in outer_sql, outer_sql
         assert outer_sql.count("LEFT OUTER JOIN") == 3, outer_sql
         assert outer_rows == [(1, "acme"), (9, None)]
+
+    def test_flattened_outer_join_null_and_missing_fk_semantics(self, tmp_path):
+        """Pin the outer-join equivalence the compiler relies on, including its one divergence.
+
+        ``users LEFT OUTER JOIN (links JOIN (p JOIN t))``: a user with no link yields
+        NULLs (identical to the nested form); a link to a ``t`` row whose inheritance
+        parent ``p`` is missing (broken integrity) yields the link/``t`` columns with
+        NULL ``p`` columns where the nested form would yield all NULLs — the ORM drops
+        such rows because the entity primary key is NULL.
+        """
+        from sqlalchemy import Column, Integer, MetaData, String, Table, select
+
+        metadata = MetaData()
+        principals = Table("p", metadata, Column("id", Integer, primary_key=True))
+        tenants = Table(
+            "tn", metadata, Column("id", Integer, primary_key=True), Column("name", String)
+        )
+        users = Table("us", metadata, Column("id", Integer, primary_key=True))
+        links = Table("lk", metadata, Column("u_id", Integer), Column("t_id", Integer))
+
+        async def probe():
+            engine = create_async_engine(turso_url(str(tmp_path / "j2.db")), poolclass=NullPool)
+            async with engine.begin() as connection:
+                await connection.run_sync(metadata.create_all)
+                await connection.execute(principals.insert().values([{"id": 2}]))
+                # tenant 3 has no principal row: broken inheritance integrity
+                await connection.execute(
+                    tenants.insert().values(
+                        [{"id": 2, "name": "acme"}, {"id": 3, "name": "orphan"}]
+                    )
+                )
+                await connection.execute(users.insert().values([{"id": 1}, {"id": 5}, {"id": 9}]))
+                await connection.execute(
+                    links.insert().values([{"u_id": 1, "t_id": 2}, {"u_id": 5, "t_id": 3}])
+                )
+                inheritance = principals.join(tenants, principals.c.id == tenants.c.id)
+                nested = links.join(inheritance, links.c.t_id == tenants.c.id)
+                statement = (
+                    select(users.c.id, principals.c.id, tenants.c.name)
+                    .select_from(users.join(nested, users.c.id == links.c.u_id, isouter=True))
+                    .order_by(users.c.id)
+                )
+                rows = (await connection.execute(statement)).all()
+            await engine.dispose()
+            return rows
+
+        rows = _run(probe())
+        assert rows[0] == (1, 2, "acme")  # full match
+        assert rows[1] == (5, None, "orphan")  # divergence: nested form gives (5, None, None)
+        assert rows[2] == (9, None, None)  # no link at all: NULLs, identical to nested form
+
+    def test_unverified_join_shapes_fail_to_compile(self, tmp_path):
+        """Shapes the flattening has not been verified for raise instead of changing results."""
+        from sqlalchemy import Column, Integer, MetaData, Table, select
+        from sqlalchemy.exc import CompileError
+
+        metadata = MetaData()
+        a = Table("a", metadata, Column("id", Integer), Column("b_id", Integer))
+        b = Table("b", metadata, Column("id", Integer), Column("c_id", Integer))
+        c = Table("c", metadata, Column("id", Integer))
+        engine = create_async_engine(turso_url(str(tmp_path / "j3.db")), poolclass=NullPool)
+
+        # nested OUTER join inside the group
+        nested_outer = a.join(b.join(c, b.c.c_id == c.c.id, isouter=True), a.c.b_id == b.c.id)
+        with pytest.raises(CompileError, match="nested OUTER join"):
+            str(select(a.c.id).select_from(nested_outer).compile(engine.sync_engine))
+
+        # OUTER edge whose group table would get no predicate at all
+        unconstrained = a.join(b.join(c, c.c.id == c.c.id), a.c.id == a.c.id, isouter=True)
+        with pytest.raises(CompileError, match="no ON predicate"):
+            str(select(a.c.id).select_from(unconstrained).compile(engine.sync_engine))
+
+        _run(engine.dispose())
 
     def test_two_engines_see_each_others_commits(self, tmp_path):
         async def probe():

@@ -25,7 +25,6 @@ pytest.importorskip("turso", reason="pyturso not installed")
 import turso
 
 from cognee.infrastructure.databases.graph.turso.adapter import TursoAdapter as GraphAdapter
-from cognee.infrastructure.databases.turso import config as turso_config_module
 from cognee.infrastructure.databases.turso import (
     get_turso_config,
     is_retryable_conflict,
@@ -43,10 +42,8 @@ def journal_mode(request, monkeypatch):
     """Point TursoConfig at the requested journal mode for the duration of a test."""
     monkeypatch.setenv("TURSO_JOURNAL_MODE", request.param)
     get_turso_config.cache_clear()
-    turso_config_module.get_turso_config.cache_clear()
     yield request.param
     get_turso_config.cache_clear()
-    turso_config_module.get_turso_config.cache_clear()
 
 
 def _connect(path: str, mode: str):

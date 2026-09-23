@@ -43,13 +43,20 @@ class TestLocalMode:
         async def probe():
             async with adapter.engine.connect() as connection:
                 version = (await connection.execute(text("SELECT turso_version()"))).scalar()
-                journal_mode = (await connection.execute(text("PRAGMA journal_mode"))).scalar()
+                pragmas = {
+                    name: (await connection.execute(text(f"PRAGMA {name}"))).scalar()
+                    for name in ("journal_mode", "synchronous", "busy_timeout")
+                }
             await adapter.engine.dispose()
-            return version, journal_mode
+            return version, pragmas
 
-        version, journal_mode = _run(probe())
+        version, pragmas = _run(probe())
         assert version, "turso_version() returned nothing — not running on the Turso engine"
-        assert journal_mode == get_turso_config().turso_journal_mode
+        # Every connection PRAGMA of the shared Turso engine policy is in effect.
+        config = get_turso_config()
+        assert pragmas["journal_mode"] == config.turso_journal_mode
+        assert pragmas["synchronous"] in (1, "1", "NORMAL", "normal")
+        assert int(pragmas["busy_timeout"]) == config.turso_busy_timeout_ms
         assert importlib.metadata.version("pyturso")
 
     def test_roundtrip_through_inherited_engine(self, tmp_path):

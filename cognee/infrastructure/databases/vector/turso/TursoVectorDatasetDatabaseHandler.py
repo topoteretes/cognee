@@ -3,7 +3,7 @@ from uuid import UUID
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
-from cognee.infrastructure.databases.turso import DATABASE_COMPANION_SUFFIXES
+from cognee.infrastructure.databases.turso import remove_database_files_from_storage
 from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.databases.vector.create_vector_engine import (
     vector_engine_cache,
@@ -62,11 +62,8 @@ class TursoVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         await vector_engine_cache.aevict_for_database(dataset_database.vector_database_name)
 
         databases_directory_path = os.path.dirname(dataset_database.vector_database_url)
-        storage = get_file_storage(databases_directory_path)
-        await storage.remove(dataset_database.vector_database_name)
-        # The engine's companions (-wal/-shm in WAL mode, -log in MVCC mode) must go
-        # too, or a same-name recreate would inherit stale state.
-        for suffix in DATABASE_COMPANION_SUFFIXES:
-            companion = dataset_database.vector_database_name + suffix
-            if await storage.file_exists(companion):
-                await storage.remove(companion)
+        # The engine's companions (-wal/-shm in WAL mode, -log in MVCC mode) go
+        # with the file, or a same-name recreate would inherit stale state.
+        await remove_database_files_from_storage(
+            get_file_storage(databases_directory_path), dataset_database.vector_database_name
+        )

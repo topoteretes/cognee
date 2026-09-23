@@ -16,15 +16,12 @@ Only local files are supported. Remote Turso databases (``DB_TURSO_URL``) are
 rejected by ``create_relational_engine`` in this version.
 """
 
-import os
-
 from cognee.infrastructure.databases.turso import (
-    DATABASE_COMPANION_SUFFIXES,
+    configure_engine,
     connect_args_for_mode,
-    connect_pragmas,
     exclusive_transaction,
     get_turso_config,
-    install_transaction_hook,
+    remove_database_files,
     turso_url,
 )
 from cognee.shared.logging_utils import get_logger
@@ -45,13 +42,15 @@ class TursoAdapter(SQLAlchemyAdapter):
     ):
         self.turso_config = get_turso_config()
         connect_args = {**(connect_args or {}), **connect_args_for_mode(self.turso_config)}
-        # The base adapter's sqlite branch builds the async engine, the connect
-        # PRAGMAs (via _sqlite_connect_pragmas below) and the sessionmaker.
+        # The base adapter's sqlite branch builds the async engine and the
+        # sessionmaker and calls _configure_sqlite_engine (below) for the
+        # per-connection setup.
         super().__init__(turso_url(database_path), connect_args=connect_args, pool_args=pool_args)
-        install_transaction_hook(self.engine, self.turso_config)
 
-    def _sqlite_connect_pragmas(self) -> list[str]:
-        return connect_pragmas(self.turso_config)
+    def _configure_sqlite_engine(self) -> None:
+        # The one Turso engine policy, shared with the graph and cache engines:
+        # journal mode + timeouts on every connection, BEGIN CONCURRENT in mvcc.
+        configure_engine(self.engine, config=self.turso_config)
 
     # DDL must run in an exclusive transaction under MVCC; a no-op in WAL mode.
 
@@ -81,10 +80,9 @@ class TursoAdapter(SQLAlchemyAdapter):
         await super().delete_database()
         if not self.db_path:
             return
-        for suffix in DATABASE_COMPANION_SUFFIXES:
-            companion = self.db_path + suffix
-            try:
-                if os.path.exists(companion):
-                    os.remove(companion)
-            except OSError as error:
-                logger.warning("Could not remove Turso companion file %s: %s", companion, error)
+        try:
+            remove_database_files(self.db_path)
+        except OSError as error:
+            # Best effort, like the base class's own file removal: a lingering
+            # companion must never poison teardown.
+            logger.warning("Could not remove Turso database files for %s: %s", self.db_path, error)

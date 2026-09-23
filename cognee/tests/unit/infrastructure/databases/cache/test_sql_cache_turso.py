@@ -15,7 +15,6 @@ from sqlalchemy import text
 pytest.importorskip("turso", reason="pyturso not installed")
 
 from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAdapter
-from cognee.infrastructure.databases.turso import config as turso_config_module
 from cognee.infrastructure.databases.turso import get_turso_config, turso_url
 
 
@@ -23,10 +22,8 @@ from cognee.infrastructure.databases.turso import get_turso_config, turso_url
 def journal_mode(request, monkeypatch):
     monkeypatch.setenv("TURSO_JOURNAL_MODE", request.param)
     get_turso_config.cache_clear()
-    turso_config_module.get_turso_config.cache_clear()
     yield request.param
     get_turso_config.cache_clear()
-    turso_config_module.get_turso_config.cache_clear()
 
 
 def _run(coro):

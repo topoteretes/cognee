@@ -7,7 +7,7 @@ from cognee.infrastructure.databases.graph.get_graph_engine import (
     create_graph_engine,
     graph_engine_cache,
 )
-from cognee.infrastructure.databases.turso.files import database_file_paths
+from cognee.infrastructure.databases.turso.files import remove_database_files
 from cognee.modules.users.models import DatasetDatabase, User
 
 
@@ -93,6 +93,4 @@ class TursoGraphDatasetDatabaseHandler:
         # (-wal/-shm in WAL mode, -log in MVCC mode). Leaving them behind risks
         # stale data surviving under a same-name recreate.
         if dataset_url and os.path.isabs(dataset_url):
-            for path in database_file_paths(dataset_url):
-                if os.path.exists(path):
-                    os.remove(path)
+            remove_database_files(dataset_url)

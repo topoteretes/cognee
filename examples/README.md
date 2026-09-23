@@ -94,6 +94,7 @@ features.** See [Contributing](#-contributing-a-new-example) for the precise cat
 |---|---|
 | [`neptune_analytics_example.py`](guides/neptune_analytics_example.py) | AWS account + provisioned Neptune Analytics graph |
 | [`local_ollama_example.py`](guides/local_ollama_example.py) | `ollama serve` + two pulled models — fully local |
+| [`turso_local_example.py`](guides/turso_local_example.py) | Relational, graph, vector and session cache all on the Turso rewrite engine (`cognee[turso]`); `ingest` / `verify` / `cleanup` phases show persistence across a restart |
 | [`s3_storage.py`](guides/s3_storage.py) | Your S3 bucket + AWS credentials |
 
 ## 🎓 `advanced_guides/` — the same topic, deeper

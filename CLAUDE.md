@@ -395,8 +395,8 @@ GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 
 #### Turso (all three layers)
 `DB_PROVIDER=turso`, `GRAPH_DATABASE_PROVIDER=turso`, `VECTOR_DB_PROVIDER=turso` and
-`CACHE_BACKEND=turso` (the session cache's `cache.db`, same layout as the sqlite backend) each run on the
-Turso rewrite engine (`pyturso`, `pip install cognee"[turso]"`) through one shared dialect,
+`CACHE_BACKEND=turso` (the session cache's `cache.db`, same layout as the sqlite backend) — all four
+layers — run on the Turso rewrite engine (`pyturso`, `pip install cognee"[turso]"`) through one shared dialect,
 `sqlite+cognee_turso://` (`cognee/infrastructure/databases/turso/`). Local database files only:
 remote Turso settings (`DB_TURSO_URL`, `GRAPH_DATABASE_KEY`, a `libsql://` vector URL) are a hard
 error. Shared knobs (`TursoConfig`, env prefix `TURSO_`): `TURSO_JOURNAL_MODE=wal|mvcc` (default

@@ -127,16 +127,7 @@ class SQLAlchemyAdapter:
             # letting readers proceed, so concurrent writers wait (bounded by
             # busy_timeout) instead of deadlocking. These PRAGMAs are connection
             # scoped, so they must be (re)applied on every new connection.
-            connect_pragmas = self._sqlite_connect_pragmas()
-
-            @event.listens_for(self.engine.sync_engine, "connect")
-            def _set_sqlite_pragmas(dbapi_connection, connection_record):
-                cursor = dbapi_connection.cursor()
-                try:
-                    for statement in connect_pragmas:
-                        cursor.execute(statement)
-                finally:
-                    cursor.close()
+            self._configure_sqlite_engine()
         else:
             # Transform pool_args from tuple into dict if provided
             # Note: For caching purposes, pool_args is stored as a sorted tuple of key-value pairs in the config
@@ -184,17 +175,23 @@ class SQLAlchemyAdapter:
         except FileNotFoundError:
             pass
 
-    def _sqlite_connect_pragmas(self) -> list[str]:
-        """PRAGMAs run on every new connection of a file-based engine (see ``__init__``).
+    def _configure_sqlite_engine(self) -> None:
+        """Install the per-connection setup of a file-based engine (see ``__init__``).
 
-        Subclasses for SQLite-compatible engines (Turso) override this to apply
-        their own journal mode and timeouts.
+        SQLite: the WAL/synchronous/busy_timeout PRAGMAs on every new connection.
+        Subclasses for SQLite-compatible engines (Turso) override this with their
+        own engine configuration (journal mode, timeouts, transaction hooks).
         """
-        return [
-            "PRAGMA journal_mode=WAL",
-            "PRAGMA synchronous=NORMAL",
-            "PRAGMA busy_timeout=120000",
-        ]
+
+        @event.listens_for(self.engine.sync_engine, "connect")
+        def _set_sqlite_pragmas(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA synchronous=NORMAL")
+                cursor.execute("PRAGMA busy_timeout=120000")
+            finally:
+                cursor.close()
 
     @asynccontextmanager
     async def get_async_session(self) -> AsyncGenerator[AsyncSession, None]:

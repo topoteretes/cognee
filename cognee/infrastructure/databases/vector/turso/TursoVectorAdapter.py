@@ -97,12 +97,13 @@ class TursoVectorAdapter(VectorDBInterface):
             raise OSError(
                 "Remote Turso databases are not supported by the Turso vector backend in this "
                 f"version (VECTOR_DB_URL={url!r}). Point VECTOR_DB_URL at a local database "
-                "file path instead."
+                "file path instead. Remote URL support from the former libSQL adapter is "
+                "deprecated; this check will be removed in a future release."
             )
+        # ``api_key`` and ``database_name`` are accepted for factory-signature parity
+        # with the other vector adapters; a local Turso file needs neither.
         self.url = url
-        self.api_key = api_key
         self.embedding_engine = embedding_engine
-        self.database_name = database_name
         self.turso_config = get_turso_config()
 
         # One lock serializes access to the shared sync Turso connection. It
@@ -600,7 +601,9 @@ class TursoVectorAdapter(VectorDBInterface):
         ]
 
         tags_json = json.dumps(list(tags))
+        tag_set = set(tags)
         node_ids_list = [str(node_id) for node_id in node_ids] if node_ids is not None else None
+        failures: list[tuple[str, Exception]] = []
 
         for table_name in candidate_tables:
             id_scope = ""
@@ -614,24 +617,17 @@ class TursoVectorAdapter(VectorDBInterface):
             # FIRST. Only these rows are rewritten or deleted-when-empty,
             # otherwise a row that was already stored with an empty
             # belongs_to_set (e.g. an untagged index row) would be deleted as
-            # collateral on any unrelated tag removal. Mirrors PGVector.
-            select_sql = (
+            # collateral on any unrelated tag removal. Mirrors PGVector. The
+            # table is a verified collection (_is_collection), so a failing
+            # read here is a real error and propagates.
+            rows = await self._execute(
                 f'SELECT id, payload FROM "{table_name}" '
                 f"WHERE json_type(payload, '$.belongs_to_set') = 'array' "
                 f"AND EXISTS (SELECT 1 FROM json_each(payload, '$.belongs_to_set') je "
-                f"WHERE je.value IN (SELECT value FROM json_each(?))){id_scope}"
+                f"WHERE je.value IN (SELECT value FROM json_each(?))){id_scope}",
+                [tags_json] + scope_params,
+                fetch=True,
             )
-            # The SELECT doubles as the "is this a vector collection?" probe: a
-            # PascalCase relational table without a JSON belongs_to_set payload
-            # errors here and is skipped quietly.
-            try:
-                rows = await self._execute(select_sql, [tags_json] + scope_params, fetch=True)
-            except Exception as error:  # not a vector collection; skip
-                logger.debug(
-                    "remove_belongs_to_set_tags skipped '%s': %s", table_name, error, exc_info=True
-                )
-                continue
-
             if not rows:
                 continue
 
@@ -639,7 +635,6 @@ class TursoVectorAdapter(VectorDBInterface):
             # a SQL-side rewrite needs, so filter the arrays here and write the
             # payloads back with plain binds: UPDATE the survivors, DELETE the
             # rows whose array became empty, all in one transaction.
-            tag_set = set(tags)
             statements: list[tuple[str, tuple]] = []
             for row_id, payload_text in rows:
                 payload = json.loads(payload_text) if payload_text else {}
@@ -654,22 +649,27 @@ class TursoVectorAdapter(VectorDBInterface):
                     )
                 else:
                     statements.append((f'DELETE FROM "{table_name}" WHERE id = ?', (row_id,)))
-            # A write failure once we know the table is a real collection is a
-            # genuine error: surface it at warning rather than hiding it at
-            # debug, but keep going so one table can't abort the rest.
+            # One table's failure must not stop the others, but it must not be
+            # lost either: every failure is re-raised together once all tables
+            # have been attempted, so a stale tag never survives silently.
             try:
                 await retry_on_conflict(
                     lambda statements=statements: asyncio.to_thread(self._run_write, statements)
                 )
-            except Exception as error:  # surface, but continue other tables
+            except Exception as error:
                 logger.warning(
                     "remove_belongs_to_set_tags failed to update '%s': %s",
                     table_name,
                     error,
                     exc_info=True,
                 )
+                failures.append((table_name, error))
 
-        return
+        if failures:
+            summary = "; ".join(f"{table}: {error}" for table, error in failures)
+            raise RuntimeError(
+                f"remove_belongs_to_set_tags failed for {len(failures)} collection(s): {summary}"
+            ) from failures[0][1]
 
     async def prune(self):
         """Drop every collection table and reset cached reflection state."""

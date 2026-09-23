@@ -7,7 +7,12 @@ package: one SQLAlchemy dialect (``sqlite+cognee_turso://``), one settings class
 
 from .config import TursoConfig, get_turso_config
 from .runtime import INSTALL_HINT, require_turso
-from .files import DATABASE_COMPANION_SUFFIXES, database_file_paths, remove_database_files
+from .files import (
+    DATABASE_COMPANION_SUFFIXES,
+    database_file_paths,
+    remove_database_files,
+    remove_database_files_from_storage,
+)
 from .transactions import (
     apply_pragmas,
     begin_statement,
@@ -50,10 +55,6 @@ def turso_url(database_path: str) -> str:
     return f"{_URL_PREFIX}/{database_path}"
 
 
-def is_turso_url(connection_string: str) -> bool:
-    return connection_string.startswith(_URL_PREFIX)
-
-
 __all__ = [
     "DATABASE_COMPANION_SUFFIXES",
     "INSTALL_HINT",
@@ -69,9 +70,9 @@ __all__ = [
     "install_connect_pragmas",
     "install_transaction_hook",
     "is_retryable_conflict",
-    "is_turso_url",
     "register_dialect",
     "remove_database_files",
+    "remove_database_files_from_storage",
     "require_turso",
     "retry_on_conflict",
     "turso_url",

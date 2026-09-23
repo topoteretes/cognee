@@ -1,4 +1,13 @@
-"""Filesystem helpers for local Turso database files."""
+"""Filesystem helpers for local Turso database files.
+
+Two cleanup entry points, one per storage model, so every Turso-backed store
+removes the same set of files with the same error policy:
+
+* :func:`remove_database_files` — local paths (``os``); raises ``OSError`` on a
+  real removal failure, missing files are fine.
+* :func:`remove_database_files_from_storage` — through cognee's async file
+  storage (local or S3-backed), same semantics.
+"""
 
 import os
 
@@ -14,7 +23,25 @@ def database_file_paths(database_path: str) -> list[str]:
 
 
 def remove_database_files(database_path: str) -> None:
-    """Remove a local Turso database file and its companions if they exist."""
+    """Remove a local Turso database file and its companions.
+
+    Missing files are skipped; any other ``OSError`` propagates so callers decide
+    whether cleanup is best-effort (relational teardown) or must succeed (dataset
+    deletion).
+    """
     for path in database_file_paths(database_path):
-        if os.path.exists(path):
+        try:
             os.remove(path)
+        except FileNotFoundError:
+            continue
+
+
+async def remove_database_files_from_storage(storage, database_name: str) -> None:
+    """Remove a Turso database file and its companions through a cognee file storage.
+
+    ``storage`` is a ``get_file_storage(directory)`` instance and
+    ``database_name`` the file name inside it. Missing companions are skipped.
+    """
+    for name in database_file_paths(database_name):
+        if await storage.file_exists(name):
+            await storage.remove(name)

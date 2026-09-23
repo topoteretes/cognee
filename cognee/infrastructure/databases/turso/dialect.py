@@ -94,18 +94,3 @@ def register_dialect() -> None:
     if not _registered:
         registry.register(f"{DIALECT_NAME}.{DRIVER_NAME}", __name__, "CogneeTursoDialect")
         _registered = True
-
-
-def turso_url(database_path: str) -> str:
-    """Return the SQLAlchemy URL for a local Turso database file (or ``:memory:``).
-
-    Registers the dialect as a side effect so callers can hand the URL straight to
-    ``create_async_engine``. An absolute path yields ``sqlite+cognee_turso:////abs``,
-    the same four-slash shape the SQLite branch produces.
-    """
-    register_dialect()
-    return f"{DIALECT_NAME}+{DRIVER_NAME}:///{database_path}"
-
-
-def is_turso_url(connection_string: str) -> bool:
-    return connection_string.startswith(f"{DIALECT_NAME}+{DRIVER_NAME}://")

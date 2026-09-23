@@ -72,8 +72,15 @@ def create_session_context_unique_index(conn) -> None:
     )
 
 
-def standalone_sqlite_cache_path(alembic_conn) -> str | None:
-    """Path of the standalone SQLite cache database this migration must also fix.
+TURSO_DRIVER = "cognee_turso"
+
+
+def standalone_sqlite_cache_path(alembic_conn) -> tuple[str, str] | None:
+    """Path and driver of the standalone SQLite-family cache database to fix.
+
+    Returns ``(path, driver)``; the driver is ``aiosqlite`` for stock SQLite and
+    ``cognee_turso`` for a cache on the Turso rewrite engine, whose files (in
+    ``mvcc`` journal mode) stdlib ``sqlite3`` cannot open — see ``_connect_cache``.
 
     Resolves the location exactly as the runtime does (CACHE_DB_URL when set,
     else a cache.db next to the relational SQLite database). Returns None when
@@ -131,16 +138,33 @@ def standalone_sqlite_cache_path(alembic_conn) -> str | None:
         return None
     if not os.path.exists(path):
         return None
-    return path
+    return path, url.get_driver_name()
 
 
-def heal_standalone_sqlite_cache(path: str) -> None:
+def _connect_cache(path: str, driver: str):
+    """Open the standalone cache file with the engine that owns it.
+
+    A Turso cache is opened through pyturso: in ``wal`` mode stdlib ``sqlite3``
+    could read it too, but an ``mvcc``-mode file is not a SQLite database to it
+    ("file is not a database"), and the migration must not fail on upgrade.
+    Both connections expose the same DB-API surface this migration uses.
+    """
+    if driver == TURSO_DRIVER:
+        import turso
+
+        connection = turso.connect(path)
+        connection.execute("PRAGMA busy_timeout=30000").fetchall()
+        return connection
+    return sqlite3.connect(path, timeout=30)
+
+
+def heal_standalone_sqlite_cache(path: str, driver: str = "aiosqlite") -> None:
     """Apply the same dedupe-then-index to the standalone cache.db file.
 
     Any failure propagates and fails the migration: there is no runtime
     fallback, so a cache database left without the index must block the deploy.
     """
-    connection = sqlite3.connect(path, timeout=30)
+    connection = _connect_cache(path, driver)
     try:
         table_exists = connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (TABLE_NAME,)
@@ -162,10 +186,10 @@ def heal_standalone_sqlite_cache(path: str) -> None:
         connection.close()
 
 
-def drop_standalone_sqlite_cache_index(path: str) -> None:
+def drop_standalone_sqlite_cache_index(path: str, driver: str = "aiosqlite") -> None:
     """Downgrade mirror: the pre-index adapter appends duplicate keys, so the
     unique index must not survive a downgrade or old writes raise IntegrityError."""
-    connection = sqlite3.connect(path, timeout=30)
+    connection = _connect_cache(path, driver)
     try:
         connection.execute(f"DROP INDEX IF EXISTS {INDEX_NAME}")
         connection.commit()
@@ -183,9 +207,9 @@ def upgrade() -> None:
         dedupe_session_context_entries(conn)
         create_session_context_unique_index(conn)
 
-    path = standalone_sqlite_cache_path(conn)
-    if path is not None:
-        heal_standalone_sqlite_cache(path)
+    standalone = standalone_sqlite_cache_path(conn)
+    if standalone is not None:
+        heal_standalone_sqlite_cache(*standalone)
 
 
 def downgrade() -> None:
@@ -197,6 +221,6 @@ def downgrade() -> None:
     }:
         op.drop_index(INDEX_NAME, table_name=TABLE_NAME)
 
-    path = standalone_sqlite_cache_path(conn)
-    if path is not None:
-        drop_standalone_sqlite_cache_index(path)
+    standalone = standalone_sqlite_cache_path(conn)
+    if standalone is not None:
+        drop_standalone_sqlite_cache_index(*standalone)
