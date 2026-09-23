@@ -27,3 +27,27 @@ jobs:
 
       - name: Run pre-commit hooks
         uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd  # v3.0.1
+
+  # A package's declared license covers its Python code, not every file in its
+  # wheel: pypandoc-binary declares MIT and installs the GPL pandoc executable.
+  # This installs every extra and scans the native programs packages bundle.
+  # Python 3.13 on purpose: pypandoc-binary is only installed on 3.13+ (on
+  # 3.11 uv picks the plain pypandoc wrapper, which ships no binary).
+  bundled-program-licenses:
+    name: Bundled Program Licenses
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
+        with:
+          enable-cache: true
+
+      - name: Install every extra on Python 3.13
+        run: uv sync --locked --all-extras --no-install-project --python 3.13
+
+      - name: Check bundled programs for copyleft licenses
+        run: uv run --no-sync python scripts/check_bundled_program_licenses.py
