@@ -416,3 +416,56 @@ async def test_data_persists_across_reopen(tmp_path):
         assert node is not None and node["name"] == "Keep"
     finally:
         await second.close()
+
+
+@pytest.mark.asyncio
+async def test_temporal_collect_time_ids_and_events(adapter):
+    """The TEMPORAL search path: timestamps by range, then events within two hops."""
+    from cognee.modules.engine.utils.generate_timestamp_datapoint import (
+        generate_timestamp_datapoint,
+    )
+    from cognee.tasks.temporal_graph.models import Timestamp as TimestampQuery
+
+    def stamp(node_id: str, year: int):
+        datapoint = generate_timestamp_datapoint(TimestampQuery(year=year))
+        return (
+            node_id,
+            {"name": datapoint.timestamp_str, "type": "Timestamp", "time_at": datapoint.time_at},
+        )
+
+    await adapter.add_nodes(
+        [
+            stamp("t1990", 1990),
+            stamp("t2000", 2000),
+            stamp("t2010", 2010),
+            ("ev_a", {"name": "Fall of a wall", "type": "Event", "description": "1990-ish"}),
+            ("ev_b", {"name": "Millennium", "type": "Event", "location": "Everywhere"}),
+            ("ent", {"name": "Bridge entity", "type": "Entity"}),
+            ("ev_far", {"name": "Too far", "type": "Event"}),
+        ]
+    )
+    await adapter.add_edges(
+        [
+            ("ev_a", "t1990", "at", {}),  # one hop
+            ("ent", "t2000", "mentions", {}),  # ev_b reaches t2000 in two hops via ent
+            ("ev_b", "ent", "involves", {}),
+            ("ev_far", "ev_b", "follows", {}),  # three hops from t2000: excluded
+        ]
+    )
+
+    assert sorted(await adapter.collect_time_ids(time_from=TimestampQuery(year=1995))) == [
+        "t2000",
+        "t2010",
+    ]
+    assert await adapter.collect_time_ids(time_to=TimestampQuery(year=1995)) == ["t1990"]
+    assert await adapter.collect_time_ids(
+        time_from=TimestampQuery(year=1995), time_to=TimestampQuery(year=2005)
+    ) == ["t2000"]
+    assert await adapter.collect_time_ids() == []
+
+    events = (await adapter.collect_events(["t2000"]))[0]["events"]
+    assert [event["id"] for event in events] == ["ev_b"]
+    assert events[0]["location"] == "Everywhere"
+    events = (await adapter.collect_events("'t1990', 't2000'"))[0]["events"]
+    assert sorted(event["id"] for event in events) == ["ev_a", "ev_b"]
+    assert (await adapter.collect_events([]))[0]["events"] == []

@@ -35,6 +35,8 @@ from cognee.infrastructure.databases.turso import (
     turso_url,
 )
 from cognee.infrastructure.engine import DataPoint
+from cognee.modules.engine.models.Timestamp import Timestamp
+from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import get_logger
 
@@ -862,6 +864,67 @@ class TursoAdapter(GraphDBInterface):
                 edges.append((row.source_id, row.target_id, row.relationship_name, props))
 
             return nodes, edges
+
+    # ------------------------------------------------------------------ #
+    # Temporal retrieval (SearchType.TEMPORAL), mirroring the Ladybug/Neo4j
+    # adapters: Timestamp nodes carry ``time_at`` (ms since the epoch) in their
+    # properties; Event nodes sit within two hops of their timestamps.
+    # ------------------------------------------------------------------ #
+    async def collect_time_ids(
+        self,
+        time_from: Timestamp | None = None,
+        time_to: Timestamp | None = None,
+    ) -> list[str]:
+        """Return ids of ``Timestamp`` nodes whose ``time_at`` lies in the inclusive range.
+
+        Either bound may be omitted; with neither, nothing is selected (as in the
+        Ladybug adapter). A Timestamp without a numeric ``time_at`` is skipped.
+        """
+        if not time_from and not time_to:
+            return []
+
+        conditions = ["type = 'Timestamp'", "json_extract(properties, '$.time_at') IS NOT NULL"]
+        params: dict[str, Any] = {}
+        if time_from:
+            conditions.append("CAST(json_extract(properties, '$.time_at') AS INTEGER) >= :lower")
+            params["lower"] = date_to_int(time_from)
+        if time_to:
+            conditions.append("CAST(json_extract(properties, '$.time_at') AS INTEGER) <= :upper")
+            params["upper"] = date_to_int(time_to)
+
+        async with self._session() as session:
+            result = await session.execute(
+                text(f"SELECT id FROM graph_node WHERE {' AND '.join(conditions)}"), params
+            )
+            return [row[0] for row in result.fetchall()]
+
+    async def collect_events(self, ids: list[str] | str) -> list[dict[str, Any]]:
+        """Collect the ``Event`` nodes within one or two hops of ``ids``.
+
+        Same contract as the Ladybug adapter: ``[{"events": [...]}]`` where each
+        event has ``id``, ``name``, ``description`` and, when set, ``location``.
+        ``ids`` may also be the comma-joined string form the Neo4j path produces.
+        """
+        if isinstance(ids, str):
+            ids = [uid.strip().strip("'\"") for uid in ids.split(",") if uid.strip()]
+        seeds = {str(uid) for uid in ids}
+        if not seeds:
+            return [{"events": []}]
+
+        nodes, _ = await self.get_neighborhood(sorted(seeds), depth=2)
+        events = []
+        for node_id, data in nodes:
+            if node_id in seeds or data.get("type") != "Event":
+                continue
+            event: dict[str, Any] = {
+                "id": node_id,
+                "name": data.get("name"),
+                "description": data.get("description"),
+            }
+            if data.get("location"):
+                event["location"] = data["location"]
+            events.append(event)
+        return [{"events": events}]
 
     async def delete_graph(self) -> None:
         """Delete all nodes and edges from the graph."""
