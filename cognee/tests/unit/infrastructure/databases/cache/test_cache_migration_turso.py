@@ -128,3 +128,17 @@ def test_standalone_cache_path_reports_the_driver(tmp_path, monkeypatch):
         str(cache_file),
         migration.TURSO_DRIVER,
     )
+
+
+def test_heal_turso_cache_without_driver_fails_with_install_hint(tmp_path):
+    """A Turso cache with pyturso missing must fail loudly with the install hint."""
+    import sys
+    from unittest.mock import patch
+
+    migration = _load_migration()
+    path = str(tmp_path / "cache.db")
+    with (
+        patch.dict(sys.modules, {"turso": None}),
+        pytest.raises(RuntimeError, match="pyturso is not installed"),
+    ):
+        migration.heal_standalone_sqlite_cache(path, migration.TURSO_DRIVER)

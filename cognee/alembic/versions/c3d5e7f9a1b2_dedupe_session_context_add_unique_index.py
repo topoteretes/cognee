@@ -150,7 +150,19 @@ def _connect_cache(path: str, driver: str):
     Both connections expose the same DB-API surface this migration uses.
     """
     if driver == TURSO_DRIVER:
-        import turso
+        # Without the turso extra there is no way to heal a Turso cache, and the
+        # runtime cache engine would fail to start anyway; fail here with the
+        # install hint rather than a bare ModuleNotFoundError.
+        from cognee.infrastructure.databases.turso.runtime import INSTALL_HINT
+
+        try:
+            import turso
+        except ImportError as error:
+            raise RuntimeError(
+                f"The session cache at {path} lives on the Turso engine (CACHE_BACKEND=turso "
+                f"or a sqlite+cognee_turso CACHE_DB_URL) but pyturso is not installed. "
+                f"{INSTALL_HINT}"
+            ) from error
 
         connection = turso.connect(path)
         connection.execute("PRAGMA busy_timeout=30000").fetchall()
