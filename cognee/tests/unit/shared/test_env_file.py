@@ -26,6 +26,7 @@ def _isolated(monkeypatch, tmp_path):
     if env_file._find_upward(tmp_path) is not None:  # pragma: no cover - host has a stray .env
         pytest.skip("a .env above the pytest tmp dir would confound these tests")
     snapshot = dict(os.environ)
+    monkeypatch.delenv(env_file.ENV_FILE_VARIABLE, raising=False)
     monkeypatch.setattr(env_file, "_loaded", False)
     monkeypatch.setattr(env_file, "_resolved", None)
     monkeypatch.setattr(env_file, "_package_directory", lambda: tmp_path / "no-package-env")
@@ -53,11 +54,59 @@ def test_the_working_directory_file_is_found_first(monkeypatch, tmp_path):
 
 def test_a_parent_of_the_working_directory_counts_as_the_project(monkeypatch, tmp_path):
     root = _write_env(tmp_path / "repo", "from-repo-root")
+    (tmp_path / "repo" / "pyproject.toml").touch()
     deep = tmp_path / "repo" / "services" / "api"
     deep.mkdir(parents=True)
     monkeypatch.chdir(deep)
 
     assert env_file.resolve_env_file() == str(root)
+
+
+def test_the_search_stops_at_the_project_root(tmp_path):
+    """A .env above the nearest .git / pyproject.toml belongs to someone else."""
+    _write_env(tmp_path, "from-shared-parent")
+    (tmp_path / "repo" / ".git").mkdir(parents=True)
+    deep = tmp_path / "repo" / "src"
+    deep.mkdir()
+
+    assert env_file._find_upward(deep) is None
+
+
+def test_without_a_project_marker_the_search_continues_upward(monkeypatch, tmp_path):
+    """A plain folder of scripts has no .git / pyproject.toml; its .env is still found."""
+    scripts = _write_env(tmp_path / "scripts", "from-scripts-folder")
+    deep = tmp_path / "scripts" / "sub"
+    deep.mkdir()
+    monkeypatch.chdir(deep)
+
+    assert env_file.resolve_env_file() == str(scripts)
+
+
+def test_cognee_env_file_names_the_file_and_skips_the_search(monkeypatch, tmp_path):
+    _write_env(tmp_path / "project", "from-project")
+    pinned = tmp_path / "config" / "cognee.env"
+    pinned.parent.mkdir()
+    pinned.write_text(f"{KEY}=from-pinned\n")
+    monkeypatch.chdir(tmp_path / "project")
+    monkeypatch.setenv(env_file.ENV_FILE_VARIABLE, str(pinned))
+
+    assert env_file.load_env_file() == str(pinned)
+    assert os.environ[KEY] == "from-pinned"
+
+
+def test_an_empty_cognee_env_file_keeps_the_search(monkeypatch, tmp_path):
+    project = _write_env(tmp_path / "project", "from-project")
+    monkeypatch.chdir(tmp_path / "project")
+    monkeypatch.setenv(env_file.ENV_FILE_VARIABLE, "")
+
+    assert env_file.resolve_env_file() == str(project)
+
+
+def test_a_cognee_env_file_that_does_not_exist_is_an_error(monkeypatch, tmp_path):
+    monkeypatch.setenv(env_file.ENV_FILE_VARIABLE, str(tmp_path / "missing.env"))
+
+    with pytest.raises(FileNotFoundError, match="COGNEE_ENV_FILE"):
+        env_file.load_env_file()
 
 
 def test_the_package_side_file_is_the_fallback(monkeypatch, tmp_path):

@@ -317,7 +317,7 @@ Support for PDF, DOCX, CSV, images, audio, code files in `cognee/infrastructure/
 ## Important Configuration
 
 ### Environment Setup
-Copy `.env.template` to `.env` and configure. Cognee finds the file once per process, at import, searching the working directory and its parents first, then the cognee package directory and its parents (`cognee/shared/env_file.py`). Values from the file take precedence over variables already set in the shell, for settings classes and `os.getenv` reads alike, so a project `.env` is the single source of truth wherever the environment happens to be installed. The path that was loaded (or "No .env file found") is logged at info on import.
+Copy `.env.template` to `.env` and configure. Cognee finds the file once per process, at import, searching the working directory and its parents first, then the cognee package directory and its parents (`cognee/shared/env_file.py`). Each search stops at the project root, the nearest directory with a `.git` or `pyproject.toml`, so a `.env` above a project is never loaded; with no such marker (a plain folder of scripts) it continues up to the filesystem root. `COGNEE_ENV_FILE=/path/to/file` skips the search and loads that file (a path that is not a file raises at import). Values from the file take precedence over variables already set in the shell, for settings classes and `os.getenv` reads alike, so a project `.env` is the single source of truth wherever the environment happens to be installed. The path that was loaded (or "No .env file found") is logged at info on import.
 
 ```bash
 # Minimal setup (defaults to OpenAI + local file-based databases)
