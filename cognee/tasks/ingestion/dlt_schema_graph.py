@@ -12,6 +12,10 @@ from uuid import NAMESPACE_OID, UUID, uuid5
 
 from cognee.infrastructure.databases.provenance import graph_provenance_write_kwargs
 from cognee.modules.engine.models import DltColumn
+from cognee.modules.ontology.get_default_ontology_resolver import (
+    get_configured_ontology_resolver,
+)
+from cognee.modules.ontology.schema_alignment import align_tables_with_ontology
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.schema.models import SchemaRelationship, SchemaTable
 from cognee.tasks.storage.index_data_points import index_data_points
@@ -97,6 +101,20 @@ async def emit_dlt_schema_graph(
         )
         schema_nodes.append(table_node)
         table_node_ids[table_name] = table_node.id
+
+    # Business-to-technical mapping: with an ontology configured, each table node
+    # realizes the ontology class its name resolves to (see schema_alignment).
+    if table_node_ids:
+        try:
+            ontology_resolver = get_configured_ontology_resolver()
+        except Exception as error:  # an ontology misconfiguration must not block ingestion
+            logger.warning("Skipping ontology alignment of DLT tables: %s", error, exc_info=True)
+            ontology_resolver = None
+        alignment = align_tables_with_ontology(
+            [(node_id, name) for name, node_id in table_node_ids.items()], ontology_resolver
+        )
+        schema_nodes.extend(alignment.entity_types.values())
+        schema_edges.extend(alignment.edges)
 
     # SchemaRelationship nodes for each FK definition
     relationship_count = 0

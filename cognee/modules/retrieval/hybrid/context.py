@@ -24,6 +24,13 @@ def format_hybrid_context(global_context: str, retrieved_objects: Any) -> str:
     if facts:
         sections.append(facts)
 
+    # Grounding explains terms; it never stands in for retrieved content, so an
+    # otherwise empty context stays empty (and the empty-context guard still fires).
+    grounding = display_value(retrieved_objects.get("ontology_grounding"))
+    if grounding and sections:
+        insert_at = 1 if global_context else 0
+        sections.insert(insert_at, grounding)
+
     return "\n\n".join(sections)
 
 

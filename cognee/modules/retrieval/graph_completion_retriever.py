@@ -10,6 +10,11 @@ from cognee.infrastructure.session.get_session_manager import get_session_manage
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
+from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
+from cognee.modules.ontology.query_grounding import (
+    QueryGrounding,
+    ground_query_with_configured_ontology,
+)
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
@@ -73,8 +78,17 @@ class GraphCompletionRetriever(BaseRetriever):
         include_global_context_index: bool = False,
         global_context_index_top_k: int = 3,
         include_references: bool = False,
+        ontology_grounding: bool | None = None,
+        ontology_resolver: BaseOntologyResolver | None = None,
     ):
-        """Initialize retriever with prompt paths and search parameters."""
+        """Initialize retriever with prompt paths and search parameters.
+
+        ``ontology_grounding`` resolves query terms against the configured ontology
+        (``ONTOLOGY_FILE_PATH``), pins the matched ontology nodes as traversal seeds
+        and prepends an "Ontology grounding" block to the context. ``None`` follows
+        ``ONTOLOGY_QUERY_GROUNDING`` (default on); ``ontology_resolver`` overrides the
+        configured resolver.
+        """
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
         self.system_prompt = system_prompt
@@ -96,6 +110,21 @@ class GraphCompletionRetriever(BaseRetriever):
         self.include_global_context_index = include_global_context_index
         self.global_context_index_top_k = global_context_index_top_k
         self.include_references = include_references
+        self.ontology_grounding = ontology_grounding
+        self.ontology_resolver = ontology_resolver
+
+    def ground_query(self, query: str | None) -> QueryGrounding:
+        """Resolve the query's terms against the ontology (no LLM, no embedding).
+
+        Called once for seeding and once for the context block; the lookup is
+        memoized per resolver and query, so the second call is a dict hit. Never
+        raises: no ontology configured, or grounding off, yields an empty grounding.
+        """
+        return ground_query_with_configured_ontology(
+            query,
+            resolver=self.ontology_resolver,
+            enabled=self.ontology_grounding,
+        )
 
     def _use_session_cache(self) -> bool:
         """Check if session caching is enabled for the current user."""
@@ -203,6 +232,12 @@ class GraphCompletionRetriever(BaseRetriever):
         # error yields {}, so the search stays byte-identical to an
         # un-personalized run.
         personal_weights = await load_preference_weights()
+        # Ontology concepts the query names become pinned seeds: they are projected
+        # with the vector hits and rank ahead of them, so "exposure" reaches the
+        # CreditExposure class node even when the embedding neighbourhood misses it.
+        pinned_node_ids = (
+            self.ground_query(query).seed_node_ids_by_collection() if query_batch is None else {}
+        )
         return await brute_force_triplet_search(
             query,
             query_batch,
@@ -218,6 +253,7 @@ class GraphCompletionRetriever(BaseRetriever):
             neighborhood_depth=self.neighborhood_depth,
             neighborhood_seed_top_k=self.neighborhood_seed_top_k,
             personal_weights=personal_weights or None,
+            pinned_node_ids=pinned_node_ids or None,
         )
 
     async def get_triplets_batch(
@@ -276,6 +312,14 @@ class GraphCompletionRetriever(BaseRetriever):
             )
 
         graph_context = await self.resolve_edges_to_text(triplets) if triplets else ""
+
+        # The grounding block only accompanies real graph context: on its own it
+        # names concepts without any facts about them, and an empty context must
+        # stay empty so "nothing found" remains detectable.
+        if graph_context:
+            grounding_block = self.ground_query(query).to_context_block()
+            if grounding_block:
+                graph_context = f"{grounding_block}\n\n{graph_context}"
 
         if not self.include_global_context_index:
             if not triplets:

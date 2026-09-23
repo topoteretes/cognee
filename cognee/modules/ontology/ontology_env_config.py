@@ -44,6 +44,7 @@ class OntologyEnvConfig(BaseSettings):
     - ontology_matching
     - ontology_file_path
     - ontology_mode
+    - ontology_query_grounding
     - model_config
     """
 
@@ -51,6 +52,10 @@ class OntologyEnvConfig(BaseSettings):
     matching_strategy: str = "fuzzy"
     ontology_file_path: str = ""
     ontology_mode: str = DEFAULT_ONTOLOGY_MODE
+    # Read-time use of the ontology: graph-completion and hybrid searches resolve query
+    # terms against the ontology, pin the matched nodes as seeds and tell the LLM what
+    # each term means. Only active when ontology_file_path is set.
+    ontology_query_grounding: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow", populate_by_name=True)
 
