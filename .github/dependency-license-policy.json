@@ -4,5 +4,10 @@
     "CC0-1.0", "ISC", "MIT", "MIT-0", "Unlicense", "Zlib",
     "PSF-2.0", "Python-2.0", "Unicode-3.0", "Unicode-DFS-2016"
   ],
+  "artifact_hosts": [
+    "files.pythonhosted.org",
+    "download-r2.pytorch.org",
+    "registry.npmjs.org"
+  ],
   "reviewed_packages": []
 }
