@@ -118,10 +118,13 @@ and appends hits with `source="skills"`. Disable with
 
 ## Pitfalls
 
-- **Empty results usually mean permissions.** A dataset the user cannot
-  read returns `[]`, not an error, so it does not leak which datasets
-  exist. Check grants (the `cognee-permissions` skill) before debugging the
-  graph. An unknown dataset *name* does raise `DatasetNotFoundError`.
+- **Permissions change what you get back.** With no `datasets`, recall
+  searches only datasets the user can read, so a user without grants gets
+  `[]`. Asking for a dataset **id** the user cannot read raises
+  `PermissionDeniedError` (HTTP 403). Dataset **names** resolve only among
+  the user's own datasets, so a name that is not theirs (even one shared
+  with them) raises `DatasetNotFoundError`; use `dataset_ids` for shared
+  datasets. See the `cognee-permissions` skill.
 - **"Memory warming up".** On an empty graph recall returns one
   `source="system"` item with `status="memory_warming_up"` (or
   `"build_failed"` plus `error_message`) instead of results. Wait for the

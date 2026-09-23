@@ -924,7 +924,7 @@ shutdown = visualization_server(port=8080)  # synchronous; returns a shutdown ca
 - Solution: Always configure both LLM and embedding providers, or ensure valid OpenAI API key
 
 **Permission Denied on Search**
-- Behavior: Returns empty list rather than error (prevents information leakage)
+- Behavior: Without `datasets`, search covers only datasets the user can read, so a user without grants gets an empty list. An explicit dataset id the user cannot read raises `PermissionDeniedError` (HTTP 403). Dataset names resolve only among the user's own datasets, so a shared dataset's name raises `DatasetNotFoundError`; pass its id instead.
 - Solution: Check dataset permissions and user access rights
 
 **Database Connection Issues**
