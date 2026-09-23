@@ -28,16 +28,14 @@ jobs:
       - name: Run pre-commit hooks
         uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd  # v3.0.1
 
-  # A package's declared license covers its Python code, not every file in its
-  # wheel: pypandoc-binary declares MIT and installs the GPL pandoc executable.
-  # This installs every extra and scans the native programs packages bundle.
-  # Python 3.13 on purpose: pypandoc-binary is only installed on 3.13+ (on
-  # 3.11 uv picks the plain pypandoc wrapper, which ships no binary).
+  # Fails when a dependency's license would extend to cognee's Apache-2.0 code:
+  # strong copyleft (GPL, AGPL) in a package cognee imports or a native library
+  # it vendors. Installs every extra, so optional dependencies are covered too.
   # The result depends only on the resolved dependencies, so the install and
   # scan run only when they (or the check itself) change. With no base to
   # compare against (workflow_dispatch, a new branch), it always runs.
-  bundled-program-licenses:
-    name: Bundled Program Licenses
+  license-compatibility:
+    name: License Compatibility
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
@@ -51,9 +49,9 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
-          if [ -n "$BASE" ] && git diff --quiet "$BASE" HEAD -- uv.lock pyproject.toml scripts/check_bundled_program_licenses.py; then
+          if [ -n "$BASE" ] && git diff --quiet "$BASE" HEAD -- uv.lock pyproject.toml scripts/check_license_compatibility.py; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "Dependencies unchanged; skipping the bundled program scan."
+            echo "Dependencies unchanged; skipping the license check."
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
@@ -68,6 +66,6 @@ jobs:
         if: steps.deps.outputs.changed == 'true'
         run: uv sync --locked --all-extras --no-install-project --python 3.13
 
-      - name: Check bundled programs for copyleft licenses
+      - name: Check dependency licenses against Apache-2.0
         if: steps.deps.outputs.changed == 'true'
-        run: uv run --no-sync python scripts/check_bundled_program_licenses.py
+        run: uv run --no-sync python scripts/check_license_compatibility.py
