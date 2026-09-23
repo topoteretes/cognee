@@ -45,7 +45,6 @@ class LoaderEngine:
             "dlt_csv_loader",
             "csv_loader",
             "unstructured_loader",
-            "advanced_pdf_loader",
             "docling_loader",
         ]
 

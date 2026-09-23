@@ -161,8 +161,10 @@ docs = [
     "lxml>=5,<6 ; python_version >= '3.13' and python_version < '3.14'",
     # cp314 wheels start at lxml 6.0.1.
     "lxml>=6.0.1,<7 ; python_version >= '3.14'",
-    # Keep document partitioning independent of Pandoc-based converters.
-    "unstructured[csv, doc, docx, md, ppt, pptx, tsv, xlsx, pdf]>=0.18.1,<19",
+    # No Pandoc-based converters (GPL pandoc) and no `pdf` extra: it vendors
+    # LGPL libheif/libde265 (pi-heif) and pulls torch with NVIDIA's CUDA
+    # packages. PDFs go through pypdf, or docling-full for model-based parsing.
+    "unstructured[csv, doc, docx, md, ppt, pptx, tsv, xlsx]>=0.18.1,<19",
     "nltk>=3.9.3,<4", # TODO: Remove when unstructured is above v0.21.0 as it won't use nltk anymore
 ]
 # enola-cli is a core dependency. The empty extra keeps `cognee[codegraph]` installable.

@@ -40,9 +40,11 @@ def test_docs_extra_has_no_pandoc_converters():
     docs = read_toml("pyproject.toml")["project"]["optional-dependencies"]["docs"]
     requirement = next(Requirement(value) for value in docs if value.startswith("unstructured["))
     assert requirement.extras.isdisjoint({"epub", "odt", "org", "rst", "rtf"})
-    assert {"docx", "pptx", "xlsx", "pdf"} <= requirement.extras
+    assert {"docx", "pptx", "xlsx"} <= requirement.extras
+    # unstructured[pdf] vendors LGPL libraries (pi-heif) and pulls torch/NVIDIA.
+    assert "pdf" not in requirement.extras
     names = {package["name"] for package in read_toml("uv.lock")["package"]}
-    assert names.isdisjoint({"pypandoc", "pypandoc-binary"})
+    assert names.isdisjoint({"pypandoc", "pypandoc-binary", "pi-heif", "unstructured-inference"})
 
 
 def test_mcp_defaults_to_slim_docling():
