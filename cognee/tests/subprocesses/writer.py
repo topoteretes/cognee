@@ -2,9 +2,10 @@ import asyncio
 import time
 import uuid
 
+from common import get_kuzu_db_path
+
 from cognee.infrastructure.databases.graph.ladybug.adapter import LadybugAdapter
 from cognee.modules.data.processing.document_types import PdfDocument
-from common import get_kuzu_db_path
 
 
 def create_node(name):

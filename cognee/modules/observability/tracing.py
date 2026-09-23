@@ -8,18 +8,20 @@ import os
 import re
 import threading
 from collections import defaultdict
-from typing import Optional, Sequence
+from collections.abc import Sequence
+from typing import Optional
 
 try:
     from opentelemetry import trace
-    from opentelemetry.sdk.trace import TracerProvider, ReadableSpan
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
     from opentelemetry.sdk.trace.export import (
+        BatchSpanProcessor,
+        ConsoleSpanExporter,
+        SimpleSpanProcessor,
         SpanExporter,
         SpanExportResult,
-        SimpleSpanProcessor,
-        ConsoleSpanExporter,
     )
-    from opentelemetry.sdk.resources import Resource
     from opentelemetry.trace import StatusCode
 
     _OTEL_AVAILABLE = True
@@ -51,6 +53,11 @@ COGNEE_PIPELINE_NAME = "cognee.pipeline.name"
 # are Langfuse's highest-priority input/output sources (JSON-string values).
 GEN_AI_REQUEST_MODEL = "gen_ai.request.model"
 GEN_AI_SYSTEM = "gen_ai.system"
+GEN_AI_OPERATION_NAME = "gen_ai.operation.name"
+GEN_AI_PROVIDER_NAME = "gen_ai.provider.name"
+GEN_AI_RESPONSE_MODEL = "gen_ai.response.model"
+GEN_AI_EMBEDDINGS_DIMENSION_COUNT = "gen_ai.embeddings.dimension.count"
+SERVER_ADDRESS = "server.address"
 LANGFUSE_OBSERVATION_TYPE = "langfuse.observation.type"
 LANGFUSE_OBSERVATION_INPUT = "langfuse.observation.input"
 LANGFUSE_OBSERVATION_OUTPUT = "langfuse.observation.output"
@@ -64,6 +71,7 @@ COGNEE_DATA_ITEM_COUNT = "cognee.data.item_count"
 COGNEE_OPERATION_MODE = "cognee.operation.mode"  # "session", "permanent", "cloud"
 COGNEE_RECALL_SCOPE = "cognee.recall.scope"  # "session", "graph", "auto"
 COGNEE_RECALL_SOURCE = "cognee.recall.source"  # where results came from
+COGNEE_RECALL_ROUTE_RULE = "cognee.recall.route_rule"  # query_router rule that picked the type
 COGNEE_FORGET_TARGET = "cognee.forget.target"  # "dataset", "data_item", "everything"
 COGNEE_IMPROVE_STAGES = "cognee.improve.stages"
 COGNEE_GRAPH_EDGES_SYNCED = "cognee.graph.edges_synced"  # compatibility; no longer emitted
@@ -160,7 +168,7 @@ class CogneeSpanExporter(_ExporterBase):
 
     # -- Public helpers for reading collected traces --
 
-    def get_last_trace_spans(self) -> Optional[list[dict]]:
+    def get_last_trace_spans(self) -> list[dict] | None:
         with self._lock:
             if not self._trace_order:
                 return None
@@ -260,7 +268,7 @@ def _is_auto_instrumented() -> bool:
     return current is not None and type(current).__name__ != "ProxyTracerProvider"
 
 
-def _parse_otlp_headers(raw: Optional[str]) -> Optional[dict]:
+def _parse_otlp_headers(raw: str | None) -> dict | None:
     """Parse an ``OTEL_EXPORTER_OTLP_HEADERS``-style ``key=value,key2=value2``
     string into a dict. Splitting on the first ``=`` preserves base64 padding in
     values (e.g. ``Authorization=Basic abc==``). Returns None when empty."""
@@ -274,16 +282,42 @@ def _parse_otlp_headers(raw: Optional[str]) -> Optional[dict]:
     return headers or None
 
 
+def _requires_http_exporter(endpoint: str) -> bool:
+    """Return True when the endpoint is known to accept only HTTP OTLP.
+
+    Covers Langfuse, Dynatrace, and any generic HTTPS endpoint on port 443/4318
+    that clearly isn't a gRPC-only backend.  gRPC exporters must never be
+    pointed at these URLs — they fail silently (connection accepted, then
+    closed) which causes traces to disappear without any visible error.
+    """
+    http_only_patterns = (
+        "/api/public/otel",  # Langfuse
+        "live.dynatrace.com",  # Dynatrace SaaS
+        "dynatrace.com",  # Dynatrace (any subdomain)
+        "/api/v2/otlp",  # Dynatrace OTLP path
+        "otel.live.dynatrace.com",  # Dynatrace dedicated ingest
+        ":4318",  # standard OTLP HTTP port
+        ":443/",  # standard HTTPS — almost certainly HTTP OTLP
+    )
+    return any(pat in endpoint for pat in http_only_patterns)
+
+
 def _try_add_otlp_exporter(provider: "TracerProvider") -> None:
     """If an OTLP endpoint is configured, add an OTLP span exporter.
 
-    Reads the endpoint and headers from ``BaseConfig``. The OTLP exporters also
-    honour the standard ``OTEL_EXPORTER_OTLP_*`` env vars for compression, etc.
+    Reads the endpoint and headers from ``BaseConfig``. Uses a
+    ``BatchSpanProcessor`` for reliable async export.
 
-    Langfuse's OTLP endpoint (``/api/public/otel``) only accepts OTLP over HTTP,
-    so the HTTP exporter is forced for it — including self-hosted instances on a
-    custom domain. Every other endpoint prefers gRPC and falls back to HTTP.
+    Endpoint-specific rules:
+    - Dynatrace (``live.dynatrace.com``, ``/api/v2/otlp``): HTTP only.
+    - Langfuse (``/api/public/otel``): HTTP only.
+    - gRPC-only backends (port 4317, no HTTP path): gRPC.
+    - Everything else: try gRPC, fall back to HTTP.
     """
+    import logging as _logging
+
+    _log = _logging.getLogger("cognee.observability")
+
     from cognee.base_config import get_base_config
 
     config = get_base_config()
@@ -299,32 +333,37 @@ def _try_add_otlp_exporter(provider: "TracerProvider") -> None:
         )
 
         exporter = OTLPHttpSpanExporter(endpoint=endpoint, headers=headers)
-        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        provider.add_span_processor(BatchSpanProcessor(exporter))
+        _log.info("OTel: OTLP HTTP trace exporter registered → %s", endpoint)
 
     def _warn_no_exporter() -> None:
         import warnings
 
-        warnings.warn(
-            "otel_exporter_otlp_endpoint is set but no OTLP exporter is installed. "
-            "Install with: pip install cognee[tracing]",
-            stacklevel=2,
+        msg = (
+            f"OTEL_EXPORTER_OTLP_ENDPOINT is set to '{endpoint}' but the OTLP "
+            "exporter package is not installed. Traces will NOT be exported. "
+            "Install with: pip install cognee[tracing]"
         )
+        _log.error("OTel: %s", msg)
+        warnings.warn(msg, stacklevel=2)
 
-    # Langfuse ingests OTLP over HTTP only (no gRPC).
-    if "/api/public/otel" in endpoint:
+    # Backends that accept only HTTP OTLP (Dynatrace, Langfuse, port 4318 …)
+    if _requires_http_exporter(endpoint):
         try:
             _add_http_exporter()
         except ImportError:
             _warn_no_exporter()
         return
 
+    # Everything else: prefer gRPC (port 4317), fall back to HTTP.
     try:
         from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
             OTLPSpanExporter,
         )
 
         exporter = OTLPSpanExporter(endpoint=endpoint, headers=headers)
-        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        provider.add_span_processor(BatchSpanProcessor(exporter))
+        _log.info("OTel: OTLP gRPC trace exporter registered → %s", endpoint)
     except ImportError:
         try:
             _add_http_exporter()
@@ -375,16 +414,28 @@ def setup_tracing(console_output: bool = False) -> "trace.Tracer":
             }
         )
 
+        import logging as _logging
+
+        _log = _logging.getLogger("cognee.observability")
+
         _provider = TracerProvider(resource=resource)
         _provider.add_span_processor(SimpleSpanProcessor(_exporter))
 
-        # Add OTLP exporter when endpoint is configured (e.g. Dash0, Grafana, etc.)
+        # Add OTLP exporter when endpoint is configured (e.g. Dynatrace, Dash0, Grafana …)
         _try_add_otlp_exporter(_provider)
 
         if console_output:
             _provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
 
         trace.set_tracer_provider(_provider)
+
+        endpoint = config.otel_exporter_otlp_endpoint
+        _log.info(
+            "OTel tracing initialised — service=%s version=%s endpoint=%s",
+            config.otel_service_name,
+            version,
+            endpoint or "none (in-memory only)",
+        )
 
     _tracer = _provider.get_tracer("cognee", version)
     return _tracer

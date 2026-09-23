@@ -101,7 +101,7 @@ async def launch_neo4j_and_run_benchmark(config_params: dict, dir_suffix: str):
             with socket.create_connection(("localhost", 7474), timeout=1):
                 print("✅ Neo4j server is ready.")
                 break
-        except (socket.timeout, ConnectionRefusedError):
+        except (TimeoutError, ConnectionRefusedError):
             if neo4j_process.poll() is not None:
                 raise RuntimeError("Neo4j process terminated unexpectedly.")
             time.sleep(1)
@@ -145,7 +145,7 @@ async def main(
     print(f"🚀 Launchi  ng {runs} Graphiti QA benchmark run(s) on Modal...")
 
     # Generate unique timestamp for this benchmark session
-    base_timestamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    base_timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     config_params_list = []
 
     for run_num in range(runs):

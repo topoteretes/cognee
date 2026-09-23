@@ -1,9 +1,13 @@
-import sys
-import os
 import argparse
+import logging
+import os
 import signal
 import subprocess
-from typing import Any, Sequence, Dict, Type, cast, List
+import sys
+import warnings
+from collections.abc import Sequence
+from typing import Any
+
 import click
 
 try:
@@ -14,12 +18,14 @@ try:
 except ImportError:
     HAS_RICH = False
 
-from cognee.cli import SupportsCliCommand, DEFAULT_DOCS_URL
-from cognee.cli.config import CLI_DESCRIPTION
-from cognee.cli import debug
 import cognee.cli.echo as fmt
+from cognee.cli import DEFAULT_DOCS_URL, SupportsCliCommand, debug
+from cognee.cli.config import CLI_DESCRIPTION
 from cognee.cli.exceptions import CliCommandException
+from cognee.cli.remediation import REMEDIATION_MARKER, find_remediation
+from cognee.shared.logging_utils import get_logger
 
+logger = get_logger()
 
 ACTION_EXECUTED = False
 
@@ -35,9 +41,9 @@ class DebugAction(argparse.Action):
         option_strings: Sequence[str],
         dest: Any = argparse.SUPPRESS,
         default: Any = argparse.SUPPRESS,
-        help: str = None,
+        help: str | None = None,
     ) -> None:
-        super(DebugAction, self).__init__(
+        super().__init__(
             option_strings=option_strings, dest=dest, default=default, nargs=0, help=help
         )
 
@@ -46,7 +52,7 @@ class DebugAction(argparse.Action):
         parser: argparse.ArgumentParser,
         namespace: argparse.Namespace,
         values: Any,
-        option_string: str = None,
+        option_string: str | None = None,
     ) -> None:
         # Enable debug mode for stack traces
         debug.enable_debug()
@@ -59,9 +65,9 @@ class UiAction(argparse.Action):
         option_strings: Sequence[str],
         dest: Any = argparse.SUPPRESS,
         default: Any = argparse.SUPPRESS,
-        help: str = None,
+        help: str | None = None,
     ) -> None:
-        super(UiAction, self).__init__(
+        super().__init__(
             option_strings=option_strings, dest=dest, default=default, nargs=0, help=help
         )
 
@@ -70,7 +76,7 @@ class UiAction(argparse.Action):
         parser: argparse.ArgumentParser,
         namespace: argparse.Namespace,
         values: Any,
-        option_string: str = None,
+        option_string: str | None = None,
     ) -> None:
         # Set a flag to indicate UI should be started
         global ACTION_EXECUTED
@@ -81,7 +87,7 @@ class UiAction(argparse.Action):
 # Debug functionality is now in cognee.cli.debug module
 
 
-def _discover_commands() -> List[Type[SupportsCliCommand]]:
+def _discover_commands() -> list[type[SupportsCliCommand]]:
     """Discover all available CLI commands"""
     # Import commands dynamically to avoid early cognee initialization
     commands = []
@@ -110,6 +116,8 @@ def _discover_commands() -> List[Type[SupportsCliCommand]]:
         ("cognee.cli.commands.migrate_command", "StampCommand"),
         ("cognee.cli.commands.push_command", "PushCommand"),
         ("cognee.cli.commands.report_command", "ReportCommand"),
+        ("cognee.cli.commands.demo_command", "DemoCommand"),
+        ("cognee.cli.commands.doctor_command", "DoctorCommand"),
     ]
 
     for module_path, class_name in command_modules:
@@ -123,7 +131,7 @@ def _discover_commands() -> List[Type[SupportsCliCommand]]:
     return commands
 
 
-def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliCommand]]:
+def _create_parser() -> tuple[argparse.ArgumentParser, dict[str, SupportsCliCommand]]:
     parser = argparse.ArgumentParser(
         description=f"{CLI_DESCRIPTION} Further help is available at {DEFAULT_DOCS_URL}."
     )
@@ -174,7 +182,7 @@ def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliComm
 
     # Discover and install commands
     command_classes = _discover_commands()
-    installed_commands: Dict[str, SupportsCliCommand] = {}
+    installed_commands: dict[str, SupportsCliCommand] = {}
 
     for command_class in command_classes:
         command = command_class()
@@ -199,7 +207,7 @@ def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliComm
                 parser.description = Markdown(parser.description, style="argparse.text")
             for action in parser._actions:
                 if isinstance(action, argparse._SubParsersAction):
-                    for _subcmd, subparser in action.choices.items():
+                    for subparser in action.choices.values():
                         add_formatter_class(subparser)
 
         add_formatter_class(parser)
@@ -207,10 +215,47 @@ def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliComm
     return parser, installed_commands
 
 
+class _DropUnclosedFilter(logging.Filter):
+    """Drop aiohttp's shutdown-time ``Unclosed ...`` records (keep the rest)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not record.getMessage().startswith("Unclosed ")
+
+
+def _silence_teardown_warnings() -> None:
+    """Hide aiohttp's shutdown-time "Unclosed ..." noise from the CLI.
+
+    aiohttp finalises its ClientSession / connector / connection in
+    ``__del__`` during interpreter shutdown and reports the leak through two
+    channels: a ``ResourceWarning`` (usually hidden) and the asyncio event
+    loop's exception handler, which logs an ERROR on the ``asyncio`` logger —
+    that second one is the two-line "Unclosed client session ..." noise a
+    first-time user actually sees. Neither is actionable in the CLI, so
+    silence both, surgically (only the "Unclosed" records, so genuine asyncio
+    errors still surface). Installed only for a real CLI run (not as an import
+    side effect) and skipped in debug mode so contributors still see them.
+    """
+    warnings.filterwarnings(
+        "ignore",
+        message="Unclosed (client session|connector|connection)",
+        category=ResourceWarning,
+    )
+    logging.getLogger("asyncio").addFilter(_DropUnclosedFilter())
+
+
 def main() -> int:
     """Main CLI entry point"""
+    # Operations run from this process record origin="cli" in pipeline_runs.
+    # ContextVars set here propagate into every asyncio.run() a command makes.
+    from cognee.modules.operations import ORIGIN_CLI, set_operation_origin
+
+    set_operation_origin(ORIGIN_CLI)
+
     parser, installed_commands = _create_parser()
     args = parser.parse_args()
+
+    if not debug.is_debug_enabled():
+        _silence_teardown_warnings()
 
     # Handle UI flag
     if hasattr(args, "start_ui") and args.start_ui:
@@ -226,60 +271,25 @@ def main() -> int:
             except (BrokenPipeError, OSError):
                 pass
 
-            # First, stop Docker container if running
+            # Teardown lives in cognee.api.v1.ui.ui, which owns the processes and
+            # the container. Reimplementing it here is how the two drifted: this
+            # handler used to resolve os.getpgid(pid) first, which fails in exactly
+            # the case start_ui cares about -- npm's parent exiting before its
+            # Node child -- while start_ui signals the original group id.
+            from cognee.api.v1.ui.ui import remove_ui_container, stop_ui_pid
+
             if docker_container:
+                remove_ui_container(docker_container)
                 try:
-                    result = subprocess.run(
-                        ["docker", "stop", docker_container],
-                        capture_output=True,
-                        timeout=10,
-                        check=False,
-                    )
-                    try:
-                        if result.returncode == 0:
-                            fmt.success(f"✓ Docker container {docker_container} stopped.")
-                        else:
-                            fmt.warning(
-                                f"Could not stop container {docker_container}: {result.stderr.decode()}"
-                            )
-                    except (BrokenPipeError, OSError):
-                        pass
-                except subprocess.TimeoutExpired:
-                    try:
-                        fmt.warning(
-                            f"Timeout stopping container {docker_container}, forcing removal..."
-                        )
-                    except (BrokenPipeError, OSError):
-                        pass
-                    subprocess.run(
-                        ["docker", "rm", "-f", docker_container], capture_output=True, check=False
-                    )
-                except Exception:
+                    fmt.success(f"✓ Docker container {docker_container} stopped.")
+                except (BrokenPipeError, OSError):
                     pass
 
-            # Then, stop regular processes
             for pid in spawned_pids:
+                stop_ui_pid(pid)
                 try:
-                    if hasattr(os, "killpg"):
-                        # Unix-like systems: Use process groups
-                        pgid = os.getpgid(pid)
-                        os.killpg(pgid, signal.SIGTERM)
-                        try:
-                            fmt.success(f"✓ Process group {pgid} (PID {pid}) terminated.")
-                        except (BrokenPipeError, OSError):
-                            pass
-                    else:
-                        # Windows: Use taskkill to terminate process and its children
-                        subprocess.run(
-                            ["taskkill", "/F", "/T", "/PID", str(pid)],
-                            capture_output=True,
-                            check=False,
-                        )
-                        try:
-                            fmt.success(f"✓ Process {pid} and its children terminated.")
-                        except (BrokenPipeError, OSError):
-                            pass
-                except (OSError, ProcessLookupError, subprocess.SubprocessError):
+                    fmt.success(f"✓ Process {pid} and its children terminated.")
+                except (BrokenPipeError, OSError):
                     pass
 
             sys.exit(0)
@@ -324,8 +334,12 @@ def main() -> int:
                 fmt.echo(f"The interface is available at: http://localhost:{frontend_port}")
                 if start_backend:
                     fmt.echo(f"The API backend is available at: http://localhost:{backend_port}")
-                if start_mcp:
+                if start_mcp and docker_container:
                     fmt.echo(f"The MCP server is available at: http://localhost:{mcp_port}")
+                elif start_mcp:
+                    fmt.note(
+                        "The optional MCP server was skipped or failed to start; see logs above."
+                    )
                 fmt.note("Press Ctrl+C to stop the server...")
 
                 try:
@@ -340,21 +354,25 @@ def main() -> int:
 
                 return 0
             else:
+                # No teardown here: start_ui cleans up everything it started before
+                # returning None. Calling signal_handler again would be a second
+                # teardown against PIDs that are already gone -- and if the OS had
+                # recycled one, it would signal an unrelated process group.
                 fmt.error("Failed to start UI server. Check the logs above for details.")
-                signal_handler(signal.SIGTERM, None)
                 return 1
 
         except Exception as ex:
-            fmt.error(f"Error starting UI: {str(ex)}")
+            fmt.error(f"Error starting UI: {ex!s}")
             signal_handler(signal.SIGTERM, None)
             if debug.is_debug_enabled():
-                raise ex
+                raise
             return 1
 
     # When --api-url is set, delegate to the API server instead of running
     # in-process.  This is the correct mode for concurrent / multi-agent use
     # with file-based databases (SQLite, Ladybug, LanceDB).
-    from cognee.cli.api_dispatch import can_dispatch, dispatch as api_dispatch
+    from cognee.cli.api_dispatch import can_dispatch
+    from cognee.cli.api_dispatch import dispatch as api_dispatch
 
     if can_dispatch(args) and args.command:
         try:
@@ -362,7 +380,7 @@ def main() -> int:
         except Exception as ex:
             fmt.error(str(ex))
             if debug.is_debug_enabled():
-                raise ex
+                raise
             return 1
         return 0
 
@@ -383,10 +401,18 @@ def main() -> int:
             # Print exception
             fmt.error(str(ex))
 
+            # Surface a prescriptive next step for known first-run failure
+            # modes between the error line and the generic docs pointer, so
+            # the actionable fix sits directly under the error it addresses.
+            error_text = str(ex)
+            hint = None if REMEDIATION_MARKER in error_text else find_remediation(error_text)
+            if hint:
+                fmt.note(hint)
+
             fmt.note(f"Please refer to our docs at '{docs_url}' for further assistance.")
 
             if debug.is_debug_enabled() and raiseable_exception:
-                raise raiseable_exception
+                raise raiseable_exception from ex
 
             return error_code
     else:

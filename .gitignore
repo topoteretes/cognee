@@ -43,10 +43,6 @@ share/python-wheels/
 cognee-mcp/.python-version
 MANIFEST
 
-# cognee-mcp app bundle (built by `npm run build` under cognee-mcp/apps-src/).
-# Generated artifact — see cognee-mcp/README.md for the build step.
-cognee-mcp/src/app_bundles/
-
 # PyInstaller
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
@@ -196,6 +192,9 @@ cognee/cache/
 .cognee_system/
 .data_storage/
 .cognee_cache/
+
+# Storage for the company-brain demo (examples/demos/company_brain/)
+.cognee-readme-demo/
 .artifacts/
 .anon_id
 
@@ -211,3 +210,20 @@ deployment/helm/values-local.yml
 
 # Performance test results
 cognee/tests/performance/results
+
+# Bundled Ladybug extension binaries — populated by
+# scripts/build_ladybug_json_extension.sh, shipped in wheels via hatch artifacts
+cognee_db_workers/ladybug_extensions/**/*.lbug_extension
+
+# Local `helm template` output — generated, not checked in
+rendered.yaml
+
+# enola code-graph snapshots (written into any repository enola scans)
+.enola/
+
+# PR body files written by CI workflows (spec_extras_sync, router_docstring_sync); not repo content
+pr_body.md
+
+# Scratch data/system dirs written by the keyless e2e script
+cognee/tests/e2e/keyless/.keyless_run/
+cognee/tests/e2e/keyless/.crash_run/

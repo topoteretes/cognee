@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useTenant } from "@/modules/tenant/TenantProvider";
-import getCreditsOverview from "@/modules/billing/getCreditsOverview";
+import { useCreditsBalance, getTenantRow } from "@/modules/billing/useCreditsBalance";
 import { isCreditsBannerDismissed, dismissCreditsBanner } from "@/utils/browserStorage";
 
 export interface CreditsBannerState {
@@ -26,32 +26,18 @@ export interface CreditsBannerState {
  *   3. Voucher banner (promotional)
  */
 export function useCreditsBanner(): CreditsBannerState {
-  const { tenant, isOwner } = useTenant();
-  const [creditsSpentPct, setCreditsSpentPct] = useState<number | null>(null);
-  const [creditsRemainingUsd, setCreditsRemainingUsd] = useState<number | null>(null);
+  const { tenant } = useTenant();
+  const { data: overview } = useCreditsBalance(true);
   const [dismissed, setDismissed] = useState<boolean>(isCreditsBannerDismissed);
 
-  useEffect(() => {
-    if (!tenant) return;
-    getCreditsOverview()
-      .then((ov) => {
-        if (!ov) return;
-        const row = ov.tenants.find((t) => t.tenantId === tenant.tenant_id);
-        if (!row) return;
-        if (row.spentUsd != null && row.maxBudgetUsd) {
-          setCreditsSpentPct(Math.round((row.spentUsd / row.maxBudgetUsd) * 100));
-        }
-        if (row.remainingUsd != null) {
-          setCreditsRemainingUsd(row.remainingUsd);
-        }
-      })
-      .catch((err) => console.error("Failed to fetch credits overview:", err));
-  }, [isOwner, tenant]);
+  const row = getTenantRow(overview, tenant?.tenant_id ?? null);
+  const creditsSpentPct =
+    row?.spentUsd != null && row.maxBudgetUsd ? Math.round((row.spentUsd / row.maxBudgetUsd) * 100) : null;
+  const creditsRemainingUsd = row?.remainingUsd ?? null;
 
   const showCreditPctBanner = !dismissed && creditsSpentPct !== null && creditsSpentPct >= 90;
   const showLowBalanceBanner = !showCreditPctBanner && creditsRemainingUsd !== null && creditsRemainingUsd < 1;
-  // Promotional-only banner, hidden — voucher redemption isn't offered here.
-  const showVoucherBanner = false;
+  const showVoucherBanner = !showCreditPctBanner && !showLowBalanceBanner;
 
   const dismiss = useCallback(() => {
     dismissCreditsBanner();

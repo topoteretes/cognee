@@ -5,7 +5,7 @@ This document summarizes how to work with the cognee repository: how it’s orga
 ## Project Structure & Module Organization
 
 - `cognee/`: Core Python library and API.
-  - `api/`: FastAPI application and versioned routers (add, cognify, memify, search, delete, users, datasets, responses, visualize, settings, sync, update, checks).
+  - `api/`: FastAPI application and versioned routers under `api/v1/` — memory API (`remember`, `recall`, `improve`, `forget`), low-level operations (`add`, `cognify`, `memify`, `search`, `delete`, `update`), and supporting routers (`datasets`, `users`, `permissions`, `settings`, `sync`, `visualize`, `health`, `skills`, `sessions`, …). Each router package has a `routers/` folder; `api/client.py` registers them.
   - `cli/`: CLI entry points and subcommands invoked via `cognee` / `cognee-cli`.
   - `infrastructure/`: Databases, LLM providers, embeddings, loaders, and storage adapters.
   - `modules/`: Domain logic (graph, retrieval, ontology, users, processing, observability, etc.).
@@ -16,7 +16,7 @@ This document summarizes how to work with the cognee repository: how it’s orga
   - `__main__.py`: Entrypoint to route to CLI.
 - `cognee-mcp/`: Model Context Protocol server exposing cognee as MCP tools (SSE/HTTP/stdio). Contains its own README and Dockerfile.
 - `cognee-frontend/`: Next.js UI for local development and demos.
-- `distributed/`: Utilities for distributed execution (Modal, workers, queues).
+- `distributed/deploy/`: One-click deployment templates (Modal, Fly.io, Railway, Render, Daytona).
 - `examples/`: Example scripts demonstrating the public APIs and features (graph, code graph, multimodal, permissions, etc.).
 - `notebooks/`: Jupyter notebooks for demos and tutorials.
 - `alembic/`: Database migrations for relational backends.
@@ -27,18 +27,20 @@ Notes:
 
 ## Build, Test, and Development Commands
 
-Python (root) – requires Python >= 3.10 and < 3.14. We recommend `uv` for speed and reproducibility.
+Python (root) – requires Python >= 3.10 and < 3.15 (i.e. 3.10–3.14, see `pyproject.toml`). We recommend `uv` for speed and reproducibility.
 
 - Create/refresh env and install dev deps:
 ```bash
 uv sync --dev --all-extras --reinstall
 ```
 
-- Run the CLI (examples):
+- Run the CLI (examples). The memory commands are the primary surface; `add`/`cognify`/`search` are the low-level stages they call underneath:
 ```bash
-uv run cognee-cli add "Cognee turns documents into AI memory."
-uv run cognee-cli cognify
-uv run cognee-cli search "What does cognee do?"
+uv run cognee-cli remember "Cognee turns documents into AI memory."   # add + cognify (+ improve)
+uv run cognee-cli recall "What does cognee do?"
+uv run cognee-cli improve -d main_dataset   # enrich / index the graph
+uv run cognee-cli forget --all              # NOTE: no confirmation prompt
+uv run cognee-cli add "..." && uv run cognee-cli cognify && uv run cognee-cli search "..."   # low level
 uv run cognee-cli -ui   # Launches UI, backend API, and MCP server together
 ```
 
@@ -94,6 +96,42 @@ npm run lint    # ESLint
 npm run build && npm start
 ```
 
+## Runtime Flags Worth Knowing
+
+Three env flags trade memory features for speed; know what each disables before flipping it:
+
+- `CACHING` (default `true`) — master switch for the session-memory layer. When `false`,
+  `remember(session_id=...)` raises, `recall()` loses session history, `agent_memory`
+  session options error out, and `AUTO_FEEDBACK` is implicitly disabled. Never benchmark
+  cognee with this off — that measures cognee with its memory layer removed.
+- `AUTO_FEEDBACK` (default `true`) — one structured-output LLM call per answered turn
+  that detects implicit feedback and lets memory self-tune. Disable for low-latency,
+  lower-cost reads; session store/recall itself keeps working.
+- `DATASET_QUEUE_ENABLED` (default `true`) — per-process cap on concurrent datasets
+  (`DATASET_QUEUE_MAX_CONCURRENT`, default 6); also tears down subprocess DB engines on
+  scope exit and pins in-use engines against cache eviction. Only engages when
+  `ENABLE_BACKEND_ACCESS_CONTROL` is on (its default) — with access control off the
+  flag is a no-op, so flipping it cannot affect performance there. Disable only for
+  single-dataset scripts — under parallel multi-dataset load, turning it off risks
+  file-lock leaks and unbounded embedded engines.
+
+## Multi-Tenancy Support by Backend
+
+With `ENABLE_BACKEND_ACCESS_CONTROL=true` (the default) each user+dataset gets isolated
+graph and vector databases. Backend support (source of truth:
+`cognee/infrastructure/databases/dataset_database_handler/supported_dataset_database_handlers.py`):
+
+- Graph — supported: Ladybug/Kuzu (default), Neo4j (needs multi-database, i.e.
+  Enterprise/Aura), Postgres (demo), Turso. Unsupported: Neptune, ladybug-remote.
+- Vector — supported: LanceDB (default), PGVector, Turso. Unsupported: Neptune
+  Analytics and community adapters (unless they register a handler via
+  `use_dataset_database_handler()`).
+- Relational (SQLite/Postgres) is always a single shared DB (users, ACLs, registry).
+
+Both graph and vector must be supported, or cognee raises `EnvironmentError` — an
+unsupported backend with the flag on is a hard error, not a fallback to shared DBs;
+set `ENABLE_BACKEND_ACCESS_CONTROL=false` to run such backends single-tenant.
+
 ## Coding Style & Naming Conventions
 
 Python:
@@ -113,7 +151,7 @@ MCP server and Frontend:
   - CLI tests: `cognee/tests/cli_tests/`
 - Name test files `test_*.py`. Use `pytest.mark.asyncio` for async tests.
 - Avoid external state; rely on test fixtures and the CI-provided env vars when LLM/embedding providers are required. See CI workflows under `.github/workflows/` for expected environment variables.
-- When adding public APIs, provide/update targeted examples under `examples/python/`.
+- When adding public APIs, provide/update a targeted example under `examples/guides/` and list it in `examples/README.md` (see its "Contributing a new example" section).
 
 ## Commit & Pull Request Guidelines
 

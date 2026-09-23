@@ -1,0 +1,165 @@
+"""Build an org chart from typed DataPoints with the low-level run_tasks pipeline, no LLM.
+
+data/companies.json and data/people.json become Company, Department and Person nodes that are
+deduplicated through identity_fields. The pipeline status is printed as it runs, the graph is
+written to .artifacts/, and a GRAPH_COMPLETION search with only_context=True prints the full prompt
+the LLM would receive (retrieval context included) for "Who works for GreenFuture Solutions?".
+
+Requires: an embedding provider (no LLM call is made).
+Run: uv run python examples/demos/custom_pipelines/organizational_hierarchy/organizational_hierarchy_pipeline_example.py
+"""
+
+import asyncio
+import json
+import os
+from typing import Any
+from uuid import NAMESPACE_OID, UUID, uuid5
+
+from pydantic import BaseModel
+
+from cognee import SearchType, prune, search, visualize_graph
+from cognee.low_level import DataPoint, setup
+from cognee.modules.data.methods import load_or_create_datasets
+from cognee.modules.users.methods import get_default_user
+from cognee.pipelines import Task, run_tasks
+from cognee.tasks.storage import add_data_points
+
+
+class Person(DataPoint):
+    name: str
+    # "index_fields": fields to embed for vector search
+    # "identity_fields": fields used to generate deterministic IDs (deduplication)
+    metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+
+class Department(DataPoint):
+    name: str
+    employees: list[Person]
+    metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+
+class CompanyType(DataPoint):
+    name: str = "Company"
+    metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+
+class Company(DataPoint):
+    name: str
+    departments: list[Department] = []
+    is_type: CompanyType
+    metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+
+class LightweightData(DataPoint):
+    """Lightweight DataPoint model for data ingestion only."""
+
+    id: UUID
+    companies: list[dict[str, Any]]
+    people: list[dict[str, Any]]
+
+
+def build_lightweight_data_object(data_list):
+    return [
+        LightweightData(
+            id=uuid5(NAMESPACE_OID, str(data)), companies=data["companies"], people=data["people"]
+        )
+        for data in data_list
+    ]
+
+
+def ingest_files(data: list[Any]) -> list[Company]:
+    # With identity_fields, DataPoints with the same name automatically get the same UUID.
+    # No manual dict-based deduplication needed — just create instances freely.
+    all_companies: list[Company] = []
+
+    # Single CompanyType node shared across all data items (deterministic ID via identity_fields)
+    company_type = CompanyType()
+
+    for data_item in data:
+        people = data_item.people
+        companies = data_item.companies
+
+        # Build departments with their employees
+        dept_employees: dict[str, list[Person]] = {}
+        for person in people:
+            dept_name = person["department"]
+            if dept_name not in dept_employees:
+                dept_employees[dept_name] = []
+            dept_employees[dept_name].append(Person(name=person["name"]))
+
+        departments = {
+            name: Department(name=name, employees=employees)
+            for name, employees in dept_employees.items()
+        }
+
+        for company in companies:
+            company_departments = [
+                departments.get(dept_name, Department(name=dept_name, employees=[]))
+                for dept_name in company["departments"]
+            ]
+            all_companies.append(
+                Company(name=company["name"], departments=company_departments, is_type=company_type)
+            )
+
+    return all_companies
+
+
+async def main():
+    await prune.prune_data()
+    await prune.prune_system(metadata=True)
+
+    # Create relational database tables
+    await setup()
+
+    # If no user is provided use default user
+    user = await get_default_user()
+
+    # Create dataset object to keep track of pipeline status
+    datasets = await load_or_create_datasets(["test_dataset"], [], user)
+
+    # Prepare data for pipeline
+    companies_file_path = os.path.join(os.path.dirname(__file__), "data", "companies.json")
+    with open(companies_file_path, "r") as companies_file:
+        companies = json.load(companies_file)
+    people_file_path = os.path.join(os.path.dirname(__file__), "data", "people.json")
+    with open(people_file_path, "r") as people_file:
+        people = json.load(people_file)
+
+    # Run tasks expects a list of data even if it is just one document
+    data = [{"companies": companies, "people": people}]
+
+    pipeline = run_tasks(
+        [Task(ingest_files), Task(add_data_points)],
+        dataset_id=datasets[0].id,
+        data=build_lightweight_data_object(data),
+        incremental_loading=False,
+    )
+
+    async for status in pipeline:
+        print(status)
+
+    # Or use our simple graph preview
+    graph_file_path = str(
+        os.path.join(
+            os.path.dirname(__file__), ".artifacts/organizational_hierarchy_pipeline_example.html"
+        )
+    )
+    await visualize_graph(graph_file_path)
+
+    # Ask a question against the graph that was just built. only_context=True
+    # returns the prompt the LLM would receive (retrieval context included)
+    # instead of an answer, so this example needs only an embedding provider
+    # configured - no LLM.
+    results = await search(
+        query_text="Who works for GreenFuture Solutions?",
+        query_type=SearchType.GRAPH_COMPLETION,
+        dataset_ids=datasets[0].id,
+        user=user,
+        only_context=True,
+    )
+    for result in results:
+        print(result.search_result)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

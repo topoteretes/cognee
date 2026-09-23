@@ -8,6 +8,7 @@ import json
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
+from cognee.modules.migration import loader
 from cognee.modules.migration.cogx import (
     COGX_VERSION,
     COGXArchiveWriter,
@@ -24,7 +25,6 @@ from cognee.modules.migration.cogx import (
     read_manifest,
 )
 from cognee.modules.migration.formats import write_cypher, write_graphml, write_json
-from cognee.modules.migration import loader
 from cognee.modules.migration.loader import record_data_id, translate_records
 from cognee.modules.migration.sources import (
     COGXArchiveSource,
@@ -69,7 +69,7 @@ class TestParseTimestamp:
             2024, 3, 1, 12, 0, tzinfo=timezone.utc
         )
         assert parse_timestamp("2024-03-01") == datetime(2024, 3, 1, tzinfo=timezone.utc)
-        assert parse_timestamp(datetime(2024, 3, 1, 12, 0)) == datetime(
+        assert parse_timestamp(datetime(2024, 3, 1, 12, 0)) == datetime(  # noqa: DTZ001 - naive input is the case under test
             2024, 3, 1, 12, 0, tzinfo=timezone.utc
         )
 
@@ -216,6 +216,23 @@ class TestMem0Source:
 
     def test_skips_items_without_content(self):
         assert collect(Mem0Source([{"id": "1"}, {"id": "2", "memory": "kept"}])) != []
+
+    def test_empty_wrapper_alias_does_not_shadow_the_populated_one(self):
+        memories = collect(
+            Mem0Source(
+                {
+                    "results": [],
+                    "memories": [
+                        {"id": "1", "memory": "kept"},
+                        {"id": "2", "memory": "also kept"},
+                    ],
+                }
+            )
+        )
+        assert [memory.external_id for memory in memories] == ["1", "2"]
+
+    def test_all_empty_wrapper_aliases_yield_nothing_without_raising(self):
+        assert collect(Mem0Source({"results": [], "memories": []})) == []
 
 
 class TestLettaSource:
@@ -515,7 +532,7 @@ class TestTranslateRecords:
         assert {"Alice", "Berlin", "Person"} <= node_names
 
         assert len(batch["edges"]) == 1
-        source_id, target_id, relationship, properties = batch["edges"][0]
+        source_id, _target_id, relationship, properties = batch["edges"][0]
         assert relationship == "lives_in"
         assert properties["edge_text"] == "Alice lives in Berlin"
         assert properties["valid_at"].startswith("2024-02-01")

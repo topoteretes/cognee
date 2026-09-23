@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, List, Optional, Union
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
@@ -14,23 +14,26 @@ from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee.shared.utils import send_telemetry
+
+logger = get_logger()
 
 
 # Note: Datasets sent by name will only map to datasets owned by the request sender
 #       To search for datasets not owned by the request sender dataset UUID is needed
 class SearchPayloadDTO(InDTO):
     search_type: SearchType = Field(
-        default=SearchType.GRAPH_COMPLETION,
+        default=SearchType.HYBRID_COMPLETION,
         description=(
-            "Retrieval strategy. Common values: GRAPH_COMPLETION (default, graph context + LLM"
-            " answer), CODE (deterministic code graph), RAG_COMPLETION, CHUNKS, SUMMARIES,"
-            " TEMPORAL, FEELING_LUCKY (auto-select),"
-            " AGENTIC_COMPLETION (enables skills/tools/max_iter)."
+            "Retrieval strategy. Common values: HYBRID_COMPLETION (default, passages + entities +"
+            " LLM answer), GRAPH_COMPLETION (graph context + LLM answer), CODE (deterministic"
+            " code graph), RAG_COMPLETION, CHUNKS, SUMMARIES, TEMPORAL, FEELING_LUCKY"
+            " (auto-select), AGENTIC_COMPLETION (enables skills/tools/max_iter)."
         ),
     )
-    datasets: Optional[list[str]] = Field(
+    datasets: list[str] | None = Field(
         default=None,
         examples=[["default_dataset"]],
         description=(
@@ -38,7 +41,7 @@ class SearchPayloadDTO(InDTO):
             " use dataset_ids for datasets shared with you."
         ),
     )
-    dataset_ids: Optional[list[UUID]] = Field(
+    dataset_ids: list[UUID] | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -46,11 +49,15 @@ class SearchPayloadDTO(InDTO):
             " When provided, the datasets name list is ignored."
         ),
     )
-    query: str = Field(default="What is in the document?")
-    system_prompt: Optional[str] = Field(
+    query: str = Field(
+        ...,
+        examples=["What is in the document?"],
+        description="The question to answer. Required; there is no default query.",
+    )
+    system_prompt: str | None = Field(
         default="Answer the question using the provided context. Be as brief as possible."
     )
-    node_name: Optional[list[str]] = Field(
+    node_name: list[str] | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -58,15 +65,35 @@ class SearchPayloadDTO(InDTO):
             " (the node_set values used during add/remember)."
         ),
     )
-    top_k: Optional[int] = Field(default=15)
-    only_context: bool = Field(default=False)
+    top_k: int | None = Field(default=15)
+    only_context: bool = Field(
+        default=False,
+        description=(
+            "Return what the LLM would have received instead of its answer. For"
+            " completion search types the result is the user prompt (conversation"
+            " history, then question plus retrieval context through the retriever's"
+            " template, then the session guidance block); the system prompt (the"
+            " retriever's task template) is system_prompt_result with verbose=true. The session layer comes from"
+            " session_id (the default session when omitted). Retrieval-only types"
+            " return their context. No LLM call is made and nothing is written to the"
+            " session."
+        ),
+    )
+    session_id: str | None = Field(
+        default=None,
+        examples=[None],
+        description=(
+            "Session whose history and guidance feed the completion (or the"
+            " only_context prompt). Omit to use the default session."
+        ),
+    )
     verbose: bool = Field(
         default=False,
         description=(
             "Return detailed result information including the graph representation when available."
         ),
     )
-    skills: Optional[list[str]] = Field(
+    skills: list[str] | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -74,7 +101,7 @@ class SearchPayloadDTO(InDTO):
             " Requires search_type=AGENTIC_COMPLETION; leave null otherwise."
         ),
     )
-    tools: Optional[list[str]] = Field(
+    tools: list[str] | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -82,7 +109,7 @@ class SearchPayloadDTO(InDTO):
             " Requires search_type=AGENTIC_COMPLETION."
         ),
     )
-    max_iter: Optional[int] = Field(
+    max_iter: int | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -94,11 +121,14 @@ class SearchPayloadDTO(InDTO):
         default=False,
         description="Attach source references to completion-type results.",
     )
-    code_query: Optional[dict[str, Any]] = Field(
+    code_query: dict[str, Any] | None = Field(
         default=None,
         description=(
             "Structured arguments for search_type=CODE. Set operation to query_facts, "
-            "explore, traverse, find_path, or impact_analysis."
+            "explore, traverse, find_path, impact_analysis, insights, architecture, or "
+            "delta. Add diagram='mermaid' (or 'dot', or true) to receive the result "
+            "rendered as diagram source under search_result[0].diagram; architecture "
+            "includes a Mermaid diagram unless diagram=false."
         ),
     )
 
@@ -111,10 +141,13 @@ def get_search_router() -> APIRouter:
         text: str
         user: str
         created_at: datetime
+        # Null when the search was not scoped to a single dataset.
+        dataset_id: UUID | None = None
 
     @router.get(
         "",
-        response_model=List[SearchHistoryItem],
+        summary="List the caller's recent search history",
+        response_model=list[SearchHistoryItem],
         responses={
             403: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
@@ -140,7 +173,7 @@ def get_search_router() -> APIRouter:
         """
         send_telemetry(
             "Search API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={"endpoint": "GET /v1/search", "cognee_version": cognee_version},
         )
 
@@ -148,7 +181,10 @@ def get_search_router() -> APIRouter:
             history = await get_history(user.id, limit=0)
 
             return history
+        except CogneeApiError:
+            raise
         except Exception as error:
+            logger.exception("get_search_router.get_search_history failed, returning HTTP 500")
             return JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 content=ErrorResponse(
@@ -159,7 +195,8 @@ def get_search_router() -> APIRouter:
 
     @router.post(
         "",
-        response_model=Union[List[SearchResult], List],
+        summary="Search (low level): run one SearchType over the caller's datasets",
+        response_model=list[SearchResult] | list,
         responses={
             403: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
@@ -176,14 +213,15 @@ def get_search_router() -> APIRouter:
         types and can be scoped to specific datasets.
 
         ## Request Parameters
-        - **search_type** (SearchType): Type of search to perform (default: GRAPH_COMPLETION). Use AGENTIC_COMPLETION to enable skills, tools and max_iter.
+        - **search_type** (SearchType): Type of search to perform (default: HYBRID_COMPLETION). Use AGENTIC_COMPLETION to enable skills, tools and max_iter.
         - **datasets** (Optional[List[str]]): List of dataset names to search within
         - **dataset_ids** (Optional[List[UUID]]): List of dataset UUIDs to search within
         - **query** (str): The search query string
         - **system_prompt** Optional[str]: System prompt to be used for Completion type searches in Cognee
         - **node_name** Optional[list[str]]: Filter results to specific node_sets defined in the add pipeline (for targeted search).
         - **top_k** (Optional[int]): Maximum number of results to return (default: 15)
-        - **only_context** bool: Set to true to only return context Cognee will be sending to LLM in Completion type searches. This will be returned instead of LLM calls for completion type searches.
+        - **only_context** bool: Return what the LLM would have received instead of its answer. For completion type searches the result is the user prompt (conversation history, then question plus retrieval context through the retriever's template, then the session guidance block); the system prompt (the retriever's task template) is `system_prompt_result` with verbose=true. Retrieval-only types return their context. No LLM call is made.
+        - **session_id** (Optional[str]): Session whose history and guidance feed the completion or the only_context prompt; the default session when omitted.
         - **verbose** (bool): Return detailed result information including the graph representation when available (default: false)
         - **skills** (Optional[List[str]]): Skill names to load into the agentic retriever (AGENTIC_COMPLETION only)
         - **tools** (Optional[List[str]]): Tool whitelist for AGENTIC_COMPLETION searches
@@ -207,23 +245,26 @@ def get_search_router() -> APIRouter:
         """
         send_telemetry(
             "Search API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/search",
                 "search_type": str(payload.search_type),
                 "datasets": payload.datasets,
                 "dataset_ids": [str(dataset_id) for dataset_id in payload.dataset_ids or []],
-                "query": payload.query,
-                "system_prompt": payload.system_prompt,
-                "node_name": payload.node_name,
+                # Request fields are recorded by size, matching the recall
+                # endpoint's convention (see recall.py telemetry).
+                "query": len(payload.query or ""),
+                "system_prompt": len(payload.system_prompt or ""),
+                "node_name": len(payload.node_name or []),
                 "top_k": payload.top_k,
                 "only_context": payload.only_context,
+                "session_id": payload.session_id,
                 "verbose": payload.verbose,
                 "skills": payload.skills,
                 "tools": payload.tools,
                 "max_iter": payload.max_iter,
                 "include_references": payload.include_references,
-                "code_query": payload.code_query,
+                "code_query": len(str(payload.code_query)) if payload.code_query else 0,
                 "cognee_version": cognee_version,
             },
         )
@@ -244,6 +285,7 @@ def get_search_router() -> APIRouter:
                 top_k=payload.top_k,
                 verbose=payload.verbose,
                 only_context=payload.only_context,
+                session_id=payload.session_id,
                 skills=payload.skills,
                 tools=payload.tools,
                 max_iter=payload.max_iter,
@@ -259,6 +301,7 @@ def get_search_router() -> APIRouter:
             # returns them to the caller.
             raise
         except Exception as error:
+            logger.exception("get_search_router.search failed, returning HTTP 500")
             return JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 content=ErrorResponse(

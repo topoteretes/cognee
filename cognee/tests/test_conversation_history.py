@@ -11,10 +11,13 @@ session history; e2e for session SDK (get_session, add_feedback, delete_feedback
 import os
 import pathlib
 from collections import Counter
+from unittest.mock import patch
 
 import cognee
 from cognee.infrastructure.databases.cache import SessionQAEntry, get_cache_engine
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.session.session_turn import acknowledgement_for_turn, should_answer_turn
+from cognee.modules.retrieval import session_aware_completion
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -408,6 +411,9 @@ async def main():
     ###### END E2E: NEW SESSION SDK #####
 
     ###### E2E: Automatic feedback detection (when caching and auto_feedback enabled) ######
+    # Runs in the default concurrent mode: every session turn, answered or not, must land
+    # in QA history, so a feedback-only message is stored as its own acknowledgement entry
+    # rather than silently dropped or answered as a normal question.
     logger.info("Starting e2e tests for automatic feedback detection")
     session_id_autofeedback = "test_session_autofeedback"
     await cognee.search(
@@ -415,10 +421,25 @@ async def main():
         query_text="What is TechCorp?",
         session_id=session_id_autofeedback,
     )
-    result_autofeedback = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
-        query_text="Thanks, that was really helpful!",
-        session_id=session_id_autofeedback,
+    analyses = []
+    analyze_turn = session_aware_completion.analyze_turn
+
+    async def observe_analysis(snapshot):
+        analysis = await analyze_turn(snapshot)
+        analyses.append(analysis)
+        return analysis
+
+    # Observe the real LLM analysis without changing the retrieval or cache paths.
+    with patch.object(session_aware_completion, "analyze_turn", side_effect=observe_analysis):
+        result_autofeedback = await cognee.search(
+            query_type=SearchType.GRAPH_COMPLETION,
+            query_text="Thanks, that was really helpful!",
+            session_id=session_id_autofeedback,
+        )
+    assert len(analyses) == 1, "Concurrent feedback analysis must run exactly once"
+    [feedback_analysis] = analyses
+    assert not should_answer_turn(feedback_analysis, has_previous_qa=True), (
+        "The feedback-only message should route to an acknowledgement"
     )
     assert result_autofeedback is not None, (
         "Second search (feedback-like message) should return a result"
@@ -426,18 +447,50 @@ async def main():
     entries_autofeedback = await cognee.session.get_session(
         session_id=session_id_autofeedback, user=user, last_n=10
     )
-    assert len(entries_autofeedback) == 1, (
-        "With auto_feedback enabled, a feedback-only message must not create a new QA; "
-        f"expected 1 entry, got {len(entries_autofeedback)}"
+    assert len(entries_autofeedback) == 2, (
+        "A feedback-only message must still be recorded as its own QA entry; "
+        f"expected 2 entries, got {len(entries_autofeedback)}"
     )
-    entry_autofeedback = entries_autofeedback[0]
-    assert entry_autofeedback.question == "What is TechCorp?", (
-        "Single entry must be the first question; feedback-only text was not stored as new QA"
+    first_entry_autofeedback, second_entry_autofeedback = entries_autofeedback
+    assert first_entry_autofeedback.question == "What is TechCorp?", (
+        "First entry must be the original question"
     )
-    assert getattr(entry_autofeedback, "feedback_text", None) is None
-    assert getattr(entry_autofeedback, "feedback_score", None) is None
+    assert second_entry_autofeedback.question == "Thanks, that was really helpful!", (
+        "Feedback-only turn's raw message must be stored as the QA entry's question"
+    )
+    stored_answer_autofeedback = second_entry_autofeedback.answer or ""
+    assert stored_answer_autofeedback, (
+        "Feedback-only turn must store an acknowledgement as the QA entry's answer"
+    )
+    # Two different contracts, and a regression could satisfy either one alone,
+    # so both are pinned.
+    #
+    # Shape (from dev): a no-answer turn claims no retrieval and no served
+    # guidance -- its used_* fields stay None -- while the answered first turn
+    # recorded its graph ids. Text bounds proved flaky here: a valid
+    # acknowledgement can run long and echo the subject.
+    assert first_entry_autofeedback.used_graph_element_ids, (
+        "Answered turn must record the graph elements its answer used"
+    )
+    assert second_entry_autofeedback.used_graph_element_ids is None, (
+        "Feedback-only turn must not claim retrieval: storing the generated answer "
+        "would carry its used_graph_element_ids; "
+        f"got {second_entry_autofeedback.used_graph_element_ids}"
+    )
+    assert not second_entry_autofeedback.used_session_context_ids, (
+        "Feedback-only turn must not claim served guidance"
+    )
+    # Text: the stored answer IS the analysis output, not the independently
+    # generated answer that was discarded. Truthiness alone would not catch that
+    # -- the generated answer is truthy too.
+    expected_ack = acknowledgement_for_turn(feedback_analysis.response_to_user)
+    assert stored_answer_autofeedback == expected_ack, (
+        "Feedback-only turn must store the analysis acknowledgement, not the generated answer"
+    )
+    assert getattr(second_entry_autofeedback, "feedback_text", None) is None
+    assert getattr(second_entry_autofeedback, "feedback_score", None) is None
     logger.info(
-        "Automatic feedback detection e2e passed without auto-populating QA feedback fields",
+        "Automatic feedback detection e2e passed: feedback-only turn stored as its own QA entry",
     )
     ###### END E2E: Automatic feedback detection #####
 

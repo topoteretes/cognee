@@ -1,5 +1,22 @@
+# Official Ladybug extension binaries — this image is the origin content
+# behind extension.ladybugdb.com, so copying from it here means the JSON
+# extension ships in the image and is never downloaded at runtime (see
+# cognee_db_workers/ladybug_extensions/README.md). All published versions are
+# collected (~1.7 MB per version pair) so this stage never needs touching when
+# the ladybug constraint changes; at runtime the loader only reads the
+# directory matching the installed ladybug version.
+# Pinned by digest so a compromised :latest tag cannot inject binaries into
+# the shipped image — same digest as scripts/fetch_ladybug_json_extension.sh,
+# which documents how to refresh both together on a ladybug bump.
+FROM ghcr.io/ladybugdb/extension-repo@sha256:180c83fb190e9d6ef8d324850b192db26794ab7cb866a38813a45365f14bd46d AS ladybug-extensions
+RUN mkdir -p /bundle && cd /usr/share/nginx/html && \
+    for f in v*/linux_*/json/libjson.lbug_extension; do \
+        d="/bundle/${f%/json/libjson.lbug_extension}"; \
+        mkdir -p "$d" && cp "$f" "$d/libjson.lbug_extension"; \
+    done
+
 # Use a Python image with uv pre-installed
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS uv
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim@sha256:e5b65587bce7de595f299855d7385fe7fca39b8a74baa261ba1b7147afa78e58 AS uv
 
 # Install the project into `/app`
 WORKDIR /app
@@ -46,13 +63,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     for extra in ${COGNEE_EXTRAS}; do \
         set -- "$@" --extra "$extra"; \
     done; \
-    uv sync "$@" --extra debug --extra api --extra postgres --extra neo4j --extra llama-index --extra aws --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-install-project --no-dev --no-editable
+    uv sync "$@" --extra debug --extra api --extra postgres --extra neo4j --extra llama-index --extra aws --extra dlt --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-install-project --no-dev --no-editable
 
 # Then, add the rest of the project source code and install it
 # Installing separately from its dependencies allows optimal layer caching
 COPY ./cognee /app/cognee
-COPY ./distributed /app/distributed
 COPY ./cognee_db_workers /app/cognee_db_workers
+# Bundle the JSON extension for both image arches; the loader picks the file
+# matching the installed ladybug version and runtime platform.
+COPY --from=ladybug-extensions /bundle/ /app/cognee_db_workers/ladybug_extensions/
 # Compatibility shim that re-exports ladybug under the legacy `kuzu`
 # module name. Listed in [tool.hatch.build.targets.wheel] packages, and
 # imported at module load by alembic/versions/b9274c27a25a_kuzu_11_migration.py.
@@ -64,9 +83,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     for extra in ${COGNEE_EXTRAS}; do \
         set -- "$@" --extra "$extra"; \
     done; \
-    uv sync "$@" --extra debug --extra aws --extra api --extra postgres --extra neo4j --extra llama-index --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-dev --no-editable
+    uv sync "$@" --extra debug --extra aws --extra api --extra postgres --extra neo4j --extra llama-index --extra dlt --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-dev --no-editable
 
-FROM python:3.12-slim-bookworm
+FROM python:3.12-slim-bookworm@sha256:782412e85d0f0984994c290652577d4018aff08145c85b262bb63dc0c7522254
 
 RUN apt-get update && apt-get install -y \
     libpq5 \
@@ -75,9 +94,24 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-COPY --from=uv /app /app
-# COPY --from=uv /app/.venv /app/.venv
-# COPY --from=uv /root/.local /root/.local
+# Run as the same non-root user as the cognee-mcp image (uid/gid 1000) so both
+# containers can share the storage volumes without ownership conflicts (a
+# root-created database directory is unwritable for the uid-1000 MCP server).
+# Created before the COPY so ownership is set in that single layer — a
+# separate `chown -R /app` would copy the whole tree up into a second layer.
+# /cognee-storage is baked into the image cognee-owned so a fresh named
+# volume mounted there initializes with the right ownership.
+# ``chown cognee /app`` (the directory inode only): WORKDIR created /app as
+# root, and ``COPY --chown`` sets ownership on the copied content, not the
+# pre-existing target dir — without this the non-root user cannot create
+# ``$HOME/.lbdb`` and the build-time extension pre-install silently fails.
+RUN groupadd --system --gid 1000 cognee \
+    && useradd --system --uid 1000 --gid cognee --no-create-home --shell /usr/sbin/nologin cognee \
+    && mkdir -p /cognee-storage/system /cognee-storage/data \
+    && chown -R cognee:cognee /cognee-storage \
+    && chown cognee:cognee /app
+
+COPY --from=uv --chown=cognee:cognee /app /app
 
 # Strip Windows carriage returns (fixes "no such file" on Windows Docker)
 RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
@@ -88,6 +122,25 @@ ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONPATH=/app
 # ENV LOG_LEVEL=ERROR
 ENV PYTHONUNBUFFERED=1
+# Writable HOME for the non-root user (~/.cognee logs, tool caches).
+ENV HOME=/app
+# Default storage OUTSIDE the source tree: the ./cognee bind mount exists for
+# dev reload and must not double as the persistence location (host-uid
+# sensitive, pollutes the checkout, and was shared with the MCP container by
+# accident rather than by design). docker-compose mounts named volumes here.
+ENV SYSTEM_ROOT_DIRECTORY=/cognee-storage/system
+ENV DATA_ROOT_DIRECTORY=/cognee-storage/data
+
+USER cognee
+
+# Pre-install Kuzu/Ladybug's JSON extension at build time (network is available
+# here) so it is baked into the image — same mechanism as the cognee-mcp
+# image. As root the server used to INSTALL it at runtime into /root/.lbdb on
+# every boot; as the non-root user that runtime install races between graph
+# workers and fails ("Directory ... cannot be created"). Best-effort: a failed
+# download must not break the image build.
+RUN python -c "from cognee_db_workers._kuzu_helpers import install_json_extension_local; install_json_extension_local(buffer_pool_size=268435456)" \
+    || echo "WARNING: JSON extension pre-install skipped (no network at build time); it will be installed on first run if the container has network access."
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 

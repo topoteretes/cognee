@@ -19,8 +19,9 @@ Endpoints under test:
 
 import os
 import uuid
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 with patch("dotenv.load_dotenv"):
     os.environ["REQUIRE_AUTHENTICATION"] = "true"
@@ -282,6 +283,39 @@ class TestAgentsE2E:
         resp = client.get("/api/v1/agents/connections", headers=headers)
         assert resp.json()["total"] == 1
 
+    def test_opencode_connection_lifecycle(self, client, headers, _patch_operations):
+        clear_registered_agent_connections()
+        payload = {
+            "agent_session_name": "opencode_workspace",
+            "type": "opencode",
+            "source": "api",
+        }
+
+        registered = client.post("/api/v1/agents/register", headers=headers, json=payload)
+        assert registered.status_code == 201, registered.text
+        connection_id = registered.json()["id"]
+        assert registered.json()["type"] == "opencode"
+
+        repeated = client.post("/api/v1/agents/register", headers=headers, json=payload)
+        assert repeated.status_code == 201, repeated.text
+        assert repeated.json()["id"] == connection_id
+
+        listed = client.get("/api/v1/agents/connections", headers=headers)
+        assert listed.status_code == 200, listed.text
+        assert listed.json()["total"] == 1
+        assert listed.json()["agents"][0]["type"] == "opencode"
+
+        unregistered = client.post(
+            "/api/v1/agents/unregister",
+            headers=headers,
+            json={"agent_session_name": payload["agent_session_name"]},
+        )
+        assert unregistered.status_code == 200, unregistered.text
+
+        remaining = client.get("/api/v1/agents/connections", headers=headers)
+        assert remaining.status_code == 200, remaining.text
+        assert remaining.json()["agents"] == []
+
     # ------------------------------------------------------------------ #
     # Sub-user agent CRUD endpoints
     # ------------------------------------------------------------------ #
@@ -436,11 +470,11 @@ class TestAgentsE2E:
 
         with (
             patch(
-                "cognee.modules.agents.operations._readable_datasets_for",
+                "cognee.modules.agents.operations.get_readable_datasets",
                 readable_datasets_for,
             ),
             patch(
-                "cognee.modules.agents.operations._visible_user_ids",
+                "cognee.modules.agents.operations.get_visible_user_ids",
                 visible_user_ids,
             ),
             patch(

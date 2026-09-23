@@ -13,11 +13,12 @@ Each memory becomes a :class:`COGXMemory` with scope taken from
 """
 
 import json
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, List, Union
+from typing import Any
 
 from cognee.modules.migration.cogx import COGXMemory, COGXRecord, COGXScope, parse_timestamp
-from cognee.modules.migration.sources.base import MemorySource
+from cognee.modules.migration.sources.base import MemorySource, read_export_file
 
 _CONTENT_KEYS = ("memory", "text", "data", "content")
 
@@ -25,24 +26,33 @@ _CONTENT_KEYS = ("memory", "text", "data", "content")
 class Mem0Source(MemorySource):
     source_system = "mem0"
 
-    def __init__(self, data: Union[str, Path, List[Any], Dict[str, Any]], mode: str = "re-derive"):
+    def __init__(self, data: str | Path | list[Any] | dict[str, Any], mode: str = "re-derive"):
         super().__init__(mode=mode)
         self._data = data
 
-    def _load_raw(self) -> List[Dict[str, Any]]:
+    def _load_raw(self) -> list[dict[str, Any]]:
         data = self._data
         if isinstance(data, (str, Path)):
-            data = json.loads(Path(data).read_text(encoding="utf-8"))
+            data = json.loads(read_export_file(data))
         if isinstance(data, dict):
+            recognized = False
             for key in ("results", "memories", "items"):
-                if isinstance(data.get(key), list):
-                    data = data[key]
-                    break
-            else:
+                value = data.get(key)
+                if not isinstance(value, list):
+                    continue
+                recognized = True
+                # An accepted alias that is present but empty must not shadow a
+                # populated one later in the list -- unwrapping on it imports
+                # nothing at all. Same rule as sources/zep.py's _first_list.
+                records = [item for item in value if isinstance(item, dict)]
+                if records:
+                    return records
+            if not recognized:
                 raise ValueError(
                     "Unrecognized Mem0 export shape: expected a list or a dict "
                     "with a 'results'/'memories' key."
                 )
+            return []
         if not isinstance(data, list):
             raise ValueError("Unrecognized Mem0 export shape: expected a list of memories.")
         return [item for item in data if isinstance(item, dict)]

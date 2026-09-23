@@ -1,7 +1,8 @@
 import asyncio
+import logging
 import os
 import pathlib
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
 import pytest
@@ -11,6 +12,7 @@ import cognee
 from cognee.context_global_variables import backend_access_control_enabled
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
+from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.exceptions import PermissionDeniedError
@@ -20,9 +22,11 @@ from cognee.modules.users.roles.methods import add_user_to_role, create_role
 from cognee.modules.users.tenants.methods import (
     add_user_to_tenant,
     create_tenant,
-    select_tenant,
     remove_user_from_tenant,
+    select_tenant,
 )
+
+logger = logging.getLogger(__name__)
 
 pytestmark = pytest.mark.asyncio
 
@@ -41,13 +45,13 @@ async def _reset_engines_and_prune() -> None:
         if hasattr(vector_engine, "engine") and hasattr(vector_engine.engine, "dispose"):
             await vector_engine.engine.dispose(close=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _reset_engines_and_prune", exc_info=True)
 
+    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
     )
     from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
-    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
 
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
@@ -89,13 +93,23 @@ async def permissions_example_env(tmp_path_factory):
     await _reset_engines_and_prune()
 
 
+async def _mock_structured_output(text_input, system_prompt, response_model, **kwargs):
+    """Session search now makes two structured-output calls per turn (answer + turn
+    analysis, run concurrently), not one - the mock has to answer each with the type it
+    asked for, or the analysis call gets the answer's plain string and crashes downstream.
+    """
+    if response_model is SessionTurnAnalysis:
+        return SessionTurnAnalysis()
+    return "MOCK_ANSWER"
+
+
 async def test_permissions_example_flow(permissions_example_env):
     """Pytest version of `examples/python/permissions_example.py` (same scenarios, asserts instead of prints)."""
     # Patch LLM calls so GRAPH_COMPLETION can run without external API keys.
     llm_patch = patch(
         "cognee.infrastructure.llm.LLMGateway.LLMGateway.acreate_structured_output",
         new_callable=AsyncMock,
-        return_value="MOCK_ANSWER",
+        side_effect=_mock_structured_output,
     )
 
     # Resolve example data file path (repo-shipped PDF).
@@ -235,14 +249,13 @@ async def test_permissions_example_flow(permissions_example_env):
     await remove_user_from_tenant(user_id=user_3.id, tenant_id=tenant_id, owner_id=user_2.id)
 
     # user_3 can no longer read the tenant dataset after being removed.
-    with pytest.raises(PermissionDeniedError):
-        with llm_patch:
-            await cognee.recall(
-                query_type=SearchType.GRAPH_COMPLETION,
-                query_text="What is in the document?",
-                user=user_3,
-                dataset_ids=[quantum_cognee_lab_dataset_id],
-            )
+    with pytest.raises(PermissionDeniedError), llm_patch:
+        await cognee.recall(
+            query_type=SearchType.GRAPH_COMPLETION,
+            query_text="What is in the document?",
+            user=user_3,
+            dataset_ids=[quantum_cognee_lab_dataset_id],
+        )
 
 
 async def test_remove_user_from_tenant_non_owner_gets_403(permissions_example_env):
@@ -341,7 +354,6 @@ async def test_improve_permission_matrix(permissions_example_env):
     paths patch the memify engine.
     """
     from importlib import import_module
-
     from uuid import uuid4
 
     from cognee.modules.data.methods import get_datasets_by_name
@@ -355,8 +367,33 @@ async def test_improve_permission_matrix(permissions_example_env):
     await cognee.add(["improve permission fixture text"], dataset_name="IMPROVE_PERMS", user=owner)
     dataset_id = (await get_datasets_by_name(["IMPROVE_PERMS"], owner.id))[0].id
 
-    def memify_patch():
-        return patch("cognee.modules.memify.memify", new_callable=AsyncMock, return_value={})
+    class memify_patch:
+        """Mock the memify engine and force the triplet-enrichment stage to run.
+
+        improve() gates that stage on the cognify ``triplet_embedding`` setting
+        (off by default, so the stage is *skipped* and memify is never called).
+        The permission checks under test happen before any stage, but case 3
+        also asserts that the stage receives the authorized dataset, so the gate
+        is opened here with a patched config.
+        """
+
+        def __init__(self):
+            self._memify = patch(
+                "cognee.modules.memify.memify", new_callable=AsyncMock, return_value={}
+            )
+            self._config = patch(
+                "cognee.modules.cognify.config.get_cognify_config",
+                return_value=MagicMock(triplet_embedding=True),
+            )
+
+        def __enter__(self):
+            self._config.__enter__()
+            return self._memify.__enter__()
+
+        def __exit__(self, *exc):
+            self._memify.__exit__(*exc)
+            self._config.__exit__(*exc)
+            return False
 
     # 1. No grant on an existing dataset: refused with 403.
     with pytest.raises(PermissionDeniedError):

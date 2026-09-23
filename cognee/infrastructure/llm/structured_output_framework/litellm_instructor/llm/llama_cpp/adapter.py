@@ -14,21 +14,20 @@ from tenacity import (
     retry,
     wait_exponential_jitter,
 )
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
-    get_instructor_mode,
-)
-from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, is_budget_exhausted_error
 
+from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
 from cognee.infrastructure.llm.retry_config import (
     llm_retry_condition,
     llm_retry_stop_condition,
 )
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
-    TranscriptionReturnType,
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
 )
-
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
+    TranscriptionReturnType,
 )
 from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
@@ -218,12 +217,18 @@ class LlamaCppAPIAdapter(LLMInterface):
 
             return response
         except Exception as e:
-            if is_budget_exhausted_error(e):
-                raise LLMPaymentRequiredError() from e
+            # Same detail-carrying message as the other adapters.
+            raise_if_budget_exhausted(e)
             raise
 
     async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType:
         raise NotImplementedError
 
-    async def transcribe_image(self, input: str, **kwargs: Any) -> str:
+    async def transcribe_image(
+        self,
+        input: str,
+        prompt: str | None = None,
+        max_completion_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str:
         raise NotImplementedError

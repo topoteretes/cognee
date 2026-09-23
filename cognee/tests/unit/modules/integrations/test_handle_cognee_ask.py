@@ -86,7 +86,8 @@ async def test_empty_query_returns_usage():
     ):
         response = await handle_cognee_ask(_body(text=""))
 
-    assert response["text"].startswith("Usage:")
+    # Worth more than "Usage: ..." — an example is what people copy.
+    assert "/cognee-ask" in response["text"]
     assert response["response_type"] == "ephemeral"
 
 

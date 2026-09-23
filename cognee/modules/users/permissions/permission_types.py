@@ -1,5 +1,3 @@
-from typing import FrozenSet
-
 PERMISSION_TYPES = ["read", "write", "delete", "share"]
 
 # Capabilities are tenant-scoped actions, as opposed to PERMISSION_TYPES which are
@@ -10,7 +8,7 @@ PERMISSION_TYPES = ["read", "write", "delete", "share"]
 # only the assignment of a capability to a principal is data the owner edits.
 MANAGE_USERS = "manage_users"
 
-CAPABILITY_TYPES: FrozenSet[str] = frozenset({MANAGE_USERS})
+CAPABILITY_TYPES: frozenset[str] = frozenset({MANAGE_USERS})
 
 # Deprecated in favour of the MANAGE_USERS capability. Kept because a tenant
 # that has not been migrated yet has no capability rows at all, so resolution
@@ -20,4 +18,4 @@ CAPABILITY_TYPES: FrozenSet[str] = frozenset({MANAGE_USERS})
 # Remove it once existing "admin" roles have been granted MANAGE_USERS through
 # the capability endpoints on the permissions router. Removing it before then
 # locks those tenants out.
-USER_MANAGEMENT_ALLOWED_ROLE_NAMES: FrozenSet[str] = frozenset({"admin"})
+USER_MANAGEMENT_ALLOWED_ROLE_NAMES: frozenset[str] = frozenset({"admin"})

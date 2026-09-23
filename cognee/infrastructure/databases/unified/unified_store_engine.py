@@ -1,14 +1,28 @@
 from __future__ import annotations
 
-from typing import Optional, cast
+from typing import cast
+from uuid import UUID
 
 from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
 
+from ..provenance.source_refs import get_data_id_from_source_ref_key
 from .capabilities import EngineCapability
 from .graph_vector_store_interface import GraphVectorStoreInterface
-from .provenance_delete_planner import execute_source_ref_removal
+from .provenance_delete_planner import SourceRefRemovalResult, execute_source_ref_removal
+
+
+def _without_kept_refs(refs_by_artifact: dict, keep_data_ids: set[UUID]) -> dict:
+    """Drop the refs that point at a kept data item; drop artifacts left with none."""
+    trimmed = {}
+    for artifact_id, refs in refs_by_artifact.items():
+        remaining = [
+            ref for ref in refs if get_data_id_from_source_ref_key(ref) not in keep_data_ids
+        ]
+        if remaining:
+            trimmed[artifact_id] = remaining
+    return trimmed
 
 
 class UnifiedStoreEngine(GraphVectorStoreInterface):
@@ -24,8 +38,8 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
 
     def __init__(
         self,
-        graph_engine: Optional[GraphDBInterface] = None,
-        vector_engine: Optional[VectorDBInterface] = None,
+        graph_engine: GraphDBInterface | None = None,
+        vector_engine: VectorDBInterface | None = None,
         capabilities: EngineCapability = EngineCapability.NONE,
     ):
         self._graph = graph_engine
@@ -82,8 +96,12 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
             and self._vector is not None
         )
 
-    async def delete_by_source_ref(self, source_ref_key: str) -> None:
-        """Delete artifacts owned only by the given source ref; detach the rest."""
+    async def delete_by_source_ref(self, source_ref_key: str) -> SourceRefRemovalResult:
+        """Delete artifacts owned only by the given source ref; detach the rest.
+
+        Returns the hard-deleted node/edge identities so callers can invalidate
+        derived caches (e.g. session entries that used the deleted elements).
+        """
         if not self.supports_graph_provenance_delete():
             raise UnsupportedProvenanceCapability()
         graph = self.graph
@@ -98,7 +116,92 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
         refs_by_node = {node_id: [source_ref_key] for node_id in node_data}
         refs_by_edge = {edge: [source_ref_key] for edge in edge_data}
 
-        await execute_source_ref_removal(
+        return await execute_source_ref_removal(
+            graph,
+            vector,
+            node_data=node_data,
+            edge_data=edge_data,
+            refs_by_node=refs_by_node,
+            refs_by_edge=refs_by_edge,
+        )
+
+    async def delete_by_source_refs(self, source_ref_keys) -> SourceRefRemovalResult:
+        """Remove MANY source refs in one planner pass (chunk-level updates).
+
+        Reads the dataset-independent ref maps once through the per-ref finders
+        and hands the planner every retired key together, so an artifact owned
+        by several retired chunks is detached or deleted in a single decision
+        and the post-delete cleanup (orphaned EdgeTypes, NodeSet tags) runs
+        once per call instead of once per chunk.
+        """
+        if not self.supports_graph_provenance_delete():
+            raise UnsupportedProvenanceCapability()
+        graph = self.graph
+        vector = self.vector
+
+        keys = list(dict.fromkeys(source_ref_keys))
+        refs_by_node: dict = {}
+        refs_by_edge: dict = {}
+        for key in keys:
+            for node_id in await graph.find_nodes_by_source_ref(key):
+                refs_by_node.setdefault(node_id, []).append(key)
+            for edge in await graph.find_edges_by_source_ref(key):
+                refs_by_edge.setdefault(edge, []).append(key)
+
+        node_data = await graph.get_node_delete_data(list(refs_by_node.keys()))
+        edge_data = await graph.get_edge_delete_data(list(refs_by_edge.keys()))
+
+        return await execute_source_ref_removal(
+            graph,
+            vector,
+            node_data=node_data,
+            edge_data=edge_data,
+            refs_by_node=refs_by_node,
+            refs_by_edge=refs_by_edge,
+        )
+
+    async def delete_by_document(self, dataset_id: str, data_id: str) -> SourceRefRemovalResult:
+        """Remove EVERY ref a document owns — v1 doc-scope AND v2 chunk-scope.
+
+        Chunk-scoped ownership (source_ref:v2) means a document's artifacts
+        may carry only their producing chunk's ref; deleting by the v1 key
+        alone would strand them. The dataset's ref maps are filtered to refs
+        whose data id is this document — any version — and the planner
+        deletes what is left unowned, detaching shared output.
+        """
+        if not self.supports_graph_provenance_delete():
+            raise UnsupportedProvenanceCapability()
+        from cognee.infrastructure.databases.provenance import parse_source_ref_key
+
+        graph = self.graph
+        vector = self.vector
+
+        def _document_refs(refs) -> list:
+            selected = []
+            for ref in refs:
+                try:
+                    parsed = parse_source_ref_key(ref)
+                except ValueError:
+                    continue
+                if str(parsed.data_id) == str(data_id):
+                    selected.append(ref)
+            return selected
+
+        refs_by_node = {
+            node_id: document_refs
+            for node_id, refs in (await graph.find_node_source_refs_by_dataset(dataset_id)).items()
+            if (document_refs := _document_refs(refs))
+        }
+        refs_by_edge = {
+            edge: document_refs
+            for edge, refs in (await graph.find_edge_source_refs_by_dataset(dataset_id)).items()
+            if (document_refs := _document_refs(refs))
+        }
+
+        node_data = await graph.get_node_delete_data(list(refs_by_node.keys()))
+        edge_data = await graph.get_edge_delete_data(list(refs_by_edge.keys()))
+
+        return await execute_source_ref_removal(
             graph,
             vector,
             node_data=node_data,
@@ -129,8 +232,14 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
             refs_by_edge=refs_by_edge,
         )
 
-    async def rollback_by_pipeline_run_id(self, pipeline_run_id: str) -> None:
-        """Remove the refs a run attached; delete artifacts left unowned."""
+    async def rollback_by_pipeline_run_id(
+        self, pipeline_run_id: str, *, keep_data_ids: set[UUID] | None = None
+    ) -> None:
+        """Remove the refs a run attached; delete artifacts left unowned.
+
+        Refs pointing at a data item in ``keep_data_ids`` stay: that document's
+        work is complete and stays owned by this run.
+        """
         if not self.supports_graph_provenance_delete():
             raise UnsupportedProvenanceCapability()
         graph = self.graph
@@ -138,6 +247,9 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
 
         refs_by_node = await graph.find_node_source_refs_by_pipeline_run(pipeline_run_id)
         refs_by_edge = await graph.find_edge_source_refs_by_pipeline_run(pipeline_run_id)
+        if keep_data_ids:
+            refs_by_node = _without_kept_refs(refs_by_node, keep_data_ids)
+            refs_by_edge = _without_kept_refs(refs_by_edge, keep_data_ids)
 
         node_data = await graph.get_node_delete_data(list(refs_by_node.keys()))
         edge_data = await graph.get_edge_delete_data(list(refs_by_edge.keys()))

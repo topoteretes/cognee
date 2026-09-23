@@ -12,14 +12,17 @@ When ``include_memory=True`` the extracted memory (entities/relationships) is
 folded in from the relational ``nodes``/``edges`` tables and linked back to the
 files it was extracted from.
 
-Two entry points:
+Entry points:
     * ``build_provenance_graph(...)`` — pure, side-effect-free assembly from
       plain records (unit-testable).
     * ``get_memory_provenance_graph(...)`` — async reader that pulls live data
       from the relational layer and calls the builder.
+    * ``visualize_memory_provenance(...)`` / ``get_memory_provenance_payload(...)``
+      — the same graph rendered as HTML or packaged as a JSON dict, sharing
+      one ``preprocess()`` call so the two cannot drift.
 """
 
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple, TypedDict, cast
+from typing import Any, NamedTuple, TypedDict, cast
 
 from cognee.shared.logging_utils import get_logger
 
@@ -35,7 +38,7 @@ class Node(NamedTuple):
     """
 
     id: str
-    properties: Dict[str, Any]
+    properties: dict[str, Any]
 
 
 class EdgeData(NamedTuple):
@@ -44,7 +47,7 @@ class EdgeData(NamedTuple):
     source: str
     target: str
     relation: str
-    properties: Dict[str, Any]
+    properties: dict[str, Any]
 
 
 # ── Input record shapes (relational projection inputs) ───────────────────────
@@ -57,24 +60,44 @@ class _HasId(TypedDict):
 
 
 class TenantRecord(_HasId, total=False):
-    name: Optional[str]
+    name: str | None
 
 
 class UserRecord(_HasId, total=False):
-    name: Optional[str]
-    tenant_ids: List[str]
+    name: str | None
+    tenant_ids: list[str]
+
+
+class RoleRecord(_HasId, total=False):
+    name: str | None
+    tenant_id: str | None
+    user_ids: list[str]
+
+
+class AclGrantRecord(TypedDict, total=False):
+    """One ACL row: a permission a principal holds on a dataset.
+
+    ``principal_kind`` is one of "role" | "user" | "tenant" — the same
+    vocabulary the CLO-399 dataset-groups endpoint uses, so a client already
+    rendering that distinction elsewhere does not learn a second one here.
+    """
+
+    principal_id: str
+    principal_kind: str
+    dataset_id: str
+    permission: str
 
 
 class DatasetRecord(_HasId, total=False):
-    name: Optional[str]
-    owner_id: Optional[str]
-    tenant_id: Optional[str]
+    name: str | None
+    owner_id: str | None
+    tenant_id: str | None
 
 
 class FileRecord(_HasId, total=False):
-    name: Optional[str]
-    dataset_ids: List[str]
-    dataset_name: Optional[str]
+    name: str | None
+    dataset_ids: list[str]
+    dataset_name: str | None
 
 
 class AgentDatasetRef(TypedDict, total=False):
@@ -83,45 +106,62 @@ class AgentDatasetRef(TypedDict, total=False):
 
 
 class AgentRecord(_HasId, total=False):
-    name: Optional[str]
-    user_id: Optional[str]
-    session_id: Optional[str]
-    datasets: List[AgentDatasetRef]
+    name: str | None
+    user_id: str | None
+    session_id: str | None
+    datasets: list[AgentDatasetRef]
 
 
 class SessionRecord(_HasId, total=False):
-    name: Optional[str]
-    user_id: Optional[str]
-    dataset_id: Optional[str]
-    agent_id: Optional[str]
+    name: str | None
+    user_id: str | None
+    dataset_id: str | None
+    agent_id: str | None
 
 
 class MemoryPayload(TypedDict, total=False):
-    nodes: List[Tuple[str, Dict[str, Any]]]
-    edges: List[Tuple[str, str, str, Dict[str, Any]]]
-    links: List[Dict[str, Any]]
+    nodes: list[tuple[str, dict[str, Any]]]
+    edges: list[tuple[str, str, str, dict[str, Any]]]
+    links: list[dict[str, Any]]
+
+
+# Delete/share are still projected (as their own edge, not folded into reads/
+# writes) rather than dropped: an ACL row exists because someone granted it,
+# and hiding half of what a principal can do would misstate the story this
+# graph exists to tell.
+_ACL_EDGE_RELATIONS = {
+    "read": "reads",
+    "write": "writes",
+    "delete": "can_delete",
+    "share": "can_share",
+}
 
 
 def build_provenance_graph(
     *,
-    tenants: Optional[List[TenantRecord]] = None,
-    users: Optional[List[UserRecord]] = None,
-    datasets: Optional[List[DatasetRecord]] = None,
-    files: Optional[List[FileRecord]] = None,
-    agents: Optional[List[AgentRecord]] = None,
-    sessions: Optional[List[SessionRecord]] = None,
-    memory: Optional[MemoryPayload] = None,
-) -> Tuple[List[Node], List[EdgeData]]:
+    tenants: list[TenantRecord] | None = None,
+    users: list[UserRecord] | None = None,
+    roles: list[RoleRecord] | None = None,
+    datasets: list[DatasetRecord] | None = None,
+    files: list[FileRecord] | None = None,
+    agents: list[AgentRecord] | None = None,
+    sessions: list[SessionRecord] | None = None,
+    acl_grants: list[AclGrantRecord] | None = None,
+    memory: MemoryPayload | None = None,
+) -> tuple[list[Node], list[EdgeData]]:
     """Assemble actor/ownership/session records into a ``(nodes, edges)`` graph.
 
     Record shapes (all ids are strings):
         tenants:  {"id", "name"}
         users:    {"id", "name", "tenant_ids": [..]}
+        roles:    {"id", "name", "tenant_id", "user_ids": [..]}
         datasets: {"id", "name", "owner_id", "tenant_id"}
         files:    {"id", "name", "dataset_ids": [..], "dataset_name"?}
         agents:   {"id", "name", "user_id", "session_id"?,
                    "datasets": [{"dataset_id", "role": "read"|"read_write"}]}
         sessions: {"id", "name", "user_id", "dataset_id", "agent_id"?}
+        acl_grants: [{"principal_id", "principal_kind": "role"|"user"|"tenant",
+                      "dataset_id", "permission": "read"|"write"|"delete"|"share"}]
         memory:   optional {"nodes": [(id, props)], "edges": [(s, t, rel, props)],
                             "links": [{"node_id", "data_id", "dataset_id"}]}
 
@@ -130,13 +170,15 @@ def build_provenance_graph(
     """
     tenants = tenants or []
     users = users or []
+    roles = roles or []
     datasets = datasets or []
     files = files or []
     agents = agents or []
     sessions = sessions or []
+    acl_grants = acl_grants or []
 
-    nodes: Dict[str, Node] = {}
-    edges: List[EdgeData] = []
+    nodes: dict[str, Node] = {}
+    edges: list[EdgeData] = []
     seen_edges = set()
 
     def add_node(node_id: str, node_type: str, name: str, **extra) -> None:
@@ -157,6 +199,8 @@ def build_provenance_graph(
         add_node(f"tenant:{tenant['id']}", "Tenant", tenant.get("name") or "Tenant")
     for user in users:
         add_node(f"user:{user['id']}", "User", user.get("name") or str(user["id"]))
+    for role in roles:
+        add_node(f"role:{role['id']}", "Role", role.get("name") or str(role["id"]))
     for dataset in datasets:
         add_node(f"dataset:{dataset['id']}", "Dataset", dataset.get("name") or "Dataset")
     for file in files:
@@ -175,6 +219,13 @@ def build_provenance_graph(
     for user in users:
         for tenant_id in user.get("tenant_ids") or []:
             add_edge(f"tenant:{tenant_id}", f"user:{user['id']}", "has_member")
+
+    for role in roles:
+        role_tenant_id = role.get("tenant_id")
+        if role_tenant_id:
+            add_edge(f"tenant:{role_tenant_id}", f"role:{role['id']}", "has_role")
+        for user_id in role.get("user_ids") or []:
+            add_edge(f"role:{role['id']}", f"user:{user_id}", "has_member")
 
     for dataset in datasets:
         owner_id = dataset.get("owner_id")
@@ -208,6 +259,19 @@ def build_provenance_graph(
         if sess_dataset_id:
             add_edge(f"session:{sess['id']}", f"dataset:{sess_dataset_id}", "recorded_in")
 
+    # ACL grants: what a role, a user or the tenant principal itself can do
+    # with a dataset, as distinct from who *owns* it (the "owns" edges above,
+    # from Dataset.owner_id). A dataset shared via ShareDatasetModal with a
+    # group, an individual, or the whole workspace shows up here and nowhere
+    # else — before this, only ownership was visible, so a shared dataset
+    # with no ACL projection looked unshared.
+    for grant in acl_grants:
+        edge_relation = _ACL_EDGE_RELATIONS.get(grant.get("permission"))
+        if edge_relation is None:
+            continue
+        source = f"{grant['principal_kind']}:{grant['principal_id']}"
+        add_edge(source, f"dataset:{grant['dataset_id']}", edge_relation)
+
     # ── Optional memory layer ────────────────────────────────────────
     if memory:
         for node_id, props in memory.get("nodes") or []:
@@ -233,11 +297,11 @@ def build_provenance_graph(
 # ── Live relational readers ──────────────────────────────────────────────────
 
 
-async def _read_agents(user_ids: List[str]) -> List[AgentRecord]:
+async def _read_agents(user_ids: list[str]) -> list[AgentRecord]:
     """Best-effort enumeration of agent connections (registered + persisted)."""
     from uuid import UUID
 
-    connections: List[Any] = []
+    connections: list[Any] = []
     try:
         from cognee.modules.agents.registry import (
             list_persisted_agent_connections,
@@ -247,7 +311,7 @@ async def _read_agents(user_ids: List[str]) -> List[AgentRecord]:
         try:
             connections += list(list_registered_agent_connections() or [])
         except Exception as error:  # pragma: no cover - defensive
-            logger.debug(f"registered agent enumeration skipped: {error}")
+            logger.debug(f"registered agent enumeration skipped: {error}", exc_info=True)
         try:
             connections += list(
                 await list_persisted_agent_connections(
@@ -256,18 +320,18 @@ async def _read_agents(user_ids: List[str]) -> List[AgentRecord]:
                 or []
             )
         except Exception as error:  # pragma: no cover - defensive
-            logger.debug(f"persisted agent enumeration skipped: {error}")
+            logger.debug(f"persisted agent enumeration skipped: {error}", exc_info=True)
     except Exception as error:  # pragma: no cover - module unavailable
-        logger.debug(f"agent registry unavailable: {error}")
+        logger.debug(f"agent registry unavailable: {error}", exc_info=True)
         return []
 
-    agents: List[AgentRecord] = []
+    agents: list[AgentRecord] = []
     seen = set()
     for conn in connections:
         if conn.id in seen:
             continue
         seen.add(conn.id)
-        refs: List[AgentDatasetRef] = [
+        refs: list[AgentDatasetRef] = [
             {"dataset_id": str(ref.id), "role": ref.role or "read"}
             for ref in (conn.datasets or [])
             if getattr(ref, "id", None)
@@ -284,12 +348,12 @@ async def _read_agents(user_ids: List[str]) -> List[AgentRecord]:
     return agents
 
 
-async def _read_sessions(user_ids: List[str], agents: List[AgentRecord]) -> List[SessionRecord]:
+async def _read_sessions(user_ids: list[str], agents: list[AgentRecord]) -> list[SessionRecord]:
     """Best-effort enumeration of session records."""
     from uuid import UUID
 
     agent_by_session = {sid: a["id"] for a in agents if (sid := a.get("session_id"))}
-    sessions: List[SessionRecord] = []
+    sessions: list[SessionRecord] = []
     try:
         from cognee.modules.session_lifecycle.metrics import list_session_rows
 
@@ -307,13 +371,13 @@ async def _read_sessions(user_ids: List[str], agents: List[AgentRecord]) -> List
                 }
             )
     except Exception as error:  # pragma: no cover - defensive
-        logger.debug(f"session enumeration skipped: {error}")
+        logger.debug(f"session enumeration skipped: {error}", exc_info=True)
     return sessions
 
 
 async def _read_memory_relational(
-    limit: int = 5000, dataset_ids: Optional[List[str]] = None
-) -> Optional[MemoryPayload]:
+    limit: int = 5000, dataset_ids: list[str] | None = None
+) -> MemoryPayload | None:
     """Read extracted memory from the relational ``nodes``/``edges`` tables.
 
     Avoids the knowledge-graph backend entirely, so it works when that backend
@@ -328,15 +392,15 @@ async def _read_memory_relational(
         from sqlalchemy import select
 
         from cognee.infrastructure.databases.relational import get_relational_engine
-        from cognee.modules.graph.models.Node import Node as NodeRow
         from cognee.modules.graph.models.Edge import Edge as EdgeRow
+        from cognee.modules.graph.models.Node import Node as NodeRow
     except Exception as error:  # pragma: no cover - models unavailable
-        logger.debug(f"relational memory models unavailable: {error}")
+        logger.debug(f"relational memory models unavailable: {error}", exc_info=True)
         return None
 
-    nodes: List[Tuple[str, Dict[str, Any]]] = []
-    edges: List[Tuple[str, str, str, Dict[str, Any]]] = []
-    links: List[Dict[str, Any]] = []
+    nodes: list[tuple[str, dict[str, Any]]] = []
+    edges: list[tuple[str, str, str, dict[str, Any]]] = []
+    links: list[dict[str, Any]] = []
     node_ids: set = set()
     try:
         db_engine = get_relational_engine()
@@ -369,7 +433,7 @@ async def _read_memory_relational(
                     continue
                 edges.append(EdgeData(src, dst, row.relationship_name or "related", {}))
     except Exception as error:  # pragma: no cover - defensive
-        logger.debug(f"relational memory read skipped: {error}")
+        logger.debug(f"relational memory read skipped: {error}", exc_info=True)
         return None
 
     if not nodes:
@@ -378,29 +442,29 @@ async def _read_memory_relational(
 
 
 async def _read_memory_graph_provenance(
-    limit: int = 5000, dataset_ids: Optional[List[str]] = None
-) -> Optional[MemoryPayload]:
+    limit: int = 5000, dataset_ids: list[str] | None = None
+) -> MemoryPayload | None:
     """Read extracted memory from graph provenance on ledger-free graphs."""
     if not dataset_ids:
         return None
 
     from cognee.infrastructure.databases.provenance import (
         EdgeIdentity,
-        get_data_id_from_source_ref_key,
-        get_dataset_id_from_source_ref_key,
+        parse_source_ref_key,
     )
     from cognee.infrastructure.databases.provenance.markers import (
         stores_provenance_in_graph,
     )
     from cognee.infrastructure.databases.unified import get_unified_engine
+    from cognee.infrastructure.engine import is_internal_node
 
     unified = await get_unified_engine()
     graph = unified.graph
     if not await stores_provenance_in_graph(graph):
         return None
 
-    refs_by_node: Dict[str, List[str]] = {}
-    refs_by_edge: Dict[Any, List[str]] = {}
+    refs_by_node: dict[str, list[str]] = {}
+    refs_by_edge: dict[Any, list[str]] = {}
     for dataset_id in dataset_ids:
         for node_id, refs in (await graph.find_node_source_refs_by_dataset(dataset_id)).items():
             refs_by_node.setdefault(str(node_id), []).extend(refs)
@@ -409,18 +473,23 @@ async def _read_memory_graph_provenance(
 
     graph_nodes, graph_edges = await graph.get_graph_data()
 
+    # Internal nodes (``is_internal`` marker, e.g. per-user preference state)
+    # must never be surfaced; drop them plus every edge and link touching them.
+    internal_ids = {str(node_id) for node_id, props in graph_nodes if is_internal_node(props)}
+
     node_ids = set(refs_by_node)
     node_ids.update(edge.source_id for edge in refs_by_edge)
     node_ids.update(edge.target_id for edge in refs_by_edge)
+    node_ids -= internal_ids
     nodes_by_id = {str(node_id): props for node_id, props in graph_nodes}
 
-    nodes: List[Tuple[str, Dict[str, Any]]] = []
+    nodes: list[tuple[str, dict[str, Any]]] = []
     for node_id in sorted(node_ids)[:limit]:
         props = nodes_by_id.get(node_id)
         if props is not None:
             nodes.append(Node(node_id, dict(props)))
 
-    edges: List[Tuple[str, str, str, Dict[str, Any]]] = []
+    edges: list[tuple[str, str, str, dict[str, Any]]] = []
     edge_ref_keys = set(refs_by_edge)
     for source, target, relation, props in graph_edges:
         edge = EdgeIdentity(str(source), str(target), str(relation))
@@ -432,27 +501,120 @@ async def _read_memory_graph_provenance(
         if len(edges) >= limit * 4:
             break
 
-    links: List[Dict[str, Any]] = []
+    links: list[dict[str, Any]] = []
     for node_id, refs in refs_by_node.items():
+        if node_id in internal_ids:
+            continue
         for source_ref_key in refs:
-            links.append(
-                {
-                    "node_id": node_id,
-                    "data_id": str(get_data_id_from_source_ref_key(source_ref_key)),
-                    "dataset_id": str(get_dataset_id_from_source_ref_key(source_ref_key)),
-                }
-            )
+            # v1 refs are document-scoped; v2 refs additionally name the
+            # producing chunk. Foreign formats are skipped, never crash the
+            # visualization.
+            try:
+                parsed = parse_source_ref_key(source_ref_key)
+            except ValueError:
+                continue
+            link = {
+                "node_id": node_id,
+                "data_id": str(parsed.data_id),
+                "dataset_id": str(parsed.dataset_id),
+            }
+            if parsed.chunk_id is not None:
+                link["chunk_id"] = str(parsed.chunk_id)
+            links.append(link)
 
     if not nodes:
         return None
     return {"nodes": nodes, "edges": edges, "links": links}
 
 
+async def _read_roles_and_grants(
+    tenant_ids: list[str] | None,
+    dataset_ids: list[str],
+    scope_user_ids: list[str] | None = None,
+) -> tuple[list[RoleRecord], list[AclGrantRecord]]:
+    """Best-effort read of roles (with membership) and ACL grants on the
+    in-scope datasets.
+
+    ``Principal.id``/``Principal.type`` are read as bare columns rather than
+    through ``select(Principal)`` or an outer join onto ``User``/``Role``/
+    ``Tenant``: the latter makes SQLAlchemy try to resolve the polymorphic
+    identity across all three subclass tables at once and it folds rows
+    together — the exact bug CLO-399's dataset-groups endpoint hit first.
+    Reading the two plain columns sidesteps that; there is no entity to
+    misidentify when nothing is asking the ORM to build one.
+
+    ``tenant_ids=None`` with ``scope_user_ids`` set (the OSS/single-user path,
+    where roles are not owned by a user) keeps only roles the scoped users are
+    actually members of, so this cannot surface a group of people outside the
+    requested scope.
+    """
+    from uuid import UUID as _UUID
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.users.models import ACL, Permission, Role
+    from cognee.modules.users.models.Principal import Principal
+
+    def _to_uuid(value):
+        # Role.tenant_id and ACL.dataset_id are sqlalchemy.UUID(as_uuid=True):
+        # on SQLite the bind processor calls value.hex, which a plain string
+        # does not have. Callers pass either — get_memory_provenance_graph's
+        # dataset_ids are already stringified — so coerce once here instead
+        # of pushing that constraint onto every caller.
+        return value if isinstance(value, _UUID) else _UUID(str(value))
+
+    roles: list[RoleRecord] = []
+    grants: list[AclGrantRecord] = []
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        role_stmt = select(Role).options(selectinload(Role.users))
+        if tenant_ids is not None:
+            role_stmt = role_stmt.where(Role.tenant_id.in_(_to_uuid(t) for t in tenant_ids))
+        role_rows = (await session.execute(role_stmt)).scalars().all()
+
+        if tenant_ids is None and scope_user_ids is not None:
+            allowed = set(scope_user_ids)
+            role_rows = [r for r in role_rows if {str(u.id) for u in r.users} & allowed]
+
+        for role in role_rows:
+            roles.append(
+                {
+                    "id": str(role.id),
+                    "name": role.name,
+                    "tenant_id": str(role.tenant_id),
+                    "user_ids": [str(u.id) for u in (role.users or [])],
+                }
+            )
+
+        if dataset_ids:
+            grant_stmt = (
+                select(Principal.id, Principal.type, ACL.dataset_id, Permission.name)
+                .select_from(ACL)
+                .join(Principal, Principal.id == ACL.principal_id)
+                .join(Permission, Permission.id == ACL.permission_id)
+                .where(ACL.dataset_id.in_(_to_uuid(d) for d in dataset_ids))
+            )
+            for principal_id, kind, dataset_id, permission in await session.execute(grant_stmt):
+                grants.append(
+                    {
+                        "principal_id": str(principal_id),
+                        "principal_kind": kind,
+                        "dataset_id": str(dataset_id),
+                        "permission": permission,
+                    }
+                )
+
+    return roles, grants
+
+
 async def get_memory_provenance_graph(
     include_memory: bool = False,
-    scope_tenant_ids: Optional[List[Any]] = None,
-    scope_user_ids: Optional[List[Any]] = None,
-) -> Tuple[List[Node], List[EdgeData]]:
+    scope_tenant_ids: list[Any] | None = None,
+    scope_user_ids: list[Any] | None = None,
+) -> tuple[list[Node], list[EdgeData]]:
     """Read live relational data and project it into a provenance ``(nodes, edges)``.
 
     Args:
@@ -476,10 +638,10 @@ async def get_memory_provenance_graph(
 
     scoped = scope_tenant_ids is not None or scope_user_ids is not None
 
-    tenants: List[Dict[str, Any]] = []
-    users: List[Dict[str, Any]] = []
-    datasets: List[Dict[str, Any]] = []
-    files: Dict[str, Dict[str, Any]] = {}
+    tenants: list[dict[str, Any]] = []
+    users: list[dict[str, Any]] = []
+    datasets: list[dict[str, Any]] = []
+    files: dict[str, dict[str, Any]] = {}
 
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
@@ -545,6 +707,16 @@ async def get_memory_provenance_graph(
         allowed_user_ids = set(user_ids)
         agents = [a for a in agents if a.get("user_id") in allowed_user_ids]
     sessions = await _read_sessions(user_ids, agents)
+    roles, acl_grants = await _read_roles_and_grants(
+        tenant_ids=scope_tenant_ids,
+        dataset_ids=dataset_ids,
+        # user_ids is already resolved to this call's in-scope users (strings);
+        # only meaningful without a tenant scope, where roles carry no other
+        # link back to "in scope" at all.
+        scope_user_ids=user_ids
+        if scope_tenant_ids is None and scope_user_ids is not None
+        else None,
+    )
     # Scope memory to the in-scope datasets so it never leaks across tenants.
     memory = None
     if include_memory:
@@ -553,21 +725,23 @@ async def get_memory_provenance_graph(
             memory = await _read_memory_relational(dataset_ids=dataset_ids if scoped else None)
 
     return build_provenance_graph(
-        tenants=cast(List[TenantRecord], tenants),
-        users=cast(List[UserRecord], users),
-        datasets=cast(List[DatasetRecord], datasets),
-        files=cast(List[FileRecord], list(files.values())),
+        tenants=cast(list[TenantRecord], tenants),
+        users=cast(list[UserRecord], users),
+        roles=cast(list[RoleRecord], roles),
+        datasets=cast(list[DatasetRecord], datasets),
+        files=cast(list[FileRecord], list(files.values())),
         agents=agents,
         sessions=sessions,
+        acl_grants=cast(list[AclGrantRecord], acl_grants),
         memory=memory,
     )
 
 
 async def visualize_memory_provenance(
-    destination_file_path: Optional[str] = None,
+    destination_file_path: str | None = None,
     include_memory: bool = False,
-    scope_tenant_ids: Optional[List[Any]] = None,
-    scope_user_ids: Optional[List[Any]] = None,
+    scope_tenant_ids: list[Any] | None = None,
+    scope_user_ids: list[Any] | None = None,
 ) -> str:
     """Render the live memory-provenance graph to a self-contained HTML file.
 
@@ -588,3 +762,33 @@ async def visualize_memory_provenance(
     if destination_file_path:
         logger.info(f"Memory provenance visualization saved at: {destination_file_path}")
     return html
+
+
+async def get_memory_provenance_payload(
+    include_memory: bool = False,
+    scope_tenant_ids: list[Any] | None = None,
+    scope_user_ids: list[Any] | None = None,
+) -> dict:
+    """The live memory-provenance graph as a JSON-safe dict, for a client
+    that renders it itself instead of an embedded HTML page.
+
+    Routes the same ``(nodes, edges)`` from ``get_memory_provenance_graph``
+    through ``build_visualization_payload`` — the same preprocessing
+    (``preprocess()``) the HTML path already runs the provenance graph
+    through via ``cognee_network_visualization``, just packaged as a dict
+    instead of interpolated into a template. The two cannot drift on the
+    data for the same reason CLO-401's dataset visualization JSON and HTML
+    paths cannot: both come from one ``preprocess()`` call.
+
+    ``scope_tenant_ids`` / ``scope_user_ids``: see ``get_memory_provenance_graph``.
+    """
+    from cognee.modules.visualization.cognee_network_visualization import (
+        build_visualization_payload,
+    )
+
+    graph_data = await get_memory_provenance_graph(
+        include_memory=include_memory,
+        scope_tenant_ids=scope_tenant_ids,
+        scope_user_ids=scope_user_ids,
+    )
+    return build_visualization_payload(graph_data)

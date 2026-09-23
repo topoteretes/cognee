@@ -62,6 +62,35 @@ def mock_graph_engine(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_internal_nodes_and_their_edges_are_hidden(monkeypatch):
+    """Nodes marked is_internal (e.g. user preferences) never reach the inventory."""
+    nodes, edges = _synthetic_graph()
+    nodes = nodes + [
+        (
+            "pref-1",
+            {
+                "type": "UserPreference",
+                "name": "UserPreference",
+                "is_internal": True,
+                "preference_text": "prefers terse answers",
+            },
+        )
+    ]
+    edges = edges + [("pref-1", "e-carlos", "prefers", {"weight": 1.4})]
+
+    engine = AsyncMock()
+    engine.get_graph_data = AsyncMock(return_value=(nodes, edges))
+    monkeypatch.setattr(inventory_module, "get_graph_engine", AsyncMock(return_value=engine))
+
+    inventory = await get_schema_inventory()
+    types = {rec["type"] for rec in inventory}
+    assert "UserPreference" not in types
+
+    all_relations = [rel for rec in inventory for rel in rec["relationships"]]
+    assert all("prefers" not in rel["relation"] for rel in all_relations)
+
+
+@pytest.mark.asyncio
 async def test_counts_are_true_totals(mock_graph_engine):
     inventory = await get_schema_inventory(samples_per_type=2)
     counts = {rec["type"]: rec["count"] for rec in inventory}

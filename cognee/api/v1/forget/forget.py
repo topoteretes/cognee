@@ -1,24 +1,29 @@
+from typing import Any
 from uuid import UUID
-from typing import Optional, Union, Any
 
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.locks import dataset_lock
-from cognee.shared.logging_utils import get_logger
 from cognee.modules.observability import (
-    new_span,
     COGNEE_DATASET_NAME,
     COGNEE_FORGET_TARGET,
     COGNEE_RESULT_COUNT,
+    MEMORY_OPERATION,
+    MEMORY_SYSTEM,
+    increment_items_deleted,
+    new_span,
+    record_operation_duration,
 )
+from cognee.modules.operations import record_operation
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("forget")
 
 
 async def forget(
     *,
-    data_id: Optional[UUID] = None,
-    dataset: Optional[str] = None,
-    dataset_id: Optional[UUID] = None,
+    data_id: UUID | None = None,
+    dataset: str | None = None,
+    dataset_id: UUID | None = None,
     everything: bool = False,
     memory_only: bool = False,
     user: Any = None,
@@ -63,8 +68,8 @@ async def forget(
     Returns:
         Dict with deletion summary: items removed, datasets removed.
     """
-    from cognee.shared.utils import send_telemetry
     from cognee import __version__ as cognee_version
+    from cognee.shared.utils import send_telemetry
 
     dataset_ref = dataset_id or dataset
 
@@ -96,7 +101,13 @@ async def forget(
         },
     )
 
-    with new_span("cognee.api.forget") as span:
+    import time as _time
+
+    _forget_start_ns = _time.monotonic_ns()
+
+    with new_span("memory.delete") as span:
+        span.set_attribute(MEMORY_SYSTEM, "cognee")
+        span.set_attribute(MEMORY_OPERATION, "delete")
         span.set_attribute(COGNEE_FORGET_TARGET, target)
         if dataset_ref:
             span.set_attribute(COGNEE_DATASET_NAME, str(dataset_ref))
@@ -118,41 +129,54 @@ async def forget(
             )
             return result
 
-        from cognee.modules.users.methods import get_default_user
+        async with record_operation("forget", user=user) as operation_context:
+            # In case there is no database, forget will fail when getting a user
+            from cognee.low_level import setup
+            from cognee.modules.users.methods import get_default_user
 
-        # In case there is no database, forget will fail when getting a user
-        from cognee.low_level import setup
+            await setup()
 
-        await setup()
+            if user is None:
+                user = await get_default_user()
+            operation_context.set_user(user)
 
-        if user is None:
-            user = await get_default_user()
+            # `everything` deletes across all datasets; the per-dataset DB context is
+            # established per-dataset inside datasets.delete_all -> empty_dataset, so we
+            # must NOT enter a single-dataset context here (dataset_ref is None, which
+            # would try to create a dataset_database row for a non-existent dataset).
+            if everything:
+                result = await _forget_everything(user)
+                _removed = result.get("datasets_removed", 0)
+                span.set_attribute(COGNEE_RESULT_COUNT, _removed)
+                _duration_ms = (_time.monotonic_ns() - _forget_start_ns) / 1_000_000
+                _attrs = {"memory.system": "cognee", "memory.operation": "delete"}
+                record_operation_duration(_duration_ms, _attrs)
+                increment_items_deleted(_removed, _attrs)
+                return result
 
-        # `everything` deletes across all datasets; the per-dataset DB context is
-        # established per-dataset inside datasets.delete_all -> empty_dataset, so we
-        # must NOT enter a single-dataset context here (dataset_ref is None, which
-        # would try to create a dataset_database row for a non-existent dataset).
-        if everything:
-            result = await _forget_everything(user)
-            span.set_attribute(COGNEE_RESULT_COUNT, result.get("datasets_removed", 0))
-            return result
+            # All remaining operations are scoped to a single dataset.
+            if dataset_ref is None:
+                if memory_only:
+                    raise ValueError("memory_only requires dataset or dataset_id.")
+                if data_id is not None:
+                    raise ValueError("data_id requires dataset or dataset_id.")
+                raise ValueError(
+                    "Specify dataset, dataset_id, data_id+dataset, or everything=True."
+                )
 
-        # All remaining operations are scoped to a single dataset.
-        if dataset_ref is None:
-            if memory_only:
-                raise ValueError("memory_only requires dataset or dataset_id.")
-            if data_id is not None:
-                raise ValueError("data_id requires dataset or dataset_id.")
-            raise ValueError("Specify dataset, dataset_id, data_id+dataset, or everything=True.")
+            # Authorize before any dataset database context is entered: context
+            # entry provisions per-dataset database registry rows, a write that
+            # must never happen for a caller without delete permission (an
+            # unauthorized caller used to surface as a UniqueViolation 500 — or,
+            # for an unprovisioned dataset, actually created rows).
+            resolved_dataset_id = await _resolve_dataset_id(dataset_ref, user)
+            operation_context.set_dataset(resolved_dataset_id)
 
-        # Authorize before entering the dataset's database context: context
-        # entry provisions per-dataset database registry rows, a write that
-        # must never happen for a caller without delete permission (an
-        # unauthorized caller used to surface as a UniqueViolation 500 — or,
-        # for an unprovisioned dataset, actually created rows).
-        resolved_dataset_id = await _resolve_dataset_id(dataset_ref, user)
-
-        async with set_database_global_context_variables(resolved_dataset_id, user.id):
+            # No database context here: each path below establishes it AFTER
+            # acquiring the per-dataset lock (the memory helpers directly, the
+            # others via datasets.delete_data/empty_dataset). Entering it first
+            # would hold a dataset-queue slot while waiting on the lock —
+            # the SDK-483 order inversion (canonical: dataset lock -> queue slot).
             if memory_only:
                 if data_id is not None:
                     return await _forget_data_memory(data_id, dataset_ref, user)
@@ -191,22 +215,22 @@ async def _forget_everything(user: Any) -> dict:
             if cache_engine is not None:
                 await cache_engine.prune()
     except Exception as e:
-        logger.warning("forget: session cache cleanup failed (non-fatal): %s", e)
+        logger.warning("forget: session cache cleanup failed (non-fatal): %s", e, exc_info=True)
 
     logger.info("forget: deleted all data for user=%s (%d datasets)", user.id, count)
     return {"datasets_removed": count, "status": "success"}
 
 
-async def _forget_dataset(dataset_ref: Union[str, UUID], user: Any) -> dict:
+async def _forget_dataset(dataset_ref: str | UUID, user: Any) -> dict:
     """Delete an entire dataset by name or UUID.
 
     Cleanup scope:
     - Relational DB (datasets, data records): yes
     - Graph DB (nodes, edges): yes
     - Vector DB (embeddings): yes
-    - Session cache: no (sessions are keyed by user_id+session_id,
-      not by dataset — targeted cleanup requires tagging sessions
-      with dataset_id, which is a future enhancement)
+    - Session cache: yes — sessions attributed to the dataset (via
+      session_records.dataset_id or the per-dataset default session id)
+      are deleted inside datasets.empty_dataset (non-fatal, best-effort)
     """
     from cognee.api.v1.datasets.datasets import datasets
 
@@ -218,7 +242,7 @@ async def _forget_dataset(dataset_ref: Union[str, UUID], user: Any) -> dict:
     return {"dataset_id": str(dataset_id), "status": "success"}
 
 
-async def _forget_data_item(data_id: UUID, dataset_ref: Union[str, UUID], user: Any) -> dict:
+async def _forget_data_item(data_id: UUID, dataset_ref: str | UUID, user: Any) -> dict:
     """Delete a single data item from a dataset."""
     from cognee.api.v1.datasets.datasets import datasets
 
@@ -240,7 +264,7 @@ async def _forget_data_item(data_id: UUID, dataset_ref: Union[str, UUID], user: 
     return {"data_id": str(data_id), "dataset_id": str(dataset_id), "status": "success"}
 
 
-async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> dict:
+async def _forget_dataset_memory(dataset_ref: str | UUID, user: Any) -> dict:
     """Delete only memory (graph + vector) for a dataset, preserving raw files.
 
     This allows re-cognifying the dataset with different settings
@@ -249,6 +273,9 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
     Cleanup scope:
     - Graph DB (nodes, edges): yes
     - Vector DB (embeddings): yes
+    - Session cache: yes — attributed sessions are deleted; QAs in
+      dataset-unattributed sessions that used the removed graph ids are
+      removed (non-fatal, best-effort)
     - Pipeline status: reset (so cognify re-processes all data)
     - Relational DB (dataset, data records): preserved
     - Raw files: preserved
@@ -258,28 +285,56 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
 
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.data.models import Data
-    from cognee.modules.data.models.DatasetData import DatasetData
     from cognee.modules.graph.methods.delete_dataset_nodes_and_edges import (
         delete_dataset_nodes_and_edges,
-    )
-    from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
-        reset_dataset_pipeline_run_status,
     )
 
     dataset_id = await _resolve_dataset_id(dataset_ref, user)
 
     # Same per-dataset lock as pipeline runs: wait for any in-flight pipeline
-    # on this dataset and exclude concurrent deletes.
-    async with dataset_lock(dataset_id):
+    # on this dataset and exclude concurrent deletes. The database context comes
+    # AFTER the lock — canonical order (dataset lock -> queue slot), SDK-483.
+    async with (
+        dataset_lock(dataset_id),
+        set_database_global_context_variables(dataset_id, user.id),
+    ):
         # 1. Delete graph nodes/edges and vector embeddings
-        await delete_dataset_nodes_and_edges(dataset_id, user.id)
+        deleted_elements = await delete_dataset_nodes_and_edges(dataset_id, user.id)
+
+        # 1b. Drop sessions attributed to this dataset, then remove tagged
+        # QAs from dataset-unattributed sessions (non-fatal).
+        try:
+            from cognee.modules.session_lifecycle.invalidate_sessions import (
+                invalidate_sessions_for_dataset,
+                invalidate_sessions_for_deleted_data,
+            )
+
+            await invalidate_sessions_for_dataset(dataset_id)
+            await invalidate_sessions_for_deleted_data(
+                dataset_id,
+                deleted_elements.node_ids,
+                deleted_elements.edge_ids,
+                user_id=user.id,
+            )
+        except Exception as error:
+            logger.warning(
+                "forget: session invalidation failed for dataset %s (non-fatal): %s",
+                dataset_id,
+                error,
+                exc_info=True,
+            )
+
+        # 1c. The edges are gone, so the evidence rows describing them are stale;
+        # the next cognify recaptures them under its own run (non-fatal).
+        from cognee.modules.provenance.edge_evidence import delete_edge_evidence
+
+        await delete_edge_evidence(dataset_id)
 
         # 2. Reset pipeline_status on all data records in this dataset
         db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:
-            data_ids_query = select(DatasetData.data_id).where(DatasetData.dataset_id == dataset_id)
             data_records = (
-                (await session.execute(select(Data).where(Data.id.in_(data_ids_query))))
+                (await session.execute(select(Data).where(Data.dataset_id == dataset_id)))
                 .scalars()
                 .all()
             )
@@ -298,13 +353,6 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
 
             await session.commit()
 
-        # 3. Reset dataset-level pipeline run status so cached cognify runs can execute again.
-        await reset_dataset_pipeline_run_status(
-            dataset_id=dataset_id,
-            user=user,
-            pipeline_names=["cognify_pipeline"],
-        )
-
     logger.info(
         "forget: cleared memory for dataset=%s, user=%s (%d data records reset)",
         dataset_id,
@@ -318,7 +366,7 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
     }
 
 
-async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user: Any) -> dict:
+async def _forget_data_memory(data_id: UUID, dataset_ref: str | UUID, user: Any) -> dict:
     """Delete only memory (graph + vector) for a single data item, preserving the raw file.
 
     This allows re-cognifying a specific file with different settings
@@ -327,6 +375,8 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user
     Cleanup scope:
     - Graph DB (nodes, edges for this data item): yes
     - Vector DB (embeddings for this data item): yes
+    - Session cache: targeted — session entries whose answers used the
+      deleted graph elements are removed (non-fatal, best-effort)
     - Pipeline status (for this data item): reset for cognify only
     - Relational DB (data record): preserved
     - Raw file: preserved
@@ -343,10 +393,41 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user
     dataset_id = await _resolve_dataset_id(dataset_ref, user)
 
     # Same per-dataset lock as pipeline runs: wait for any in-flight pipeline
-    # on this dataset and exclude concurrent deletes.
-    async with dataset_lock(dataset_id):
+    # on this dataset and exclude concurrent deletes. The database context comes
+    # AFTER the lock — canonical order (dataset lock -> queue slot), SDK-483.
+    async with (
+        dataset_lock(dataset_id),
+        set_database_global_context_variables(dataset_id, user.id),
+    ):
         # 1. Delete graph nodes/edges and vector embeddings for this data item
-        await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
+        deleted_elements = await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
+
+        # 1b. Remove session entries whose answers used the deleted graph
+        # elements, so completions stop asserting the removed content (non-fatal).
+        try:
+            from cognee.modules.session_lifecycle.invalidate_sessions import (
+                invalidate_sessions_for_deleted_data,
+            )
+
+            await invalidate_sessions_for_deleted_data(
+                dataset_id,
+                deleted_elements.node_ids,
+                deleted_elements.edge_ids,
+                user_id=user.id,
+            )
+        except Exception as error:
+            logger.warning(
+                "forget: session invalidation failed for data %s in dataset %s (non-fatal): %s",
+                data_id,
+                dataset_id,
+                error,
+                exc_info=True,
+            )
+
+        # 1c. Drop this item's edge evidence with its edges (non-fatal).
+        from cognee.modules.provenance.edge_evidence import delete_edge_evidence
+
+        await delete_edge_evidence(dataset_id, data_id)
 
         # 2. Reset pipeline_status for this data record
         db_engine = get_relational_engine()
@@ -383,7 +464,7 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user
     }
 
 
-async def _resolve_dataset_id(dataset_ref: Union[str, UUID], user: Any) -> UUID:
+async def _resolve_dataset_id(dataset_ref: str | UUID, user: Any) -> UUID:
     """Resolve a dataset name or UUID to a UUID, with permission check."""
     if isinstance(dataset_ref, UUID):
         from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
@@ -393,7 +474,12 @@ async def _resolve_dataset_id(dataset_ref: Union[str, UUID], user: Any) -> UUID:
             raise ValueError(f"Dataset {dataset_ref} not found or not accessible.")
         return dataset.id
 
+    from cognee.modules.data.exceptions import DatasetNotFoundError
     from cognee.modules.data.methods import get_authorized_dataset_by_name
 
     dataset = await get_authorized_dataset_by_name(dataset_ref, user, "delete")
+    if dataset is None:
+        # Same message for missing and unauthorized: the name lookup returns None
+        # for both, and distinguishing them would leak which dataset names exist.
+        raise DatasetNotFoundError(message=f"Dataset '{dataset_ref}' not found or not accessible.")
     return dataset.id

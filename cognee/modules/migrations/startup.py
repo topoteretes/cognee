@@ -26,10 +26,10 @@ and a FAILED run does not set the flag, so the next call retries.
 """
 
 import asyncio
+import importlib.resources as pkg_resources
 import logging
 import os
-import importlib.resources as pkg_resources
-from typing import Optional
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,13 @@ def _get_startup_lock() -> asyncio.Lock:
 
 MIGRATIONS_PACKAGE = "cognee"
 MIGRATIONS_DIR_NAME = "alembic"
+
+# Alembic's EnvironmentContext installs module-global proxies (``alembic.op``,
+# ``alembic.context``) for the duration of a command; two commands in
+# concurrent worker threads corrupt each other (KeyError on exit). Every
+# database-creation path now runs the chain, so concurrent creators
+# (create_db_and_tables alongside run_migrations) must take turns here.
+_alembic_command_lock = threading.Lock()
 
 
 class MigrationError(Exception):
@@ -114,7 +121,7 @@ def _auto_migrations_enabled() -> bool:
     return os.getenv("ENABLE_AUTO_MIGRATIONS", "true").lower() not in ("false", "0", "no")
 
 
-def _build_alembic_config(script_location: Optional[str] = None):
+def _build_alembic_config(script_location: str | None = None, engine=None):
     """Alembic Config for the relational schema migrations.
 
     ``script_location`` — the directory holding ``env.py`` + ``versions/`` —
@@ -124,6 +131,10 @@ def _build_alembic_config(script_location: Optional[str] = None):
     env var → package default. (The alembic.ini is always cognee's packaged,
     boilerplate one; only the script location moves.) ``configure_logger`` is off
     so env.py doesn't fileConfig()-reset the host process's loggers.
+
+    ``engine`` — the relational adapter to migrate, handed to env.py through
+    ``config.attributes``; ``None`` means the globally configured engine. An
+    adapter's ``create_database()`` passes itself, so it builds ITS database.
     """
     from alembic.config import Config
 
@@ -141,13 +152,17 @@ def _build_alembic_config(script_location: Optional[str] = None):
     config = Config(alembic_ini_path)
     config.set_main_option("script_location", script_location)
     config.attributes["configure_logger"] = False
+    if engine is not None:
+        config.attributes["relational_engine"] = engine
     return config
 
 
-async def run_relational_migrations(target: str = "head", script_location: Optional[str] = None):
+async def run_relational_migrations(
+    target: str = "head", script_location: str | None = None, engine=None
+):
     """Apply the Alembic relational-schema migrations up to ``target`` (default
-    head), in-process. ``script_location`` overrides the Alembic scripts dir (see
-    ``_build_alembic_config``).
+    head), in-process. ``script_location`` overrides the Alembic scripts dir and
+    ``engine`` the database to migrate (see ``_build_alembic_config``).
 
     Run in a worker thread (env.py drives an async engine via asyncio.run, which
     needs a thread with no running loop), NOT a subprocess: env.py resolves the
@@ -159,7 +174,8 @@ async def run_relational_migrations(target: str = "head", script_location: Optio
     def _upgrade():
         from alembic import command
 
-        command.upgrade(_build_alembic_config(script_location), target)
+        with _alembic_command_lock:
+            command.upgrade(_build_alembic_config(script_location, engine), target)
 
     try:
         await asyncio.to_thread(_upgrade)
@@ -170,7 +186,7 @@ async def run_relational_migrations(target: str = "head", script_location: Optio
     logger.info("Relational migrations applied (target %s).", target)
 
 
-async def run_relational_downgrade(target: str, script_location: Optional[str] = None):
+async def run_relational_downgrade(target: str, script_location: str | None = None):
     """Revert the Alembic relational-schema migrations DOWN to ``target``
     (an Alembic revision, or ``"base"`` for the empty schema), in-process.
     ``script_location`` overrides the Alembic scripts dir.
@@ -183,7 +199,8 @@ async def run_relational_downgrade(target: str, script_location: Optional[str] =
     def _downgrade():
         from alembic import command
 
-        command.downgrade(_build_alembic_config(script_location), target)
+        with _alembic_command_lock:
+            command.downgrade(_build_alembic_config(script_location), target)
 
     try:
         await asyncio.to_thread(_downgrade)
@@ -192,24 +209,6 @@ async def run_relational_downgrade(target: str, script_location: Optional[str] =
         raise MigrationError("Relational DB downgrade failed.") from error
 
     logger.info("Relational schema downgraded (target %s).", target)
-
-
-async def run_relational_stamp(revision: str = "head", script_location: Optional[str] = None):
-    """Record an Alembic revision without running any migration.
-    ``script_location`` overrides the Alembic scripts dir.
-
-    Used after ``create_database`` builds a fresh schema with
-    ``Base.metadata.create_all``: that schema already IS head, so we stamp it
-    instead of replaying every historical migration.
-    """
-
-    def _stamp():
-        from alembic import command
-
-        command.stamp(_build_alembic_config(script_location), revision)
-
-    await asyncio.to_thread(_stamp)
-    logger.info("Stamped fresh relational schema at %s.", revision)
 
 
 async def _relational_schema_exists() -> bool:
@@ -225,20 +224,38 @@ async def _relational_schema_exists() -> bool:
       - ``alembic_version`` is Alembic's own marker, so it still identifies a
         migration-managed DB even if the ``users`` table is renamed or
         restructured in the future.
-    Only when NEITHER exists is the database genuinely empty — the one state
-    where create_all + stamp head is safe.
+    Only when NEITHER exists is the database genuinely empty — routed to
+    ``create_database()``, which prepares the storage and builds the schema by
+    running the migration chain (nothing is stamped: every recorded revision
+    executed). A wrong "empty" verdict is therefore benign — both branches
+    converge on the same guarded chain.
+
+    A failed inspection still RAISES instead of answering: "cannot inspect" is
+    not "empty", and a server still starting up or a transient connection
+    failure must surface as the error it is. The one genuinely-fresh case that
+    used to surface as an exception (a local SQLite database whose file does
+    not exist yet) is decided as the filesystem fact it is, before connecting.
     """
     from sqlalchemy import inspect
 
     from cognee.infrastructure.databases.relational import get_relational_engine
 
-    try:
-        async with get_relational_engine().engine.connect() as connection:
-            tables = await connection.run_sync(
-                lambda sync_conn: inspect(sync_conn).get_table_names()
-            )
-    except Exception:
-        return False  # cannot inspect (e.g. brand-new SQLite file) -> treat as empty
+    engine = get_relational_engine()
+
+    # Brand-new local SQLite database: the file is not there yet
+    # (create_database() creates the directory and file). S3-backed SQLite is
+    # excluded — its engine connects to a local temp file that always exists,
+    # and a fresh S3 database reports empty through the inspection below.
+    if (
+        engine.engine.dialect.name == "sqlite"
+        and engine.db_path
+        and "s3://" not in engine.db_path
+        and not os.path.exists(engine.db_path)
+    ):
+        return False
+
+    async with engine.engine.connect() as connection:
+        tables = await connection.run_sync(lambda sync_conn: inspect(sync_conn).get_table_names())
     return "users" in tables or "alembic_version" in tables
 
 
@@ -250,7 +267,7 @@ _DATA_BOOKKEEPING_ALEMBIC_REVISIONS = ("c1a2b3d4e5f9", "d8f4a1b2c3e9")
 
 
 def _relational_downgrade_drops_bookkeeping(
-    relational_target: str, script_location: Optional[str] = None
+    relational_target: str, script_location: str | None = None
 ) -> bool:
     """True if downgrading the relational schema to ``relational_target`` would
     revert (drop) a migration that holds the data-migration bookkeeping.
@@ -272,7 +289,7 @@ def _relational_downgrade_drops_bookkeeping(
 async def apply_all_migrations(
     data_target: str = "head",
     relational_target: str = "head",
-    script_location: Optional[str] = None,
+    script_location: str | None = None,
 ) -> list[dict]:
     """UPGRADE every database under the ONE global migration lock: the relational
     schema FIRST (Alembic, to ``relational_target``), then the graph/vector data
@@ -287,29 +304,31 @@ async def apply_all_migrations(
     gate or the once-per-process guard — those belong to ``run_migrations``;
     the CLI must migrate even when automatic migrations are disabled.
     """
-    from cognee.modules.migrations.runner import migration_lock, run_database_migrations
     from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.migrations.runner import migration_lock, run_database_migrations
 
     async with migration_lock():
         if await _relational_schema_exists():
             # Existing database: apply pending migrations up to relational_target.
             await run_relational_migrations(relational_target, script_location)
         else:
-            # Fresh database: create_all builds the schema at HEAD, so stamp head
-            # rather than replaying history. A partial relational_target only makes
-            # sense for an existing DB — a fresh one is head by construction.
-            logger.info("Fresh database: creating schema and stamping at head.")
-            await get_relational_engine().create_database()
-            await run_relational_stamp("head", script_location)
+            # Fresh database: prepare the storage and build the schema by
+            # running the ENTIRE chain — the initial revision carries the
+            # frozen base schema. No stamp is written: alembic_version only
+            # ever records revisions that actually executed. A partial
+            # relational_target only makes sense for an existing DB — a fresh
+            # one is built to head.
+            logger.info("Fresh database: building the schema from the migration chain.")
+            await get_relational_engine().create_database(script_location)
 
         return await run_database_migrations(data_target)
 
 
 async def revert_all_migrations(
-    data_target: Optional[str] = None,
-    relational_target: Optional[str] = None,
-    dataset_ids: Optional[list] = None,
-    script_location: Optional[str] = None,
+    data_target: str | None = None,
+    relational_target: str | None = None,
+    dataset_ids: list | None = None,
+    script_location: str | None = None,
 ) -> list[dict]:
     """DOWNGRADE under the ONE global migration lock, in REVERSE order: the data
     chain FIRST, then the relational schema.

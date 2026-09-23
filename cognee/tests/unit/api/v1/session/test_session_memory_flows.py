@@ -1,13 +1,14 @@
 import asyncio
 import importlib
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
 
 from cognee.api.v1.session import SessionQAEntry
+from cognee.exceptions import CogneeValidationError
 from cognee.modules.recall.types.RecallResponse import ResponseQAEntry
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchType
@@ -21,6 +22,9 @@ _mod_sm = importlib.import_module("cognee.infrastructure.session.get_session_man
 _pkg_improve = importlib.import_module("cognee.api.v1.improve")
 _mod_query_router = importlib.import_module("cognee.api.v1.recall.query_router")
 _mod_search_methods = importlib.import_module("cognee.modules.search.methods.search")
+_mod_authorized_dataset = importlib.import_module(
+    "cognee.modules.data.methods.get_authorized_dataset"
+)
 
 
 @contextmanager
@@ -438,13 +442,13 @@ class TestSearchSession:
 
         entries = [
             SessionQAEntry(
-                time=datetime.utcnow().isoformat(),
+                time=datetime.now(timezone.utc).isoformat(),
                 question="What is a paragraph?",
                 context="",
                 answer="A block of text.",
             ),
             SessionQAEntry(
-                time=datetime.utcnow().isoformat(),
+                time=datetime.now(timezone.utc).isoformat(),
                 question="What is a graph?",
                 context="",
                 answer="Nodes and edges.",
@@ -477,13 +481,13 @@ class TestSearchSession:
 
         entries = [
             SessionQAEntry(
-                time=datetime.utcnow().isoformat(),
+                time=datetime.now(timezone.utc).isoformat(),
                 question="Tell me about cats",
                 context="",
                 answer="Cats are animals.",
             ),
             SessionQAEntry(
-                time=datetime.utcnow().isoformat(),
+                time=datetime.now(timezone.utc).isoformat(),
                 question="Tell me about cats and dogs",
                 context="",
                 answer="Both are pets.",
@@ -517,7 +521,7 @@ class TestSearchSession:
 
         entries = [
             SessionQAEntry(
-                time=datetime.utcnow().isoformat(),
+                time=datetime.now(timezone.utc).isoformat(),
                 question="What is Einstein?",
                 context="",
                 answer="A physicist.",
@@ -572,7 +576,7 @@ class TestSearchSession:
 
         entries = [
             SessionQAEntry(
-                time=datetime.utcnow().isoformat(),
+                time=datetime.now(timezone.utc).isoformat(),
                 question="I have a cat",
                 context="",
                 answer="Nice.",
@@ -608,6 +612,16 @@ def _get_recall_module():
     return importlib.import_module("cognee.api.v1.recall.recall")
 
 
+@pytest.fixture(autouse=True)
+def _stub_search_history():
+    """These tests mock recall/search internals (users, routed query types), and
+    the history write would bind those mocks into a real INSERT. History is not
+    under test here — it has its own coverage in test_recall_logs_query_history.py
+    — so stub it at its source module (recall imports it inside the function)."""
+    with patch("cognee.modules.search.operations.log_search_history", AsyncMock()):
+        yield
+
+
 class TestRecallSessionMode:
     @pytest.fixture(autouse=True)
     def _disable_telemetry(self, monkeypatch):
@@ -620,7 +634,7 @@ class TestRecallSessionMode:
 
         session_entries = [
             ResponseQAEntry(
-                time=datetime.utcnow().isoformat(),
+                time=datetime.now(timezone.utc).isoformat(),
                 question="test",
                 context="",
                 answer="result",
@@ -793,7 +807,7 @@ class TestRecallSessionMode:
 
         session_entries = [
             ResponseQAEntry(
-                time=datetime.utcnow().isoformat(),
+                time=datetime.now(timezone.utc).isoformat(),
                 question="test",
                 context="",
                 answer="session result",
@@ -830,3 +844,225 @@ class TestRecallSessionMode:
 
         assert [result.source for result in results] == ["session", "graph"]
         assert authorized_search_mock.await_args.kwargs["dataset_ids"] == [dataset_id]
+
+
+class TestRecallResponseModelParam:
+    """recall(response_model=...) folds into retriever_specific_config."""
+
+    @pytest.fixture(autouse=True)
+    def _disable_telemetry(self, monkeypatch):
+        monkeypatch.setattr("cognee.shared.utils.send_telemetry", lambda *args, **kwargs: None)
+
+    @staticmethod
+    def _fake_model():
+        from pydantic import BaseModel
+
+        class Facts(BaseModel):
+            name: str
+
+        return Facts
+
+    @staticmethod
+    def _patched_graph_recall(recall_mod, authorized_search_mock):
+        user = MagicMock()
+        user.id = uuid4()
+        return (
+            patch.object(recall_mod, "get_default_user", AsyncMock(return_value=user)),
+            patch.object(recall_mod, "set_session_user_context_variable", AsyncMock()),
+            patch.object(_mod_search_methods, "authorized_search", authorized_search_mock),
+        )
+
+    @pytest.mark.asyncio
+    async def test_response_model_forwards_into_retriever_config(self):
+        recall_mod = _get_recall_module()
+        model = self._fake_model()
+        authorized_search = AsyncMock(return_value=[])
+
+        p1, p2, p3 = self._patched_graph_recall(recall_mod, authorized_search)
+        with p1, p2, p3:
+            await recall_mod.recall(
+                "test",
+                query_type=SearchType.GRAPH_COMPLETION,
+                response_model=model,
+            )
+
+        forwarded = authorized_search.await_args.kwargs["retriever_specific_config"]
+        assert forwarded == {"response_model": model}
+
+    @pytest.mark.asyncio
+    async def test_response_model_merges_without_mutating_caller_config(self):
+        recall_mod = _get_recall_module()
+        model = self._fake_model()
+        caller_config = {"facts_top_k": 3}
+        authorized_search = AsyncMock(return_value=[])
+
+        p1, p2, p3 = self._patched_graph_recall(recall_mod, authorized_search)
+        with p1, p2, p3:
+            await recall_mod.recall(
+                "test",
+                query_type=SearchType.GRAPH_COMPLETION,
+                retriever_specific_config=caller_config,
+                response_model=model,
+            )
+
+        forwarded = authorized_search.await_args.kwargs["retriever_specific_config"]
+        assert forwarded == {"facts_top_k": 3, "response_model": model}
+        assert caller_config == {"facts_top_k": 3}
+
+    @pytest.mark.asyncio
+    async def test_conflicting_response_models_raise(self):
+        recall_mod = _get_recall_module()
+        model = self._fake_model()
+        other_model = self._fake_model()
+
+        with pytest.raises(CogneeValidationError):
+            await recall_mod.recall(
+                "test",
+                query_type=SearchType.GRAPH_COMPLETION,
+                retriever_specific_config={"response_model": other_model},
+                response_model=model,
+            )
+
+    @pytest.mark.asyncio
+    async def test_same_model_in_both_places_is_allowed(self):
+        recall_mod = _get_recall_module()
+        model = self._fake_model()
+        authorized_search = AsyncMock(return_value=[])
+
+        p1, p2, p3 = self._patched_graph_recall(recall_mod, authorized_search)
+        with p1, p2, p3:
+            await recall_mod.recall(
+                "test",
+                query_type=SearchType.GRAPH_COMPLETION,
+                retriever_specific_config={"response_model": model},
+                response_model=model,
+            )
+
+        forwarded = authorized_search.await_args.kwargs["retriever_specific_config"]
+        assert forwarded == {"response_model": model}
+
+    @pytest.mark.asyncio
+    async def test_response_model_forwarded_as_schema_in_remote_mode(self):
+        """Remote mode sends model_json_schema(), not the class."""
+        recall_mod = _get_recall_module()
+        model = self._fake_model()
+        serve_state = importlib.import_module("cognee.api.v1.serve.state")
+
+        remote_client = MagicMock()
+        remote_client.recall = AsyncMock(return_value=[])
+
+        user = MagicMock()
+        user.id = uuid4()
+        with (
+            patch.object(recall_mod, "get_default_user", AsyncMock(return_value=user)),
+            patch.object(recall_mod, "set_session_user_context_variable", AsyncMock()),
+            patch.object(serve_state, "get_remote_client", MagicMock(return_value=remote_client)),
+        ):
+            await recall_mod.recall(
+                "test",
+                query_type=SearchType.GRAPH_COMPLETION,
+                response_model=model,
+            )
+
+        sent = remote_client.recall.await_args.kwargs["response_schema"]
+        assert sent == model.model_json_schema()
+
+    @pytest.mark.asyncio
+    async def test_no_response_model_sends_no_schema_in_remote_mode(self):
+        recall_mod = _get_recall_module()
+        serve_state = importlib.import_module("cognee.api.v1.serve.state")
+
+        remote_client = MagicMock()
+        remote_client.recall = AsyncMock(return_value=[])
+
+        user = MagicMock()
+        user.id = uuid4()
+        with (
+            patch.object(recall_mod, "get_default_user", AsyncMock(return_value=user)),
+            patch.object(recall_mod, "set_session_user_context_variable", AsyncMock()),
+            patch.object(serve_state, "get_remote_client", MagicMock(return_value=remote_client)),
+        ):
+            await recall_mod.recall("test", query_type=SearchType.GRAPH_COMPLETION)
+
+        assert remote_client.recall.await_args.kwargs["response_schema"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag", [None, False, True])
+@pytest.mark.parametrize("background", [False, True])
+async def test_self_improvement_opt_out_keeps_permanent_ingestion(flag, background):
+    user = MagicMock()
+    user.id = "u1"
+    add, cognify, improve = AsyncMock(), AsyncMock(return_value={"status": "ok"}), AsyncMock()
+    with (
+        _patch_remember_startup(),
+        patch("cognee.api.v1.add.add", add),
+        patch("cognee.api.v1.cognify.cognify", cognify),
+        patch.object(_pkg_improve, "improve", improve),
+        patch("cognee.modules.users.methods.get_default_user", AsyncMock(return_value=user)),
+        patch.object(
+            _get_remember_module(),
+            "resolve_authorized_user_datasets",
+            AsyncMock(return_value=(user, "")),
+        ),
+    ):
+        kwargs = {} if flag is None else {"self_improvement": flag}
+        result = await _get_remember_module().remember(
+            "memory", run_in_background=background, **kwargs
+        )
+        if result._task is not None:
+            await result._task
+    add.assert_awaited_once()
+    assert add.call_args.kwargs["data"] == "memory"
+    cognify.assert_awaited_once()
+    assert improve.await_count == (0 if flag is False else 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag", [None, False, True])
+async def test_self_improvement_controls_session_bridge_without_skipping_cache(flag):
+    user = MagicMock(id="u1")
+    store, improve = AsyncMock(), AsyncMock()
+    with (
+        _patch_remember_startup(),
+        patch.object(_get_remember_module(), "_add_to_session", store),
+        patch.object(_pkg_improve, "improve", improve),
+    ):
+        kwargs = {} if flag is None else {"self_improvement": flag}
+        result = await _get_remember_module().remember(
+            "memory", session_id="s1", dataset_id=uuid4(), user=user, **kwargs
+        )
+        if result._task is not None:
+            await result._task
+    store.assert_awaited_once_with("s1", "memory", user)
+    assert improve.await_count == (0 if flag is False else 1)
+    assert result.status == "session_stored"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag", [None, False, True])
+async def test_typed_api_session_entry_never_runs_automatic_improvement(flag):
+    from cognee.memory import QAEntry
+
+    user = MagicMock(id=uuid4())
+    manager = MagicMock(is_available=True)
+    manager.add_qa = AsyncMock(return_value="qa1")
+    improve = AsyncMock()
+    with (
+        _patch_remember_startup(),
+        patch.object(_mod_sm, "get_session_manager", return_value=manager),
+        patch.object(_pkg_improve, "improve", improve),
+        patch.object(
+            _mod_authorized_dataset, "get_authorized_dataset", AsyncMock(return_value=None)
+        ),
+        patch("cognee.modules.session_lifecycle.metrics.ensure_and_touch_session", AsyncMock()),
+    ):
+        kwargs = {} if flag is None else {"self_improvement": flag}
+        result = await _get_remember_module().remember(
+            QAEntry(question="", answer="memory", context=""), session_id="s1", user=user, **kwargs
+        )
+    manager.add_qa.assert_awaited_once()
+    assert manager.add_qa.call_args.kwargs["answer"] == "memory"
+    improve.assert_not_awaited()
+    assert result._task is None
+    assert result.status == "session_stored"

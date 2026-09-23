@@ -7,22 +7,24 @@ import pytest
 @pytest.fixture
 def tapes_adapter():
     """TapesCacheAdapter rooted in a temp cache directory."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with patch(
+    with (
+        tempfile.TemporaryDirectory() as tmpdir,
+        patch(
             "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
             return_value={"data_root_directory": tmpdir},
-        ):
-            from cognee.infrastructure.databases.cache.tapes.TapesCacheAdapter import (
-                TapesCacheAdapter,
-            )
+        ),
+    ):
+        from cognee.infrastructure.databases.cache.tapes.TapesCacheAdapter import (
+            TapesCacheAdapter,
+        )
 
-            inst = TapesCacheAdapter(
-                tapes_ingest_url="http://tapes.test:8081",
-                tapes_agent_name="cognee-unit",
-                tapes_model="unit-model",
-            )
-            yield inst
-            inst.cache.close()
+        inst = TapesCacheAdapter(
+            tapes_ingest_url="http://tapes.test:8081",
+            tapes_agent_name="cognee-unit",
+            tapes_model="unit-model",
+        )
+        yield inst
+        inst.cache.close()
 
 
 def _patched_post_returning(status_code: int = 202):

@@ -12,6 +12,8 @@ logger = get_logger()
 class JsonListChunker(Chunker):
     """Chunk a JSON list document into one stringified item per chunk."""
 
+    chunker_id = "json_list_chunker_v1"
+
     async def read(self):
         document_id = str(self.document.id)
         document_name = self.document.name or basename(self.document.raw_data_location)
@@ -41,6 +43,7 @@ class JsonListChunker(Chunker):
                 )
 
             yield DocumentChunk(
+                chunker_id=self.chunker_id,
                 id=uuid5(NAMESPACE_OID, f"{document_id}-{index}"),
                 text=text,
                 chunk_size=chunk_size,

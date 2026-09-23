@@ -1,56 +1,75 @@
 import asyncio
-from typing import Any, Dict, List, Optional, Type
+from typing import Any
 
-from cognee.context_global_variables import current_dataset_id, session_user
+from cognee.base_config import get_base_config
+from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.retrieval.base_retriever import BaseRetriever
-from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.hybrid.chunks import retrieve_hybrid_chunks, search_collection
 from cognee.modules.retrieval.hybrid.context import (
-    extract_context_object_ids,
-    format_hybrid_context,
+    extract_context_object_ids as extract_hybrid_object_ids,
 )
-from cognee.modules.retrieval.hybrid.entities import build_entities
-from cognee.modules.retrieval.hybrid.facts import edge_rank_by_id, select_facts
-from cognee.modules.retrieval.hybrid.results import result_id
-from cognee.modules.retrieval.utils.completion import generate_completion
+from cognee.modules.retrieval.hybrid.context import (
+    format_hybrid_context,
+    format_hybrid_context_batch,
+)
+from cognee.modules.retrieval.hybrid.entities import build_entities, search_entities
+from cognee.modules.retrieval.hybrid.facts import (
+    edge_rank_by_id,
+    resolve_facts_top_k,
+    select_facts_for_entities,
+)
+from cognee.modules.retrieval.hybrid.merge import merge_hybrid_results
+from cognee.modules.retrieval.hybrid.references import cite_hybrid_completions
+from cognee.modules.retrieval.hybrid.truth import build_truth_context
+from cognee.modules.retrieval.utils.completion import (
+    SessionPrompt,
+    generate_completion,
+    generate_completion_batch,
+)
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
     load_root_text,
     search_top_global_context_summaries,
 )
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
-from cognee.modules.truth_subspace import align
-from cognee.modules.truth_subspace.centroids import load_centroids, pad_coords
-from cognee.modules.truth_subspace.constants import DEFAULT_K
+from cognee.modules.user_preferences import load_preference_text, load_preference_weights
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("HybridRetriever")
+
+DEFAULT_HYBRID_LANE_TOP_K = 10
 
 
 class HybridRetriever(BaseRetriever):
     """Completion retriever using chunk, entity, and optional global-context channels."""
 
+    # Search is not an LLM gateway: when every channel comes back empty there
+    # is no answer to give (SDK-270 / gh #3728).
+    skip_completion_on_empty_context = True
+
     def __init__(
         self,
-        chunks_top_k: Optional[int] = 5,
-        entities_top_k: Optional[int] = 5,
+        chunks_top_k: int | None = 5,
+        entities_top_k: int | None = 5,
         max_edges_per_entity: int = 10,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
         include_global_context_index: bool = False,
         global_context_index_top_k: int = 3,
-        session_id: Optional[str] = None,
-        response_model: Type = str,
+        session_id: str | None = None,
+        response_model: type = str,
+        include_references: bool = False,
         user_prompt_path: str = "hybrid_context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
-        system_prompt: Optional[str] = None,
-        text_summaries_top_k: Optional[int] = None,
+        system_prompt: str | None = None,
+        text_summaries_top_k: int | None = None,
         use_importance_weight: bool = True,
         use_truth_weight: bool = False,
-        facts_top_k: Optional[int] = 5,
+        facts_top_k: int | None = 5,
     ):
         self.chunks_top_k = chunks_top_k if chunks_top_k is not None else 5
         self.entities_top_k = entities_top_k if entities_top_k is not None else 5
@@ -61,6 +80,7 @@ class HybridRetriever(BaseRetriever):
         self.global_context_index_top_k = global_context_index_top_k
         self.session_id = session_id
         self.response_model = response_model
+        self.include_references = include_references
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
         self.system_prompt = system_prompt
@@ -75,18 +95,43 @@ class HybridRetriever(BaseRetriever):
         return bool(user_id and CacheConfig().caching)
 
     async def get_retrieved_objects(
-        self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
-    ) -> Dict[str, Any]:
-        _reject_query_batch(query_batch)
-        validate_retriever_input(query, None, self._use_session_cache())
-
+        self, query: str | None = None, query_batch: list[str] | None = None
+    ) -> Any:
+        validate_retriever_input(query, query_batch, self._use_session_cache())
         self._unified_engine = await get_unified_engine()
+        if await self._unified_engine.graph.is_empty():
+            # Same contract as GraphCompletionRetriever (SDK-270 / gh #3728): an
+            # empty graph is a state problem, not a query miss, and this is the
+            # default search type -- it must not answer a fresh install with a
+            # dict of empty channels while every other completion type says 404.
+            raise NoDataError(
+                "The knowledge graph is empty. Ingest data through Cognee before searching."
+            )
+        if query_batch:
+            return list(await asyncio.gather(*[self._retrieve_one(q) for q in query_batch]))
+        return await self._retrieve_one(query)
+
+    async def _retrieve_one(self, query: str) -> dict[str, Any]:
         query_embeddings = await self._unified_engine.vector.embedding_engine.embed_text([query])
         query_vector = query_embeddings[0]
 
-        q_coords, truth_state_by_id, current_truth_epoch = await self._build_truth_context(
-            query_vector
+        truth = await build_truth_context(
+            self._unified_engine,
+            query_vector,
+            use_truth_weight=self.use_truth_weight,
+            chunks_top_k=self.chunks_top_k,
+            node_name=self.node_name,
+            node_name_filter_operator=self.node_name_filter_operator,
         )
+
+        # Personal prefers weights ride into the chunk-lane ranking only —
+        # the entity lane selects by vector top-k with no re-rankable score
+        # list. The lookup is memoized per context — on a concurrent session
+        # turn each gather lane inherits the read warmed by
+        # warm_preference_cache; without that warm a lane's read is its own —
+        # and fails open: flag off, no node, or any error yields {}, keeping
+        # ranking byte-identical to an un-personalized run.
+        personal_weights = await load_preference_weights()
 
         chunk_objects, (entities, facts) = await asyncio.gather(
             retrieve_hybrid_chunks(
@@ -99,84 +144,28 @@ class HybridRetriever(BaseRetriever):
                 use_importance_weight=self.use_importance_weight,
                 query_vector=query_vector,
                 use_truth_weight=self.use_truth_weight,
-                q_coords=q_coords,
-                truth_state_by_id=truth_state_by_id,
-                current_truth_epoch=current_truth_epoch,
+                q_coords=truth.q_coords,
+                truth_state_by_id=truth.truth_state_by_id,
+                current_truth_epoch=truth.current_truth_epoch,
+                personal_weights=personal_weights,
+                personal_influence=get_base_config().personalization_influence,
             ),
             self._retrieve_entities_and_facts(query, query_vector),
         )
         return {**chunk_objects, "entities": entities, "facts": facts}
-
-    async def _build_truth_context(self, query_vector: list[float]) -> tuple:
-        """Truth-subspace alignment context for the chunk lane.
-
-        Returns ``(q_coords, truth_state_by_id, current_truth_epoch)``. Values
-        are ``None`` when the truth weight is off or centroid slots are absent,
-        so ranking stays at exact baseline. Fails open to baseline on any error.
-        """
-        if not self.use_truth_weight:
-            return None, None, None
-
-        try:
-            dataset_id = current_dataset_id.get()
-            if dataset_id is None:
-                return None, None, None
-
-            centroids = await load_centroids(self._unified_engine.vector, str(dataset_id))
-            if not centroids:
-                return None, None, None
-
-            centroid_vectors = [centroid.centroid for centroid in centroids]
-            q_coords = pad_coords(align.query_coords(query_vector, centroid_vectors), DEFAULT_K)
-            current_truth_epoch = max(centroid.truth_epoch for centroid in centroids)
-
-            candidate_chunk_ids = await self._candidate_chunk_ids(query_vector)
-            if not candidate_chunk_ids:
-                return q_coords, {}, current_truth_epoch
-
-            truth_state_by_id = await self._unified_engine.graph.get_node_truth_state(
-                candidate_chunk_ids
-            )
-            return q_coords, truth_state_by_id, current_truth_epoch
-        except Exception as error:
-            logger.debug("Truth-subspace lookup failed; using baseline ranking: %s", error)
-            return None, None, None
-
-    async def _candidate_chunk_ids(self, query_vector: list[float]) -> list[str]:
-        """Candidate DocumentChunk ids whose truth alignments we batch-fetch.
-
-        Mirrors the chunk lane's vector candidate window so the truth coords map
-        covers the chunks that ranking can surface."""
-        candidate_limit = max(0, self.chunks_top_k * 2)
-        chunk_hits = await search_collection(
-            self._unified_engine.vector,
-            "DocumentChunk_text",
-            "",
-            candidate_limit,
-            self.node_name,
-            self.node_name_filter_operator,
-            query_vector=query_vector,
-        )
-        ids = []
-        for hit in chunk_hits:
-            chunk_id = result_id(hit)
-            if chunk_id:
-                ids.append(str(chunk_id))
-        return ids
 
     async def _retrieve_entities_and_facts(self, query: str, query_vector: list[float]) -> tuple:
         """Entity lane, run concurrently with the chunk lane so the graph round trip for
         edge bullets overlaps the chunk pipeline's ranking and summary loading."""
         max_ranked_bullets = self.entities_top_k * max(0, self.max_edges_per_entity)
         entity_hits, edge_hits = await asyncio.gather(
-            search_collection(
+            search_entities(
                 self._unified_engine.vector,
-                "Entity_name",
                 query,
                 self.entities_top_k,
                 self.node_name,
                 self.node_name_filter_operator,
-                query_vector=query_vector,
+                query_vector,
             ),
             search_collection(
                 self._unified_engine.vector,
@@ -189,38 +178,43 @@ class HybridRetriever(BaseRetriever):
                 query_vector=query_vector,
             ),
         )
-        entities = await build_entities(
+        entities, reachable_ids = await build_entities(
             self._unified_engine.graph,
             entity_hits,
             self.max_edges_per_entity,
             edge_rank_by_id(edge_hits),
+            self.node_name,
+            self.node_name_filter_operator,
         )
-        return entities, self._select_facts(edge_hits, entities)
-
-    def _select_facts(self, edge_hits: List[Any], entities: List[dict]) -> List[dict]:
-        """Facts are gated off for scoped searches: EdgeType rows carry no node-set fields."""
-        if self.facts_top_k <= 0 or self.node_name:
-            return []
-
-        bullet_ids = {
-            edge["edge_type_id"]
-            for entity in entities
-            for edge in entity.get("edges", [])
-            if edge.get("edge_type_id")
-        }
-        return select_facts(edge_hits, bullet_ids, self.facts_top_k)
+        node_scoped = bool(self.node_name)
+        return entities, select_facts_for_entities(
+            edge_hits,
+            entities,
+            reachable_ids,
+            resolve_facts_top_k(
+                entities,
+                node_scoped=node_scoped,
+                facts_top_k=self.facts_top_k,
+                entity_edge_budget=max_ranked_bullets,
+            ),
+            node_scoped,
+        )
 
     async def get_context_from_objects(
         self,
-        query: Optional[str] = None,
-        query_batch: Optional[List[str]] = None,
+        query: str | None = None,
+        query_batch: list[str] | None = None,
         retrieved_objects: Any = None,
-    ) -> str:
-        _reject_query_batch(query_batch)
+    ) -> Any:
+        if query_batch:
+            global_contexts = await asyncio.gather(
+                *[self._build_global_context_section(q) for q in query_batch]
+            )
+            return format_hybrid_context_batch(global_contexts, retrieved_objects)
         global_context = await self._build_global_context_section(query)
         return format_hybrid_context(global_context, retrieved_objects)
 
-    async def _build_global_context_section(self, query: Optional[str]) -> str:
+    async def _build_global_context_section(self, query: str | None) -> str:
         if not self.include_global_context_index or not query:
             return ""
 
@@ -242,61 +236,96 @@ class HybridRetriever(BaseRetriever):
 
     async def get_completion_from_context(
         self,
-        query: Optional[str] = None,
-        query_batch: Optional[List[str]] = None,
+        query: str | None = None,
+        query_batch: list[str] | None = None,
         retrieved_objects: Any = None,
-        context: Optional[str] = None,
-        effective_query: Optional[str] = None,
+        context: Any = None,
+        effective_query: str | None = None,
         turn_preparation=None,
-    ) -> List[Any]:
-        _reject_query_batch(query_batch)
+    ) -> list[Any]:
+        if self.skip_completion_on_empty_context and not query_batch and not context:
+            # Empty context must not reach the LLM: search is not an LLM
+            # gateway, and the only possible output is a phantom "no context
+            # provided" deflection (SDK-270 / gh #3728). A global-context
+            # prelude counts as real grounding, so this only fires when every
+            # section came back empty.
+            logger.warning("Empty context: skipping LLM completion, returning no results")
+            return []
 
-        if self._use_session_cache():
+        prompts = {
+            "user_prompt_path": self.user_prompt_path,
+            "system_prompt_path": self.system_prompt_path,
+            "system_prompt": self.system_prompt,
+            "response_model": self.response_model,
+        }
+        use_session = self._use_session_cache() and not query_batch
+        if use_session:
             sm = get_session_manager()
             completion = await sm.generate_completion_with_session(
                 session_id=self.session_id,
                 query=query,
                 context=context,
-                user_prompt_path=self.user_prompt_path,
-                system_prompt_path=self.system_prompt_path,
-                system_prompt=self.system_prompt,
-                response_model=self.response_model,
                 summarize_context=False,
-                used_graph_element_ids=extract_context_object_ids(retrieved_objects),
+                used_graph_element_ids=extract_hybrid_object_ids(retrieved_objects),
                 max_context_chars=getattr(self, "max_context_chars", None),
                 effective_query=effective_query,
                 turn_preparation=turn_preparation,
+                **prompts,
             )
-            return [completion]
+            completions = [completion]
+        elif query_batch:
+            preference_text = await load_preference_text()
+            completions = await generate_completion_batch(
+                query_batch=query_batch,
+                context=context,
+                session=SessionPrompt(guidance=preference_text),
+                **prompts,
+            )
+        else:
+            preference_text = await load_preference_text()
+            completions = [
+                await generate_completion(
+                    query=query,
+                    context=context,
+                    session=SessionPrompt(guidance=preference_text),
+                    **prompts,
+                )
+            ]
+        return await self.append_references(completions, retrieved_objects)
 
-        completion = await generate_completion(
-            query=query,
-            context=context,
-            user_prompt_path=self.user_prompt_path,
-            system_prompt_path=self.system_prompt_path,
-            system_prompt=self.system_prompt,
-            response_model=self.response_model,
+    async def append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
+        return cite_hybrid_completions(
+            completions,
+            retrieved_objects,
+            enabled=self.include_references and self.response_model is str,
         )
-        return [completion]
+
+    def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
+        return merge_hybrid_results(
+            primary,
+            secondary,
+            chunks_limit=self.chunks_top_k,
+            entities_limit=self.entities_top_k,
+            facts_limit=self.facts_top_k,
+        )
+
+    def extract_context_object_ids(self, retrieved_objects: Any) -> dict[str, list[str]] | None:
+        return extract_hybrid_object_ids(retrieved_objects)
 
     async def get_completion(
-        self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
-    ) -> List[Any]:
-        _reject_query_batch(query_batch)
-        validate_retriever_input(query, None, self._use_session_cache())
+        self, query: str | None = None, query_batch: list[str] | None = None
+    ) -> list[Any]:
+        validate_retriever_input(query, query_batch, self._use_session_cache())
 
-        retrieved_objects = await self.get_retrieved_objects(query=query)
+        retrieved_objects = await self.get_retrieved_objects(query=query, query_batch=query_batch)
         context = await self.get_context_from_objects(
             query=query,
+            query_batch=query_batch,
             retrieved_objects=retrieved_objects,
         )
         return await self.get_completion_from_context(
             query=query,
+            query_batch=query_batch,
             retrieved_objects=retrieved_objects,
             context=context,
         )
-
-
-def _reject_query_batch(query_batch: Optional[List[str]]) -> None:
-    if query_batch is not None:
-        raise QueryValidationError("HYBRID_COMPLETION does not support query_batch.")

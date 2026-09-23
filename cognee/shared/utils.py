@@ -26,6 +26,24 @@ _TELEMETRY_API_KEY_TRACKING_SALT_ENV = "TELEMETRY_API_KEY_TRACKING_SALT"
 _DEFAULT_TELEMETRY_API_KEY_TRACKING_SALT = b"cognee.telemetry.api-key-tracking.v1"
 _TELEMETRY_API_KEY_TRACKING_ITERATIONS = 100_000
 
+# Strong refs for fire-and-forget telemetry tasks. asyncio only holds a weak
+# reference to a task, so without anchoring here the gc can collect an
+# in-flight telemetry request mid-run. Tasks remove themselves on done.
+_TELEMETRY_TASKS: set = set()
+
+
+def as_uuid(value) -> UUID | None:
+    """Coerce ``value`` to a UUID, or return None when it is not one.
+
+    The tolerant counterpart to ``UUID(str(value))`` for identifiers that
+    arrive as UUIDs, strings, or context values that may legitimately hold
+    something else (e.g. a dataset *name* in ``current_dataset_id``).
+    """
+    try:
+        return UUID(str(value))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
 
 def create_secure_ssl_context() -> ssl.SSLContext:
     """
@@ -68,7 +86,7 @@ def get_anonymous_id() -> str:
         else:
             anonymous_id = _ANON_ID_FILE.read_text(encoding="utf-8").strip()
     except Exception as e:
-        logger.warning("Could not create or read anonymous id file: %s", e)
+        logger.warning("Could not create or read anonymous id file: %s", e, exc_info=True)
         return "unknown-anonymous-id"
     return anonymous_id
 
@@ -100,21 +118,54 @@ def get_persistent_id() -> str:
         _PERSISTENT_ID_FILE.write_text(persistent_id, encoding="utf-8")
         return persistent_id
     except Exception as e:
-        logger.warning("Could not create or read persistent id file: %s", e)
+        logger.warning("Could not create or read persistent id file: %s", e, exc_info=True)
         return get_anonymous_id()
+
+
+# Property keys hashed (uuid5 fingerprint) in every telemetry event's
+# additional_properties before they leave the process. session_id/session_ids
+# and dataset names are user-chosen and may carry meaning; only a fingerprint
+# may leave — the one place enforcing what remember/improve previously hashed
+# by hand. A key holding a list is hashed element by element, so per-dataset
+# activity can still be grouped without the name. Elements that are UUIDs are
+# ids, not content, and pass through (the datasets status events put dataset
+# ids under the same key); fingerprinted elements carry the "fp:" prefix so a
+# row can tell an id from a fingerprint, since both are UUID-shaped.
+TELEMETRY_SANITIZED_PROPERTIES = ["url", "session_id", "session_ids", "datasets"]
+TELEMETRY_FINGERPRINT_PREFIX = "fp:"
+
+
+def _fingerprint(value: str) -> str:
+    return str(uuid5(NAMESPACE_OID, value))
+
+
+def _is_uuid(value: str) -> bool:
+    try:
+        UUID(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _sanitize_nested_properties(obj: Any, property_names: list[str]) -> Any:
     """
     Recursively replaces any property whose key matches one of `property_names`
     (e.g., ['url', 'path']) in a nested dict or list with a uuid5 hash
-    of its string value. Returns a new sanitized copy.
+    of its string value, or of each string element when the value is a list.
+    Returns a new sanitized copy.
     """
     if isinstance(obj, dict):
         new_obj = {}
         for k, v in obj.items():
             if k in property_names and isinstance(v, str):
-                new_obj[k] = str(uuid5(NAMESPACE_OID, v))
+                new_obj[k] = _fingerprint(v)
+            elif k in property_names and isinstance(v, list):
+                new_obj[k] = [
+                    TELEMETRY_FINGERPRINT_PREFIX + _fingerprint(item)
+                    if isinstance(item, str) and not _is_uuid(item)
+                    else item
+                    for item in v
+                ]
             else:
                 new_obj[k] = _sanitize_nested_properties(v, property_names)
         return new_obj
@@ -161,10 +212,72 @@ async def _get_telemetry_session() -> aiohttp.ClientSession:
             or _telemetry_session.closed
             or _telemetry_session_loop is not loop
         ):
+            # Close the stale session instead of dropping it: aiohttp accepts
+            # close() from a different loop, and an unowned session emits
+            # "Unclosed client session" at garbage collection.
+            if _telemetry_session is not None and not _telemetry_session.closed:
+                try:
+                    await _telemetry_session.close()
+                except Exception:
+                    logger.debug("Ignoring exception in _get_telemetry_session", exc_info=True)
             timeout = aiohttp.ClientTimeout(total=TELEMETRY_REQUEST_TIMEOUT)
             _telemetry_session = aiohttp.ClientSession(timeout=timeout)
             _telemetry_session_loop = loop
+            _register_telemetry_session_atexit()
         return _telemetry_session
+
+
+async def close_telemetry_session() -> None:
+    """Flush in-flight telemetry tasks and close the shared aiohttp session.
+
+    Safe to call repeatedly and from any loop; ``_get_telemetry_session``
+    rebuilds transparently if telemetry fires again afterwards. Called from the
+    FastAPI lifespan shutdown and, as a last resort, from an ``atexit`` hook so
+    SDK scripts don't print "Unclosed client session" at interpreter exit.
+    """
+    global _telemetry_session, _telemetry_session_loop
+
+    if _TELEMETRY_TASKS:
+        try:
+            await asyncio.gather(*list(_TELEMETRY_TASKS), return_exceptions=True)
+        except Exception:
+            logger.debug("Ignoring exception in close_telemetry_session", exc_info=True)
+    session = _telemetry_session
+    _telemetry_session = None
+    _telemetry_session_loop = None
+    if session is not None and not session.closed:
+        try:
+            await session.close()
+        except Exception:
+            logger.debug("Ignoring exception in close_telemetry_session", exc_info=True)
+
+
+_telemetry_atexit_registered = False
+
+
+def _register_telemetry_session_atexit() -> None:
+    global _telemetry_atexit_registered
+    if _telemetry_atexit_registered:
+        return
+    _telemetry_atexit_registered = True
+
+    import atexit
+
+    def _close_at_exit() -> None:
+        # The loop that owned the session is gone by now; run the closer on a
+        # fresh one. In-flight tasks died with their loop, so gather() over
+        # them is a no-op here — this exists purely to release the session.
+        if _telemetry_session is None or _telemetry_session.closed:
+            return
+        try:
+            asyncio.run(close_telemetry_session())
+        except Exception:
+            logger.debug(
+                "Ignoring exception in _register_telemetry_session_atexit._close_at_exit",
+                exc_info=True,
+            )
+
+    atexit.register(_close_at_exit)
 
 
 async def _send_telemetry_request(payload: dict) -> None:
@@ -218,10 +331,56 @@ def _get_api_key_fingerprint() -> str:
     return _get_api_key_tracking_id()
 
 
-def send_telemetry(event_name: str, user_id: str | UUID, additional_properties: dict | None = None):
+def _resolve_identity(user) -> tuple[str, str | None]:
+    """Resolve a telemetry caller into ``(user_id, tenant_id)`` strings.
+
+    Callers pass whatever they have in hand — a ``User`` model, a bare UUID, or
+    the literal ``"sdk"`` sentinel. Resolving here rather than at each call site
+    is deliberate: ``str()`` on a ``User`` yields its object repr (the model
+    defines no ``__str__``), so any site that forwarded the object was silently
+    recording ``<...User object at 0x...>`` as the user id. Centralising it fixes
+    every emitter at once and keeps ``tenant_id`` from having to be threaded
+    through ~40 call sites by hand.
+    """
+    # Guarded attribute-by-attribute: getattr's default only swallows
+    # AttributeError, but an expired/detached ORM instance raises
+    # DetachedInstanceError (or MissingGreenlet under async lazy-load) on
+    # attribute access — and telemetry identity must never break the
+    # operation that emitted the event. Partial failure keeps what resolved.
+    try:
+        resolved_id = str(getattr(user, "id", user))
+    except Exception:
+        logger.debug("Ignoring exception in _resolve_identity", exc_info=True)
+        resolved_id = "unknown-user"
+    try:
+        tenant_id = getattr(user, "tenant_id", None)
+        resolved_tenant = str(tenant_id) if tenant_id else None
+    except Exception:
+        logger.debug("Ignoring exception in _resolve_identity", exc_info=True)
+        resolved_tenant = None
+    return resolved_id, resolved_tenant
+
+
+def send_telemetry(
+    event_name: str,
+    user=None,
+    additional_properties: dict | None = None,
+    *,
+    user_id=None,
+):
     """Send a product telemetry event.
 
-    Three identity layers are sent with every event:
+    Args:
+        event_name: The event to record.
+        user: A ``User`` model, a user UUID, or a string sentinel such as
+            ``"sdk"``. When a ``User`` is given, both its ``id`` and its
+            ``tenant_id`` are recorded — prefer passing the model over
+            pre-resolving ``user.id``, or the event carries no tenant.
+        additional_properties: Extra event properties.
+        user_id: Deprecated alias for ``user``, kept so out-of-tree callers that
+            pass it by keyword keep working. Ignored when ``user`` is given.
+
+    Identity layers sent with every event:
 
     - **anonymous_id**: Original project-root ID (.anon_id). May change
       on reinstall. Kept for backward compatibility with historical data.
@@ -230,6 +389,8 @@ def send_telemetry(event_name: str, user_id: str | UUID, additional_properties: 
       correlate a single machine across all user_id changes.
     - **user_id**: Transient Cognee User UUID from the database. Changes
       when the user is deleted and recreated via forget(everything=True).
+    - **tenant_id**: The user's tenant UUID, or ``"Single User Tenant"`` when the
+      deployment has no tenancy.
     - **api_key_tracking_id**: Stable pseudonymous ID derived from the full
       LLM API key when configured. Use this to group activity by key without
       sending the key or visible key fragments.
@@ -243,35 +404,45 @@ def send_telemetry(event_name: str, user_id: str | UUID, additional_properties: 
     if env in ["test", "dev"]:
         return
     additional_properties = _sanitize_nested_properties(
-        obj=additional_properties, property_names=["url"]
+        obj=additional_properties, property_names=TELEMETRY_SANITIZED_PROPERTIES
     )
+    resolved_user_id, tenant_id = _resolve_identity(user if user is not None else user_id)
     anonymous_id = str(get_anonymous_id())
     persistent_id = str(get_persistent_id())
     api_key_tracking_id = _get_api_key_tracking_id()
+    # Where this telemetry event originates. Defaults to "sdk"; deployments such
+    # as the managed cloud set TELEMETRY_ORIGIN (e.g. "cloud") so events can be
+    # segmented by origin.
+    telemetry_origin = os.getenv("TELEMETRY_ORIGIN", "sdk")
     current_time = datetime.now(timezone.utc)
     payload = {
         "anonymous_id": anonymous_id,
         "event_name": event_name,
         "user_properties": {
-            "user_id": str(user_id),
+            "user_id": resolved_user_id,
+            "tenant_id": tenant_id or "Single User Tenant",
             "persistent_id": persistent_id,
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
         },
         "properties": {
             "time": current_time.strftime("%m/%d/%Y"),
-            "user_id": str(user_id),
+            "user_id": resolved_user_id,
+            "tenant_id": tenant_id or "Single User Tenant",
             "anonymous_id": anonymous_id,
             "persistent_id": persistent_id,
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
+            "telemetry_origin": telemetry_origin,
             **additional_properties,
         },
     }
 
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(_send_telemetry_request(payload))
+        task = loop.create_task(_send_telemetry_request(payload))
+        _TELEMETRY_TASKS.add(task)
+        task.add_done_callback(_TELEMETRY_TASKS.discard)
     except RuntimeError:
         # No running event loop (shutdown, sync context, etc.) — telemetry is
         # best-effort; dropping the event is better than crashing the caller.

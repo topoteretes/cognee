@@ -1,7 +1,7 @@
 from pathlib import Path
-from typing import List, Optional, Union
 
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models.User import User
@@ -11,10 +11,10 @@ logger = get_logger("report")
 
 
 async def report(
-    datasets: Optional[Union[str, List[str]]] = "main_dataset",
-    output_path: Optional[str] = "graph_report.md",
+    datasets: str | list[str] | None = DEFAULT_DATASET_NAME,
+    output_path: str | None = "graph_report.md",
     top_n: int = 10,
-    user: Optional[User] = None,
+    user: User | None = None,
 ) -> str:
     """Generate a Graph Insight Report from the knowledge graph.
 

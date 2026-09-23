@@ -1,27 +1,34 @@
+"""Close pipeline runs that were left STARTED by a process that is gone.
+
+Runs at API startup only. A booting process has no runs of its own in flight,
+so a STARTED row it finds cannot be one it is executing. Rows younger than
+``COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS`` are still left alone, in case a
+sibling process (a rolling deploy) is running them.
+"""
+
 import os
 from datetime import datetime, timedelta, timezone
-
-from sqlalchemy import func, select
-from sqlalchemy.orm import aliased
+from types import SimpleNamespace
 
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.data.models import Dataset
-from cognee.modules.pipelines.methods import reset_pipeline_run_status
-from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
+from cognee.modules.pipelines.exceptions import AbandonedPipelineRunError
+from cognee.modules.pipelines.methods import get_unterminated_pipeline_runs
+from cognee.modules.pipelines.operations.log_pipeline_run_error import log_pipeline_run_error
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("cognify.recovery")
 
-# A cognify run is only treated as "stale" (abandoned by a crashed process) once
-# it has stayed in a non-terminal state longer than this threshold. This guards
-# against rolling back a run that is still actively executing in another live
-# worker/replica (e.g. during a rolling deploy or a multi-process deployment
-# sharing one database). A heartbeat/lease would be more precise; an age
-# threshold is a pragmatic guard. Override via env when long-running cognify
-# jobs legitimately exceed the default.
 STALE_RUN_MIN_AGE_SECONDS = int(os.getenv("COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS", "3600"))
+
+# The rollback each pipeline supplies for its own failed runs (the same policy
+# run_tasks applies when a run errors inline). A pipeline without an entry has
+# nothing to roll back at error time either, so at startup it is only closed.
+ROLLBACK_HANDLERS = {
+    "cognify_pipeline": cognify_rollback_handler,
+}
 
 
 def _is_older_than_threshold(created_at) -> bool:
@@ -32,66 +39,47 @@ def _is_older_than_threshold(created_at) -> bool:
     """
     if created_at is None:
         return True
-
     if created_at.tzinfo is None:
         created_at = created_at.replace(tzinfo=timezone.utc)
-
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=STALE_RUN_MIN_AGE_SECONDS)
     return created_at <= cutoff
 
 
-async def recover_stale_cognify_runs_on_startup() -> None:
-    """Recover latest non-terminal cognify runs during API startup.
+async def recover_stale_pipeline_runs_on_startup() -> None:
+    """Roll back and close every pipeline run left STARTED, during API startup.
 
-    Startup recovery is intentionally limited to API lifespan initialization,
-    before any new pipeline processing starts.
+    Candidates are the runs whose newest row is still ``DATASET_PROCESSING_STARTED``,
+    keyed by run id: a run abandoned while a newer run of the same pipeline on the
+    same dataset later completed is still found and closed. A run whose newest row
+    is already ``ERRORED`` or ``COMPLETED`` stays exactly as it is: an ERRORED run
+    was rolled back inline when it failed (see ``run_tasks``), so touching it again
+    would repeat the rollback on every restart.
 
-    Only runs whose latest status is ``DATASET_PROCESSING_STARTED`` are
-    recovered: an ``ERRORED`` run has already been rolled back inline at error
-    time (see ``run_tasks``), so re-selecting it here would repeat the rollback
-    on every restart. After a successful rollback the dataset's pipeline status
-    is reset to ``DATASET_PROCESSING_INITIATED`` so it is no longer reported as
-    "already being processed" and can be cognified again.
+    A candidate is first rolled back with the pipeline's own handler from
+    ``ROLLBACK_HANDLERS``, if it has one, keeping the documents the run had
+    already completed, then closed with a
+    ``DATASET_PROCESSING_ERRORED`` row whose error is ``AbandonedPipelineRunError``.
+    The ERRORED row carries the STARTED row's user, tenant, start time, input
+    summary, origin and parent operation, so it describes the run that died,
+    not the process closing it. The run gate then no longer reports the dataset
+    as "already being processed", and the activity feed shows the run as
+    abandoned rather than making it disappear. If the rollback fails the run is
+    left at STARTED so the next startup retries it.
     """
     db_engine = get_relational_engine()
 
     try:
-        async with db_engine.get_async_session() as session:
-            latest_per_dataset = (
-                select(
-                    PipelineRun,
-                    func.row_number()
-                    .over(
-                        partition_by=PipelineRun.dataset_id,
-                        order_by=PipelineRun.created_at.desc(),
-                    )
-                    .label("rn"),
-                )
-                .where(PipelineRun.pipeline_name == "cognify_pipeline")
-                .subquery()
-            )
-
-            latest_run = aliased(PipelineRun, latest_per_dataset)
-            recovery_candidates = (
-                (
-                    await session.execute(
-                        select(latest_run)
-                        .where(latest_per_dataset.c.rn == 1)
-                        .where(latest_run.status == PipelineRunStatus.DATASET_PROCESSING_STARTED)
-                    )
-                )
-                .scalars()
-                .all()
-            )
+        recovery_candidates = await get_unterminated_pipeline_runs()
     except Exception:
-        logger.error("Failed to recover latest cognify run which did not successfully finish.")
+        logger.exception("Failed to load pipeline runs for startup recovery.")
         return
 
     for pipeline_run in recovery_candidates:
         if not _is_older_than_threshold(getattr(pipeline_run, "created_at", None)):
             logger.info(
-                "Skipping startup recovery for run %s: started less than %ds ago, "
+                "Skipping startup recovery for %s run %s: started less than %ds ago, "
                 "treating it as a live run rather than a stale one.",
+                pipeline_run.pipeline_name,
                 pipeline_run.pipeline_run_id,
                 STALE_RUN_MIN_AGE_SECONDS,
             )
@@ -99,37 +87,58 @@ async def recover_stale_cognify_runs_on_startup() -> None:
 
         async with db_engine.get_async_session() as session:
             dataset = await session.get(Dataset, pipeline_run.dataset_id)
-
         if dataset is None:
             logger.warning(
-                "Skipping startup recovery for run %s: dataset %s not found.",
+                "Skipping startup recovery for %s run %s: dataset %s not found.",
+                pipeline_run.pipeline_name,
                 pipeline_run.pipeline_run_id,
                 pipeline_run.dataset_id,
             )
             continue
 
+        rollback_handler = ROLLBACK_HANDLERS.get(pipeline_run.pipeline_name)
         try:
             async with set_database_global_context_variables(dataset.id, dataset.owner_id):
-                await cognify_rollback_handler(
-                    pipeline_run_id=pipeline_run.pipeline_run_id,
-                    dataset=dataset,
-                )
-                # Clear the lingering STARTED status so a re-run is not blocked by
-                # check_pipeline_run_qualification ("already being processed").
-                await reset_pipeline_run_status(
-                    user_id=dataset.owner_id,
-                    dataset_id=dataset.id,
-                    pipeline_name="cognify_pipeline",
-                )
+                if rollback_handler is not None:
+                    # Documents the run had completed stay; a later run may have
+                    # trusted them and skipped them, so removing them now would
+                    # leave holes nothing refills. Only unfinished work goes.
+                    await rollback_handler(
+                        pipeline_run_id=pipeline_run.pipeline_run_id,
+                        dataset=dataset,
+                        keep_completed_data=True,
+                    )
+                await _close_as_abandoned(pipeline_run, dataset)
             logger.info(
-                "Startup recovery completed for cognify run %s (dataset=%s).",
+                "Startup recovery closed %s run %s as abandoned (dataset=%s, rolled_back=%s).",
+                pipeline_run.pipeline_name,
                 pipeline_run.pipeline_run_id,
                 pipeline_run.dataset_id,
+                rollback_handler is not None,
             )
-        except Exception as error:
-            logger.error(
-                "Startup recovery failed for cognify run %s: %s",
+        except Exception:
+            logger.exception(
+                "Startup recovery failed for %s run %s",
+                pipeline_run.pipeline_name,
                 pipeline_run.pipeline_run_id,
-                error,
-                exc_info=True,
             )
+
+
+async def _close_as_abandoned(pipeline_run, dataset) -> None:
+    """Write the ERRORED row for ``pipeline_run``, carrying the STARTED row's metadata."""
+    user_id = getattr(pipeline_run, "user_id", None)
+    await log_pipeline_run_error(
+        pipeline_run_id=pipeline_run.pipeline_run_id,
+        pipeline_id=pipeline_run.pipeline_id,
+        pipeline_name=pipeline_run.pipeline_name,
+        dataset_id=dataset.id,
+        data=None,
+        e=AbandonedPipelineRunError(),
+        user=SimpleNamespace(id=user_id, tenant_id=getattr(pipeline_run, "tenant_id", None))
+        if user_id
+        else None,
+        started_at=getattr(pipeline_run, "started_at", None),
+        data_info=(getattr(pipeline_run, "run_info", None) or {}).get("data"),
+        origin=getattr(pipeline_run, "origin", None),
+        parent_operation_id=getattr(pipeline_run, "parent_operation_id", None),
+    )

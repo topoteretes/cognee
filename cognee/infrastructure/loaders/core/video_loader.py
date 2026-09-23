@@ -9,7 +9,9 @@ from typing import Any
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
-from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
+from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface, LoaderResult
+from cognee.infrastructure.loaders.store_derived_text import store_derived_text
+from cognee.infrastructure.loaders.utils.require_llm import require_llm_for_media
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
@@ -110,11 +112,11 @@ class VideoLoader(LoaderInterface):
         Returns:
             True if file can be handled, False otherwise
         """
-        if extension in self.supported_extensions and mime_type in self.supported_mime_types:
-            return True
-        return False
+        return bool(
+            extension in self.supported_extensions and mime_type in self.supported_mime_types
+        )
 
-    async def load(self, file_path: str, **kwargs: Any) -> str:
+    async def load(self, file_path: str, **kwargs: Any) -> "str | LoaderResult":
         """
         Load and process the video file.
 
@@ -135,6 +137,10 @@ class VideoLoader(LoaderInterface):
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
+        require_llm_for_media(
+            "Video", "cognee transcribes the video's audio track with the LLM before indexing it"
+        )
+
         with open(file_path, "rb") as f:
             file_metadata = await get_file_metadata(f)
         # Name ingested file of current loader based on original file content hash
@@ -151,9 +157,7 @@ class VideoLoader(LoaderInterface):
         data_root_directory = storage_config["data_root_directory"]
         storage = get_file_storage(data_root_directory)
 
-        full_file_path = await storage.store(storage_file_name, transcript)
-
-        return full_file_path
+        return await store_derived_text(storage, storage_file_name, transcript)
 
     @asynccontextmanager
     async def _audio_source(self, file_path: str, extension: str):
@@ -201,7 +205,7 @@ class VideoLoader(LoaderInterface):
         ]
 
         def run_ffmpeg() -> subprocess.CompletedProcess:
-            return subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            return subprocess.run(command, capture_output=True, check=False)
 
         try:
             result = await asyncio.to_thread(run_ffmpeg)
@@ -233,6 +237,7 @@ class VideoLoader(LoaderInterface):
             logger.debug(
                 "Segmented transcription request failed (%s); retrying without it.",
                 error,
+                exc_info=True,
             )
             result = await LLMGateway.create_transcript(audio_path)
 

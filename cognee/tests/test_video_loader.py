@@ -1,3 +1,4 @@
+import hashlib
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -160,7 +161,12 @@ async def test_load_persists_timestamped_transcript(
     with patch("cognee.infrastructure.loaders.core.video_loader.os.remove"):
         result = await loader.load(FIXTURE_PATH)
 
-    assert result == "/fake/root/text_hash123.txt"
+    assert result.file_path == "/fake/root/text_hash123.txt"
+    # The loader describes the text it wrote so ingestion need not read it back.
+    assert (
+        result.file_metadata["content_hash"]
+        == hashlib.md5(EXPECTED_TRANSCRIPT.encode("utf-8")).hexdigest()
+    )
     mock_extract.assert_awaited_once()
     storage_instance.store.assert_awaited_once_with("text_hash123.txt", EXPECTED_TRANSCRIPT)
 
@@ -332,9 +338,11 @@ async def test_extract_audio_nonzero_exit_raises_and_cleans_up(mock_run, loader)
     """A non-zero ffmpeg exit raises with stderr and removes the temp WAV."""
     mock_run.return_value = MagicMock(returncode=1, stderr=b"Invalid data found")
 
-    with _RemoveSpy() as removed:
-        with pytest.raises(RuntimeError, match="ffmpeg failed to extract audio"):
-            await loader._extract_audio("/usr/bin/ffmpeg", "/videos/clip.mkv")
+    with (
+        _RemoveSpy() as removed,
+        pytest.raises(RuntimeError, match="ffmpeg failed to extract audio"),
+    ):
+        await loader._extract_audio("/usr/bin/ffmpeg", "/videos/clip.mkv")
 
     assert removed.paths and removed.paths[0].endswith(".wav")
     assert not os.path.exists(removed.paths[0])
@@ -347,8 +355,7 @@ async def test_extract_audio_nonzero_exit_raises_and_cleans_up(mock_run, loader)
 )
 async def test_extract_audio_invocation_error_cleans_up(mock_run, loader):
     """If the ffmpeg invocation itself raises, the temp WAV is still removed."""
-    with _RemoveSpy() as removed:
-        with pytest.raises(OSError):
-            await loader._extract_audio("/usr/bin/ffmpeg", "/videos/clip.mkv")
+    with _RemoveSpy() as removed, pytest.raises(OSError):
+        await loader._extract_audio("/usr/bin/ffmpeg", "/videos/clip.mkv")
 
     assert removed.paths and not os.path.exists(removed.paths[0])

@@ -12,7 +12,6 @@ from pathlib import Path
 import httpx
 import pytest
 
-
 MCP_ROOT = Path(__file__).resolve().parents[1]  # cognee-mcp/
 if str(MCP_ROOT) not in sys.path:
     sys.path.insert(0, str(MCP_ROOT))
@@ -21,57 +20,10 @@ CogneeClient = importlib.import_module("src.cognee_client").CogneeClient
 server_utils = importlib.import_module("src.server_utils")
 retrieval_utils = importlib.import_module("src.retrieval_utils")
 format_recall_results = server_utils.format_recall_results
-format_search_results = server_utils.format_search_results
 normalize_delete_mode = server_utils.normalize_delete_mode
-parse_cognify_data = server_utils.parse_cognify_data
-validate_cognify_file_paths = server_utils.validate_cognify_file_paths
 validate_top_k = server_utils.validate_top_k
 get_chunk_neighbors_from_graph = retrieval_utils.get_chunk_neighbors_from_graph
 get_document_from_graph = retrieval_utils.get_document_from_graph
-
-
-def test_parse_cognify_data_accepts_plain_text():
-    parsed = parse_cognify_data("plain text")
-
-    assert parsed.items == ["plain text"]
-    assert parsed.is_batch is False
-
-
-def test_parse_cognify_data_accepts_json_batch():
-    parsed = parse_cognify_data(json.dumps(["/tmp/a.txt", "inline memory"]))
-
-    assert parsed.items == ["/tmp/a.txt", "inline memory"]
-    assert parsed.is_batch is True
-
-
-@pytest.mark.parametrize("payload", ["[]", "[1]", '[""]', "[1, 2]"])
-def test_parse_cognify_data_rejects_invalid_batches(payload):
-    with pytest.raises(ValueError):
-        parse_cognify_data(payload)
-
-
-def test_parse_cognify_data_preserves_plain_text_starting_with_bracket():
-    parsed = parse_cognify_data("[note: inline memory")
-
-    assert parsed.items == ["[note: inline memory"]
-    assert parsed.is_batch is False
-
-
-def test_validate_cognify_file_paths_reports_batch_index():
-    error = validate_cognify_file_paths(
-        ["/missing/file.txt"],
-        path_exists=lambda _: False,
-    )
-
-    assert "File not found: /missing/file.txt" in error
-
-    batch_error = validate_cognify_file_paths(
-        ["inline text", "/missing/file.txt"],
-        path_exists=lambda _: False,
-    )
-
-    assert "Invalid batch item at index 1" in batch_error
-    assert "File not found: /missing/file.txt" in batch_error
 
 
 def test_validate_top_k_and_delete_mode():
@@ -84,23 +36,6 @@ def test_validate_top_k_and_delete_mode():
         validate_top_k(101)
     with pytest.raises(ValueError):
         normalize_delete_mode("unsafe")
-
-
-def test_format_search_results_handles_envelope_and_completion_rows():
-    rendered = format_search_results(
-        {
-            "query": "what matters?",
-            "results": [
-                {"dataset_name": "alpha", "search_result": ["first answer", "second answer"]},
-                {"dataset_name": "beta", "text": "third answer"},
-            ],
-        },
-        "GRAPH_COMPLETION",
-    )
-
-    assert "[alpha] first answer" in rendered
-    assert "[alpha] second answer" in rendered
-    assert "[beta] third answer" in rendered
 
 
 def test_format_recall_results_handles_normalized_rows():
@@ -117,29 +52,69 @@ def test_format_recall_results_handles_normalized_rows():
     assert "[graph] graph answer" in rendered
 
 
+def test_cognee_client_auth_schemes():
+    # 1. Default non-tenant URL -> Bearer token
+    client = CogneeClient(api_url="http://localhost:8000", api_token="secret_key")
+    headers = client._get_headers()
+    assert headers["Authorization"] == "Bearer secret_key"
+    assert "X-Api-Key" not in headers
+
+    # 2. Explicit x-api-key scheme -> X-Api-Key header
+    client_key = CogneeClient(
+        api_url="http://localhost:8000",
+        api_token="secret_key",
+        api_auth_scheme="x-api-key",
+    )
+    headers_key = client_key._get_headers()
+    assert headers_key["X-Api-Key"] == "secret_key"
+    assert "Authorization" not in headers_key
+
+    # 3. Explicit bearer scheme -> Bearer token
+    client_bearer = CogneeClient(
+        api_url="http://localhost:8000",
+        api_token="secret_key",
+        api_auth_scheme="bearer",
+    )
+    headers_bearer = client_bearer._get_headers()
+    assert headers_bearer["Authorization"] == "Bearer secret_key"
+    assert "X-Api-Key" not in headers_bearer
+
+    # 4. Cloud tenant URL -> X-Api-Key + X-Tenant-Id
+    tenant_url = "https://tenant-12345678-1234-1234-1234-123456789abc.cognee.ai"
+    client_cloud = CogneeClient(api_url=tenant_url, api_token="secret_key")
+    headers_cloud = client_cloud._get_headers()
+    assert headers_cloud["X-Api-Key"] == "secret_key"
+    assert headers_cloud["X-Tenant-Id"] == "12345678-1234-1234-1234-123456789abc"
+    assert "Authorization" not in headers_cloud
+
+    # 5. COGNEE_API_AUTH_SCHEME environment variable
+    os.environ["COGNEE_API_AUTH_SCHEME"] = "x-api-key"
+    try:
+        client_env = CogneeClient(api_url="http://localhost:8000", api_token="secret_key")
+        headers_env = client_env._get_headers()
+        assert headers_env["X-Api-Key"] == "secret_key"
+        assert "Authorization" not in headers_env
+    finally:
+        os.environ.pop("COGNEE_API_AUTH_SCHEME", None)
+
+
 # Tools that the MCP server is expected to expose. Kept as named groups so the
 # contract documents intent rather than just enumerating names. The hardening
 # rule is that the LLM-direct memory API stays minimal (V2: remember/recall/
-# forget); the workspace UI adds entry tools (one per common user phrasing) and
-# a small set of internals called by the React workspace via app.callServerTool.
+# forget).
 MEMORY_API_TOOLS = {"remember", "recall", "forget"}
-WORKSPACE_UI_ENTRY_TOOLS = {
-    "visualize_graph_ui",
-    "upload_file_ui",
-    "open_cognee_workspace",
+STATUS_TOOLS = {
+    # Ingestion is queued (remember(background=True)) because it outruns the
+    # host's request deadline, so progress and failures are only observable
+    # through a status call.
+    "cognify_status",
 }
-WORKSPACE_INTERNAL_TOOLS = {
-    "list_datasets_json",
-    "list_dataset_data_json",
-    "create_dataset_json",
-    "get_client_info_json",
-}
-EXPECTED_TOOLS = MEMORY_API_TOOLS | WORKSPACE_UI_ENTRY_TOOLS | WORKSPACE_INTERNAL_TOOLS
+EXPECTED_TOOLS = MEMORY_API_TOOLS | STATUS_TOOLS
 
 
 @pytest.mark.asyncio
 async def test_mcp_exposes_only_memory_tools():
-    import src.server as server
+    from src import server
 
     tools = await server.mcp.list_tools()
 
@@ -379,6 +354,8 @@ class FakeCogneeModule:
         # client deletes it as soon as remember() returns.
         if isinstance(data, str) and os.path.isfile(data):
             self.seen_paths.append(data)
+            # A blocking read is fine in a test double: no event loop to
+            # starve, and the file is a few bytes on tmpfs.
             with open(data, "rb") as handle:
                 self.seen_payloads.append(handle.read())
         if self._error is not None:
@@ -590,7 +567,7 @@ class RecordingRememberClient:
 @pytest.mark.asyncio
 async def test_mcp_remember_rejects_invalid_payloads(monkeypatch, kwargs, expected_error):
     """Bad argument combinations are refused before any ingestion is attempted."""
-    import src.server as server
+    from src import server
 
     fake_client = RecordingRememberClient()
     monkeypatch.setattr(server, "cognee_client", fake_client)
@@ -605,7 +582,7 @@ async def test_mcp_remember_rejects_invalid_payloads(monkeypatch, kwargs, expect
 @pytest.mark.asyncio
 async def test_mcp_remember_rejects_uploads_over_the_size_limit(monkeypatch):
     """Oversized uploads are rejected client-side rather than posted."""
-    import src.server as server
+    from src import server
 
     fake_client = RecordingRememberClient()
     monkeypatch.setattr(server, "cognee_client", fake_client)
@@ -627,7 +604,7 @@ async def test_mcp_remember_rejects_uploads_over_the_size_limit(monkeypatch):
 @pytest.mark.asyncio
 async def test_mcp_remember_forwards_file_uploads(monkeypatch):
     """The merged tool hands filename + content_base64 straight to the client."""
-    import src.server as server
+    from src import server
 
     fake_client = RecordingRememberClient()
     monkeypatch.setattr(server, "cognee_client", fake_client)
@@ -650,6 +627,8 @@ async def test_mcp_remember_forwards_file_uploads(monkeypatch):
             "dataset_name": "ds",
             "session_id": None,
             "custom_prompt": "extract carefully",
+            "ontology_key": None,
+            "self_improvement": True,
         }
     ]
     # The confirmation names the file and its decoded size, not the base64 length.
@@ -661,7 +640,7 @@ async def test_mcp_remember_forwards_file_uploads(monkeypatch):
 @pytest.mark.asyncio
 async def test_mcp_remember_still_stores_text_and_session_entries(monkeypatch):
     """Absorbing cognify_file left the pre-existing text paths intact."""
-    import src.server as server
+    from src import server
 
     fake_client = RecordingRememberClient()
     monkeypatch.setattr(server, "cognee_client", fake_client)
@@ -680,7 +659,7 @@ async def test_mcp_remember_still_stores_text_and_session_entries(monkeypatch):
 @pytest.mark.asyncio
 async def test_mcp_remember_defaults_dataset_when_caller_omits_it(monkeypatch):
     """Uploads inherit the agent-scoped default dataset, same as text writes."""
-    import src.server as server
+    from src import server
 
     fake_client = RecordingRememberClient()
     monkeypatch.setattr(server, "cognee_client", fake_client)
@@ -694,7 +673,7 @@ async def test_mcp_remember_defaults_dataset_when_caller_omits_it(monkeypatch):
 @pytest.mark.asyncio
 async def test_mcp_remember_reports_client_failures(monkeypatch):
     """Ingestion errors surface as tool errors instead of propagating."""
-    import src.server as server
+    from src import server
 
     class ExplodingClient:
         async def remember(self, **kwargs):
@@ -713,7 +692,7 @@ async def test_mcp_remember_reports_client_failures(monkeypatch):
 @pytest.mark.asyncio
 async def test_mcp_no_longer_exposes_cognify_file():
     """cognify_file was absorbed into remember and must be gone from the surface."""
-    import src.server as server
+    from src import server
 
     tools = await server.mcp.list_tools()
 
@@ -724,7 +703,7 @@ async def test_mcp_no_longer_exposes_cognify_file():
 @pytest.mark.asyncio
 async def test_mcp_remember_advertises_file_upload_parameters():
     """The merged tool's schema is what tells an LLM it can send files."""
-    import src.server as server
+    from src import server
 
     tools = await server.mcp.list_tools()
     remember_tool = next(tool for tool in tools if tool.name == "remember")
@@ -739,7 +718,7 @@ async def test_mcp_remember_advertises_file_upload_parameters():
 
 @pytest.mark.asyncio
 async def test_mcp_recall_forwards_system_prompt(monkeypatch):
-    import src.server as server
+    from src import server
 
     class FakeClient:
         def __init__(self):
@@ -798,58 +777,6 @@ async def test_cognee_client_api_delete_uses_mode_aware_endpoint():
     assert requests[0].url.params["data_id"] == "00000000-0000-0000-0000-000000000001"
     assert requests[0].url.params["dataset_id"] == "00000000-0000-0000-0000-000000000002"
     assert requests[0].url.params["mode"] == "hard"
-
-
-@pytest.mark.asyncio
-async def test_cognify_tool_batches_add_calls(monkeypatch, tmp_path):
-    import src.server as server
-
-    data_file = tmp_path / "memory.txt"
-    data_file.write_text("memory", encoding="utf-8")
-
-    class FakeClient:
-        use_api = False
-
-        def __init__(self):
-            self.added = []
-            self.cognified = None
-
-        async def add(self, data, dataset_name="main_dataset"):
-            self.added.append((data, dataset_name))
-
-        async def cognify(self, datasets=None, custom_prompt=None, graph_model=None):
-            self.cognified = {
-                "datasets": datasets,
-                "custom_prompt": custom_prompt,
-                "graph_model": graph_model,
-            }
-
-    fake_client = FakeClient()
-    created_tasks = []
-    original_create_task = asyncio.create_task
-
-    def capture_task(coro):
-        task = original_create_task(coro)
-        created_tasks.append(task)
-        return task
-
-    monkeypatch.setattr(server, "cognee_client", fake_client)
-    monkeypatch.setattr(server.asyncio, "create_task", capture_task)
-
-    result = await server.cognify(
-        json.dumps([str(data_file), "inline memory"]),
-        dataset_name="batch_ds",
-        custom_prompt="extract carefully",
-    )
-
-    assert "Queued 2 item(s)" in result[0].text
-    await created_tasks[0]
-    assert fake_client.added == [(str(data_file), "batch_ds"), ("inline memory", "batch_ds")]
-    assert fake_client.cognified == {
-        "datasets": ["batch_ds"],
-        "custom_prompt": "extract carefully",
-        "graph_model": None,
-    }
 
 
 class FakeGraph:
@@ -985,142 +912,6 @@ async def test_get_chunk_neighbors_from_graph_validates_inputs():
         await get_chunk_neighbors_from_graph(graph, "chunk-1", direction="sideways")
 
 
-@pytest.mark.asyncio
-async def test_document_retrieval_tools_format_json(monkeypatch):
-    import src.server as server
-
-    class FakeClient:
-        async def get_document(self, document_id, include_metadata=True, max_chunks=0):
-            return {
-                "document_id": document_id,
-                "include_metadata": include_metadata,
-                "max_chunks": max_chunks,
-                "chunks": [],
-            }
-
-        async def get_chunk_neighbors(
-            self,
-            chunk_id,
-            neighbor_count=2,
-            include_target=True,
-            direction="both",
-        ):
-            return {
-                "target_chunk_id": chunk_id,
-                "neighbor_count": neighbor_count,
-                "include_target": include_target,
-                "direction": direction,
-                "chunks": [],
-            }
-
-    monkeypatch.setattr(server, "cognee_client", FakeClient())
-
-    document_result = await server.get_document("doc-1", include_metadata=False, max_chunks=3)
-    neighbors_result = await server.get_chunk_neighbors(
-        "chunk-1",
-        neighbor_count=1,
-        include_target=False,
-        direction="forward",
-    )
-
-    assert json.loads(document_result[0].text)["document_id"] == "doc-1"
-    neighbor_payload = json.loads(neighbors_result[0].text)
-    assert neighbor_payload["target_chunk_id"] == "chunk-1"
-    assert neighbor_payload["direction"] == "forward"
-
-
-def test_format_named_items_lists_names_and_ids():
-    import src.server as server
-
-    assert server._format_named_items([], "dataset", "datasets") == "No datasets found."
-
-    rendered = server._format_named_items(
-        [{"id": "a1", "name": "docs"}, {"id": "", "name": ""}],
-        "dataset",
-        "datasets",
-    )
-    assert rendered.startswith("2 datasets:")
-    assert "- docs (a1)" in rendered
-    assert "- (unnamed)" in rendered
-
-    singular = server._format_named_items([{"id": "x", "name": "only"}], "data item", "data items")
-    assert singular.startswith("1 data item:")
-
-
-def test_format_named_items_caps_long_lists():
-    import src.server as server
-
-    items = [{"id": str(i), "name": f"n{i}"} for i in range(52)]
-    rendered = server._format_named_items(items, "dataset", "datasets", limit=3)
-
-    assert rendered.startswith("52 datasets:")
-    assert "- n0 (0)" in rendered
-    assert "- n3 (3)" not in rendered
-    assert "… and 49 more (see structuredContent)." in rendered
-
-
-@pytest.mark.asyncio
-async def test_list_datasets_json_puts_names_in_text_channel(monkeypatch):
-    import src.server as server
-
-    class FakeClient:
-        async def list_datasets(self):
-            return [
-                {"id": "id-1", "name": "alpha"},
-                {"id": "id-2", "name": "beta"},
-            ]
-
-    monkeypatch.setattr(server, "cognee_client", FakeClient())
-
-    result = await server.list_datasets_json()
-
-    text = result.content[0].text
-    assert "2 datasets:" in text
-    assert "alpha (id-1)" in text
-    assert "beta (id-2)" in text
-    # Structured payload is preserved for the workspace UI.
-    assert result.structured_content == {
-        "datasets": [
-            {"id": "id-1", "name": "alpha"},
-            {"id": "id-2", "name": "beta"},
-        ]
-    }
-
-
-@pytest.mark.asyncio
-async def test_list_datasets_json_text_channel_over_mcp_protocol(monkeypatch):
-    """End-to-end over the real MCP protocol: a client that reads only the text
-    content blocks must still see dataset names (regression guard for CLO-319)."""
-    from mcp.shared.memory import create_connected_server_and_client_session
-
-    import src.server as server
-
-    class FakeClient:
-        async def list_datasets(self):
-            return [
-                {"id": "id-alpha", "name": "alpha"},
-                {"id": "id-beta", "name": "beta"},
-            ]
-
-    monkeypatch.setattr(server, "cognee_client", FakeClient())
-
-    # FastMCP 3 keeps the low-level Server on _mcp_server; the SDK helper needs that,
-    # not the FastMCP wrapper.
-    async with create_connected_server_and_client_session(server.mcp._mcp_server) as client:
-        await client.initialize()
-
-        tool_names = {tool.name for tool in (await client.list_tools()).tools}
-        assert "list_datasets_json" in tool_names
-
-        result = await client.call_tool("list_datasets_json", {})
-
-    assert result.isError is False
-    text = "\n".join(block.text for block in result.content if block.type == "text")
-    assert "2 datasets:" in text
-    assert "alpha (id-alpha)" in text
-    assert "beta (id-beta)" in text
-
-
 def _recall_payload(requests: "list[httpx.Request]") -> dict:
     """Payload of the recall POST; a bare recall sends a GET /datasets preflight first."""
     recall_request = next(r for r in requests if r.url.path == "/api/v1/recall")
@@ -1227,3 +1018,259 @@ async def test_recall_without_env_default_omits_system_prompt(monkeypatch):
 
     payload = _recall_payload(requests)
     assert "system_prompt" not in payload
+
+
+# ---------------------------------------------------------------------------
+# Transport security: Host/Origin (DNS-rebinding) guard
+#
+# FastMCP installs its guard on the streamable-http app only; create_sse_app()
+# accepts no such option, so http_app() silently drops the allow-lists when
+# transport="sse" and the guard never runs. The server mounts the middleware
+# itself to close that gap. These exercise it over a real ASGI round trip.
+#
+# A permitted SSE request opens an event stream and never completes, so
+# "accepted" is observed as a timeout rather than a status code.
+# ---------------------------------------------------------------------------
+
+TRANSPORT_PATHS = {"http": ("/mcp", "POST"), "sse": ("/sse", "GET")}
+_ACCEPTED = "accepted"
+
+
+def _probe(app, transport, path=None, **headers):
+    """Return the status code, or _ACCEPTED if the request opened a stream."""
+    import logging
+    import threading
+
+    from starlette.testclient import TestClient
+
+    default_path, method = TRANSPORT_PATHS[transport]
+    target = path or default_path
+    result = []
+
+    def run():
+        try:
+            with TestClient(app, base_url="http://127.0.0.1:8000") as client:
+                result.append(client.request(method, target, headers=headers, json={}).status_code)
+        except Exception as exc:
+            # Broad on purpose. An empty result reads as _ACCEPTED, so a crash
+            # in this thread would satisfy the `!= 421` / `!= 404` assertions.
+            # Recording it keeps a failure from masquerading as "accepted";
+            # the log gives the traceback the assertion message cannot carry.
+            logging.getLogger(__name__).exception("probe request failed")
+            result.append(repr(exc))
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(timeout=10)
+    return result[0] if result else _ACCEPTED
+
+
+@pytest.mark.parametrize("transport", ["http", "sse"])
+@pytest.mark.parametrize("bind", ["0.0.0.0", "127.0.0.1"])
+def test_transport_rejects_foreign_host_and_origin(monkeypatch, transport, bind):
+    """Both transports reject rebinding attempts, on any bind address.
+
+    DNS rebinding targets loopback services, so 127.0.0.1 must be guarded too.
+    """
+    monkeypatch.delenv("MCP_DISABLE_DNS_REBINDING_PROTECTION", raising=False)
+    monkeypatch.delenv("MCP_ALLOWED_HOSTS", raising=False)
+
+    from src import server
+
+    app = server._build_http_app(transport, bind)
+
+    assert _probe(app, transport, Host="attacker.example") == 421, (
+        f"{transport} on {bind} accepted a foreign Host header"
+    )
+    assert _probe(app, transport, Origin="http://attacker.example") == 403, (
+        f"{transport} on {bind} accepted a foreign Origin header"
+    )
+
+
+@pytest.mark.parametrize("transport", ["http", "sse"])
+def test_mcp_allowed_hosts_admits_named_host(monkeypatch, transport):
+    """The documented escape hatch works on both transports."""
+    monkeypatch.delenv("MCP_DISABLE_DNS_REBINDING_PROTECTION", raising=False)
+    monkeypatch.setenv("MCP_ALLOWED_HOSTS", "10.0.0.5:*")
+
+    from src import server
+
+    app = server._build_http_app(transport, "0.0.0.0")
+
+    assert _probe(app, transport, Host="10.0.0.5:8000") != 421
+    assert _probe(app, transport, Host="attacker.example") == 421
+
+
+@pytest.mark.parametrize("transport", ["http", "sse"])
+def test_dns_rebinding_protection_can_be_disabled(monkeypatch, transport):
+    monkeypatch.setenv("MCP_DISABLE_DNS_REBINDING_PROTECTION", "true")
+    monkeypatch.delenv("MCP_ALLOWED_HOSTS", raising=False)
+
+    from src import server
+
+    app = server._build_http_app(transport, "0.0.0.0")
+
+    assert _probe(app, transport, Host="attacker.example") != 421
+
+
+@pytest.mark.parametrize(
+    "transport,explicit,expected",
+    [
+        ("http", None, "/mcp"),
+        ("http", "/custom", "/custom"),
+        ("sse", None, "/sse"),
+        ("sse", "/events", "/events"),
+    ],
+)
+def test_path_flag_moves_endpoint_without_clobbering_defaults(transport, explicit, expected):
+    """--path applies, and omitting it leaves each transport's own default.
+
+    The transports have different defaults (/mcp, /sse). Forwarding a single
+    "/mcp" default to both silently relocated the SSE endpoint.
+    """
+    from src import server
+
+    app = server._build_http_app(transport, "127.0.0.1", explicit)
+
+    assert _probe(app, transport, path=expected) != 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag", [None, False, True])
+@pytest.mark.parametrize("use_api", [False, True])
+@pytest.mark.parametrize(
+    ("session_id", "background", "upload"),
+    [
+        (None, False, False),
+        (None, True, False),
+        (None, False, True),
+        (None, True, True),
+        ("s1", False, False),
+        ("s1", True, False),
+    ],
+)
+async def test_remember_self_improvement_end_to_end(
+    monkeypatch, flag, use_api, session_id, background, upload
+):
+    """The tool carries False through real client dispatch, including queued uploads."""
+    from email import policy
+    from email.parser import BytesParser
+
+    server = importlib.import_module("src.server")
+    requests = []
+    fake = FakeCogneeModule()
+    client = await _mock_api_client(requests) if use_api else _local_client(fake)
+    monkeypatch.setattr(server, "cognee_client", client)
+    kwargs = {"dataset_name": "ds", "session_id": session_id, "background": background}
+    if flag is not None:
+        kwargs["self_improvement"] = flag
+    if upload:
+        kwargs.update(filename="note.txt", content_base64=base64.b64encode(b"memory").decode())
+    else:
+        kwargs["data"] = "memory"
+    try:
+        result = await server.remember(**kwargs)
+        if background and not session_id:
+            await asyncio.gather(*server._background_tasks)
+        assert "Error" not in result[0].text
+        if not use_api:
+            assert len(fake.calls) == 1
+            received = fake.calls[0]
+            assert received["dataset_name"] == "ds"
+            if upload:
+                assert fake.seen_payloads == [b"memory"]
+            else:
+                assert received["data"] == "memory"
+        elif session_id:
+            assert requests[-1].url.path == "/api/v1/remember/entry"
+            received = json.loads(requests[-1].content)
+            assert received["entry"]["answer"] == "memory"
+        else:
+            request = requests[-1]
+            assert request.url.path == "/api/v1/remember"
+            message = BytesParser(policy=policy.default).parsebytes(
+                f"Content-Type: {request.headers['content-type']}\r\n\r\n".encode()
+                + request.content
+            )
+            received = {
+                part.get_param("name", header="content-disposition"): part.get_payload(
+                    decode=True
+                ).decode()
+                for part in message.iter_parts()
+            }
+            assert received["data"] == "memory"
+        if flag is False:
+            # Only an opt-out is propagated; True and omission both leave the
+            # core default in charge, so neither reaches the wire.
+            expected = "false" if use_api and not session_id else False
+            assert received["self_improvement"] == expected
+        else:
+            assert "self_improvement" not in received
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_api_pipeline_status_sends_the_requested_pipeline_name():
+    """The requested pipeline name has to reach the server.
+
+    `GET /api/v1/datasets/status` defaults to cognify_pipeline when `pipeline`
+    is omitted, so dropping the name does not fail loudly — it returns
+    cognify_pipeline's status labelled as whatever the caller asked for.
+    """
+    requests: list[httpx.Request] = []
+    client = await _mock_api_client(requests)
+    dataset_id = "11111111-1111-1111-1111-111111111111"
+
+    try:
+        await client.get_pipeline_status([dataset_id], "add_pipeline")
+    finally:
+        await client.close()
+
+    status_calls = [r for r in requests if r.url.path == "/api/v1/datasets/status"]
+    assert len(status_calls) == 1
+    params = status_calls[0].url.params
+    assert params.get_list("dataset") == [dataset_id]
+    assert params.get_list("pipeline") == ["add_pipeline"], (
+        f"pipeline name was dropped; query was {status_calls[0].url.query!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_pipeline_status_distinguishes_pipelines():
+    """Two different names must produce two different queries.
+
+    The multi-pipeline branch in cognify_status calls this once per name and
+    labels each result with the name it asked for, so identical queries would
+    report one pipeline's status under every name.
+    """
+    requests: list[httpx.Request] = []
+    client = await _mock_api_client(requests)
+    dataset_id = "11111111-1111-1111-1111-111111111111"
+
+    try:
+        await client.get_pipeline_status([dataset_id], "add_pipeline")
+        await client.get_pipeline_status([dataset_id], "code_graph_pipeline")
+    finally:
+        await client.close()
+
+    status_calls = [r for r in requests if r.url.path == "/api/v1/datasets/status"]
+    requested = [name for r in status_calls for name in r.url.params.get_list("pipeline")]
+    assert requested == ["add_pipeline", "code_graph_pipeline"]
+
+
+@pytest.mark.asyncio
+async def test_api_pipeline_status_omits_an_empty_pipeline_name():
+    """No name means the server applies its own default, as before."""
+    requests: list[httpx.Request] = []
+    client = await _mock_api_client(requests)
+    dataset_id = "11111111-1111-1111-1111-111111111111"
+
+    try:
+        await client.get_pipeline_status([dataset_id], "")
+    finally:
+        await client.close()
+
+    status_calls = [r for r in requests if r.url.path == "/api/v1/datasets/status"]
+    assert status_calls[0].url.params.get_list("pipeline") == []
+    assert status_calls[0].url.params.get_list("dataset") == [dataset_id]

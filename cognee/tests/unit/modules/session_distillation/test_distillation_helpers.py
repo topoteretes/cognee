@@ -10,13 +10,14 @@ from uuid import uuid4
 
 import pytest
 
-from cognee.exceptions import CogneeValidationError
 import cognee.modules.session_distillation.distill as distill_module
+from cognee.exceptions import CogneeValidationError
 from cognee.modules.session_distillation.distill import render_lesson_document
 from cognee.modules.session_distillation.models import (
     BATCH_CHAR_BUDGET,
     CURATOR_BLOCKS_PER_BATCH,
     MAX_CANDIDATE_CHARS,
+    MAX_QA_FEEDBACK_CHARS,
     MAX_QA_QUESTION_CHARS,
     ProposedLesson,
     WrittenLesson,
@@ -76,13 +77,18 @@ class TestLoadDistillableSessionInputs:
         )
         monkeypatch.setattr(distill_module, "get_session_manager", lambda: session_manager)
 
-        qa_rows, context_entries = await distill_module.load_distillable_session_inputs(
+        context_entries = await distill_module.load_distillable_context_entries(
+            SimpleNamespace(user_id="u-1", session_id="s-1")
+        )
+        qa_rows = await distill_module.load_session_qa_rows(
             SimpleNamespace(user_id="u-1", session_id="s-1")
         )
 
         assert len(qa_rows) == 1
         assert qa_rows[0]["question"] == "What changed?"
         assert len(context_entries) == 4
+        # The context load never touches the QA history: the cheap exits in
+        # distill_session run before any QA read.
         session_manager.get_session_context_entries.assert_awaited_once_with(
             user_id="u-1",
             session_id="s-1",
@@ -109,12 +115,62 @@ class TestLoadDistillableSessionInputs:
         )
         monkeypatch.setattr(distill_module, "get_session_manager", lambda: session_manager)
 
-        _qa_rows, context_entries = await distill_module.load_distillable_session_inputs(
+        context_entries = await distill_module.load_distillable_context_entries(
             SimpleNamespace(user_id="u-1", session_id="s-1")
         )
 
         assert len(context_entries) == 1
         assert context_entries[0].harmful_count == 0
+
+
+class TestIsEntryDistillable:
+    """C3: the gate reads clamped net helpfulness, not harmful_count == 0."""
+
+    def test_one_harmful_outvoted_by_three_helpful_is_distillable(self):
+        assert distill_module.is_entry_distillable(_context_entry(harmful_count=1, helpful_count=3))
+
+    def test_unrated_confident_entry_is_distillable(self):
+        assert distill_module.is_entry_distillable(_context_entry())
+
+    def test_net_negative_entry_is_not_distillable(self):
+        assert not distill_module.is_entry_distillable(_context_entry(harmful_count=1))
+        assert not distill_module.is_entry_distillable(
+            _context_entry(harmful_count=3, helpful_count=2)
+        )
+
+    def test_even_split_is_distillable(self):
+        assert distill_module.is_entry_distillable(_context_entry(harmful_count=2, helpful_count=2))
+
+    def test_clamp_matches_the_ranker(self):
+        # Ten harmful ratings clamp to -3; three helpful ratings cannot outvote them,
+        # exactly as the ranker would score the same entry.
+        assert not distill_module.is_entry_distillable(
+            _context_entry(harmful_count=10, helpful_count=3)
+        )
+
+    def test_low_confidence_is_not_distillable_regardless_of_votes(self):
+        assert not distill_module.is_entry_distillable(
+            _context_entry(confidence=0.5, helpful_count=5)
+        )
+
+    @pytest.mark.asyncio
+    async def test_load_keeps_entry_rated_harmful_once_but_helpful_three_times(self, monkeypatch):
+        session_manager = SimpleNamespace(
+            get_session_context_entries=AsyncMock(
+                return_value=[
+                    _context_row(harmful_count=1, helpful_count=3, content="Survives."),
+                    _context_row(harmful_count=1, content="Dropped."),
+                ]
+            ),
+            get_session=AsyncMock(return_value=[]),
+        )
+        monkeypatch.setattr(distill_module, "get_session_manager", lambda: session_manager)
+
+        context_entries = await distill_module.load_distillable_context_entries(
+            SimpleNamespace(user_id="u-1", session_id="s-1")
+        )
+
+        assert [entry.content for entry in context_entries] == ["Survives."]
 
 
 class TestBuildCuratorBatches:
@@ -128,6 +184,31 @@ class TestBuildCuratorBatches:
         assert "User: How do I update firmware?" in batches[0]
         assert f"Candidate {context_entries[0].id}" in batches[0]
         assert "Flashing wipes calibration." in batches[0]
+
+    def test_feedback_text_is_appended_to_the_turn_block(self):
+        batch = distill_module.build_curator_batches(
+            [_qa_row("Which port?", "8080.", feedback_text="Wrong, it is 9000.")], []
+        )[0]
+
+        assert (
+            batch
+            == "User: Which port?\nAssistant: 8080.\nUser feedback on this answer: Wrong, it is 9000."
+        )
+
+    def test_turn_without_feedback_has_no_feedback_line(self):
+        batch = distill_module.build_curator_batches([_qa_row("Q?", "A.")], [])[0]
+
+        assert "User feedback on this answer" not in batch
+
+    def test_feedback_text_is_normalized_and_capped(self):
+        batch = distill_module.build_curator_batches(
+            [_qa_row("Q?", "A.", feedback_text="  too   " + "w" * (MAX_QA_FEEDBACK_CHARS * 2))],
+            [],
+        )[0]
+
+        feedback_line = batch.split("User feedback on this answer: ", 1)[1]
+        assert feedback_line.startswith("too w")
+        assert len(feedback_line) == MAX_QA_FEEDBACK_CHARS
 
     def test_candidate_label_includes_profile_and_section(self):
         qa_entry = _context_entry(section="rules", content="Be concise.")
@@ -241,7 +322,7 @@ class TestProfileSymmetry:
 
         # (3) Distillation sees both profiles.
         monkeypatch.setattr(distill_module, "get_session_manager", lambda: sm)
-        _qa_rows, entries = await distill_module.load_distillable_session_inputs(
+        entries = await distill_module.load_distillable_context_entries(
             SimpleNamespace(user_id="u", session_id="s")
         )
         assert {entry.context_profile for entry in entries} == {"qa", "agent"}
@@ -257,10 +338,10 @@ class TestRenderLessonDocument:
                 why_learned="Learned while planning the audit trip",
             ),
             session_id="s-1",
-            distilled_on="2026-06-11",
         )
 
-        assert document.startswith("# Session learning — 2026-06-11 (session s-1)")
+        assert document.startswith("# Session learning (session s-1)")
+        assert "2026" not in document  # no run date: identical lessons must hash identically
         assert "RoutePulse predicts delivery delays for European freight." in document
         assert "(Learned while planning the audit trip.)" in document
 
@@ -268,7 +349,6 @@ class TestRenderLessonDocument:
         document = render_lesson_document(
             WrittenLesson(accept=True, statement="Talk to Priya Tan before Mateo Reed."),
             session_id="s-1",
-            distilled_on="2026-06-11",
         )
         assert "## " not in document
         assert document.count("# Session learning") == 1
@@ -277,7 +357,6 @@ class TestRenderLessonDocument:
         document = render_lesson_document(
             WrittenLesson(accept=True, statement="Plain statement."),
             session_id="s-1",
-            distilled_on="2026-06-11",
         )
         assert "Plain statement.\n" in document
         assert "()" not in document

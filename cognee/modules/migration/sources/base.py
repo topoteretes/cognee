@@ -11,11 +11,26 @@ encapsulated in the source object.
 """
 
 from abc import ABC, abstractmethod
-from typing import AsyncIterator, Optional
+from collections.abc import AsyncIterator
+from pathlib import Path
 
 from cognee.modules.migration.cogx import COGXRecord
 
 IMPORT_MODES = ("re-derive", "preserve", "hybrid")
+
+
+def read_export_file(path: str | Path) -> str:
+    """Read an export file through the local-path allowlist.
+
+    Export paths can arrive from outside the SDK (CLI arguments, callers
+    forwarding request data), so they take the same containment check as
+    ingestion's local-file reads: symlink-safe resolution, confined to
+    ``COGNEE_ALLOWED_LOCAL_FILE_ROOTS`` when that allowlist is set (unset by
+    default, meaning any local path).
+    """
+    from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+
+    return resolve_local_path(path, must_exist=True).read_text(encoding="utf-8")
 
 
 class MemorySource(ABC):
@@ -49,7 +64,7 @@ class MemorySource(ABC):
     # the per-dataset databases land under the right identity. None (all
     # other sources / archives without the file) keeps today's behavior:
     # the importing user owns everything.
-    social_layer: Optional[dict] = None
+    social_layer: dict | None = None
 
     # Cognee-origin archives only (COGXArchiveSource sets it from the
     # manifest): the SOURCE store's stamped data-migration revision at export
@@ -59,7 +74,7 @@ class MemorySource(ABC):
     # rows. External systems (Mem0, Zep, Letta, ...) leave it None: their
     # records are written entirely by current-code pipelines, so the target's
     # own stamp is already correct.
-    migration_revision: Optional[str] = None
+    migration_revision: str | None = None
 
     def __init__(self, mode: str = "re-derive"):
         if mode not in IMPORT_MODES:
