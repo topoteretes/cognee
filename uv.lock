@@ -1419,6 +1419,13 @@ gmail = [
     { name = "google-auth-oauthlib" },
     { name = "pandas" },
 ]
+google-drive = [
+    { name = "dlt", extra = ["sqlalchemy"] },
+    { name = "google-api-python-client" },
+    { name = "google-auth" },
+    { name = "google-auth-oauthlib" },
+    { name = "pandas" },
+]
 groq = [
     { name = "groq" },
 ]
@@ -1527,6 +1534,7 @@ requires-dist = [
     { name = "diskcache", specifier = ">=5.6.3" },
     { name = "dlt", extras = ["sqlalchemy"], marker = "extra == 'dlt'", specifier = ">=1.9.0,<2" },
     { name = "dlt", extras = ["sqlalchemy"], marker = "extra == 'gmail'", specifier = ">=1.9.0,<2" },
+    { name = "dlt", extras = ["sqlalchemy"], marker = "extra == 'google-drive'", specifier = ">=1.9.0,<2" },
     { name = "docling", marker = "extra == 'docling-full'", specifier = ">=2.115,<3" },
     { name = "docling-slim", extras = ["convert-core", "format-pdf", "format-office", "format-html", "format-email", "format-markdown", "format-latex"], marker = "extra == 'docling'", specifier = ">=2.115,<3" },
     { name = "enola-cli", specifier = "==0.4.21" },
@@ -1540,8 +1548,11 @@ requires-dist = [
     { name = "gitpython", marker = "extra == 'dev'", specifier = ">=3.1.43,<4" },
     { name = "gliner2", extras = ["local"], marker = "extra == 'gliner'", specifier = ">=2.0.0,<3" },
     { name = "google-api-python-client", marker = "extra == 'gmail'", specifier = ">=2.100.0,<3" },
+    { name = "google-api-python-client", marker = "extra == 'google-drive'", specifier = ">=2.100.0,<3" },
     { name = "google-auth", marker = "extra == 'gmail'", specifier = ">=2.23.0,<3" },
+    { name = "google-auth", marker = "extra == 'google-drive'", specifier = ">=2.23.0,<3" },
     { name = "google-auth-oauthlib", marker = "extra == 'gmail'", specifier = ">=1.1.0,<2" },
+    { name = "google-auth-oauthlib", marker = "extra == 'google-drive'", specifier = ">=1.1.0,<2" },
     { name = "groq", marker = "extra == 'groq'", specifier = ">=0.8.0,<1.0.0" },
     { name = "gunicorn", specifier = ">=20.1.0,<24" },
     { name = "instructor", specifier = ">=1.9.1,<1.15.3" },
@@ -1589,6 +1600,7 @@ requires-dist = [
     { name = "pandas", marker = "extra == 'dlt'", specifier = ">=2.2.2,<3.0.0" },
     { name = "pandas", marker = "extra == 'evals'", specifier = ">=2.2.2,<3.0.0" },
     { name = "pandas", marker = "extra == 'gmail'", specifier = ">=2.2.2,<3.0.0" },
+    { name = "pandas", marker = "extra == 'google-drive'", specifier = ">=2.2.2,<3.0.0" },
     { name = "pgvector", marker = "extra == 'postgres'", specifier = ">=0.3.5,<0.4" },
     { name = "pgvector", marker = "extra == 'postgres-binary'", specifier = ">=0.3.5,<0.4" },
     { name = "playwright", marker = "extra == 'scraping'", specifier = ">=1.9.0" },
@@ -1636,7 +1648,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.34.0,<1.0.0" },
     { name = "websockets", specifier = ">=15.0.1,<16.0.0" },
 ]
-provides-extras = ["api", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "turso", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "aws", "dlt", "gmail", "baml", "dev", "debug", "redis", "tracing", "docling", "docling-full", "gliner", "rapidocr"]
+provides-extras = ["api", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "turso", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "aws", "dlt", "gmail", "google-drive", "baml", "dev", "debug", "redis", "tracing", "docling", "docling-full", "gliner", "rapidocr"]
 
 [package.metadata.requires-dev]
 dev = [

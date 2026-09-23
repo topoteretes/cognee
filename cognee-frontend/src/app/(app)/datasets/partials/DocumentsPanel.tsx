@@ -11,12 +11,15 @@ import UploadProgressBar from "./UploadProgressBar";
 import ScrollLoader from "./ScrollLoader";
 import { MAX_RENDERED_ROWS } from "@/modules/datasets/maxRenderedRows";
 import DocumentList, { type DocRow } from "./DocumentList";
+import ProcessingSummary from "./ProcessingSummary";
+import type { DatasetProcessing } from "@/modules/datasets/useDatasetProcessing";
 
 // The Documents column of the brains finder: hidden file input, drag-and-drop,
 // header with add/paste actions, upload progress/error banners, and the doc
 // list (or the appropriate empty/loading state). Owns the file input ref, the
 // drag counter, and the drag-over highlight — all purely presentational.
 export default function DocumentsPanel<T extends DocRow>({
+  processingCounts, processingCountsError = false, processingFailed = false, onRefreshProcessing,
   selectedId,
   selectedName,
   docsLoading,
@@ -38,6 +41,10 @@ export default function DocumentsPanel<T extends DocRow>({
   onRetryBuild,
   onRetryDocs,
 }: {
+  processingCounts?: DatasetProcessing;
+  processingCountsError?: boolean;
+  processingFailed?: boolean;
+  onRefreshProcessing?: () => void;
   selectedId: string | null;
   selectedName: string | null;
   docsLoading: boolean;
@@ -98,7 +105,7 @@ export default function DocumentsPanel<T extends DocRow>({
               <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.55)", letterSpacing: "0.08em", textTransform: "uppercase" }}>{selectedName}</span>
               <span style={{ fontSize: 11, color: "rgba(255,255,255,0.2)" }}>·</span>
               <span style={{ fontSize: 11, color: "rgba(237,236,234,0.35)", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                {docsLoading ? <SkeletonBar width={36} height={8} /> : processing ? "processing" : <>{displayedCount} doc{displayedCount !== 1 ? "s" : ""}</>}
+                {docsLoading ? <SkeletonBar width={36} height={8} /> : <>{processingCounts?.total ?? displayedCount} imported</>}
               </span>
               <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
                 <button onClick={() => fileInputRef.current?.click()} className="hover:bg-[#5A0ED6] cursor-pointer" style={{ background: "#6510F4", color: "#fff", border: "none", borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 500, cursor: "pointer" }}>Add files</button>
@@ -109,6 +116,8 @@ export default function DocumentsPanel<T extends DocRow>({
             <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.55)", letterSpacing: "0.08em", textTransform: "uppercase" }}>Documents</span>
           )}
         </div>
+
+        {selectedId && onRefreshProcessing && <ProcessingSummary data={processingCounts} error={processingCountsError} failed={processingFailed} running={processing} onRefresh={onRefreshProcessing} />}
 
         {/* Estimate → upload → build all report through one bar (progress.stage);
             gate on the stage, not isUploading, so the estimate phase — which
