@@ -3,7 +3,7 @@
 from contextlib import ExitStack
 from importlib import import_module
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
 
@@ -20,6 +20,12 @@ def sync_mocks():
             token=AsyncMock(return_value="token"),
         )
         for patcher in (
+            patch.object(
+                sync_module.ingestion,
+                "require_active_credential",
+                AsyncMock(side_effect=lambda credential: credential),
+            ),
+            patch.object(sync_module.ingestion, "retire_resources", AsyncMock()),
             patch.object(sync_module.ingestion, "source_factory", return_value=mocks.source),
             patch.object(sync_module.ingestion, "build_service", return_value="service"),
             patch("cognee.modules.integrations.gmail.adapter.access_token_for", mocks.token),
@@ -45,7 +51,12 @@ def credential(**metadata):
 @pytest.mark.parametrize("labels", [None, ["INBOX"], ["INBOX", "Label_1"]])
 async def test_sdk_source_receives_the_exact_scope(labels, sync_mocks):
     await sync_module.sync_gmail(credential(selected_label_ids=labels))
-    sync_mocks.source.assert_called_once_with(label_ids=labels, service="service")
+    sync_mocks.source.assert_called_once_with(
+        label_ids=labels,
+        service="service",
+        check_active=ANY,
+        resource_name=sync_module.ingestion.resource_name("gmail", credential()),
+    )
     sync_mocks.remember.assert_awaited_once_with(
         "dlt-source",
         dataset_name=sync_module.dataset_name_for_account("person@example.com", "subject"),

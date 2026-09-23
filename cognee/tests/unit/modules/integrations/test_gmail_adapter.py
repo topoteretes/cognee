@@ -8,6 +8,12 @@ import pytest
 from cognee.modules.integrations.gmail import adapter, client
 
 
+@pytest.fixture(autouse=True)
+def active_credential():
+    with patch.object(adapter, "require_active_credential", AsyncMock(side_effect=lambda c: c)):
+        yield
+
+
 @pytest.mark.asyncio
 async def test_label_picker_uses_gmail_client_with_current_access_token():
     credential = SimpleNamespace(token_expires_at=None)
@@ -48,7 +54,9 @@ async def test_expired_token_is_refreshed_before_listing_labels():
     refreshed = SimpleNamespace(token_expires_at=None)
     with (
         patch.object(adapter.GoogleGmailIntegration, "refresh", AsyncMock()) as refresh,
-        patch.object(adapter, "get_credential_by_account", AsyncMock(return_value=refreshed)),
+        patch.object(
+            adapter, "require_active_credential", AsyncMock(side_effect=[credential, refreshed])
+        ),
         patch.object(
             adapter, "decrypt_token_payload", return_value={"access_token": "fresh-token"}
         ) as decrypt,

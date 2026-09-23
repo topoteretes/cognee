@@ -33,9 +33,9 @@ from urllib.parse import urlencode
 from cognee.modules.integrations.base import OAuthInstallation, OAuthIntegration
 from cognee.modules.integrations.credentials import (
     decrypt_token_payload,
-    get_credential_by_account,
-    revoke_credential_by_account,
-    upsert_credential,
+    require_active_credential,
+    revoke_credential_if_current,
+    update_refreshed_credential,
 )
 from cognee.modules.integrations.google_drive import client
 from cognee.modules.integrations.google_drive.google_drive_settings import (
@@ -246,7 +246,7 @@ class GoogleDriveIntegration(OAuthIntegration):
             )
         except client.GoogleAuthError as error:
             if error.code == "invalid_grant":
-                await revoke_credential_by_account(self.provider, credential.provider_account_id)
+                await revoke_credential_if_current(credential)
                 logger.warning(
                     "Google Drive access for account %s was revoked at the provider; "
                     "local credential revoked",
@@ -254,10 +254,8 @@ class GoogleDriveIntegration(OAuthIntegration):
                 )
             raise
 
-        await upsert_credential(
-            provider=self.provider,
-            user_id=credential.user_id,
-            provider_account_id=credential.provider_account_id,
+        await update_refreshed_credential(
+            credential,
             # Google returns no new refresh token: the original stays valid
             # until the account revokes it, so it is carried forward.
             token_payload={
@@ -265,17 +263,7 @@ class GoogleDriveIntegration(OAuthIntegration):
                 "refresh_token": refresh_token,
             },
             token_expires_at=_expires_at(refreshed.get("expires_in")),
-            # Every one of these is assigned unconditionally by
-            # upsert_credential, so anything left out is cleared, on a path
-            # that runs hourly. provider_metadata matters most: the account's
-            # email lives there and the dataset name is derived from it, so
-            # dropping it would send the next sync to a different dataset and
-            # split the account's memory in two.
-            account_label=credential.account_label,
-            auth_type=credential.auth_type,
             scopes=refreshed.get("scope") or credential.scopes,
-            provider_metadata=credential.provider_metadata,
-            workspace_id=credential.workspace_id,
         )
 
     async def revoke_remote(self, credential: IntegrationCredential) -> None:
@@ -312,6 +300,7 @@ async def access_token_for(credential: IntegrationCredential) -> str:
     have to reimplement the same expiry check, and getting it wrong shows up
     as an intermittent 401 rather than an error anyone can act on.
     """
+    credential = await require_active_credential(credential)
     expires_at = credential.token_expires_at
     if expires_at is not None:
         # A naive timestamp comes back from SQLite, which stores no timezone;
@@ -323,12 +312,7 @@ async def access_token_for(credential: IntegrationCredential) -> str:
             # refresh() writes through its own session, so the instance we
             # were handed still carries the pre-rotation ciphertext. Read the
             # row back rather than decrypting a stale one.
-            credential = (
-                await get_credential_by_account(
-                    GoogleDriveIntegration.provider, credential.provider_account_id
-                )
-                or credential
-            )
+            credential = await require_active_credential(credential)
 
     token = decrypt_token_payload(credential).get("access_token")
     if not token:

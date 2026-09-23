@@ -61,7 +61,7 @@ from __future__ import annotations
 
 import base64
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from cognee.shared.logging_utils import get_logger
@@ -325,14 +325,28 @@ def full_backfill(
     baseline_history_id = _mailbox_history_id(service)
 
     count = 0
+    known_ids = set(state.get("known_ids", []))
+    present_ids = set()
     for message_id in _list_message_ids(service, label_ids, max_results):
         message = _get_message(service, message_id, stats)
         if message is None:
             continue
         count += 1
+        present_ids.add(message_id)
         yield parse_message(message)
 
-    if baseline_history_id is not None:
+    # A capped or failed scan is not evidence of absence. Only reconcile after
+    # exhausting a complete listing; exceptions never reach this checkpoint.
+    if max_results is None:
+        for message_id in sorted(known_ids - present_ids):
+            if stats is not None:
+                stats["deleted"] = stats.get("deleted", 0) + 1
+            yield _deleted_row(message_id)
+        state["known_ids"] = sorted(present_ids)
+    else:
+        state["known_ids"] = sorted(known_ids | present_ids)
+        state.pop("last_history_id", None)
+    if baseline_history_id is not None and max_results is None:
         state["last_history_id"] = baseline_history_id
     logger.info("Full backfill yielded %d message(s).", count)
 
@@ -423,6 +437,7 @@ def incremental_fetch(
     seen_added -= seen_deleted
 
     added_count = 0
+    known_ids = set(state.get("known_ids", []))
     for msg_id in seen_added:
         message = _get_message(service, msg_id, stats)
         if message is None:
@@ -446,6 +461,7 @@ def incremental_fetch(
             seen_deleted.add(msg_id)
             continue
         added_count += 1
+        known_ids.add(msg_id)
         yield parse_message(message)
 
     for msg_id in seen_deleted:
@@ -453,6 +469,7 @@ def incremental_fetch(
             stats["deleted"] = stats.get("deleted", 0) + 1
         yield _deleted_row(msg_id)
 
+    state["known_ids"] = sorted(known_ids - seen_deleted)
     state["last_history_id"] = str(newest_history_id)
     logger.info(
         "Incremental sync yielded %d added/changed and %d deleted message(s).",
@@ -466,6 +483,8 @@ def incremental_fetch(
 # ---------------------------------------------------------------------------
 def gmail_source(
     *,
+    resource_name: str = "gmail_messages",
+    check_active: Callable[[], None] | None = None,
     credentials_path: str = "credentials.json",
     token_path: str = "token.json",
     label_ids: list[str] | None = None,
@@ -475,6 +494,8 @@ def gmail_source(
     """Return a ``dlt`` resource that yields Gmail messages for ``remember``.
 
     Args:
+        resource_name: Stable, account-specific name when sharing a dlt pipeline.
+        check_active: Optional host authorization checkpoint during extraction.
         credentials_path: Path to the OAuth client-secret JSON (Desktop app).
         token_path: Where the cached user token is read/written.
         label_ids: Restrict to these Gmail label ids (e.g. ``["INBOX"]``).
@@ -506,7 +527,7 @@ def gmail_source(
     stats: dict[str, int] = {}
 
     @dlt.resource(
-        name="gmail_messages",
+        name=resource_name,
         primary_key="id",
         write_disposition="merge",
         # _deleted is a boolean hard-delete marker: rows where it is True are
@@ -527,15 +548,16 @@ def gmail_source(
         same_scope = resource_state.get("label_scope") == scope
 
         if same_scope and resource_state.get("last_history_id"):
-            yield from incremental_fetch(client, resource_state, label_ids=label_ids, stats=stats)
+            rows = incremental_fetch(client, resource_state, label_ids=label_ids, stats=stats)
         else:
-            yield from full_backfill(
+            rows = full_backfill(
                 client,
                 resource_state,
                 label_ids=label_ids,
                 max_results=max_results,
                 stats=stats,
             )
+        yield from dlt_utils.guarded_rows(rows, check_active)
         # Do not persist the new scope if extraction fails midway through.
         resource_state["label_scope"] = scope
 
@@ -544,5 +566,6 @@ def gmail_source(
     # marker Cognee would ingest the DLT table as one structured object and
     # never run normal document cognification or orphan cleanup.
     setattr(resource, DOCUMENT_SOURCE_ATTR, "gmail")
+    setattr(resource, dlt_utils.PIPELINE_SCOPE_ATTR, resource_name)
     resource.cognee_sync_stats = stats
     return resource

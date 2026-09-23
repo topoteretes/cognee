@@ -8,9 +8,9 @@ from urllib.parse import urlencode
 from cognee.modules.integrations.base import OAuthInstallation, OAuthIntegration
 from cognee.modules.integrations.credentials import (
     decrypt_token_payload,
-    get_credential_by_account,
-    revoke_credential_by_account,
-    upsert_credential,
+    require_active_credential,
+    revoke_credential_if_current,
+    update_refreshed_credential,
 )
 from cognee.modules.integrations.gmail import client as gmail_client
 from cognee.modules.integrations.gmail.gmail_settings import GoogleGmailSettings, require
@@ -140,22 +140,16 @@ class GoogleGmailIntegration(OAuthIntegration):
             )
         except client.GoogleAuthError as error:
             if error.code == "invalid_grant":
-                await revoke_credential_by_account(self.provider, credential.provider_account_id)
+                await revoke_credential_if_current(credential)
             raise
 
-        await upsert_credential(
-            provider=self.provider,
-            user_id=credential.user_id,
-            provider_account_id=credential.provider_account_id,
+        await update_refreshed_credential(
+            credential,
             token_payload={
                 "access_token": refreshed["access_token"],
                 "refresh_token": refresh_token,
             },
-            workspace_id=credential.workspace_id,
-            account_label=credential.account_label,
-            auth_type=credential.auth_type,
             scopes=refreshed.get("scope") or credential.scopes,
-            provider_metadata=credential.provider_metadata,
             token_expires_at=_expires_at(refreshed.get("expires_in")),
         )
 
@@ -178,18 +172,14 @@ def _expires_at(expires_in: Any) -> datetime | None:
 
 
 async def access_token_for(credential: IntegrationCredential) -> str:
+    credential = await require_active_credential(credential)
     expires_at = credential.token_expires_at
     if expires_at is not None:
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
         if expires_at - _REFRESH_MARGIN <= datetime.now(timezone.utc):
             await GoogleGmailIntegration().refresh(credential)
-            credential = (
-                await get_credential_by_account(
-                    GoogleGmailIntegration.provider, credential.provider_account_id
-                )
-                or credential
-            )
+            credential = await require_active_credential(credential)
     token = decrypt_token_payload(credential).get("access_token")
     if not token:
         raise RuntimeError(

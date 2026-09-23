@@ -100,6 +100,7 @@ class _History:
         self._svc = svc
 
     def list(self, **kwargs):
+        self._svc.history_calls.append(kwargs)
         return _Request(self._svc.history_response)
 
 
@@ -132,6 +133,7 @@ class FakeGmailService:
         # Map of message id -> HTTP status to raise from messages().get(), used
         # to simulate transient (non-404) fetch failures.
         self.get_errors = get_errors or {}
+        self.history_calls = []
 
     def users(self):
         return _Users(self)
@@ -204,6 +206,80 @@ def test_full_backfill_respects_max_results():
     svc = FakeGmailService(messages=[_make_message(str(i)) for i in range(10)])
     rows = list(full_backfill(svc, {}, max_results=3))
     assert len(rows) == 3
+
+
+def test_backfill_reconciles_missing_messages_after_history_expiry():
+    state = {}
+    list(full_backfill(FakeGmailService(messages=[_make_message("gone")]), state))
+    service = FakeGmailService(history_response=_HttpError(404), profile_history_id="900")
+    assert list(incremental_fetch(service, state)) == [{"id": "gone", "_deleted": True}]
+    assert state["known_ids"] == []
+    assert state["last_history_id"] == "900"
+
+
+def test_capped_backfill_does_not_delete_or_establish_incremental_baseline():
+    state = {"known_ids": ["keep"], "last_history_id": "old"}
+    service = FakeGmailService(messages=[_make_message("new")])
+    rows = list(full_backfill(service, state, max_results=1))
+    assert not any(row["_deleted"] for row in rows)
+    assert state["known_ids"] == ["keep", "new"]
+    assert "last_history_id" not in state
+
+
+def test_failed_backfill_preserves_known_ids_and_does_not_emit_deletions():
+    state = {"known_ids": ["keep"], "last_history_id": "100"}
+    service = FakeGmailService(messages=[_make_message("new")], get_errors={"new": 503})
+    with pytest.raises(_HttpError):
+        list(full_backfill(service, state))
+    assert state == {"known_ids": ["keep"], "last_history_id": "100"}
+
+
+def test_incremental_ids_are_included_in_the_next_backfill_reconciliation():
+    state = {"known_ids": [], "last_history_id": "100"}
+    service = FakeGmailService(
+        messages=[_make_message("new")],
+        history_response={
+            "history": [{"messagesAdded": [{"message": {"id": "new"}}]}],
+            "historyId": "200",
+        },
+    )
+    list(incremental_fetch(service, state))
+    assert list(full_backfill(FakeGmailService(), state)) == [{"id": "new", "_deleted": True}]
+
+
+def test_accounts_alternating_in_one_pipeline_keep_independent_cursors(tmp_path):
+    from types import SimpleNamespace
+
+    from cognee.modules.integrations.google.ingestion import resource_name
+    from cognee.tasks.ingestion.dlt_utils import pipeline_name_for_source
+
+    dlt = pytest.importorskip("dlt")
+    names = {
+        account: resource_name(
+            "gmail", SimpleNamespace(user_id="owner", provider_account_id=account)
+        )
+        for account in ["a", "b"]
+    }
+    assert names["a"] != names["b"]
+
+    def sync(account, service):
+        source = gmail_source(service=service, resource_name=names[account])
+        pipeline = dlt.pipeline(
+            pipeline_name=pipeline_name_for_source(source, f"mailbox_{account}"),
+            dataset_name=f"mailbox_{account}",
+            pipelines_dir=str(tmp_path / "pipelines"),
+            destination=dlt.destinations.sqlalchemy(f"sqlite:///{tmp_path / (account + '.db')}"),
+        )
+        pipeline.run(source)
+
+    sync("a", FakeGmailService(messages=[_make_message("a1")], profile_history_id="100"))
+    sync("b", FakeGmailService(messages=[_make_message("b1")], profile_history_id="900"))
+    account_a = FakeGmailService(profile_history_id="101")
+    sync("a", account_a)
+    assert account_a.history_calls[0]["startHistoryId"] == "100"
+    account_b = FakeGmailService(profile_history_id="901")
+    sync("b", account_b)
+    assert account_b.history_calls[0]["startHistoryId"] == "900"
 
 
 # ---------------------------------------------------------------------------
@@ -479,7 +555,6 @@ def test_e2e_changing_labels_backfills_existing_messages(tmp_path):
     pipeline.run(gmail_source(service=service, label_ids=["Label_project"]))
     with pipeline.sql_client() as sql:
         assert sql.execute_sql("SELECT id FROM gmail_messages ORDER BY id") == [
-            ("inbox",),
             ("project",),
         ]
 

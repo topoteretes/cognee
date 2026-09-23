@@ -38,6 +38,14 @@ _PERSONAL_USERINFO = {"sub": "110000000000000000002", "email": "someone@gmail.co
 
 
 @pytest.fixture(autouse=True)
+def active_credential():
+    with patch.object(
+        adapter_module, "require_active_credential", AsyncMock(side_effect=lambda c: c)
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _settings(monkeypatch):
     settings = (
         "cognee.modules.integrations.google_drive.google_drive_settings.google_drive_settings"
@@ -144,7 +152,7 @@ def test_parse_installation_survives_a_missing_refresh_token():
 
 
 @pytest.mark.asyncio
-async def test_refresh_carries_forward_every_field_upsert_would_otherwise_clear():
+async def test_refresh_updates_only_tokens_and_scopes():
     credential = make_credential(
         provider_metadata={"email": "goran@topoteretes.com", "account_type": "workspace"},
         workspace_id="workspace-1",
@@ -160,20 +168,14 @@ async def test_refresh_carries_forward_every_field_upsert_would_otherwise_clear(
             "refresh_access_token",
             AsyncMock(return_value={"access_token": "ya29.new", "expires_in": 3599}),
         ),
-        patch.object(adapter_module, "upsert_credential", AsyncMock()) as upsert,
+        patch.object(adapter_module, "update_refreshed_credential", AsyncMock()) as upsert,
     ):
         await GoogleDriveIntegration().refresh(credential)
 
     written = upsert.await_args.kwargs
-    # upsert_credential assigns every one of these unconditionally, so any of
-    # them left out is cleared on a path that runs hourly. provider_metadata
-    # is the one that hurts: the dataset name is derived from the email it
-    # holds, so losing it sends the next sync to a different dataset.
-    assert written["account_label"] == credential.account_label
-    assert written["auth_type"] == credential.auth_type
+    assert upsert.await_args.args == (credential,)
+    assert set(written) == {"token_payload", "token_expires_at", "scopes"}
     assert written["scopes"] == credential.scopes
-    assert written["provider_metadata"] == credential.provider_metadata
-    assert written["workspace_id"] == credential.workspace_id
     # Google issues no new refresh token, so the stored one is carried over.
     assert written["token_payload"] == {
         "access_token": "ya29.new",
@@ -195,7 +197,7 @@ async def test_refresh_revokes_the_credential_when_the_account_pulled_access():
             "refresh_access_token",
             AsyncMock(side_effect=GoogleAuthError("token refresh", "invalid_grant")),
         ),
-        patch.object(adapter_module, "revoke_credential_by_account", AsyncMock()) as revoke,
+        patch.object(adapter_module, "revoke_credential_if_current", AsyncMock()) as revoke,
         pytest.raises(GoogleAuthError),
     ):
         await GoogleDriveIntegration().refresh(credential)
@@ -203,7 +205,7 @@ async def test_refresh_revokes_the_credential_when_the_account_pulled_access():
     # There is no webhook telling us the account revoked us, so an
     # invalid_grant is the only signal, and it must not leave the connection
     # showing as healthy.
-    revoke.assert_awaited_once_with("google_drive", credential.provider_account_id)
+    revoke.assert_awaited_once_with(credential)
 
 
 @pytest.mark.asyncio
@@ -220,7 +222,7 @@ async def test_refresh_does_not_revoke_on_a_transient_failure():
             "refresh_access_token",
             AsyncMock(side_effect=GoogleAuthError("token refresh", "http_503")),
         ),
-        patch.object(adapter_module, "revoke_credential_by_account", AsyncMock()) as revoke,
+        patch.object(adapter_module, "revoke_credential_if_current", AsyncMock()) as revoke,
         pytest.raises(GoogleAuthError),
     ):
         await GoogleDriveIntegration().refresh(credential)
@@ -253,7 +255,7 @@ async def test_access_token_for_rotates_an_expiring_token_and_rereads_the_row():
     with (
         patch.object(GoogleDriveIntegration, "refresh", AsyncMock()) as refresh,
         patch.object(
-            adapter_module, "get_credential_by_account", AsyncMock(return_value=fresh)
+            adapter_module, "require_active_credential", AsyncMock(side_effect=[stale, fresh])
         ) as reread,
         patch.object(
             adapter_module, "decrypt_token_payload", return_value={"access_token": "ya29.new"}
@@ -264,7 +266,7 @@ async def test_access_token_for_rotates_an_expiring_token_and_rereads_the_row():
     refresh.assert_awaited_once()
     # The row has to be re-read: refresh writes through its own session, so
     # the instance we were handed still holds the pre-rotation ciphertext.
-    reread.assert_awaited_once()
+    assert reread.await_count == 2
     decrypt.assert_called_once_with(fresh)
     assert token == "ya29.new"
 

@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.integrations.crypto import decrypt_credentials, encrypt_credentials
@@ -24,6 +24,75 @@ logger = logging.getLogger(__name__)
 
 STATUS_ACTIVE = "active"
 STATUS_REVOKED = "revoked"
+
+
+class CredentialInactiveError(RuntimeError):
+    """The connection was disconnected or replaced while work was in flight."""
+
+
+async def require_active_credential(credential: IntegrationCredential) -> IntegrationCredential:
+    """Reload authorization; a detached row is not proof of a live connection."""
+    current = await get_credential_by_account(credential.provider, credential.provider_account_id)
+    if (
+        current is None
+        or current.status != STATUS_ACTIVE
+        or current.id != credential.id
+        or current.user_id != credential.user_id
+        or current.workspace_id != credential.workspace_id
+    ):
+        raise CredentialInactiveError("Google connection is no longer active for this owner")
+    return current
+
+
+def _current_token_conditions(credential: IntegrationCredential):
+    # Compare the encrypted token snapshot too: reconnect may reuse the same
+    # row and owner while an old refresh (or invalid_grant response) is pending.
+    return (
+        IntegrationCredential.id == credential.id,
+        IntegrationCredential.status == STATUS_ACTIVE,
+        IntegrationCredential.user_id == credential.user_id,
+        IntegrationCredential.workspace_id == credential.workspace_id,
+        IntegrationCredential.ciphertext == credential.ciphertext,
+        IntegrationCredential.nonce == credential.nonce,
+    )
+
+
+async def update_refreshed_credential(
+    credential: IntegrationCredential,
+    *,
+    token_payload: dict[str, Any],
+    token_expires_at: datetime | None,
+    scopes: str | None,
+) -> None:
+    """Atomically refresh an active token; never install/reactivate a connection."""
+    ciphertext, nonce, version, key_id = encrypt_credentials(token_payload)
+    async with get_relational_engine().get_async_session() as db:
+        result = await db.execute(
+            update(IntegrationCredential)
+            .where(*_current_token_conditions(credential))
+            .values(
+                ciphertext=ciphertext,
+                nonce=nonce,
+                encryption_version=version,
+                key_id=key_id,
+                token_expires_at=token_expires_at,
+                scopes=scopes,
+            )
+        )
+        await db.commit()
+        if result.rowcount != 1:
+            raise CredentialInactiveError("Connection changed while refreshing its token")
+
+
+async def revoke_credential_if_current(credential: IntegrationCredential) -> None:
+    """An old invalid_grant must not revoke a newly reconnected account."""
+    async with get_relational_engine().get_async_session() as db:
+        await db.execute(
+            update(IntegrationCredential)
+            .where(*_current_token_conditions(credential))
+            .values(status=STATUS_REVOKED, revoked_at=datetime.now(timezone.utc))
+        )
+        await db.commit()
 
 
 class _Unset:

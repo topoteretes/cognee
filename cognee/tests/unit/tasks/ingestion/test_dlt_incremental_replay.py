@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from cognee.tasks.ingestion.dlt_utils import DOCUMENT_SOURCE_ATTR
+from cognee.tasks.ingestion.dlt_utils import DOCUMENT_SOURCE_ATTR, PIPELINE_SCOPE_ATTR
 
 ingest = importlib.import_module("cognee.tasks.ingestion.ingest_dlt_source")
 
@@ -47,6 +47,7 @@ async def test_no_change_sync_replays_its_own_documents_only(tmp_path, monkeypat
 
         resource = documents()
         setattr(resource, DOCUMENT_SOURCE_ATTR, "google_drive")
+        setattr(resource, PIPELINE_SCOPE_ATTR, name)
         return resource
 
     async def run(name, rows):

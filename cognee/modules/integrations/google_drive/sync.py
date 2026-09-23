@@ -8,6 +8,7 @@ import logging
 import re
 from hashlib import sha256
 
+from cognee.modules.integrations.credentials import CredentialInactiveError
 from cognee.modules.integrations.google import ingestion
 from cognee.modules.integrations.google_drive import client
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
@@ -45,6 +46,9 @@ async def _sync_source(
 
     selected = (credential.provider_metadata or {}).get("selected_folder_ids")
     if selected == []:
+        await ingestion.retire_resources(
+            "google_drive", credential, _dataset_name(credential), set()
+        )
         return SYNC_STATUS_OK, {"scanned": 0, "skipped": 0, "failed": 0}
     if selected is not None and (
         not isinstance(selected, list)
@@ -58,6 +62,7 @@ async def _sync_source(
     shared_drive_ids: set[str] = set()
     page_token = None
     while True:
+        await ingestion.require_active_credential(credential)
         page = await client.list_drives(access_token, page_token)
         shared_drive_ids.update(
             str(drive["id"]) for drive in page.get("drives", []) or [] if drive.get("id")
@@ -67,19 +72,21 @@ async def _sync_source(
             break
     folder_ids = list(dict.fromkeys(selected or ["root", *sorted(shared_drive_ids)]))
     owner = await get_user(credential.user_id)
+    retained = set()
     for folder_id in folder_ids:
+        await ingestion.require_active_credential(credential)
         source = None
         try:
             source_kwargs = {
                 "folder_id": folder_id,
-                "resource_name": (
-                    f"google_drive_files_{sha256(folder_id.encode()).hexdigest()[:16]}"
-                ),
+                "resource_name": ingestion.resource_name("google_drive", credential, folder_id),
                 "service": service,
+                "check_active": ingestion.extraction_checkpoint(credential),
             }
             if folder_id in shared_drive_ids:
                 source_kwargs["shared_drive_id"] = folder_id
             source = source_factory(**source_kwargs)
+            retained.add(source_kwargs["resource_name"])
             result = await remember(
                 source,
                 dataset_name=_dataset_name(credential),
@@ -92,6 +99,8 @@ async def _sync_source(
             if getattr(result, "status", None) == "errored":
                 counts["failed"] += 1
                 counts["failed_ingestion"] = counts.get("failed_ingestion", 0) + 1
+        except CredentialInactiveError:
+            raise
         except Exception:
             counts["failed"] += 1
             counts["failed_ingestion"] = counts.get("failed_ingestion", 0) + 1
@@ -102,6 +111,10 @@ async def _sync_source(
             )
         finally:
             ingestion.add_source_counts(counts, source)
+    if not counts["failed"]:
+        await ingestion.retire_resources(
+            "google_drive", credential, _dataset_name(credential), retained
+        )
     return (
         SYNC_STATUS_DEGRADED if counts["failed"] else SYNC_STATUS_OK,
         counts,

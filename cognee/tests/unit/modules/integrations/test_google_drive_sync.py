@@ -1,10 +1,9 @@
 """Drive sync delegates extraction and incremental state to the SDK source."""
 
 from contextlib import ExitStack
-from hashlib import sha256
 from importlib import import_module
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
 
@@ -45,6 +44,12 @@ def sync_mocks():
             drives=AsyncMock(return_value={"drives": []}),
         )
         for patcher in (
+            patch.object(
+                sync_module.ingestion,
+                "require_active_credential",
+                AsyncMock(side_effect=lambda credential: credential),
+            ),
+            patch.object(sync_module.ingestion, "retire_resources", AsyncMock()),
             patch.object(sync_module.ingestion, "source_factory", return_value=mocks.source),
             patch.object(sync_module.ingestion, "build_service", return_value="service"),
             patch.object(sync_module.client, "list_drives", mocks.drives),
@@ -66,8 +71,11 @@ async def test_selected_folders_use_stable_independent_sources(sync_mocks):
     for call, folder in zip(sync_mocks.source.call_args_list, ["folder-a", "folder-b"]):
         assert call.kwargs == {
             "folder_id": folder,
-            "resource_name": f"google_drive_files_{sha256(folder.encode()).hexdigest()[:16]}",
+            "resource_name": sync_module.ingestion.resource_name(
+                "google_drive", make_credential(), folder
+            ),
             "service": "service",
+            "check_active": ANY,
         }
     for call in sync_mocks.remember.await_args_list:
         assert not isinstance(call.args[0], list)
@@ -155,3 +163,41 @@ async def test_file_counts_and_skip_reasons_are_aggregated_across_folders(sync_m
         "failed": 0,
         "skipped_too_large": 4,
     }
+
+
+@pytest.mark.asyncio
+async def test_disconnect_during_first_folder_stops_remaining_folders(sync_mocks):
+    from cognee.modules.integrations.credentials import CredentialInactiveError
+
+    async def disconnect(*args, **kwargs):
+        sync_module.ingestion.require_active_credential.side_effect = CredentialInactiveError()
+        return SimpleNamespace(status="completed")
+
+    sync_mocks.remember.side_effect = disconnect
+    with pytest.raises(CredentialInactiveError):
+        await sync_drive(make_credential(selected_folder_ids=["a", "b"]))
+    assert sync_mocks.remember.await_count == 1
+    sync_module.ingestion.retire_resources.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("folders", [[], ["a"]])
+async def test_deselection_reconciles_previously_synced_resources(folders, sync_mocks):
+    credential = make_credential(selected_folder_ids=folders)
+    await sync_drive(credential)
+    sync_module.ingestion.retire_resources.assert_awaited_once_with(
+        "google_drive",
+        credential,
+        sync_module._dataset_name(credential),
+        {
+            sync_module.ingestion.resource_name("google_drive", credential, folder)
+            for folder in folders
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_failed_replacement_does_not_retire_legacy_data(sync_mocks):
+    sync_mocks.remember.return_value = SimpleNamespace(status="errored")
+    await sync_drive(make_credential(selected_folder_ids=["a"]))
+    sync_module.ingestion.retire_resources.assert_not_awaited()

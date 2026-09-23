@@ -54,6 +54,7 @@ Limitations
 
 import io
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -271,6 +272,7 @@ def _iter_rows(service, config: _DriveConfig, state: dict, stats: dict[str, int]
     stats.clear()
     stats.update(scanned=0, skipped=0, failed=0, deleted=0)
     page_token = state.get("page_token")
+    known_ids = set(state.get("known_ids", []))
 
     if page_token is None:
         # Capture the changes cursor BEFORE the full listing, so a file edited
@@ -279,11 +281,18 @@ def _iter_rows(service, config: _DriveConfig, state: dict, stats: dict[str, int]
         # write_disposition="merge".
         start_token = _get_start_page_token(service, config.shared_drive_id)
         yielded = 0
+        present_ids = set()
         for file_meta in _list_files_in_scope(service, config):
+            # Extraction failure does not mean the file disappeared.
+            present_ids.add(file_meta["id"])
             row = _file_to_row(service, file_meta, config, stats)
             if row is not None:
                 yielded += 1
                 yield row
+        for file_id in sorted(known_ids - present_ids):
+            stats["deleted"] += 1
+            yield {"id": file_id, "_deleted": True}
+        state["known_ids"] = sorted(present_ids)
         if not stats["failed"]:
             state["page_token"] = start_token
         logger.info("Google Drive: initial sync yielded %d file(s).", yielded)
@@ -296,6 +305,7 @@ def _iter_rows(service, config: _DriveConfig, state: dict, stats: dict[str, int]
     yielded = 0
     tombstoned = 0
     for file_id in deleted_ids:
+        known_ids.discard(file_id)
         tombstoned += 1
         stats["deleted"] += 1
         yield {"id": file_id, "_deleted": True}
@@ -313,6 +323,7 @@ def _iter_rows(service, config: _DriveConfig, state: dict, stats: dict[str, int]
                 )
             except Exception as e:
                 if _is_not_found(e):
+                    known_ids.discard(file_id)
                     tombstoned += 1
                     stats["deleted"] += 1
                     yield {"id": file_id, "_deleted": True}
@@ -326,18 +337,21 @@ def _iter_rows(service, config: _DriveConfig, state: dict, stats: dict[str, int]
                 scope_folder_ids,
                 config.shared_drive_id if config.include_subfolders else None,
             ):
+                known_ids.discard(file_id)
                 tombstoned += 1
                 stats["deleted"] += 1
                 yield {"id": file_id, "_deleted": True}
                 continue
 
             row = _file_to_row(service, file_meta, config, stats)
+            known_ids.add(file_id)
             if row is not None:
                 yielded += 1
                 yield row
 
     # Retry transient extraction failures on the next run instead of losing
     # them behind a successfully advanced changes cursor.
+    state["known_ids"] = sorted(known_ids)
     if not stats["failed"]:
         state["page_token"] = new_page_token
     logger.info(
@@ -587,6 +601,7 @@ def google_drive_source(
     folder_id: str | None = None,
     *,
     resource_name: str = "google_drive_files",
+    check_active: Callable[[], None] | None = None,
     auth_mode: str | None = None,
     credentials_path: str | None = None,
     token_path: str | None = None,
@@ -606,6 +621,7 @@ def google_drive_source(
         resource_name: Stable dlt resource name. Hosts syncing several folders
             in one dataset should give each folder its own name so each
             folder's Changes API cursor is persisted independently.
+        check_active: Optional host authorization checkpoint during extraction.
         auth_mode: ``"service_account"`` (default) or ``"oauth"``.
         credentials_path: Path to the service-account key or OAuth client-secret JSON.
         token_path: Where the cached OAuth user token is read/written (oauth mode).
@@ -677,7 +693,9 @@ def google_drive_source(
             credentials_path=config.credentials_path,
             token_path=config.token_path,
         )
-        yield from _iter_rows(client, config, dlt.current.resource_state(), stats)
+        yield from dlt_utils.guarded_rows(
+            _iter_rows(client, config, dlt.current.resource_state(), stats), check_active
+        )
 
     resource = google_drive_files()
     # Opt into the document ingestion path: each file row (id/title/content/url)
@@ -686,6 +704,7 @@ def google_drive_source(
     # connector. Sync stays incremental — hand this to remember() with
     # write_disposition="merge" (the Changes-API delta + _deleted hard-delete).
     setattr(resource, DOCUMENT_SOURCE_ATTR, "google_drive")
+    setattr(resource, dlt_utils.PIPELINE_SCOPE_ATTR, resource_name)
     # Host-readable diagnostics contain counts only, never file names or content.
     resource.cognee_sync_stats = stats
     return resource

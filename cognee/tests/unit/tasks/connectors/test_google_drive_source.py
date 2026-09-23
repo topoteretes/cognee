@@ -194,6 +194,69 @@ def test_initial_sync_yields_all_files_and_advances_state(fake_content_extractio
     assert state["page_token"] == "t0"
 
 
+def test_full_scan_deletes_absent_files_despite_permanently_bad_content(monkeypatch):
+    good, bad = _file_meta("good"), _file_meta("bad", mime_type=PDF_MIME)
+    service = FakeDriveService({"root": [good, bad]}, {"good": good, "bad": bad})
+    monkeypatch.setattr(
+        gd_source,
+        "extract_file_content",
+        lambda service, file_id, *args: "content" if file_id == "good" else None,
+    )
+    state = {}
+    assert [row["id"] for row in gd_source._iter_rows(service, _config(), state)] == ["good"]
+    assert "page_token" not in state  # bad PDF still requires a retry
+    service.files_by_folder["root"] = [bad]
+    assert list(gd_source._iter_rows(service, _config(), state)) == [
+        {"id": "good", "_deleted": True}
+    ]
+    assert state["known_ids"] == ["bad"]  # failed extraction is not deletion
+
+
+def test_incomplete_full_listing_does_not_reconcile_absence(monkeypatch):
+    service = FakeDriveService({}, {})
+    state = {"known_ids": ["keep"]}
+
+    def failed_listing(*args):
+        yield _file_meta("new")
+        raise RuntimeError("listing failed on page two")
+
+    monkeypatch.setattr(gd_source, "_list_files_in_scope", failed_listing)
+    rows = gd_source._iter_rows(service, _config(), state)
+    assert next(rows)["id"] == "new"
+    with pytest.raises(RuntimeError):
+        next(rows)
+    assert state == {"known_ids": ["keep"]}
+
+
+def test_empty_replacement_clears_only_retired_folder_and_reselection_backfills(tmp_path):
+    from cognee.modules.integrations.google.ingestion import empty_resource
+
+    dlt = pytest.importorskip("dlt")
+    pipeline = dlt.pipeline(
+        pipeline_name="drive_deselection",
+        dataset_name="drive",
+        destination=dlt.destinations.sqlalchemy(f"sqlite:///{tmp_path / 'drive.db'}"),
+        pipelines_dir=str(tmp_path / "pipelines"),
+    )
+    a, b = _file_meta("a"), _file_meta("b", parents=("other",))
+    service = FakeDriveService({"root": [a], "other": [b]}, {"a": a, "b": b})
+
+    def sync(folder, name):
+        pipeline.run(
+            gd_source.google_drive_source(folder_id=folder, resource_name=name, service=service)
+        )
+
+    sync("root", "folder_a")
+    sync("other", "folder_b")
+    pipeline.run(empty_resource("google_drive", "folder_a"), write_disposition="replace")
+    with pipeline.sql_client() as sql:
+        assert sql.execute_sql("SELECT id FROM folder_a") == []
+        assert sql.execute_sql("SELECT id FROM folder_b") == [("b",)]
+    sync("root", "folder_a")  # no Changes response configured: must full-scan again
+    with pipeline.sql_client() as sql:
+        assert sql.execute_sql("SELECT id FROM folder_a") == [("a",)]
+
+
 def test_incremental_sync_only_touches_changed_file(fake_content_extraction):
     file_a = _file_meta("fileA")
     file_b = _file_meta("fileB")

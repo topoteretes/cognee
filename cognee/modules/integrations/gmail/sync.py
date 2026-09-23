@@ -38,6 +38,7 @@ async def _sync_source(
 
     labels = (credential.provider_metadata or {}).get("selected_label_ids", [])
     if labels == []:
+        await ingestion.retire_resources("gmail", credential, _dataset_name(credential), set())
         return SYNC_STATUS_OK, {"scanned": 0, "skipped": 0, "failed": 0}
     if labels is not None and (
         not isinstance(labels, list)
@@ -49,7 +50,14 @@ async def _sync_source(
     access_token = await access_token_for(credential)
     service = ingestion.build_service("gmail", access_token)
     owner = await get_user(credential.user_id)
-    source = source_factory(label_ids=labels, service=service)
+    resource_name = ingestion.resource_name("gmail", credential)
+    source = source_factory(
+        label_ids=labels,
+        service=service,
+        resource_name=resource_name,
+        check_active=ingestion.extraction_checkpoint(credential),
+    )
+    await ingestion.require_active_credential(credential)
     try:
         result = await remember(
             source,
@@ -65,6 +73,10 @@ async def _sync_source(
     if getattr(result, "status", None) == "errored":
         counts["failed"] += 1
         counts["failed_ingestion"] = 1
+    else:
+        await ingestion.retire_resources(
+            "gmail", credential, _dataset_name(credential), {resource_name}
+        )
     return (
         SYNC_STATUS_DEGRADED if counts["failed"] else SYNC_STATUS_OK,
         counts,

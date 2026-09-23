@@ -13,6 +13,7 @@ from cognee.infrastructure.databases.relational.config import get_relational_con
 from cognee.modules.data.models import Data
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.dlt_row_data import DltRowData, DltRows
+from cognee.tasks.ingestion.dlt_utils import pipeline_name_for_source
 from cognee.tasks.ingestion.exceptions.exceptions import (
     DLTIngestionError,
     InvalidDLTArgumentError,
@@ -108,7 +109,7 @@ async def ingest_dlt_source(
     # dlt_csv_loader in parallel), so staging must serialize here.
     async with _staging_lock:
         pipeline = dlt.pipeline(
-            pipeline_name="ingest_dlt_source",
+            pipeline_name=pipeline_name_for_source(dlt_source, original_dataset_name),
             destination=destination,
             dataset_name=dataset_name,
         )
