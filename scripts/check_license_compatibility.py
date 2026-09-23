@@ -84,18 +84,15 @@ REVIEWED: dict[str, str] = {}
 CHUNK = 1 << 20
 
 
-def strong_copyleft(alternatives: list[str], expressions: bool = True) -> set[str]:
+def strong_copyleft(alternatives: list[str]) -> set[str]:
     """Strong copyleft licenses that apply when any one of ``alternatives`` may be chosen.
 
     Empty when some alternative is free of strong copyleft or carries a
-    linking exception. With ``expressions``, each alternative may itself be an
-    ``OR`` expression; classifiers are prose ("GNU Library or Lesser ...") and
-    are not split.
+    linking exception. Each alternative may itself be an ``OR`` expression.
     """
     required: set[str] = set()
     for expression in alternatives:
-        parts = re.split(r"\s+OR\s+", expression.upper()) if expressions else [expression.upper()]
-        for alternative in parts:
+        for alternative in re.split(r"\s+OR\s+", expression.upper()):
             if LINKING_EXCEPTION.search(alternative):
                 return set()
             terms = set(GNU_ID.findall(alternative))
@@ -133,8 +130,8 @@ def embedded_strong_copyleft(path: Path) -> set[str]:
     return set() if "LGPL" in found else found & STRONG_COPYLEFT
 
 
-def declared_licenses(dist: Distribution) -> list[tuple[str, list[str], bool]]:
-    """The distribution's declared license sources: (where, alternatives, expressions)."""
+def declared_licenses(dist: Distribution) -> list[tuple[str, list[str]]]:
+    """The distribution's declared license sources: (where, alternatives)."""
     metadata = dist.metadata
     license_field = (metadata.get("License") or "").strip()
     if "\n" in license_field or len(license_field) > MAX_LICENSE_NAME:
@@ -145,9 +142,9 @@ def declared_licenses(dist: Distribution) -> list[tuple[str, list[str], bool]]:
         if c.startswith("License ::")
     ]
     return [
-        ("License-Expression", [metadata.get("License-Expression") or ""], True),
-        ("License", [license_field], True),
-        ("classifiers", classifiers, False),
+        ("License-Expression", [metadata.get("License-Expression") or ""]),
+        ("License", [license_field]),
+        ("classifiers", classifiers),
     ]
 
 
@@ -167,9 +164,9 @@ def manifest_lines(dist: Distribution) -> list[tuple[str, str]]:
 def findings(dist: Distribution) -> list[tuple[str, str]]:
     """Strong copyleft the distribution declares, lists or vendors: (where, what)."""
     found = []
-    for where, alternatives, expressions in declared_licenses(dist):
+    for where, alternatives in declared_licenses(dist):
         if alternatives and all(alternatives):
-            terms = strong_copyleft(alternatives, expressions)
+            terms = strong_copyleft(alternatives)
             if terms:
                 found.append((where, f"declares {', '.join(sorted(terms))}"))
     for where, line in manifest_lines(dist):
