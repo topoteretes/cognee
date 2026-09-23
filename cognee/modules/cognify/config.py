@@ -27,9 +27,9 @@ class CognifyConfig(BaseSettings):
     # "llm" / "gliner_demo" pin one regardless of credentials. The GLiNER demo
     # requires the `gliner` extra and makes no LLM call.
     graph_extractor: str = "auto"
-    # Runtime for the GLiNER demo extractor's neural pieces (env: GLINER_BACKEND):
-    # "torch" (default) runs gliner2 as shipped; "onnx" runs its encoder, boundary
-    # head and relation scorer on ONNX Runtime from a one-time export
+    # Runtime for the GLiNER demo extractor (env: GLINER_BACKEND): "torch" (default)
+    # runs gliner2 as shipped; "onnx" runs it on ONNX Runtime with no torch,
+    # transformers or gliner2 installed, from a one-time export
     # (python -m cognee.tasks.graph.gliner_demo.onnx.export).
     gliner_backend: str = "torch"
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
@@ -95,6 +95,13 @@ class KeylessExtractorNotInstalledError(CogneeConfigurationError):
         )
 
 
+def _gliner_runtime_installed() -> bool:
+    """gliner2 for the torch backend; nothing extra for GLINER_BACKEND=onnx."""
+    from cognee.tasks.graph.gliner_demo.extractor import gliner_runtime_installed
+
+    return gliner_runtime_installed()
+
+
 def resolve_extractor(
     value: str | None, config: CognifyConfig, llm_configured: bool | None = None
 ) -> str:
@@ -121,7 +128,7 @@ def resolve_extractor(
 
             llm_configured = not keyless_local_defaults_apply()
         extractor = LLM_EXTRACTOR if llm_configured else GLINER_DEMO_EXTRACTOR
-        if extractor == GLINER_DEMO_EXTRACTOR and importlib.util.find_spec("gliner2") is None:
+        if extractor == GLINER_DEMO_EXTRACTOR and not _gliner_runtime_installed():
             raise KeylessExtractorNotInstalledError()
     if extractor not in EXTRACTORS:
         raise ValueError(

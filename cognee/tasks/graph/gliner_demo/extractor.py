@@ -17,6 +17,7 @@ spans inside the model.
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import os
 import threading
 import time
@@ -61,7 +62,13 @@ _inference_lock = threading.Lock()
 
 
 def require_gliner2() -> None:
-    """Fail fast with an install hint when the optional dependency is missing."""
+    """Fail fast with an install hint when the optional dependency is missing.
+
+    GLINER_BACKEND=onnx runs without gliner2 (its inference code is copied in
+    ``gliner_demo/onnx/_gliner2``), so there is nothing to require.
+    """
+    if resolve_gliner_backend() == "onnx":
+        return
     try:
         import gliner2
     except ImportError as error:
@@ -107,6 +114,8 @@ def load_extractor(model_name: str = DEFAULT_MODEL) -> Any:
         extractor = _extractors.get((model_name, backend))
         if extractor is not None:
             return extractor
+        if backend == "onnx":
+            return _load_onnx(model_name)
 
         require_gliner2()
         from gliner2 import AutoExtractor
@@ -122,18 +131,37 @@ def load_extractor(model_name: str = DEFAULT_MODEL) -> Any:
         )
         started = time.perf_counter()
         extractor = AutoExtractor.from_pretrained(model_name)
-        if backend == "onnx":
-            from .onnx.runtime import attach_onnx_backend
-
-            attach_onnx_backend(extractor, model_name)
         logger.info(
-            "GLiNER model %s ready in %.1fs (%s backend)",
-            model_name,
-            time.perf_counter() - started,
-            backend,
+            "GLiNER model %s ready in %.1fs (torch)", model_name, time.perf_counter() - started
         )
         _extractors[(model_name, backend)] = extractor
         return extractor
+
+
+def _load_onnx(model_name: str) -> Any:
+    """The torch-free extractor (``gliner_demo/onnx``); caller holds ``_load_lock``."""
+    from .onnx.runtime import load_onnx_extractor
+
+    started = time.perf_counter()
+    extractor = load_onnx_extractor(model_name)
+    logger.info(
+        "GLiNER model %s ready in %.1fs (ONNX Runtime, no torch)",
+        model_name,
+        time.perf_counter() - started,
+    )
+    _extractors[(model_name, "onnx")] = extractor
+    return extractor
+
+
+def gliner_runtime_installed() -> bool:
+    """Whether the configured GLiNER backend's runtime is importable.
+
+    ``torch`` needs the ``gliner2`` package (the ``gliner`` extra); ``onnx`` needs
+    only onnxruntime and tokenizers, which are core dependencies.
+    """
+    if resolve_gliner_backend() == "onnx":
+        return True
+    return importlib.util.find_spec("gliner2") is not None
 
 
 async def get_extractor(model_name: str = DEFAULT_MODEL) -> Any:

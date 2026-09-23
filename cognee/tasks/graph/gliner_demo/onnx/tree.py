@@ -11,11 +11,12 @@ import dataclasses
 import importlib
 from typing import Any
 
-import torch
 
+def flatten(obj: Any) -> tuple[dict, list]:
+    """Export side only (needs torch); ``unflatten`` is torch-free."""
+    import torch
 
-def flatten(obj: Any) -> tuple[dict, list[torch.Tensor]]:
-    tensors: list[torch.Tensor] = []
+    tensors: list = []
 
     def go(o):
         if isinstance(o, torch.Tensor):

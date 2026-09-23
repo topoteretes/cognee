@@ -329,7 +329,9 @@ exclude = [
     "cognee/modules/users/models/ACL.py",
     "cognee/modules/pipelines/models/Task.py",
     "cognee/modules/data/models/Dataset.py",
-    "cognee/modules/notebooks/tutorials/"  # Ignore tutorial Python files
+    "cognee/modules/notebooks/tutorials/",  # Ignore tutorial Python files
+    # gliner2 inference code copied by vendor_gliner2.py; must stay byte-identical to upstream
+    "cognee/tasks/graph/gliner_demo/onnx/_gliner2/",
 ]
 
 [tool.ruff.lint]

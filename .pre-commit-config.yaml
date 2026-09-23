@@ -1,5 +1,7 @@
 # See https://pre-commit.com for more information
 # See https://pre-commit.com/hooks.html for more hooks
+# gliner2 inference code copied by vendor_gliner2.py stays byte-identical to upstream.
+exclude: ^cognee/tasks/graph/gliner_demo/onnx/_gliner2/
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v3.2.0
