@@ -1,6 +1,6 @@
 import importlib
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -713,3 +713,108 @@ async def test_graph_completion_accepts_graph_only_knobs():
     assert result.search_type is SearchType.GRAPH_COMPLETION
     assert factory_mock.await_args.kwargs["wide_search_top_k"] == 200
     assert factory_mock.await_args.kwargs["triplet_distance_penalty"] == 2.5
+
+
+@pytest.mark.asyncio
+async def test_get_retriever_output_returns_structured_evidence_for_hybrid_completion():
+    """End to end through the public consumer with the real HybridRetriever.
+
+    The default search type must fill ``evidence`` with the chunks, entities and
+    edge bullets it actually rendered, not the base class's empty list.
+    """
+    from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
+
+    def hit(result_id, payload):
+        return SimpleNamespace(id=result_id, payload=payload, score=0.9)
+
+    async def search(collection_name, *args, **kwargs):
+        if collection_name == "DocumentChunk_text":
+            return [
+                hit(
+                    "chunk-1",
+                    {
+                        "id": "chunk-1",
+                        "text": "Alice joined Acme.",
+                        "document_id": "doc-1",
+                        "document_name": "notes.txt",
+                        "chunk_index": 2,
+                    },
+                )
+            ]
+        if collection_name == "Entity_name":
+            return [hit("entity-1", {"id": "entity-1", "name": "Alice"})]
+        return []
+
+    vector = MagicMock()
+    vector.search = AsyncMock(side_effect=search)
+    vector.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
+    graph = MagicMock()
+    graph.is_empty = AsyncMock(return_value=False)
+    graph.get_neighborhood = AsyncMock(
+        return_value=(
+            [("entity-1", {"name": "Alice"}), ("acme-id", {"name": "Acme"})],
+            [
+                (
+                    "entity-1",
+                    "acme-id",
+                    "works_at",
+                    {"edge_text": "Alice works at Acme.", "edge_object_id": "edge-1"},
+                )
+            ],
+        )
+    )
+    dataset = SimpleNamespace(id=uuid4(), name="reports", tenant_id=uuid4())
+
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=_FakeGraphEngine(),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "hybrid_deferral_reason",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            new_callable=AsyncMock,
+            return_value=HybridRetriever(text_summaries_top_k=0),
+        ),
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+            return_value=SimpleNamespace(vector=vector, graph=graph),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "graph_source_evidence",
+            new_callable=AsyncMock,
+            return_value=[],
+        ) as resolve_sources,
+    ):
+        result = await get_retriever_output(
+            SearchType.HYBRID_COMPLETION,
+            "Where does Alice work?",
+            dataset=dataset,
+            include_references=True,
+            only_context=True,
+        )
+
+    assert result.search_type is SearchType.HYBRID_COMPLETION
+    assert [(reference.kind, reference.artifact_id) for reference in result.evidence] == [
+        ("segment", "chunk-1"),
+        ("graph_node", "entity-1"),
+        ("graph_node", "acme-id"),
+        ("graph_edge", "edge-1"),
+    ]
+    assert all(reference.dataset_id == str(dataset.id) for reference in result.evidence)
+    assert result.evidence[0].document_name == "notes.txt"
+    assert result.evidence[3].relationship_name == "works_at"
+    # The graph_edge item is what makes the consumer resolve sidecar sources, as for graph completion.
+    resolve_sources.assert_awaited_once()
+    assert "## Relevant passages\nAlice joined Acme." in result.context
+    assert "- Alice works at Acme." in result.context
