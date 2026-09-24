@@ -6,6 +6,7 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -107,6 +108,20 @@ def _install(tmp_path, present, installed_after=True):
     ):
         outcome = install.install_gliner_runtime("https://mirror.example/cpu")
     return runs, outcome
+
+
+def test_a_shadowed_distribution_pins_the_copy_python_imports():
+    """A venv with --system-site-packages lists the venv's copy first, then the
+    system's; import resolves the first, so the pin must not be the second."""
+
+    def dist(name, version):
+        return SimpleNamespace(metadata={"Name": name}, version=version)
+
+    with patch(
+        "importlib.metadata.distributions",
+        return_value=[dist("numpy", "2.2.0"), dist("Numpy", "1.26.4"), dist("tqdm", "4.67.1")],
+    ):
+        assert install.installed_pins() == ["numpy==2.2.0", "tqdm==4.67.1"]
 
 
 def test_missing_torch_comes_from_the_cpu_index_then_the_extra_with_installed_pins(tmp_path):

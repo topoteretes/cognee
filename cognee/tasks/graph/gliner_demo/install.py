@@ -121,12 +121,18 @@ def gliner_extra() -> tuple[str, list[str]]:
 
 
 def installed_pins() -> list[str]:
-    """``name==version`` for every distribution installed in this environment."""
-    pins = {}
+    """``name==version`` for every distribution installed in this environment.
+
+    Distributions come in ``sys.path`` order, and the first one for a name is the
+    one ``import`` resolves, so it is the one to pin: a venv created with
+    ``--system-site-packages`` also lists the system's copy of a package after the
+    venv's, and pinning that older copy would make step 2 downgrade the live one.
+    """
+    pins: dict[str, str] = {}
     for distribution in importlib.metadata.distributions():
         name = distribution.metadata["Name"]
         if name:
-            pins[name.lower()] = f"{name}=={distribution.version}"
+            pins.setdefault(name.lower(), f"{name}=={distribution.version}")
     return sorted(pins.values())
 
 
