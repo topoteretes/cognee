@@ -41,6 +41,16 @@ class User(SQLAlchemyBaseUserTableUUID, Principal):
     # ACL Relationship (One-to-Many)
     acls = relationship("ACL", back_populates="principal", cascade="all, delete")
 
+    # Capabilities granted to the user personally (One-to-Many). Deleted with
+    # the user through the ORM, as acls are, because the CASCADE on
+    # principal_capabilities.principal_id is not enforced on SQLite. Named by
+    # foreign key because granted_by also points at users.
+    capabilities = relationship(
+        "PrincipalCapability",
+        foreign_keys="PrincipalCapability.principal_id",
+        cascade="all, delete",
+    )
+
     __mapper_args__ = {
         "polymorphic_identity": "user",
     }

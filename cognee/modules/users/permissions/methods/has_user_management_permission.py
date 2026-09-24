@@ -1,22 +1,16 @@
 from uuid import UUID
 
-from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.modules.users.permissions.methods.get_tenant import get_tenant
-from cognee.modules.users.permissions.methods.get_user_role_names_in_tenant import (
-    get_user_role_names_in_tenant,
-)
-from cognee.modules.users.permissions.permission_types import (
-    USER_MANAGEMENT_ALLOWED_ROLE_NAMES,
-)
+from cognee.modules.users.permissions.methods.has_grant_permission import has_grant_permission
+from cognee.modules.users.permissions.permission_types import MANAGE_USERS
 
 
 async def has_user_management_permission(requester_id: UUID, tenant_id: UUID) -> bool:
     """
     Check if requester is allowed to manage users for a tenant.
 
-    The requester is allowed if they are the tenant owner or have one of the
-    roles in USER_MANAGEMENT_ALLOWED_ROLE_NAMES (e.g. admin). Add role
-    names to that set in permission_types.py to extend without changing call sites.
+    The requester is allowed if they hold the MANAGE_USERS capability in this
+    tenant, granted either to the tenant or to one of their roles in it. The
+    tenant owner holds every capability, so they always pass.
 
     Reuse this across all user management endpoints (list users, assign/remove
     roles, add/remove users from tenant, etc.) for consistent authorization.
@@ -29,17 +23,8 @@ async def has_user_management_permission(requester_id: UUID, tenant_id: UUID) ->
         True if the requester has permission to manage users for the tenant.
 
     Raises:
-        PermissionDeniedError: If the requester is not authorized (not owner
-            and no allowed role in this tenant).
+        CapabilityDeniedError: If the requester is not authorized. It is a
+            PermissionDeniedError, so callers catching that keep working.
         TenantNotFoundError: If the tenant does not exist.
     """
-    tenant = await get_tenant(tenant_id)
-
-    if tenant.owner_id == requester_id:
-        return True
-
-    role_names = await get_user_role_names_in_tenant(requester_id, tenant_id)
-    if USER_MANAGEMENT_ALLOWED_ROLE_NAMES & set(role_names):
-        return True
-
-    raise PermissionDeniedError(message="User is not authorized to manage users for this tenant")
+    return await has_grant_permission(requester_id, tenant_id, MANAGE_USERS)

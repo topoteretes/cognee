@@ -72,7 +72,24 @@ Everything reduces to one relation — **a grant**: *principal* × *permission*
    tenant grant, and what the user was granted personally — there is no
    deny in the model, resolution is gated on actual tenant membership, and
    the tenant owner short-circuits as holding every capability.
-   Grant/revoke endpoints ride the permissions router.
+   Grant/revoke endpoints ride the permissions router and are gated by
+   capabilities of their own: granting needs `grant_capabilities`,
+   revoking needs `revoke_capabilities`, and neither comes with
+   `manage_users`. A granter can only pass on capabilities they hold
+   themselves (`get_unheld_capabilities`), the same rule role assignment
+   follows, so `grant_capabilities` is not a way to reach the rest of the
+   catalog. The owner and the `admin` role hold everything. Every capability check goes through
+   `has_grant_permission(requester, tenant, capability)`;
+   `has_user_management_permission` is that check for `manage_users`.
+   Each row records who made the grant in `granted_by` (nullable, kept
+   when the granter is removed), and both endpoints take `capability`
+   repeated to grant or revoke several at once, all or nothing. For a user
+   principal the grant lands in the `tenant_id` given, or the caller's
+   current tenant; a role or tenant principal always uses its own tenant.
+   A missing principal or tenant answers like a refusal (403), so the
+   endpoints do not reveal which ids exist. Removing a user from a tenant
+   drops their personal capabilities there, and deleting a role drops the
+   role's, so neither comes back later.
 
 ## Where permissions are enforced
 
@@ -106,6 +123,14 @@ Two behaviors worth knowing:
   this tenant" (owner always passes), with the role-name match kept only
   as a deprecated fallback so tenants upgrading from the old check don't
   lose user management until their `admin` role is granted the capability.
+  The fallback sits in `has_grant_permission`, so an `admin` role also
+  passes the grant and revoke checks until it is migrated.
+- **Creating roles, assigning them and adding users to a tenant** need
+  `manage_users`, not ownership. Assigning a role has one more rule
+  (`require_role_capabilities`): the requester must hold every capability
+  the role carries, and a role named `admin` counts as carrying all of
+  them. Without it, `manage_users` would reach every other capability by
+  joining a role that has it.
 - **Role visibility**: members of a role can see the role itself and their
   co-members; anyone with user-management permission sees all
   (`tenants/methods/get_users_in_role.py`). Lookups are tenant-scoped — a
