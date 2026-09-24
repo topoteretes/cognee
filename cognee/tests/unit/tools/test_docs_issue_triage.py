@@ -434,6 +434,45 @@ def test_small_gap_never_hands_the_editor_a_path_outside_the_checked_pages(
     assert "(docs file: python-api/config.mdx)" in seen[0]
 
 
+def _git_repo(root, files):
+    import subprocess
+
+    for rel, text in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text)
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+
+
+def test_grep_ranks_files_and_spots_by_names_found_not_by_path_order(triage, tmp_path):
+    # "aaa" files sort first and mention one common name many times; the file that names
+    # both searched names must still come first, and its signature spot must be shown.
+    noise = "".join(f"def f{i}():\n    return recall_log({i})\n\n" for i in range(400))
+    methods = "".join(f"    def m{i}(self):\n        return recall_log({i})\n" for i in range(300))
+    signature = "def recall(query, top_k=15):\n    # returns top_k results\n    return run(query)\n"
+    files = {f"cognee/aaa_{n}.py": noise for n in range(6)}
+    files["cognee/zzz_recall.py"] = "class Api:\n" + methods + "\n" + signature
+    _git_repo(tmp_path, files)
+    hits = triage.git_grep_hits(["top_k", "recall"], tmp_path)
+
+    shown = [line for line in hits.splitlines() if line.startswith("--- ")]
+    assert shown[0] == "--- cognee/zzz_recall.py (names: recall, top_k)"
+    best = hits.split(shown[0], 1)[1].split("\n--- ", 1)[0]
+    assert "def recall(query, top_k=15):" in best
+    assert "more matching spots in this file not shown" in best  # capped per file
+    assert len(hits) <= triage.GREP_MAX_CHARS + 1
+    assert triage.git_grep_hits(["nowhere_to_be_found"], tmp_path) == ""
+
+
+def test_not_in_source_needs_code_to_have_been_searched(phase3, monkeypatch, tmp_path):
+    _fake_api(phase3, monkeypatch, [("/issues/4632", _gap_issue())])
+    monkeypatch.setattr(phase3, "git_grep_hits", lambda tokens, root: "")
+    _source_verdict(phase3, monkeypatch, "not_in_source", "No such behaviour in the hits.")
+    code, [row] = _run(phase3, ["--issue-number", "4632", "--dry-run"], tmp_path)
+    assert code == 0 and row["verdict"] == "uncertain"
+    assert "search found no code" in row["reason"]
+
+
 def test_docs_check_hands_its_claim_reason_and_code_names_to_the_source_check(
     phase3, monkeypatch, tmp_path
 ):

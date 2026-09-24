@@ -32,6 +32,7 @@ import re
 import smtplib
 import subprocess
 import sys
+import tempfile
 import textwrap
 import urllib.error
 import urllib.parse
@@ -180,6 +181,24 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 GREP_PATHS = ("cognee", ".env.template")
 GREP_EXCLUDES = (":(exclude)cognee/tests",)
 GREP_MAX_CHARS = 80_000
+# Files are ranked by the searched names they contain. The best GREP_BEST_FILES show a few
+# lines around each match (-C) under the enclosing function's header (-p); the rest show
+# only the matching lines under their header. Inside each file, the spots naming the most
+# different searched names come first, so neither file order nor line order decides what
+# fits. Each file is capped, and files that do not fit are listed by name.
+GREP_BEST_FILES = 4
+GREP_CONTEXT_LINES = 4
+# Dense matches merge into one long hunk; past this many lines it is cut into pieces of
+# one match window each, so the ranking can still choose between them.
+GREP_SPOT_MAX_LINES = 4 * (2 * GREP_CONTEXT_LINES + 1)
+GREP_BEST_FILE_MAX_CHARS = 12_000
+GREP_OTHER_FILE_MAX_CHARS = 1_500
+GREP_UNSHOWN_LISTED = 20
+# Reserved at the end of the output for the list of files that did not fit.
+GREP_TAIL_CHARS = 2_000
+# Without the python diff driver git takes only unindented lines as function starts, so
+# the header shown for a match inside a method would be its class.
+GREP_ATTRIBUTES = "*.py diff=python\n"
 GREP_MAX_TOKENS = 24
 GREP_MIN_TOKEN_LEN = 3
 MAX_HANDOFF_IDENTIFIERS = 8
@@ -896,18 +915,142 @@ def issue_identifiers(title: str, body: str) -> list[str]:
     return found[:GREP_MAX_TOKENS]
 
 
-def git_grep_hits(tokens: list[str], repo_root: Path) -> str:
-    """One fixed-string git grep over the source for every token; empty when nothing matches."""
-    if not tokens:
-        return ""
-    command = ["git", "-C", str(repo_root), "grep", "-I", "-n", "-F"]
+def _run_git_grep(
+    repo_root: Path, attributes: Path, flags: list[str], tokens: list[str], paths
+) -> str:
+    command = ["git", "-C", str(repo_root), "-c", f"core.attributesFile={attributes}"]
+    command += ["grep", "-I", "-F", *flags]
     for token in tokens:
         command += ["-e", token]
-    command += ["--", *GREP_PATHS, *GREP_EXCLUDES]
+    command += ["--", *paths]
     completed = subprocess.run(command, capture_output=True, text=True, check=False)
     if completed.returncode not in (0, 1):  # 1 = no match
         raise RuntimeError(f"git grep failed ({completed.returncode}): {completed.stderr.strip()}")
-    return completed.stdout[:GREP_MAX_CHARS]
+    return completed.stdout
+
+
+def rank_grep_files(matches: dict[str, dict[str, int]]) -> list[str]:
+    """Files ordered by how many different searched names they contain, rarer names weighing
+    more (a name found in few files says more than one found everywhere), then by match count."""
+    files_with: dict[str, int] = {}
+    for counts in matches.values():
+        for token in counts:
+            files_with[token] = files_with.get(token, 0) + 1
+    total = len(matches)
+
+    def key(path: str) -> tuple[float, int, str]:
+        counts = matches[path]
+        score = sum(math.log(1 + total / files_with[token]) for token in counts)
+        return (-score, -sum(counts.values()), path)
+
+    return sorted(matches, key=key)
+
+
+def _grep_spots(text: str, path: str, split_on_headers: bool) -> list[str]:
+    """Split one file's git grep output into spots: ``--``-separated hunks with -C, or one
+    function header plus its matching lines without context."""
+    header = re.compile(re.escape(path) + r"=\d+=")
+    spots: list[list[str]] = [[]]
+    for line in text.splitlines():
+        if line == "--" or (split_on_headers and header.match(line) and spots[-1]):
+            spots.append([])
+            if line == "--":
+                continue
+        spots[-1].append(line)
+    # git prints a function header on its own before the hunk it belongs to; keep them
+    # together so a spot is never shown without the function it sits in.
+    merged: list[list[str]] = []
+    for spot in (spot for spot in spots if spot):
+        if merged and all(header.match(line) for line in merged[-1]):
+            merged[-1].extend(spot)
+        else:
+            merged.append(spot)
+    pieces: list[list[str]] = []
+    window = 2 * GREP_CONTEXT_LINES + 1
+    for spot in merged:
+        if len(spot) <= GREP_SPOT_MAX_LINES:
+            pieces.append(spot)
+        else:
+            pieces += [spot[i : i + window] for i in range(0, len(spot), window)]
+    return ["\n".join(spot) for spot in pieces]
+
+
+def _pick_spots(spots: list[str], tokens: list[str], limit: int) -> str:
+    """The spots naming the most different tokens, up to ``limit`` chars, in file order."""
+    order = sorted(
+        range(len(spots)), key=lambda i: (-sum(token in spots[i] for token in tokens), i)
+    )
+    chosen: list[int] = []
+    used = 0
+    for i in order:
+        if used + len(spots[i]) + 3 <= limit:
+            chosen.append(i)
+            used += len(spots[i]) + 3
+    text = "\n--\n".join(spots[i] for i in sorted(chosen))
+    if len(chosen) < len(spots):
+        text += f"\n(... {len(spots) - len(chosen)} more matching spots in this file not shown)"
+    return text
+
+
+def git_grep_hits(tokens: list[str], repo_root: Path) -> str:
+    """Ranked git grep over the source with context; empty when nothing matches.
+
+    Every token is a fixed string. See the GREP_* constants for how files and the spots
+    inside them are chosen to fit GREP_MAX_CHARS.
+    """
+    if not tokens:
+        return ""
+    with tempfile.TemporaryDirectory() as tmp:
+        attributes = Path(tmp) / "attributes"
+        attributes.write_text(GREP_ATTRIBUTES, encoding="utf-8")
+        # -z -o: "path\0matched token" per occurrence, whatever the path contains
+        found = _run_git_grep(
+            repo_root, attributes, ["-z", "-o"], tokens, (*GREP_PATHS, *GREP_EXCLUDES)
+        )
+        matches: dict[str, dict[str, int]] = {}
+        for line in found.splitlines():
+            path, _, token = line.partition("\0")
+            if path and token:
+                counts = matches.setdefault(path, {})
+                counts[token] = counts.get(token, 0) + 1
+        if not matches:
+            return ""
+
+        ranked = rank_grep_files(matches)
+        parts = [
+            (
+                "Files ranked by how many of the searched names they contain (rarer names count "
+                "more). path:line: is a match, path-line- surrounding code, path=line= the "
+                "enclosing function's first line, -- a gap."
+            ),
+            "",
+            "== Best matches: code around each match ==",
+        ]
+        used = sum(len(part) + 1 for part in parts)
+        shown = 0
+        for position, path in enumerate(ranked):
+            best = position < GREP_BEST_FILES
+            if position == GREP_BEST_FILES:
+                parts += ["", "== Other matches: matching lines under their function header =="]
+            if best:
+                flags, limit = ["-n", "-p", f"-C{GREP_CONTEXT_LINES}"], GREP_BEST_FILE_MAX_CHARS
+            else:
+                flags, limit = ["-n", "-p"], GREP_OTHER_FILE_MAX_CHARS
+            output = _run_git_grep(repo_root, attributes, flags, tokens, (path,))
+            text = _pick_spots(_grep_spots(output, path, not best), tokens, limit)
+            header = f"--- {path} (names: {', '.join(sorted(matches[path]))})"
+            if used + len(header) + len(text) + 2 > GREP_MAX_CHARS - GREP_TAIL_CHARS:
+                break
+            parts += [header, text]
+            used += len(header) + len(text) + 2
+            shown += 1
+        unshown = ranked[shown:]
+        if unshown:
+            listed = ", ".join(unshown[:GREP_UNSHOWN_LISTED])
+            more = len(unshown) - GREP_UNSHOWN_LISTED
+            tail = f"== Not shown: {len(unshown)} more matching files: {listed}"
+            parts += ["", tail + (f", and {more} more" if more > 0 else "")]
+    return "\n".join(parts)[:GREP_MAX_CHARS] + "\n"
 
 
 def linked_pull_requests(repo: str, number: int, core_team: set[str]) -> list[str]:
@@ -996,7 +1139,7 @@ def build_source_check_user_message(
         parts += ["", label, "", text]
     parts += [
         "",
-        "git grep hits in the cognee source (path:line:text):",
+        "git grep hits in the cognee source:",
         grep_hits or "(no hits for the identifiers named in the issue)",
     ]
     return "\n".join(parts)
@@ -1098,6 +1241,10 @@ def check_issue_against_source(row: dict[str, Any], index: DocsIndex, repo_root:
     )
     if verdict not in SOURCE_CHECK_VERDICTS:
         verdict, reason = "uncertain", f"unexpected verdict {verdict!r}: {reason}"
+    if verdict == "not_in_source" and not grep_hits:
+        # "not in the source" needs code that was looked at; with no hits nothing was.
+        verdict = "uncertain"
+        reason = f"{reason} (downgraded: the search found no code to check the claim against)"
 
     cleaned_docs = allowed_docs_files(docs_files, row["pages_shown"])
     if verdict == "small_gap" and not cleaned_docs:
