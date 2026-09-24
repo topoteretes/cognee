@@ -128,12 +128,18 @@ jobs:
           PR_TITLE: ${{ matrix.pr_title }}
           PR_BODY_B64: ${{ matrix.pr_body_b64 }}
           PR_URL: ${{ matrix.pr_url }}
+          # The head branch name is chosen by the PR author (fork branches too) and
+          # git allows `$(...)` in it, so it reaches the shell only through env.
+          BRANCH_NAME: ${{ matrix.branch_name }}
+          MERGE_SHA: ${{ matrix.merge_sha }}
+          FIRST_PARENT: ${{ matrix.first_parent }}
+          SECOND_PARENT: ${{ matrix.second_parent }}
         run: |
           uv run python tools/generate_branch_notes.py \
-            --branch-name "${{ matrix.branch_name }}" \
-            --merge-sha "${{ matrix.merge_sha }}" \
-            --first-parent "${{ matrix.first_parent }}" \
-            --second-parent "${{ matrix.second_parent }}" \
+            --branch-name "${BRANCH_NAME}" \
+            --merge-sha "${MERGE_SHA}" \
+            --first-parent "${FIRST_PARENT}" \
+            --second-parent "${SECOND_PARENT}" \
             --pr-number "${PR_NUMBER}" \
             --pr-title "${PR_TITLE}" \
             --pr-body-base64 "${PR_BODY_B64}" \
@@ -172,12 +178,20 @@ jobs:
           token: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
           ref: main
           path: docs-repo
+          # The Claude steps below can write files in this workspace, so the PAT
+          # must not sit in docs-repo/.git. Only the fetch and push get it.
+          persist-credentials: false
 
       - name: Prepare docs branch
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
         working-directory: docs-repo
+        env:
+          PUSH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
         run: |
-          git fetch origin "${{ steps.assessment.outputs.docs_branch }}" || true
+          basic="$(printf 'x-access-token:%s' "${PUSH_TOKEN}" | base64 -w0)"
+          echo "::add-mask::${basic}"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${basic}" \
+            fetch origin "${{ steps.assessment.outputs.docs_branch }}" || true
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if git show-ref --verify --quiet "refs/remotes/origin/${{ steps.assessment.outputs.docs_branch }}"; then
@@ -200,6 +214,23 @@ jobs:
             --assessment-json "${{ steps.branch_paths.outputs.assessment_json }}" \
             --scope-json-output "${{ steps.branch_paths.outputs.docs_edit_scope_json }}" \
             --scope-markdown-output "${{ steps.branch_paths.outputs.docs_edit_scope_markdown }}"
+
+      # The Claude steps read text that PR authors wrote (title, body, diff) and can
+      # write files. Later steps run tools/ scripts and git with the PAT, so record
+      # everything those steps execute or obey before any agent runs, and fail if an
+      # agent changed it. The manifest script lives in RUNNER_TEMP, outside the
+      # workspace the agents can write to.
+      - name: Record protected files before the agents run
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        run: |
+          set -euo pipefail
+          cat > "${RUNNER_TEMP}/protected_manifest.sh" <<'EOF'
+          set -euo pipefail
+          find tools .github docs-repo/.git/hooks -type f -not -path '*/__pycache__/*' -print0 \
+            | sort -z | xargs -0 sha256sum
+          sha256sum docs-repo/.git/config
+          EOF
+          bash "${RUNNER_TEMP}/protected_manifest.sh" > "${RUNNER_TEMP}/protected.sha256"
 
       - name: Plan docs changes with Claude
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
@@ -247,6 +278,16 @@ jobs:
             echo "The action failed on the turn count but the planning agent finished cleanly - keeping the work."
           fi
 
+      # Before the next git command: a planted hook or core.fsmonitor would run there.
+      - name: Check the planning agent left protected files alone
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        run: |
+          if ! bash "${RUNNER_TEMP}/protected_manifest.sh" \
+               | diff "${RUNNER_TEMP}/protected.sha256" - >&2; then
+            echo "The planning agent changed tools/, .github/ or docs-repo/.git; stopping." >&2
+            exit 1
+          fi
+
       - name: Validate docs scope plan
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
         run: |
@@ -261,7 +302,7 @@ jobs:
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
         id: scope_plan
         run: |
-          python3 tools/write_docs_scope_plan_outputs.py \
+          python3 -I tools/write_docs_scope_plan_outputs.py \
             --scope-plan "${{ steps.branch_paths.outputs.docs_scope_plan }}"
 
       - name: Print generated planning markdown
@@ -307,7 +348,9 @@ jobs:
             - **Documentation scope plan** (`./${{ steps.branch_paths.outputs.docs_scope_plan }}`)
             - **Branch notes** (`./${{ steps.branch_paths.outputs.notes_markdown }}`)
             - **Documentation assessment** (`./${{ steps.branch_paths.outputs.assessment_markdown }}`)
-          claude_args: "--allowed-tools Read,Edit,Write,Glob,Grep,Bash --max-turns 50"
+          # No Bash: the prompt carries PR-author text, and editing files is all this
+          # step needs. The notes and scope plan already hold the diff context.
+          claude_args: "--allowed-tools Read,Edit,Write,Glob,Grep --max-turns 50"
 
       # The action fails a step whose reported turn count overshoots the cap even
       # when the agent finished cleanly, which throws away completed work. So judge
@@ -332,6 +375,16 @@ jobs:
             echo "The action failed on the turn count but the editing agent finished cleanly - keeping the work."
           fi
 
+      # Before any git command or tools/ script that follows: the PAT reaches both.
+      - name: Check the editing agent left protected files alone
+        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' }}
+        run: |
+          if ! bash "${RUNNER_TEMP}/protected_manifest.sh" \
+               | diff "${RUNNER_TEMP}/protected.sha256" - >&2; then
+            echo "The editing agent changed tools/, .github/ or docs-repo/.git; stopping." >&2
+            exit 1
+          fi
+
       - name: Prepare docs PR content
         if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' }}
         id: pr_content
@@ -342,7 +395,7 @@ jobs:
           SHORT_SHA: ${{ matrix.short_sha }}
           DEFAULT_PR_TITLE: ${{ steps.assessment.outputs.pr_title }}
         run: |
-          python3 tools/prepare_docs_pr_content.py \
+          python3 -I tools/prepare_docs_pr_content.py \
             --notes-json "${NOTES_JSON}" \
             --assessment-json "${ASSESSMENT_JSON}" \
             --branch-name "${BRANCH_NAME}" \
@@ -368,7 +421,14 @@ jobs:
       - name: Push docs draft branch
         if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' && steps.commit_docs.outputs.changes_made == 'true' }}
         working-directory: docs-repo
-        run: git push --force-with-lease origin "${{ steps.assessment.outputs.docs_branch }}"
+        env:
+          PUSH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+          DOCS_BRANCH: ${{ steps.assessment.outputs.docs_branch }}
+        run: |
+          basic="$(printf 'x-access-token:%s' "${PUSH_TOKEN}" | base64 -w0)"
+          echo "::add-mask::${basic}"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${basic}" \
+            push --force-with-lease origin "${DOCS_BRANCH}"
 
       - name: Create or update docs pull request
         if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' }}
@@ -380,7 +440,7 @@ jobs:
           PR_BODY: ${{ steps.pr_content.outputs.pr_body }}
           CHANGES_MADE: ${{ steps.commit_docs.outputs.changes_made }}
         run: |
-          python3 tools/manage_docs_pr.py \
+          python3 -I tools/manage_docs_pr.py \
             --target-repo topoteretes/cognee-docs \
             --head-branch "${HEAD_BRANCH}" \
             --pr-title "${PR_TITLE}" \
@@ -391,12 +451,17 @@ jobs:
         if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' }}
         env:
           CHANGED_FILES: ${{ steps.pr_content.outputs.changed_files }}
+          # PR title and head branch are author-controlled: env only, never ${{ }} in run.
+          PR_NUMBER: ${{ matrix.pr_number }}
+          PR_TITLE: ${{ matrix.pr_title }}
+          BRANCH_NAME: ${{ matrix.branch_name }}
+          MERGE_SHA: ${{ matrix.merge_sha }}
         run: |
           {
-            echo "## PR docs review: #${{ matrix.pr_number }} ${{ matrix.pr_title }}"
+            echo "## PR docs review: #${PR_NUMBER} ${PR_TITLE}"
             echo
-            echo "- Branch: \`${{ matrix.branch_name }}\`"
-            echo "- Merge commit: \`${{ matrix.merge_sha }}\`"
+            echo "- Branch: \`${BRANCH_NAME}\`"
+            echo "- Merge commit: \`${MERGE_SHA}\`"
             echo "- Needs documentation update: \`${{ steps.assessment.outputs.needs_update }}\`"
             if [ "${{ steps.assessment.outputs.needs_update }}" = "true" ]; then
               echo "- Docs branch: \`${{ steps.assessment.outputs.docs_branch }}\`"
