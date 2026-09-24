@@ -15,10 +15,12 @@ libraries and no live credentials are required, so these run in CI. Coverage:
 """
 
 import base64
+import json
 
 import pytest
 
 from cognee.tasks.ingestion.connectors.gmail import (
+    GmailQuota,
     full_backfill,
     gmail_source,
     incremental_fetch,
@@ -183,6 +185,61 @@ def test_parse_message_tolerates_missing_internal_date():
     row = parse_message({"id": "m3", "payload": {}})
     assert row["internal_date"] == 0
     assert row["body"] == ""
+
+
+def test_parse_message_emits_title_and_content_for_document_ingestion():
+    msg = _make_message(
+        "m4",
+        subject="Invoice #42",
+        sender="billing@example.com",
+        body="Your invoice is attached.",
+    )
+    row = parse_message(msg)
+
+    assert row["title"] == "Invoice #42"
+    assert "From: billing@example.com" in row["content"]
+    assert "To: me@example.com" in row["content"]
+    assert row["content"].endswith("Your invoice is attached.")
+
+
+def test_parse_message_content_falls_back_to_snippet_for_html_only_mail():
+    msg = {
+        "id": "m5",
+        "threadId": "t",
+        "labelIds": [],
+        "snippet": "Preview of an HTML newsletter",
+        "payload": {
+            "mimeType": "text/html",
+            "headers": [{"name": "Subject", "value": "News"}],
+            "body": {"data": _b64("<p>html only</p>")},
+        },
+    }
+    row = parse_message(msg)
+
+    assert row["body"] == ""
+    assert row["content"] == "Preview of an HTML newsletter"
+
+
+def test_parsed_message_becomes_a_non_empty_document():
+    # Regression (SDK-799): document-source rows are read through their
+    # title/content columns only, so a Gmail row without them was ingested
+    # as an empty document and cognify built nothing.
+    from types import SimpleNamespace
+    from uuid import NAMESPACE_OID, uuid5
+
+    from cognee.tasks.ingestion.resolve_dlt_sources import _build_document_data_item
+
+    row = parse_message(
+        _make_message("m6", subject="Lunch?", sender="alice@example.com", body="Tomorrow at noon?")
+    )
+    dlt_row = SimpleNamespace(table_name="gmail_messages", row_data=row, content_hash="h")
+
+    item = _build_document_data_item(dlt_row, uuid5(NAMESPACE_OID, "m6"), "gmail")
+
+    assert item.data.startswith("# Lunch?")
+    assert "From: alice@example.com" in item.data
+    assert "Tomorrow at noon?" in item.data
+    assert item.system_metadata["external_id"] == "m6"
 
 
 # ---------------------------------------------------------------------------
@@ -561,3 +618,124 @@ def test_e2e_changing_labels_backfills_existing_messages(tmp_path):
     # Keeping the same selection takes the incremental path on the next run.
     service.get_errors = {"project": 503}
     pipeline.run(gmail_source(service=service, label_ids=["Label_project"]))
+
+
+# ---------------------------------------------------------------------------
+# GmailQuota: pacing and retries
+# ---------------------------------------------------------------------------
+class _FakeClock:
+    """Deterministic clock whose sleep() just advances time."""
+
+    def __init__(self):
+        self.now = 0.0
+        self.sleeps = []
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+class _RateLimitError(Exception):
+    """Mimics a googleapiclient HttpError with a JSON reason body."""
+
+    def __init__(self, status, reason=None):
+        super().__init__(f"HTTP {status} {reason}")
+        self.resp = type("Resp", (), {"status": status})()
+        body = {"error": {"errors": [{"reason": reason}] if reason else []}}
+        self.content = json.dumps(body).encode("utf-8")
+
+
+class _FlakyRequest:
+    """Raises the queued errors in order, then returns ``result``."""
+
+    def __init__(self, errors, result="ok"):
+        self._errors = list(errors)
+        self._result = result
+        self.calls = 0
+
+    def execute(self):
+        self.calls += 1
+        if self._errors:
+            raise self._errors.pop(0)
+        return self._result
+
+
+def _quota(units_per_minute=6000):
+    clock = _FakeClock()
+    return GmailQuota(units_per_minute, clock=clock, sleep=clock.sleep), clock
+
+
+def test_quota_keeps_every_minute_under_the_budget():
+    quota, clock = _quota(units_per_minute=6000)
+
+    fetched = 0
+    while clock.now < 60.0:
+        quota.acquire(20)  # one messages.get
+        fetched += 1
+
+    # 6,000 units / 20 per fetch = 300 a minute, plus at most a 1-second burst.
+    assert 300 <= fetched <= 306
+
+
+def test_quota_does_not_wait_within_the_burst():
+    quota, clock = _quota(units_per_minute=6000)
+    quota.acquire(20)
+    quota.acquire(5)
+    assert clock.sleeps == []
+
+
+def test_quota_rejects_a_budget_too_small_for_one_fetch():
+    with pytest.raises(ValueError):
+        GmailQuota(10)
+
+
+def test_execute_retries_rate_limits_with_backoff_starting_at_one_second():
+    quota, clock = _quota()
+    request = _FlakyRequest(
+        [_RateLimitError(403, "rateLimitExceeded"), _RateLimitError(429), _RateLimitError(503)]
+    )
+
+    assert quota.execute(request, 20) == "ok"
+    assert request.calls == 4
+    backoffs = [s for s in clock.sleeps if s >= 1.0]
+    assert len(backoffs) == 3
+    assert 1.0 <= backoffs[0] < 2.0
+    assert 2.0 <= backoffs[1] < 3.0
+    assert 4.0 <= backoffs[2] < 5.0
+
+
+@pytest.mark.parametrize(
+    "error",
+    [_RateLimitError(404), _RateLimitError(410), _RateLimitError(403, "insufficientPermissions")],
+)
+def test_execute_raises_non_retryable_errors_immediately(error):
+    quota, clock = _quota()
+    request = _FlakyRequest([error])
+
+    with pytest.raises(type(error)):
+        quota.execute(request, 20)
+    assert request.calls == 1
+    assert clock.sleeps == []
+
+
+def test_execute_gives_up_after_the_last_attempt():
+    quota, _ = _quota()
+    request = _FlakyRequest([_RateLimitError(403, "userRateLimitExceeded")] * 20)
+
+    with pytest.raises(_RateLimitError):
+        quota.execute(request, 20)
+    assert request.calls == 8
+
+
+def test_backfill_paces_every_call_through_the_quota():
+    quota, clock = _quota(units_per_minute=600)  # 30 fetches a minute
+    service = FakeGmailService(messages=[_make_message(f"m{i}") for i in range(40)])
+
+    rows = list(full_backfill(service, {}, label_ids=["INBOX"], quota=quota))
+
+    assert len(rows) == 40
+    # 1 (profile) + 5 (list) + 40 * 20 (gets) = 806 units at 10 units/second.
+    assert clock.now >= 70.0

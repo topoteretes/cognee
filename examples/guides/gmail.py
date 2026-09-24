@@ -35,7 +35,7 @@ One-time setup
 
 Run it:
 
-    uv run python examples/demos/gmail_connector_example.py
+    uv run python examples/guides/gmail.py
 """
 
 import asyncio
@@ -50,14 +50,15 @@ DATASET_NAME = "gmail_inbox"
 # Routing kwargs shared by every remember() call below.
 #   write_disposition="merge" is REQUIRED: the add pipeline defaults to
 #     "replace", which would wipe the whole synced inbox on the second sync.
-#   max_rows_per_table=0 disables cognee's per-table read cap so orphan-cleanup
-#     (forget-on-delete) compares against the *entire* synced corpus, not a
-#     50-row window.
+#   max_rows_per_table=0 guarantees no per-table read cap applies (even if
+#     DLT_MAX_ROWS_PER_TABLE is set), so orphan-cleanup (forget-on-delete)
+#     compares against the *entire* synced corpus.
+#   incremental_loading is left at its default (True) so a re-sync only builds
+#     the graph for new or changed messages instead of the whole inbox again.
 GMAIL_REMEMBER_KWARGS = {
     "primary_key": "id",
     "write_disposition": "merge",
     "max_rows_per_table": 0,
-    "incremental_loading": False,
     "self_improvement": False,
 }
 
@@ -78,7 +79,8 @@ async def main():
     await cognee.prune.prune_system(metadata=True)
 
     # Build the source. Scope it to INBOX and (for the demo) cap the backfill so
-    # the first run is quick. Drop ``max_results`` to ingest the whole label.
+    # the first run is quick. Drop ``max_results`` to ingest the whole label;
+    # Gmail's quota limits a full backfill to roughly 250 messages a minute.
     source = gmail_source(
         credentials_path=credentials_path,
         token_path=token_path,
@@ -94,6 +96,7 @@ async def main():
         **GMAIL_REMEMBER_KWARGS,
     )
     print(result)
+    print("Sync stats:", source.cognee_sync_stats)
 
     answer = await cognee.search(
         query_text="Summarize the most important emails in my inbox.",
@@ -103,28 +106,33 @@ async def main():
     print("Inbox summary:", answer)
 
     # ── Second sync: incremental delta + forget-on-delete ──────────────────
-    # Re-running with the SAME dataset reuses the persisted historyId cursor:
-    # only messages added/changed since sync #1 are fetched, and anything you
+    # Syncing again right away finds nothing new, so this step is left for you
+    # to run later (e.g. tomorrow, or on a schedule). Re-running remember() on
+    # the SAME dataset reuses the persisted historyId cursor: only messages
+    # added/changed since the last sync are fetched, and anything you
     # deleted/trashed in Gmail is removed from memory by orphan_cleanup.
-    print("\n=== Gmail sync #2 (incremental) ===")
-    source = gmail_source(
-        credentials_path=credentials_path,
-        token_path=token_path,
-        label_ids=["INBOX"],
-    )
-    result = await cognee.remember(
-        source,
-        dataset_name=DATASET_NAME,
-        **GMAIL_REMEMBER_KWARGS,
-    )
-    print(result)
-
-    answer = await cognee.search(
-        query_text="What changed in my inbox recently?",
-        query_type=cognee.SearchType.GRAPH_COMPLETION,
-        datasets=[DATASET_NAME],
-    )
-    print("Recent changes:", answer)
+    #
+    # To try it:
+    #   1. Remove ``max_results`` from sync #1 above. A capped backfill does not
+    #      record a cursor, so the next sync would be a full backfill again.
+    #   2. Remove the prune calls at the top, so the next run keeps sync #1.
+    #   3. Uncomment the block below and run the script again once your inbox
+    #      has changed. "Sync stats" shows how many messages were fetched and
+    #      how many were forgotten.
+    #
+    # print("\n=== Gmail sync #2 (incremental) ===")
+    # source = gmail_source(
+    #     credentials_path=credentials_path,
+    #     token_path=token_path,
+    #     label_ids=["INBOX"],
+    # )
+    # result = await cognee.remember(
+    #     source,
+    #     dataset_name=DATASET_NAME,
+    #     **GMAIL_REMEMBER_KWARGS,
+    # )
+    # print(result)
+    # print("Sync stats:", source.cognee_sync_stats)
 
 
 if __name__ == "__main__":
