@@ -42,6 +42,13 @@ async def main():
     await cognee.remember(DRIVER_NOTES, dataset_name="driver_records", self_improvement=False)
 
     # include_memory=True folds in the extracted graph and links it back to source files.
+    # No scope_* argument: this is the OSS single-user default, where the one
+    # local user owns everything and an unscoped read is the documented,
+    # deliberate behavior — not a call site that was missed when scoping was
+    # added for multi-tenant deployments. A real API caller should always
+    # pass scope_tenant_ids/scope_user_ids/scope_dataset_ids; see
+    # get_schema_router.py's _provenance_scope() for how that scope is
+    # computed per request.
     nodes, edges = await cognee.get_memory_provenance_graph(include_memory=True)
 
     name_of = {node_id: properties.get("name") for node_id, properties in nodes}

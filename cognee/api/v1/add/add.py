@@ -19,6 +19,10 @@ from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline
 from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
     resolve_authorized_user_dataset,
 )
+from cognee.modules.pipelines.models.PipelineRunInfo import (
+    PipelineRunAlreadyCompleted,
+    PipelineRunCompleted,
+)
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
@@ -120,7 +124,9 @@ async def add(
         graph_db_config: Optional configuration for graph database (for custom setups).
         dataset_id: Optional specific dataset UUID to use instead of dataset_name.
         run_in_background: If True, starts ingestion asynchronously and returns immediately.
-                          If False (default), waits for completion before returning.
+                           DLT orphan cleanup is skipped; propagating upstream deletions
+                           requires a successful foreground sync.
+                           If False (default), waits for completion before returning.
         extraction_rules: Optional dictionary of rules (e.g., CSS selectors, XPath) for extracting specific content from web pages using BeautifulSoup
         tavily_config: Optional configuration for Tavily API, including API key and extraction settings
         soup_crawler_config: Optional configuration for BeautifulSoup crawler, specifying concurrency, crawl delay, and extraction rules.
@@ -307,11 +313,13 @@ async def add(
     # Background runs must not depend on caller/request-scoped stream lifetimes.
     # Materialize stream-like inputs into owned in-memory buffers up front.
     if run_in_background:
-        # Detached pipelines run one-at-a-time (to avoid DB write conflicts)
-        # and commit later, so we cannot safely defer cleanup past their commit
-        # from here without racing them. Run it up front instead.
+        # The detached pipeline has not committed when this call returns.
+        # Never delete the previous data without proof its replacement succeeded.
         if orphan_cleanup is not None:
-            await orphan_cleanup()
+            logger.warning(
+                "Skipping DLT orphan cleanup for background ingestion; "
+                "reload the affected source in the foreground to propagate upstream deletions."
+            )
             orphan_cleanup = None
         data = await materialize_stream_for_background(data)
 
@@ -334,16 +342,17 @@ async def add(
         skip_connection_test=skip_connection_test,
     )
 
-    # Foreground runs: the fresh rows are committed by pipeline_executor_func
-    # above, so it's now safe to clean up orphans. (Background runs already ran
-    # this up front and set orphan_cleanup to None.)
-    if orphan_cleanup is not None:
-        await orphan_cleanup()
-
     # run_pipeline_blocking returns {dataset_id: PipelineRunInfo} but callers
     # expect a single PipelineRunInfo (add always processes one dataset).
     if isinstance(result, dict) and len(result) == 1:
         result = next(iter(result.values()))
+
+    # Executors may return an error result rather than raise. Only a successful
+    # foreground completion proves it is safe to remove the previous records.
+    if orphan_cleanup is not None and isinstance(
+        result, (PipelineRunCompleted, PipelineRunAlreadyCompleted)
+    ):
+        await orphan_cleanup()
 
     _duration_ms = (_time.monotonic_ns() - _add_start_ns) / 1_000_000
     _attrs = {

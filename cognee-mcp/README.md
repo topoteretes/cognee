@@ -623,8 +623,14 @@ rm -rf "$DATA_ROOT/.cognee_system" "$DATA_ROOT/.data_storage"
 # Store permanent memory
 remember(data="Cognee MCP now exposes a focused memory API.", dataset_name="main_dataset")
 
-# Store session memory
-remember(data="Temporary working note", session_id="agent-session-1")
+# Store permanent memory without the automatic improve stage (add + cognify still run)
+remember(data="A new fact", dataset_name="main_dataset", self_improvement=False)
+
+# The opt-out also applies to file uploads and background=True ingestion
+remember(data="A new fact", self_improvement=False, background=True)
+
+# Store session memory without a background graph bridge in direct mode
+remember(data="Temporary working note", session_id="agent-session-1", self_improvement=False)
 
 # Recall from memory
 recall(query="What changed in the MCP server?", session_id="agent-session-1")
@@ -632,6 +638,14 @@ recall(query="What changed in the MCP server?", session_id="agent-session-1")
 # Delete one dataset
 forget(dataset="main_dataset")
 ```
+
+`self_improvement` defaults to `True`; only an explicit `False` is forwarded, so
+`True` leaves the core default in charge. In permanent mode, `False` disables
+automatic improvement without skipping ingestion or graph building.
+In **direct session mode**, it disables the automatic session-to-graph bridge while
+still storing the session entry. In **API session mode**, MCP uses typed QA entries,
+which stay in the session cache for all flag values; the flag does not enable a
+graph bridge there. It does not control separately requested skill improvement.
 
 
 ### Select an uploaded ontology for a write

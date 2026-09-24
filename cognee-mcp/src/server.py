@@ -373,8 +373,9 @@ async def remember(
     self-improvement loop (improve) unless self_improvement=False.
 
     With session_id (session memory): Stores the data in the session
-    cache only. Fast, no entity extraction. Omit session_id when the
-    content should be stored as permanent graph memory.
+    cache. Direct mode may also bridge it to the graph in the background;
+    API mode uses typed cache entries and does not bridge to the graph.
+    Omit session_id when the content should be stored as permanent graph memory.
 
     Pass either `data` (text) or `filename` + `content_base64` (a file
     upload, up to 10 MB), not both. File uploads are permanent-memory
@@ -395,9 +396,15 @@ async def remember(
         agent-scoped dataset (e.g. "cursor_vscode_memory"), or
         "main_dataset" if no client identity is detected.
     session_id : str, optional
-        Session ID. When set, stores in session cache only.
+        Session ID. Stores in cache; direct mode may also bridge to the graph
+        unless self_improvement is False.
     custom_prompt : str, optional
         Custom prompt for entity extraction (permanent mode only).
+    self_improvement : bool
+        False skips automatic improvement after permanent ingestion; add and
+        cognify still run. In direct session mode, False disables the background
+        session-to-graph bridge. API session entries are cache-only regardless
+        of this flag. Default True.
     ontology_key : str or list[str], optional
         One or more uploaded ontology keys for extraction (permanent mode only).
         API mode uses ontologies uploaded by the authenticated API user. Local
@@ -409,10 +416,6 @@ async def remember(
         deadline shorter than ingestion takes. Ignored with session_id, which
         is already fast. Errors surface via cognify_status, not the return
         value.
-    self_improvement : bool
-        Run the improve loop (triplet enrichment and, with sessions, the
-        session bridge) after cognify. Permanent mode only; default True.
-        Pass False for a plain add + cognify ingestion.
     """
     if content_base64 and data:
         return [
