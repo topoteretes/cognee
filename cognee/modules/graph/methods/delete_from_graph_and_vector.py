@@ -18,11 +18,6 @@ def _get_deleted_edge_retrieval_text(edge: Edge) -> str:
     return get_edge_retrieval_text(attributes.get("edge_text"), edge.relationship_name)
 
 
-def _get_remaining_edge_retrieval_text(edge) -> str:
-    properties = edge[3] if len(edge) > 3 and isinstance(edge[3], dict) else {}
-    return get_edge_retrieval_text(properties.get("edge_text"), edge[2])
-
-
 async def delete_from_graph_and_vector(
     affected_nodes: list[Node],
     affected_edges: list[Edge],
@@ -127,12 +122,9 @@ async def delete_from_graph_and_vector(
         try:
             if not graph_engine:
                 graph_engine = await get_graph_engine()
-            _, remaining_edges = await graph_engine.get_graph_data()
-            remaining_edge_texts = set()
-            for edge in remaining_edges:
-                edge_text = _get_remaining_edge_retrieval_text(edge)
-                if edge_text:
-                    remaining_edge_texts.add(edge_text)
+            remaining_edge_texts = await graph_engine.get_edge_retrieval_texts_in_use(
+                deleted_edge_texts
+            )
 
             orphaned_edge_type_ids = [
                 str(EdgeType.id_for(edge_text))
