@@ -1,4 +1,3 @@
-import importlib.util
 import os
 from functools import lru_cache
 
@@ -25,8 +24,15 @@ class CognifyConfig(BaseSettings):
     # cognify pipeline (env: GRAPH_EXTRACTOR). "auto" (default) runs the LLM
     # path when a usable LLM key is configured and the GLiNER demo otherwise;
     # "llm" / "gliner_demo" pin one regardless of credentials. The GLiNER demo
-    # requires the `gliner` extra and makes no LLM call.
+    # installs its runtime on first use (see below) and makes no LLM call.
     graph_extractor: str = "auto"
+    # GLiNER's torch is not a cognee dependency: when the demo extractor is
+    # resolved and gliner2/torch are missing, CPU-only torch is installed from
+    # GLINER_TORCH_INDEX_URL plus the `gliner` extra (gliner_demo/install.py).
+    # GLINER_AUTO_INSTALL=false raises KeylessExtractorNotInstalledError instead,
+    # for environments installed at build time.
+    gliner_auto_install: bool = True
+    gliner_torch_index_url: str = "https://download.pytorch.org/whl/cpu"
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def to_dict(self) -> dict:
@@ -40,6 +46,8 @@ class CognifyConfig(BaseSettings):
             "contradiction_max_facts": self.contradiction_max_facts,
             "provenance_tracking": self.provenance_tracking,
             "graph_extractor": self.graph_extractor,
+            "gliner_auto_install": self.gliner_auto_install,
+            "gliner_torch_index_url": self.gliner_torch_index_url,
         }
 
 
@@ -77,14 +85,14 @@ def _log_gliner_demo_notice_once() -> None:
 
 
 class KeylessExtractorNotInstalledError(CogneeConfigurationError):
-    """No LLM key is configured and the local extractor's package is missing."""
+    """The GLiNER demo extractor is needed, its runtime is missing, and auto-install is off."""
 
     def __init__(self):
         super().__init__(
-            "No LLM API key is configured, so cognify would extract the graph with the "
-            "local GLiNER demo model, but the `gliner2` package is not installed. Either "
-            'install it with: pip install "cognee[gliner]" or set LLM_API_KEY to extract '
-            "with an LLM.",
+            "Cognify would extract the graph with the local GLiNER demo model, but its "
+            "runtime (gliner2 + torch) is not installed and GLINER_AUTO_INSTALL is false. "
+            "Install it with: python -m cognee.tasks.graph.gliner_demo.install (CPU torch), "
+            'or pip install "cognee[gliner]", or set LLM_API_KEY to extract with an LLM.',
             "KeylessExtractorNotInstalledError",
         )
 
@@ -100,8 +108,9 @@ def resolve_extractor(
     at all. ``llm_configured`` overrides the key check (tests); by default it
     is the inverse of ``keyless_local_defaults_apply()``, which also keeps
     ``llm`` when the preflight is disabled (mocked or deliberately partial
-    config). Resolving to the demo extractor logs the enterprise notice once
-    per process.
+    config). Resolving to the demo extractor installs its runtime when it is
+    missing (``GLINER_AUTO_INSTALL``) and logs the enterprise notice once per
+    process.
 
     This is the ONLY place the extractor setting is read. Callers resolve once,
     up front, and pass the resolved value (or values derived from it) onward —
@@ -115,16 +124,29 @@ def resolve_extractor(
 
             llm_configured = not keyless_local_defaults_apply()
         extractor = LLM_EXTRACTOR if llm_configured else GLINER_DEMO_EXTRACTOR
-        if extractor == GLINER_DEMO_EXTRACTOR and importlib.util.find_spec("gliner2") is None:
-            raise KeylessExtractorNotInstalledError()
     if extractor not in EXTRACTORS:
         raise ValueError(
             f"Unknown extractor {extractor!r}; expected one of "
             f"{', '.join((AUTO_EXTRACTOR, *EXTRACTORS))}"
         )
     if extractor == GLINER_DEMO_EXTRACTOR:
+        _ensure_gliner_runtime(config)
         _log_gliner_demo_notice_once()
     return extractor
+
+
+def _ensure_gliner_runtime(config: CognifyConfig) -> None:
+    """Install the GLiNER runtime when it is missing, or raise when auto-install is off."""
+    from cognee.tasks.graph.gliner_demo.install import (
+        gliner_runtime_installed,
+        install_gliner_runtime,
+    )
+
+    if gliner_runtime_installed():
+        return
+    if not config.gliner_auto_install:
+        raise KeylessExtractorNotInstalledError()
+    install_gliner_runtime(config.gliner_torch_index_url)
 
 
 def default_pipeline_needs_llm(extractor: str, config: CognifyConfig) -> bool:

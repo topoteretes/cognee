@@ -33,6 +33,12 @@ dependencies = [
     "sqlalchemy>=2.0.39,<3.0.0",
     "aiosqlite>=0.20.0,<1.0.0",
     "filelock>=3.12.0,<4.0.0",  # cross-process migration lock for SQLite (Linux/macOS/Windows)
+    "packaging>=24.0",  # requirement parsing for the GLiNER runtime install
+    # gliner2 needs transformers<5, and transformers 4.x needs these two ranges. Pinned
+    # in core (the lockfile already resolves inside them) so the GLiNER runtime installed
+    # at first use never has to change a package the running process has imported.
+    "huggingface-hub>=0.34,<1",
+    "tokenizers>=0.22,<=0.23.0",
     "tiktoken>=0.8.0,<1.0.0",
     # <1.97.0: 1.97.0 fails to build litellm.types.utils.Message on Python 3.10 (unresolved
     # forward ref) and 1.98.0+ import typing.NotRequired (3.11+). See BerriAI/litellm#38202.
@@ -234,7 +240,10 @@ docling = [
 ]
 docling-full = ["docling>=2.115,<3", "transformers>=4.55"]
 # GLiNER demo: LLM-free graph extraction and summaries (cognee/tasks/graph/gliner_demo).
-# Pulls torch; protobuf + sentencepiece are needed by the DeBERTa tokenizer fallback.
+# Not needed up front: the first GLiNER cognify installs these itself, with CPU-only torch
+# from the PyTorch index (gliner_demo/install.py). Installing the extra with pip instead
+# takes torch from PyPI (the CUDA build on Linux, for GPU hosts). protobuf + sentencepiece
+# are needed by the DeBERTa tokenizer fallback.
 gliner = ["gliner2[local]>=2.0.0,<3", "protobuf>=5.29.6", "sentencepiece>=0.2.0"]
 rapidocr = ["rapidocr-onnxruntime>=1.3.0,<2"]
 
