@@ -20,6 +20,18 @@ Entry points:
     * ``visualize_memory_provenance(...)`` / ``get_memory_provenance_payload(...)``
       — the same graph rendered as HTML or packaged as a JSON dict, sharing
       one ``preprocess()`` call so the two cannot drift.
+
+Invariant a dataset scope depends on: ``get_memory_provenance_graph`` does not
+always prune a record's references to an out-of-scope dataset before handing
+it to ``build_provenance_graph`` — an agent kept because at least one of its
+datasets is in scope still carries every dataset ref verbatim, and a kept
+role's ``user_ids`` is not re-checked against the dataset-scoped user query.
+Both are safe only because ``build_provenance_graph``'s ``add_edge()`` refuses
+to create an edge unless both endpoints are already nodes, and an out-of-scope
+dataset is never added as a node in the first place — so the edge toward it is
+silently never created, not filtered after the fact. That check is therefore
+load-bearing for every dataset scope in this module, not an optimization to
+trim: do not hoist or skip it without re-deriving that no scope depends on it.
 """
 
 from typing import Any, NamedTuple, TypedDict, cast
@@ -779,6 +791,22 @@ async def get_memory_provenance_graph(
         # the ones attached to an in-scope dataset. One with no dataset at all
         # has no grant to check and is dropped, which is the fail-closed half
         # of the same rule.
+        #
+        # This only drops the AGENT/SESSION when none of its datasets are in
+        # scope — an agent kept because one of several datasets qualifies
+        # still carries its out-of-scope refs verbatim in agent["datasets"],
+        # unpruned. That is safe, not sloppy: build_provenance_graph's
+        # add_edge() only connects two ids that are already nodes, and an
+        # out-of-scope dataset was never added as a node (the dataset_stmt
+        # query above only returns in-scope rows), so the "reads"/"writes"
+        # edge toward it is silently never created. The same shape covers a
+        # kept role's full user_ids below — role membership can only ever
+        # name users the dataset-scoped user query above also admits, since
+        # that query's role clause and this role filter agree on which roles
+        # qualify, so no dangling edge is possible there either. Both are
+        # therefore load-bearing on add_edge()'s node-membership check, not
+        # on this loop pruning the underlying ref lists — keep that check if
+        # this ever gets "optimised" into something that skips it.
         in_scope = set(dataset_ids)
         agents = [
             agent
