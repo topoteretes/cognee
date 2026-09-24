@@ -16,3 +16,8 @@ Verdicts:
 - needs_source: a specific documentation claim that the provided pages do not resolve, or a claim that the docs and the product disagree
 
 documentation_covered leads to a public comment that links the pages and asks the reporter to close the issue. Choose it only when that comment would be fair to the reporter. Prefer needs_source when unsure.
+
+For needs_source, also fill two fields for the next step, which checks the claim against the cognee source code:
+- claim: one sentence stating what the reporter says about the product or its docs, phrased so the code can confirm or refute it (e.g. "recall() ignores top_k and always returns 15 results").
+- identifiers: up to 8 code names that code must contain for the claim to be checked: functions, parameters, classes, config keys, env vars (e.g. recall, top_k). Names only, no sentences. Include them even when the issue does not format them as code.
+Leave both empty for every other verdict.

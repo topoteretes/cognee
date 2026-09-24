@@ -42,7 +42,7 @@ def triage(monkeypatch):
     monkeypatch.setattr(
         module,
         "run_site_check",
-        lambda system_prompt, user_message: ("needs_source", "default site verdict", []),
+        lambda system_prompt, user_message: ("needs_source", "default site verdict", [], "", []),
     )
     module._real_run_source_checks = module.run_source_checks
     monkeypatch.setattr(module, "run_source_checks", lambda repo, results, index, root: True)
@@ -107,9 +107,13 @@ def _posts(calls):
     return [c for c in calls if isinstance(c, tuple)]
 
 
-def _site_verdict(triage, monkeypatch, verdict, reason="r", pages=()):
+def _site_verdict(triage, monkeypatch, verdict, reason="r", pages=(), claim="", identifiers=()):
     covering = [(url, "states the relevant fact") for url in pages]
-    monkeypatch.setattr(triage, "run_site_check", lambda sp, um: (verdict, reason, covering))
+    monkeypatch.setattr(
+        triage,
+        "run_site_check",
+        lambda sp, um: (verdict, reason, covering, claim, list(identifiers)),
+    )
 
 
 def _source_verdict(phase3, monkeypatch, verdict, reason="r", source=(), docs=()):
@@ -322,7 +326,9 @@ def test_maintainer_reply_leaves_the_thread_to_them_without_an_llm_call(
     monkeypatch.setattr(
         triage,
         "run_site_check",
-        lambda sp, um: llm_calls.append(um) or ("documentation_covered", "x", [(PAGE_SEARCH, "n")]),
+        lambda sp, um: (
+            llm_calls.append(um) or ("documentation_covered", "x", [(PAGE_SEARCH, "n")], "", [])
+        ),
     )
     comments = [
         {"body": "Hello, thanks!", "user": {"login": "github-actions[bot]", "type": "Bot"}},
@@ -426,6 +432,47 @@ def test_small_gap_never_hands_the_editor_a_path_outside_the_checked_pages(
     code, [row] = _run(phase3, ["--issue-number", "4632"], tmp_path)
     assert code == 0 and row["verdict"] == "uncertain" and row["docs_files"] == []
     assert "(docs file: python-api/config.mdx)" in seen[0]
+
+
+def test_docs_check_hands_its_claim_reason_and_code_names_to_the_source_check(
+    phase3, monkeypatch, tmp_path
+):
+    # An issue with no backticks or CONSTANTS: before the hand-off the grep searched nothing.
+    issue = _issue(4700, "[Docs]: recall ignores top_k", body="The docs say recall takes top_k.")
+    _fake_api(phase3, monkeypatch, [("/issues/4700", issue)])
+    _site_verdict(
+        phase3,
+        monkeypatch,
+        "needs_source",
+        "The config page lists top_k without a default.",
+        claim="recall() ignores top_k and always returns 15 results.",
+        identifiers=["`top_k`", "recall", "top_k", "ab", "two words", "x" * 81],
+    )
+    grepped = []
+    monkeypatch.setattr(
+        phase3, "git_grep_hits", lambda tokens, root: grepped.append(tokens) or "cognee/r.py:1:x"
+    )
+    seen = _source_verdict(phase3, monkeypatch, "not_in_source", "No cap on top_k in recall.")
+    code, [row] = _run(phase3, ["--issue-number", "4700", "--dry-run"], tmp_path)
+
+    assert code == 0
+    # only single grep-able names survive: no duplicates, too-short, spaced or oversized ones
+    assert grepped == [["top_k", "recall"]] and row["grep_terms"] == ["top_k", "recall"]
+    assert "Claim to test: recall() ignores top_k and always returns 15 results." in seen[0]
+    assert "Why the docs did not settle it: The config page lists top_k" in seen[0]
+    assert row["reason"] == "No cap on top_k in recall."  # the docs check's reason is kept apart
+    table = "\n".join(phase3.human_review_table_lines([row]))
+    assert "recall() ignores top_k" in table and "`top_k`, `recall`" in table
+    assert "Docs check: The config page lists top_k" in table and "Source check: No cap" in table
+
+
+def test_hand_off_fields_stay_empty_unless_the_docs_check_needs_the_source(
+    triage, monkeypatch, tmp_path
+):
+    _fake_api(triage, monkeypatch, [("/issues/4656", _docs_issue())])
+    _site_verdict(triage, monkeypatch, "too_vague", claim="c", identifiers=["recall"])
+    code, [row] = _run(triage, ["--issue-number", "4656", "--dry-run"], tmp_path)
+    assert code == 0 and (row["claim"], row["identifiers"], row["site_reason"]) == ("", [], "")
 
 
 @pytest.mark.parametrize("verdict", ["not_in_source", "too_big", "uncertain"])
