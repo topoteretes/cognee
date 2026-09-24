@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from collections.abc import Coroutine
+from collections.abc import Collection, Coroutine
 from contextlib import asynccontextmanager, nullcontext
 from datetime import datetime, timezone
 from textwrap import dedent
@@ -1846,6 +1846,26 @@ class Neo4jAdapter(GraphDBInterface):
         from cognee.infrastructure.databases.graph.degree_seeds import cypher_degree_seeds
 
         return await cypher_degree_seeds(self, top_k, typed=False)
+
+    async def get_edge_retrieval_texts_in_use(self, edge_texts: Collection[str]) -> set[str]:
+        """Match retrieval texts in the store; only the matching texts come back.
+
+        Mirrors ``get_edge_retrieval_text``: the trimmed ``edge_text`` property
+        when it is non-blank, else the relationship type.
+        """
+        wanted = sorted({text for text in edge_texts if text})
+        if not wanted:
+            return set()
+
+        query = f"""
+        MATCH (:`{BASE_LABEL}`)-[r]->(:`{BASE_LABEL}`)
+        WITH trim(coalesce(toStringOrNull(r.edge_text), '')) AS stored_text, type(r) AS rel
+        WITH CASE WHEN stored_text <> '' THEN stored_text ELSE trim(rel) END AS text
+        WHERE text IN $edge_texts
+        RETURN DISTINCT text
+        """
+        results = await self.query(query, {"edge_texts": wanted})
+        return {record["text"] for record in results}
 
     async def get_graph_data(self):
         """
