@@ -1,22 +1,21 @@
 """Install the GLiNER runtime (torch + ``gliner2``) the first time GLiNER is used.
 
-PyPI's Linux torch wheels bundle the CUDA libraries (several GB), so torch is not a
-dependency of ``cognee`` itself. When a cognify resolves to the GLiNER extractor and
-its runtime is missing, this module installs it into the running environment:
+The recommended install for GLiNER users is ``pip install "cognee[gliner]"``. This
+module is the fail-safe for users without it, so they can try GLiNER anyway: when a
+cognify resolves to the GLiNER extractor and its runtime is missing, it installs the
+``gliner`` extra (read from cognee's own metadata, so ``pyproject.toml`` is the only
+list) into the running environment:
 
-1. torch, only when no torch (CPU or GPU build) is installed, from the PyTorch CPU
-   index only, so no other package can come from there;
-2. the ``gliner`` extra's requirements (read from cognee's own metadata), only when
-   ``gliner2`` is missing, from the default index.
+1. its torch requirement, only when no torch (CPU or GPU build) is installed, from
+   the PyTorch CPU index only, so no other package can come from there (PyPI's Linux
+   torch pulls several GB of CUDA libraries);
+2. the rest of the extra, only when ``gliner2`` is missing, from the default index.
 
 Step 2 runs with every installed distribution pinned to its current version: the
 running process may already have imported them, and a package replaced on disk
-under a live import breaks it. An install that would need to change one fails with
-the resolver's message instead.
+under a live import breaks it. An install that would need to change one fails.
 
-Users who manage torch themselves install ``cognee[gliner]`` (torch from PyPI: the
-CUDA build on Linux) or run ``python -m cognee.tasks.graph.gliner_demo.install`` at
-build time (the Docker image does) and may set ``GLINER_AUTO_INSTALL=false``.
+Every failure raises ``GlinerInstallError`` with the extra as the proposed fix.
 """
 
 from __future__ import annotations
@@ -35,13 +34,13 @@ from pathlib import Path
 from filelock import FileLock
 from packaging.requirements import Requirement
 
+from cognee.exceptions import CogneeConfigurationError
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("gliner.install")
 
-TORCH_REQUIREMENT = "torch>=2.1,<3"
-DEFAULT_TORCH_INDEX_URL = "https://download.pytorch.org/whl/cpu"
 GLINER_EXTRA = "gliner"
+INSTALL_EXTRA_HINT = 'pip install "cognee[gliner]"'
 # Seconds between "still installing" status lines while an install step runs.
 HEARTBEAT_SECONDS = 15
 # Installer output lines worth relaying: what is being fetched and what landed.
@@ -57,8 +56,18 @@ _PROGRESS_PREFIXES = (
 )
 
 
-class GlinerInstallError(RuntimeError):
-    """The GLiNER runtime is missing and could not be installed."""
+class GlinerInstallError(CogneeConfigurationError):
+    """The GLiNER runtime is missing and could not be installed automatically."""
+
+    def __init__(self, message: str):
+        super().__init__(
+            f"Could not install the GLiNER runtime automatically: {message}",
+            "GlinerInstallError",
+            remediation=(
+                f"Install cognee with the GLiNER extra: {INSTALL_EXTRA_HINT} "
+                "(or set LLM_API_KEY to extract with an LLM)."
+            ),
+        )
 
 
 def _installed(module: str) -> bool:
@@ -70,21 +79,23 @@ def gliner_runtime_installed() -> bool:
     return _installed("gliner2") and _installed("torch")
 
 
-def gliner_requirements() -> list[str]:
-    """The ``gliner`` extra's requirements, as declared in cognee's installed metadata."""
-    requirements = []
+def gliner_extra() -> tuple[str, list[str]]:
+    """The ``gliner`` extra from cognee's installed metadata: (torch requirement, the rest)."""
+    torch, rest = None, []
     for line in importlib.metadata.requires("cognee") or []:
         requirement = Requirement(line)
         marker = requirement.marker
         if marker and "extra" in str(marker) and marker.evaluate({"extra": GLINER_EXTRA}):
             requirement.marker = None
-            requirements.append(str(requirement))
-    if not requirements:
+            if requirement.name == "torch":
+                torch = str(requirement)
+            else:
+                rest.append(str(requirement))
+    if torch is None or not rest:
         raise GlinerInstallError(
-            f"cognee's installed metadata declares no `{GLINER_EXTRA}` extra; "
-            "reinstall cognee so its metadata is complete."
+            f"cognee's installed metadata has no complete `{GLINER_EXTRA}` extra."
         )
-    return requirements
+    return torch, rest
 
 
 def installed_pins() -> list[str]:
@@ -104,11 +115,7 @@ def installer_command() -> list[str]:
     uv = shutil.which("uv")
     if uv is not None:
         return [uv, "pip", "install", "--python", sys.executable]
-    raise GlinerInstallError(
-        "Cannot install the GLiNER runtime: this environment has neither pip nor uv. "
-        f"Install it yourself: pip install torch --index-url {DEFAULT_TORCH_INDEX_URL} "
-        '&& pip install "cognee[gliner]"'
-    )
+    raise GlinerInstallError("this environment has neither pip nor uv.")
 
 
 def _run(command: list[str], step: str) -> None:
@@ -138,24 +145,44 @@ def _run(command: list[str], step: str) -> None:
     finally:
         finished.set()
     if returncode != 0:
-        raise GlinerInstallError(
-            f"Installing the GLiNER runtime failed while {step} ({' '.join(command)}):\n"
-            + "\n".join(tail)
-        )
+        raise GlinerInstallError(f"{step} failed ({' '.join(command)}):\n" + "\n".join(tail))
     logger.info("GLiNER runtime: done %s in %ds", step, time.monotonic() - started)
 
 
-def install_gliner_runtime(index_url: str = DEFAULT_TORCH_INDEX_URL) -> None:
-    """Install whichever of torch (CPU build) and the ``gliner`` extra is missing.
+def _install_rest(command: list[str], requirements: list[str]) -> None:
+    """Step 2: the rest of the extra, with every installed distribution pinned."""
+    constraints_path = None
+    try:
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as constraints:
+            constraints_path = Path(constraints.name)
+            constraints.write("\n".join(installed_pins()) + "\n")
+        _run(
+            [*command, "-c", str(constraints_path), *requirements],
+            "installing gliner2 and its tokenizer dependencies (step 2 of 2)",
+        )
+    finally:
+        if constraints_path is not None:
+            constraints_path.unlink(missing_ok=True)
+
+
+def install_gliner_runtime(index_url: str) -> None:
+    """Install whichever of torch (CPU build, from ``index_url``) and the extra is missing.
 
     A file lock next to the environment serializes concurrent processes; one that
     waited finds the runtime installed and returns.
     """
-    with FileLock(str(Path(sys.prefix) / ".cognee-gliner-install.lock")):
+    lock_path = Path(sys.prefix) / ".cognee-gliner-install.lock"
+    try:
+        lock = FileLock(str(lock_path))
+        lock.acquire()
+    except OSError as error:
+        raise GlinerInstallError(f"{sys.prefix} is not writable ({error}).") from error
+    try:
         # A process that waited on the lock must see what the holder installed.
         importlib.invalidate_caches()
         if gliner_runtime_installed():
             return
+        torch_requirement, rest = gliner_extra()
         command = installer_command()
         started = time.monotonic()
         logger.warning(
@@ -169,31 +196,30 @@ def install_gliner_runtime(index_url: str = DEFAULT_TORCH_INDEX_URL) -> None:
         )
         if not _installed("torch"):
             _run(
-                [*command, "--index-url", index_url, TORCH_REQUIREMENT],
+                [*command, "--index-url", index_url, torch_requirement],
                 "downloading CPU-only PyTorch (step 1 of 2)",
             )
             importlib.invalidate_caches()
         if not _installed("gliner2"):
-            with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as constraints:
-                constraints.write("\n".join(installed_pins()) + "\n")
-            try:
-                _run(
-                    [*command, "-c", constraints.name, *gliner_requirements()],
-                    "installing gliner2 and its tokenizer dependencies (step 2 of 2)",
-                )
-            finally:
-                Path(constraints.name).unlink()
+            _install_rest(command, rest)
             importlib.invalidate_caches()
         if not gliner_runtime_installed():
             raise GlinerInstallError(
-                f"Installed the GLiNER runtime into {sys.prefix}, but this interpreter "
-                "still cannot import gliner2 and torch."
+                f"installed into {sys.prefix}, but this interpreter still cannot import "
+                "gliner2 and torch."
             )
         logger.info(
             "GLiNER runtime ready (torch %s) after %ds.",
             importlib.metadata.version("torch"),
             time.monotonic() - started,
         )
+        logger.info(
+            "Tip: if you keep using GLiNER, install cognee with the extra (%s) so it stays "
+            "in your environment instead of being downloaded again.",
+            INSTALL_EXTRA_HINT,
+        )
+    finally:
+        lock.release()
 
 
 if __name__ == "__main__":

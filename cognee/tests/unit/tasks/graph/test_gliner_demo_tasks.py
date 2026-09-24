@@ -1071,7 +1071,7 @@ def test_resolve_extractor_without_auto_install_raises_the_install_hint():
     with (
         patch("importlib.util.find_spec", return_value=None),
         patch("cognee.tasks.graph.gliner_demo.install.install_gliner_runtime") as install,
-        pytest.raises(KeylessExtractorNotInstalledError, match="gliner_demo.install"),
+        pytest.raises(KeylessExtractorNotInstalledError, match=r"cognee\[gliner\]"),
     ):
         resolve_extractor(None, config, llm_configured=False)
     install.assert_not_called()

@@ -90,10 +90,12 @@ class KeylessExtractorNotInstalledError(CogneeConfigurationError):
     def __init__(self):
         super().__init__(
             "Cognify would extract the graph with the local GLiNER demo model, but its "
-            "runtime (gliner2 + torch) is not installed and GLINER_AUTO_INSTALL is false. "
-            "Install it with: python -m cognee.tasks.graph.gliner_demo.install (CPU torch), "
-            'or pip install "cognee[gliner]", or set LLM_API_KEY to extract with an LLM.',
+            "runtime (gliner2 + torch) is not installed and GLINER_AUTO_INSTALL is false.",
             "KeylessExtractorNotInstalledError",
+            remediation=(
+                'Install cognee with the GLiNER extra: pip install "cognee[gliner]" '
+                "(or set LLM_API_KEY to extract with an LLM)."
+            ),
         )
 
 

@@ -1412,6 +1412,7 @@ gliner = [
     { name = "gliner2", extra = ["local"] },
     { name = "protobuf" },
     { name = "sentencepiece" },
+    { name = "torch" },
 ]
 gmail = [
     { name = "google-api-python-client" },
@@ -1633,6 +1634,7 @@ requires-dist = [
     { name = "tenacity", specifier = ">=9.0.0" },
     { name = "tiktoken", specifier = ">=0.8.0,<1.0.0" },
     { name = "tokenizers", specifier = ">=0.22,<=0.23.0" },
+    { name = "torch", marker = "extra == 'gliner'", specifier = ">=2.1,<3" },
     { name = "transformers", marker = "extra == 'docling-full'", specifier = ">=4.55" },
     { name = "transformers", marker = "extra == 'huggingface'", specifier = ">=4.46.3,<6" },
     { name = "transformers", marker = "extra == 'ollama'", specifier = ">=4.46.3,<6" },
