@@ -243,3 +243,55 @@ def test_same_row_write_conflict_is_detected_and_retryable(tmp_path, journal_mod
     assert first.execute("SELECT bal FROM acct WHERE id = 'a'").fetchone()[0] == 11
     first.close()
     second.close()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_tag_removal_on_the_same_rows_loses_nothing(tmp_path, journal_mode):
+    """Two adapters (connections) strip different tags from the same rows at once.
+
+    Read-modify-write on the JSON payload: each removal must see the other's
+    result, never overwrite it from a stale read.
+    """
+    path = str(tmp_path / "tags.db")
+    first = TursoVectorAdapter(url=path, api_key=None, embedding_engine=_Embedding())
+    second = TursoVectorAdapter(url=path, api_key=None, embedding_engine=_Embedding())
+    docs = [_Doc(text=f"doc {i}", belongs_to_set=["A", "B", "keep"]) for i in range(40)]
+    await first.create_data_points("Doc_text", docs)
+
+    try:
+        for _ in range(5):
+            await asyncio.gather(
+                first.remove_belongs_to_set_tags(["A"]), second.remove_belongs_to_set_tags(["B"])
+            )
+        rows = await first._execute('SELECT payload FROM "Doc_text"', fetch=True)
+        assert len(rows) == 40
+        import json as _json
+
+        assert all(_json.loads(row[0])["belongs_to_set"] == ["keep"] for row in rows)
+    finally:
+        await first.close()
+        await second.close()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_payload_updates_on_the_same_row_merge(tmp_path, journal_mode):
+    path = str(tmp_path / "payload.db")
+    first = TursoVectorAdapter(url=path, api_key=None, embedding_engine=_Embedding())
+    second = TursoVectorAdapter(url=path, api_key=None, embedding_engine=_Embedding())
+    doc = _Doc(text="shared row", belongs_to_set=[])
+    await first.create_data_points("Doc_text", [doc])
+
+    try:
+        await asyncio.gather(
+            *(first.update_payload("Doc_text", {doc.id: {"text": f"left {i}"}}) for i in range(10)),
+            *(
+                second.update_payload("Doc_text", {doc.id: {"belongs_to_set": [f"right {i}"]}})
+                for i in range(10)
+            ),
+        )
+        [result] = await first.retrieve("Doc_text", [str(doc.id)])
+        assert result.payload["text"].startswith("left ")
+        assert result.payload["belongs_to_set"][0].startswith("right ")
+    finally:
+        await first.close()
+        await second.close()

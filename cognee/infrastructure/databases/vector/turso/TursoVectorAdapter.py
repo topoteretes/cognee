@@ -189,20 +189,37 @@ class TursoVectorAdapter(VectorDBInterface):
         except Exception:  # nothing to recover; the caller re-raises the cause
             logger.debug("Turso rollback after a failed write", exc_info=True)
 
-    def _run_write(self, statements: list[tuple[str, tuple]]) -> None:
-        """Execute ``statements`` inside one committed transaction (sync, locked)."""
+    def _transaction(self, work):
+        """Run ``work(connection)`` inside one committed transaction (sync, locked).
+
+        Reads and writes issued by ``work`` share a snapshot: under MVCC a row
+        another transaction committed after the snapshot fails the write with
+        ``Write-write conflict``, under WAL the read-to-write lock upgrade fails
+        with ``database is locked``; both are retried by the async callers, which
+        re-run ``work`` and therefore re-read. That is what makes the adapter's
+        read-modify-write paths safe across processes.
+        """
         with self._connection_lock:
             connection = self._get_connection()
             begin = begin_statement(self.turso_config)
             if begin:
                 connection.execute(begin)
             try:
-                for sql, params in statements:
-                    connection.execute(sql, params)
+                result = work(connection)
                 self._commit(connection, begin)
+                return result
             except Exception:
                 self._rollback(connection)
                 raise
+
+    def _run_write(self, statements: list[tuple[str, tuple]]) -> None:
+        """Execute ``statements`` inside one committed transaction (sync, locked)."""
+
+        def work(connection):
+            for sql, params in statements:
+                connection.execute(sql, params)
+
+        self._transaction(work)
 
     async def _execute(
         self,
@@ -310,38 +327,31 @@ class TursoVectorAdapter(VectorDBInterface):
         The engine rejects a scalar subquery inside ``ON CONFLICT DO UPDATE SET``, so
         the stored tag arrays are read first and unioned here; the upsert itself
         then only assigns ``excluded.payload``. As in PGVector, a conflicting row
-        keeps its stored vector.
+        keeps its stored vector. Read and write share one transaction (see
+        ``_transaction``), so a concurrent writer cannot make the merge stale.
         """
-        with self._connection_lock:
-            connection = self._get_connection()
-            begin = begin_statement(self.turso_config)
-            if begin:
-                connection.execute(begin)
-            try:
-                existing = connection.execute(
-                    f"SELECT id, json_extract(payload, '$.belongs_to_set') FROM \"{collection_name}\" "
-                    f"WHERE id IN (SELECT value FROM json_each(?))",
-                    (json.dumps(list(rows)),),
-                ).fetchall()
-                for row_id, stored_tags in existing:
-                    payload = rows[row_id]["payload"]
-                    payload["belongs_to_set"] = _union_tags(
-                        json.loads(stored_tags) if stored_tags else None,
-                        payload.get("belongs_to_set"),
-                    )
-                insert_sql = (
-                    f'INSERT INTO "{collection_name}" (id, payload, vector) '
-                    f"VALUES (?, ?, vector32(?)) "
-                    f"ON CONFLICT(id) DO UPDATE SET payload = excluded.payload"
+
+        def work(connection):
+            existing = connection.execute(
+                f"SELECT id, json_extract(payload, '$.belongs_to_set') FROM \"{collection_name}\" "
+                f"WHERE id IN (SELECT value FROM json_each(?))",
+                (json.dumps(list(rows)),),
+            ).fetchall()
+            for row_id, stored_tags in existing:
+                payload = rows[row_id]["payload"]
+                payload["belongs_to_set"] = _union_tags(
+                    json.loads(stored_tags) if stored_tags else None,
+                    payload.get("belongs_to_set"),
                 )
-                for row_id, row in rows.items():
-                    connection.execute(
-                        insert_sql, (row_id, json.dumps(row["payload"]), row["vector"])
-                    )
-                self._commit(connection, begin)
-            except Exception:
-                self._rollback(connection)
-                raise
+            insert_sql = (
+                f'INSERT INTO "{collection_name}" (id, payload, vector) '
+                f"VALUES (?, ?, vector32(?)) "
+                f"ON CONFLICT(id) DO UPDATE SET payload = excluded.payload"
+            )
+            for row_id, row in rows.items():
+                connection.execute(insert_sql, (row_id, json.dumps(row["payload"]), row["vector"]))
+
+        self._transaction(work)
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         """Create the index collection (table) for the given name/property pair."""
@@ -383,29 +393,36 @@ class TursoVectorAdapter(VectorDBInterface):
             return
         if not await self.has_collection(collection_name):
             return
-        for data_point_id, fields in payload_updates.items():
-            rows = await self._execute(
-                f'SELECT payload FROM "{collection_name}" WHERE id = ?',
-                [str(data_point_id)],
-                fetch=True,
-            )
-            if not rows:
-                continue
-            payload = json.loads(rows[0][0]) if rows[0][0] else {}
-            # Caller contract: the fields already exist in the payload (see
-            # PGVectorAdapter.update_payload).
-            unknown_fields = set(fields) - set(payload)
-            if unknown_fields:
-                raise ValueError(
-                    f"update_payload: fields {sorted(unknown_fields)} do not exist in the "
-                    f"payload of {collection_name!r} row {data_point_id}"
+
+        updates = {str(data_point_id): fields for data_point_id, fields in payload_updates.items()}
+
+        def work(connection):
+            rows = connection.execute(
+                f'SELECT id, payload FROM "{collection_name}" '
+                f"WHERE id IN (SELECT value FROM json_each(?))",
+                (json.dumps(list(updates)),),
+            ).fetchall()
+            for row_id, payload_text in rows:
+                fields = updates[row_id]
+                payload = json.loads(payload_text) if payload_text else {}
+                # Caller contract: the fields already exist in the payload (see
+                # PGVectorAdapter.update_payload).
+                unknown_fields = set(fields) - set(payload)
+                if unknown_fields:
+                    raise ValueError(
+                        f"update_payload: fields {sorted(unknown_fields)} do not exist in the "
+                        f"payload of {collection_name!r} row {row_id}"
+                    )
+                payload.update(fields)
+                connection.execute(
+                    f'UPDATE "{collection_name}" SET payload = ? WHERE id = ?',
+                    (json.dumps(payload), row_id),
                 )
-            payload.update(fields)
-            await self._execute(
-                f'UPDATE "{collection_name}" SET payload = ? WHERE id = ?',
-                [json.dumps(payload), str(data_point_id)],
-                commit=True,
-            )
+
+        # Read and write in one transaction, re-run from the read on a conflict, so a
+        # concurrent writer's change to the same row is never overwritten from a
+        # stale payload.
+        await retry_on_conflict(lambda: asyncio.to_thread(self._transaction, work))
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         """Return rows from ``collection_name`` matching any of ``data_point_ids``."""
@@ -617,44 +634,44 @@ class TursoVectorAdapter(VectorDBInterface):
             # FIRST. Only these rows are rewritten or deleted-when-empty,
             # otherwise a row that was already stored with an empty
             # belongs_to_set (e.g. an untagged index row) would be deleted as
-            # collateral on any unrelated tag removal. Mirrors PGVector. The
-            # table is a verified collection (_is_collection), so a failing
-            # read here is a real error and propagates.
-            rows = await self._execute(
+            # collateral on any unrelated tag removal. Mirrors PGVector.
+            #
+            # The engine cannot bind a parameter inside the nested json_each()
+            # a SQL-side rewrite needs, so the arrays are filtered here and the
+            # payloads written back with plain binds: UPDATE the survivors,
+            # DELETE the rows whose array became empty. Read and writes share
+            # one transaction and the whole unit is retried on a conflict, so a
+            # concurrent removal of another tag from the same row is never
+            # undone from a stale read.
+            select_sql = (
                 f'SELECT id, payload FROM "{table_name}" '
                 f"WHERE json_type(payload, '$.belongs_to_set') = 'array' "
                 f"AND EXISTS (SELECT 1 FROM json_each(payload, '$.belongs_to_set') je "
-                f"WHERE je.value IN (SELECT value FROM json_each(?))){id_scope}",
-                [tags_json] + scope_params,
-                fetch=True,
+                f"WHERE je.value IN (SELECT value FROM json_each(?))){id_scope}"
             )
-            if not rows:
-                continue
 
-            # The engine cannot bind a parameter inside the nested json_each()
-            # a SQL-side rewrite needs, so filter the arrays here and write the
-            # payloads back with plain binds: UPDATE the survivors, DELETE the
-            # rows whose array became empty, all in one transaction.
-            statements: list[tuple[str, tuple]] = []
-            for row_id, payload_text in rows:
-                payload = json.loads(payload_text) if payload_text else {}
-                remaining = [tag for tag in payload.get("belongs_to_set", []) if tag not in tag_set]
-                if remaining:
-                    payload["belongs_to_set"] = remaining
-                    statements.append(
-                        (
+            def work(connection, select_sql=select_sql, table_name=table_name, scope=scope_params):
+                rows = connection.execute(select_sql, (tags_json, *scope)).fetchall()
+                for row_id, payload_text in rows:
+                    payload = json.loads(payload_text) if payload_text else {}
+                    remaining = [
+                        tag for tag in payload.get("belongs_to_set", []) if tag not in tag_set
+                    ]
+                    if remaining:
+                        payload["belongs_to_set"] = remaining
+                        connection.execute(
                             f'UPDATE "{table_name}" SET payload = ? WHERE id = ?',
                             (json.dumps(payload), row_id),
                         )
-                    )
-                else:
-                    statements.append((f'DELETE FROM "{table_name}" WHERE id = ?', (row_id,)))
+                    else:
+                        connection.execute(f'DELETE FROM "{table_name}" WHERE id = ?', (row_id,))
+
             # One table's failure must not stop the others, but it must not be
             # lost either: every failure is re-raised together once all tables
             # have been attempted, so a stale tag never survives silently.
             try:
                 await retry_on_conflict(
-                    lambda statements=statements: asyncio.to_thread(self._run_write, statements)
+                    lambda work=work: asyncio.to_thread(self._transaction, work)
                 )
             except Exception as error:
                 logger.warning(
