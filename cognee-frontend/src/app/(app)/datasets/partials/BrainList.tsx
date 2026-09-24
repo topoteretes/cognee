@@ -4,6 +4,7 @@ import type { ReactElement } from "react";
 import { Tooltip } from "@mantine/core";
 import SkeletonBar from "@/ui/elements/SkeletonBar";
 import PlusIcon from "@/ui/elements/PlusIcon";
+import type { DatasetProcessing } from "@/modules/datasets/useDatasetProcessing";
 
 export type BrainStatus =
   | "pending"
@@ -15,6 +16,7 @@ export type BrainStatus =
   | "loading";
 
 export interface BrainListItem {
+  processingCounts?: DatasetProcessing;
   id: string;
   name: string;
   status: BrainStatus;
@@ -86,10 +88,11 @@ export default function BrainList<T extends BrainListItem>({
           // Doc counts are unreliable while the pipeline runs — hide them
           // until the dataset reaches a terminal status.
           const processing = ds.status === "pending" || ds.status === "running";
+          const incomplete = !processing && ds.status === "completed" && (ds.processingCounts?.pending ?? 0) > 0;
           const isOutdated = outdatedIds.has(ds.id);
-          const dotColor = isOutdated ? OUTDATED_DOT : STATUS_DOT[ds.status];
-          const statusLabel = isOutdated ? OUTDATED_LABEL : STATUS_LABEL[ds.status];
-          const statusHint = isOutdated ? OUTDATED_HINT : STATUS_HINT[ds.status];
+          const dotColor = isOutdated ? OUTDATED_DOT : incomplete ? "#F59E0B" : STATUS_DOT[ds.status];
+          const statusLabel = isOutdated ? OUTDATED_LABEL : incomplete ? "Partially processed" : STATUS_LABEL[ds.status];
+          const statusHint = isOutdated ? OUTDATED_HINT : incomplete ? "Some imported items are not ready to search" : STATUS_HINT[ds.status];
           return (
             <div key={ds.id} onClick={() => onSelect(ds.id)}
               style={{
@@ -121,7 +124,10 @@ export default function BrainList<T extends BrainListItem>({
                 </Tooltip>
               )}
               <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: "#EDECEA", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {ds.name}
+                <span title={ds.name}>{ds.name}</span>
+                {ds.processingCounts && <span style={{ display: "block", fontSize: 11, fontWeight: 400, color: "rgba(237,236,234,0.6)", marginTop: 4 }}>
+                  {ds.processingCounts.completed} / {ds.processingCounts.total} ready · {ds.processingCounts.pending} remaining
+                </span>}
               </span>
               <span style={{ fontSize: 11, color: "rgba(237,236,234,0.35)", flexShrink: 0, minWidth: 16, textAlign: "right" }}>
                 {docsLoadingRow ? <SkeletonBar width={14} height={8} /> : processing ? "processing" : ds.documents}

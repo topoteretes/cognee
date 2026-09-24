@@ -17,6 +17,7 @@ from cognee.modules.retrieval.hybrid.context import (
     format_hybrid_context_batch,
 )
 from cognee.modules.retrieval.hybrid.entities import build_entities, search_entities
+from cognee.modules.retrieval.hybrid.external_metadata import project_external_metadata
 from cognee.modules.retrieval.hybrid.facts import (
     edge_rank_by_id,
     resolve_facts_top_k,
@@ -70,6 +71,8 @@ class HybridRetriever(BaseRetriever):
         use_importance_weight: bool = True,
         use_truth_weight: bool = False,
         facts_top_k: int | None = 5,
+        include_external_metadata: bool = False,
+        external_metadata_keys: list[str] | None = None,
     ):
         self.chunks_top_k = chunks_top_k if chunks_top_k is not None else 5
         self.entities_top_k = entities_top_k if entities_top_k is not None else 5
@@ -88,6 +91,11 @@ class HybridRetriever(BaseRetriever):
         self.use_importance_weight = use_importance_weight
         self.use_truth_weight = use_truth_weight
         self.facts_top_k = facts_top_k if facts_top_k is not None else 5
+        # Opt-in: surface allowlisted keys of the document external_metadata
+        # stored on each chunk. Off by default, so returned objects and the
+        # prompt stay exactly as before.
+        self.include_external_metadata = include_external_metadata
+        self.external_metadata_keys = list(external_metadata_keys or [])
 
     def _use_session_cache(self) -> bool:
         user = session_user.get()
@@ -151,6 +159,11 @@ class HybridRetriever(BaseRetriever):
                 personal_influence=get_base_config().personalization_influence,
             ),
             self._retrieve_entities_and_facts(query, query_vector),
+        )
+        project_external_metadata(
+            chunk_objects.get("chunks", []),
+            self.include_external_metadata,
+            self.external_metadata_keys,
         )
         return {**chunk_objects, "entities": entities, "facts": facts}
 

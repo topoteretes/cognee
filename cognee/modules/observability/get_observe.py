@@ -90,6 +90,48 @@ def _set_generation_output(span, result) -> None:
         logger.debug("Ignoring exception in _set_generation_output", exc_info=True)
 
 
+def _set_embedding_attributes(span, adapter) -> None:
+    """Emit standard OTel-GenAI attributes on an embeddings span (metadata only).
+
+    Uses only data available on the embedding engine (provider, model,
+    dimensions, endpoint). No input text is recorded. Follows the existing
+    generation pattern (CLIENT span, capped/redacted payloads) without
+    inventing a parallel vocabulary.
+    """
+    from cognee.modules.observability.tracing import (
+        GEN_AI_EMBEDDINGS_DIMENSION_COUNT,
+        GEN_AI_OPERATION_NAME,
+        GEN_AI_PROVIDER_NAME,
+        GEN_AI_REQUEST_MODEL,
+        SERVER_ADDRESS,
+    )
+
+    span.set_attribute(GEN_AI_OPERATION_NAME, "embeddings")
+
+    provider = getattr(adapter, "provider", None)
+    if provider:
+        span.set_attribute(GEN_AI_PROVIDER_NAME, str(provider).lower())
+
+    model = getattr(adapter, "model", None)
+    if model:
+        span.set_attribute(GEN_AI_REQUEST_MODEL, model)
+
+    dimensions = getattr(adapter, "dimensions", None)
+    if isinstance(dimensions, int):
+        span.set_attribute(GEN_AI_EMBEDDINGS_DIMENSION_COUNT, dimensions)
+
+    endpoint = getattr(adapter, "endpoint", None)
+    if endpoint:
+        try:
+            from urllib.parse import urlparse
+
+            host = urlparse(str(endpoint)).hostname
+            if host:
+                span.set_attribute(SERVER_ADDRESS, host)
+        except Exception:
+            logger.debug("Ignoring exception in _set_embedding_attributes", exc_info=True)
+
+
 def _wrap_with_otel(inner_decorator):
     """Compose OTEL span creation around an existing decorator.
 
@@ -125,14 +167,21 @@ def _wrap_with_otel(inner_decorator):
                     if tracer is None:
                         return await wrapped(*args, **kwargs)
 
-                    kind = SpanKind.CLIENT if category == "generation" else SpanKind.INTERNAL
+                    kind = (
+                        SpanKind.CLIENT
+                        if category in ("generation", "embeddings")
+                        else SpanKind.INTERNAL
+                    )
                     with tracer.start_as_current_span(
                         f"cognee.observe.{func.__name__}", kind=kind
                     ) as span:
                         span.set_attribute(COGNEE_SPAN_CATEGORY, category)
                         is_generation = category == "generation" and bool(args)
+                        is_embedding = category == "embeddings" and bool(args)
                         if is_generation:
                             _set_generation_attributes(span, args[0], func, args, kwargs)
+                        if is_embedding:
+                            _set_embedding_attributes(span, args[0])
                         result = await wrapped(*args, **kwargs)
                         if is_generation:
                             _set_generation_output(span, result)
@@ -156,14 +205,21 @@ def _wrap_with_otel(inner_decorator):
                     if tracer is None:
                         return wrapped(*args, **kwargs)
 
-                    kind = SpanKind.CLIENT if category == "generation" else SpanKind.INTERNAL
+                    kind = (
+                        SpanKind.CLIENT
+                        if category in ("generation", "embeddings")
+                        else SpanKind.INTERNAL
+                    )
                     with tracer.start_as_current_span(
                         f"cognee.observe.{func.__name__}", kind=kind
                     ) as span:
                         span.set_attribute(COGNEE_SPAN_CATEGORY, category)
                         is_generation = category == "generation" and bool(args)
+                        is_embedding = category == "embeddings" and bool(args)
                         if is_generation:
                             _set_generation_attributes(span, args[0], func, args, kwargs)
+                        if is_embedding:
+                            _set_embedding_attributes(span, args[0])
                         result = wrapped(*args, **kwargs)
                         if is_generation:
                             _set_generation_output(span, result)

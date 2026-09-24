@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { useTenant } from "@/modules/tenant/TenantContext";
 import { useUser } from "@/modules/users/UserContext";
+import isCloudEnvironment from "@/utils/isCloudEnvironment";
 import getConnectionStatus from "@/modules/integrations/getConnectionStatus";
 import { describeOAuthFailure, stashOAuthOutcome } from "@/modules/integrations/oauthOutcome";
 import { DATA_SOURCE_CARDS } from "@/modules/integrations/dataSourceCards";
 import type { TeamConnectorCfg, TeamConnectionState } from "@/modules/integrations/types";
 import DataSourceCard from "./DataSourceCard";
+import GoogleIntegrationsSection from "./GoogleIntegrationsSection";
 import ConnectModal from "./ConnectModal";
 import { useConnectorConnect } from "./useConnectorConnect";
 import { useConnectorChannels } from "./useConnectorChannels";
@@ -24,6 +26,7 @@ const SEARCH_INPUT =
 const PROVIDERS = DATA_SOURCE_CARDS.map((c) => c.key);
 
 export default function DataSourceSection(): ReactElement {
+  const showSdkGoogle = !isCloudEnvironment();
   const { tenant, isOwner } = useTenant();
   const tenantId = tenant?.tenant_id ?? null;
   const { availableTenants } = useUser();
@@ -152,7 +155,9 @@ export default function DataSourceSection(): ReactElement {
         <div>
           <h2 className="m-0 mb-1 text-[18px] font-bold tracking-[-0.01em] text-[var(--color-cognee-fg,#EDECEA)]">Data sources</h2>
           <p className="m-0 text-[14px] text-[var(--color-cognee-fg,#EDECEA)]/55">
-            Connect the tools your team already uses to your brains. One connection per workspace, shared with everyone.
+            {showSdkGoogle
+              ? "Connect your tools to your brains. Slack connects your workspace; Google Drive and Gmail connect your account."
+              : "Connect the tools your team already uses to your brains. One connection per workspace, shared with everyone."}
           </p>
         </div>
         {DATA_SOURCE_CARDS.length >= SEARCH_MIN_CONNECTORS && (
@@ -185,6 +190,7 @@ export default function DataSourceSection(): ReactElement {
             onRetry={() => retryStatus(cfg.key)}
           />
         ))}
+        {showSdkGoogle && <GoogleIntegrationsSection />}
       </div>
 
       {filteredCards.length === 0 && (
