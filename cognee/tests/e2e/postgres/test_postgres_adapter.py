@@ -977,3 +977,83 @@ async def test_bounded_neighborhood_is_stable_across_generic_plan_switches(adapt
     ]
 
     assert all(result == results[0] for result in results)
+
+
+# -- Tests: streamed visualization (SDK-787) --
+
+
+@pytest.mark.asyncio
+async def test_streamed_graph_matches_preprocess_and_never_sends_text(adapter):
+    import json
+
+    from cognee.modules.visualization.graph_stream import begin_graph_stream, stream_graph_events
+    from cognee.modules.visualization.preprocessor import COMPACT_PROPERTY_KEYS, preprocess
+
+    await adapter.add_nodes(
+        [("hub", {"name": "hub", "type": "Entity", "source_node_set": "docs"})]
+        + [
+            (f"chunk-{index}", {"type": "DocumentChunk", "text": f"chunk {index} " * 400})
+            for index in range(30)
+        ]
+    )
+    await adapter.add_edges([("hub", f"chunk-{index}", "contains", {}) for index in range(30)])
+    await adapter.add_edges([("chunk-0", "chunk-1", "next", {})])
+
+    requested = []
+    native = adapter.iter_bounded_neighborhood
+
+    def spy(*args, **kwargs):
+        requested.append(kwargs.get("property_keys"))
+        return native(*args, **kwargs)
+
+    adapter.iter_bounded_neighborhood = spy
+
+    stream = await begin_graph_stream(
+        stream_graph_events(
+            adapter,
+            query=None,
+            seed_node_ids=["hub"],
+            neighborhood_depth=1,
+            seed_top_k=10,
+            max_nodes=100,
+            chunk_size=8,
+        )
+    )
+    frames = [frame async for frame in stream.frames()]
+    events = [
+        (lines[0][7:], json.loads(lines[1][6:]))
+        for lines in (frame.strip().splitlines() for frame in frames if frame.startswith("event"))
+    ]
+
+    assert [name for name, _ in events][:2] == ["meta", "chunk"]
+    assert [name for name, _ in events][-2:] == ["summary", "done"]
+    assert requested == [list(COMPACT_PROPERTY_KEYS)]  # projected in SQL, not in Python
+
+    sent, links = {}, []
+    for name, data in events:
+        if name == "chunk":
+            for node in data["nodes"]:
+                sent[node["id"]] = node
+            for link in data["links"]:
+                assert link["source"] in sent and link["target"] in sent
+                links.append(link)
+    assert all("text" not in node for node in sent.values())
+    assert len(json.dumps([data for name, data in events if name == "chunk"])) < 20_000
+
+    reference = preprocess(await adapter.get_neighborhood(["hub"], depth=1))
+    by_id = {node["id"]: node for node in reference.nodes}
+    assert {node_id: node["name"] for node_id, node in sent.items()} == {
+        node_id: node["name"] for node_id, node in by_id.items()
+    }
+    summaries = [data for name, data in events if name == "summary"]
+    summary = {
+        "nodes": {k: v for part in summaries for k, v in part["nodes"].items()},
+        "color_maps": summaries[0]["color_maps"],
+    }
+    assert all(len(part["nodes"]) <= 8 for part in summaries)
+    assert summary["nodes"] == {
+        node_id: {"importance": node["importance"], "label_priority": node["label_priority"]}
+        for node_id, node in by_id.items()
+    }
+    assert summary["color_maps"]["node_set"] == reference.color_maps["node_set"]
+    assert len(links) == len(reference.links)

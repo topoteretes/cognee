@@ -228,6 +228,12 @@ def looks_like_identifier(value) -> bool:
     return isinstance(value, str) and bool(_IDENTIFIER_LIKE_RE.match(value.strip()))
 
 
+# Readable fields derive_node_name falls back to, in order. A streamed payload
+# must ask the store for these too: chunk nodes carry no name, so their label
+# comes from the first 120 characters of their text.
+_NAME_FALLBACK_KEYS = ("title", "text", "summary", "description", "content")
+
+
 def derive_node_name(node_info, node_id):
     """Pick a human-readable label for a node, falling back through name/title/text/etc.
 
@@ -240,7 +246,7 @@ def derive_node_name(node_info, node_id):
     if name and not looks_like_identifier(name):
         return name
 
-    for key in ("title", "text", "summary", "description", "content"):
+    for key in _NAME_FALLBACK_KEYS:
         value = node_info.get(key)
         if isinstance(value, str) and value.strip() and not looks_like_identifier(value):
             normalized = " ".join(value.split())
@@ -925,6 +931,30 @@ def _bundle_key(source_stage, target_stage, edge_class, relation):
     return f"{source_stage}|{target_stage}|{edge_class}|{relation or ''}"
 
 
+def _display_name(node_info, node_id) -> tuple[str, bool]:
+    """The node's label and whether it is a placeholder.
+
+    Unnamed nodes (UUID/hash names) must never become Key-mode label landmarks.
+    """
+    raw_name = node_info.get("name")
+    name = derive_node_name(node_info, node_id)
+    return name, looks_like_identifier(raw_name) or name.startswith("Unnamed ")
+
+
+def _importance(degree: int, max_degree: int) -> float:
+    """Log-scaled, capped degree: a normalized 0..1 visual weight, not a semantic
+    score, so the renderer can size labels and halos cleanly."""
+    return math.log1p(degree) / math.log1p(max(1, max_degree))
+
+
+def _label_priority(is_unnamed: bool, stage: str, importance: float, threshold: float) -> bool:
+    """Whether a node earns a Key-mode label slot."""
+    if is_unnamed:
+        # A placeholder name is never worth a Key-mode label slot.
+        return False
+    return stage in _ALWAYS_LABEL_STAGES or importance >= threshold > 0
+
+
 def _compact_provenance(node_info):
     """Only emit a provenance dict when at least one field is present, so the
     inspector can hide the section cleanly on legacy graphs."""
@@ -1289,13 +1319,7 @@ def preprocess(graph_data, schema_data: dict[str, Any] | None = None) -> Preproc
         # Distilled session-learning nodes get a ring overlay in the renderer
         # (type fill is preserved) so the self-improvement feature is visible.
         node_info["is_memory_learning"] = is_distilled_learning_node(node_info)
-        raw_name = node_info.get("name")
-        node_info["name"] = derive_node_name(node_info, node_id)
-        # Unnamed nodes (UUID/hash names) must never become Key-mode label
-        # landmarks; pass 3 reads this flag.
-        node_info["is_unnamed"] = looks_like_identifier(raw_name) or node_info["name"].startswith(
-            "Unnamed "
-        )
+        node_info["name"], node_info["is_unnamed"] = _display_name(node_info, node_id)
         created_at = node_info.get("created_at")
         if isinstance(created_at, int) and not isinstance(created_at, bool):
             # Preserve the creation timestamp (epoch ms) for the Memory
@@ -1382,26 +1406,19 @@ def preprocess(graph_data, schema_data: dict[str, Any] | None = None) -> Preproc
         )
 
     # ── Nodes pass 2: degree, importance ───────────────────────────────────
+    max_degree = max(degree_counter.values() or [1])
     for node in nodes:
         deg = degree_counter.get(node["id"], 0)
         node["degree"] = deg
-        # log-scaled, capped — importance is a normalized 0..1 visual weight,
-        # not a semantic score, so the renderer can size labels/halos cleanly.
-        node["importance"] = math.log1p(deg) / math.log1p(
-            max(1, max(degree_counter.values() or [1]))
-        )
+        node["importance"] = _importance(deg, max_degree)
 
     # ── Nodes pass 3: label priority budget ────────────────────────────────
     importances = [n["importance"] for n in nodes]
     threshold = _label_priority_threshold(importances, percentile=0.75)
     for node in nodes:
-        if node.get("is_unnamed"):
-            # A placeholder name is never worth a Key-mode label slot.
-            node["label_priority"] = False
-        elif node["stage"] in _ALWAYS_LABEL_STAGES or node["importance"] >= threshold > 0:
-            node["label_priority"] = True
-        else:
-            node["label_priority"] = False
+        node["label_priority"] = _label_priority(
+            bool(node.get("is_unnamed")), node["stage"], node["importance"], threshold
+        )
 
     # ── Color maps (verbatim shape from the original orchestrator) ─────────
     color_maps = {
@@ -1432,3 +1449,94 @@ def preprocess(graph_data, schema_data: dict[str, Any] | None = None) -> Preproc
         has_meaningful_topological_rank=has_meaningful_rank,
         memory_map=_build_memory_map(nodes, links),
     )
+
+
+# ── Streamed payload ─────────────────────────────────────────────────────────
+#
+# The streamed /visualize/json reads the graph in chunks and must never hold
+# the whole graph with its properties. Everything a chunk carries is computed
+# from that chunk alone, with the same helpers preprocess() uses, so the two
+# cannot drift. The graph-wide fields are derived at the end from a small
+# accumulator and sent once as the summary.
+
+# Properties the store is asked for when streaming. Every key the compact
+# fields below are derived from, including the name fallbacks: dropping `text`
+# here would name every chunk "Unnamed DocumentChunk".
+COMPACT_PROPERTY_KEYS = ("name", *_NAME_FALLBACK_KEYS, "belongs_to_set", "source_node_set")
+
+
+def compact_node(node_id, node_info) -> dict[str, Any]:
+    """The per-node fields the Mindmap reads, computed as preprocess() does."""
+    name, is_unnamed = _display_name(node_info, node_id)
+    node = {
+        "id": str(node_id),
+        "name": name,
+        "type": node_info.get("type"),
+        "stage": _stage_for_node(node_info),
+        "is_unnamed": is_unnamed,
+    }
+    for key in ("belongs_to_set", "source_node_set"):
+        if node_info.get(key) is not None:
+            node[key] = node_info[key]
+    return node
+
+
+def compact_link(edge) -> dict[str, Any]:
+    """The per-link fields the Mindmap reads, from an adapter edge tuple."""
+    edge_info = edge[3] if len(edge) >= 4 else {}
+    relation = edge[2]
+    return {
+        "source": str(edge[0]),
+        "target": str(edge[1]),
+        "relation": relation,
+        "edge_class": _edge_class(relation, edge_info),
+    }
+
+
+class CompactGraphAccumulator:
+    """What the graph-wide fields need, collected chunk by chunk.
+
+    Degree counts, and per node its stage, placeholder flag and node-set value:
+    a few fields per node, never the properties. ``summary()`` returns the
+    ``importance`` and ``label_priority`` preprocess() would assign, and the
+    ``node_set`` color map it would build, for the whole streamed graph.
+    """
+
+    def __init__(self) -> None:
+        self._nodes: dict[str, tuple[str, bool]] = {}
+        self._node_sets: list[Any] = []
+        self._degree: Counter = Counter()
+        self.link_count = 0
+
+    def add(self, nodes: list[dict[str, Any]], links: list[dict[str, Any]]) -> None:
+        for node in nodes:
+            self._nodes[node["id"]] = (node["stage"], node["is_unnamed"])
+            self._node_sets.append(node.get("source_node_set"))
+        for link in links:
+            self._degree[link["source"]] += 1
+            self._degree[link["target"]] += 1
+        self.link_count += len(links)
+
+    @property
+    def node_count(self) -> int:
+        return len(self._nodes)
+
+    def summary(self) -> dict[str, Any]:
+        max_degree = max(self._degree.values() or [1])
+        importance = {
+            node_id: _importance(self._degree.get(node_id, 0), max_degree)
+            for node_id in self._nodes
+        }
+        threshold = _label_priority_threshold(list(importance.values()), percentile=0.75)
+        return {
+            "nodes": {
+                node_id: {
+                    "importance": importance[node_id],
+                    "label_priority": _label_priority(
+                        is_unnamed, stage, importance[node_id], threshold
+                    ),
+                }
+                for node_id, (stage, is_unnamed) in self._nodes.items()
+            },
+            "color_maps": {"node_set": build_node_set_colors(self._node_sets)},
+        }

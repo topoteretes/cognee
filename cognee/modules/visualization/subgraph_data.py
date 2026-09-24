@@ -10,6 +10,7 @@ at ``max_nodes`` in the store.
 Pass ``full=True`` to render the entire graph (legacy behavior).
 """
 
+from collections.abc import AsyncIterator
 from typing import Any
 
 from cognee.infrastructure.databases.graph.bounded_neighborhood import hop_distances
@@ -191,27 +192,49 @@ def truncate_subgraph(
     return (kept_nodes, kept_edges), True
 
 
+def iter_seed_neighborhood(
+    graph_engine: Any,
+    seeds: list[str],
+    depth: int,
+    max_nodes: int,
+    *,
+    chunk_size: int,
+    property_keys: list[str] | tuple[str, ...] | None = None,
+) -> AsyncIterator[GraphData]:
+    """The adapter's ``iter_bounded_neighborhood`` chunks for these seeds.
+
+    A store with a native implementation stops at ``max_nodes`` instead of
+    returning the whole neighbourhood for Python to cut.
+    """
+    # Only passed when asked for, so the unprojected read calls the adapter
+    # exactly as it did before property projection had a caller.
+    options: dict[str, Any] = {"chunk_size": chunk_size}
+    if property_keys is not None:
+        options["property_keys"] = list(property_keys)
+    method = getattr(graph_engine, "iter_bounded_neighborhood", None)
+    if callable(method):
+        return method(seeds, depth, max_nodes, **options)
+    # Community registration permits duck-typed adapters, not only subclasses.
+    from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+
+    return GraphDBInterface.iter_bounded_neighborhood(
+        graph_engine, seeds, depth, max_nodes, **options
+    )
+
+
 async def expand_seed_neighborhood(
     graph_engine: Any, seeds: list[str], depth: int, max_nodes: int
 ) -> GraphData:
     """The seeds' neighbourhood capped at ``max_nodes``, as one ``(nodes, edges)``.
 
-    Reads through the adapter's ``iter_bounded_neighborhood``, so a store with
-    a native implementation stops at ``max_nodes`` instead of returning the
-    whole neighbourhood for Python to cut. The chunks are collected into one
-    result here; one chunk of ``max_nodes`` keeps it to a single node read.
+    The chunks are collected into one result; one chunk of ``max_nodes`` keeps
+    it to a single node read.
     """
-    method = getattr(graph_engine, "iter_bounded_neighborhood", None)
-    if not callable(method):
-        # Community registration permits duck-typed adapters, not only subclasses.
-        from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
-
-        def method(*args, **kwargs):
-            return GraphDBInterface.iter_bounded_neighborhood(graph_engine, *args, **kwargs)
-
     nodes_data: list[Node] = []
     edges_data: list[EdgeData] = []
-    async for chunk_nodes, chunk_edges in method(seeds, depth, max_nodes, chunk_size=max_nodes):
+    async for chunk_nodes, chunk_edges in iter_seed_neighborhood(
+        graph_engine, seeds, depth, max_nodes, chunk_size=max_nodes
+    ):
         nodes_data.extend(chunk_nodes)
         edges_data.extend(chunk_edges)
     return nodes_data, edges_data
