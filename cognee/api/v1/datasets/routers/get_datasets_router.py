@@ -61,13 +61,24 @@ StatusPipelineNamesQuery = Annotated[
     Query(
         alias="pipeline",
         description=(
-            "Pipeline names to check: 'add_pipeline', 'cognify_pipeline', or"
-            " 'code_graph_pipeline' (code ingestion via remember"
-            " content_type='code'). Omit to default to cognify_pipeline."
+            "Pipeline names to check: 'add_pipeline' or 'cognify_pipeline'"
+            " ('code_graph_pipeline' is accepted as a legacy alias of"
+            " cognify_pipeline). Omit to default to cognify_pipeline."
         ),
         examples=[["cognify_pipeline"]],
     ),
 ]
+
+# remember(content_type="code") used to run its own ``code_graph_pipeline``;
+# code repositories are now built by cognify's CODE_REPO route under
+# ``cognify_pipeline`` (SDK-793). The old name stays accepted so existing
+# pollers keep working; it is answered with the cognify_pipeline status.
+LEGACY_PIPELINE_ALIASES = {"code_graph_pipeline": "cognify_pipeline"}
+
+
+def canonical_pipeline_names(names: list[str]) -> list[str]:
+    """Map legacy pipeline names to their current ones; order kept, duplicates dropped."""
+    return list(dict.fromkeys(LEGACY_PIPELINE_ALIASES.get(name, name) for name in names))
 
 
 class PipelineRunStatusWithProgress(BaseModel):
@@ -581,7 +592,8 @@ def get_datasets_router() -> APIRouter:
           - If omitted, defaults to **cognify_pipeline** (backward-compatible behavior)
           - If one pipeline is provided, response is a flat map
           - If multiple pipelines are provided, response is nested per dataset and pipeline
-          - **Available options: add_pipeline, cognify_pipeline, code_graph_pipeline**
+          - **Available options: add_pipeline, cognify_pipeline** (code_graph_pipeline is a
+            legacy alias of cognify_pipeline and is reported under that name)
           - Note: a background code ingest creates its pipeline run only once the
             repository is cloned — a dataset missing from the response means the run
             has not started yet, not that it failed
@@ -625,7 +637,7 @@ def get_datasets_router() -> APIRouter:
 
             datasets_statuses = await cognee_datasets.get_status(
                 [dataset.id for dataset in authorized_datasets],
-                pipeline_names=pipelines or None,
+                pipeline_names=canonical_pipeline_names(pipelines) or None,
             )
 
             return datasets_statuses
@@ -659,9 +671,9 @@ def get_datasets_router() -> APIRouter:
         ## Query Parameters
         - **dataset** (List[UUID]): Dataset UUIDs to check (from GET /api/v1/datasets). Omit to get
           status for all datasets you can read.
-        - **pipeline** (List[str]): Pipeline names to check: 'add_pipeline', 'cognify_pipeline', or
-          'code_graph_pipeline' (code ingestion via remember content_type='code'). Omit to default
-          to cognify_pipeline.
+        - **pipeline** (List[str]): Pipeline names to check: 'add_pipeline' or 'cognify_pipeline'
+          ('code_graph_pipeline' is accepted as a legacy alias of cognify_pipeline). Omit to
+          default to cognify_pipeline.
 
         ## Response
         - Single pipeline (default): {dataset_id: {status, progress}}
@@ -695,7 +707,7 @@ def get_datasets_router() -> APIRouter:
 
             datasets_progress = await cognee_datasets.get_progress(
                 [dataset.id for dataset in authorized_datasets],
-                pipeline_names=pipelines or None,
+                pipeline_names=canonical_pipeline_names(pipelines) or None,
             )
 
             return datasets_progress
@@ -1000,7 +1012,8 @@ def get_datasets_router() -> APIRouter:
             "cognify_pipeline",
             description=(
                 "Pipeline whose per-item completion to count: 'cognify_pipeline'"
-                " (default), 'add_pipeline', or 'code_graph_pipeline'."
+                " (default) or 'add_pipeline' ('code_graph_pipeline' is accepted as a"
+                " legacy alias of cognify_pipeline)."
             ),
             examples=["cognify_pipeline"],
         ),
@@ -1062,7 +1075,9 @@ def get_datasets_router() -> APIRouter:
             )
 
         try:
-            return await get_dataset_processing_status(dataset[0].id, pipeline_name=pipeline)
+            return await get_dataset_processing_status(
+                dataset[0].id, pipeline_name=canonical_pipeline_names([pipeline])[0]
+            )
         except CogneeApiError:
             raise
         except Exception:

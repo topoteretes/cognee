@@ -215,9 +215,144 @@ async def test_add_code_repository_stores_the_pinned_repo_item(tmp_path, monkeyp
     assert manifest_item.data_id == pinned_id
     assert manifest_item.system_metadata["source"] == "code_repo"
     assert manifest_item.system_metadata["repo_url"] == "https://github.com/org/repo"
+    # Graph-only by default: nothing recorded, and the keyless add is not probed.
+    assert "index_vectors" not in manifest_item.system_metadata
+    assert add_mock.await_args.kwargs["skip_connection_test"] is True
     assert add_mock.await_args.kwargs["dataset_id"] == dataset.id
     assert add_mock.await_args.kwargs["user"] is user
     get_data_mock.assert_awaited_once_with(user.id, pinned_id, dataset.id)
+
+
+@pytest.mark.asyncio
+async def test_add_code_repository_records_index_vectors_on_the_row(tmp_path, monkeypatch):
+    """index_vectors lives on the manifest row, so the CODE_REPO route embeds on
+    every build of the row, not only the one remember() triggered."""
+    import importlib
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from uuid import uuid4
+
+    from cognee.tasks.code_graph.code_repo import add_code_repository, code_repo_index_vectors
+
+    add_module = importlib.import_module("cognee.api.v1.add")
+    data_methods_module = importlib.import_module("cognee.modules.data.methods")
+    unique_id_module = importlib.import_module("cognee.modules.data.methods.get_unique_data_id")
+
+    dataset = SimpleNamespace(id=uuid4(), name="my_code")
+    monkeypatch.setattr(unique_id_module, "get_unique_data_id", AsyncMock(return_value=uuid4()))
+    monkeypatch.setattr(data_methods_module, "reset_data_pipeline_status", AsyncMock())
+    add_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(add_module, "add", add_mock)
+    monkeypatch.setattr(data_methods_module, "get_data", AsyncMock(return_value=SimpleNamespace()))
+
+    await add_code_repository(
+        _make_repo(tmp_path), user=SimpleNamespace(id=uuid4()), dataset=dataset, index_vectors=True
+    )
+
+    manifest_item = add_mock.await_args.args[0]
+    assert manifest_item.system_metadata["index_vectors"] is True
+    assert code_repo_index_vectors(manifest_item) is True
+    # Embedding is coming, so the connection probe stays on for this add.
+    assert add_mock.await_args.kwargs["skip_connection_test"] is False
+
+
+def test_code_repo_index_vectors_reads_every_metadata_shape():
+    from types import SimpleNamespace
+
+    from cognee.tasks.code_graph.code_repo import code_repo_index_vectors
+
+    assert code_repo_index_vectors({"source": "code_repo", "index_vectors": True}) is True
+    assert code_repo_index_vectors({"source": "code_repo"}) is False
+    assert code_repo_index_vectors('{"source": "code_repo", "index_vectors": true}') is True
+    assert code_repo_index_vectors("not json") is False
+    assert code_repo_index_vectors(SimpleNamespace(system_metadata={"index_vectors": True}))
+    assert code_repo_index_vectors(SimpleNamespace(system_metadata=None)) is False
+
+
+@pytest.mark.asyncio
+async def test_code_repo_route_embeds_only_when_the_row_asks_for_vectors(tmp_path, monkeypatch):
+    """The CODE_REPO route reads index_vectors off the row: graph_only for a plain
+    row, embeddings for a row stored by remember(index_vectors=True)."""
+    import importlib
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from cognee.tasks.code_graph.code_repo import extract_code_repo_graph
+
+    extract_module = importlib.import_module("cognee.tasks.code_graph.extract_code_graph")
+    monkeypatch.setattr(extract_module, "extract_code_graph", AsyncMock(return_value=["points"]))
+    add_points = AsyncMock(return_value="state")
+    monkeypatch.setattr(extract_module, "add_code_graph_data_points", add_points)
+    monkeypatch.setattr(extract_module, "add_code_graph_edges", AsyncMock())
+
+    repo = _make_repo(tmp_path)
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps({"repo_path": str(repo)}))
+
+    def _row(**metadata):
+        return SimpleNamespace(
+            id="row",
+            raw_data_location=str(manifest_path),
+            system_metadata={"source": "code_repo", **metadata},
+        )
+
+    await extract_code_repo_graph([_row()])
+    assert add_points.await_args.kwargs["graph_only"] is True
+
+    await extract_code_repo_graph([_row(index_vectors=True)])
+    assert add_points.await_args.kwargs["graph_only"] is False
+
+
+@pytest.mark.asyncio
+async def test_cognify_code_repository_runs_the_cognify_route_over_one_row(monkeypatch):
+    """remember(content_type="code") builds a stored row the way cognify() would:
+    the CODE_REPO task list, under cognify_pipeline, with incremental loading, over
+    that row only. The terminal run info comes back."""
+    import importlib
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from cognee.tasks.code_graph.code_repo import cognify_code_repository, get_code_repo_tasks
+
+    pipeline_module = importlib.import_module("cognee.modules.pipelines.operations.pipeline")
+    rollback_module = importlib.import_module("cognee.modules.cognify.rollback")
+    calls = []
+    started, completed = (
+        SimpleNamespace(status="PipelineRunStarted"),
+        SimpleNamespace(status="PipelineRunCompleted"),
+    )
+
+    async def _fake_run_pipeline(**kwargs):
+        calls.append(kwargs)
+        yield started
+        yield completed
+
+    monkeypatch.setattr(pipeline_module, "run_pipeline", _fake_run_pipeline)
+
+    row = SimpleNamespace(id=uuid4(), system_metadata={"source": "code_repo"})
+    dataset = SimpleNamespace(id=uuid4(), name="my_code")
+    user = SimpleNamespace(id=uuid4())
+
+    terminal = await cognify_code_repository(row, dataset, user)
+
+    assert terminal is completed
+    (kwargs,) = calls
+    assert kwargs["data"] == [row]
+    assert kwargs["datasets"] == [dataset.id]
+    assert kwargs["user"] is user
+    assert kwargs["pipeline_name"] == "cognify_pipeline"
+    assert kwargs["incremental_loading"] is True
+    assert kwargs["rollback_handler"] is rollback_module.cognify_rollback_handler
+    assert [task.executable for task in kwargs["tasks"]] == [
+        task.executable for task in get_code_repo_tasks()
+    ]
+    # Graph-only row: no key demanded from a keyless install.
+    assert kwargs["skip_connection_test"] is True
+
+    row.system_metadata["index_vectors"] = True
+    await cognify_code_repository(row, dataset, user)
+    assert calls[-1]["skip_connection_test"] is False
 
 
 @pytest.mark.asyncio

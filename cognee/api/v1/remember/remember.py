@@ -972,12 +972,14 @@ async def remember(
             repositories. ``run_in_background=True`` is honored for code:
             the call returns a ``running`` result with the dataset_id while
             cloning and graph extraction continue server-side — poll the
-            dataset status for ``code_graph_pipeline`` or await the result.
-            Each repository is stored as one Data row in the dataset; its
-            ``id`` is on the repository's result item once its run has
-            finished (a background result's ``items`` fill in as its
-            repositories run), for ``forget(data_id=...)``. An item that errored after
-            its row was stored still carries the ``id``.
+            dataset status (``cognify_pipeline``) or await the result.
+            Each repository is stored as one Data row in the dataset through
+            ``add()`` and built through cognify's CODE_REPO route, the same as
+            ``add(<repo dir>)`` followed by ``cognify()``; its ``id`` is on the
+            repository's result item once its run has finished (a background
+            result's ``items`` fill in as its repositories run), for
+            ``forget(data_id=...)``. An item that errored after its row was
+            stored still carries the ``id``.
         skill_improvement: Internal skill-improvement control dict used with
             ``SkillRunEntry`` or ``content_type="skills"``. ``apply=True``
             requires an existing ``proposal_id``.
@@ -1472,12 +1474,11 @@ async def _remember_inner(
         from pathlib import Path as _Path
 
         from cognee import __version__ as cognee_version
-        from cognee.infrastructure.locks.dataset_lock import dataset_lock
-        from cognee.modules.data.methods import mark_data_processed
-        from cognee.modules.run_custom_pipeline import run_custom_pipeline
         from cognee.shared.utils import send_telemetry
-        from cognee.tasks.code_graph import get_code_graph_tasks
-        from cognee.tasks.code_graph.code_repo import add_code_repository
+        from cognee.tasks.code_graph.code_repo import (
+            add_code_repository,
+            cognify_code_repository,
+        )
         from cognee.tasks.code_graph.resolve_repo import (
             is_remote_repo,
             redact_repo_spec,
@@ -1523,74 +1524,41 @@ async def _remember_inner(
         result.dataset_id = str(dataset.id)
         result.dataset_name = dataset.name
 
-        def _apply_code_run_info(item: dict, pipeline_result) -> None:
-            # Blocking run_custom_pipeline returns {dataset_id: PipelineRunInfo};
-            # lift the identifiers onto the result so callers can poll
-            # GET /v1/datasets/status?pipeline=code_graph_pipeline, and surface
-            # an errored run as an errored result instead of a false success.
-            if not isinstance(pipeline_result, dict) or not pipeline_result:
+        def _apply_code_run_info(item: dict, run_info) -> None:
+            # The terminal PipelineRunInfo of the row's cognify run: lift its
+            # identifiers onto the result so callers can poll
+            # GET /v1/datasets/status, and surface an errored run as an errored
+            # item instead of a false success.
+            if run_info is None:
                 return
-            ds_id, run_info = next(iter(pipeline_result.items()))
-            result.dataset_id = str(ds_id)
-            run_dataset_name = getattr(run_info, "dataset_name", None)
-            if run_dataset_name:
-                result.dataset_name = run_dataset_name
             run_id = getattr(run_info, "pipeline_run_id", None)
             if run_id is not None:
                 item["pipeline_run_id"] = str(run_id)
                 result.pipeline_run_id = str(run_id)
             if "Errored" in getattr(run_info, "status", ""):
                 item["status"] = "errored"
-                item["error"] = (
-                    getattr(run_info, "error_message", None) or "code_graph_pipeline errored"
-                )
+                item["error"] = getattr(run_info, "error_message", None) or "cognify errored"
 
         async def _run_one_repo(spec, item: dict) -> None:
             repo_path = await resolve_repo_source(spec, credentials=repo_credentials)
             item["path"] = str(repo_path)
-            # The Data row's stamps are read-modify-written as a whole: holding
-            # the dataset lock from the row write to the final stamp keeps a
-            # concurrent add()/cognify() of the dataset from overwriting them.
-            # The lock is re-entrant, so add() and the pipeline run inside it.
-            async with dataset_lock(dataset.id):
-                # The default (graph-only) pipeline performs no LLM or embedding
-                # calls, so it must not demand an API key on first run. With
-                # index_vectors=True embeddings are used, so the checks stay on.
-                skip_connection_test = not bool(index_vectors)
-                # One Data row per repository gives the caller a data_id for
-                # forget() and lists the repo on the dataset. Running the pipeline
-                # over that row lets the graph writes record it as their owner, so
-                # forget(data_id=...) removes the nodes this row wrote. Code node
-                # ids are keyed on the repository name (its directory basename), so
-                # two rows whose repos share a name share nodes, and only the first
-                # writer owns the unchanged ones.
-                data = await add_code_repository(
-                    repo_path,
-                    user=user,
-                    dataset=dataset,
-                    source_url=item["source"] if is_remote_repo(spec) else None,
-                    skip_connection_test=skip_connection_test,
-                )
-                item["id"] = str(data.id)
-                pipeline_result = await run_custom_pipeline(
-                    tasks=get_code_graph_tasks(str(repo_path), index_vectors=bool(index_vectors)),
-                    data=[data],
-                    dataset=dataset.id,
-                    user=user,
-                    pipeline_name="code_graph_pipeline",
-                    skip_connection_test=skip_connection_test,
-                )
-                _apply_code_run_info(item, pipeline_result)
-                if item.get("status") != "errored":
-                    # The row's graph is built, exactly as the cognify CODE_REPO
-                    # route would build it: stamp cognify completion so a later
-                    # cognify() of the dataset does not rerun enola for it, and the
-                    # code graph pipeline's own slot for per-item status.
-                    await mark_data_processed(
-                        data.id,
-                        dataset.id,
-                        pipeline_names=("cognify_pipeline", "code_graph_pipeline"),
-                    )
+            # One Data row per repository, stored through add() exactly as
+            # add(<repo dir>) stores it: the caller gets a data_id for forget(),
+            # the dataset lists the repo, and a later cognify() of the dataset
+            # sees a row it already knows. index_vectors is recorded on the row,
+            # so every rebuild of it honours the choice made here.
+            data = await add_code_repository(
+                repo_path,
+                user=user,
+                dataset=dataset,
+                source_url=item["source"] if is_remote_repo(spec) else None,
+                index_vectors=bool(index_vectors),
+            )
+            item["id"] = str(data.id)
+            # Build the row's graph the way cognify() builds it: the CODE_REPO
+            # route, under cognify_pipeline, so the row's completion stamp is the
+            # real one. An unchanged repo is already stamped and this is a no-op.
+            _apply_code_run_info(item, await cognify_code_repository(data, dataset, user))
 
         async def _run_repos(isolate_failures: bool) -> None:
             for position, spec in enumerate(repo_specs, start=1):

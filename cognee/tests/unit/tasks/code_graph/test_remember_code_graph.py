@@ -1,4 +1,5 @@
-"""remember(content_type='code') routes repos through the code-graph pipeline."""
+"""remember(content_type='code') stores each repository through add() and builds it
+through cognify's CODE_REPO route (SDK-783, SDK-793)."""
 
 import importlib
 from types import SimpleNamespace
@@ -12,15 +13,13 @@ from cognee.api.v1.remember.remember import remember
 remember_module = importlib.import_module("cognee.api.v1.remember.remember")
 resolve_module = importlib.import_module("cognee.tasks.code_graph.resolve_repo")
 code_repo_module = importlib.import_module("cognee.tasks.code_graph.code_repo")
-data_methods_module = importlib.import_module("cognee.modules.data.methods")
-pipeline_module = importlib.import_module("cognee.modules.run_custom_pipeline")
 migrations_module = importlib.import_module("cognee.modules.migrations.startup")
 cognify_config_module = importlib.import_module("cognee.modules.cognify.config")
 
 
 @pytest.fixture
 def code_remember_env(monkeypatch, tmp_path):
-    """Stub out migrations, dataset and repo resolution, the Data row, and the pipeline run."""
+    """Stub out migrations, dataset and repo resolution, the Data row, and its cognify run."""
     monkeypatch.setenv("TELEMETRY_DISABLED", "1")
     monkeypatch.setattr(migrations_module, "run_migrations_and_block", AsyncMock())
 
@@ -38,27 +37,32 @@ def code_remember_env(monkeypatch, tmp_path):
     add_repo_mock = AsyncMock(return_value=data_row)
     monkeypatch.setattr(code_repo_module, "add_code_repository", add_repo_mock)
 
-    mark_processed_mock = AsyncMock()
-    monkeypatch.setattr(data_methods_module, "mark_data_processed", mark_processed_mock)
-
-    pipeline_mock = AsyncMock(return_value=None)
-    monkeypatch.setattr(pipeline_module, "run_custom_pipeline", pipeline_mock)
+    cognify_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(code_repo_module, "cognify_code_repository", cognify_mock)
 
     return {
         "repo_dir": repo_dir,
         "resolve": resolve_mock,
-        "pipeline": pipeline_mock,
+        "cognify": cognify_mock,
         "dataset": dataset,
         "user": user,
         "datasets": datasets_mock,
         "data_row": data_row,
         "add_repo": add_repo_mock,
-        "mark_processed": mark_processed_mock,
     }
 
 
+def _run_info(status, dataset_name="my_code", error_message=None):
+    return SimpleNamespace(
+        status=status,
+        pipeline_run_id=uuid4(),
+        dataset_name=dataset_name,
+        error_message=error_message,
+    )
+
+
 @pytest.mark.asyncio
-async def test_single_repo_runs_code_graph_pipeline(code_remember_env):
+async def test_single_repo_is_stored_then_built_through_the_cognify_route(code_remember_env):
     result = await remember(
         "https://github.com/org/repo",
         dataset_name="my_code",
@@ -68,49 +72,37 @@ async def test_single_repo_runs_code_graph_pipeline(code_remember_env):
     code_remember_env["resolve"].assert_awaited_once_with(
         "https://github.com/org/repo", credentials=None
     )
-    code_remember_env["pipeline"].assert_awaited_once()
-    call = code_remember_env["pipeline"].await_args
-    assert call.kwargs["dataset"] == code_remember_env["dataset"].id
-    assert call.kwargs["pipeline_name"] == "code_graph_pipeline"
-    assert call.kwargs["data"] == [code_remember_env["data_row"]]
-    assert len(call.kwargs["tasks"]) == 3
+    code_remember_env["add_repo"].assert_awaited_once_with(
+        code_remember_env["repo_dir"],
+        user=code_remember_env["user"],
+        dataset=code_remember_env["dataset"],
+        source_url="https://github.com/org/repo",
+        index_vectors=False,
+    )
+    code_remember_env["cognify"].assert_awaited_once_with(
+        code_remember_env["data_row"], code_remember_env["dataset"], code_remember_env["user"]
+    )
 
     assert result.status == "completed"
     assert result.items_processed == 1
     assert result.items[0]["kind"] == "code_repository"
     assert result.items[0]["source"] == "https://github.com/org/repo"
+    assert result.items[0]["id"] == str(code_remember_env["data_row"].id)
+    assert result.dataset_id == str(code_remember_env["dataset"].id)
 
 
 @pytest.mark.asyncio
-async def test_repo_list_runs_pipeline_per_repo(code_remember_env):
+async def test_repo_list_stores_and_builds_each_repo(code_remember_env):
     repos = ["https://github.com/org/a", "https://github.com/org/b", "/local/c"]
 
     result = await remember(repos, content_type="code")
 
     assert code_remember_env["resolve"].await_count == 3
     assert code_remember_env["add_repo"].await_count == 3
-    assert code_remember_env["pipeline"].await_count == 3
+    assert code_remember_env["cognify"].await_count == 3
     assert [item["source"] for item in result.items] == repos
     # One dataset for the whole batch, resolved before the first repo runs.
     code_remember_env["datasets"].assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_each_repo_is_stored_as_a_data_row_in_the_dataset(code_remember_env):
-    """SDK-783: a repository gets a Data row, so the caller has a data_id to forget."""
-    result = await remember(
-        "https://github.com/org/repo", dataset_name="my_code", content_type="code"
-    )
-
-    code_remember_env["add_repo"].assert_awaited_once_with(
-        code_remember_env["repo_dir"],
-        user=code_remember_env["user"],
-        dataset=code_remember_env["dataset"],
-        source_url="https://github.com/org/repo",
-        skip_connection_test=True,
-    )
-    assert result.items[0]["id"] == str(code_remember_env["data_row"].id)
-    assert result.dataset_id == str(code_remember_env["dataset"].id)
 
 
 @pytest.mark.asyncio
@@ -121,41 +113,42 @@ async def test_local_repo_row_records_no_source_url(code_remember_env):
 
 
 @pytest.mark.asyncio
-async def test_completed_repo_is_stamped_as_cognified(code_remember_env):
-    """A later cognify() of the dataset must not rerun enola for a repo already built."""
-    await remember("/some/repo", content_type="code")
-
-    code_remember_env["mark_processed"].assert_awaited_once_with(
-        code_remember_env["data_row"].id,
-        code_remember_env["dataset"].id,
-        pipeline_names=("cognify_pipeline", "code_graph_pipeline"),
-    )
-
-
-@pytest.mark.asyncio
-async def test_errored_repo_is_not_stamped_as_cognified(code_remember_env):
-    pipeline_result, _, _ = _pipeline_result("PipelineRunErrored")
-    code_remember_env["pipeline"].return_value = pipeline_result
-
-    await remember("/some/repo", content_type="code")
-
-    code_remember_env["mark_processed"].assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_index_vectors_is_forwarded_to_tasks(code_remember_env):
+async def test_index_vectors_is_recorded_on_the_row(code_remember_env):
+    """The route reads the flag off the row, so remember() only has to store it."""
     await remember("/some/repo", content_type="code", index_vectors=True)
 
-    tasks = code_remember_env["pipeline"].await_args.kwargs["tasks"]
-    assert tasks[1].default_params["kwargs"]["graph_only"] is False
+    assert code_remember_env["add_repo"].await_args.kwargs["index_vectors"] is True
 
 
 @pytest.mark.asyncio
 async def test_code_defaults_to_graph_only(code_remember_env):
     await remember("/some/repo", content_type="code")
 
-    tasks = code_remember_env["pipeline"].await_args.kwargs["tasks"]
-    assert tasks[1].default_params["kwargs"]["graph_only"] is True
+    assert code_remember_env["add_repo"].await_args.kwargs["index_vectors"] is False
+
+
+@pytest.mark.asyncio
+async def test_no_other_builder_runs(code_remember_env, monkeypatch):
+    """The row's cognify run is the only graph build: no custom pipeline, no
+    stamp written by hand, no dataset lock taken by remember itself."""
+    custom_pipeline_module = importlib.import_module("cognee.modules.run_custom_pipeline")
+    data_methods_module = importlib.import_module("cognee.modules.data.methods")
+    lock_module = importlib.import_module("cognee.infrastructure.locks.dataset_lock")
+    custom = AsyncMock()
+    stamp = AsyncMock()
+    monkeypatch.setattr(custom_pipeline_module, "run_custom_pipeline", custom)
+    monkeypatch.setattr(data_methods_module, "mark_data_processed", stamp)
+    monkeypatch.setattr(
+        lock_module,
+        "dataset_lock",
+        lambda *_a, **_k: pytest.fail("remember() must not take the dataset lock itself"),
+    )
+
+    result = await remember("/some/repo", content_type="code")
+
+    assert result.status == "completed"
+    custom.assert_not_awaited()
+    stamp.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -179,44 +172,31 @@ async def test_index_vectors_without_code_content_type_is_rejected(code_remember
         await remember("some text", index_vectors=True)
 
 
-def _pipeline_result(status, dataset_name="my_code"):
-    """Shape of a blocking run_custom_pipeline return: {dataset_id: run_info}."""
-    dataset_uuid = uuid4()
-    run_id = uuid4()
-    return (
-        {
-            dataset_uuid: SimpleNamespace(
-                status=status, pipeline_run_id=run_id, dataset_name=dataset_name
-            )
-        },
-        dataset_uuid,
-        run_id,
-    )
-
-
 @pytest.mark.asyncio
 async def test_blocking_captures_pipeline_run_info(code_remember_env):
-    pipeline_result, dataset_uuid, run_id = _pipeline_result("PipelineRunCompleted")
-    code_remember_env["pipeline"].return_value = pipeline_result
+    run_info = _run_info("PipelineRunCompleted")
+    code_remember_env["cognify"].return_value = run_info
 
     result = await remember("/some/repo", dataset_name="my_code", content_type="code")
 
     assert result.status == "completed"
-    assert result.dataset_id == str(dataset_uuid)
-    assert result.pipeline_run_id == str(run_id)
-    assert result.items[0]["pipeline_run_id"] == str(run_id)
+    assert result.dataset_id == str(code_remember_env["dataset"].id)
+    assert result.pipeline_run_id == str(run_info.pipeline_run_id)
+    assert result.items[0]["pipeline_run_id"] == str(run_info.pipeline_run_id)
 
 
 @pytest.mark.asyncio
 async def test_blocking_errored_run_marks_result_errored(code_remember_env):
-    pipeline_result, _, _ = _pipeline_result("PipelineRunErrored")
-    code_remember_env["pipeline"].return_value = pipeline_result
+    code_remember_env["cognify"].return_value = _run_info(
+        "PipelineRunErrored", error_message="enola crashed"
+    )
 
     result = await remember("/some/repo", content_type="code")
 
     assert result.status == "errored"
-    assert "code_graph_pipeline errored" in result.error
+    assert result.error == "/some/repo: enola crashed"
     assert result.items[0]["status"] == "errored"
+    assert result.items[0]["id"] == str(code_remember_env["data_row"].id)
     assert result.items_processed == 0
 
 
@@ -239,7 +219,9 @@ async def test_run_in_background_returns_running_then_completes(code_remember_en
     assert result.status == "completed"
     assert result.items_processed == 1
     assert result.items[0]["id"] == str(code_remember_env["data_row"].id)
-    assert code_remember_env["pipeline"].await_args.kwargs["dataset"] == resolved_dataset.id
+    code_remember_env["cognify"].assert_awaited_once_with(
+        code_remember_env["data_row"], resolved_dataset, code_remember_env["user"]
+    )
 
 
 @pytest.mark.asyncio
@@ -261,24 +243,23 @@ async def test_background_failure_continues_batch(code_remember_env):
         "https://github.com/org/good",
     ]
     assert result.items[0]["status"] == "errored"
-    assert result.items[1].get("status") != "errored"
+    assert "id" not in result.items[0]
+    assert result.items[1]["id"] == str(code_remember_env["data_row"].id)
     assert result.items_processed == 1
-    # The good repo still ran through the pipeline.
-    assert code_remember_env["pipeline"].await_count == 1
+    assert code_remember_env["cognify"].await_count == 1
 
 
 @pytest.mark.asyncio
 async def test_failure_after_the_row_is_stored_keeps_its_id(code_remember_env):
-    """A repo whose pipeline raises after its Data row was written still reports
+    """A repo whose build raises after its Data row was written still reports
     that row's id, so the caller can forget it."""
-    code_remember_env["pipeline"].side_effect = RuntimeError("enola crashed")
+    code_remember_env["cognify"].side_effect = RuntimeError("enola crashed")
 
     result = await remember("/some/repo", content_type="code", run_in_background=True)
     await result
 
     assert result.items[0]["status"] == "errored"
     assert result.items[0]["id"] == str(code_remember_env["data_row"].id)
-    code_remember_env["mark_processed"].assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -287,15 +268,9 @@ async def test_result_error_names_every_failed_repo(code_remember_env):
     result.error, each with its own cause."""
     repo_dir = code_remember_env["repo_dir"]
     code_remember_env["resolve"].side_effect = [repo_dir, RuntimeError("clone failed")]
-    dataset_uuid = uuid4()
-    code_remember_env["pipeline"].return_value = {
-        dataset_uuid: SimpleNamespace(
-            status="PipelineRunErrored",
-            pipeline_run_id=uuid4(),
-            dataset_name="my_code",
-            error_message="enola crashed",
-        )
-    }
+    code_remember_env["cognify"].return_value = _run_info(
+        "PipelineRunErrored", error_message="enola crashed"
+    )
 
     result = await remember(
         ["https://github.com/org/a", "https://github.com/org/b"],
@@ -308,42 +283,6 @@ async def test_result_error_names_every_failed_repo(code_remember_env):
     assert result.error == (
         "https://github.com/org/a: enola crashed; https://github.com/org/b: clone failed"
     )
-
-
-@pytest.mark.asyncio
-async def test_row_write_run_and_stamp_hold_the_dataset_lock(code_remember_env, monkeypatch):
-    """The row's stamps are read-modify-written as a whole, so storing the row,
-    building its graph, and stamping it must all happen under the dataset lock."""
-    from contextlib import asynccontextmanager
-
-    lock_module = importlib.import_module("cognee.infrastructure.locks.dataset_lock")
-    events = []
-
-    @asynccontextmanager
-    async def _recording_lock(dataset_id):
-        events.append(("lock", dataset_id))
-        yield
-        events.append(("unlock", dataset_id))
-
-    monkeypatch.setattr(lock_module, "dataset_lock", _recording_lock)
-    for name in ("add_repo", "pipeline", "mark_processed"):
-        code_remember_env[name].side_effect = lambda *_args, _name=name, **_kwargs: events.append(
-            (_name, None)
-        )
-    code_remember_env["add_repo"].side_effect = lambda *_a, **_k: (
-        events.append(("add_repo", None)) or code_remember_env["data_row"]
-    )
-
-    await remember("/some/repo", content_type="code")
-
-    dataset_id = code_remember_env["dataset"].id
-    assert events == [
-        ("lock", dataset_id),
-        ("add_repo", None),
-        ("pipeline", None),
-        ("mark_processed", None),
-        ("unlock", dataset_id),
-    ]
 
 
 @pytest.mark.asyncio
@@ -401,4 +340,4 @@ async def test_code_route_never_resolves_the_graph_extractor(code_remember_env, 
     )
 
     assert result.status == "completed"
-    code_remember_env["pipeline"].assert_awaited_once()
+    code_remember_env["cognify"].assert_awaited_once()

@@ -137,6 +137,37 @@ def test_processing_status_forwards_pipeline_query_param(authenticated_client, m
     helper.assert_awaited_once_with(dataset_id, pipeline_name="add_pipeline")
 
 
+def test_processing_status_answers_the_legacy_code_graph_name_with_cognify(
+    authenticated_client, monkeypatch
+):
+    """remember(content_type="code") used to stamp code_graph_pipeline; its rows
+    are built under cognify_pipeline now (SDK-793), so an old poller asking for
+    the legacy name must get the cognify status, not a permanently pending one."""
+    dataset_id = uuid.uuid4()
+    _authorize_datasets(monkeypatch, [SimpleNamespace(id=dataset_id)])
+
+    helper = AsyncMock(return_value={"total": 1, "completed": 1, "pending": 0, "items": []})
+    _patch_status_helper(monkeypatch, helper)
+
+    response = authenticated_client.get(
+        f"/api/v1/datasets/{dataset_id}/processing-status",
+        params={"pipeline": "code_graph_pipeline"},
+    )
+
+    assert response.status_code == 200
+    helper.assert_awaited_once_with(dataset_id, pipeline_name="cognify_pipeline")
+
+
+def test_canonical_pipeline_names_maps_the_alias_and_keeps_order_without_duplicates():
+    router_module = importlib.import_module(ROUTER_MODULE)
+
+    assert router_module.canonical_pipeline_names(
+        ["add_pipeline", "cognify_pipeline", "code_graph_pipeline"]
+    ) == ["add_pipeline", "cognify_pipeline"]
+    assert router_module.canonical_pipeline_names(["code_graph_pipeline"]) == ["cognify_pipeline"]
+    assert router_module.canonical_pipeline_names([]) == []
+
+
 def test_processing_status_unknown_or_unauthorized_dataset_is_404(
     authenticated_client, monkeypatch
 ):

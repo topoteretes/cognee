@@ -448,14 +448,14 @@ async def main():
         # An unchanged repository whose re-sync fails keeps its stamps: its graph
         # is still built, so a later cognify() of the dataset must not pick the
         # row up again (it would rerun enola, or fail when the clone is gone).
-        import cognee.modules.run_custom_pipeline as custom_pipeline_module
+        import cognee.tasks.code_graph.code_repo as code_repo_module
 
-        real_run_custom_pipeline = custom_pipeline_module.run_custom_pipeline
+        real_cognify_code_repository = code_repo_module.cognify_code_repository
 
         async def _failing_code_graph_run(*_args, **_kwargs):
             raise RuntimeError("simulated code graph failure")
 
-        custom_pipeline_module.run_custom_pipeline = _failing_code_graph_run
+        code_repo_module.cognify_code_repository = _failing_code_graph_run
         try:
             result = await cognee.remember(
                 str(repo_path),
@@ -464,7 +464,7 @@ async def main():
                 raise_on_error=False,
             )
         finally:
-            custom_pipeline_module.run_custom_pipeline = real_run_custom_pipeline
+            code_repo_module.cognify_code_repository = real_cognify_code_repository
         assert result.status == "errored", result
         assert result.items[0].get("id") == first_data_id, result.items
         processing = await get_dataset_processing_status(remember_dataset.id)
@@ -484,13 +484,14 @@ async def main():
             f"Expected one Data row per remembered repository, got {[row.name for row in data_rows]}"
         )
         assert all(_system_metadata(row).get("source") == "code_repo" for row in data_rows)
-        # Stamped as cognified (a later cognify() of the dataset has nothing to
-        # redo) and in the code graph pipeline's own per-item slot.
-        for pipeline_name in ("cognify_pipeline", "code_graph_pipeline"):
-            processing = await get_dataset_processing_status(remember_dataset.id, pipeline_name)
-            assert processing["pending"] == 0, (
-                f"Repositories left pending for {pipeline_name}: {processing}"
-            )
+        # Built through cognify's own route under cognify_pipeline, so the rows
+        # carry the real cognify stamp: a later cognify() of the dataset has
+        # nothing to redo, and nothing was stamped under any other name.
+        processing = await get_dataset_processing_status(remember_dataset.id, "cognify_pipeline")
+        assert processing["pending"] == 0, f"Repositories left pending: {processing}"
+        assert all(
+            set(row.pipeline_status) <= {"add_pipeline", "cognify_pipeline"} for row in data_rows
+        ), f"Unexpected pipeline stamps: {[row.pipeline_status for row in data_rows]}"
 
         await cognee.forget(data_id=UUID(first_data_id), dataset_id=remember_dataset.id)
 

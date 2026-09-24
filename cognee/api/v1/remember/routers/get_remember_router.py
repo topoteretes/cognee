@@ -345,7 +345,7 @@ def get_remember_router() -> APIRouter:
         - **content_type** (Optional[str]): Set to "skills" to ingest SKILL.md files as
           Skill nodes, or "code" to index whole repositories — each raw_data entry is
           then a git URL or server-local repo path and one code graph is built per
-          entry (poll progress via GET /v1/datasets/status?pipeline=code_graph_pipeline);
+          entry (poll progress via GET /v1/datasets/status, the cognify_pipeline);
           each repository is one data item, its id on the result item;
           omit for normal ingestion.
         - **index_vectors** (Optional[bool]): content_type="code" only — also embed the

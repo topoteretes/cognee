@@ -26,12 +26,19 @@ pipeline's incremental check sees it; re-adding a changed repo then resets
 pipeline status through the normal content-change detection. The clear is
 unconditional, so an unchanged repo's small manifest is stored again on every
 add; its cognify stamps are kept and nothing is rebuilt. The
-repository itself is read from its original location at cognify time — like
-``remember(content_type="code")``, the enola run happens in place.
+repository itself is read from its original location at cognify time: the
+enola run happens in place.
 
 A GitHub/GitLab repository URL passed to ``add()`` takes the same path after a
 shallow clone (``resolve_code_repository_url``): the clone directory is the
 "original location" the manifest points at.
+
+``remember(content_type="code")`` is the same route with the documents left
+out, split into its two halves so it can report per repository:
+``add_code_repository`` stores the manifest row through ``add()`` and
+``cognify_code_repository`` runs the CODE_REPO task list over that one row
+under ``cognify_pipeline``. One builder, one completion stamp, whichever entry
+point stored the row.
 """
 
 import hashlib
@@ -131,6 +138,22 @@ REPO_SKIPPED_MEDIA_EXTENSIONS = frozenset(
 def is_code_repo_sourced(metadata) -> bool:
     """Check whether system_metadata indicates a repo manifest (source == "code_repo")."""
     return metadata_source(metadata) == "code_repo"
+
+
+def code_repo_index_vectors(metadata) -> bool:
+    """Whether a repo manifest row asked for its code facts to be embedded.
+
+    Recorded by ``resolve_code_repository(index_vectors=True)`` as
+    ``system_metadata["index_vectors"]``; absent means graph-only, the default.
+    Accepts the same shapes as ``metadata_source``.
+    """
+    meta = getattr(metadata, "system_metadata", metadata)
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except (json.JSONDecodeError, TypeError):
+            return False
+    return bool(isinstance(meta, dict) and meta.get("index_vectors"))
 
 
 def detect_code_project(directory: Path) -> bool:
@@ -240,6 +263,7 @@ async def resolve_code_repository(
     dataset_id=None,
     source_url: str | None = None,
     include_documents: bool = True,
+    index_vectors: bool = False,
 ):
     """Build the repo-level DataItem (and the document file list) for a project.
 
@@ -250,7 +274,9 @@ async def resolve_code_repository(
     With a pinned id and a dataset, the stored row's add stamp is cleared so
     the re-add reaches ingestion's content comparison (see the reset below).
     ``source_url`` (credential-free) records where a cloned repository came
-    from as ``system_metadata["repo_url"]``.
+    from as ``system_metadata["repo_url"]``. ``index_vectors`` is recorded as
+    ``system_metadata["index_vectors"]`` so the CODE_REPO route embeds the
+    code facts on every build of this row, not only the first.
 
     Without an LLM API key, the project's document files are excluded (logged)
     instead of emitted: their routes need an LLM (images transcribe at add
@@ -306,6 +332,8 @@ async def resolve_code_repository(
     }
     if source_url is not None:
         system_metadata["repo_url"] = source_url
+    if index_vectors:
+        system_metadata["index_vectors"] = True
 
     manifest_item = DataItem(
         data=manifest_text,
@@ -351,15 +379,14 @@ async def add_code_repository(
     user,
     dataset,
     source_url: str | None = None,
-    skip_connection_test: bool = False,
+    index_vectors: bool = False,
 ):
     """Store a resolved repository as its one code_repo Data row, without cognifying it.
 
-    ``remember(content_type="code")`` builds the graph itself (the
-    code_graph_pipeline over this row) and needs the row only for its id and
-    its dataset listing. It is the same manifest item ``add(<repo>)`` ingests,
-    pinned to the same identity, so both routes keep one record per repository.
-    The repository's documents are not ingested. Returns the stored Data row.
+    The ``add()`` half of ``remember(content_type="code")``: the same manifest
+    item ``add(<repo>)`` ingests, pinned to the same identity, so both entry
+    points keep one record per repository. The repository's documents are not
+    ingested. Returns the stored Data row; ``cognify_code_repository`` builds it.
     """
     from cognee.api.v1.add import add
     from cognee.modules.data.methods import get_data
@@ -371,13 +398,17 @@ async def add_code_repository(
         dataset_id=dataset.id,
         source_url=source_url,
         include_documents=False,
+        index_vectors=index_vectors,
     )
     add_result = await add(
         manifest_item,
         dataset_name=dataset.name,
         dataset_id=dataset.id,
         user=user,
-        skip_connection_test=skip_connection_test,
+        # Storing a manifest calls no LLM and embeds nothing, so a keyless
+        # install must not be asked for a key here. With index_vectors the
+        # build embeds, so the probe stays on to fail early on a bad embedder.
+        skip_connection_test=not index_vectors,
     )
     # With RAISE_INCREMENTAL_LOADING_ERRORS=false a failed ingest returns an
     # errored run instead of raising; surface its cause, not a missing row.
@@ -397,6 +428,37 @@ async def add_code_repository(
     return data
 
 
+async def cognify_code_repository(data, dataset, user):
+    """Build one stored code_repo row's graph exactly as ``cognify()`` would.
+
+    The ``cognify()`` half of ``remember(content_type="code")``, narrowed to
+    one row: the CODE_REPO route task list runs over ``data`` under
+    ``cognify_pipeline`` with incremental loading, so the row's completion
+    stamp is the one ``cognify()`` reads and writes. A row already built by
+    either entry point is skipped as already completed, a changed one is
+    rebuilt, and no other row of the dataset is touched. Returns the run's
+    terminal PipelineRunInfo (``None`` if the run yielded nothing).
+    """
+    from cognee.modules.cognify.rollback import cognify_rollback_handler
+    from cognee.modules.pipelines.operations.pipeline import run_pipeline
+
+    run_info = None
+    async for run_info in run_pipeline(
+        tasks=get_code_repo_tasks(),
+        data=[data],
+        datasets=[dataset.id],
+        user=user,
+        pipeline_name="cognify_pipeline",
+        incremental_loading=True,
+        rollback_handler=cognify_rollback_handler,
+        # The route calls no LLM (needs_llm is derived from its task list) and
+        # embeds only when the row asks for vectors; probe embeddings only then.
+        skip_connection_test=not code_repo_index_vectors(data),
+    ):
+        pass
+    return run_info
+
+
 async def extract_code_repo_graph(
     data_documents: list,
     ctx: Optional["PipelineContext"] = None,
@@ -405,8 +467,8 @@ async def extract_code_repo_graph(
 
     Reads the stored manifest for the repo path and runs the standard code
     graph tasks on the ORIGINAL directory (enola writes its .enola snapshot
-    there, exactly like remember(content_type="code")). One repository node,
-    cross-file edges, one graph read per repo. No LLM, no embeddings.
+    there). One repository node, cross-file edges, one graph read per repo.
+    No LLM; embeddings only for a row stored with ``index_vectors``.
     """
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
     from cognee.tasks.code_graph.extract_code_graph import (
@@ -434,7 +496,10 @@ async def extract_code_repo_graph(
             )
 
         data_points = await extract_code_graph(repo_path=repo_path)
-        state = await add_code_graph_data_points(data_points, ctx=ctx, graph_only=True)
+        # Graph-only unless the row asked for vectors (remember(index_vectors=True)).
+        state = await add_code_graph_data_points(
+            data_points, ctx=ctx, graph_only=not code_repo_index_vectors(data_item)
+        )
         await add_code_graph_edges(state, repo_path=repo_path, ctx=ctx)
 
         logger.info("Code repo graph extracted for %s (%s).", repo_path, data_item.id)
