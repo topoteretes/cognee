@@ -3,8 +3,8 @@
 Multipart has no encoding for an empty array, so clients that render a list
 field with one blank item (Swagger UI) send ``data=""``. Before
 ``cognee.api.upload_fields`` the ``UploadFile`` validator rejected that part
-before the handler ran, which made e.g. ``POST /v1/remember`` with
-``content_type="code"`` unusable from Swagger UI.
+before the handler ran, which made e.g. ``POST /v1/remember`` with a
+repository URL in ``raw_data`` unusable from Swagger UI.
 """
 
 import importlib
@@ -104,14 +104,13 @@ def test_drop_blank_uploads_rejects_text_with_actionable_message():
 # --- /remember --------------------------------------------------------------
 
 
-def test_remember_code_ingestion_with_blank_data_part(client, fake_remember):
-    """The Swagger UI shape: content_type=code, raw_data filled, data left blank."""
+def test_remember_repository_url_with_blank_data_part(client, fake_remember):
+    """The Swagger UI shape: a repository URL in raw_data, data left blank."""
     response = client.post(
         "/remember",
         files=BLANK_PART,
         data={
             "datasetName": "ds",
-            "content_type": "code",
             "raw_data": "https://github.com/topoteretes/cognee",
             "node_set": "",
             "index_vectors": "false",
@@ -119,7 +118,8 @@ def test_remember_code_ingestion_with_blank_data_part(client, fake_remember):
     )
     assert response.status_code == 200, response.text
     assert fake_remember["data"] == ["https://github.com/topoteretes/cognee"]
-    assert fake_remember["kwargs"]["content_type"] == "code"
+    assert fake_remember["kwargs"]["content_type"] is None
+    assert "index_vectors" not in fake_remember["kwargs"]
 
 
 def test_remember_blank_data_part_without_content_type_is_treated_as_no_uploads(
@@ -155,16 +155,6 @@ def test_remember_real_upload_still_reaches_handler_as_uploadfile(client, fake_r
     [upload] = fake_remember["data"]
     assert upload.filename == "service.py"
     assert hasattr(upload, "file")
-
-
-def test_remember_code_still_rejects_real_upload(client, fake_remember):
-    response = client.post(
-        "/remember",
-        files=PY_FILE,
-        data={"datasetName": "ds", "content_type": "code", "raw_data": "/repo"},
-    )
-    assert response.status_code == 400
-    assert "does not accept file uploads" in response.json()["detail"]
 
 
 def test_remember_openapi_keeps_binary_schema_and_empty_list_examples(client):

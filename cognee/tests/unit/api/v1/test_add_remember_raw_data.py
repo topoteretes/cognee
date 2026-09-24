@@ -5,10 +5,9 @@ GitHub/GitLab repository URL — and joins the uploads as a single list, uploads
 first. The router does no interpretation of its own: the strings reach add()
 exactly as an SDK caller would pass them, and labels/external_metadata pair
 with the combined list. Empty entries (Swagger UI submits untouched array items
-as "") are dropped. A request with neither uploads nor raw_data is a 400. With
-content_type="code" the raw_data entries are the repository specs; remember
-rejects raw_data together with content_type="skills" or "cogx-archive" because
-those paths never run string inputs through add().
+as "") are dropped. A request with neither uploads nor raw_data is a 400.
+remember rejects raw_data together with content_type="skills" or "cogx-archive"
+because those paths never run string inputs through add().
 """
 
 import importlib
@@ -199,7 +198,7 @@ def test_remember_combines_uploads_and_raw_data_uploads_first(client):
         assert sent[1] == REPO_URL
 
 
-def test_remember_code_content_type_takes_repo_specs_from_raw_data(client):
+def test_remember_forwards_index_vectors_with_repo_urls(client):
     with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
         mock_remember.return_value = remember_completed()
 
@@ -207,14 +206,45 @@ def test_remember_code_content_type_takes_repo_specs_from_raw_data(client):
             "/api/v1/remember",
             data={
                 "datasetName": "test_dataset",
-                "content_type": "code",
                 "raw_data": [REPO_URL, "", "/srv/other/repo"],
+                "index_vectors": "true",
             },
         )
 
         assert response.status_code == 200, response.text
         assert mock_remember.call_args.args[0] == [REPO_URL, "/srv/other/repo"]
-        assert mock_remember.call_args.kwargs["content_type"] == "code"
+        assert mock_remember.call_args.kwargs["index_vectors"] is True
+        assert mock_remember.call_args.kwargs["content_type"] is None
+
+
+def test_remember_rejects_the_removed_code_content_type(client):
+    with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
+        response = client.post(
+            "/api/v1/remember",
+            files=[("data", ("notes.txt", b"hello", "text/plain"))],
+            data={"datasetName": "test_dataset", "content_type": "code"},
+        )
+
+        assert response.status_code == 400
+        assert "Unsupported content_type 'code'" in response.json()["detail"]
+        mock_remember.assert_not_awaited()
+
+
+def test_remember_rejects_index_vectors_with_session_id(client):
+    with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
+        response = client.post(
+            "/api/v1/remember",
+            data={
+                "datasetName": "test_dataset",
+                "raw_data": [REPO_URL],
+                "session_id": "s1",
+                "index_vectors": "true",
+            },
+        )
+
+        assert response.status_code == 400
+        assert "index_vectors" in response.json()["detail"]
+        mock_remember.assert_not_awaited()
 
 
 @pytest.mark.parametrize("content_type", ["skills", "cogx-archive"])

@@ -1,9 +1,9 @@
 """Resolve repository specs (local paths or remote git URLs) to local clones.
 
-Used by ``remember(..., content_type="code")`` so callers can pass a GitHub
-URL (or a list of them) and get the enola code-graph pipeline run on a local
-shallow clone, and by ``add()`` to recognise a GitHub/GitLab repository URL
-(:func:`code_repo_clone_url`) and clone it the same way. Clones live under
+Used by ``add()`` to recognise a GitHub/GitLab repository URL
+(:func:`code_repo_clone_url`) and shallow-clone it for the enola code-graph
+route, and by the GitHub integration sync to clone private repositories with
+an installation token (``resolve_repo_source(credentials=...)``). Clones live under
 ``BaseConfig.repos_root_directory`` (``~/.cognee/repos`` by default) and are
 reused across calls; an existing clone is refreshed with a best-effort
 ``git pull``.
@@ -111,8 +111,8 @@ def code_repo_clone_url(spec) -> str | None:
     host. Deeper forge URLs (``/blob/``, ``/tree/``, ``/issues``, ``/pull/``,
     GitLab's ``/-/`` pages) and forge site pages (``/topics/x``, ``/explore``)
     name pages, not repositories, and are left to the web-page path. ``git@``
-    and ``ssh://`` specs are not detected: they have no web-page reading to
-    disambiguate from and stay explicit via ``remember(content_type="code")``.
+    and ``ssh://`` specs are not detected: clone them yourself and pass the
+    local directory.
 
     The returned URL is normalised for ``git clone``: query and fragment
     dropped, trailing slash removed, userinfo (a token) kept -- redact it with
