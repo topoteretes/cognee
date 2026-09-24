@@ -1283,3 +1283,129 @@ async def test_facts_section_renders_after_entities():
         "## Relevant entities\n### Alice\n- Alice works at Acme.\n\n"
         "## Related facts\n- Acme acquired Initech."
     )
+
+
+# ------------------------------------------------- document external_metadata
+
+
+def _metadata_chunk(chunk_id, text, stored=None):
+    """A DocumentChunk_text row as the vector store returns it: metadata is JSON text."""
+    chunk_payload = {"id": chunk_id, "text": text}
+    if stored is not None:
+        chunk_payload["external_metadata"] = stored
+    return _result(chunk_id, chunk_payload)
+
+
+async def _retrieve_with(retriever, chunks):
+    vector = MagicMock()
+    vector.search = _vector_search(chunks=chunks)
+    with patch(
+        "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+        new_callable=AsyncMock,
+        return_value=_unified(vector=vector, graph=_graph()),
+    ):
+        return await retriever.get_retrieved_objects(query="q")
+
+
+@pytest.mark.asyncio
+async def test_external_metadata_is_stripped_from_objects_by_default():
+    """Flag off: the stored value never leaves the retriever, even when the row carried it."""
+    retriever = HybridRetriever(text_summaries_top_k=0)
+
+    retrieved = await _retrieve_with(
+        retriever,
+        [_metadata_chunk("chunk-1", "First passage", '{"created_at": "2024-01-15"}')],
+    )
+
+    assert retrieved["chunks"][0].payload == {"id": "chunk-1", "text": "First passage"}
+    context = await retriever.get_context_from_objects(query="q", retrieved_objects=retrieved)
+    assert context == "## Relevant passages\nFirst passage"
+
+
+@pytest.mark.asyncio
+async def test_external_metadata_projects_only_allowlisted_keys_onto_objects():
+    retriever = HybridRetriever(
+        text_summaries_top_k=0,
+        include_external_metadata=True,
+        external_metadata_keys=["created_at", "missing"],
+    )
+
+    retrieved = await _retrieve_with(
+        retriever,
+        [
+            _metadata_chunk(
+                "chunk-1", "First", '{"created_at": "2024-01-15", "source_id": "doc-7"}'
+            ),
+            _metadata_chunk("chunk-2", "Second", '{"source_id": "doc-8"}'),
+            _metadata_chunk("chunk-3", "Third"),
+        ],
+    )
+
+    payloads = [chunk.payload for chunk in retrieved["chunks"]]
+    assert payloads[0]["external_metadata"] == {"created_at": "2024-01-15"}
+    assert "source_id" not in payloads[0]["external_metadata"]
+    assert payloads[1]["external_metadata"] is None  # stored keys outside the allowlist
+    assert payloads[2]["external_metadata"] is None  # chunk written before the field existed
+    assert [chunk.id for chunk in retrieved["chunks"]] == ["chunk-1", "chunk-2", "chunk-3"]
+
+
+@pytest.mark.asyncio
+async def test_passage_section_renders_allowlisted_metadata_above_text():
+    retriever = HybridRetriever(
+        text_summaries_top_k=0,
+        include_external_metadata=True,
+        external_metadata_keys=["created_at", "author"],
+    )
+
+    retrieved = await _retrieve_with(
+        retriever,
+        [
+            _metadata_chunk(
+                "chunk-1",
+                "First passage",
+                '{"created_at": "2024-01-15", "author": "Ada", "source_id": "doc-7"}',
+            ),
+            _metadata_chunk("chunk-2", "Second passage", '{"source_id": "doc-8"}'),
+        ],
+    )
+    context = await retriever.get_context_from_objects(query="q", retrieved_objects=retrieved)
+
+    assert context == (
+        "## Relevant passages\n"
+        "created_at: 2024-01-15\n"
+        "author: Ada\n"
+        "First passage\n"
+        "---\n"
+        "Second passage"
+    )
+    assert "source_id" not in context
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stored", ["", "{}", "{oops", '["a"]', "42"])
+async def test_external_metadata_unusable_stored_values_project_to_none(stored):
+    retriever = HybridRetriever(
+        text_summaries_top_k=0,
+        include_external_metadata=True,
+        external_metadata_keys=["created_at"],
+    )
+
+    retrieved = await _retrieve_with(retriever, [_metadata_chunk("chunk-1", "First", stored)])
+
+    assert retrieved["chunks"][0].payload["external_metadata"] is None
+
+
+@pytest.mark.asyncio
+async def test_passage_section_never_renders_unprojected_metadata_text():
+    """Raw JSON text handed straight to the formatter (flag off, cached objects) stays hidden."""
+    retriever = HybridRetriever(text_summaries_top_k=0)
+
+    context = await retriever.get_context_from_objects(
+        query="q",
+        retrieved_objects={
+            "chunks": [_metadata_chunk("chunk-1", "First passage", '{"created_at": "x"}')],
+            "entities": [],
+        },
+    )
+
+    assert context == "## Relevant passages\nFirst passage"
