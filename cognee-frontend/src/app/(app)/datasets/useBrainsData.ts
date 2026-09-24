@@ -14,6 +14,7 @@ import deleteDataset from "@/modules/datasets/deleteDataset";
 import deleteDatasetData from "@/modules/datasets/deleteDatasetData";
 import cognifyDataset from "@/modules/datasets/cognifyDataset";
 import { useDatasetStatuses } from "@/modules/datasets/useDatasetStatuses";
+import { useDatasetProcessing } from "@/modules/datasets/useDatasetProcessing";
 import { normalizeDatasetStatusResponse, type DatasetStatusDetail } from "@/modules/datasets/datasetStatusDetail";
 import { trackEvent } from "@/modules/analytics";
 import { loadGraphModelsConfig } from "@/modules/configuration/userConfiguration";
@@ -51,6 +52,7 @@ export function useBrainsData(): UseBrainsDataResult {
   const [outdatedDatasets, setOutdated] = useState<Set<string>>(new Set());
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const processingCounts = useDatasetProcessing(selectedId);
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
   const {
@@ -193,13 +195,26 @@ export function useBrainsData(): UseBrainsDataResult {
     }
   }, [selectedId, docsTotal]);
 
+  // A connector can import more rows while this page stays open. Refresh the
+  // visible page as the persisted total changes, without resetting pagination
+  // on every individual cognify completion.
+  const importedTotal = processingCounts.data?.total;
+  const lastImportSnapshot = useRef<{ id: string | null; total: number | undefined }>({ id: null, total: undefined });
+  useEffect(() => {
+    const previous = lastImportSnapshot.current;
+    lastImportSnapshot.current = { id: selectedId, total: importedTotal };
+    if (selectedId && previous.id === selectedId && previous.total !== undefined && importedTotal !== undefined && previous.total !== importedTotal) {
+      void loadDocs(selectedId);
+    }
+  }, [selectedId, importedTotal, loadDocs]);
+
   async function refreshSelectedDocs(id: string): Promise<void> {
     await loadDocs(id);
   }
 
   async function handleRefresh(): Promise<void> {
     setRefreshing(true);
-    await Promise.all([loadDatasets(), selectedId ? refreshSelectedDocs(selectedId) : Promise.resolve()]);
+    await Promise.all([loadDatasets(), selectedId ? refreshSelectedDocs(selectedId) : Promise.resolve(), selectedId ? processingCounts.refetch() : Promise.resolve()]);
     setRefreshing(false);
   }
 
@@ -446,14 +461,18 @@ export function useBrainsData(): UseBrainsDataResult {
   }
 
   const selectedDataset = datasets.find((d) => d.id === selectedId) ?? null;
+  const completionById = new Map(processingCounts.data?.items.map(item => [item.id, item.completed]));
 
   return {
+    processingCounts: processingCounts.data,
+    processingCountsError: processingCounts.isError,
+    refreshProcessingCounts: () => { void processingCounts.refetch(); },
     isLoading: loading || isInitializing,
-    datasets,
+    datasets: datasets.map(d => d.id === selectedId && processingCounts.data ? { ...d, processingCounts: processingCounts.data } : d),
     datasetsError,
     selectedId,
     selectedDataset,
-    selectedDocs,
+    selectedDocs: selectedDocs.map(doc => ({ ...doc, completed: completionById.get(doc.id) })),
     docsLoading,
     docsError,
     docsTotal,

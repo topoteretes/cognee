@@ -1,10 +1,12 @@
 """Unit tests for bounded-subgraph seed resolution and truncation."""
 
+from functools import partial
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.modules.visualization.subgraph_data import (
     DEFAULT_NEIGHBORHOOD_DEPTH,
     fetch_visualization_graph_data,
@@ -13,6 +15,17 @@ from cognee.modules.visualization.subgraph_data import (
     resolve_seeds_from_recall,
     truncate_subgraph,
 )
+
+
+def _mock_engine():
+    """A mocked engine with no native bounded read, so it takes the interface default.
+
+    A bare MagicMock would answer ``iter_bounded_neighborhood`` with another
+    MagicMock, which is not an async iterator.
+    """
+    engine = MagicMock()
+    engine.iter_bounded_neighborhood = partial(GraphDBInterface.iter_bounded_neighborhood, engine)
+    return engine
 
 
 def _chain_graph(node_count: int = 20):
@@ -108,7 +121,7 @@ async def test_resolve_seeds_from_query_empty_when_no_hits():
 
 @pytest.mark.asyncio
 async def test_resolve_seed_priority_explicit_over_recall_query_degree():
-    engine = MagicMock()
+    engine = _mock_engine()
     engine.get_graph_data = AsyncMock(return_value=_chain_graph(5))
     with patch(
         "cognee.modules.visualization.subgraph_data.resolve_seeds_from_query",
@@ -128,7 +141,7 @@ async def test_resolve_seed_priority_falls_through_to_degree():
     # The ranking is the adapter's job now, so this asserts the fall-through
     # and that the adapter is asked — not how it counts. How it counts is
     # covered by the interface-default test below.
-    engine = MagicMock()
+    engine = _mock_engine()
     engine.get_top_degree_node_ids = AsyncMock(return_value=["hub"])
     engine.get_graph_data = AsyncMock(
         side_effect=AssertionError("seed ranking must not read the whole graph")
@@ -143,7 +156,7 @@ async def test_resolve_seed_priority_falls_through_to_degree():
 
 @pytest.mark.asyncio
 async def test_resolve_seed_none_on_empty_graph():
-    engine = MagicMock()
+    engine = _mock_engine()
     engine.get_top_degree_node_ids = AsyncMock(return_value=[])
     seeds, source = await resolve_seed_node_ids(engine)
     assert (seeds, source) == ([], "none")
@@ -180,7 +193,7 @@ def test_truncate_subgraph_noop_under_cap():
 @pytest.mark.asyncio
 async def test_fetch_full_graph_skips_neighborhood():
     full_graph = _chain_graph(5)
-    engine = MagicMock()
+    engine = _mock_engine()
     engine.get_graph_data = AsyncMock(return_value=full_graph)
     engine.get_neighborhood = AsyncMock()
 
@@ -195,7 +208,7 @@ async def test_fetch_full_graph_skips_neighborhood():
 async def test_fetch_subgraph_expands_explicit_seeds():
     full_graph = _chain_graph(20)
     subgraph = (full_graph[0][8:12], full_graph[1][8:11])
-    engine = MagicMock()
+    engine = _mock_engine()
     engine.get_neighborhood = AsyncMock(return_value=subgraph)
 
     graph_data = await fetch_visualization_graph_data(
@@ -207,13 +220,17 @@ async def test_fetch_subgraph_expands_explicit_seeds():
     engine.get_neighborhood.assert_awaited_once_with(
         node_ids=["10"], depth=DEFAULT_NEIGHBORHOOD_DEPTH
     )
-    assert graph_data == subgraph
+    nodes, edges = graph_data
+    # Same subgraph, with the seed first and then nodes by hop distance.
+    assert [node_id for node_id, _ in nodes] == ["10", "9", "11", "8"]
+    assert sorted(nodes) == sorted(subgraph[0])
+    assert sorted(edges) == sorted(subgraph[1])
 
 
 @pytest.mark.asyncio
 async def test_fetch_subgraph_uses_query_seeds():
     subgraph = _chain_graph(4)
-    engine = MagicMock()
+    engine = _mock_engine()
     engine.get_neighborhood = AsyncMock(return_value=subgraph)
     engine.get_graph_data = AsyncMock()
 
@@ -232,7 +249,7 @@ async def test_fetch_truncates_oversized_neighborhood():
     # get_neighborhood returns more than max_nodes; fetch must cap while keeping
     # the seed and leaving no dangling edges.
     nodes, edges = _chain_graph(20)
-    engine = MagicMock()
+    engine = _mock_engine()
     engine.get_neighborhood = AsyncMock(return_value=(nodes, edges))
 
     kept_nodes, kept_edges = await fetch_visualization_graph_data(
@@ -246,7 +263,7 @@ async def test_fetch_truncates_oversized_neighborhood():
 
 @pytest.mark.asyncio
 async def test_fetch_no_seeds_renders_empty():
-    engine = MagicMock()
+    engine = _mock_engine()
     engine.get_top_degree_node_ids = AsyncMock(return_value=[])
     engine.get_neighborhood = AsyncMock()
 
@@ -262,6 +279,6 @@ async def test_fetch_no_seeds_renders_empty():
     [{"neighborhood_depth": 0}, {"seed_top_k": 0}, {"max_nodes": 0}],
 )
 async def test_fetch_validates_bounds(kwargs):
-    engine = MagicMock()
+    engine = _mock_engine()
     with pytest.raises(ValueError):
         await fetch_visualization_graph_data(engine, **kwargs)

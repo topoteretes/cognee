@@ -80,6 +80,7 @@ async def test_default_sync_covers_every_installation_repo(mocks):
         user=mocks.owner,
         content_type="code",
         repo_credentials="tok123",
+        raise_on_error=False,
     )
 
 
