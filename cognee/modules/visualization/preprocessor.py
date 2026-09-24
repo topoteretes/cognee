@@ -512,6 +512,12 @@ def _relationship_label(relation_counts):
 # semantic type of extracted entities (mirrors get_schema_inventory).
 ENTITY_TYPE_RELATION: str = "is_a"
 
+# Set by bounded reads on each Entity whose type the store resolved; see
+# subgraph_data.resolve_entity_types. Underscored so it never collides with a
+# custom graph_model field; preprocess() and compact_node() turn it into the
+# public entity_type field.
+SEMANTIC_TYPE_KEY: str = "_semantic_type"
+
 
 def _link_relation(link: dict[str, Any]) -> str:
     """Read a link's relation name across the shapes the preprocessor emits."""
@@ -525,6 +531,28 @@ def _link_relation(link: dict[str, Any]) -> str:
     )
 
 
+def semantic_entity_type_names(
+    nodes_list: list[dict[str, Any]], links_list: list[dict[str, Any]]
+) -> set[str]:
+    """Names of the semantic entity types (Person/Broker/…) in this graph.
+
+    Those reached via an ``is_a`` edge in the read, plus those a bounded read
+    resolved from the store for entities whose type node was not admitted.
+    """
+    nodes_by_id = {node["id"]: node for node in nodes_list}
+    names = {
+        node[SEMANTIC_TYPE_KEY]
+        for node in nodes_list
+        if node.get("type") == "Entity" and node.get(SEMANTIC_TYPE_KEY)
+    }
+    for link in links_list:
+        if _link_relation(link) == ENTITY_TYPE_RELATION:
+            target = nodes_by_id.get(str(link["target"]))
+            if target and target.get("name"):
+                names.add(target["name"])
+    return names
+
+
 def resolve_semantic_types(
     nodes_list: list[dict[str, Any]], links_list: list[dict[str, Any]]
 ) -> dict[str, str]:
@@ -534,7 +562,10 @@ def resolve_semantic_types(
     "Entity"``) resolve to the EntityType ``name`` reached via the ``is_a`` edge,
     so semantic types (Person/Tool/Broker) surface instead of the literal
     "Entity". Mirrors ``get_schema_inventory._resolve_node_types`` adapted to the
-    preprocessor's normalized node/link shape.
+    preprocessor's normalized node/link shape. The ``SEMANTIC_TYPE_KEY``
+    property, which bounded reads set from the store
+    (``subgraph_data.resolve_entity_types``), wins over the edges, since the
+    EntityType node may be outside the read.
     """
     nodes_by_id = {node["id"]: node for node in nodes_list}
 
@@ -550,7 +581,9 @@ def resolve_semantic_types(
     for node in nodes_list:
         node_id = node["id"]
         raw_type = node.get("type")
-        if raw_type == "Entity" and entity_type_name.get(node_id):
+        if raw_type == "Entity" and node.get(SEMANTIC_TYPE_KEY):
+            node_type[node_id] = node[SEMANTIC_TYPE_KEY]
+        elif raw_type == "Entity" and entity_type_name.get(node_id):
             node_type[node_id] = entity_type_name[node_id]
         else:
             node_type[node_id] = raw_type or "Node"
@@ -563,16 +596,10 @@ def extract_type_schema_graph_data(
     """Fallback schema view: collapse the graph to one node per semantic type."""
     node_type_by_id = resolve_semantic_types(nodes_list, links_list)
 
-    # Names reached via the is_a edge are semantic *entity* types (Person, Broker,
-    # …) — rank them in the Entity column rather than letting them fall through to
+    # Names reached via the is_a edge, or resolved from the store by a bounded
+    # read, are semantic *entity* types (Person, Broker, …) — rank them in the Entity column rather than letting them fall through to
     # the default ("Summaries") rank.
-    nodes_by_id_lookup = {node["id"]: node for node in nodes_list}
-    semantic_type_names = set()
-    for link in links_list:
-        if _link_relation(link) == ENTITY_TYPE_RELATION:
-            target_node = nodes_by_id_lookup.get(str(link["target"]))
-            if target_node and target_node.get("name"):
-                semantic_type_names.add(target_node["name"])
+    semantic_type_names = semantic_entity_type_names(nodes_list, links_list)
 
     # Bound the Entity column: keep the most-populated semantic entity types
     # as their own cards and remap the long tail onto one rollup type. The
@@ -821,14 +848,7 @@ def build_operation_layer(
     present = {n["name"] for n in type_nodes}
     pipeline_by_type = {n["name"]: n.get("source_pipeline") for n in type_nodes}
 
-    # Semantic entity types are those reached via the is_a edge (Person/Broker/…).
-    nodes_by_id = {n["id"]: n for n in nodes_list}
-    semantic_entity_types = set()
-    for link in links_list:
-        if _link_relation(link) == ENTITY_TYPE_RELATION:
-            target = nodes_by_id.get(str(link["target"]))
-            if target and target.get("name"):
-                semantic_entity_types.add(target["name"])
+    semantic_entity_types = semantic_entity_type_names(nodes_list, links_list)
 
     def resolve_targets(effect):
         names = set()
@@ -1405,7 +1425,11 @@ def preprocess(graph_data, schema_data: dict[str, Any] | None = None) -> Preproc
             }
         )
 
-    # ── Nodes pass 2: degree, importance ───────────────────────────────────
+    # ── Nodes pass 2: degree, importance, semantic type ────────────────────
+    semantic_types = resolve_semantic_types(nodes, links)
+    for node in nodes:
+        node["entity_type"] = semantic_types[node["id"]]
+
     max_degree = max(degree_counter.values() or [1])
     for node in nodes:
         deg = degree_counter.get(node["id"], 0)
@@ -1430,6 +1454,9 @@ def preprocess(graph_data, schema_data: dict[str, Any] | None = None) -> Preproc
 
     schema_graph = extract_schema_graph_data(nodes, links)
     build_operation_layer(schema_graph, nodes, links)
+    # Internal to the read; clients get it as entity_type.
+    for node in nodes:
+        node.pop(SEMANTIC_TYPE_KEY, None)
 
     # Stages present in the graph, in canonical left-to-right order
     present_stages = [s for s in STAGE_ORDER if any(n["stage"] == s for n in nodes)]
@@ -1456,8 +1483,13 @@ def preprocess(graph_data, schema_data: dict[str, Any] | None = None) -> Preproc
 # The streamed /visualize/json reads the graph in chunks and must never hold
 # the whole graph with its properties. Everything a chunk carries is computed
 # from that chunk alone, with the same helpers preprocess() uses, so the two
-# cannot drift. The graph-wide fields are derived at the end from a small
-# accumulator and sent once as the summary.
+# cannot drift. The one input from outside the chunk is each Entity's semantic
+# type, which the read looks up in the store (subgraph_data.resolve_entity_types)
+# because the EntityType node may be in another chunk or outside the read. If
+# that lookup fails, a chunk falls back to its own is_a links, and an entity
+# whose is_a link arrives in a later chunk is sent as "Entity" and corrected by
+# an ``entity_type`` in its summary entry. The graph-wide fields are derived at
+# the end from a small accumulator and sent once as the summary.
 
 # Properties the store is asked for when streaming. Every key the compact
 # fields below are derived from, including the name fallbacks: dropping `text`
@@ -1472,6 +1504,11 @@ def compact_node(node_id, node_info) -> dict[str, Any]:
         "id": str(node_id),
         "name": name,
         "type": node_info.get("type"),
+        "entity_type": (
+            node_info.get(SEMANTIC_TYPE_KEY)
+            if node_info.get("type") == "Entity" and node_info.get(SEMANTIC_TYPE_KEY)
+            else node_info.get("type") or "Node"
+        ),
         "stage": _stage_for_node(node_info),
         "is_unnamed": is_unnamed,
     }
@@ -1493,13 +1530,35 @@ def compact_link(edge) -> dict[str, Any]:
     }
 
 
+def compact_chunk(nodes_data, edges_data) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """A chunk's compact nodes and links, typed as preprocess() would type them.
+
+    An Entity the store lookup did not type falls back to an ``is_a`` link in
+    this chunk, the same fallback ``resolve_semantic_types`` applies.
+    """
+    nodes = [compact_node(node_id, properties) for node_id, properties in nodes_data]
+    links = [compact_link(edge) for edge in edges_data]
+    names = {node["id"]: node["name"] for node in nodes if node["type"] == "EntityType"}
+    linked_types = {
+        link["source"]: names[link["target"]]
+        for link in links
+        if link["relation"] == ENTITY_TYPE_RELATION and names.get(link["target"])
+    }
+    for node in nodes:
+        if node["entity_type"] == "Entity" and node["id"] in linked_types:
+            node["entity_type"] = linked_types[node["id"]]
+    return nodes, links
+
+
 class CompactGraphAccumulator:
     """What the graph-wide fields need, collected chunk by chunk.
 
     Degree counts, and per node its stage, placeholder flag and node-set value:
     a few fields per node, never the properties. ``summary()`` returns the
     ``importance`` and ``label_priority`` preprocess() would assign, and the
-    ``node_set`` color map it would build, for the whole streamed graph.
+    ``node_set`` color map it would build, for the whole streamed graph. A node
+    a chunk sent as "Entity" whose ``is_a`` link and type node only arrived
+    later also gets the ``entity_type`` preprocess() would resolve.
     """
 
     def __init__(self) -> None:
@@ -1507,15 +1566,35 @@ class CompactGraphAccumulator:
         self._node_sets: list[Any] = []
         self._degree: Counter = Counter()
         self.link_count = 0
+        # For entities a chunk sent as "Entity": the EntityType names seen, and
+        # the is_a targets, so summary() can type them as preprocess() would.
+        self._untyped: set[str] = set()
+        self._type_names: dict[str, str] = {}
+        self._is_a: dict[str, str] = {}
 
     def add(self, nodes: list[dict[str, Any]], links: list[dict[str, Any]]) -> None:
         for node in nodes:
             self._nodes[node["id"]] = (node["stage"], node["is_unnamed"])
             self._node_sets.append(node.get("source_node_set"))
+            if node["type"] == "Entity" and node["entity_type"] == "Entity":
+                self._untyped.add(node["id"])
+            elif node["type"] == "EntityType" and node["name"]:
+                self._type_names[node["id"]] = node["name"]
         for link in links:
             self._degree[link["source"]] += 1
             self._degree[link["target"]] += 1
+            if link["relation"] == ENTITY_TYPE_RELATION:
+                self._is_a[link["source"]] = link["target"]
         self.link_count += len(links)
+
+    def _late_entity_types(self) -> dict[str, str]:
+        """Types for entities whose is_a link came in a later chunk than they did."""
+        late = {}
+        for node_id in self._untyped:
+            name = self._type_names.get(self._is_a.get(node_id, ""))
+            if name:
+                late[node_id] = name
+        return late
 
     @property
     def node_count(self) -> int:
@@ -1528,15 +1607,19 @@ class CompactGraphAccumulator:
             for node_id in self._nodes
         }
         threshold = _label_priority_threshold(list(importance.values()), percentile=0.75)
+        nodes = {
+            node_id: {
+                "importance": importance[node_id],
+                "label_priority": _label_priority(
+                    is_unnamed, stage, importance[node_id], threshold
+                ),
+            }
+            for node_id, (stage, is_unnamed) in self._nodes.items()
+        }
+        # Only present where it corrects what the chunk sent.
+        for node_id, entity_type in self._late_entity_types().items():
+            nodes[node_id]["entity_type"] = entity_type
         return {
-            "nodes": {
-                node_id: {
-                    "importance": importance[node_id],
-                    "label_priority": _label_priority(
-                        is_unnamed, stage, importance[node_id], threshold
-                    ),
-                }
-                for node_id, (stage, is_unnamed) in self._nodes.items()
-            },
+            "nodes": nodes,
             "color_maps": {"node_set": build_node_set_colors(self._node_sets)},
         }

@@ -7,9 +7,9 @@ neither the pod nor the client ever holds the whole graph with its properties.
 
 Events, in order: ``meta`` (seeds, seed source, bounds), one ``chunk`` per
 store chunk (compact ``nodes`` and ``links``; every link's endpoints were
-already sent), ``summary`` (``importance`` and ``label_priority`` per node, in
-events of at most ``chunk_size`` nodes, the first also carrying
-``color_maps.node_set``), ``done`` (totals). A failure after the 200 is one
+already sent), ``summary`` (``importance`` and ``label_priority`` per node, plus
+``entity_type`` where it corrects a type a chunk sent as "Entity", in events of
+at most ``chunk_size`` nodes, the first also carrying ``color_maps.node_set``), ``done`` (totals). A failure after the 200 is one
 ``error`` event carrying the status the JSON path would have returned.
 
 Four properties are deliberate and easy to break:
@@ -52,8 +52,7 @@ from .exceptions import GraphStreamCapacityError
 from .preprocessor import (
     COMPACT_PROPERTY_KEYS,
     CompactGraphAccumulator,
-    compact_link,
-    compact_node,
+    compact_chunk,
 )
 from .subgraph_data import iter_seed_neighborhood, resolve_seed_node_ids
 
@@ -126,8 +125,7 @@ async def stream_graph_events(
             chunk_size=chunk_size,
             property_keys=COMPACT_PROPERTY_KEYS,
         ):
-            nodes = [compact_node(node_id, properties) for node_id, properties in nodes_data]
-            links = [compact_link(edge) for edge in edges_data]
+            nodes, links = compact_chunk(nodes_data, edges_data)
             accumulator.add(nodes, links)
             yield "chunk", {"index": chunks, "nodes": nodes, "links": links}
             chunks += 1
