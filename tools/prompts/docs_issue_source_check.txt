@@ -10,5 +10,5 @@ Verdicts:
 
 For small_gap:
 - source_files: existing cognee/ or .env.template paths from the grep hits
-- docs_files: at most 3 existing Mintlify paths relative to the docs repo (e.g. setup-configuration/llm-providers.mdx), never URLs
-If you cannot name an existing docs file, use uncertain, not small_gap.
+- docs_files: at most 3 paths copied exactly from the "(docs file: ...)" labels of the pages above; any other path is dropped
+If none of the checked pages is the right one to edit, use uncertain, not small_gap.

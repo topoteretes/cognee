@@ -374,18 +374,13 @@ def test_small_gap_becomes_a_flat_string_matrix_row_only_on_live_runs(
         "small_gap",
         "config page should say so",
         source=["cognee/api/v1/config/config.py"],
-        docs=[
-            "python-api/config.mdx",
-            "https://docs.cognee.ai/not-a-path",
-            "a.mdx",
-            "b.mdx",
-            "c.mdx",
-        ],
+        docs=["python-api/config.mdx", f"{PAGE_CONFIG}#setup", "guides/unseen.mdx"],
     )
     code, [row] = _run(phase3, ["--issue-number", "4632"], tmp_path)
     assert code == 0
     assert row["verdict"] == "small_gap" and row["comment"] == ""
-    assert row["docs_files"] == ["python-api/config.mdx", "a.mdx", "b.mdx"]  # URL dropped, cap 3
+    # only files of pages the docs check saw; the page URL maps to the same file
+    assert row["docs_files"] == ["python-api/config.mdx"]
     output = output_file.read_text()
     assert "has_gaps=true\n" in output
     [matrix] = [
@@ -393,10 +388,7 @@ def test_small_gap_becomes_a_flat_string_matrix_row_only_on_live_runs(
         for line in output.splitlines()
         if line.startswith("matrix=")
     ]
-    assert (
-        matrix[0]["number"] == "4632"
-        and matrix[0]["docs_files"] == "python-api/config.mdx a.mdx b.mdx"
-    )
+    assert matrix[0]["number"] == "4632" and matrix[0]["docs_files"] == "python-api/config.mdx"
     assert base64.b64decode(matrix[0]["body_b64"]).decode().startswith("[Docs]: set_graph_model()")
 
     output_file.write_text("")
@@ -412,6 +404,28 @@ def test_small_gap_without_an_existing_docs_file_is_uncertain(phase3, monkeypatc
     _source_verdict(phase3, monkeypatch, "small_gap", "gap", ["cognee/a.py"], [])
     code, [row] = _run(phase3, ["--issue-number", "4632", "--dry-run"], tmp_path)
     assert code == 0 and row["verdict"] == "uncertain" and row["docs_files"] == []
+
+
+@pytest.mark.parametrize(
+    "named",
+    [
+        "python-api/../../tools/manage_docs_pr.py",
+        "python-api/../.git/config",
+        "/etc/passwd",
+        "tools/manage_docs_pr.py",
+        "https://docs.cognee.ai/python-api/../../tools/manage_docs_pr",
+    ],
+)
+def test_small_gap_never_hands_the_editor_a_path_outside_the_checked_pages(
+    phase3, monkeypatch, tmp_path, named
+):
+    # The draft-docs agent can write files and the next step runs tools/ with the PAT,
+    # so the LLM's path must never be trusted: an issue can steer what it names.
+    _fake_api(phase3, monkeypatch, [("/issues/4632", _gap_issue())])
+    seen = _source_verdict(phase3, monkeypatch, "small_gap", "gap", ["cognee/a.py"], [named])
+    code, [row] = _run(phase3, ["--issue-number", "4632"], tmp_path)
+    assert code == 0 and row["verdict"] == "uncertain" and row["docs_files"] == []
+    assert "(docs file: python-api/config.mdx)" in seen[0]
 
 
 @pytest.mark.parametrize("verdict", ["not_in_source", "too_big", "uncertain"])

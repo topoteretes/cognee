@@ -188,6 +188,8 @@ IDENTIFIER_RES = (
     re.compile(r"\bSearchType\.\w+"),
 )
 MAX_DOCS_FILES = 3
+# URL path of an editable docs page: lowercase slug segments, never "." or "..".
+DOCS_PAGE_PATH_RE = re.compile(r"[a-z0-9][a-z0-9_-]*(?:/[a-z0-9][a-z0-9_-]*)*")
 # Matrix rows carry the issue text base64-encoded, truncated like pr_body_b64 in
 # tools/prepare_merged_branches.py; the draft-docs job decodes it to issue_excerpt.md.
 MATRIX_EXCERPT_MAX_BYTES = 4000
@@ -935,7 +937,9 @@ def build_source_check_user_message(
         "Docs pages already checked (they did not answer the report):",
     ]
     for url, text in docs_pages.items():
-        parts += ["", f"=== {url}", "", text]
+        docs_file = docs_file_for_url(url)
+        label = f"=== {url} (docs file: {docs_file})" if docs_file else f"=== {url} (not editable)"
+        parts += ["", label, "", text]
     parts += [
         "",
         "git grep hits in the cognee source (path:line:text):",
@@ -969,7 +973,7 @@ async def source_check_with_llm(system_prompt: str, user_message: str) -> Any:
         )
         docs_files: list[str] = Field(
             default_factory=list,
-            description="At most 3 existing docs paths relative to the docs repo, e.g. guides/x.mdx",
+            description="At most 3 docs files, copied from the '(docs file: ...)' labels",
         )
 
     try:
@@ -996,11 +1000,34 @@ def run_source_check(
     return result.verdict, result.reason, list(result.source_files), list(result.docs_files)
 
 
-def _clean_docs_path(path: str) -> str | None:
-    path = path.strip().strip("`").lstrip("./")
-    if not path or path.startswith(("http://", "https://")) or " " in path:
+def docs_file_for_url(url: str) -> str | None:
+    """The cognee-docs source file behind a docs.cognee.ai page, or None when not editable.
+
+    Each Mintlify page is ``<url path>.mdx`` in the docs repo. API-reference pages are
+    generated from the OpenAPI spec and have no file of their own.
+    """
+    path = normalize_docs_url(url).removeprefix(DOCS_SITE).strip("/")
+    if not path or path.startswith("api-reference/") or not DOCS_PAGE_PATH_RE.fullmatch(path):
         return None
-    return path
+    return f"{path}.mdx"
+
+
+def allowed_docs_files(named: list[str], pages_shown: list[str]) -> list[str]:
+    """The LLM's docs files, kept only when they belong to a page the docs check saw.
+
+    The draft-docs job hands these paths to an agent that can write files, so the LLM
+    may only choose among files derived from ``pages_shown``; it never supplies a path.
+    """
+    allowed = {f for f in (docs_file_for_url(url) for url in pages_shown) if f}
+    kept: list[str] = []
+    for name in named:
+        name = name.strip().strip("`")
+        if name.startswith(DOCS_SITE):
+            name = docs_file_for_url(name) or ""
+        name = name.removeprefix("./")
+        if name in allowed and name not in kept:
+            kept.append(name)
+    return kept[:MAX_DOCS_FILES]
 
 
 def check_issue_against_source(row: dict[str, Any], index: DocsIndex, repo_root: Path) -> None:
@@ -1014,10 +1041,10 @@ def check_issue_against_source(row: dict[str, Any], index: DocsIndex, repo_root:
     if verdict not in SOURCE_CHECK_VERDICTS:
         verdict, reason = "uncertain", f"unexpected verdict {verdict!r}: {reason}"
 
-    cleaned_docs = [p for p in (_clean_docs_path(f) for f in docs_files) if p][:MAX_DOCS_FILES]
+    cleaned_docs = allowed_docs_files(docs_files, row["pages_shown"])
     if verdict == "small_gap" and not cleaned_docs:
         verdict = "uncertain"
-        reason = f"{reason} (downgraded: no existing docs file named)"
+        reason = f"{reason} (downgraded: no docs file of a checked page named)"
 
     row["verdict"] = verdict
     row["reason"] = reason

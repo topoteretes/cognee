@@ -194,24 +194,36 @@ jobs:
           token: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
           ref: main
           path: docs-repo
+          # Claude below can write files in this workspace, so the PAT must not sit in
+          # docs-repo/.git. Only the fetch and push steps receive it.
+          persist-credentials: false
 
       - name: Write the issue excerpt
         env:
           BODY_B64: ${{ matrix.body_b64 }}
         run: python3 -c "import base64, os, pathlib; pathlib.Path('issue_excerpt.md').write_bytes(base64.b64decode(os.environ['BODY_B64']))"
 
-      # The source check names docs files from grep hits and page text; drop any
-      # that do not exist in the docs repo. With none left there is nothing to
-      # edit, so this matrix item ends here without a comment.
+      # The triage script only lets the source check pick files of pages the docs
+      # check saw (<url path>.mdx). Recheck here, since these paths go to an agent
+      # that can write files: plain slug paths only, resolving inside docs-repo.
+      # With none left there is nothing to edit, so this matrix item ends here
+      # without a comment.
       - name: Resolve docs files
         id: docs_files
         env:
           DOCS_FILES: ${{ matrix.docs_files }}
         run: |
           set -euo pipefail
+          docs_root="$(realpath docs-repo)"
+          read -r -a paths <<< "${DOCS_FILES}"
           existing=""
-          for path in ${DOCS_FILES}; do
-            if [ -f "docs-repo/${path}" ]; then
+          for path in "${paths[@]}"; do
+            if [[ ! "${path}" =~ ^[a-z0-9][a-z0-9_-]*(/[a-z0-9][a-z0-9_-]*)*\.mdx$ ]]; then
+              echo "skipping ${path}: not a plain docs page path"
+              continue
+            fi
+            resolved="$(realpath -e "docs-repo/${path}" 2>/dev/null || true)"
+            if [ -n "${resolved}" ] && [ -f "${resolved}" ] && [[ "${resolved}" == "${docs_root}/"* ]]; then
               existing="${existing} ${path}"
             else
               echo "skipping ${path}: not in docs-repo"
@@ -234,9 +246,14 @@ jobs:
       - name: Prepare docs branch
         if: ${{ steps.docs_files.outputs.has_files == 'true' }}
         working-directory: docs-repo
+        env:
+          PUSH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
         run: |
           BRANCH="automation/docs-issue-${{ matrix.number }}"
-          git fetch origin "${BRANCH}" || true
+          basic="$(printf 'x-access-token:%s' "${PUSH_TOKEN}" | base64 -w0)"
+          echo "::add-mask::${basic}"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${basic}" \
+            fetch origin "${BRANCH}" || true
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if git show-ref --verify --quiet "refs/remotes/origin/${BRANCH}"; then
@@ -244,6 +261,22 @@ jobs:
           else
             git checkout -B "${BRANCH}"
           fi
+
+      # Claude reads text anyone can write (the issue) and can write files. Later
+      # steps run git and tools/ scripts with the PAT, so record everything they
+      # execute or obey, and fail below if Claude changed it. The manifest script
+      # lives in RUNNER_TEMP, outside the workspace Claude can write to.
+      - name: Record protected files before Claude runs
+        if: ${{ steps.docs_files.outputs.has_files == 'true' }}
+        run: |
+          set -euo pipefail
+          cat > "${RUNNER_TEMP}/protected_manifest.sh" <<'EOF'
+          set -euo pipefail
+          find tools .github docs-repo/.git/hooks -type f -not -path '*/__pycache__/*' -print0 \
+            | sort -z | xargs -0 sha256sum
+          sha256sum docs-repo/.git/config
+          EOF
+          bash "${RUNNER_TEMP}/protected_manifest.sh" > "${RUNNER_TEMP}/protected.sha256"
 
       - name: Edit docs with Claude
         if: ${{ steps.docs_files.outputs.has_files == 'true' }}
@@ -283,6 +316,16 @@ jobs:
             echo "The action failed on the turn count but the agent finished cleanly - keeping the work."
           fi
 
+      # Before the next git command: a planted hook or core.fsmonitor would run there.
+      - name: Check Claude left protected files alone
+        if: ${{ steps.docs_files.outputs.has_files == 'true' }}
+        run: |
+          if ! bash "${RUNNER_TEMP}/protected_manifest.sh" \
+               | diff "${RUNNER_TEMP}/protected.sha256" - >&2; then
+            echo "The editing agent changed tools/, .github/ or docs-repo/.git; stopping." >&2
+            exit 1
+          fi
+
       - name: Commit docs draft
         if: ${{ steps.docs_files.outputs.has_files == 'true' }}
         id: commit_docs
@@ -305,7 +348,13 @@ jobs:
       - name: Push docs draft branch
         if: ${{ steps.commit_docs.outputs.changes_made == 'true' }}
         working-directory: docs-repo
-        run: git push --force-with-lease origin "automation/docs-issue-${{ matrix.number }}"
+        env:
+          PUSH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+        run: |
+          basic="$(printf 'x-access-token:%s' "${PUSH_TOKEN}" | base64 -w0)"
+          echo "::add-mask::${basic}"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${basic}" \
+            push --force-with-lease origin "automation/docs-issue-${{ matrix.number }}"
 
       - name: Create or update docs pull request
         if: ${{ steps.commit_docs.outputs.changes_made == 'true' }}
@@ -330,7 +379,7 @@ jobs:
 
             Follow-up (out of scope): cognee repo Markdown, CLAUDE.md, and Python docstrings.
         run: |
-          python3 tools/manage_docs_pr.py \
+          python3 -I tools/manage_docs_pr.py \
             --target-repo topoteretes/cognee-docs \
             --head-branch "automation/docs-issue-${{ matrix.number }}" \
             --pr-title "${PR_TITLE}" \
@@ -344,18 +393,21 @@ jobs:
         if: ${{ steps.manage_pr.outputs.pr_number != '' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python3 tools/docs_issue_triage.py --repo "${{ github.repository }}" --post-gap-comment "${{ matrix.number }}"
+        run: python3 -I tools/docs_issue_triage.py --repo "${{ github.repository }}" --post-gap-comment "${{ matrix.number }}"
 
       - name: Summarize
         if: ${{ steps.commit_docs.outputs.changes_made == 'true' }}
+        env:
+          DOCS_FILES: ${{ steps.docs_files.outputs.existing }}
+          PR_URL: ${{ steps.manage_pr.outputs.pr_url }}
         run: |
           {
             echo "## Docs draft for #${{ matrix.number }}"
             echo
             echo "- Docs branch: \`automation/docs-issue-${{ matrix.number }}\`"
-            echo "- Docs files: \`${{ steps.docs_files.outputs.existing }}\`"
-            if [ -n "${{ steps.manage_pr.outputs.pr_url }}" ]; then
-              echo "- Pull request: ${{ steps.manage_pr.outputs.pr_url }}"
+            echo "- Docs files: \`${DOCS_FILES}\`"
+            if [ -n "${PR_URL}" ]; then
+              echo "- Pull request: ${PR_URL}"
               echo "- Public comment: posted (defensive wording, no PR link)"
             else
               echo "- Pull request: not created; no public comment"
