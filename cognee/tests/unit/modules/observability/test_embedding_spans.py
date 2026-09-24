@@ -1,14 +1,11 @@
 """Regression test for #5144: embedding calls emit a standard GenAI span."""
 
-import os
-
 import pytest
-
-os.environ["MOCK_EMBEDDING"] = "true"
 
 
 @pytest.mark.asyncio
-async def test_embed_text_emits_genai_embeddings_span():
+async def test_embed_text_emits_genai_embeddings_span(monkeypatch):
+    monkeypatch.setenv("MOCK_EMBEDDING", "true")
     try:
         import opentelemetry
     except ImportError:

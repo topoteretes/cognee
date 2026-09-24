@@ -73,8 +73,25 @@ def extract_context_object_ids(retrieved_objects: Any) -> dict[str, list[str]] |
 
 
 def format_passages(chunks: list[Any]) -> str:
-    texts = [display_value(payload(chunk).get("text")) for chunk in chunks or []]
-    texts = [text for text in texts if text]
-    if not texts:
+    passages = []
+    for chunk in chunks or []:
+        chunk_payload = payload(chunk)
+        text = display_value(chunk_payload.get("text"))
+        if not text:
+            continue
+        passages.append(_metadata_lines(chunk_payload.get("external_metadata")) + text)
+    if not passages:
         return ""
-    return "## Relevant passages\n" + "\n---\n".join(texts)
+    return "## Relevant passages\n" + "\n---\n".join(passages)
+
+
+def _metadata_lines(metadata: Any) -> str:
+    """``key: value`` lines above a passage, for the projected metadata only.
+
+    The retriever sets ``external_metadata`` to the allowlisted dict when the
+    caller opted in (``project_external_metadata``); anything else, including
+    the raw JSON text a chunk stores, is not rendered.
+    """
+    if not isinstance(metadata, dict) or not metadata:
+        return ""
+    return "".join(f"{key}: {value}\n" for key, value in metadata.items())
