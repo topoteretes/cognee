@@ -207,14 +207,37 @@ async def run_tasks(
                     finally:
                         await _record_item_progress()
 
+                # return_exceptions=True so one item's failure does not abandon its
+                # in-flight siblings: without it gather() raises on the first
+                # failure and the other items keep running detached — each with a
+                # Started telemetry event and, if the process then exits, no
+                # terminal one. The flag only makes gather() wait; what propagates
+                # afterwards is unchanged, see the two re-raises below.
                 gathered = await asyncio.gather(
                     *[
                         asyncio.create_task(_run_item(item, item_tasks))
                         for item, item_tasks in work_items
                     ],
+                    return_exceptions=True,
                 )
 
-                # Separate successes from unhandled exceptions
+                # A cancelled item is a control signal, not an item failure: hand
+                # it to the CLO-365 handler below as CancelledError, exactly as a
+                # cancelled gather() would.
+                for result in gathered:
+                    if isinstance(result, asyncio.CancelledError):
+                        raise result
+                # An item that hard-raised (rather than returning a
+                # PipelineRunErrored dict) still propagates out of run_tasks, as
+                # it did before the flag; only result-dict errors are the
+                # non-raising path the handler's final check keeps quiet.
+                for result in gathered:
+                    if isinstance(result, BaseException):
+                        raise result
+
+                # Separate successes from unhandled exceptions. Every exception was
+                # re-raised above, so the BaseException branch below is unreachable;
+                # the block exists for the result-dict path (PipelineRunErrored).
                 results = []
                 first_item_error: BaseException | None = None
                 for i, result in enumerate(gathered):

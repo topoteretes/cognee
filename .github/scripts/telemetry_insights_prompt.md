@@ -6,13 +6,14 @@ You are running inside a scheduled GitHub Action for the cognee repository. Your
 
 `telemetry_aggregates/*.csv` (already extracted for you; covers the last ~70 days so you can compute day-over-day, week-over-week, and month-over-month comparisons yourself):
 
-- `daily_event_volumes.csv` — day, tracking_event, version, origin (`sdk`/`cloud`/`cli`/unknown — the surface split), self_hosted, events, distinct_identities
+- `daily_event_volumes.csv` — day, tracking_event, version, origin (`sdk`/`cloud`/`cli`/unknown — the surface split), install_kind (`docker`/`git`/`package`; rows from builds before the field only carry `git-or-docker`/`package`, derived from the version suffix — `git-or-docker` is NOT "self-hosted": the official Docker image reports it too), events, distinct_identities
 - `pipeline_outcomes_daily.csv` — day, version, started/completed/errored counts for graph-build pipeline runs (+ identities_with_errors)
+- `pipeline_error_types_daily.csv` — day, version, exception_type (the Python class of the error that ended a run — `CancelledError` is a cancelled run, `AbandonedPipelineRunError` a run closed by startup recovery after its process died; `unknown` is an event from a build before the field), errors, distinct_identities
 - `sdk_exec_outcomes_daily.csv` — day, version, operation (search/add/cognify), started/completed/errored
 - `api_endpoint_daily.csv` — day, endpoint route, version, events, distinct_identities (the FastAPI surface)
-- `provider_stack_daily.csv` — day, llm/graph/vector/relational provider (+ llm_model), version, completed_runs, identities
+- `provider_stack_daily.csv` — day, llm/embedding/graph/vector/relational provider (+ llm_model, embedding_model, graph_extractor `llm`/`gliner_demo` — the keyless default shows as embedding fastembed + extractor gliner_demo), version, completed_runs, identities
 - `search_type_daily.csv` — day, SearchType enum, version, events
-- `version_lifecycle.csv` — version, self_hosted, first_seen/last_seen, events, identities
+- `version_lifecycle.csv` — version, install_kind, first_seen/last_seen, events, identities
 
 Provider/model values containing identifier-shaped text are grouped into a `redacted` bucket before counting. These rows still contribute to run and distinct-identity totals; treat `redacted` as a mixed set of private configurations, not a specific provider or model.
 

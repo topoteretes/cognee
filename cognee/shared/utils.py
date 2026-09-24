@@ -7,6 +7,7 @@ import pathlib
 import socketserver
 import ssl
 from datetime import datetime, timezone
+from functools import lru_cache
 from threading import Thread
 from typing import Any
 from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
@@ -14,6 +15,7 @@ from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 import aiohttp
 
 from cognee.shared.logging_utils import get_logger
+from cognee.version import is_source_checkout
 
 logger = get_logger()
 
@@ -133,6 +135,47 @@ def get_persistent_id() -> str:
 # row can tell an id from a fingerprint, since both are UUID-shaped.
 TELEMETRY_SANITIZED_PROPERTIES = ["url", "session_id", "session_ids", "datasets"]
 TELEMETRY_FINGERPRINT_PREFIX = "fp:"
+# Single dataset identifiers (remember/forget send ``dataset_name``, push/export
+# ``dataset``): a dataset *id* passes through, a dataset *name* leaves as
+# ``fp:`` + fingerprint — the rule the ``datasets`` list already follows.
+TELEMETRY_DATASET_NAME_PROPERTIES = ["dataset_name", "dataset"]
+
+# How this cognee is deployed, sent with every event as ``install_kind``. A closed
+# enum: ``docker`` (our images set COGNEE_INSTALL_KIND; any container carries
+# /.dockerenv), ``git`` (imported from a source tree), ``package`` (installed from
+# PyPI). Replaces reading the deployment kind off the ``-local`` version suffix,
+# which the official Docker image carries too (see ``cognee.version``).
+INSTALL_KIND_ENV = "COGNEE_INSTALL_KIND"
+INSTALL_KINDS = ("docker", "git", "package")
+_CONTAINER_MARKER = "/.dockerenv"
+
+
+@lru_cache(maxsize=1)
+def get_install_kind() -> str:
+    """Resolve the deployment kind once per process; never raises."""
+    explicit = os.getenv(INSTALL_KIND_ENV, "").strip().lower()
+    if explicit in INSTALL_KINDS:
+        return explicit
+    if explicit:
+        logger.debug("Ignoring unknown %s=%r", INSTALL_KIND_ENV, explicit)
+    if os.path.exists(_CONTAINER_MARKER):
+        return "docker"
+    if is_source_checkout():
+        return "git"
+    return "package"
+
+
+def telemetry_exception_type(error: BaseException) -> str:
+    """The class name telemetry records for ``error`` — never its message.
+
+    Messages interpolate user content (dataset names, paths, prompt fragments),
+    so error events carry the type only, the same rule the API layer applies in
+    ``cognee.api.exception_telemetry``. A ``PipelineRunFailedError`` wraps the
+    item error that actually broke as ``first_error``; report that root cause,
+    as the run record does.
+    """
+    root = getattr(error, "first_error", None) or error
+    return type(root).__name__
 
 
 def _fingerprint(value: str) -> str:
@@ -147,17 +190,37 @@ def _is_uuid(value: str) -> bool:
     return True
 
 
+def _mask_dataset_name(value: Any) -> Any:
+    """A dataset id passes through; a dataset name leaves as ``fp:`` + fingerprint.
+
+    Ids are not content. Names are user-chosen and descriptive, so only a marked
+    fingerprint leaves the process. Empty strings stay empty (``forget`` sends
+    ``""`` for "no dataset"), and non-strings are untouched.
+    """
+    if isinstance(value, str) and value and not _is_uuid(value):
+        return TELEMETRY_FINGERPRINT_PREFIX + _fingerprint(value)
+    return value
+
+
 def _sanitize_nested_properties(obj: Any, property_names: list[str]) -> Any:
     """
     Recursively replaces any property whose key matches one of `property_names`
     (e.g., ['url', 'path']) in a nested dict or list with a uuid5 hash
     of its string value, or of each string element when the value is a list.
+    Keys in ``TELEMETRY_DATASET_NAME_PROPERTIES`` get the dataset rule
+    (``_mask_dataset_name``) whether the value is a string or a list.
     Returns a new sanitized copy.
     """
     if isinstance(obj, dict):
         new_obj = {}
         for k, v in obj.items():
-            if k in property_names and isinstance(v, str):
+            if k in TELEMETRY_DATASET_NAME_PROPERTIES:
+                new_obj[k] = (
+                    [_mask_dataset_name(item) for item in v]
+                    if isinstance(v, list)
+                    else _mask_dataset_name(v)
+                )
+            elif k in property_names and isinstance(v, str):
                 new_obj[k] = _fingerprint(v)
             elif k in property_names and isinstance(v, list):
                 new_obj[k] = [
@@ -434,6 +497,7 @@ def send_telemetry(
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
             "telemetry_origin": telemetry_origin,
+            "install_kind": get_install_kind(),
             **additional_properties,
         },
     }

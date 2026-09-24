@@ -72,6 +72,8 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Set environment variables for MCP server
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
+# Telemetry deployment kind (cognee.shared.utils.get_install_kind); see SDK-775.
+ENV COGNEE_INSTALL_KIND=docker
 # Give the non-root user a stable, writable HOME so Kuzu/Ladybug caches its
 # downloaded extensions in a consistent location across build and runtime.
 ENV HOME=/app
