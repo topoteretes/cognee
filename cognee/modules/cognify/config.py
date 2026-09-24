@@ -173,6 +173,7 @@ async def ensure_extractor_runtime(extractor: str, config: CognifyConfig) -> Non
     ``GlinerInstallError`` when the install fails.
     """
     import asyncio
+    import concurrent.futures
 
     from cognee.shared.utils import send_telemetry
     from cognee.tasks.graph.gliner_demo.install import (
@@ -188,14 +189,20 @@ async def ensure_extractor_runtime(extractor: str, config: CognifyConfig) -> Non
     properties = _gliner_install_properties(config)
     loop = asyncio.get_running_loop()
 
+    async def started() -> None:
+        send_telemetry(GLINER_INSTALL_STARTED_EVENT, "sdk", additional_properties=properties)
+
     def on_start() -> None:
         # Runs in the install thread, and only in the call that installs (a caller that
-        # waited on the lock never gets here). send_telemetry needs the event loop.
-        loop.call_soon_threadsafe(
-            lambda: send_telemetry(
-                GLINER_INSTALL_STARTED_EVENT, "sdk", additional_properties=properties
-            )
-        )
+        # waited on the lock never gets here). send_telemetry needs the event loop, and
+        # Started must land before Completed/Failed: a callback merely scheduled on the
+        # loop can run after this coroutine has already resumed (seen on Python 3.14),
+        # so wait for the loop to record it. Best effort: telemetry never blocks an
+        # install for more than a moment.
+        try:
+            asyncio.run_coroutine_threadsafe(started(), loop).result(timeout=5)
+        except concurrent.futures.TimeoutError:  # a distinct class on Python 3.10
+            pass
 
     try:
         outcome = await asyncio.to_thread(
