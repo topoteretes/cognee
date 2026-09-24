@@ -21,7 +21,7 @@ from typing import Optional, Tuple
 
 from cognee.tasks.graph.gliner_demo.onnx import _tensor as torch
 from cognee.tasks.graph.gliner_demo.onnx._tensor import nn
-from cognee.tasks.graph.gliner_demo.onnx._hf import (
+from transformers import (
     AutoConfig,
     AutoModel,
     AutoTokenizer,

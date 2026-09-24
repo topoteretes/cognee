@@ -20,7 +20,7 @@ try:  # Literal is stdlib on 3.8+
 except ImportError:  # pragma: no cover
     Literal = None  # type: ignore
 
-from cognee.tasks.graph.gliner_demo.onnx._hf import PretrainedConfig
+from transformers import PretrainedConfig
 
 ArchitectureName = str  # Literal["span", "boundary"] conceptually.
 

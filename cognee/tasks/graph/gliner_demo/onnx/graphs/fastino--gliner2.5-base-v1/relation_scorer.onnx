@@ -1,0 +1,1697 @@
+
+pytorch2.14.0:†ƒ
+•
+boundary_statesval_0node_Shape_0"Shape*
+
+end†*
+start†JÑ
+	namespacew_empty_nn_module_stack_from_metadata_hook: _empty_nn_module_stack_from_metadata_hook/sym_size_int_11: aten.sym_size.intJd
+pkg.torch.onnx.class_hierarchyB['_empty_nn_module_stack_from_metadata_hook', 'aten.sym_size.int']Jô
+pkg.torch.onnx.fx_node%sym_size_int_11 : [num_users=1] = call_function[target=torch.ops.aten.sym_size.int](args = (%boundary_states, 1), kwargs = {})J^
+pkg.torch.onnx.name_scopes@['_empty_nn_module_stack_from_metadata_hook', 'sym_size_int_11']Js
+pkg.torch.onnx.stack_traceUFile "torch/fx/passes/runtime_assert.py", line 24, in insert_deferred_runtime_asserts
+ï
+val_0sym_size_int_11node_sym_size_int_11"SqueezeJÑ
+	namespacew_empty_nn_module_stack_from_metadata_hook: _empty_nn_module_stack_from_metadata_hook/sym_size_int_11: aten.sym_size.intJd
+pkg.torch.onnx.class_hierarchyB['_empty_nn_module_stack_from_metadata_hook', 'aten.sym_size.int']Jô
+pkg.torch.onnx.fx_node%sym_size_int_11 : [num_users=1] = call_function[target=torch.ops.aten.sym_size.int](args = (%boundary_states, 1), kwargs = {})J^
+pkg.torch.onnx.name_scopes@['_empty_nn_module_stack_from_metadata_hook', 'sym_size_int_11']Js
+pkg.torch.onnx.stack_traceUFile "torch/fx/passes/runtime_assert.py", line 24, in insert_deferred_runtime_asserts
+≤
+relation_query_statesval_1node_Shape_1"Shape*
+
+end†*
+start†JÑ
+	namespacew_empty_nn_module_stack_from_metadata_hook: _empty_nn_module_stack_from_metadata_hook/sym_size_int_12: aten.sym_size.intJd
+pkg.torch.onnx.class_hierarchyB['_empty_nn_module_stack_from_metadata_hook', 'aten.sym_size.int']J†
+pkg.torch.onnx.fx_nodeÖ%sym_size_int_12 : [num_users=2] = call_function[target=torch.ops.aten.sym_size.int](args = (%relation_query_states, 1), kwargs = {})J^
+pkg.torch.onnx.name_scopes@['_empty_nn_module_stack_from_metadata_hook', 'sym_size_int_12']Js
+pkg.torch.onnx.stack_traceUFile "torch/fx/passes/runtime_assert.py", line 24, in insert_deferred_runtime_asserts
+ú
+val_1sym_size_int_12node_sym_size_int_12"SqueezeJÑ
+	namespacew_empty_nn_module_stack_from_metadata_hook: _empty_nn_module_stack_from_metadata_hook/sym_size_int_12: aten.sym_size.intJd
+pkg.torch.onnx.class_hierarchyB['_empty_nn_module_stack_from_metadata_hook', 'aten.sym_size.int']J†
+pkg.torch.onnx.fx_nodeÖ%sym_size_int_12 : [num_users=2] = call_function[target=torch.ops.aten.sym_size.int](args = (%relation_query_states, 1), kwargs = {})J^
+pkg.torch.onnx.name_scopes@['_empty_nn_module_stack_from_metadata_hook', 'sym_size_int_12']Js
+pkg.torch.onnx.stack_traceUFile "torch/fx/passes/runtime_assert.py", line 24, in insert_deferred_runtime_asserts
+≥
+batch_index
+val_10clamp
+node_clamp"ClipJG
+	namespace:: __main__._TensorRelationScorer/clamp: aten.clamp.defaultJZ
+pkg.torch.onnx.class_hierarchy8['__main__._TensorRelationScorer', 'aten.clamp.default']Jå
+pkg.torch.onnx.fx_noder%clamp : [num_users=1] = call_function[target=torch.ops.aten.clamp.default](args = (%batch_index, 0), kwargs = {})J+
+pkg.torch.onnx.name_scopes['', 'clamp']J°
+pkg.torch.onnx.stack_traceÇFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 200, in forward
+    b = torch.minimum(batch_index.clamp(min=0), batch_count - 1)
+≈
+clamp
+val_10	minimum_1node_minimum_1"MinJM
+	namespace@: __main__._TensorRelationScorer/minimum_1: aten.minimum.defaultJ\
+pkg.torch.onnx.class_hierarchy:['__main__._TensorRelationScorer', 'aten.minimum.default']Jë
+pkg.torch.onnx.fx_nodew%minimum_1 : [num_users=9] = call_function[target=torch.ops.aten.minimum.default](args = (%clamp, %sub_1), kwargs = {})J/
+pkg.torch.onnx.name_scopes['', 'minimum_1']J°
+pkg.torch.onnx.stack_traceÇFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 200, in forward
+    b = torch.minimum(batch_index.clamp(min=0), batch_count - 1)
+›
+relation_index
+val_10clamp_1node_clamp_1"ClipJI
+	namespace<: __main__._TensorRelationScorer/clamp_1: aten.clamp.defaultJZ
+pkg.torch.onnx.class_hierarchy8['__main__._TensorRelationScorer', 'aten.clamp.default']Jë
+pkg.torch.onnx.fx_nodew%clamp_1 : [num_users=1] = call_function[target=torch.ops.aten.clamp.default](args = (%relation_index, 0), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'clamp_1']Jª
+pkg.torch.onnx.stack_traceúFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 202, in forward
+    rel_idx = torch.minimum(relation_index.clamp(min=0), torch.tensor(relation_count) - 1)
+ 
+sym_size_int_12
+minimumsub_4
+node_sub_4"SubJD
+	namespace7: __main__._TensorRelationScorer/sub_4: aten.sub.TensorJW
+pkg.torch.onnx.class_hierarchy5['__main__._TensorRelationScorer', 'aten.sub.Tensor']Jã
+pkg.torch.onnx.fx_nodeq%sub_4 : [num_users=1] = call_function[target=torch.ops.aten.sub.Tensor](args = (%scalar_tensor, 1), kwargs = {})J+
+pkg.torch.onnx.name_scopes['', 'sub_4']Jª
+pkg.torch.onnx.stack_traceúFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 202, in forward
+    rel_idx = torch.minimum(relation_index.clamp(min=0), torch.tensor(relation_count) - 1)
+‚
+clamp_1
+sub_4	minimum_2node_minimum_2"MinJM
+	namespace@: __main__._TensorRelationScorer/minimum_2: aten.minimum.defaultJ\
+pkg.torch.onnx.class_hierarchy:['__main__._TensorRelationScorer', 'aten.minimum.default']Jì
+pkg.torch.onnx.fx_nodey%minimum_2 : [num_users=1] = call_function[target=torch.ops.aten.minimum.default](args = (%clamp_1, %sub_4), kwargs = {})J/
+pkg.torch.onnx.name_scopes['', 'minimum_2']Jª
+pkg.torch.onnx.stack_traceúFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 202, in forward
+    rel_idx = torch.minimum(relation_index.clamp(min=0), torch.tensor(relation_count) - 1)
+¯
+batch_index
+val_10genode_ge"GreaterOrEqualJ@
+	namespace3: __main__._TensorRelationScorer/ge: aten.ge.ScalarJV
+pkg.torch.onnx.class_hierarchy4['__main__._TensorRelationScorer', 'aten.ge.Scalar']JÖ
+pkg.torch.onnx.fx_nodek%ge : [num_users=1] = call_function[target=torch.ops.aten.ge.Scalar](args = (%batch_index, 0), kwargs = {})J(
+pkg.torch.onnx.name_scopes
+['', 'ge']J˜
+pkg.torch.onnx.stack_traceÿFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 204, in forward
+    (batch_index >= 0)
+Å
+batch_index
+minimumltnode_lt"LessJ@
+	namespace3: __main__._TensorRelationScorer/lt: aten.lt.TensorJV
+pkg.torch.onnx.class_hierarchy4['__main__._TensorRelationScorer', 'aten.lt.Tensor']Jå
+pkg.torch.onnx.fx_noder%lt : [num_users=1] = call_function[target=torch.ops.aten.lt.Tensor](args = (%batch_index, %minimum), kwargs = {})J(
+pkg.torch.onnx.name_scopes
+['', 'lt']JÇ
+pkg.torch.onnx.stack_trace„File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 205, in forward
+    & (batch_index < batch_count)
+°
+ge
+ltbitwise_andnode_bitwise_and"AndJR
+	namespaceE: __main__._TensorRelationScorer/bitwise_and: aten.bitwise_and.TensorJ_
+pkg.torch.onnx.class_hierarchy=['__main__._TensorRelationScorer', 'aten.bitwise_and.Tensor']Jê
+pkg.torch.onnx.fx_nodev%bitwise_and : [num_users=1] = call_function[target=torch.ops.aten.bitwise_and.Tensor](args = (%ge, %lt), kwargs = {})J1
+pkg.torch.onnx.name_scopes['', 'bitwise_and']J˜
+pkg.torch.onnx.stack_traceÿFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 204, in forward
+    (batch_index >= 0)
+ç
+relation_index
+val_10ge_1	node_ge_1"GreaterOrEqualJB
+	namespace5: __main__._TensorRelationScorer/ge_1: aten.ge.ScalarJV
+pkg.torch.onnx.class_hierarchy4['__main__._TensorRelationScorer', 'aten.ge.Scalar']Jä
+pkg.torch.onnx.fx_nodep%ge_1 : [num_users=1] = call_function[target=torch.ops.aten.ge.Scalar](args = (%relation_index, 0), kwargs = {})J*
+pkg.torch.onnx.name_scopes['', 'ge_1']J¸
+pkg.torch.onnx.stack_trace›File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 206, in forward
+    & (relation_index >= 0)
+¬
+bitwise_and
+ge_1bitwise_and_1node_bitwise_and_1"AndJT
+	namespaceG: __main__._TensorRelationScorer/bitwise_and_1: aten.bitwise_and.TensorJ_
+pkg.torch.onnx.class_hierarchy=['__main__._TensorRelationScorer', 'aten.bitwise_and.Tensor']Jû
+pkg.torch.onnx.fx_nodeÉ%bitwise_and_1 : [num_users=1] = call_function[target=torch.ops.aten.bitwise_and.Tensor](args = (%bitwise_and, %ge_1), kwargs = {})J3
+pkg.torch.onnx.name_scopes['', 'bitwise_and_1']J˜
+pkg.torch.onnx.stack_traceÿFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 204, in forward
+    (batch_index >= 0)
+ß
+relation_index
+sym_size_int_12lt_1	node_lt_1"LessJB
+	namespace5: __main__._TensorRelationScorer/lt_1: aten.lt.ScalarJV
+pkg.torch.onnx.class_hierarchy4['__main__._TensorRelationScorer', 'aten.lt.Scalar']Jô
+pkg.torch.onnx.fx_node%lt_1 : [num_users=1] = call_function[target=torch.ops.aten.lt.Scalar](args = (%relation_index, %sym_size_int_12), kwargs = {})J*
+pkg.torch.onnx.name_scopes['', 'lt_1']Jà
+pkg.torch.onnx.stack_traceÈFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 207, in forward
+    & (relation_index < relation_count)
+∆
+bitwise_and_1
+lt_1bitwise_and_2node_bitwise_and_2"AndJT
+	namespaceG: __main__._TensorRelationScorer/bitwise_and_2: aten.bitwise_and.TensorJ_
+pkg.torch.onnx.class_hierarchy=['__main__._TensorRelationScorer', 'aten.bitwise_and.Tensor']J†
+pkg.torch.onnx.fx_nodeÖ%bitwise_and_2 : [num_users=1] = call_function[target=torch.ops.aten.bitwise_and.Tensor](args = (%bitwise_and_1, %lt_1), kwargs = {})J3
+pkg.torch.onnx.name_scopes['', 'bitwise_and_2']J˜
+pkg.torch.onnx.stack_traceÿFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 204, in forward
+    (batch_index >= 0)
+–
+bitwise_and_2
+	pair_maskbitwise_and_3node_bitwise_and_3"AndJT
+	namespaceG: __main__._TensorRelationScorer/bitwise_and_3: aten.bitwise_and.TensorJ_
+pkg.torch.onnx.class_hierarchy=['__main__._TensorRelationScorer', 'aten.bitwise_and.Tensor']J•
+pkg.torch.onnx.fx_nodeä%bitwise_and_3 : [num_users=1] = call_function[target=torch.ops.aten.bitwise_and.Tensor](args = (%bitwise_and_2, %pair_mask), kwargs = {})J3
+pkg.torch.onnx.name_scopes['', 'bitwise_and_3']J˜
+pkg.torch.onnx.stack_traceÿFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 204, in forward
+    (batch_index >= 0)
+»
+	minimum_1
+val_17val_18node_Unsqueeze_18"	UnsqueezeJF
+	namespace9: __main__._TensorRelationScorer/index: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']J≠
+pkg.torch.onnx.fx_nodeí%index : [num_users=3] = call_function[target=torch.ops.aten.index.Tensor](args = (%relation_query_states, [%minimum_1, %minimum_2]), kwargs = {})J+
+pkg.torch.onnx.name_scopes['', 'index']Jå
+pkg.torch.onnx.stack_traceÌFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 215, in forward
+    rel = relation_query_states[b, rel_idx]
+»
+	minimum_2
+val_17val_20node_Unsqueeze_20"	UnsqueezeJF
+	namespace9: __main__._TensorRelationScorer/index: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']J≠
+pkg.torch.onnx.fx_nodeí%index : [num_users=3] = call_function[target=torch.ops.aten.index.Tensor](args = (%relation_query_states, [%minimum_1, %minimum_2]), kwargs = {})J+
+pkg.torch.onnx.name_scopes['', 'index']Jå
+pkg.torch.onnx.stack_traceÌFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 215, in forward
+    rel = relation_query_states[b, rel_idx]
+’
+val_18
+val_20val_21node_Concat_21"Concat*
+axisˇˇˇˇˇˇˇˇˇ†JF
+	namespace9: __main__._TensorRelationScorer/index: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']J≠
+pkg.torch.onnx.fx_nodeí%index : [num_users=3] = call_function[target=torch.ops.aten.index.Tensor](args = (%relation_query_states, [%minimum_1, %minimum_2]), kwargs = {})J+
+pkg.torch.onnx.name_scopes['', 'index']Jå
+pkg.torch.onnx.stack_traceÌFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 215, in forward
+    rel = relation_query_states[b, rel_idx]
+Â
+relation_query_states
+val_21val_22node_GatherND_22"GatherND*
+
+batch_dims †JF
+	namespace9: __main__._TensorRelationScorer/index: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']J≠
+pkg.torch.onnx.fx_nodeí%index : [num_users=3] = call_function[target=torch.ops.aten.index.Tensor](args = (%relation_query_states, [%minimum_1, %minimum_2]), kwargs = {})J+
+pkg.torch.onnx.name_scopes['', 'index']Jå
+pkg.torch.onnx.stack_traceÌFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 215, in forward
+    rel = relation_query_states[b, rel_idx]
+π
+
+tail_start
+
+head_startsub_15node_sub_15"SubJE
+	namespace8: __main__._TensorRelationScorer/sub_15: aten.sub.TensorJW
+pkg.torch.onnx.class_hierarchy5['__main__._TensorRelationScorer', 'aten.sub.Tensor']Jì
+pkg.torch.onnx.fx_nodey%sub_15 : [num_users=1] = call_function[target=torch.ops.aten.sub.Tensor](args = (%tail_start, %head_start), kwargs = {})J,
+pkg.torch.onnx.name_scopes['', 'sub_15']J†
+pkg.torch.onnx.stack_traceÅFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 216, in forward
+    delta = (tail_start - head_start).to(boundary_states.dtype)
+÷
+sub_15_to_copynode__to_copy"Cast*	
+to†JM
+	namespace@: __main__._TensorRelationScorer/_to_copy: aten._to_copy.defaultJ]
+pkg.torch.onnx.class_hierarchy;['__main__._TensorRelationScorer', 'aten._to_copy.default']J†
+pkg.torch.onnx.fx_nodeÖ%_to_copy : [num_users=2] = call_function[target=torch.ops.aten._to_copy.default](args = (%sub_15,), kwargs = {dtype: torch.float32})J.
+pkg.torch.onnx.name_scopes['', '_to_copy']J†
+pkg.torch.onnx.stack_traceÅFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 216, in forward
+    delta = (tail_start - head_start).to(boundary_states.dtype)
+í
+
+head_start
+val_10clamp_2node_clamp_2"ClipJI
+	namespace<: __main__._TensorRelationScorer/clamp_2: aten.clamp.defaultJZ
+pkg.torch.onnx.class_hierarchy8['__main__._TensorRelationScorer', 'aten.clamp.default']Jç
+pkg.torch.onnx.fx_nodes%clamp_2 : [num_users=1] = call_function[target=torch.ops.aten.clamp.default](args = (%head_start, 0), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'clamp_2']J¯
+pkg.torch.onnx.stack_traceŸFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 219, in forward
+    gather(head_start),
+é
+sym_size_int_11
+minimumsub_19node_sub_19"SubJE
+	namespace8: __main__._TensorRelationScorer/sub_19: aten.sub.TensorJW
+pkg.torch.onnx.class_hierarchy5['__main__._TensorRelationScorer', 'aten.sub.Tensor']Jé
+pkg.torch.onnx.fx_nodet%sub_19 : [num_users=1] = call_function[target=torch.ops.aten.sub.Tensor](args = (%scalar_tensor_1, 1), kwargs = {})J,
+pkg.torch.onnx.name_scopes['', 'sub_19']J¯
+pkg.torch.onnx.stack_traceŸFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 219, in forward
+    gather(head_start),
+ä
+sub_19
+val_10clamp_3node_clamp_3"ClipJI
+	namespace<: __main__._TensorRelationScorer/clamp_3: aten.clamp.defaultJZ
+pkg.torch.onnx.class_hierarchy8['__main__._TensorRelationScorer', 'aten.clamp.default']Jâ
+pkg.torch.onnx.fx_nodeo%clamp_3 : [num_users=1] = call_function[target=torch.ops.aten.clamp.default](args = (%sub_19, 0), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'clamp_3']J¯
+pkg.torch.onnx.stack_traceŸFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 219, in forward
+    gather(head_start),
+£
+clamp_2
+clamp_3	minimum_3node_minimum_3"MinJM
+	namespace@: __main__._TensorRelationScorer/minimum_3: aten.minimum.defaultJ\
+pkg.torch.onnx.class_hierarchy:['__main__._TensorRelationScorer', 'aten.minimum.default']Jï
+pkg.torch.onnx.fx_node{%minimum_3 : [num_users=1] = call_function[target=torch.ops.aten.minimum.default](args = (%clamp_2, %clamp_3), kwargs = {})J/
+pkg.torch.onnx.name_scopes['', 'minimum_3']J¯
+pkg.torch.onnx.stack_traceŸFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 219, in forward
+    gather(head_start),
+¥
+	minimum_3
+val_17val_31node_Unsqueeze_31"	UnsqueezeJH
+	namespace;: __main__._TensorRelationScorer/index_1: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']J©
+pkg.torch.onnx.fx_nodeé%index_1 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%boundary_states, [%minimum_1, %minimum_3]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_1']J¯
+pkg.torch.onnx.stack_traceŸFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 219, in forward
+    gather(head_start),
+¡
+val_18
+val_31val_32node_Concat_32"Concat*
+axisˇˇˇˇˇˇˇˇˇ†JH
+	namespace;: __main__._TensorRelationScorer/index_1: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']J©
+pkg.torch.onnx.fx_nodeé%index_1 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%boundary_states, [%minimum_1, %minimum_3]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_1']J¯
+pkg.torch.onnx.stack_traceŸFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 219, in forward
+    gather(head_start),
+À
+boundary_states
+val_32val_33node_GatherND_33"GatherND*
+
+batch_dims †JH
+	namespace;: __main__._TensorRelationScorer/index_1: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']J©
+pkg.torch.onnx.fx_nodeé%index_1 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%boundary_states, [%minimum_1, %minimum_3]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_1']J¯
+pkg.torch.onnx.stack_traceŸFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 219, in forward
+    gather(head_start),
+Ç
+head_end
+minimumsub_22node_sub_22"SubJE
+	namespace8: __main__._TensorRelationScorer/sub_22: aten.sub.TensorJW
+pkg.torch.onnx.class_hierarchy5['__main__._TensorRelationScorer', 'aten.sub.Tensor']Já
+pkg.torch.onnx.fx_nodem%sub_22 : [num_users=1] = call_function[target=torch.ops.aten.sub.Tensor](args = (%head_end, 1), kwargs = {})J,
+pkg.torch.onnx.name_scopes['', 'sub_22']J˙
+pkg.torch.onnx.stack_trace€File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 220, in forward
+    gather(head_end - 1),
+å
+sub_22
+val_10clamp_4node_clamp_4"ClipJI
+	namespace<: __main__._TensorRelationScorer/clamp_4: aten.clamp.defaultJZ
+pkg.torch.onnx.class_hierarchy8['__main__._TensorRelationScorer', 'aten.clamp.default']Jâ
+pkg.torch.onnx.fx_nodeo%clamp_4 : [num_users=1] = call_function[target=torch.ops.aten.clamp.default](args = (%sub_22, 0), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'clamp_4']J˙
+pkg.torch.onnx.stack_trace€File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 220, in forward
+    gather(head_end - 1),
+•
+clamp_4
+clamp_3	minimum_4node_minimum_4"MinJM
+	namespace@: __main__._TensorRelationScorer/minimum_4: aten.minimum.defaultJ\
+pkg.torch.onnx.class_hierarchy:['__main__._TensorRelationScorer', 'aten.minimum.default']Jï
+pkg.torch.onnx.fx_node{%minimum_4 : [num_users=1] = call_function[target=torch.ops.aten.minimum.default](args = (%clamp_4, %clamp_5), kwargs = {})J/
+pkg.torch.onnx.name_scopes['', 'minimum_4']J˙
+pkg.torch.onnx.stack_trace€File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 220, in forward
+    gather(head_end - 1),
+∂
+	minimum_4
+val_17val_42node_Unsqueeze_42"	UnsqueezeJH
+	namespace;: __main__._TensorRelationScorer/index_2: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']J©
+pkg.torch.onnx.fx_nodeé%index_2 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%boundary_states, [%minimum_1, %minimum_4]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_2']J˙
+pkg.torch.onnx.stack_trace€File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 220, in forward
+    gather(head_end - 1),
+√
+val_18
+val_42val_43node_Concat_43"Concat*
+axisˇˇˇˇˇˇˇˇˇ†JH
+	namespace;: __main__._TensorRelationScorer/index_2: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']J©
+pkg.torch.onnx.fx_nodeé%index_2 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%boundary_states, [%minimum_1, %minimum_4]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_2']J˙
+pkg.torch.onnx.stack_trace€File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 220, in forward
+    gather(head_end - 1),
+Õ
+boundary_states
+val_43val_44node_GatherND_44"GatherND*
+
+batch_dims †JH
+	namespace;: __main__._TensorRelationScorer/index_2: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']J©
+pkg.torch.onnx.fx_nodeé%index_2 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%boundary_states, [%minimum_1, %minimum_4]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_2']J˙
+pkg.torch.onnx.stack_trace€File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 220, in forward
+    gather(head_end - 1),
+í
+
+tail_start
+val_10clamp_6node_clamp_6"ClipJI
+	namespace<: __main__._TensorRelationScorer/clamp_6: aten.clamp.defaultJZ
+pkg.torch.onnx.class_hierarchy8['__main__._TensorRelationScorer', 'aten.clamp.default']Jç
+pkg.torch.onnx.fx_nodes%clamp_6 : [num_users=1] = call_function[target=torch.ops.aten.clamp.default](args = (%tail_start, 0), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'clamp_6']J¯
+pkg.torch.onnx.stack_traceŸFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 221, in forward
+    gather(tail_start),
+£
+clamp_6
+clamp_3	minimum_5node_minimum_5"MinJM
+	namespace@: __main__._TensorRelationScorer/minimum_5: aten.minimum.defaultJ\
+pkg.torch.onnx.class_hierarchy:['__main__._TensorRelationScorer', 'aten.minimum.default']Jï
+pkg.torch.onnx.fx_node{%minimum_5 : [num_users=1] = call_function[target=torch.ops.aten.minimum.default](args = (%clamp_6, %clamp_7), kwargs = {})J/
+pkg.torch.onnx.name_scopes['', 'minimum_5']J¯
+pkg.torch.onnx.stack_traceŸFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 221, in forward
+    gather(tail_start),
+¥
+	minimum_5
+val_17val_53node_Unsqueeze_53"	UnsqueezeJH
+	namespace;: __main__._TensorRelationScorer/index_3: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']J©
+pkg.torch.onnx.fx_nodeé%index_3 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%boundary_states, [%minimum_1, %minimum_5]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_3']J¯
+pkg.torch.onnx.stack_traceŸFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 221, in forward
+    gather(tail_start),
+¡
+val_18
+val_53val_54node_Concat_54"Concat*
+axisˇˇˇˇˇˇˇˇˇ†JH
+	namespace;: __main__._TensorRelationScorer/index_3: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']J©
+pkg.torch.onnx.fx_nodeé%index_3 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%boundary_states, [%minimum_1, %minimum_5]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_3']J¯
+pkg.torch.onnx.stack_traceŸFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 221, in forward
+    gather(tail_start),
+À
+boundary_states
+val_54val_55node_GatherND_55"GatherND*
+
+batch_dims †JH
+	namespace;: __main__._TensorRelationScorer/index_3: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']J©
+pkg.torch.onnx.fx_nodeé%index_3 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%boundary_states, [%minimum_1, %minimum_5]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_3']J¯
+pkg.torch.onnx.stack_traceŸFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 221, in forward
+    gather(tail_start),
+Ç
+tail_end
+minimumsub_32node_sub_32"SubJE
+	namespace8: __main__._TensorRelationScorer/sub_32: aten.sub.TensorJW
+pkg.torch.onnx.class_hierarchy5['__main__._TensorRelationScorer', 'aten.sub.Tensor']Já
+pkg.torch.onnx.fx_nodem%sub_32 : [num_users=1] = call_function[target=torch.ops.aten.sub.Tensor](args = (%tail_end, 1), kwargs = {})J,
+pkg.torch.onnx.name_scopes['', 'sub_32']J˙
+pkg.torch.onnx.stack_trace€File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 222, in forward
+    gather(tail_end - 1),
+å
+sub_32
+val_10clamp_8node_clamp_8"ClipJI
+	namespace<: __main__._TensorRelationScorer/clamp_8: aten.clamp.defaultJZ
+pkg.torch.onnx.class_hierarchy8['__main__._TensorRelationScorer', 'aten.clamp.default']Jâ
+pkg.torch.onnx.fx_nodeo%clamp_8 : [num_users=1] = call_function[target=torch.ops.aten.clamp.default](args = (%sub_32, 0), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'clamp_8']J˙
+pkg.torch.onnx.stack_trace€File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 222, in forward
+    gather(tail_end - 1),
+•
+clamp_8
+clamp_3	minimum_6node_minimum_6"MinJM
+	namespace@: __main__._TensorRelationScorer/minimum_6: aten.minimum.defaultJ\
+pkg.torch.onnx.class_hierarchy:['__main__._TensorRelationScorer', 'aten.minimum.default']Jï
+pkg.torch.onnx.fx_node{%minimum_6 : [num_users=1] = call_function[target=torch.ops.aten.minimum.default](args = (%clamp_8, %clamp_9), kwargs = {})J/
+pkg.torch.onnx.name_scopes['', 'minimum_6']J˙
+pkg.torch.onnx.stack_trace€File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 222, in forward
+    gather(tail_end - 1),
+∂
+	minimum_6
+val_17val_64node_Unsqueeze_64"	UnsqueezeJH
+	namespace;: __main__._TensorRelationScorer/index_4: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']J©
+pkg.torch.onnx.fx_nodeé%index_4 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%boundary_states, [%minimum_1, %minimum_6]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_4']J˙
+pkg.torch.onnx.stack_trace€File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 222, in forward
+    gather(tail_end - 1),
+√
+val_18
+val_64val_65node_Concat_65"Concat*
+axisˇˇˇˇˇˇˇˇˇ†JH
+	namespace;: __main__._TensorRelationScorer/index_4: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']J©
+pkg.torch.onnx.fx_nodeé%index_4 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%boundary_states, [%minimum_1, %minimum_6]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_4']J˙
+pkg.torch.onnx.stack_trace€File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 222, in forward
+    gather(tail_end - 1),
+Õ
+boundary_states
+val_65val_66node_GatherND_66"GatherND*
+
+batch_dims †JH
+	namespace;: __main__._TensorRelationScorer/index_4: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']J©
+pkg.torch.onnx.fx_nodeé%index_4 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%boundary_states, [%minimum_1, %minimum_6]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_4']J˙
+pkg.torch.onnx.stack_trace€File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 222, in forward
+    gather(tail_end - 1),
+ˇ
+_to_copysign	node_sign"SignJE
+	namespace8: __main__._TensorRelationScorer/sign: aten.sign.defaultJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.sign.default']JÖ
+pkg.torch.onnx.fx_nodek%sign : [num_users=1] = call_function[target=torch.ops.aten.sign.default](args = (%_to_copy,), kwargs = {})J*
+pkg.torch.onnx.name_scopes['', 'sign']JÖ
+pkg.torch.onnx.stack_traceÊFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 224, in forward
+    torch.sign(delta).unsqueeze(-1),
+Ø
+sign
+val_17	unsqueezenode_unsqueeze"	UnsqueezeJO
+	namespaceB: __main__._TensorRelationScorer/unsqueeze: aten.unsqueeze.defaultJ^
+pkg.torch.onnx.class_hierarchy<['__main__._TensorRelationScorer', 'aten.unsqueeze.default']Jé
+pkg.torch.onnx.fx_nodet%unsqueeze : [num_users=1] = call_function[target=torch.ops.aten.unsqueeze.default](args = (%sign, -1), kwargs = {})J/
+pkg.torch.onnx.name_scopes['', 'unsqueeze']JÖ
+pkg.torch.onnx.stack_traceÊFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 224, in forward
+    torch.sign(delta).unsqueeze(-1),
+¨
+_to_copyabs_1
+node_abs_1"AbsJE
+	namespace8: __main__._TensorRelationScorer/abs_1: aten.abs.defaultJX
+pkg.torch.onnx.class_hierarchy6['__main__._TensorRelationScorer', 'aten.abs.default']JÖ
+pkg.torch.onnx.fx_nodek%abs_1 : [num_users=1] = call_function[target=torch.ops.aten.abs.default](args = (%_to_copy,), kwargs = {})J+
+pkg.torch.onnx.name_scopes['', 'abs_1']J±
+pkg.torch.onnx.stack_traceíFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 225, in forward
+    (delta.abs() / length.clamp(min=1).to(boundary_states.dtype)).unsqueeze(-1),
+€
+sym_size_int_11
+minimumclamp_10node_clamp_10"ClipJJ
+	namespace=: __main__._TensorRelationScorer/clamp_10: aten.clamp.defaultJZ
+pkg.torch.onnx.class_hierarchy8['__main__._TensorRelationScorer', 'aten.clamp.default']Jì
+pkg.torch.onnx.fx_nodey%clamp_10 : [num_users=1] = call_function[target=torch.ops.aten.clamp.default](args = (%scalar_tensor_1, 1), kwargs = {})J.
+pkg.torch.onnx.name_scopes['', 'clamp_10']J±
+pkg.torch.onnx.stack_traceíFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 225, in forward
+    (delta.abs() / length.clamp(min=1).to(boundary_states.dtype)).unsqueeze(-1),
+ı
+clamp_10
+_to_copy_1node__to_copy_1"Cast*	
+to†JO
+	namespaceB: __main__._TensorRelationScorer/_to_copy_1: aten._to_copy.defaultJ]
+pkg.torch.onnx.class_hierarchy;['__main__._TensorRelationScorer', 'aten._to_copy.default']J§
+pkg.torch.onnx.fx_nodeâ%_to_copy_1 : [num_users=1] = call_function[target=torch.ops.aten._to_copy.default](args = (%clamp_10,), kwargs = {dtype: torch.float32})J0
+pkg.torch.onnx.name_scopes['', '_to_copy_1']J±
+pkg.torch.onnx.stack_traceíFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 225, in forward
+    (delta.abs() / length.clamp(min=1).to(boundary_states.dtype)).unsqueeze(-1),
+±
+abs_1
+
+_to_copy_1divnode_div"DivJB
+	namespace5: __main__._TensorRelationScorer/div: aten.div.TensorJW
+pkg.torch.onnx.class_hierarchy5['__main__._TensorRelationScorer', 'aten.div.Tensor']Jã
+pkg.torch.onnx.fx_nodeq%div : [num_users=1] = call_function[target=torch.ops.aten.div.Tensor](args = (%abs_1, %_to_copy_1), kwargs = {})J)
+pkg.torch.onnx.name_scopes['', 'div']J±
+pkg.torch.onnx.stack_traceíFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 225, in forward
+    (delta.abs() / length.clamp(min=1).to(boundary_states.dtype)).unsqueeze(-1),
+„
+div
+val_17unsqueeze_1node_unsqueeze_1"	UnsqueezeJQ
+	namespaceD: __main__._TensorRelationScorer/unsqueeze_1: aten.unsqueeze.defaultJ^
+pkg.torch.onnx.class_hierarchy<['__main__._TensorRelationScorer', 'aten.unsqueeze.default']Jè
+pkg.torch.onnx.fx_nodeu%unsqueeze_1 : [num_users=1] = call_function[target=torch.ops.aten.unsqueeze.default](args = (%div, -1), kwargs = {})J1
+pkg.torch.onnx.name_scopes['', 'unsqueeze_1']J±
+pkg.torch.onnx.stack_traceíFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 225, in forward
+    (delta.abs() / length.clamp(min=1).to(boundary_states.dtype)).unsqueeze(-1),
+¸
+val_33
+val_44
+val_55
+val_66
+val_22
+	unsqueeze
+unsqueeze_1catnode_cat"Concat*
+axisˇˇˇˇˇˇˇˇˇ†JC
+	namespace6: __main__._TensorRelationScorer/cat: aten.cat.defaultJX
+pkg.torch.onnx.class_hierarchy6['__main__._TensorRelationScorer', 'aten.cat.default']J»
+pkg.torch.onnx.fx_node≠%cat : [num_users=1] = call_function[target=torch.ops.aten.cat.default](args = ([%index_1, %index_2, %index_3, %index_4, %index, %unsqueeze, %unsqueeze_1], -1), kwargs = {})J)
+pkg.torch.onnx.name_scopes['', 'cat']J˜
+pkg.torch.onnx.stack_traceÿFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 217, in forward
+    feats = torch.cat(
+∂
+cat
+m.mlp.0.weight
+m.mlp.0.biaslinearnode_linear"Gemm*
+beta  Ä?†*
+transB†*
+alpha  Ä?†*
+transA †Jü
+	namespaceë: __main__._TensorRelationScorer/m.mlp: torch.nn.modules.container.Sequential/m.mlp.0: torch.nn.modules.linear.Linear/linear: aten.linear.defaultJß
+pkg.torch.onnx.class_hierarchyÑ['__main__._TensorRelationScorer', 'torch.nn.modules.container.Sequential', 'torch.nn.modules.linear.Linear', 'aten.linear.default']J®
+pkg.torch.onnx.fx_nodeç%linear : [num_users=1] = call_function[target=torch.ops.aten.linear.default](args = (%cat, %p_m_mlp_0_weight, %p_m_mlp_0_bias), kwargs = {})J@
+pkg.torch.onnx.name_scopes"['', 'm.mlp', 'm.mlp.0', 'linear']J˝
+pkg.torch.onnx.stack_traceﬁFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 229, in forward
+    score = m.mlp(feats).squeeze(-1)
+  File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/.venv/lib/python3.12/site-packages/torch/nn/modules/container.py", line 259, in forward
+    input = module(input)
+  File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/.venv/lib/python3.12/site-packages/torch/nn/modules/linear.py", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+œ
+
+lineargelu	node_gelu"Gelu*
+approximate"none†Jù
+	namespaceè: __main__._TensorRelationScorer/m.mlp: torch.nn.modules.container.Sequential/m.mlp.1: torch.nn.modules.activation.GELU/gelu: aten.gelu.defaultJß
+pkg.torch.onnx.class_hierarchyÑ['__main__._TensorRelationScorer', 'torch.nn.modules.container.Sequential', 'torch.nn.modules.activation.GELU', 'aten.gelu.default']JÉ
+pkg.torch.onnx.fx_nodei%gelu : [num_users=1] = call_function[target=torch.ops.aten.gelu.default](args = (%linear,), kwargs = {})J>
+pkg.torch.onnx.name_scopes ['', 'm.mlp', 'm.mlp.1', 'gelu']JÖ
+pkg.torch.onnx.stack_traceÊFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 229, in forward
+    score = m.mlp(feats).squeeze(-1)
+  File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/.venv/lib/python3.12/site-packages/torch/nn/modules/container.py", line 259, in forward
+    input = module(input)
+  File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/.venv/lib/python3.12/site-packages/torch/nn/modules/activation.py", line 817, in forward
+    return F.gelu(input, approximate=self.approximate)
+¬
+gelu
+m.mlp.3.weight
+m.mlp.3.biaslinear_1node_linear_1"Gemm*
+beta  Ä?†*
+transB†*
+alpha  Ä?†*
+transA †J°
+	namespaceì: __main__._TensorRelationScorer/m.mlp: torch.nn.modules.container.Sequential/m.mlp.3: torch.nn.modules.linear.Linear/linear_1: aten.linear.defaultJß
+pkg.torch.onnx.class_hierarchyÑ['__main__._TensorRelationScorer', 'torch.nn.modules.container.Sequential', 'torch.nn.modules.linear.Linear', 'aten.linear.default']J´
+pkg.torch.onnx.fx_nodeê%linear_1 : [num_users=1] = call_function[target=torch.ops.aten.linear.default](args = (%gelu, %p_m_mlp_3_weight, %p_m_mlp_3_bias), kwargs = {})JB
+pkg.torch.onnx.name_scopes$['', 'm.mlp', 'm.mlp.3', 'linear_1']J˝
+pkg.torch.onnx.stack_traceﬁFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 229, in forward
+    score = m.mlp(feats).squeeze(-1)
+  File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/.venv/lib/python3.12/site-packages/torch/nn/modules/container.py", line 259, in forward
+    input = module(input)
+  File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/.venv/lib/python3.12/site-packages/torch/nn/modules/linear.py", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+ô
+linear_1
+val_17squeezenode_squeeze"SqueezeJG
+	namespace:: __main__._TensorRelationScorer/squeeze: aten.squeeze.dimJX
+pkg.torch.onnx.class_hierarchy6['__main__._TensorRelationScorer', 'aten.squeeze.dim']Jä
+pkg.torch.onnx.fx_nodep%squeeze : [num_users=1] = call_function[target=torch.ops.aten.squeeze.dim](args = (%linear_1, -1), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'squeeze']JÖ
+pkg.torch.onnx.stack_traceÊFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 229, in forward
+    score = m.mlp(feats).squeeze(-1)
+Å
+val_68val_69node_ConstantOfShape_69"ConstantOfShapeJO
+	namespaceB: __main__._TensorRelationScorer/new_zeros: aten.new_zeros.defaultJ^
+pkg.torch.onnx.class_hierarchy<['__main__._TensorRelationScorer', 'aten.new_zeros.default']J¥
+pkg.torch.onnx.fx_nodeô%new_zeros : [num_users=1] = call_function[target=torch.ops.aten.new_zeros.default](args = (%boundary_states, [1, 1, 768]), kwargs = {pin_memory: False})J/
+pkg.torch.onnx.name_scopes['', 'new_zeros']J´
+pkg.torch.onnx.stack_traceåFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 233, in forward
+    boundary_states.new_zeros(boundary_states.shape[0], 1, m.hidden_size),
+Ë
+boundary_states
+minimumcumsumnode_cumsum"CumSum*
+reverse †*
+	exclusive †JI
+	namespace<: __main__._TensorRelationScorer/cumsum: aten.cumsum.defaultJ[
+pkg.torch.onnx.class_hierarchy9['__main__._TensorRelationScorer', 'aten.cumsum.default']Jí
+pkg.torch.onnx.fx_nodex%cumsum : [num_users=1] = call_function[target=torch.ops.aten.cumsum.default](args = (%boundary_states, 1), kwargs = {})J,
+pkg.torch.onnx.name_scopes['', 'cumsum']J°
+pkg.torch.onnx.stack_traceÇFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 234, in forward
+    boundary_states.float().cumsum(1).to(boundary_states.dtype),
+ó
+val_69
+cumsumcat_1
+node_cat_1"Concat*
+axis†JE
+	namespace8: __main__._TensorRelationScorer/cat_1: aten.cat.defaultJX
+pkg.torch.onnx.class_hierarchy6['__main__._TensorRelationScorer', 'aten.cat.default']Jì
+pkg.torch.onnx.fx_nodey%cat_1 : [num_users=4] = call_function[target=torch.ops.aten.cat.default](args = ([%new_zeros, %cumsum], 1), kwargs = {})J+
+pkg.torch.onnx.name_scopes['', 'cat_1']J¯
+pkg.torch.onnx.stack_traceŸFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 231, in forward
+    prefix = torch.cat(
+ƒ
+head_end
+val_10clamp_11node_clamp_11"ClipJJ
+	namespace=: __main__._TensorRelationScorer/clamp_11: aten.clamp.defaultJZ
+pkg.torch.onnx.class_hierarchy8['__main__._TensorRelationScorer', 'aten.clamp.default']Jå
+pkg.torch.onnx.fx_noder%clamp_11 : [num_users=1] = call_function[target=torch.ops.aten.clamp.default](args = (%head_end, 0), kwargs = {})J.
+pkg.torch.onnx.name_scopes['', 'clamp_11']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 246, in forward
+    head_content = m.head_content_projection(pool(head_start, head_end))
+Á
+clamp_11
+sym_size_int_11	minimum_7node_minimum_7"MinJM
+	namespace@: __main__._TensorRelationScorer/minimum_7: aten.minimum.defaultJ\
+pkg.torch.onnx.class_hierarchy:['__main__._TensorRelationScorer', 'aten.minimum.default']Jü
+pkg.torch.onnx.fx_nodeÑ%minimum_7 : [num_users=1] = call_function[target=torch.ops.aten.minimum.default](args = (%clamp_11, %scalar_tensor_1), kwargs = {})J/
+pkg.torch.onnx.name_scopes['', 'minimum_7']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 246, in forward
+    head_content = m.head_content_projection(pool(head_start, head_end))
+€
+	minimum_7
+val_17val_77node_Unsqueeze_77"	UnsqueezeJH
+	namespace;: __main__._TensorRelationScorer/index_5: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']Jü
+pkg.torch.onnx.fx_nodeÑ%index_5 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%cat_1, [%minimum_1, %minimum_7]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_5']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 246, in forward
+    head_content = m.head_content_projection(pool(head_start, head_end))
+Ë
+val_18
+val_77val_78node_Concat_78"Concat*
+axisˇˇˇˇˇˇˇˇˇ†JH
+	namespace;: __main__._TensorRelationScorer/index_5: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']Jü
+pkg.torch.onnx.fx_nodeÑ%index_5 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%cat_1, [%minimum_1, %minimum_7]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_5']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 246, in forward
+    head_content = m.head_content_projection(pool(head_start, head_end))
+Ë
+cat_1
+val_78val_79node_GatherND_79"GatherND*
+
+batch_dims †JH
+	namespace;: __main__._TensorRelationScorer/index_5: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']Jü
+pkg.torch.onnx.fx_nodeÑ%index_5 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%cat_1, [%minimum_1, %minimum_7]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_5']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 246, in forward
+    head_content = m.head_content_projection(pool(head_start, head_end))
+Ê
+clamp_2
+sym_size_int_11	minimum_8node_minimum_8"MinJM
+	namespace@: __main__._TensorRelationScorer/minimum_8: aten.minimum.defaultJ\
+pkg.torch.onnx.class_hierarchy:['__main__._TensorRelationScorer', 'aten.minimum.default']Jü
+pkg.torch.onnx.fx_nodeÑ%minimum_8 : [num_users=1] = call_function[target=torch.ops.aten.minimum.default](args = (%clamp_12, %scalar_tensor_1), kwargs = {})J/
+pkg.torch.onnx.name_scopes['', 'minimum_8']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 246, in forward
+    head_content = m.head_content_projection(pool(head_start, head_end))
+€
+	minimum_8
+val_17val_87node_Unsqueeze_87"	UnsqueezeJH
+	namespace;: __main__._TensorRelationScorer/index_6: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']Jü
+pkg.torch.onnx.fx_nodeÑ%index_6 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%cat_1, [%minimum_1, %minimum_8]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_6']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 246, in forward
+    head_content = m.head_content_projection(pool(head_start, head_end))
+Ë
+val_18
+val_87val_88node_Concat_88"Concat*
+axisˇˇˇˇˇˇˇˇˇ†JH
+	namespace;: __main__._TensorRelationScorer/index_6: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']Jü
+pkg.torch.onnx.fx_nodeÑ%index_6 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%cat_1, [%minimum_1, %minimum_8]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_6']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 246, in forward
+    head_content = m.head_content_projection(pool(head_start, head_end))
+Ë
+cat_1
+val_88val_89node_GatherND_89"GatherND*
+
+batch_dims †JH
+	namespace;: __main__._TensorRelationScorer/index_6: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']Jü
+pkg.torch.onnx.fx_nodeÑ%index_6 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%cat_1, [%minimum_1, %minimum_8]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_6']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 246, in forward
+    head_content = m.head_content_projection(pool(head_start, head_end))
+¥
+val_79
+val_89sub_56node_sub_56"SubJE
+	namespace8: __main__._TensorRelationScorer/sub_56: aten.sub.TensorJW
+pkg.torch.onnx.class_hierarchy5['__main__._TensorRelationScorer', 'aten.sub.Tensor']Jç
+pkg.torch.onnx.fx_nodes%sub_56 : [num_users=1] = call_function[target=torch.ops.aten.sub.Tensor](args = (%index_5, %index_6), kwargs = {})J,
+pkg.torch.onnx.name_scopes['', 'sub_56']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 246, in forward
+    head_content = m.head_content_projection(pool(head_start, head_end))
+æ
+head_end
+
+head_startsub_58node_sub_58"SubJE
+	namespace8: __main__._TensorRelationScorer/sub_58: aten.sub.TensorJW
+pkg.torch.onnx.class_hierarchy5['__main__._TensorRelationScorer', 'aten.sub.Tensor']Jë
+pkg.torch.onnx.fx_nodew%sub_58 : [num_users=1] = call_function[target=torch.ops.aten.sub.Tensor](args = (%head_end, %head_start), kwargs = {})J,
+pkg.torch.onnx.name_scopes['', 'sub_58']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 246, in forward
+    head_content = m.head_content_projection(pool(head_start, head_end))
+“
+sub_58
+minimum	clamp_minnode_clamp_min"ClipJO
+	namespaceB: __main__._TensorRelationScorer/clamp_min: aten.clamp_min.defaultJ^
+pkg.torch.onnx.class_hierarchy<['__main__._TensorRelationScorer', 'aten.clamp_min.default']Jè
+pkg.torch.onnx.fx_nodeu%clamp_min : [num_users=1] = call_function[target=torch.ops.aten.clamp_min.default](args = (%sub_58, 1), kwargs = {})J/
+pkg.torch.onnx.name_scopes['', 'clamp_min']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 246, in forward
+    head_content = m.head_content_projection(pool(head_start, head_end))
+Á
+	clamp_min
+val_17unsqueeze_2node_unsqueeze_2"	UnsqueezeJQ
+	namespaceD: __main__._TensorRelationScorer/unsqueeze_2: aten.unsqueeze.defaultJ^
+pkg.torch.onnx.class_hierarchy<['__main__._TensorRelationScorer', 'aten.unsqueeze.default']Jï
+pkg.torch.onnx.fx_node{%unsqueeze_2 : [num_users=1] = call_function[target=torch.ops.aten.unsqueeze.default](args = (%clamp_min, -1), kwargs = {})J1
+pkg.torch.onnx.name_scopes['', 'unsqueeze_2']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 246, in forward
+    head_content = m.head_content_projection(pool(head_start, head_end))
+Û
+unsqueeze_2
+_to_copy_2node__to_copy_2"Cast*	
+to†JO
+	namespaceB: __main__._TensorRelationScorer/_to_copy_2: aten._to_copy.defaultJ]
+pkg.torch.onnx.class_hierarchy;['__main__._TensorRelationScorer', 'aten._to_copy.default']Jß
+pkg.torch.onnx.fx_nodeå%_to_copy_2 : [num_users=1] = call_function[target=torch.ops.aten._to_copy.default](args = (%unsqueeze_2,), kwargs = {dtype: torch.float32})J0
+pkg.torch.onnx.name_scopes['', '_to_copy_2']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 246, in forward
+    head_content = m.head_content_projection(pool(head_start, head_end))
+µ
+sub_56
+
+_to_copy_2div_1
+node_div_1"DivJD
+	namespace7: __main__._TensorRelationScorer/div_1: aten.div.TensorJW
+pkg.torch.onnx.class_hierarchy5['__main__._TensorRelationScorer', 'aten.div.Tensor']Jé
+pkg.torch.onnx.fx_nodet%div_1 : [num_users=1] = call_function[target=torch.ops.aten.div.Tensor](args = (%sub_56, %_to_copy_2), kwargs = {})J+
+pkg.torch.onnx.name_scopes['', 'div_1']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 246, in forward
+    head_content = m.head_content_projection(pool(head_start, head_end))
+Å
+
+div_1
+ m.head_content_projection.weight
+m.head_content_projection.biaslinear_2node_linear_2"Gemm*
+beta  Ä?†*
+transB†*
+alpha  Ä?†*
+transA †JÖ
+	namespacex: __main__._TensorRelationScorer/m.head_content_projection: torch.nn.modules.linear.Linear/linear_2: aten.linear.defaultJ}
+pkg.torch.onnx.class_hierarchy[['__main__._TensorRelationScorer', 'torch.nn.modules.linear.Linear', 'aten.linear.default']J–
+pkg.torch.onnx.fx_nodeµ%linear_2 : [num_users=2] = call_function[target=torch.ops.aten.linear.default](args = (%div_1, %p_m_head_content_projection_weight, %p_m_head_content_projection_bias), kwargs = {})JK
+pkg.torch.onnx.name_scopes-['', 'm.head_content_projection', 'linear_2']J∞
+pkg.torch.onnx.stack_traceëFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 246, in forward
+    head_content = m.head_content_projection(pool(head_start, head_end))
+  File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/.venv/lib/python3.12/site-packages/torch/nn/modules/linear.py", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+ƒ
+tail_end
+val_10clamp_13node_clamp_13"ClipJJ
+	namespace=: __main__._TensorRelationScorer/clamp_13: aten.clamp.defaultJZ
+pkg.torch.onnx.class_hierarchy8['__main__._TensorRelationScorer', 'aten.clamp.default']Jå
+pkg.torch.onnx.fx_noder%clamp_13 : [num_users=1] = call_function[target=torch.ops.aten.clamp.default](args = (%tail_end, 0), kwargs = {})J.
+pkg.torch.onnx.name_scopes['', 'clamp_13']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 247, in forward
+    tail_content = m.tail_content_projection(pool(tail_start, tail_end))
+Á
+clamp_13
+sym_size_int_11	minimum_9node_minimum_9"MinJM
+	namespace@: __main__._TensorRelationScorer/minimum_9: aten.minimum.defaultJ\
+pkg.torch.onnx.class_hierarchy:['__main__._TensorRelationScorer', 'aten.minimum.default']Jü
+pkg.torch.onnx.fx_nodeÑ%minimum_9 : [num_users=1] = call_function[target=torch.ops.aten.minimum.default](args = (%clamp_13, %scalar_tensor_1), kwargs = {})J/
+pkg.torch.onnx.name_scopes['', 'minimum_9']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 247, in forward
+    tail_content = m.tail_content_projection(pool(tail_start, tail_end))
+€
+	minimum_9
+val_17val_98node_Unsqueeze_98"	UnsqueezeJH
+	namespace;: __main__._TensorRelationScorer/index_7: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']Jü
+pkg.torch.onnx.fx_nodeÑ%index_7 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%cat_1, [%minimum_1, %minimum_9]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_7']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 247, in forward
+    tail_content = m.tail_content_projection(pool(tail_start, tail_end))
+Ë
+val_18
+val_98val_99node_Concat_99"Concat*
+axisˇˇˇˇˇˇˇˇˇ†JH
+	namespace;: __main__._TensorRelationScorer/index_7: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']Jü
+pkg.torch.onnx.fx_nodeÑ%index_7 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%cat_1, [%minimum_1, %minimum_9]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_7']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 247, in forward
+    tail_content = m.tail_content_projection(pool(tail_start, tail_end))
+Í
+cat_1
+val_99val_100node_GatherND_100"GatherND*
+
+batch_dims †JH
+	namespace;: __main__._TensorRelationScorer/index_7: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']Jü
+pkg.torch.onnx.fx_nodeÑ%index_7 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%cat_1, [%minimum_1, %minimum_9]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_7']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 247, in forward
+    tail_content = m.tail_content_projection(pool(tail_start, tail_end))
+Î
+clamp_6
+sym_size_int_11
+minimum_10node_minimum_10"MinJN
+	namespaceA: __main__._TensorRelationScorer/minimum_10: aten.minimum.defaultJ\
+pkg.torch.onnx.class_hierarchy:['__main__._TensorRelationScorer', 'aten.minimum.default']J†
+pkg.torch.onnx.fx_nodeÖ%minimum_10 : [num_users=1] = call_function[target=torch.ops.aten.minimum.default](args = (%clamp_14, %scalar_tensor_1), kwargs = {})J0
+pkg.torch.onnx.name_scopes['', 'minimum_10']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 247, in forward
+    tail_content = m.tail_content_projection(pool(tail_start, tail_end))
+ﬂ
+
+minimum_10
+val_17val_108node_Unsqueeze_108"	UnsqueezeJH
+	namespace;: __main__._TensorRelationScorer/index_8: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']J†
+pkg.torch.onnx.fx_nodeÖ%index_8 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%cat_1, [%minimum_1, %minimum_10]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_8']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 247, in forward
+    tail_content = m.tail_content_projection(pool(tail_start, tail_end))
+Ï
+val_18
+val_108val_109node_Concat_109"Concat*
+axisˇˇˇˇˇˇˇˇˇ†JH
+	namespace;: __main__._TensorRelationScorer/index_8: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']J†
+pkg.torch.onnx.fx_nodeÖ%index_8 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%cat_1, [%minimum_1, %minimum_10]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_8']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 247, in forward
+    tail_content = m.tail_content_projection(pool(tail_start, tail_end))
+Ï
+cat_1
+val_109val_110node_GatherND_110"GatherND*
+
+batch_dims †JH
+	namespace;: __main__._TensorRelationScorer/index_8: aten.index.TensorJY
+pkg.torch.onnx.class_hierarchy7['__main__._TensorRelationScorer', 'aten.index.Tensor']J†
+pkg.torch.onnx.fx_nodeÖ%index_8 : [num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%cat_1, [%minimum_1, %minimum_10]), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'index_8']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 247, in forward
+    tail_content = m.tail_content_projection(pool(tail_start, tail_end))
+∂
+val_100
+val_110sub_71node_sub_71"SubJE
+	namespace8: __main__._TensorRelationScorer/sub_71: aten.sub.TensorJW
+pkg.torch.onnx.class_hierarchy5['__main__._TensorRelationScorer', 'aten.sub.Tensor']Jç
+pkg.torch.onnx.fx_nodes%sub_71 : [num_users=1] = call_function[target=torch.ops.aten.sub.Tensor](args = (%index_7, %index_8), kwargs = {})J,
+pkg.torch.onnx.name_scopes['', 'sub_71']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 247, in forward
+    tail_content = m.tail_content_projection(pool(tail_start, tail_end))
+æ
+tail_end
+
+tail_startsub_73node_sub_73"SubJE
+	namespace8: __main__._TensorRelationScorer/sub_73: aten.sub.TensorJW
+pkg.torch.onnx.class_hierarchy5['__main__._TensorRelationScorer', 'aten.sub.Tensor']Jë
+pkg.torch.onnx.fx_nodew%sub_73 : [num_users=1] = call_function[target=torch.ops.aten.sub.Tensor](args = (%tail_end, %tail_start), kwargs = {})J,
+pkg.torch.onnx.name_scopes['', 'sub_73']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 247, in forward
+    tail_content = m.tail_content_projection(pool(tail_start, tail_end))
+‹
+sub_73
+minimumclamp_min_1node_clamp_min_1"ClipJQ
+	namespaceD: __main__._TensorRelationScorer/clamp_min_1: aten.clamp_min.defaultJ^
+pkg.torch.onnx.class_hierarchy<['__main__._TensorRelationScorer', 'aten.clamp_min.default']Jë
+pkg.torch.onnx.fx_nodew%clamp_min_1 : [num_users=1] = call_function[target=torch.ops.aten.clamp_min.default](args = (%sub_73, 1), kwargs = {})J1
+pkg.torch.onnx.name_scopes['', 'clamp_min_1']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 247, in forward
+    tail_content = m.tail_content_projection(pool(tail_start, tail_end))
+Î
+clamp_min_1
+val_17unsqueeze_3node_unsqueeze_3"	UnsqueezeJQ
+	namespaceD: __main__._TensorRelationScorer/unsqueeze_3: aten.unsqueeze.defaultJ^
+pkg.torch.onnx.class_hierarchy<['__main__._TensorRelationScorer', 'aten.unsqueeze.default']Jó
+pkg.torch.onnx.fx_node}%unsqueeze_3 : [num_users=1] = call_function[target=torch.ops.aten.unsqueeze.default](args = (%clamp_min_1, -1), kwargs = {})J1
+pkg.torch.onnx.name_scopes['', 'unsqueeze_3']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 247, in forward
+    tail_content = m.tail_content_projection(pool(tail_start, tail_end))
+Û
+unsqueeze_3
+_to_copy_3node__to_copy_3"Cast*	
+to†JO
+	namespaceB: __main__._TensorRelationScorer/_to_copy_3: aten._to_copy.defaultJ]
+pkg.torch.onnx.class_hierarchy;['__main__._TensorRelationScorer', 'aten._to_copy.default']Jß
+pkg.torch.onnx.fx_nodeå%_to_copy_3 : [num_users=1] = call_function[target=torch.ops.aten._to_copy.default](args = (%unsqueeze_3,), kwargs = {dtype: torch.float32})J0
+pkg.torch.onnx.name_scopes['', '_to_copy_3']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 247, in forward
+    tail_content = m.tail_content_projection(pool(tail_start, tail_end))
+µ
+sub_71
+
+_to_copy_3div_2
+node_div_2"DivJD
+	namespace7: __main__._TensorRelationScorer/div_2: aten.div.TensorJW
+pkg.torch.onnx.class_hierarchy5['__main__._TensorRelationScorer', 'aten.div.Tensor']Jé
+pkg.torch.onnx.fx_nodet%div_2 : [num_users=1] = call_function[target=torch.ops.aten.div.Tensor](args = (%sub_71, %_to_copy_3), kwargs = {})J+
+pkg.torch.onnx.name_scopes['', 'div_2']J©
+pkg.torch.onnx.stack_traceäFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 247, in forward
+    tail_content = m.tail_content_projection(pool(tail_start, tail_end))
+Å
+
+div_2
+ m.tail_content_projection.weight
+m.tail_content_projection.biaslinear_3node_linear_3"Gemm*
+beta  Ä?†*
+transB†*
+alpha  Ä?†*
+transA †JÖ
+	namespacex: __main__._TensorRelationScorer/m.tail_content_projection: torch.nn.modules.linear.Linear/linear_3: aten.linear.defaultJ}
+pkg.torch.onnx.class_hierarchy[['__main__._TensorRelationScorer', 'torch.nn.modules.linear.Linear', 'aten.linear.default']J–
+pkg.torch.onnx.fx_nodeµ%linear_3 : [num_users=2] = call_function[target=torch.ops.aten.linear.default](args = (%div_2, %p_m_tail_content_projection_weight, %p_m_tail_content_projection_bias), kwargs = {})JK
+pkg.torch.onnx.name_scopes-['', 'm.tail_content_projection', 'linear_3']J∞
+pkg.torch.onnx.stack_traceëFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 247, in forward
+    tail_content = m.tail_content_projection(pool(tail_start, tail_end))
+  File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/.venv/lib/python3.12/site-packages/torch/nn/modules/linear.py", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+‰	
+val_22
+m.relation_content_gate.weight
+m.relation_content_gate.biaslinear_4node_linear_4"Gemm*
+beta  Ä?†*
+transB†*
+alpha  Ä?†*
+transA †JÉ
+	namespacev: __main__._TensorRelationScorer/m.relation_content_gate: torch.nn.modules.linear.Linear/linear_4: aten.linear.defaultJ}
+pkg.torch.onnx.class_hierarchy[['__main__._TensorRelationScorer', 'torch.nn.modules.linear.Linear', 'aten.linear.default']JÃ
+pkg.torch.onnx.fx_node±%linear_4 : [num_users=1] = call_function[target=torch.ops.aten.linear.default](args = (%index, %p_m_relation_content_gate_weight, %p_m_relation_content_gate_bias), kwargs = {})JI
+pkg.torch.onnx.name_scopes+['', 'm.relation_content_gate', 'linear_4']Jû
+pkg.torch.onnx.stack_traceˇFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 248, in forward
+    gate = torch.sigmoid(m.relation_content_gate(rel))
+  File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/.venv/lib/python3.12/site-packages/torch/nn/modules/linear.py", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+¨
+linear_4sigmoidnode_sigmoid"SigmoidJK
+	namespace>: __main__._TensorRelationScorer/sigmoid: aten.sigmoid.defaultJ\
+pkg.torch.onnx.class_hierarchy:['__main__._TensorRelationScorer', 'aten.sigmoid.default']Jã
+pkg.torch.onnx.fx_nodeq%sigmoid : [num_users=1] = call_function[target=torch.ops.aten.sigmoid.default](args = (%linear_4,), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'sigmoid']Jó
+pkg.torch.onnx.stack_trace¯File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 248, in forward
+    gate = torch.sigmoid(m.relation_content_gate(rel))
+π
+linear_2
+sigmoidmul_85node_mul_85"MulJE
+	namespace8: __main__._TensorRelationScorer/mul_85: aten.mul.TensorJW
+pkg.torch.onnx.class_hierarchy5['__main__._TensorRelationScorer', 'aten.mul.Tensor']Jé
+pkg.torch.onnx.fx_nodet%mul_85 : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%linear_2, %sigmoid), kwargs = {})J,
+pkg.torch.onnx.name_scopes['', 'mul_85']J™
+pkg.torch.onnx.stack_traceãFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 251, in forward
+    + (head_content * gate * tail_content).sum(-1) / (m.hidden_size**0.5)
+∑
+mul_85
+linear_3mul_88node_mul_88"MulJE
+	namespace8: __main__._TensorRelationScorer/mul_88: aten.mul.TensorJW
+pkg.torch.onnx.class_hierarchy5['__main__._TensorRelationScorer', 'aten.mul.Tensor']Jç
+pkg.torch.onnx.fx_nodes%mul_88 : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%mul_85, %linear_3), kwargs = {})J,
+pkg.torch.onnx.name_scopes['', 'mul_88']J™
+pkg.torch.onnx.stack_traceãFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 251, in forward
+    + (head_content * gate * tail_content).sum(-1) / (m.hidden_size**0.5)
+Ó
+mul_88
+val_17sum_1
+node_sum_1"	ReduceSum*
+noop_with_empty_axes †*
+keepdims †JI
+	namespace<: __main__._TensorRelationScorer/sum_1: aten.sum.dim_IntListJ\
+pkg.torch.onnx.class_hierarchy:['__main__._TensorRelationScorer', 'aten.sum.dim_IntList']Jå
+pkg.torch.onnx.fx_noder%sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.dim_IntList](args = (%mul_88, [-1]), kwargs = {})J+
+pkg.torch.onnx.name_scopes['', 'sum_1']J™
+pkg.torch.onnx.stack_traceãFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 251, in forward
+    + (head_content * gate * tail_content).sum(-1) / (m.hidden_size**0.5)
+∏
+sum_1
+val_113div_3
+node_div_3"DivJD
+	namespace7: __main__._TensorRelationScorer/div_3: aten.div.TensorJW
+pkg.torch.onnx.class_hierarchy5['__main__._TensorRelationScorer', 'aten.div.Tensor']Jî
+pkg.torch.onnx.fx_nodez%div_3 : [num_users=1] = call_function[target=torch.ops.aten.div.Tensor](args = (%sum_1, 27.712812921102035), kwargs = {})J+
+pkg.torch.onnx.name_scopes['', 'div_3']J™
+pkg.torch.onnx.stack_traceãFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 251, in forward
+    + (head_content * gate * tail_content).sum(-1) / (m.hidden_size**0.5)
+¯
+squeeze
+div_3add_177node_add_177"AddJF
+	namespace9: __main__._TensorRelationScorer/add_177: aten.add.TensorJW
+pkg.torch.onnx.class_hierarchy5['__main__._TensorRelationScorer', 'aten.add.Tensor']Jå
+pkg.torch.onnx.fx_noder%add_177 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%squeeze, %div_3), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'add_177']JÍ
+pkg.torch.onnx.stack_traceÀFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 250, in forward
+    score
+¯
+linear_2
+linear_3
+val_22cat_2
+node_cat_2"Concat*
+axisˇˇˇˇˇˇˇˇˇ†JE
+	namespace8: __main__._TensorRelationScorer/cat_2: aten.cat.defaultJX
+pkg.torch.onnx.class_hierarchy6['__main__._TensorRelationScorer', 'aten.cat.default']Jû
+pkg.torch.onnx.fx_nodeÉ%cat_2 : [num_users=1] = call_function[target=torch.ops.aten.cat.default](args = ([%linear_2, %linear_3, %index], -1), kwargs = {})J+
+pkg.torch.onnx.name_scopes['', 'cat_2']Jπ
+pkg.torch.onnx.stack_traceöFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 252, in forward
+    + m.content_linear(torch.cat((head_content, tail_content, rel), dim=-1)).squeeze(-1)
+⁄	
+cat_2
+m.content_linear.weight
+m.content_linear.biaslinear_5node_linear_5"Gemm*
+beta  Ä?†*
+transB†*
+alpha  Ä?†*
+transA †J|
+	namespaceo: __main__._TensorRelationScorer/m.content_linear: torch.nn.modules.linear.Linear/linear_5: aten.linear.defaultJ}
+pkg.torch.onnx.class_hierarchy[['__main__._TensorRelationScorer', 'torch.nn.modules.linear.Linear', 'aten.linear.default']Jæ
+pkg.torch.onnx.fx_node£%linear_5 : [num_users=1] = call_function[target=torch.ops.aten.linear.default](args = (%cat_2, %p_m_content_linear_weight, %p_m_content_linear_bias), kwargs = {})JB
+pkg.torch.onnx.name_scopes$['', 'm.content_linear', 'linear_5']J¿
+pkg.torch.onnx.stack_trace°File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 252, in forward
+    + m.content_linear(torch.cat((head_content, tail_content, rel), dim=-1)).squeeze(-1)
+  File "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/.venv/lib/python3.12/site-packages/torch/nn/modules/linear.py", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+◊
+linear_5
+val_17	squeeze_1node_squeeze_1"SqueezeJI
+	namespace<: __main__._TensorRelationScorer/squeeze_1: aten.squeeze.dimJX
+pkg.torch.onnx.class_hierarchy6['__main__._TensorRelationScorer', 'aten.squeeze.dim']Jå
+pkg.torch.onnx.fx_noder%squeeze_1 : [num_users=1] = call_function[target=torch.ops.aten.squeeze.dim](args = (%linear_5, -1), kwargs = {})J/
+pkg.torch.onnx.name_scopes['', 'squeeze_1']Jπ
+pkg.torch.onnx.stack_traceöFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 252, in forward
+    + m.content_linear(torch.cat((head_content, tail_content, rel), dim=-1)).squeeze(-1)
+Ä
+add_177
+	squeeze_1add_188node_add_188"AddJF
+	namespace9: __main__._TensorRelationScorer/add_188: aten.add.TensorJW
+pkg.torch.onnx.class_hierarchy5['__main__._TensorRelationScorer', 'aten.add.Tensor']Jê
+pkg.torch.onnx.fx_nodev%add_188 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_177, %squeeze_1), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'add_188']JÍ
+pkg.torch.onnx.stack_traceÀFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 250, in forward
+    score
+ 
+bitwise_and_3bitwise_notnode_bitwise_not"NotJS
+	namespaceF: __main__._TensorRelationScorer/bitwise_not: aten.bitwise_not.defaultJ`
+pkg.torch.onnx.class_hierarchy>['__main__._TensorRelationScorer', 'aten.bitwise_not.default']Jò
+pkg.torch.onnx.fx_node~%bitwise_not : [num_users=1] = call_function[target=torch.ops.aten.bitwise_not.default](args = (%bitwise_and_3,), kwargs = {})J1
+pkg.torch.onnx.name_scopes['', 'bitwise_not']Jè
+pkg.torch.onnx.stack_traceFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 254, in forward
+    return score.masked_fill(~pair_valid, 0.0)
+·
+bitwise_not
+val_115
+add_188scoresnode_masked_fill"WhereJR
+	namespaceE: __main__._TensorRelationScorer/masked_fill: aten.masked_fill.ScalarJ_
+pkg.torch.onnx.class_hierarchy=['__main__._TensorRelationScorer', 'aten.masked_fill.Scalar']J§
+pkg.torch.onnx.fx_nodeâ%masked_fill : [num_users=1] = call_function[target=torch.ops.aten.masked_fill.Scalar](args = (%add_188, %bitwise_not, 0.0), kwargs = {})J1
+pkg.torch.onnx.name_scopes['', 'masked_fill']Jè
+pkg.torch.onnx.stack_traceFile "/private/tmp/claude-501/-Users-igorilic-Desktop-cognee2-cognee/45184003-45ad-45e0-806b-140e737c22b3/scratchpad/wt_onnx/cognee/tasks/graph/gliner_demo/onnx/export.py", line 254, in forward
+    return score.masked_fill(~pair_valid, 0.0)
+main_graph*GÄÇ$Bm.mlp.0.weightj+
+locationsupplied-from-model.safetensorsp*BÄBm.mlp.0.biasj+
+locationsupplied-from-model.safetensorsp*FÄBm.mlp.3.weightj+
+locationsupplied-from-model.safetensorsp*ABm.mlp.3.biasj+
+locationsupplied-from-model.safetensorsp*YÄÄB m.head_content_projection.weightj+
+locationsupplied-from-model.safetensorsp*TÄBm.head_content_projection.biasj+
+locationsupplied-from-model.safetensorsp*YÄÄB m.tail_content_projection.weightj+
+locationsupplied-from-model.safetensorsp*TÄBm.tail_content_projection.biasj+
+locationsupplied-from-model.safetensorsp*WÄÄBm.relation_content_gate.weightj+
+locationsupplied-from-model.safetensorsp*RÄBm.relation_content_gate.biasj+
+locationsupplied-from-model.safetensorsp*OÄBm.content_linear.weightj+
+locationsupplied-from-model.safetensorsp*JBm.content_linear.biasj+
+locationsupplied-from-model.safetensorsp*BminimumJ       *Bval_10J        *Bval_115J    *Bval_17Jˇˇˇˇˇˇˇˇ*&Bval_68J                     *Bval_113J◊≥›AZ€
+boundary_states
+
+
+l
+Ä"=
+/pkg.torch.export.graph_signature.InputSpec.kind
+USER_INPUT"=
+5pkg.torch.export.graph_signature.InputSpec.persistentNone"4
+!pkg.torch.onnx.original_node_nameboundary_statesZÁ
+relation_query_states
+
+
+r
+Ä"=
+/pkg.torch.export.graph_signature.InputSpec.kind
+USER_INPUT"=
+5pkg.torch.export.graph_signature.InputSpec.persistentNone":
+!pkg.torch.onnx.original_node_namerelation_query_statesZ 
+batch_index
+	
+p"=
+/pkg.torch.export.graph_signature.InputSpec.kind
+USER_INPUT"=
+5pkg.torch.export.graph_signature.InputSpec.persistentNone"0
+!pkg.torch.onnx.original_node_namebatch_indexZ–
+relation_index
+	
+p"=
+/pkg.torch.export.graph_signature.InputSpec.kind
+USER_INPUT"=
+5pkg.torch.export.graph_signature.InputSpec.persistentNone"3
+!pkg.torch.onnx.original_node_namerelation_indexZ»
+
+head_start
+	
+p"=
+/pkg.torch.export.graph_signature.InputSpec.kind
+USER_INPUT"=
+5pkg.torch.export.graph_signature.InputSpec.persistentNone"/
+!pkg.torch.onnx.original_node_name
+head_startZƒ
+head_end
+	
+p"=
+/pkg.torch.export.graph_signature.InputSpec.kind
+USER_INPUT"=
+5pkg.torch.export.graph_signature.InputSpec.persistentNone"-
+!pkg.torch.onnx.original_node_namehead_endZ»
+
+tail_start
+	
+p"=
+/pkg.torch.export.graph_signature.InputSpec.kind
+USER_INPUT"=
+5pkg.torch.export.graph_signature.InputSpec.persistentNone"/
+!pkg.torch.onnx.original_node_name
+tail_startZƒ
+tail_end
+	
+p"=
+/pkg.torch.export.graph_signature.InputSpec.kind
+USER_INPUT"=
+5pkg.torch.export.graph_signature.InputSpec.persistentNone"-
+!pkg.torch.onnx.original_node_nametail_endZ∆
+	pair_mask
+		
+p"=
+/pkg.torch.export.graph_signature.InputSpec.kind
+USER_INPUT"=
+5pkg.torch.export.graph_signature.InputSpec.persistentNone".
+!pkg.torch.onnx.original_node_name	pair_maskbà
+scores
+	
+p"?
+0pkg.torch.export.graph_signature.OutputSpec.kindUSER_OUTPUT"0
+!pkg.torch.onnx.original_node_namemasked_fillj÷
+m.mlp.0.weight
+
+
+Ä
+Ç$"<
+/pkg.torch.export.graph_signature.InputSpec.kind	PARAMETER"=
+5pkg.torch.export.graph_signature.InputSpec.persistentNone"5
+!pkg.torch.onnx.original_node_namep_m_mlp_0_weightjÕ
+m.mlp.0.bias
+	
+Ä"<
+/pkg.torch.export.graph_signature.InputSpec.kind	PARAMETER"=
+5pkg.torch.export.graph_signature.InputSpec.persistentNone"3
+!pkg.torch.onnx.original_node_namep_m_mlp_0_biasj’
+m.mlp.3.weight
+	
+
+Ä"<
+/pkg.torch.export.graph_signature.InputSpec.kind	PARAMETER"=
+5pkg.torch.export.graph_signature.InputSpec.persistentNone"5
+!pkg.torch.onnx.original_node_namep_m_mlp_3_weightjÃ
+m.mlp.3.bias
+
+
+"<
+/pkg.torch.export.graph_signature.InputSpec.kind	PARAMETER"=
+5pkg.torch.export.graph_signature.InputSpec.persistentNone"3
+!pkg.torch.onnx.original_node_namep_m_mlp_3_biasj˙
+ m.head_content_projection.weight
+
+
+Ä
+Ä"<
+/pkg.torch.export.graph_signature.InputSpec.kind	PARAMETER"=
+5pkg.torch.export.graph_signature.InputSpec.persistentNone"G
+!pkg.torch.onnx.original_node_name"p_m_head_content_projection_weightjÒ
+m.head_content_projection.bias
+	
+Ä"<
+/pkg.torch.export.graph_signature.InputSpec.kind	PARAMETER"=
+5pkg.torch.export.graph_signature.InputSpec.persistentNone"E
+!pkg.torch.onnx.original_node_name p_m_head_content_projection_biasj˙
+ m.tail_content_projection.weight
+
+
+Ä
+Ä"<
+/pkg.torch.export.graph_signature.InputSpec.kind	PARAMETER"=
+5pkg.torch.export.graph_signature.InputSpec.persistentNone"G
+!pkg.torch.onnx.original_node_name"p_m_tail_content_projection_weightjÒ
+m.tail_content_projection.bias
+	
+Ä"<
+/pkg.torch.export.graph_signature.InputSpec.kind	PARAMETER"=
+5pkg.torch.export.graph_signature.InputSpec.persistentNone"E
+!pkg.torch.onnx.original_node_name p_m_tail_content_projection_biasjˆ
+m.relation_content_gate.weight
+
+
+Ä
+Ä"<
+/pkg.torch.export.graph_signature.InputSpec.kind	PARAMETER"=
+5pkg.torch.export.graph_signature.InputSpec.persistentNone"E
+!pkg.torch.onnx.original_node_name p_m_relation_content_gate_weightjÌ
+m.relation_content_gate.bias
+	
+Ä"<
+/pkg.torch.export.graph_signature.InputSpec.kind	PARAMETER"=
+5pkg.torch.export.graph_signature.InputSpec.persistentNone"C
+!pkg.torch.onnx.original_node_namep_m_relation_content_gate_biasjÁ
+m.content_linear.weight
+	
+
+Ä"<
+/pkg.torch.export.graph_signature.InputSpec.kind	PARAMETER"=
+5pkg.torch.export.graph_signature.InputSpec.persistentNone">
+!pkg.torch.onnx.original_node_namep_m_content_linear_weightjﬁ
+m.content_linear.bias
+
+
+"<
+/pkg.torch.export.graph_signature.InputSpec.kind	PARAMETER"=
+5pkg.torch.export.graph_signature.InputSpec.persistentNone"<
+!pkg.torch.onnx.original_node_namep_m_content_linear_biasju
+minimum
+ "b
+$pkg.onnxscript.optimizer.folded_from:['clone', 'clone_1', 'lifted_tensor_0', 'lifted_tensor_1']jC
+val_10
+ "1
+$pkg.onnxscript.optimizer.folded_from	['val_9']jF
+val_115
+ "3
+$pkg.onnxscript.optimizer.folded_from['val_114']j
+val_17
+
+
+j
+val_68
+
+
+j
+val_113
+ j
+val_0
+
+
+j
+sym_size_int_11
+ j
+val_1
+
+
+j
+sym_size_int_12
+ j
+clamp
+	
+pj
+	minimum_1
+	
+pj
+clamp_1
+	
+pj
+sub_4
+ j
+	minimum_2
+	
+pj
+ge
+		
+pj
+lt
+		
+pj
+bitwise_and
+		
+pj
+ge_1
+		
+pj
+bitwise_and_1
+		
+pj
+lt_1
+		
+pj
+bitwise_and_2
+		
+pj
+bitwise_and_3
+		
+pj
+val_18
+	
+p
+j
+val_20
+	
+p
+j
+val_21
+	
+p
+j
+val_22
+
+
+p
+Äj
+sub_15
+	
+pj
+_to_copy
+	
+pj
+clamp_2
+	
+pj
+sub_19
+ j
+clamp_3
+ j
+	minimum_3
+	
+pj
+val_31
+	
+p
+j
+val_32
+	
+p
+j
+val_33
+
+
+p
+Äj
+sub_22
+	
+pj
+clamp_4
+	
+pj
+	minimum_4
+	
+pj
+val_42
+	
+p
+j
+val_43
+	
+p
+j
+val_44
+
+
+p
+Äj
+clamp_6
+	
+pj
+	minimum_5
+	
+pj
+val_53
+	
+p
+j
+val_54
+	
+p
+j
+val_55
+
+
+p
+Äj
+sub_32
+	
+pj
+clamp_8
+	
+pj
+	minimum_6
+	
+pj
+val_64
+	
+p
+j
+val_65
+	
+p
+j
+val_66
+
+
+p
+Äj
+sign
+	
+pj
+	unsqueeze
+	
+p
+j
+abs_1
+	
+pj
+clamp_10
+ j
+
+_to_copy_1
+ j
+div
+	
+pj
+unsqueeze_1
+	
+p
+j
+cat
+
+
+p
+Ç$j
+linear
+
+
+p
+Äj
+gelu
+
+
+p
+Äj
+linear_1
+	
+p
+j
+squeeze
+	
+pj
+val_69
+
+
+
+Äj
+cumsum
+
+
+l
+Äj!
+cat_1
+
+
+l + 1
+Äj
+clamp_11
+	
+pj
+	minimum_7
+	
+pj
+val_77
+	
+p
+j
+val_78
+	
+p
+j
+val_79
+
+
+p
+Äj
+	minimum_8
+	
+pj
+val_87
+	
+p
+j
+val_88
+	
+p
+j
+val_89
+
+
+p
+Äj
+sub_56
+
+
+p
+Äj
+sub_58
+	
+pj
+	clamp_min
+	
+pj
+unsqueeze_2
+	
+p
+j
+
+_to_copy_2
+	
+p
+j
+div_1
+
+
+p
+Äj
+linear_2
+
+
+p
+Äj
+clamp_13
+	
+pj
+	minimum_9
+	
+pj
+val_98
+	
+p
+j
+val_99
+	
+p
+j
+val_100
+
+
+p
+Äj
+
+minimum_10
+	
+pj
+val_108
+	
+p
+j
+val_109
+	
+p
+j
+val_110
+
+
+p
+Äj
+sub_71
+
+
+p
+Äj
+sub_73
+	
+pj
+clamp_min_1
+	
+pj
+unsqueeze_3
+	
+p
+j
+
+_to_copy_3
+	
+p
+j
+div_2
+
+
+p
+Äj
+linear_3
+
+
+p
+Äj
+linear_4
+
+
+p
+Äj
+sigmoid
+
+
+p
+Äj
+mul_85
+
+
+p
+Äj
+mul_88
+
+
+p
+Äj
+sum_1
+	
+pj
+div_3
+	
+pj
+add_177
+	
+pj
+cat_2
+
+
+p
+Äj
+linear_5
+	
+p
+j
+	squeeze_1
+	
+pj
+add_188
+	
+pj
+bitwise_not
+		
+pÇÜ
+
+0pkg.torch.export.ExportedProgram.graph_signature—	
+# inputs
+p_m_mlp_0_weight: PARAMETER target='m.mlp.0.weight'
+p_m_mlp_0_bias: PARAMETER target='m.mlp.0.bias'
+p_m_mlp_3_weight: PARAMETER target='m.mlp.3.weight'
+p_m_mlp_3_bias: PARAMETER target='m.mlp.3.bias'
+p_m_head_content_projection_weight: PARAMETER target='m.head_content_projection.weight'
+p_m_head_content_projection_bias: PARAMETER target='m.head_content_projection.bias'
+p_m_tail_content_projection_weight: PARAMETER target='m.tail_content_projection.weight'
+p_m_tail_content_projection_bias: PARAMETER target='m.tail_content_projection.bias'
+p_m_relation_content_gate_weight: PARAMETER target='m.relation_content_gate.weight'
+p_m_relation_content_gate_bias: PARAMETER target='m.relation_content_gate.bias'
+p_m_content_linear_weight: PARAMETER target='m.content_linear.weight'
+p_m_content_linear_bias: PARAMETER target='m.content_linear.bias'
+c_lifted_tensor_0: CONSTANT_TENSOR target='lifted_tensor_0'
+c_lifted_tensor_1: CONSTANT_TENSOR target='lifted_tensor_1'
+boundary_states: USER_INPUT
+relation_query_states: USER_INPUT
+batch_index: USER_INPUT
+relation_index: USER_INPUT
+head_start: USER_INPUT
+head_end: USER_INPUT
+tail_start: USER_INPUT
+tail_end: USER_INPUT
+pair_mask: USER_INPUT
+
+# outputs
+masked_fill: USER_OUTPUT
+Ço
+2pkg.torch.export.ExportedProgram.range_constraints9{s2: VR[2, 16384], s62: VR[2, 1024], s13: VR[2, 1048576]}B
+ 

@@ -37,20 +37,21 @@ def backend_env(monkeypatch):
 # ---------------------------------------------------------------- no torch
 
 
-def test_the_onnx_path_imports_without_torch_transformers_or_gliner2():
+def test_the_onnx_path_imports_without_torch_or_gliner2():
     """Run in a fresh interpreter with those packages made unimportable."""
     script = textwrap.dedent(
         """
-        import importlib.abc, sys
-        class Block(importlib.abc.MetaPathFinder):
-            def find_spec(self, name, path, target=None):
-                if name.split(".")[0] in ("torch", "transformers", "gliner2"):
-                    raise ImportError(name)
-        sys.meta_path.insert(0, Block())
+        import sys
+        # How Python marks a package as absent (transformers does the same for
+        # torch): find_spec() answers None and ``import`` raises ImportError.
+        sys.modules["torch"] = None
+        sys.modules["gliner2"] = None
         import cognee.tasks.graph.gliner_demo.onnx.runtime
         import cognee.tasks.graph.gliner_demo.onnx._gliner2.models.boundary.engine
         import cognee.tasks.graph.gliner_demo.onnx._gliner2.processor
-        loaded = [m for m in ("torch", "transformers", "gliner2") if m in sys.modules]
+        # transformers parks a None placeholder at sys.modules["torch"] when torch is
+        # missing; only a real module counts as loaded.
+        loaded = [m for m in ("torch", "gliner2") if sys.modules.get(m) is not None]
         print("LOADED:" + ",".join(loaded))
         """
     )
@@ -82,35 +83,69 @@ def test_unknown_backend_is_an_error(backend_env):
         extractor_module.resolve_gliner_backend()
 
 
-# ---------------------------------------------------------------- export checks
+# ---------------------------------------------------------------- shipped graphs
 
 
-def _export_dir(tmp_path, **meta_overrides):
-    out = tmp_path / MODEL.replace("/", "--")
-    out.mkdir(parents=True)
+def test_graphs_for_the_default_model_ship_with_cognee_and_are_small():
+    directory = runtime.graphs_dir(MODEL)
+    meta = json.loads((directory / "meta.json").read_text())
+    assert meta["model"] == MODEL and len(meta["revision"]) == 40  # a pinned commit, not "main"
+    sizes = {g: (directory / f"{g}.onnx").stat().st_size for g in runtime.GRAPHS}
+    assert sum(sizes.values()) < 5 * 1024 * 1024, sizes  # weights come from model.safetensors
+    assert set(meta["weights"]) == set(runtime.GRAPHS)
+
+
+def test_a_model_without_shipped_graphs_says_how_to_create_them():
+    with pytest.raises(runtime.OnnxModelNotExportedError, match="onnx.export --model someone/else"):
+        runtime.load_onnx_extractor("someone/else")
+
+
+def test_graphs_from_another_gliner2_version_are_refused(monkeypatch, tmp_path):
+    directory = tmp_path / MODEL.replace("/", "--")
+    directory.mkdir()
     for graph in runtime.GRAPHS:
-        (out / graph).write_bytes(b"")
-    from cognee.tasks.graph.gliner_demo.onnx._gliner2 import __version__
-
-    (out / "meta.json").write_text(
-        json.dumps({"model": MODEL, "gliner2_version": __version__} | meta_overrides)
-    )
-    return out
-
-
-def test_missing_export_says_how_to_create_one(tmp_path):
-    with pytest.raises(runtime.OnnxModelNotExportedError, match="onnx.export --model"):
-        runtime.load_onnx_extractor(MODEL, tmp_path / "nothing-here")
-
-
-def test_an_export_of_another_model_is_refused(tmp_path):
-    with pytest.raises(RuntimeError, match="holds an export of someone/else"):
-        runtime.load_onnx_extractor(MODEL, _export_dir(tmp_path, model="someone/else"))
-
-
-def test_an_export_from_another_gliner2_version_is_refused(tmp_path):
+        (directory / f"{graph}.onnx").write_bytes(b"")
+    (directory / "meta.json").write_text(json.dumps({"model": MODEL, "gliner2_version": "1.9.0"}))
+    monkeypatch.setattr(runtime, "_GRAPHS_ROOT", tmp_path)
     with pytest.raises(RuntimeError, match="exported with gliner2 1.9.0"):
-        runtime.load_onnx_extractor(MODEL, _export_dir(tmp_path, gliner2_version="1.9.0"))
+        runtime.load_onnx_extractor(MODEL)
+
+
+def test_a_checkpoint_tensor_of_the_wrong_shape_is_refused(tmp_path):
+    recipe = {"w": ["layer.weight", False, [4, 8], "float32"]}
+    with pytest.raises(RuntimeError, match=r"expects float32\[4, 8\]"):
+        runtime.weighted_session(
+            tmp_path / "g.onnx", recipe, {"layer.weight": np.zeros((8, 4), np.float32)}
+        )
+
+
+def test_a_missing_checkpoint_tensor_is_refused(tmp_path):
+    with pytest.raises(RuntimeError, match="has no tensor layer.weight"):
+        runtime.weighted_session(
+            tmp_path / "g.onnx", {"w": ["layer.weight", False, [1], "float32"]}, {}
+        )
+
+
+def test_safetensors_reader_matches_the_format(tmp_path):
+    import struct
+
+    from cognee.tasks.graph.gliner_demo.onnx import safetensors_numpy
+
+    a = np.arange(6, dtype=np.float32).reshape(2, 3)
+    b = np.array([7], dtype=np.int64)
+    header = {
+        "a": {"dtype": "F32", "shape": [2, 3], "data_offsets": [0, a.nbytes]},
+        "b": {"dtype": "I64", "shape": [1], "data_offsets": [a.nbytes, a.nbytes + b.nbytes]},
+        "__metadata__": {"format": "np"},
+    }
+    raw = json.dumps(header).encode()
+    path = tmp_path / "t.safetensors"
+    path.write_bytes(struct.pack("<Q", len(raw)) + raw + a.tobytes() + b.tobytes())
+
+    loaded = safetensors_numpy.load(path)
+    assert set(loaded) == {"a", "b"}
+    np.testing.assert_array_equal(loaded["a"], a)
+    np.testing.assert_array_equal(loaded["b"], b)
 
 
 # ---------------------------------------------------------------- ONNX stand-ins

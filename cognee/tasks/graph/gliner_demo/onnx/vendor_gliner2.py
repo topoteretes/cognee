@@ -72,7 +72,6 @@ REWRITES = [
         rf"\1from {PACKAGE}._tensor import DataLoader",
     ),
     (r"^(\s*)import torch\b", rf"\1from {PACKAGE} import _tensor as torch"),
-    (r"^(\s*)from transformers import\b", rf"\1from {PACKAGE}._hf import"),
     (r"^(\s*)from gliner2(\.| import)", rf"\1from {PACKAGE}._gliner2\2"),
     (r"^(\s*)import gliner2\b", rf"\1import {PACKAGE}._gliner2 as gliner2"),
 ]

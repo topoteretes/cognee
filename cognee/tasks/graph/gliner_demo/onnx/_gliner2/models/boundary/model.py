@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 from cognee.tasks.graph.gliner_demo.onnx import _tensor as torch
 from cognee.tasks.graph.gliner_demo.onnx._tensor import nn
 from cognee.tasks.graph.gliner_demo.onnx._tensor import functional as F
-from cognee.tasks.graph.gliner_demo.onnx._hf import AutoConfig
+from transformers import AutoConfig
 from cognee.tasks.graph.gliner_demo.onnx._gliner2.configuration import BoundaryHeadSettings, ExtractorConfig
 from cognee.tasks.graph.gliner_demo.onnx._gliner2.models.base import (
     BaseExtractorModel,

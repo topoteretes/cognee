@@ -17,6 +17,13 @@ lengths >= 32 and the runtime pads shorter inputs with masked positions.
 
 The export verifies itself: every recorded example call is replayed through
 ONNX Runtime and compared with torch; any mismatch aborts before files are kept.
+
+What is kept is graphs without weights. Every weight in the three graphs is a
+tensor of the checkpoint's own ``model.safetensors`` at a pinned Hugging Face
+revision, as-is or transposed, so the runtime reads the weights from the file
+users download from Hugging Face anyway (the torch backend downloads the same
+file) and the shipped graphs are about 2 MB. The weight-free graphs are
+checked bit-identical to the full ones before they are written.
 """
 
 from __future__ import annotations
@@ -308,10 +315,10 @@ def _relation_inputs(args):
     )
 
 
-def _verify(path: Path, inputs, expected) -> float:
+def _verify(path: Path, inputs, expected, session=None) -> float:
     import onnxruntime as ort
 
-    session = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+    session = session or ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
     feeds = {i.name: x.numpy() for i, x in zip(session.get_inputs(), inputs)}
     got = session.run(None, feeds)
     expected = expected if isinstance(expected, (tuple, list)) else (expected,)
@@ -365,14 +372,76 @@ def _length_axes(head, example) -> list[list[list[int]]]:
     return axes
 
 
+# Weights not found in the checkpoint stay inside the graph. Only small
+# constants (shape vectors, a reshaped EOS state) may; anything bigger means a
+# weight was fused or rewritten and the checkpoint cannot supply it.
+MAX_EMBEDDED_BYTES = 64 * 1024
+
+
+def _strip_weights(graph_path: Path, checkpoint: dict, out_path: Path) -> dict:
+    """Write ``graph_path`` without the weights ``checkpoint`` holds; return the recipe.
+
+    The recipe maps each stripped initializer to ``[checkpoint tensor, transposed,
+    shape, dtype]``; the runtime checks shape and dtype before using a tensor.
+    """
+    import hashlib
+
+    import onnx
+    from onnx import TensorProto, numpy_helper
+
+    def key(array):
+        # The array's own shape: np.ascontiguousarray turns a 0-d scalar into a
+        # 1-element array, which would match a [1]-shaped checkpoint tensor the
+        # graph cannot take in place of its scalar.
+        return (
+            hashlib.sha1(np.ascontiguousarray(array).tobytes()).hexdigest(),
+            str(array.dtype),
+            tuple(array.shape),
+        )
+
+    as_is = {key(v): name for name, v in checkpoint.items()}
+    transposed = {key(v.T): name for name, v in checkpoint.items() if v.ndim == 2}
+    model = onnx.load(str(graph_path))
+    recipe, embedded = {}, 0
+    for init in model.graph.initializer:
+        array = numpy_helper.to_array(init)
+        k = key(array)
+        if k in as_is:
+            recipe[init.name] = [as_is[k], False, list(array.shape), str(array.dtype)]
+        elif array.ndim == 2 and k in transposed:
+            recipe[init.name] = [transposed[k], True, list(array.shape), str(array.dtype)]
+        else:
+            embedded += array.nbytes
+            continue
+        init.ClearField("raw_data")
+        init.ClearField("float_data")
+        init.data_location = TensorProto.EXTERNAL
+        del init.external_data[:]
+        entry = init.external_data.add()
+        entry.key, entry.value = "location", "supplied-from-model.safetensors"
+    if embedded > MAX_EMBEDDED_BYTES:
+        raise RuntimeError(
+            f"{graph_path.name}: {embedded} bytes of weights are not tensors of the checkpoint; "
+            "the weight-free graph would not reproduce it"
+        )
+    onnx.save(model, str(out_path))
+    return recipe
+
+
 def export(model_name: str, out_dir: Path) -> Path:
     from importlib.metadata import version
 
+    from gliner2 import AutoExtractor
+    from huggingface_hub import hf_hub_download, model_info
     from torch.export import Dim
 
-    from ..extractor import load_extractor
+    from . import safetensors_numpy
+    from .runtime import weighted_session
 
-    extractor = load_extractor(model_name)
+    # Pin the checkpoint: the shipped graphs name its tensors, so the runtime must
+    # read exactly this revision's model.safetensors.
+    revision = model_info(model_name).sha
+    extractor = AutoExtractor.from_pretrained(model_name, revision=revision)
     extractor.eval()
     torch.set_grad_enabled(False)
     calls = _record_calls(extractor)
@@ -469,8 +538,56 @@ def export(model_name: str, out_dir: Path) -> Path:
                 if len(a[3])
             ],
         }
+        checkpoint = safetensors_numpy.load(
+            hf_hub_download(model_name, "model.safetensors", revision=revision)
+        )
+        templates = tmp / "templates"
+        templates.mkdir()
+        recipes = {}
+        for graph in ("encoder", "boundary_head", "relation_scorer"):
+            recipes[graph] = _strip_weights(
+                tmp / f"{graph}.onnx", checkpoint, templates / f"{graph}.onnx"
+            )
+
+        def full_and_template(graph):
+            import onnxruntime as ort
+
+            full = ort.InferenceSession(
+                str(tmp / f"{graph}.onnx"), providers=["CPUExecutionProvider"]
+            )
+            template, _ = weighted_session(templates / f"{graph}.onnx", recipes[graph], checkpoint)
+            return full, template
+
+        def identical(graph, inputs):
+            full, template = full_and_template(graph)
+            feeds = {i.name: x.numpy() for i, x in zip(full.get_inputs(), inputs)}
+            return all(
+                np.array_equal(a, b)
+                for a, b in zip(full.run(None, feeds), template.run(None, feeds))
+            )
+
+        checks = (
+            [("encoder", enc_in)]
+            + [
+                ("boundary_head", tuple(a[:4]))
+                for a, _, _ in calls["boundary_head"]
+                if a[0].shape[1] >= MIN_TEXT_LENGTH
+            ]
+            + [
+                ("relation_scorer", _relation_inputs(a))
+                for a, _, _ in calls["relation_scorer"]
+                if len(a[3])
+            ]
+        )
+        for graph, inputs in checks:
+            if not identical(graph, inputs):
+                raise RuntimeError(
+                    f"{graph}: the weight-free graph does not reproduce the full export"
+                )
+
         meta = {
             "model": model_name,
+            "revision": revision,
             "gliner2_version": version("gliner2"),
             "architecture": "boundary",
             "opset": OPSET,
@@ -479,9 +596,10 @@ def export(model_name: str, out_dir: Path) -> Path:
             "boundary_head_length_axes": _length_axes(extractor.boundary_head, head_in),
             "verification_max_abs_diff": {k: max(v) if v else None for k, v in report.items()},
         }
-        (tmp / "meta.json").write_text(json.dumps(meta, indent=1))
+        meta["weights"] = recipes
+        (templates / "meta.json").write_text(json.dumps(meta, indent=1) + "\n")
         out_dir.mkdir(parents=True, exist_ok=True)
-        for item in tmp.iterdir():
+        for item in templates.iterdir():
             shutil.move(str(item), str(out_dir / item.name))
         return out_dir
     finally:
@@ -490,15 +608,15 @@ def export(model_name: str, out_dir: Path) -> Path:
 
 def main(argv: list[str] | None = None) -> None:
     from ..extractor import DEFAULT_MODEL
-    from .runtime import default_onnx_dir
+    from .runtime import graphs_dir
 
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args(argv)
-    out = export(args.model, args.out or default_onnx_dir(args.model))
+    out = export(args.model, args.out or graphs_dir(args.model))
     meta = json.loads((out / "meta.json").read_text())
-    print(f"exported {args.model} to {out}")
+    print(f"exported {args.model} at revision {meta['revision']} to {out}")
     print("verification (max abs diff vs torch):", meta["verification_max_abs_diff"])
 
 

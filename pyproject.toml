@@ -62,6 +62,10 @@ dependencies = [
     # Local CPU embeddings (onnxruntime, ~65 MB): the embedder cognee runs on when no
     # LLM key and no EMBEDDING_* settings are configured, so a bare install can ingest.
     "fastembed<=0.8.0",
+    # Tokenizers and configs only, never torch: exact chunk sizing for the local
+    # fastembed embedder and the GLiNER ONNX path (GLINER_BACKEND=onnx). <5 matches
+    # gliner2 and docling-full, so every install resolves one version.
+    "transformers>=4.55,<5",
     # onnxruntime 1.23.2 only ships wheels through cp313; cp314 wheels start
     # at onnxruntime 1.24.1. Split by python_version so existing 3.10–3.13
     # users keep the pinned version and 3.14 picks up the first cp314-capable

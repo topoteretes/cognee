@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, Dict, Tuple, List, Optional
 from cognee.tasks.graph.gliner_demo.onnx import _tensor as torch
-from cognee.tasks.graph.gliner_demo.onnx._hf import AutoTokenizer
+from transformers import AutoTokenizer
 
 from cognee.tasks.graph.gliner_demo.onnx._gliner2.processing.word_splitter import (  # noqa: F401 - public re-exports
     CharLevelSplitter,

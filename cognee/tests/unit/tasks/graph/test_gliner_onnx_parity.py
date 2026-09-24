@@ -1,8 +1,7 @@
 """Torch vs ONNX Runtime parity on the real GLiNER demo model (opt-in).
 
-Needs the model and an export; run with:
+Needs gliner2 (the ``gliner`` extra) and downloads the model; run with:
 
-    python -m cognee.tasks.graph.gliner_demo.onnx.export
     GLINER_ONNX_PARITY=1 pytest cognee/tests/unit/tasks/graph/test_gliner_onnx_parity.py
 """
 
@@ -12,7 +11,7 @@ import pytest
 
 pytestmark = pytest.mark.skipif(
     os.getenv("GLINER_ONNX_PARITY") != "1",
-    reason="set GLINER_ONNX_PARITY=1 (needs the model and an ONNX export)",
+    reason="set GLINER_ONNX_PARITY=1 (needs gliner2 and downloads the model)",
 )
 
 TEXTS = [

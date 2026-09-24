@@ -2,53 +2,78 @@
 
 ``load_onnx_extractor`` builds gliner2's boundary extractor from the copied,
 torch-free gliner2 modules in ``_gliner2`` (tensors are numpy, see
-``_tensor``), the checkpoint's ``config.json`` and ``tokenizer.json``, and the
-three ONNX graphs ``export.py`` writes: the DeBERTa encoder, the boundary head
-and the relation scorer. Tokenization, batching, windowing and decoding are
-gliner2's own code, so the output matches the torch backend up to float
-rounding. Exporting needs torch once; running needs onnxruntime, tokenizers
-and numpy, which cognee already depends on.
+``_tensor``) and three ONNX graphs shipped with cognee in ``graphs/<model>``:
+the DeBERTa encoder, the boundary head and the relation scorer. The graphs
+carry no weights (about 2 MB together). Their weights are the checkpoint's own
+``model.safetensors``, downloaded from Hugging Face at the revision the graphs
+were exported against — the file the torch backend downloads too — and read
+with numpy. Tokenization, batching, windowing and decoding are gliner2's own
+code, so the output matches the torch backend up to float rounding. Running
+needs onnxruntime, transformers (tokenizer and config only, no torch),
+huggingface_hub and numpy, all core dependencies; only exporting new graphs
+needs torch.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 
-from . import _tensor
+from . import _tensor, safetensors_numpy
 from ._tensor import _t
 from .tree import unflatten
 
-ONNX_DIR_ENV = "GLINER_ONNX_DIR"
-GRAPHS = ("encoder.onnx", "boundary_head.onnx", "relation_scorer.onnx")
+GRAPHS = ("encoder", "boundary_head", "relation_scorer")
+_GRAPHS_ROOT = Path(__file__).resolve().parent / "graphs"
 _VENDORED = "cognee.tasks.graph.gliner_demo.onnx._gliner2"
 
 
 class OnnxModelNotExportedError(RuntimeError):
-    """The ONNX backend was selected but no export exists for this model."""
+    """The ONNX backend was selected for a model cognee ships no graphs for."""
 
-    def __init__(self, model_name: str, onnx_dir: Path):
+    def __init__(self, model_name: str):
+        shipped = sorted(p.parent.name.replace("--", "/") for p in _GRAPHS_ROOT.glob("*/meta.json"))
         super().__init__(
-            f"GLINER_BACKEND=onnx needs an ONNX export of {model_name} in {onnx_dir}. "
-            "Create it once, on a machine with the `gliner` extra (torch), with: "
-            f"python -m cognee.tasks.graph.gliner_demo.onnx.export --model {model_name}"
+            f"GLINER_BACKEND=onnx has no ONNX graphs for {model_name}; cognee ships graphs for "
+            f"{', '.join(shipped) or 'no model'}. Graphs for another model are created, with the "
+            f"`gliner` extra (torch), by: python -m cognee.tasks.graph.gliner_demo.onnx.export --model {model_name}"
         )
 
 
-def default_onnx_dir(model_name: str) -> Path:
-    base = os.getenv(ONNX_DIR_ENV)
-    root = Path(base).expanduser() if base else Path.home() / ".cognee" / "models" / "gliner-onnx"
-    return root / model_name.replace("/", "--")
+def graphs_dir(model_name: str) -> Path:
+    return _GRAPHS_ROOT / model_name.replace("/", "--")
 
 
-def _session(path: Path):
+def weighted_session(template: Path, recipe: dict, checkpoint: dict):
+    """An ONNX Runtime session for a weight-free graph, weights taken from ``checkpoint``.
+
+    Returns the session and the arrays backing its weights, which must outlive it.
+    """
     import onnxruntime as ort
 
-    return ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+    names, values, arrays = [], [], []
+    for initializer, (tensor, transposed, shape, dtype) in recipe.items():
+        if tensor not in checkpoint:
+            raise RuntimeError(
+                f"model.safetensors has no tensor {tensor} (needed by {template.name})"
+            )
+        array = checkpoint[tensor].T if transposed else checkpoint[tensor]
+        if list(array.shape) != list(shape) or str(array.dtype) != dtype:
+            raise RuntimeError(
+                f"{tensor} in model.safetensors is {array.dtype}{list(array.shape)}; "
+                f"{template.name} expects {dtype}{list(shape)}"
+            )
+        array = np.ascontiguousarray(array)
+        arrays.append(array)
+        names.append(initializer)
+        values.append(ort.OrtValue.ortvalue_from_numpy(array))
+    options = ort.SessionOptions()
+    options.add_external_initializers(names, values)
+    session = ort.InferenceSession(str(template), options, providers=["CPUExecutionProvider"])
+    return session, (arrays, values)
 
 
 def _run(session, *arrays) -> list[np.ndarray]:
@@ -166,63 +191,73 @@ class _NoRecordDecoder:
         raise NotImplementedError("record extraction is not supported by the ONNX GLiNER path")
 
 
-def _checkpoint_file(model_name: str, name: str) -> str:
-    if os.path.isdir(model_name):
-        return str(Path(model_name) / name)
+def _checkpoint_file(model_name: str, name: str, revision: str) -> str:
     from huggingface_hub import hf_hub_download
 
-    return hf_hub_download(model_name, name)
+    return hf_hub_download(model_name, name, revision=revision)
 
 
-def load_onnx_extractor(model_name: str, onnx_dir: Path | None = None):
-    """Build the torch-free boundary extractor for ``model_name`` from its ONNX export."""
+def load_onnx_extractor(model_name: str):
+    """Build the torch-free boundary extractor for ``model_name`` from its shipped graphs."""
     from ._gliner2 import __version__ as vendored_version
     from ._gliner2.configuration import BoundaryHeadSettings, ExtractorConfig
+    from ._gliner2.models.base import load_extractor_tokenizer
     from ._gliner2.models.boundary.engine import BoundaryExtractor
     from ._gliner2.models.boundary.relations import (
         RelationProposalSettings,
         TypedRelationPairGenerator,
     )
     from ._gliner2.processor import SchemaTransformer
-    from ._hf import AutoTokenizer
 
-    onnx_dir = onnx_dir or default_onnx_dir(model_name)
-    meta_path = onnx_dir / "meta.json"
-    if not meta_path.is_file() or not all((onnx_dir / g).is_file() for g in GRAPHS):
-        raise OnnxModelNotExportedError(model_name, onnx_dir)
+    directory = graphs_dir(model_name)
+    meta_path = directory / "meta.json"
+    if not meta_path.is_file() or not all((directory / f"{g}.onnx").is_file() for g in GRAPHS):
+        raise OnnxModelNotExportedError(model_name)
     meta = json.loads(meta_path.read_text())
     if meta["model"] != model_name:
-        raise RuntimeError(f"{onnx_dir} holds an export of {meta['model']}, not {model_name}")
+        raise RuntimeError(f"{directory} holds graphs for {meta['model']}, not {model_name}")
     if meta["gliner2_version"] != vendored_version:
         raise RuntimeError(
-            f"{onnx_dir} was exported with gliner2 {meta['gliner2_version']}; this cognee runs "
+            f"{directory} was exported with gliner2 {meta['gliner2_version']}; this cognee runs "
             f"the gliner2 {vendored_version} inference code. Re-export with gliner2 "
             f"{vendored_version}: python -m cognee.tasks.graph.gliner_demo.onnx.export --model {model_name}"
         )
+    revision = meta["revision"]
 
-    config = ExtractorConfig.from_pretrained(_checkpoint_file(model_name, "config.json"))
+    config = ExtractorConfig.from_pretrained(_checkpoint_file(model_name, "config.json", revision))
     if config.architecture != "boundary":
         raise ValueError(
             f"the ONNX GLiNER path supports the boundary architecture, not {config.architecture!r}"
         )
     settings = BoundaryHeadSettings(**config.boundary_head)
     encoder_config = SimpleNamespace(
-        **json.loads(Path(_checkpoint_file(model_name, "encoder_config/config.json")).read_text())
+        **json.loads(
+            Path(_checkpoint_file(model_name, "encoder_config/config.json", revision)).read_text()
+        )
     )
+    checkpoint = safetensors_numpy.load(_checkpoint_file(model_name, "model.safetensors", revision))
+    sessions = {
+        graph: weighted_session(directory / f"{graph}.onnx", meta["weights"][graph], checkpoint)
+        for graph in GRAPHS
+    }
 
     extractor = BoundaryExtractor.__new__(BoundaryExtractor)
     extractor.config = config
+    # gliner2's own loader, as the torch path uses it: this checkpoint's legacy
+    # special-token metadata needs its compatibility retry.
+    tokenizer_dir = str(
+        Path(_checkpoint_file(model_name, "tokenizer_config.json", revision)).parent
+    )
+    _checkpoint_file(model_name, "tokenizer.json", revision)
     extractor.processor = SchemaTransformer(
-        tokenizer=AutoTokenizer.from_pretrained(model_name), token_pooling=config.token_pooling
+        tokenizer=load_extractor_tokenizer(tokenizer_dir), token_pooling=config.token_pooling
     )
     extractor.hidden_size = encoder_config.hidden_size
     extractor.boundary_settings = settings
     extractor.enable_records = settings.enable_records
     extractor.enable_relations = settings.enable_relations
-    extractor.encoder = OnnxEncoder(_session(onnx_dir / "encoder.onnx"), encoder_config)
-    extractor.boundary_head = OnnxBoundaryHead(
-        _session(onnx_dir / "boundary_head.onnx"), meta, settings
-    )
+    extractor.encoder = OnnxEncoder(sessions["encoder"][0], encoder_config)
+    extractor.boundary_head = OnnxBoundaryHead(sessions["boundary_head"][0], meta, settings)
     extractor.record_decoder = _NoRecordDecoder()
     if settings.enable_relations:
         extractor.relation_pair_generator = TypedRelationPairGenerator(
@@ -233,6 +268,8 @@ def load_onnx_extractor(model_name: str, onnx_dir: Path | None = None):
                 argument_threshold=settings.relation_argument_proposal_threshold,
             )
         )
-        extractor.relation_scorer = OnnxRelationScorer(_session(onnx_dir / "relation_scorer.onnx"))
+        extractor.relation_scorer = OnnxRelationScorer(sessions["relation_scorer"][0])
     extractor.name_or_path = model_name
+    # The weight arrays back the sessions' initializers; keep them alive with it.
+    extractor._onnx_weights = [keep for _, keep in sessions.values()]
     return extractor
