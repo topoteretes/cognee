@@ -4,6 +4,14 @@
 
 ### Added
 
+- Streamed `GET /api/v1/visualize/json`: with `Accept: text/event-stream` or `stream=true` the
+  graph arrives as server-sent events, `meta`, then one `chunk` per read (compact nodes and links,
+  no property bag), then `summary` events with `importance`, `label_priority` and
+  `color_maps.node_set`, then `done`. Every link's endpoints are sent before it. `max_nodes` goes
+  up to 20000 when streamed; the JSON response keeps its 5000 cap and rejects more exactly as
+  before, and `full=true` cannot be streamed. A process holds at most 8 streams at once and
+  answers 503 beyond that. Without opting in the JSON response is unchanged (SDK-787).
+
 - `GraphDBInterface.iter_bounded_neighborhood(node_ids, depth, max_nodes, chunk_size=2000,
   property_keys=None)`: the seeds' neighbourhood capped at `max_nodes`, yielded in chunks.
   Seeds come first, then nodes by hop distance; every edge between two members arrives
