@@ -4,12 +4,16 @@ from uuid import uuid4
 import pytest
 
 from cognee.modules.users.exceptions import PermissionDeniedError, TenantNotFoundError
-from cognee.modules.users.permissions.methods import has_user_management_permission
+from cognee.modules.users.permissions.methods import (
+    has_grant_permission,
+    has_user_management_permission,
+)
 from cognee.modules.users.permissions.permission_types import MANAGE_USERS
 
 # Module where get_effective_capabilities and get_user_role_names_in_tenant are
-# looked up when has_user_management_permission runs
-_perm_mod = importlib.import_module(has_user_management_permission.__module__)
+# looked up when has_user_management_permission runs: it delegates to
+# has_grant_permission for MANAGE_USERS
+_perm_mod = importlib.import_module(has_grant_permission.__module__)
 
 # Module where get_tenant is looked up when the capability resolution runs
 _cap_mod = importlib.import_module(

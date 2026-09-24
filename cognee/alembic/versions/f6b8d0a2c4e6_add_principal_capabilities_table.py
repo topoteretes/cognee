@@ -1,7 +1,7 @@
 """add principal_capabilities table
 
 Revision ID: f6b8d0a2c4e6
-Revises: d4e6f8a0b2c3
+Revises: e7f9a1c3d5b8
 Create Date: 2026-08-03 00:00:00.000000
 
 Capabilities (tenant-scoped actions such as "manage_users") get a table of
@@ -18,18 +18,23 @@ directly, and a grant leaking across tenants becomes unrepresentable.
 No data migration: nothing wrote capability rows before this table existed.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
 
 revision: str = "f6b8d0a2c4e6"
-down_revision: Union[str, None] = "d4e6f8a0b2c3"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "e7f9a1c3d5b8"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    # Existence-guarded like every revision in the chain, so it no-ops on a
+    # database that already has the table.
+    if "principal_capabilities" in sa.inspect(op.get_bind()).get_table_names():
+        return
+
     op.create_table(
         "principal_capabilities",
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
@@ -50,5 +55,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if "principal_capabilities" not in sa.inspect(op.get_bind()).get_table_names():
+        return
+
     op.drop_index("ix_principal_capabilities_tenant_id", table_name="principal_capabilities")
     op.drop_table("principal_capabilities")

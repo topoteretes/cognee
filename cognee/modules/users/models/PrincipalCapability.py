@@ -28,8 +28,21 @@ class PrincipalCapability(Base):
 
     principal_id = Column(UUID, ForeignKey("principals.id", ondelete="CASCADE"), primary_key=True)
 
-    tenant_id = Column(UUID, ForeignKey("tenants.id", ondelete="CASCADE"), primary_key=True)
+    # Indexed on its own because resolution asks what a set of principals
+    # holds in one tenant, which the primary key (leading on principal_id)
+    # does not serve. Migration f6b8d0a2c4e6 creates the same index.
+    tenant_id = Column(
+        UUID, ForeignKey("tenants.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
 
     # A name from the CAPABILITY_TYPES catalog, not a foreign key: the catalog
     # is code, because the code is what gives each name meaning.
     capability = Column(String, primary_key=True)
+
+    # Who made the grant, for tracing how a principal came to hold a
+    # capability. Nullable because a grant written straight through the SDK has
+    # no requester. The grant outlives the person who made it: removing them
+    # does not take capabilities away from others. On Postgres the foreign key
+    # sets this to NULL when they are deleted; SQLite does not enforce it, so
+    # there the removed granter's id stays.
+    granted_by = Column(UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

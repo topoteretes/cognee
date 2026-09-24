@@ -1,4 +1,3 @@
-from typing import Set
 from uuid import UUID
 
 from sqlalchemy import or_, select
@@ -9,7 +8,7 @@ from cognee.modules.users.permissions.methods.get_tenant import get_tenant
 from cognee.modules.users.permissions.permission_types import CAPABILITY_TYPES
 
 
-async def get_effective_capabilities(user_id: UUID, tenant_id: UUID) -> Set[str]:
+async def get_effective_capabilities(user_id: UUID, tenant_id: UUID) -> set[str]:
     """
         Return every capability the user has in the given tenant.
 
@@ -24,24 +23,23 @@ async def get_effective_capabilities(user_id: UUID, tenant_id: UUID) -> Set[str]
 
         Resolution is additionally gated on actual membership in the tenant,
         once, at the top. That matters because the callers of this function
-        guard user management for a tenant_id supplied by the request, and it is
+        guard tenant operations for a tenant_id supplied by the request, and it is
         also what makes granting to an invited person safe: the grant may exist
         before they accept, but resolves to nothing until they are a member.
 
         The tenant owner holds every capability in the catalog regardless of
-        what is stored, matching how has_user_management_permission already
-        treats them.
+        what is stored, so a capability added to the catalog reaches them
+        without a grant.
 
         A tenant with no grants yet resolves to an empty set for everyone but
-        the owner; the deprecated role-name fallback in
-        has_user_management_permission is what carries such a tenant until its
-        capabilities are assigned.
+        the owner; the deprecated role-name fallback in has_grant_permission is
+        what carries such a tenant until its capabilities are assigned.
     Args:
         user_id: Id of the user.
         tenant_id: Id of the tenant the capabilities are scoped to.
 
     Returns:
-        Set[str]: Capability names, empty when the user has none or is not a
+        set[str]: Capability names, empty when the user has none or is not a
         member of the tenant.
     """
     tenant = await get_tenant(tenant_id)
@@ -77,7 +75,7 @@ async def get_effective_capabilities(user_id: UUID, tenant_id: UUID) -> Set[str]
                 ),
             )
         )
-        capabilities: Set[str] = {row[0] for row in result.all()}
+        capabilities: set[str] = {row[0] for row in result.all()}
 
     # Grants are validated against the catalog when written, but the catalog is
     # code and can shrink; a name that fell out of it must stop resolving.

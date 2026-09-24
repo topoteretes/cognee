@@ -67,7 +67,8 @@ async def test_delete_role_uses_user_management_permission_and_deletes_principal
     role_id = uuid4()
     tenant_id = uuid4()
     requester_id = uuid4()
-    session = FakeSession([SimpleNamespace(tenant_id=tenant_id)])
+    # The role lookup, then the row lock taken before the deletes.
+    session = FakeSession([SimpleNamespace(tenant_id=tenant_id), role_id])
     permission_calls = []
 
     async def fake_has_user_management_permission(*, requester_id, tenant_id):
@@ -84,7 +85,16 @@ async def test_delete_role_uses_user_management_permission_and_deletes_principal
     await delete_role(role_id=role_id, owner_id=requester_id)
 
     assert permission_calls == [(requester_id, tenant_id)]
-    assert get_delete_tables(session) == ["user_roles", "acls", "roles", "principals"]
+    # The lock comes before the first delete, or a membership inserted in
+    # between on Postgres makes the role delete fail its foreign key.
+    assert session.statements[1]._for_update_arg is not None
+    assert get_delete_tables(session) == [
+        "user_roles",
+        "acls",
+        "principal_capabilities",
+        "roles",
+        "principals",
+    ]
     assert session.committed is True
 
 

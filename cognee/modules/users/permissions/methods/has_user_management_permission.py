@@ -1,16 +1,7 @@
 from uuid import UUID
 
-from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.modules.users.permissions.methods.get_effective_capabilities import (
-    get_effective_capabilities,
-)
-from cognee.modules.users.permissions.methods.get_user_role_names_in_tenant import (
-    get_user_role_names_in_tenant,
-)
-from cognee.modules.users.permissions.permission_types import (
-    MANAGE_USERS,
-    USER_MANAGEMENT_ALLOWED_ROLE_NAMES,
-)
+from cognee.modules.users.permissions.methods.has_grant_permission import has_grant_permission
+from cognee.modules.users.permissions.permission_types import MANAGE_USERS
 
 
 async def has_user_management_permission(requester_id: UUID, tenant_id: UUID) -> bool:
@@ -32,17 +23,8 @@ async def has_user_management_permission(requester_id: UUID, tenant_id: UUID) ->
         True if the requester has permission to manage users for the tenant.
 
     Raises:
-        PermissionDeniedError: If the requester is not authorized.
+        CapabilityDeniedError: If the requester is not authorized. It is a
+            PermissionDeniedError, so callers catching that keep working.
         TenantNotFoundError: If the tenant does not exist.
     """
-    capabilities = await get_effective_capabilities(requester_id, tenant_id)
-    if MANAGE_USERS in capabilities:
-        return True
-
-    # Deprecated path: tenants upgrading from the role-name check would otherwise
-    # lose user management until their "admin" role is granted the capability.
-    role_names = await get_user_role_names_in_tenant(requester_id, tenant_id)
-    if USER_MANAGEMENT_ALLOWED_ROLE_NAMES & set(role_names):
-        return True
-
-    raise PermissionDeniedError(message="User is not authorized to manage users for this tenant")
+    return await has_grant_permission(requester_id, tenant_id, MANAGE_USERS)
