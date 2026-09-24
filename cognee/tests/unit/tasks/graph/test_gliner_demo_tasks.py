@@ -1044,8 +1044,8 @@ def test_resolve_extractor_auto_reads_the_keyless_rule_by_default():
         assert resolve_extractor(None, _config_with_extractor("auto")) == "gliner_demo"
 
 
-def test_resolve_extractor_installs_a_missing_gliner_runtime():
-    """Resolving to GLiNER, by ``auto`` or explicitly, installs its runtime when missing."""
+def test_resolve_extractor_never_installs_the_gliner_runtime():
+    """Resolution is a decision only; cognify awaits ensure_extractor_runtime to install."""
     from cognee.modules.cognify.config import resolve_extractor
 
     with (
@@ -1055,25 +1055,7 @@ def test_resolve_extractor_installs_a_missing_gliner_runtime():
         auto = _config_with_extractor("auto")
         assert resolve_extractor(None, auto, llm_configured=False) == "gliner_demo"
         assert resolve_extractor("gliner_demo", auto, llm_configured=True) == "gliner_demo"
-        # The LLM path never touches the GLiNER runtime.
         assert resolve_extractor(None, auto, llm_configured=True) == "llm"
-    assert install.call_count == 2
-    install.assert_called_with("https://download.pytorch.org/whl/cpu")
-
-
-def test_resolve_extractor_without_auto_install_raises_the_install_hint():
-    from cognee.modules.cognify.config import (
-        KeylessExtractorNotInstalledError,
-        resolve_extractor,
-    )
-
-    config = _config_with_extractor("auto").model_copy(update={"gliner_auto_install": False})
-    with (
-        patch("importlib.util.find_spec", return_value=None),
-        patch("cognee.tasks.graph.gliner_demo.install.install_gliner_runtime") as install,
-        pytest.raises(KeylessExtractorNotInstalledError, match=r"cognee\[gliner\]"),
-    ):
-        resolve_extractor(None, config, llm_configured=False)
     install.assert_not_called()
 
 
