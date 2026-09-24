@@ -11,8 +11,9 @@ The adapter is instantiated via ``__new__`` to bypass the real database
 connection — ``has_edges`` only depends on ``self.query``.
 """
 
-import pytest
 from unittest.mock import AsyncMock
+
+import pytest
 
 from cognee.infrastructure.databases.graph.ladybug.adapter import LadybugAdapter
 

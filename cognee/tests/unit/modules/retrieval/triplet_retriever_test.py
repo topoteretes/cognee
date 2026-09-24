@@ -1,10 +1,11 @@
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from cognee.infrastructure.session.session_manager import SessionTurnPreparation
-from cognee.modules.retrieval.triplet_retriever import TripletRetriever
-from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+import pytest
+
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.session.session_manager import SessionTurnPreparation
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 
 
 @pytest.fixture(autouse=True)
@@ -70,12 +71,14 @@ async def test_get_objects_no_collection(mock_vector_engine):
 
     retriever = TripletRetriever()
 
-    with patch(
-        "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
-        return_value=mock_vector_engine,
+    with (
+        patch(
+            "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
+            return_value=mock_vector_engine,
+        ),
+        pytest.raises(NoDataError, match="create_triplet_embeddings"),
     ):
-        with pytest.raises(NoDataError, match="create_triplet_embeddings"):
-            await retriever.get_retrieved_objects("test query")
+        await retriever.get_retrieved_objects("test query")
 
 
 @pytest.mark.asyncio
@@ -101,12 +104,14 @@ async def test_get_objects_collection_not_found_error(mock_vector_engine):
 
     retriever = TripletRetriever()
 
-    with patch(
-        "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
-        return_value=mock_vector_engine,
+    with (
+        patch(
+            "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
+            return_value=mock_vector_engine,
+        ),
+        pytest.raises(NoDataError, match="No data found"),
     ):
-        with pytest.raises(NoDataError, match="No data found"):
-            await retriever.get_retrieved_objects("test query")
+        await retriever.get_retrieved_objects("test query")
 
 
 @pytest.mark.asyncio
@@ -119,13 +124,15 @@ async def test_get_context_empty_payload_text(mock_vector_engine):
 
     retriever = TripletRetriever()
 
-    with patch(
-        "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
-        return_value=mock_vector_engine,
+    with (
+        patch(
+            "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
+            return_value=mock_vector_engine,
+        ),
+        pytest.raises(KeyError),
     ):
-        with pytest.raises(KeyError):
-            objects = await retriever.get_retrieved_objects("test query")
-            await retriever.get_context_from_objects("test query", retrieved_objects=objects)
+        objects = await retriever.get_retrieved_objects("test query")
+        await retriever.get_context_from_objects("test query", retrieved_objects=objects)
 
 
 @pytest.mark.asyncio
@@ -210,23 +217,15 @@ async def test_get_context_forwards_nodeset_filter_to_vector_search(mock_vector_
 
 @pytest.mark.asyncio
 async def test_get_completion_without_context(mock_vector_engine):
-    """Test get_completion retrieves context when not provided."""
-    mock_result = MagicMock()
-    mock_result.payload = {"text": "Test triplet"}
-    mock_vector_engine.has_collection.return_value = True
-    mock_vector_engine.search.return_value = [mock_result]
-
+    """No context means no LLM call and no results (SDK-270 / gh #3728):
+    get_completion_from_context never re-derives a missing context."""
     retriever = TripletRetriever()
 
     with (
         patch(
-            "cognee.modules.retrieval.triplet_retriever.get_vector_engine_async",
-            return_value=mock_vector_engine,
-        ),
-        patch(
             "cognee.modules.retrieval.triplet_retriever.generate_completion",
-            return_value="Generated answer",
-        ),
+            new_callable=AsyncMock,
+        ) as mock_generate,
         patch("cognee.modules.retrieval.triplet_retriever.CacheConfig") as mock_cache_config,
     ):
         mock_config = MagicMock()
@@ -235,9 +234,8 @@ async def test_get_completion_without_context(mock_vector_engine):
 
         completion = await retriever.get_completion_from_context("test query", None, None)
 
-    assert isinstance(completion, list)
-    assert len(completion) == 1
-    assert completion[0] == "Generated answer"
+    assert completion == []
+    mock_generate.assert_not_awaited()
 
 
 @pytest.mark.asyncio

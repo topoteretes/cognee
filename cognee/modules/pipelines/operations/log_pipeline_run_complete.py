@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -17,10 +17,10 @@ async def log_pipeline_run_complete(
     dataset_id: UUID,
     data: Any,
     *,
-    user: Optional[User] = None,
-    started_at: Optional[datetime] = None,
-    tokens_in: Optional[int] = None,
-    tokens_out: Optional[int] = None,
+    user: User | None = None,
+    started_at: datetime | None = None,
+    tokens_in: int | None = None,
+    tokens_out: int | None = None,
 ):
     data_info = summarize_run_info_data(data)
 

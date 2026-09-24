@@ -15,14 +15,18 @@ Slack's own signing secret to them, plus everything that IS Slack-specific
 (the authorize/token-exchange endpoints, bot scopes, response shape).
 """
 
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 import aiohttp
 
 from cognee.modules.integrations.oauth_flow import (
     make_state as _make_state,
+)
+from cognee.modules.integrations.oauth_flow import (
     sign_state_payload as _sign_state_payload,
+)
+from cognee.modules.integrations.oauth_flow import (
     validate_state as _validate_state,
 )
 from cognee.modules.integrations.slack.slack_settings import require
@@ -53,7 +57,7 @@ def make_state(user_id: UUID) -> str:
     return _make_state(user_id, signing_secret=require("signing_secret"))
 
 
-def validate_state(state: str) -> Optional[UUID]:
+def validate_state(state: str) -> UUID | None:
     """Return the ``user_id`` for a valid, unexpired state; ``None`` otherwise.
 
     Verifies the HMAC before reading any field, so a forged or tampered state
@@ -77,8 +81,9 @@ async def exchange_code(code: str) -> dict[str, Any]:
     rejected — Slack returns HTTP 200 with ``ok: false``, so HTTP status
     alone cannot be trusted.
     """
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-        async with session.post(
+    async with (
+        aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+        session.post(
             _ACCESS_URL,
             data={
                 "client_id": require("client_id"),
@@ -86,8 +91,9 @@ async def exchange_code(code: str) -> dict[str, Any]:
                 "code": code,
                 "redirect_uri": require("redirect_uri"),
             },
-        ) as response:
-            payload = await response.json()
+        ) as response,
+    ):
+        payload = await response.json()
 
     if not payload.get("ok"):
         raise RuntimeError(f"Slack oauth.v2.access failed: {payload.get('error', 'unknown')}")

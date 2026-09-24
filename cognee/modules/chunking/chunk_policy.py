@@ -25,8 +25,8 @@ Two boundaries are deliberate:
   compares it to the new text, trusting nothing.
 """
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Dict, List, Optional
 
 from cognee.modules.chunking.chunk_id import chunk_content_hash, content_chunk_id
 from cognee.modules.chunking.incremental_chunking import (
@@ -44,7 +44,7 @@ class ChunkPlanRequest:
 
     old_text: str
     new_text: str
-    stored_chunks: List[dict]  # full chunk nodes, in document order
+    stored_chunks: list[dict]  # full chunk nodes, in document order
     document: object  # the Document new chunks attach to
     chunker_cls: type
     fallback_budget: int  # token budget for chunks with none recorded
@@ -55,14 +55,14 @@ class ChunkPlan:
     """A complete decision about the document's chunks after the edit."""
 
     # Genuinely new content: needs LLM extraction and a fresh write.
-    fresh: List[DocumentChunk] = field(default_factory=list)
+    fresh: list[DocumentChunk] = field(default_factory=list)
     # Replacement chunks byte-identical to one being replaced, so they keep
     # their node id and subgraph: stored id -> final chunk_index.
-    reused: Dict[str, int] = field(default_factory=dict)
+    reused: dict[str, int] = field(default_factory=dict)
     # Untouched chunks whose position moved: stored id -> final chunk_index.
-    kept_moves: Dict[str, int] = field(default_factory=dict)
+    kept_moves: dict[str, int] = field(default_factory=dict)
     # Stored chunk ids that no longer exist after the edit.
-    deleted_ids: List[str] = field(default_factory=list)
+    deleted_ids: list[str] = field(default_factory=list)
     # How many disjoint regions the edit touched (reporting only).
     regions: int = 0
 
@@ -72,7 +72,7 @@ ChunkPolicy = Callable[[ChunkPlanRequest], Awaitable[ChunkPlan]]
 
 async def _chunk_region(
     document, region_text: str, max_chunk_size: int, chunker_cls: type
-) -> List[DocumentChunk]:
+) -> list[DocumentChunk]:
     """Run the configured chunker over one replacement region.
 
     Replacement chunks get the same boundary semantics as pipeline chunks; only
@@ -90,7 +90,7 @@ async def _chunk_region(
     return [chunk async for chunk in chunker.read()]
 
 
-def _region_chunk_budget(stored_chunks: List[dict], region, fallback: int) -> int:
+def _region_chunk_budget(stored_chunks: list[dict], region, fallback: int) -> int:
     """Token budget for re-chunking one region.
 
     The budget recorded on the chunks the region replaces wins when the current
@@ -113,9 +113,9 @@ def _region_chunk_budget(stored_chunks: List[dict], region, fallback: int) -> in
 
 def _assemble_final_chunks(
     document,
-    stored_chunks: List[dict],
+    stored_chunks: list[dict],
     plan: IncrementalPlan,
-    region_chunk_lists: List[List[DocumentChunk]],
+    region_chunk_lists: list[list[DocumentChunk]],
 ) -> tuple:
     """Walk the final document order once: kept chunks and region chunks interleaved.
 
@@ -135,7 +135,7 @@ def _assemble_final_chunks(
     }
 
     occurrences: dict = {}
-    region_chunks: List[DocumentChunk] = []
+    region_chunks: list[DocumentChunk] = []
     kept_final_index: dict = {}
     final_index = 0
     position = 0
@@ -179,7 +179,7 @@ def _assemble_final_chunks(
     return region_chunks, kept_final_index
 
 
-def stored_chunker_id(stored_chunks: List[dict]) -> Optional[str]:
+def stored_chunker_id(stored_chunks: list[dict]) -> str | None:
     """The chunker every stored chunk agrees on, or None when unknown.
 
     None means "cannot tell" — legacy chunks predate the field, and a document
@@ -255,10 +255,10 @@ DEFAULT_CHUNK_POLICY: ChunkPolicy = diff_region_policy
 
 
 __all__ = [
+    "DEFAULT_CHUNK_POLICY",
     "ChunkPlan",
     "ChunkPlanRequest",
     "ChunkPolicy",
-    "DEFAULT_CHUNK_POLICY",
     "IncrementalPlanError",
     "diff_region_policy",
     "stored_chunker_id",

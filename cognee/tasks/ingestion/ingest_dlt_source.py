@@ -4,22 +4,22 @@ import json
 import os
 import re
 from collections import Counter
-from typing import List, Optional
 
 from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from cognee.modules.data.models import Data
 from cognee.infrastructure.databases.postgres.admin import create_pg_database_if_not_exists
 from cognee.infrastructure.databases.relational.config import get_relational_config
-from cognee.tasks.ingestion.dlt_row_data import DltRowData
+from cognee.modules.data.models import Data
+from cognee.shared.logging_utils import get_logger
+from cognee.tasks.ingestion.dlt_row_data import DltRowData, DltRows
+from cognee.tasks.ingestion.dlt_utils import pipeline_name_for_source
 from cognee.tasks.ingestion.exceptions.exceptions import (
-    UnsupportedDBProviderError,
     DLTIngestionError,
     InvalidDLTArgumentError,
+    UnsupportedDBProviderError,
 )
 from cognee.tasks.ingestion.get_dlt_destination import get_dlt_destination
-from cognee.shared.logging_utils import get_logger
 
 try:
     import dlt
@@ -39,10 +39,10 @@ _SAFE_IDENT_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
 async def ingest_dlt_source(
     dlt_source,
     dataset_name: str,
-    primary_key: Optional[str] = None,
+    primary_key: str | None = None,
     write_disposition: str = "replace",
-    max_rows_per_table: Optional[int] = None,
-) -> List[DltRowData]:
+    max_rows_per_table: int | None = None,
+) -> DltRows:
     """
     Ingests a dlt (re)source by running the dlt pipeline on it.
     Returns a list of DltRowData, one per row in the ingested tables.
@@ -109,7 +109,7 @@ async def ingest_dlt_source(
     # dlt_csv_loader in parallel), so staging must serialize here.
     async with _staging_lock:
         pipeline = dlt.pipeline(
-            pipeline_name="ingest_dlt_source",
+            pipeline_name=pipeline_name_for_source(dlt_source, original_dataset_name),
             destination=destination,
             dataset_name=dataset_name,
         )
@@ -122,13 +122,30 @@ async def ingest_dlt_source(
                 message=f"DLT pipeline execution failed for dataset '{original_dataset_name}': {e}"
             ) from e
 
+        # An incremental source can emit no rows (or only update its cursor),
+        # so its load package need not contain a table job. Its previously
+        # staged documents still need reconciling into Cognee: a failed
+        # cognify or a removed local item must be recoverable without editing
+        # the remote file. Scope by the CURRENT resource, never the pipeline's
+        # whole accumulated schema, which can also contain Gmail/other folders.
+        from cognee.tasks.ingestion.dlt_utils import document_source_tag
+
+        retained_tables: set[str] = set()
+        if document_source_tag(dlt_source):
+            resources = getattr(dlt_source, "resources", None)
+            resource_names = set(resources.selected) if resources is not None else {dlt_source.name}
+            retained_tables = {
+                name
+                for name, table in pipeline.default_schema.tables.items()
+                if table.get("resource") in resource_names and not table.get("parent")
+            }
+
     # Scope the read-back to the tables this source actually loaded. The
     # staging DB is shared per dataset, so it can still hold tables from other
     # sources ingested earlier; reading those would leak rows across sources.
-    # The package's completed jobs name exactly the tables this load wrote;
-    # the schema can't be used here — dlt persists it in pipeline state, so it
-    # accumulates tables across runs and sources.
-    loaded_tables: set = set()
+    # Completed jobs identify tables written this time; document sources also
+    # reconcile their own retained tables on a zero-change run (above).
+    loaded_tables: set = set(retained_tables)
     if load_info is not None:
         for package in load_info.load_packages:
             for job in package.jobs.get("completed_jobs", []):
@@ -177,7 +194,7 @@ async def ingest_dlt_source(
             message=f"Failed to read rows from DLT database '{dlt_db_name}': {e}"
         ) from e
 
-    return row_data_list
+    return DltRows(row_data_list, loaded_tables=filtered_schema)
 
 
 async def _extract_dlt_schema(
@@ -285,10 +302,10 @@ async def _read_rows_from_tables(
     dlt_db_name: str,
     dataset_name: str,
     schema: dict,
-    primary_key: Optional[str],
+    primary_key: str | None,
     relational_config,
     max_rows_per_table: int = 0,
-) -> List[DltRowData]:
+) -> list[DltRowData]:
     """Read rows from the dlt database tables and return DltRowData objects."""
     if relational_config.db_provider == "sqlite":
         # DLT creates a separate SQLite file: {db_name}__{dataset_name}
@@ -341,12 +358,12 @@ async def _read_single_table(
     conn,
     table_name: str,
     table_info: dict,
-    primary_key: Optional[str],
+    primary_key: str | None,
     dataset_name: str,
     dlt_db_name: str,
     relational_config,
     max_rows: int = 0,
-) -> List[DltRowData]:
+) -> list[DltRowData]:
     """Read rows from a single table and return DltRowData objects.
 
     At most ``max_rows`` rows are read.  Pass 0 or a negative value to
@@ -435,7 +452,7 @@ async def _read_single_table(
 
 
 def _resolve_primary_key(
-    provided_pk: Optional[str],
+    provided_pk: str | None,
     table_info: dict,
     column_names: list,
     table_name: str = "",
@@ -497,11 +514,11 @@ def _to_safe_ident(s: str) -> str:
     return s[:63]
 
 
-async def migrate_dlt_database(data: List[Data]):
+async def migrate_dlt_database(data: list[Data]):
     """Legacy function for migrating dlt database schema to graph database."""
-    from cognee.tasks.ingestion.migrate_relational_database import migrate_relational_database
     from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
+    from cognee.tasks.ingestion.migrate_relational_database import migrate_relational_database
 
     graph_engine = await get_graph_engine()
 

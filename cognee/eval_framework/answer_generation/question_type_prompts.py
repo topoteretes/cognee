@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
-from typing import Mapping, Optional
 
 QUESTION_TYPE_DEFAULT_KEY = "DEFAULT"
 
@@ -10,7 +10,7 @@ QUESTION_TYPE_DEFAULT_KEY = "DEFAULT"
 def get_question_type_prompt(
     prompt_paths: Mapping[str, str],
     question_type: str,
-) -> Optional[str]:
+) -> str | None:
     prompt_path = prompt_paths.get(question_type) or prompt_paths.get(QUESTION_TYPE_DEFAULT_KEY)
     if prompt_path is None:
         return None

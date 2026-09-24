@@ -1,18 +1,18 @@
+import asyncio
 import os
 import pathlib
-import asyncio
 
 import cognee
-import cognee.modules.ingestion as ingestion
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm import get_max_chunk_tokens
 from cognee.infrastructure.llm.extraction import extract_content_graph
+from cognee.modules import ingestion
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.tasks.documents import extract_chunks_from_documents
 from cognee.tasks.ingestion import save_data_item_to_storage
-from cognee.infrastructure.files.utils.open_data_file import open_data_file
 
 
 async def extract_graphs(document_chunks):

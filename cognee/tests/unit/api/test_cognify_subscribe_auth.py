@@ -88,9 +88,8 @@ def _connect(app, run_id=PIPELINE_RUN_ID):
 
 
 def _closed_code(app, run_id=PIPELINE_RUN_ID):
-    with pytest.raises(WebSocketDisconnect) as closed:
-        with _connect(app, run_id) as connection:
-            connection.receive_json()
+    with pytest.raises(WebSocketDisconnect) as closed, _connect(app, run_id) as connection:
+        connection.receive_json()
     return closed.value.code
 
 

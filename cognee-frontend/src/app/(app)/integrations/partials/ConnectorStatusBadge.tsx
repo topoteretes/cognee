@@ -8,6 +8,7 @@ import type { ConnectionStatus } from "@/modules/integrations/types";
 interface ConnectorStatusBadgeProps {
   /** Undefined while the control-plane call is still in flight. */
   status: ConnectionStatus | undefined;
+  needsReconnect?: boolean;
   /**
    * Health of a *connected* workspace (CLO-389): "degraded" means authorized
    * but not working — an expired token, or Slack refusing the bot.
@@ -20,6 +21,7 @@ const PILL = "flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-[
 export default function ConnectorStatusBadge({
   status,
   syncStatus,
+  needsReconnect = true,
 }: ConnectorStatusBadgeProps): ReactElement | null {
   // A placeholder rather than the disconnected state: rendering "Connect" on a
   // workspace that is already connected, then flipping it a beat later, reads
@@ -46,7 +48,7 @@ export default function ConnectorStatusBadge({
     return (
       <span className={classNames(PILL, "bg-[var(--color-cognee-warning,#F59E0B)]/15 font-semibold text-[var(--color-cognee-warning,#F59E0B)]")}>
         <span className="size-1.5 rounded-full bg-[var(--color-cognee-warning,#F59E0B)]" />
-        Needs reconnect
+        {needsReconnect ? "Needs reconnect" : "Sync issue"}
       </span>
     );
   }

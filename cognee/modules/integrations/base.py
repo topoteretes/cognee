@@ -67,9 +67,9 @@ class OAuthInstallation:
     provider_account_id: str
     token_payload: dict[str, Any]
     provider_metadata: dict[str, Any] = field(default_factory=dict)
-    account_label: Optional[str] = None
-    scopes: Optional[str] = None
-    token_expires_at: Optional[datetime] = None
+    account_label: str | None = None
+    scopes: str | None = None
+    token_expires_at: datetime | None = None
     auth_type: str = "oauth2"
 
 
@@ -84,6 +84,9 @@ class OAuthIntegration(ABC):
 
     provider: ClassVar[str]
     settings_cls: ClassVar[type[IntegrationSettings]]
+    # Optional provider metadata key used by the generic resource picker.
+    # ``None`` means this provider has no selectable sub-resources.
+    resource_selection_key: ClassVar[str | None] = None
 
     @abstractmethod
     def authorize_url(self, state: str) -> str:
@@ -102,6 +105,13 @@ class OAuthIntegration(ABC):
         else (display/routing data such as a bot user id) goes in
         ``provider_metadata``, which is stored in the clear. Never put secret
         material in ``provider_metadata``.
+
+        ``provider_metadata`` is **merged** into whatever the row already
+        holds, not swapped for it, so that settings written outside the OAuth
+        flow (Slack's channel allowlist) survive a reconnect. Two rules follow
+        for an adapter: build the dict unconditionally, writing a key with a
+        null value rather than leaving it out, since an omitted key keeps its
+        stored value; and do not expect to clear the metadata from here.
         """
 
     @abstractmethod
@@ -146,7 +156,7 @@ class OAuthIntegration(ABC):
         ``headers`` are lower-cased — providers put the event name in a
         header (GitHub's ``x-github-event``), not the body.
         """
-        return None
+        return
 
     async def on_installed(self, credential: IntegrationCredential) -> None:
         """Post-install hook, fired in the background after a successful connect.
@@ -156,6 +166,26 @@ class OAuthIntegration(ABC):
         Runs detached from the callback request — failures log, they never
         break the install redirect.
         """
+        return
+
+    async def sync_now(self, credential: IntegrationCredential) -> None:
+        """Run a user-requested sync, when the provider supports one.
+
+        The default is deliberately a no-op: not every OAuth provider has a
+        sync implementation yet, and a generic route must not invent one.
+        Providers with a durable or manually-triggered sync override this
+        method and the same hook can later be called by a scheduler.
+        """
+        return
+
+    async def list_resources(
+        self, credential: IntegrationCredential
+    ) -> list[dict[str, Any]] | None:
+        """Return provider resources for a generic picker, or ``None``."""
+        return None
+
+    def dataset_name(self, credential: IntegrationCredential) -> str | None:
+        """Return the provider dataset to delete on an opted-in disconnect."""
         return None
 
     async def revoke_remote(self, credential: IntegrationCredential) -> None:
@@ -166,7 +196,7 @@ class OAuthIntegration(ABC):
         revoked and the remote token stays live until it expires or the
         user removes the app from their side.
         """
-        return None
+        return
 
     async def refresh(self, credential: IntegrationCredential) -> None:
         """Refresh an expiring token in place.
@@ -175,7 +205,7 @@ class OAuthIntegration(ABC):
         and support a refresh grant; callers should not assume this rotates
         anything unless the concrete integration documents that it does.
         """
-        return None
+        return
 
 
 class WebhookVerifier(ABC):

@@ -64,14 +64,16 @@ async def post_to_response_url(response_url: str, payload: dict[str, Any]) -> No
         )
         return
     try:
-        async with aiohttp.ClientSession(timeout=_RESPONSE_URL_TIMEOUT) as session:
+        async with (
+            aiohttp.ClientSession(timeout=_RESPONSE_URL_TIMEOUT) as session,
             # allow_redirects=False: aiohttp follows redirects by default, and the
             # guard above only ever sees hop 0. A 3xx from hooks.slack.com would
             # otherwise carry this request -- and on 307/308 the answer text itself,
             # since those preserve method and body -- to whatever Location names,
             # including an internal address. Slack never redirects a response_url.
-            async with session.post(response_url, json=payload, allow_redirects=False) as response:
-                if response.status != 200:
-                    logger.warning("Slack response_url POST returned %s", response.status)
-    except Exception:  # noqa: BLE001 - nothing left to report to if delivery itself fails
+            session.post(response_url, json=payload, allow_redirects=False) as response,
+        ):
+            if response.status != 200:
+                logger.warning("Slack response_url POST returned %s", response.status)
+    except Exception:  # nothing left to report to if delivery itself fails
         logger.exception("Failed to deliver a message via Slack response_url")

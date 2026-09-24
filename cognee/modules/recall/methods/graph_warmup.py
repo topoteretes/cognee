@@ -27,7 +27,6 @@ cross-tenant oracle for other tenants' processing state.
 
 import time
 from dataclasses import dataclass
-from typing import Optional
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
@@ -61,8 +60,8 @@ STATE_BUILD_FAILED = "build_failed"
 class WarmupProbe:
     state: str
     datapoint_count: int
-    error_class: Optional[str] = None
-    error_message: Optional[str] = None
+    error_class: str | None = None
+    error_message: str | None = None
 
     @property
     def is_warm(self) -> bool:
@@ -219,7 +218,9 @@ async def assess_memory_readiness(user, dataset_ids: list[UUID] | None) -> Warmu
             _warmup_cache[key] = (probe, time.monotonic() + config.recall_warmup_cache_ttl)
         return probe
     except Exception as error:
-        logger.warning("Graph warm-up probe failed; treating memory as warm: %s", error)
+        logger.warning(
+            "Graph warm-up probe failed; treating memory as warm: %s", error, exc_info=True
+        )
         return WarmupProbe(STATE_WARM, _WARM_COUNT)
 
 

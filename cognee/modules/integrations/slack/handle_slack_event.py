@@ -20,7 +20,7 @@ throttled to 1 req/min).
 
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from cognee.modules.integrations.credentials import decrypt_token_payload
 from cognee.modules.integrations.slack.home import publish_home_view
@@ -70,7 +70,7 @@ async def handle_slack_event(raw_body: bytes) -> dict[str, Any]:
     return {"ok": True}
 
 
-async def _publish_home_view(team_id: str, slack_user_id: Optional[str]) -> None:
+async def _publish_home_view(team_id: str, slack_user_id: str | None) -> None:
     """Best-effort Home tab refresh — never raises.
 
     A broken Home tab is a cosmetic problem, not a reason to fail this
@@ -89,5 +89,5 @@ async def _publish_home_view(team_id: str, slack_user_id: Optional[str]) -> None
         access_token = decrypt_token_payload(credential).get("access_token")
         if access_token:
             await publish_home_view(access_token, slack_user_id)
-    except Exception:  # noqa: BLE001 - a broken Home tab must never fail the event ack
+    except Exception:  # a broken Home tab must never fail the event ack
         logger.exception("Failed to publish App Home view for team %s", team_id)

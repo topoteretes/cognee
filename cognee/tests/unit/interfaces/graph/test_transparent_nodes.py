@@ -5,14 +5,15 @@ not part of the contract.
 """
 
 import logging
-from typing import Any, List, Optional
+from typing import Any
 
 import pytest
 
 from cognee.infrastructure.engine import DataPoint, Edge
 from cognee.modules.engine.models import NodeSet
 from cognee.modules.graph.utils import get_graph_from_model
-from cognee.modules.graph.utils.unwrap_transparent_nodes import _WARNED_DROPPED_FIELDS
+from cognee.modules.graph.utils.unwrap_transparent_nodes import unwrap_transparent
+from cognee.shared.logging_utils import _warned_once_keys
 
 TRANSPARENT = {"index_fields": [], "transparent": True}
 
@@ -29,37 +30,37 @@ class Company(DataPoint):
 
 class Person(DataPoint):
     name: str
-    likes: Optional[List[Activity]] = None
-    works_for: Optional[Company] = None
+    likes: list[Activity] | None = None
+    works_for: Company | None = None
     metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
 
 class Directory(DataPoint):
-    people: List[Person]
-    companies: List[Company]
+    people: list[Person]
+    companies: list[Company]
     metadata: dict = {"index_fields": []}
 
 
 class TransparentDirectory(DataPoint):
-    people: List[Person]
-    companies: List[Company]
+    people: list[Person]
+    companies: list[Company]
     metadata: dict = TRANSPARENT
 
 
 class MemberGroup(DataPoint):
-    members: List[Person]
+    members: list[Person]
     metadata: dict = TRANSPARENT
 
 
 class NestedDirectory(DataPoint):
-    groups: List[MemberGroup]
-    companies: List[Company]
+    groups: list[MemberGroup]
+    companies: list[Company]
     metadata: dict = TRANSPARENT
 
 
 class Department(DataPoint):
     name: str
-    groups: List[Any]
+    groups: list[Any]
     metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
 
@@ -67,33 +68,33 @@ class NamedGroup(DataPoint):
     """A transparent wrapper that wrongly carries real data in ``name``."""
 
     name: str
-    members: List[Person]
+    members: list[Person]
     metadata: dict = {"index_fields": ["name"], "transparent": True}
 
 
 class EmptyGroup(DataPoint):
-    members: List[Person] = []
+    members: list[Person] = []
     metadata: dict = TRANSPARENT
 
 
 class HolderOfEmpty(DataPoint):
     name: str
-    groups: List[EmptyGroup]
+    groups: list[EmptyGroup]
     metadata: dict = {"index_fields": ["name"]}
 
 
 class DiamondHolder(DataPoint):
     name: str
-    left: List[Any]
-    right: List[Any]
+    left: list[Any]
+    right: list[Any]
     metadata: dict = {"index_fields": ["name"]}
 
 
 class OptionalGroup(DataPoint):
     """Relationship-only wrapper whose optional fields are legitimately empty."""
 
-    members: List[Person] = []
-    lead: Optional[Person] = None
+    members: list[Person] = []
+    lead: Person | None = None
     metadata: dict = TRANSPARENT
 
 
@@ -183,7 +184,7 @@ async def test_nested_transparent_wrappers_resolve_recursively():
 @pytest.mark.asyncio
 async def test_mid_graph_wrapper_keeps_parent_field_name():
     """Case 4 (A4): the ``groups`` edge lands on each child."""
-    alice, bob, acme = _people()
+    alice, bob, _acme = _people()
     department = Department(name="Engineering", groups=[MemberGroup(members=[alice, bob])])
 
     nodes, edges = await get_graph_from_model(department)
@@ -217,7 +218,7 @@ async def test_edge_metadata_is_applied_to_each_child():
 @pytest.mark.asyncio
 async def test_wrapper_carrying_scalar_data_warns_once_and_drops_it(caplog):
     """Case 5 (A5): the value is dropped, no node is minted, one warning is logged."""
-    _WARNED_DROPPED_FIELDS.clear()
+    _warned_once_keys.clear()
     alice, bob, _ = _people()
     department = Department(
         name="Engineering", groups=[NamedGroup(name="Core team", members=[alice, bob])]
@@ -237,7 +238,7 @@ async def test_wrapper_carrying_scalar_data_warns_once_and_drops_it(caplog):
 
 @pytest.mark.asyncio
 async def test_dropped_field_warning_fires_at_most_once(caplog):
-    _WARNED_DROPPED_FIELDS.clear()
+    _warned_once_keys.clear()
     alice, bob, _ = _people()
 
     with caplog.at_level(logging.WARNING):
@@ -253,7 +254,7 @@ async def test_dropped_field_warning_fires_at_most_once(caplog):
 @pytest.mark.asyncio
 async def test_relationship_only_wrapper_never_warns(caplog):
     """An optional relationship left ``None`` and an empty list lose nothing."""
-    _WARNED_DROPPED_FIELDS.clear()
+    _warned_once_keys.clear()
     alice, _, _ = _people()
 
     with caplog.at_level(logging.WARNING):
@@ -334,7 +335,7 @@ async def test_distinct_instances_sharing_a_node_id_both_resolve():
 
     class IdentityGroup(DataPoint):
         name: str
-        members: List[Person]
+        members: list[Person]
         metadata: dict = {
             "index_fields": ["name"],
             "identity_fields": ["name"],
@@ -387,7 +388,7 @@ async def test_transparent_only_cycle_terminates():
     """Case 15."""
 
     class CyclicGroup(DataPoint):
-        peers: List[Any] = []
+        peers: list[Any] = []
         metadata: dict = TRANSPARENT
 
     first = CyclicGroup()
@@ -403,11 +404,11 @@ async def test_mixed_cycle_terminates_with_a_self_edge():
 
     class Mixed(DataPoint):
         name: str
-        groups: List[Any] = []
+        groups: list[Any] = []
         metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
     class Wrapper(DataPoint):
-        members: List[Any] = []
+        members: list[Any] = []
         metadata: dict = TRANSPARENT
 
     person = Mixed(name="Alice")
@@ -441,7 +442,7 @@ def test_transparent_survives_every_metadata_form():
     alice, bob, acme = _people()
 
     class Flagged(DataPoint):
-        people: List[Person]
+        people: list[Person]
         metadata: dict = {"index_fields": [], "transparent": True}
 
     assert Flagged(people=[alice]).metadata.get("transparent") is True
@@ -469,7 +470,7 @@ class CyclicPerson(DataPoint):
 
 class CyclicCompany(DataPoint):
     name: str
-    employees: List[Any] = []
+    employees: list[Any] = []
     metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
 
@@ -512,3 +513,65 @@ async def test_collector_returns_the_originals_that_storage_writes(root):
     # relationship fields, so edges out of those nodes would never be minted.
     assert all(isinstance(node, DataPoint) for node in collected)
     assert all(type(node) is not type(copy) for node, copy in zip(collected, stored_nodes))
+
+
+@pytest.mark.asyncio
+async def test_dropped_field_and_foreign_edge_warnings_do_not_suppress_each_other(caplog):
+    """Two warning kinds on one (class, field) must both fire — the key carries the kind."""
+    _warned_once_keys.clear()
+
+    class Crowd(DataPoint):
+        friends_with: Any = None
+        metadata: dict = TRANSPARENT
+
+    alice, bob, _ = _people()
+
+    with caplog.at_level(logging.WARNING):
+        await get_graph_from_model(Crowd(friends_with="a plain value"))
+        await get_graph_from_model(Crowd(friends_with=[Edge(source=alice, target=bob)]))
+
+    messages = [
+        record.getMessage()
+        for record in caplog.records
+        if "marked transparent" in record.getMessage()
+    ]
+    assert any("that value is dropped" in message for message in messages)
+    assert any("source is not" in message for message in messages)
+
+
+def test_diamond_of_transparent_wrappers_resolves_each_leaf_once():
+    """Stacked diamonds must not explode: same object, same children, walked once."""
+
+    class Box(DataPoint):
+        a: Any = None
+        b: Any = None
+        metadata: dict = TRANSPARENT
+
+    leaf = Person(name="Leaf")
+    node: Any = leaf
+    for _ in range(12):
+        node = Box(a=node, b=node)
+
+    assert unwrap_transparent(node) == [leaf]
+
+
+@pytest.mark.asyncio
+async def test_edge_with_transparent_source_is_skipped_with_a_warning(caplog):
+    """A transparent node is never stored, so an edge from it would dangle."""
+    _warned_once_keys.clear()
+
+    class Holder(DataPoint):
+        name: str
+        links: Any = None
+        metadata: dict = {"index_fields": ["name"]}
+
+    alice, bob, _ = _people()
+    team = MemberGroup(members=[alice])
+    holder = Holder(name="Holder", links=[Edge(source=team, target=bob)])
+
+    with caplog.at_level(logging.WARNING):
+        _nodes, edges = await get_graph_from_model(holder)
+
+    assert str(team.id) not in {str(source) for source, _, _, _ in edges}
+    assert all(name != "links" for _, _, name, _ in edges)
+    assert any("appears as the source" in record.getMessage() for record in caplog.records)

@@ -1,17 +1,20 @@
 import asyncio
+import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
-
 from graphiti_core import Graphiti
-from graphiti_core.nodes import EpisodeType
-from .qa_benchmark_base import QABenchmarkRAG, QABenchmarkConfig
 from graphiti_core.llm_client import OpenAIClient
 from graphiti_core.llm_client.config import LLMConfig
+from graphiti_core.nodes import EpisodeType
+from langchain_openai import ChatOpenAI
+
+from .qa_benchmark_base import QABenchmarkConfig, QABenchmarkRAG
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -68,6 +71,7 @@ class QABenchmarkGraphiti(QABenchmarkRAG):
             for record in indexes_result.records:
                 print(f"  - {record.get('name', 'unnamed')}: {record.get('type', 'unknown')}")
         except Exception as e:
+            logger.debug("Ignoring exception in QABenchmarkGraphiti.initialize_rag", exc_info=True)
             print(f"❌ Error checking schema: {e}")
 
         # Initialize LLM for final answer generation
@@ -82,6 +86,7 @@ class QABenchmarkGraphiti(QABenchmarkRAG):
             await graphiti.driver.execute_query("MATCH (n) DETACH DELETE n")
             print("Database cleared successfully")
         except Exception as e:
+            logger.debug("Ignoring exception in QABenchmarkGraphiti._clear_database", exc_info=True)
             print(f"Warning: Could not clear database: {e}")
 
     async def cleanup_rag(self) -> None:

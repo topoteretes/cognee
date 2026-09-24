@@ -1,6 +1,6 @@
 # Cognee Examples
 
-Runnable example scripts demonstrating cognee end-to-end — 64 scripts across three folders.
+Runnable example scripts demonstrating cognee end-to-end — 75 scripts across four folders.
 They double as the smoke-test corpus the team uses to verify behaviour across the SDK.
 
 > **New here?** Start with [`guides/simple_cognee_example.py`](guides/simple_cognee_example.py)
@@ -20,9 +20,10 @@ They double as the smoke-test corpus the team uses to verify behaviour across th
 
 | Folder | What lives there | Count |
 |---|---|---|
-| [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 31 |
+| [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 38 |
 | [`advanced_guides/`](advanced_guides/) | Deeper takes on topics a guide already covers | 8 |
-| [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 25 |
+| [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 28 |
+| [`integrations/`](integrations/) | Connector packages and deployment kits that pair cognee with other systems | 1 |
 
 One line each: **guides teach a feature, advanced guides deepen a feature, demos combine
 features.** See [Contributing](#-contributing-a-new-example) for the precise category rules.
@@ -36,6 +37,7 @@ features.** See [Contributing](#-contributing-a-new-example) for the precise cat
 | [`recall_core.py`](guides/recall_core.py) | `recall` semantics and parameters |
 | [`improve_quickstart.py`](guides/improve_quickstart.py) | Graph enrichment before/after `improve()` |
 | [`agent_memory_quickstart.py`](guides/agent_memory_quickstart.py) | Wrap an LLM agent with `@cognee.agent_memory` |
+| [`no_llm_remember_recall.py`](guides/no_llm_remember_recall.py) | `remember → recall` with no LLM key at all: GLiNER graph + `CHUNKS` recall (needs `cognee[gliner]`) |
 
 ### Sessions & self-improvement
 | Script | Demonstrates |
@@ -53,17 +55,21 @@ features.** See [Contributing](#-contributing-a-new-example) for the precise cat
 | [`temporal_recall.py`](guides/temporal_recall.py) | Time-bounded queries with `SearchType.TEMPORAL` |
 | [`references_example.py`](guides/references_example.py) | `include_references` — answers with evidence |
 | [`nodeset_grouping_example.py`](guides/nodeset_grouping_example.py) | `node_set` grouping for filtered retrieval |
+| [`hybrid_retrieval_recall.py`](guides/hybrid_retrieval_recall.py) | `HYBRID_COMPLETION` — passage-focused vs graph-focused context for the same question |
+| [`fact_validity.py`](guides/fact_validity.py) | Fact validity windows: closing a fact with `close_node`, checking it with `is_valid` |
 
 ### Graph modeling & extraction
 | Script | Demonstrates |
 |---|---|
 | [`custom_graph_model.py`](guides/custom_graph_model.py) | `graph_model=` on `remember` |
+| [`graph_model_from_json.py`](guides/graph_model_from_json.py) | Building a `graph_model` from a JSON schema spec with `graph_model_from_spec` — no model classes |
+| [`gliner_demo_llm_free_cognify.py`](guides/gliner_demo_llm_free_cognify.py) | LLM-free graph + summaries with `extractor="gliner_demo"` (needs `cognee[gliner]`) |
 | [`custom_data_models.py`](guides/custom_data_models.py) | Custom `DataPoint` subclasses and edges |
 | [`custom_prompts.py`](guides/custom_prompts.py) | Overriding the extraction prompt |
 | [`custom_tasks_and_pipelines.py`](guides/custom_tasks_and_pipelines.py) | Authoring tasks and composing a pipeline |
 | [`ontology_quickstart.py`](guides/ontology_quickstart.py) | Grounding extraction in an OWL ontology |
 | [`entity_deduplication.py`](guides/entity_deduplication.py) | Merging duplicate entities (dry-run, then real) |
-| [`consolidate_entity_descriptions_example.py`](guides/consolidate_entity_descriptions_example.py) | Merging near-duplicate entity descriptions |
+| [`consolidate_entity_descriptions_example.py`](guides/consolidate_entity_descriptions_example.py) | LLM rewrite of Entity descriptions and EntityType summaries from graph neighborhood |
 | [`low_level_llm.py`](guides/low_level_llm.py) | Direct LLM-gateway structured output |
 
 ### Ingestion
@@ -73,6 +79,10 @@ features.** See [Contributing](#-contributing-a-new-example) for the precise cat
 | [`multimedia_audio_image_processing_example.py`](guides/multimedia_audio_image_processing_example.py) | Audio + image ingestion (bundled assets) |
 | [`image_ocr_extraction.py`](guides/image_ocr_extraction.py) | Vision transcription + OCR text for an image |
 | [`code_graph_example.py`](guides/code_graph_example.py) | Code-graph pipeline + `SearchType.CODE` |
+| [`google_integration_sync.py`](guides/google_integration_sync.py) | List/select Drive folders or Gmail labels and request sync (needs a running API and a connected Google account) |
+| [`gmail.py`](guides/gmail.py) | Ingest Gmail with the bundled SDK connector, incremental sync and delete propagation (needs `cognee[gmail]`) |
+| [`google_drive.py`](guides/google_drive.py) | Ingest a Drive folder with the bundled SDK connector (needs `cognee[google-drive]`) |
+| [`presort_downloads.py`](guides/presort_downloads.py) | Presorting a messy folder before ingestion: `remember(dry_run="presort")`, then ingest the report |
 
 ### Visualization
 | Script | Demonstrates |
@@ -100,6 +110,7 @@ Each script names the simpler guide it builds on and states what it adds.
 | [`session_distillation_demo.py`](advanced_guides/session_distillation_demo.py) | `guides/session_distillation.py` | Eight-message session, hybrid recall, post-distillation verification |
 | [`global_context_index_smoke_demo.py`](advanced_guides/global_context_index_smoke_demo.py) | `guides/global_context_index.py` + `guides/global_context_index_recall.py` | 12-turn fixture, three-question sweep, pass/fail verdict |
 | [`temporal_awareness_example/`](advanced_guides/temporal_awareness_example/) | `guides/temporal_recall.py` | Real biography documents instead of inline text |
+| [`temporal_awareness_example/temporal_hybrid_demo.py`](advanced_guides/temporal_awareness_example/temporal_hybrid_demo.py) | `guides/temporal_recall.py` | Custom timestamp promotion task and direct temporal hybrid retrieval |
 | [`ontology_reference_vocabulary/`](advanced_guides/ontology_reference_vocabulary/) | `guides/ontology_quickstart.py` | Bundled OWL + texts as a constraining vocabulary |
 | [`simple_document_qa/`](advanced_guides/simple_document_qa/) | `guides/simple_cognee_example.py` | Q&A over a real 150 KB document |
 | [`truth_centroid_slots_demo.py`](advanced_guides/truth_centroid_slots_demo.py) | `guides/truth_subspace_reranking.py` | Centroid slots, epochs, and rebuilds behind truth-subspace reranking |
@@ -107,6 +118,11 @@ Each script names the simpler guide it builds on and states what it adds.
 ## 🎯 `demos/` — features combined into use cases
 
 Every demo lives in a topic folder.
+
+### [`company_brain/`](demos/company_brain/) — the README onboarding tour
+| Script | Demonstrates |
+|---|---|
+| [`company_brain_demo.py`](demos/company_brain/company_brain_demo.py) | A text fact, a code graph, and a rule stated in a session — distilled, then answered from a fresh session |
 
 ### [`comprehensive_example/`](demos/comprehensive_example/) — everything at once
 | Script | Demonstrates |
@@ -153,6 +169,11 @@ Every demo lives in a topic folder.
 | [`dynamic_steps_resume_analysis_hr_example.py`](demos/custom_pipelines/dynamic_steps_resume_analysis_hr_example.py) | Self-coded run stages toggled per run, over a CV corpus |
 | [`organizational_hierarchy/`](demos/custom_pipelines/organizational_hierarchy/) | Org-chart ingestion — high-level and low-level variants |
 
+### Standalone
+| Script | Demonstrates |
+|---|---|
+| [`graph_completion_to_hybrid.py`](demos/graph_completion_to_hybrid.py) | `GRAPH_COMPLETION` triplets fed into `HYBRID_COMPLETION` context + answer, side by side |
+
 ### [`permissions/`](demos/permissions/) — multi-tenancy (set `ENABLE_BACKEND_ACCESS_CONTROL=True`)
 | Script | Demonstrates |
 |---|---|
@@ -160,6 +181,13 @@ Every demo lives in a topic folder.
 | [`tenant_role_constraints_example.py`](demos/permissions/tenant_role_constraints_example.py) | What a role may not do |
 | [`user_permissions_and_access_control_example.py`](demos/permissions/user_permissions_and_access_control_example.py) | The full ACL surface across users, roles, tenants |
 | [`data_access_control_example.py`](demos/permissions/data_access_control_example.py) | Retrieval filtered by ACL, `PermissionDeniedError` paths |
+
+## 🔌 `integrations/` — cognee alongside other systems
+
+| Entry | What it is |
+|---|---|
+| [`README.md`](integrations/README.md) | Data-source connectors (Gmail, Slack, Notion, Drive, Confluence, …) — shipped as `cognee-community` packages on the DLT ingestion path |
+| [`docker-sandbox-kit/`](integrations/docker-sandbox-kit/) | Supervisor ↔ worker memory handover across containers, two cognee users under ACL ([`demo/supervisor_worker_handover.py`](integrations/docker-sandbox-kit/demo/supervisor_worker_handover.py)) |
 
 ## ⚙️ Running an example
 

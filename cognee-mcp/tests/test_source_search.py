@@ -1,9 +1,8 @@
 import json
-from unittest.mock import AsyncMock
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
-
 from src import server
 from src.cognee_client import CogneeClient
 

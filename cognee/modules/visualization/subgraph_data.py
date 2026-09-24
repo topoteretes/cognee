@@ -4,14 +4,16 @@
 graph. Seeds are resolved by priority — explicit node ids, a recall/search
 result's graph provenance, or a query string — and, when none of those are
 given, the highest-degree nodes so a bare call still shows a representative
-view. The seed neighborhood is expanded through the shared
-``graph_engine.get_neighborhood()`` primitive and capped at ``max_nodes``.
+view. The seed neighborhood is read through the adapter's
+``iter_bounded_neighborhood()``; adapters with a native implementation stop
+at ``max_nodes`` in the store.
 Pass ``full=True`` to render the entire graph (legacy behavior).
 """
 
-from collections import deque
-from typing import Any, Dict, List, Optional, Tuple
+from collections.abc import AsyncIterator
+from typing import Any
 
+from cognee.infrastructure.databases.graph.bounded_neighborhood import hop_distances
 from cognee.infrastructure.databases.graph.graph_db_interface import EdgeData, Node
 from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
 from cognee.shared.logging_utils import get_logger
@@ -36,15 +38,15 @@ _SEED_VECTOR_COLLECTIONS = [
 ]
 
 # (nodes, edges) in the shape get_graph_data()/get_neighborhood() already return.
-GraphData = Tuple[List[Node], List[EdgeData]]
+GraphData = tuple[list[Node], list[EdgeData]]
 
 
-def _unique_preserve_order(node_ids: List[str]) -> List[str]:
+def _unique_preserve_order(node_ids: list[str]) -> list[str]:
     """Order-preserving de-duplication of stringified node ids."""
     return list(dict.fromkeys(str(node_id) for node_id in node_ids))
 
 
-def _coerce_node_ids(value: Any) -> List[str]:
+def _coerce_node_ids(value: Any) -> list[str]:
     """Node ids from a value that is either a ``node_ids`` list or a provenance
     mapping (``{"node_ids": [...]}``). Anything else yields ``[]``."""
     if isinstance(value, dict):
@@ -54,7 +56,7 @@ def _coerce_node_ids(value: Any) -> List[str]:
     return []
 
 
-def resolve_seeds_from_recall(recall_result: Any) -> List[str]:
+def resolve_seeds_from_recall(recall_result: Any) -> list[str]:
     """Seed node ids from a recall/search result's graph provenance.
 
     Handles the shapes cognee results actually carry node ids in: a mapping with
@@ -72,7 +74,7 @@ def resolve_seeds_from_recall(recall_result: Any) -> List[str]:
         return _unique_preserve_order(seeds)
 
     items = recall_result if isinstance(recall_result, (list, tuple)) else [recall_result]
-    node_ids: List[str] = []
+    node_ids: list[str] = []
     for item in items:
         used = (
             item.get("used_graph_element_ids")
@@ -87,7 +89,7 @@ async def resolve_seeds_from_query(
     query: str,
     seed_top_k: int = DEFAULT_SEED_TOP_K,
     wide_search_top_k: int = DEFAULT_WIDE_SEARCH_TOP_K,
-) -> List[str]:
+) -> list[str]:
     """Seed node ids for a query, ranked by vector distance (nearest first).
 
     ``NodeEdgeVectorSearch.extract_relevant_node_ids()`` returns an unordered
@@ -114,38 +116,37 @@ async def resolve_seeds_from_query(
     return _unique_preserve_order([node_id for node_id, _ in scored])[:seed_top_k]
 
 
-async def resolve_seeds_by_degree(graph_engine: Any, top_k: int) -> List[str]:
+async def resolve_seeds_by_degree(graph_engine: Any, top_k: int) -> list[str]:
     """Highest-degree nodes as seeds — the default view when no seed is given.
 
-    Uses ``get_graph_data()`` (implemented by every adapter) and counts degree
-    in memory. This loads the whole graph, so it runs only as the no-seed
-    fallback; query/ids/recall seeds expand via ``get_neighborhood`` without a
-    full load.
+    Delegates the ranking to the adapter, which lets a store that can
+    aggregate do so. This used to read the whole graph via ``get_graph_data()``
+    and count degree in Python: on a 5.6M-node / 35.6M-edge graph that is tens
+    of gigabytes of Python objects built to keep ten ids, and the worker was
+    OOM-killed before it could answer. Since this is the seed source for the
+    *default* visualization — no query, no explicit seeds — that made the
+    graph view unopenable at scale rather than merely slow.
+
+    The in-memory count still exists as ``GraphDBInterface``'s inherited
+    default, so an adapter without a native ranking keeps working.
     """
-    nodes, edges = await graph_engine.get_graph_data()
-    if not nodes:
-        return []
+    method = getattr(graph_engine, "get_top_degree_node_ids", None)
+    if callable(method):
+        return await method(top_k)
+    # Community registration permits duck-typed adapters, not only subclasses.
+    from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 
-    degree: Dict[str, int] = {str(node_id): 0 for node_id, _ in nodes}
-    for edge in edges:
-        source_key, target_key = str(edge[0]), str(edge[1])
-        if source_key in degree:
-            degree[source_key] += 1
-        if target_key in degree:
-            degree[target_key] += 1
-
-    ranked = sorted(degree.items(), key=lambda item: item[1], reverse=True)
-    return [node_id for node_id, _ in ranked[:top_k]]
+    return await GraphDBInterface.get_top_degree_node_ids(graph_engine, top_k)
 
 
 async def resolve_seed_node_ids(
     graph_engine: Any,
     *,
-    seed_node_ids: Optional[List[str]] = None,
+    seed_node_ids: list[str] | None = None,
     recall_result: Any = None,
-    query: Optional[str] = None,
+    query: str | None = None,
     seed_top_k: int = DEFAULT_SEED_TOP_K,
-) -> Tuple[List[str], str]:
+) -> tuple[list[str], str]:
     """Resolve seeds by priority: explicit ids > recall > query > degree."""
     if seed_node_ids:
         return _unique_preserve_order([str(n) for n in seed_node_ids])[:seed_top_k], "explicit"
@@ -164,11 +165,11 @@ async def resolve_seed_node_ids(
 
 
 def truncate_subgraph(
-    nodes_data: List[Node],
-    edges_data: List[EdgeData],
-    seed_ids: List[str],
+    nodes_data: list[Node],
+    edges_data: list[EdgeData],
+    seed_ids: list[str],
     max_nodes: int,
-) -> Tuple[GraphData, bool]:
+) -> tuple[GraphData, bool]:
     """Cap the subgraph at ``max_nodes``, keeping seeds and their nearest nodes.
 
     Nodes are ranked by hop distance from the seeds (seeds first); edges are
@@ -177,25 +178,7 @@ def truncate_subgraph(
     if max_nodes <= 0 or len(nodes_data) <= max_nodes:
         return (nodes_data, edges_data), False
 
-    adjacency: Dict[str, set] = {}
-    for edge in edges_data:
-        source_key, target_key = str(edge[0]), str(edge[1])
-        adjacency.setdefault(source_key, set()).add(target_key)
-        adjacency.setdefault(target_key, set()).add(source_key)
-
-    hop_distance: Dict[str, int] = {}
-    queue: deque = deque()
-    for seed_id in seed_ids:
-        seed_key = str(seed_id)
-        if seed_key not in hop_distance:
-            hop_distance[seed_key] = 0
-            queue.append(seed_key)
-    while queue:
-        node_id = queue.popleft()
-        for neighbor_id in adjacency.get(node_id, ()):
-            if neighbor_id not in hop_distance:
-                hop_distance[neighbor_id] = hop_distance[node_id] + 1
-                queue.append(neighbor_id)
+    hop_distance = hop_distances(edges_data, seed_ids)
 
     node_rank = {str(node_id): index for index, (node_id, _) in enumerate(nodes_data)}
     kept_nodes = sorted(
@@ -209,12 +192,60 @@ def truncate_subgraph(
     return (kept_nodes, kept_edges), True
 
 
+def iter_seed_neighborhood(
+    graph_engine: Any,
+    seeds: list[str],
+    depth: int,
+    max_nodes: int,
+    *,
+    chunk_size: int,
+    property_keys: list[str] | tuple[str, ...] | None = None,
+) -> AsyncIterator[GraphData]:
+    """The adapter's ``iter_bounded_neighborhood`` chunks for these seeds.
+
+    A store with a native implementation stops at ``max_nodes`` instead of
+    returning the whole neighbourhood for Python to cut.
+    """
+    # Only passed when asked for, so the unprojected read calls the adapter
+    # exactly as it did before property projection had a caller.
+    options: dict[str, Any] = {"chunk_size": chunk_size}
+    if property_keys is not None:
+        options["property_keys"] = list(property_keys)
+    method = getattr(graph_engine, "iter_bounded_neighborhood", None)
+    if callable(method):
+        return method(seeds, depth, max_nodes, **options)
+    # Community registration permits duck-typed adapters, not only subclasses.
+    from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+
+    return GraphDBInterface.iter_bounded_neighborhood(
+        graph_engine, seeds, depth, max_nodes, **options
+    )
+
+
+async def expand_seed_neighborhood(
+    graph_engine: Any, seeds: list[str], depth: int, max_nodes: int
+) -> GraphData:
+    """The seeds' neighbourhood capped at ``max_nodes``, as one ``(nodes, edges)``.
+
+    The chunks are collected into one result; one chunk of ``max_nodes`` keeps
+    it to a single node read.
+    """
+    nodes_data: list[Node] = []
+    edges_data: list[EdgeData] = []
+    async for chunk_nodes, chunk_edges in iter_seed_neighborhood(
+        graph_engine, seeds, depth, max_nodes, chunk_size=max_nodes
+    ):
+        nodes_data.extend(chunk_nodes)
+        edges_data.extend(chunk_edges)
+    return nodes_data, edges_data
+
+
 async def fetch_visualization_graph_data(
     graph_engine: Any,
     *,
     full: bool = False,
-    query: Optional[str] = None,
-    seed_node_ids: Optional[List[str]] = None,
+    query: str | None = None,
+    seed_node_ids: list[str] | None = None,
     recall_result: Any = None,
     neighborhood_depth: int = DEFAULT_NEIGHBORHOOD_DEPTH,
     seed_top_k: int = DEFAULT_SEED_TOP_K,
@@ -244,19 +275,16 @@ async def fetch_visualization_graph_data(
         logger.info("Subgraph visualization: no seeds resolved; rendering empty graph.")
         return ([], [])
 
-    nodes_data, edges_data = await graph_engine.get_neighborhood(
-        node_ids=seeds, depth=neighborhood_depth
-    )
-    (nodes_data, edges_data), truncated = truncate_subgraph(
-        nodes_data, edges_data, seeds, max_nodes
+    nodes_data, edges_data = await expand_seed_neighborhood(
+        graph_engine, seeds, neighborhood_depth, max_nodes
     )
     logger.info(
-        "Subgraph visualization: seeds=%d source=%s depth=%d nodes=%d edges=%d truncated=%s",
+        "Subgraph visualization: seeds=%d source=%s depth=%d max_nodes=%d nodes=%d edges=%d",
         len(seeds),
         source,
         neighborhood_depth,
+        max_nodes,
         len(nodes_data),
         len(edges_data),
-        truncated,
     )
     return (nodes_data, edges_data)

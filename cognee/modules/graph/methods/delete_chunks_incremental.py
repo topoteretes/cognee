@@ -1,6 +1,5 @@
 """Delete chunk-owned output through the shared provenance planner."""
 
-from typing import List
 from uuid import UUID
 
 from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
@@ -14,7 +13,7 @@ def edge_endpoints(source: dict, edge: dict, target: dict) -> tuple:
     return str(source_id), str(target_id)
 
 
-async def delete_chunks_incremental(chunk_ids: List[str], dataset_id, data_id):
+async def delete_chunks_incremental(chunk_ids: list[str], dataset_id, data_id):
     """Retire every given chunk's ownership in ONE last-owner planner pass.
 
     Artifacts owned only by retired chunks are hard-deleted (graph and

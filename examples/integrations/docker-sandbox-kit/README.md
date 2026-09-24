@@ -144,7 +144,7 @@ docker-sandbox-kit/
 - `remember` builds a knowledge graph (a few LLM calls), so the first write
 takes noticeably longer than a plain key-value store; `recall` answers from
 the graph.
-- The kit defaults to `openai/gpt-5-mini`. To use another provider, edit
+- The kit defaults to `openai/gpt-5.6-luna`. To use another provider, edit
 `environment.variables`, the `credentials`/`permissions.network` blocks, and
 the stored secret accordingly (see the [cognee provider docs](https://docs.cognee.ai/)).
 - For always-on cross-sandbox memory (concurrent agents, no shared workspace),

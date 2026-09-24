@@ -9,8 +9,8 @@ import pytest
 
 from cognee.infrastructure.databases.graph.ladybug.ladybug_migrate import (
     ladybug_version_mapping,
-    run_migration_step,
     read_ladybug_storage_version,
+    run_migration_step,
 )
 
 

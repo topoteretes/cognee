@@ -6,6 +6,9 @@ parses argparse at import time and imports optional deps (psutil). Skip it
 from collection so pytest doesn't crash trying to run it.
 """
 
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 collect_ignore = ["test_subprocess_rss.py"]
 
 
@@ -25,4 +28,4 @@ def pytest_sessionfinish(session, exitstatus):
             child.terminate()
             child.join(timeout=5)
         except Exception:
-            pass
+            logger.debug("Ignoring exception in pytest_sessionfinish", exc_info=True)
