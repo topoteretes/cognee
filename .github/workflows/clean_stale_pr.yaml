@@ -18,10 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7.0.1
 
       - name: Mark and Close Stale PRs
-        uses: actions/stale@v10
+        uses: actions/stale@v11
         with:
           # Number of days of inactivity before the pull request is marked stale
           days-before-stale: 60
