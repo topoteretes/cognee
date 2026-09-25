@@ -99,6 +99,14 @@ jobs:
           cache-from: type=registry,ref=${{ steps.set-image.outputs.cache-image }}
           cache-to: type=registry,ref=${{ steps.set-image.outputs.cache-image }},mode=max
 
+  fork-pr-validation:
+    name: Fork PR validation
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm secret-dependent suites are intentionally skipped
+        run: echo "External fork PR detected; secret-dependent Test Suites jobs are skipped."
+
   pre-test:
     name: basic checks
     uses: ./.github/workflows/pre_test.yml
