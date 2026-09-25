@@ -274,3 +274,71 @@ def test_a_container_quota_and_limit_both_bound_the_pool(machine, cgroup):
     assert extractor_module.auto_inference_threads() == 4
     cgroup("memory.current", str(6 * GIB))  # 6 GiB left: memory bound 1 + 2 // 2 = 2
     assert extractor_module.auto_inference_threads() == 2
+
+
+def test_a_failing_batch_raises_and_the_pool_keeps_working():
+    """An error in one batch reaches the caller, and the shared pool stays usable."""
+    model = window_model()
+    real_batch_extract = model.batch_extract
+
+    def failing(texts, schemas, **options):
+        if any("Moscow" in text for text in texts):
+            raise RuntimeError("model failed on this batch")
+        return real_batch_extract(texts, schemas, **options)
+
+    model.batch_extract = failing
+    with ThreadPoolExecutor(3) as pool:
+        with pytest.raises(RuntimeError, match="model failed on this batch"):
+            extractor_module._extract_long_concurrently(model, pool, TEXTS, object(), **OPTIONS)
+        model.batch_extract = real_batch_extract
+        recovered = extractor_module._extract_long_concurrently(
+            model, pool, TEXTS, object(), **OPTIONS
+        )
+    assert recovered == sequential_reference(window_model())
+
+
+def test_concurrent_callers_share_the_pool_without_mixing_results():
+    """Two documents extracted at once through one pool each get their own result."""
+    other_texts = [names_text(seed, 300) for seed in (7, 8, 9)]
+    expected_a = sequential_reference(window_model())
+    expected_b = window_model().batch_extract_long(
+        other_texts,
+        object(),
+        batch_size=OPTIONS["batch_size"],
+        threshold=OPTIONS["threshold"],
+        include_confidence=True,
+        include_spans=True,
+        chunk_size=OPTIONS["window_words"],
+        chunk_overlap=OPTIONS["window_overlap_words"],
+        overlap_policy=extractor_module.OVERLAP_POLICY,
+    )
+    model = window_model()
+    with ThreadPoolExecutor(4) as pool, ThreadPoolExecutor(2) as callers:
+        future_a = callers.submit(
+            extractor_module._extract_long_concurrently, model, pool, TEXTS, object(), **OPTIONS
+        )
+        future_b = callers.submit(
+            extractor_module._extract_long_concurrently,
+            model,
+            pool,
+            other_texts,
+            object(),
+            **OPTIONS,
+        )
+        assert future_a.result() == expected_a
+        assert future_b.result() == expected_b
+
+
+def test_repeated_extraction_does_not_grow_the_thread_count(monkeypatch):
+    """The process-wide pool is reused: many calls never exceed its size in threads."""
+    monkeypatch.setattr(extractor_module, "inference_threads", lambda batch_size=16: 3)
+    extractor_module.reset_inference_pool()
+    pool = extractor_module._inference_pool(OPTIONS["batch_size"])
+    model = window_model()
+    for _ in range(10):
+        extractor_module._extract_long_concurrently(model, pool, TEXTS, object(), **OPTIONS)
+    gliner_threads = [t for t in threading.enumerate() if t.name.startswith("gliner")]
+    assert 0 < len(gliner_threads) <= 3
+    extractor_module.reset_inference_pool()
+    time.sleep(0.1)
+    assert not [t for t in threading.enumerate() if t.name.startswith("gliner")]
