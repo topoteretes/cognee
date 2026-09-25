@@ -1270,3 +1270,50 @@ async def test_recall_explicit_query_type_wins_without_a_usable_llm(monkeypatch)
         user=user,
     )
     assert captured["query_type"] == SearchType.SUMMARIES
+
+
+def _gliner_options(tasks):
+    task = next(
+        t for t in tasks if t.executable.__name__ == "extract_graph_and_summarize_with_gliner"
+    )
+    return task.default_params["kwargs"]["options"]
+
+
+@pytest.mark.asyncio
+async def test_cognify_forwards_gliner_processes_and_threads_to_the_extraction_task():
+    with patch.object(tasks_module, "require_gliner2"):
+        tasks = await _cognify_standard_tasks(
+            extractor="gliner_demo", gliner_processes=2, gliner_threads=3
+        )
+        defaults = await _cognify_standard_tasks(extractor="gliner_demo")
+    options = _gliner_options(tasks)
+    assert (options.processes, options.threads) == (2, 3)
+    # The per-document schema probe runs inside the same concurrency.
+    probe = next(t for t in tasks if t.executable.__name__ == "prepare_gliner_schema")
+    probe_kwargs = probe.default_params["kwargs"]
+    assert (probe_kwargs["inference_processes"], probe_kwargs["inference_threads"]) == (2, 3)
+    # Not given: None, so the task defers to GLINER_INFERENCE_PROCESSES / _THREADS.
+    assert (_gliner_options(defaults).processes, _gliner_options(defaults).threads) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_cognify_rejects_gliner_concurrency_for_the_llm_extractor():
+    with pytest.raises(ValueError, match="only apply to the GLiNER extractor"):
+        await _cognify_standard_tasks(extractor="llm", gliner_threads=2)
+    with pytest.raises(ValueError, match="only apply to the GLiNER extractor"):
+        await _cognify_standard_tasks(extractor="llm", gliner_processes=2)
+
+
+def test_gliner_options_validate_process_and_thread_counts():
+    assert _options(processes=2, threads=0).threads == 0  # 0 sizes it to the machine
+    with pytest.raises(ValueError, match="processes must be >= 1"):
+        _options(processes=0)
+    with pytest.raises(ValueError, match="threads must be >= 0"):
+        _options(threads=-1)
+
+
+def test_remember_routes_gliner_concurrency_to_cognify():
+    remember_module = importlib.import_module("cognee.api.v1.remember.remember")
+    for name in ("gliner_processes", "gliner_threads"):
+        assert name in remember_module._COGNIFY_ONLY
+        assert name in remember_module.RememberKwargs.__annotations__

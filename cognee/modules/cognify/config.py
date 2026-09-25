@@ -38,6 +38,13 @@ class CognifyConfig(BaseSettings):
     # half of torch's thread count, capped by free memory. 1 keeps the
     # single-threaded behaviour. Output is identical at every setting.
     gliner_inference_threads: int = 0
+    # How many processes share GLiNER extraction (env: GLINER_INFERENCE_PROCESSES).
+    # 1 (default) keeps everything in this process. N > 1 starts N - 1 worker
+    # processes, each loading its own model (~3 GB) and running its share of the
+    # model batches on GLINER_INFERENCE_THREADS threads (auto: the machine's
+    # concurrency divided across the processes). Output is identical at every
+    # setting; scripts using it need an ``if __name__ == "__main__":`` guard.
+    gliner_inference_processes: int = 1
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def to_dict(self) -> dict:
@@ -54,6 +61,7 @@ class CognifyConfig(BaseSettings):
             "gliner_auto_install": self.gliner_auto_install,
             "gliner_torch_index_url": self.gliner_torch_index_url,
             "gliner_inference_threads": self.gliner_inference_threads,
+            "gliner_inference_processes": self.gliner_inference_processes,
         }
 
 
