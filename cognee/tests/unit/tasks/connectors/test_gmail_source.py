@@ -16,6 +16,7 @@ libraries and no live credentials are required, so these run in CI. Coverage:
 
 import base64
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -663,25 +664,37 @@ class _FlakyRequest:
         return self._result
 
 
-def _quota(units_per_minute=6000):
+@pytest.fixture
+def make_quota(monkeypatch):
+    """Build a GmailQuota whose pacing window and sleeps run on a fake clock."""
+    import limits.storage.memory
+
     clock = _FakeClock()
-    return GmailQuota(units_per_minute, clock=clock, sleep=clock.sleep), clock
+    # The limits moving window reads time.time() internally.
+    monkeypatch.setattr(limits.storage.memory, "time", SimpleNamespace(time=clock))
+
+    def _make(units_per_minute=6000):
+        return GmailQuota(units_per_minute, clock=clock, sleep=clock.sleep), clock
+
+    return _make
 
 
-def test_quota_keeps_every_minute_under_the_budget():
-    quota, clock = _quota(units_per_minute=6000)
+def test_quota_keeps_every_minute_under_the_budget(make_quota):
+    quota, clock = make_quota(units_per_minute=6000)
 
     fetched = 0
-    while clock.now < 60.0:
+    while True:
         quota.acquire(20)  # one messages.get
+        if clock.now >= 60.0:
+            break
         fetched += 1
 
-    # 6,000 units / 20 per fetch = 300 a minute, plus at most a 1-second burst.
-    assert 300 <= fetched <= 306
+    # 6,000 units / 20 per fetch = 300 fetches in the first minute, no more.
+    assert fetched == 300
 
 
-def test_quota_does_not_wait_within_the_burst():
-    quota, clock = _quota(units_per_minute=6000)
+def test_quota_does_not_wait_within_the_budget(make_quota):
+    quota, clock = make_quota(units_per_minute=6000)
     quota.acquire(20)
     quota.acquire(5)
     assert clock.sleeps == []
@@ -692,8 +705,8 @@ def test_quota_rejects_a_budget_too_small_for_one_fetch():
         GmailQuota(10)
 
 
-def test_execute_retries_rate_limits_with_backoff_starting_at_one_second():
-    quota, clock = _quota()
+def test_execute_retries_rate_limits_with_backoff_starting_at_one_second(make_quota):
+    quota, clock = make_quota()
     request = _FlakyRequest(
         [_RateLimitError(403, "rateLimitExceeded"), _RateLimitError(429), _RateLimitError(503)]
     )
@@ -711,8 +724,8 @@ def test_execute_retries_rate_limits_with_backoff_starting_at_one_second():
     "error",
     [_RateLimitError(404), _RateLimitError(410), _RateLimitError(403, "insufficientPermissions")],
 )
-def test_execute_raises_non_retryable_errors_immediately(error):
-    quota, clock = _quota()
+def test_execute_raises_non_retryable_errors_immediately(error, make_quota):
+    quota, clock = make_quota()
     request = _FlakyRequest([error])
 
     with pytest.raises(type(error)):
@@ -721,8 +734,8 @@ def test_execute_raises_non_retryable_errors_immediately(error):
     assert clock.sleeps == []
 
 
-def test_execute_gives_up_after_the_last_attempt():
-    quota, _ = _quota()
+def test_execute_gives_up_after_the_last_attempt(make_quota):
+    quota, _ = make_quota()
     request = _FlakyRequest([_RateLimitError(403, "userRateLimitExceeded")] * 20)
 
     with pytest.raises(_RateLimitError):
@@ -730,12 +743,13 @@ def test_execute_gives_up_after_the_last_attempt():
     assert request.calls == 8
 
 
-def test_backfill_paces_every_call_through_the_quota():
-    quota, clock = _quota(units_per_minute=600)  # 30 fetches a minute
+def test_backfill_paces_every_call_through_the_quota(make_quota):
+    quota, clock = make_quota(units_per_minute=600)  # 30 fetches a minute
     service = FakeGmailService(messages=[_make_message(f"m{i}") for i in range(40)])
 
     rows = list(full_backfill(service, {}, label_ids=["INBOX"], quota=quota))
 
     assert len(rows) == 40
-    # 1 (profile) + 5 (list) + 40 * 20 (gets) = 806 units at 10 units/second.
-    assert clock.now >= 70.0
+    # 1 (profile) + 5 (list) + 40 * 20 (gets) = 806 units, over a 600-unit
+    # budget, so the last fetches wait for the first minute's window to pass.
+    assert clock.now >= 60.0

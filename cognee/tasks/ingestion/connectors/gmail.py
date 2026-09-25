@@ -67,11 +67,14 @@ from __future__ import annotations
 import base64
 import json
 import os
-import random
-import threading
 import time
 from collections.abc import Callable, Iterator
 from typing import Any
+
+from limits import RateLimitItemPerMinute
+from limits.storage import MemoryStorage
+from limits.strategies import MovingWindowRateLimiter
+from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_exponential_jitter
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import dlt_utils
@@ -96,7 +99,7 @@ _COST_HISTORY_LIST = 2
 _COST_GET_PROFILE = 1
 
 # Exponential backoff per Google's guidance: start at >= 1s, double each
-# retry with random jitter, cap at 64s.
+# retry with up to 1s of random jitter, cap at 64s.
 # https://developers.google.com/workspace/gmail/api/guides/handle-errors
 _MAX_ATTEMPTS = 8
 _MAX_BACKOFF_SECONDS = 64.0
@@ -136,16 +139,16 @@ def _is_retryable(exc: Exception) -> bool:
 class GmailQuota:
     """Paces Gmail API calls to a per-user quota budget and retries rate limits.
 
-    A token bucket holding at most one second's worth of units, so no 60-second
-    window can exceed ``units_per_minute`` plus that one-second burst. One
-    instance should be shared by every call made for the same mailbox.
+    Pacing uses a ``limits`` moving window, so no 60-second window spends more
+    than ``units_per_minute``; retries use ``tenacity`` with Google's backoff.
+    One instance should be shared by every call made for the same mailbox.
     """
 
     def __init__(
         self,
         units_per_minute: int = DEFAULT_QUOTA_UNITS_PER_MINUTE,
         *,
-        clock: Callable[[], float] = time.monotonic,
+        clock: Callable[[], float] = time.time,
         sleep: Callable[[float], None] = time.sleep,
     ):
         if units_per_minute < _COST_MESSAGES_GET:
@@ -153,49 +156,44 @@ class GmailQuota:
                 f"units_per_minute must be at least {_COST_MESSAGES_GET} "
                 "(the cost of fetching one message)."
             )
-        self._rate = units_per_minute / 60.0
-        self._capacity = max(self._rate, float(_COST_MESSAGES_GET))
-        self._tokens = self._capacity
+        self._item = RateLimitItemPerMinute(units_per_minute)
+        self._limiter = MovingWindowRateLimiter(MemoryStorage())
         self._clock = clock
         self._sleep = sleep
-        self._updated = clock()
-        self._lock = threading.Lock()
 
     def acquire(self, cost: int) -> None:
-        """Block until ``cost`` units are available, then spend them."""
-        with self._lock:
-            now = self._clock()
-            self._tokens = min(self._capacity, self._tokens + (now - self._updated) * self._rate)
-            self._updated = now
-            if self._tokens >= cost:
-                self._tokens -= cost
-                return
-            # Sleep exactly long enough to earn the deficit, then spend it all.
-            # Accounting for the wait directly (rather than re-reading the
-            # clock in a loop) avoids spinning on float rounding.
-            wait = (cost - self._tokens) / self._rate
-            self._sleep(wait)
-            self._tokens = 0.0
-            self._updated = now + wait
+        """Block until ``cost`` units fit in the current window, then spend them."""
+        while not self._limiter.hit(self._item, "gmail", cost=cost):
+            reset_at, _ = self._limiter.get_window_stats(self._item, "gmail")
+            # The window frees up one entry at a time, so this may loop a few
+            # times before ``cost`` units are available.
+            self._sleep(max(reset_at - self._clock(), 0.05))
 
     def execute(self, request: Any, cost: int) -> Any:
         """Run a googleapiclient request within the quota, retrying rate limits."""
-        for attempt in range(_MAX_ATTEMPTS):
+
+        def _log_retry(retry_state) -> None:
+            logger.warning(
+                "Gmail API call failed (%s); retry %d of %d in %.1fs.",
+                retry_state.outcome.exception(),
+                retry_state.attempt_number,
+                _MAX_ATTEMPTS - 1,
+                retry_state.next_action.sleep,
+            )
+
+        def _attempt() -> Any:
             self.acquire(cost)
-            try:
-                return request.execute()
-            except Exception as exc:
-                if attempt == _MAX_ATTEMPTS - 1 or not _is_retryable(exc):
-                    raise
-                delay = min(2**attempt + random.random(), _MAX_BACKOFF_SECONDS)
-                logger.warning(
-                    "Gmail API call failed (%s); retry %d of %d in %.1fs.",
-                    exc,
-                    attempt + 1,
-                    _MAX_ATTEMPTS - 1,
-                    delay,
-                )
-                self._sleep(delay)
+            return request.execute()
+
+        retrying = Retrying(
+            retry=retry_if_exception(_is_retryable),
+            wait=wait_exponential_jitter(initial=1, max=_MAX_BACKOFF_SECONDS),
+            stop=stop_after_attempt(_MAX_ATTEMPTS),
+            sleep=self._sleep,
+            before_sleep=_log_retry,
+            reraise=True,
+        )
+        return retrying(_attempt)
 
 
 def _execute(request: Any, cost: int, quota: GmailQuota | None) -> Any:
