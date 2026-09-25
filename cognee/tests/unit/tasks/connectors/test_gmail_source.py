@@ -144,7 +144,7 @@ class FakeGmailService:
 # ---------------------------------------------------------------------------
 # parse_message
 # ---------------------------------------------------------------------------
-def test_parse_message_flattens_headers_body_and_labels():
+def test_parse_message_keeps_only_the_columns_cognee_reads():
     msg = _make_message(
         "m1",
         subject="Lunch?",
@@ -154,13 +154,9 @@ def test_parse_message_flattens_headers_body_and_labels():
     )
     row = parse_message(msg)
 
+    assert set(row) == {"id", "title", "content", "_deleted"}
     assert row["id"] == "m1"
-    assert row["thread_id"] == "t_m1"
-    assert row["subject"] == "Lunch?"
-    assert row["from"] == "alice@example.com"
-    assert row["body"] == "Want to grab lunch tomorrow?"
-    assert row["labels"] == "INBOX, IMPORTANT"  # list flattened, no child table
-    assert row["internal_date"] == 1700000000000
+    assert row["title"] == "Lunch?"
     assert row["_deleted"] is False
 
 
@@ -178,13 +174,12 @@ def test_parse_message_handles_multipart_prefers_text_plain():
             ],
         },
     }
-    assert parse_message(msg)["body"] == "plain wins"
+    assert parse_message(msg)["content"] == "plain wins"
 
 
-def test_parse_message_tolerates_missing_internal_date():
+def test_parse_message_tolerates_an_empty_payload():
     row = parse_message({"id": "m3", "payload": {}})
-    assert row["internal_date"] == 0
-    assert row["body"] == ""
+    assert row == {"id": "m3", "title": "", "content": "", "_deleted": False}
 
 
 def test_parse_message_emits_title_and_content_for_document_ingestion():
@@ -216,7 +211,6 @@ def test_parse_message_content_falls_back_to_snippet_for_html_only_mail():
     }
     row = parse_message(msg)
 
-    assert row["body"] == ""
     assert row["content"] == "Preview of an HTML newsletter"
 
 

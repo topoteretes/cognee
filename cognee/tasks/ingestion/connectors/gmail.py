@@ -88,7 +88,7 @@ _HISTORY_TYPES = ["messageAdded", "messageDeleted", "labelAdded", "labelRemoved"
 # Gmail allows 6,000 quota units per user per minute; each method has a fixed
 # cost. https://developers.google.com/workspace/gmail/api/reference/quota
 # The default stays below that so other apps on the same account keep working.
-DEFAULT_QUOTA_UNITS_PER_MINUTE = 5_000
+DEFAULT_QUOTA_UNITS_PER_MINUTE = 5000
 _COST_MESSAGES_GET = 20
 _COST_MESSAGES_LIST = 5
 _COST_HISTORY_LIST = 2
@@ -270,40 +270,20 @@ def _document_content(headers: dict[str, str], body: str, snippet: str) -> str:
 
 
 def parse_message(message: dict) -> dict[str, Any]:
-    """Flatten a Gmail ``users.messages.get`` resource into a dlt row.
+    """Turn a Gmail ``users.messages.get`` resource into a dlt row.
 
-    Lists (label ids) are flattened to a comma-separated string so dlt does not
-    spawn a child table per message; this keeps the row 1:1 with a cognee
-    ``DataItem`` and the orphan-cleanup bookkeeping simple.
+    Only the columns Cognee reads are kept: ``id`` (the merge key), ``title``
+    and ``content`` (the text cognify sees) and the ``_deleted`` marker.
     """
     payload = message.get("payload", {}) or {}
     headers = _headers_to_dict(payload)
-    label_ids = message.get("labelIds", []) or []
-
-    internal_date_raw = message.get("internalDate")
-    try:
-        internal_date = int(internal_date_raw) if internal_date_raw is not None else 0
-    except (TypeError, ValueError):
-        internal_date = 0
-
-    body = _extract_plaintext(payload)
-    snippet = message.get("snippet", "")
 
     return {
         "id": message.get("id"),
-        "thread_id": message.get("threadId"),
-        # title/content are what the document ingestion path turns into text.
         "title": headers.get("subject", ""),
-        "content": _document_content(headers, body, snippet),
-        "labels": ", ".join(label_ids),
-        "subject": headers.get("subject", ""),
-        "from": headers.get("from", ""),
-        "to": headers.get("to", ""),
-        "cc": headers.get("cc", ""),
-        "date": headers.get("date", ""),
-        "snippet": snippet,
-        "body": body,
-        "internal_date": internal_date,
+        "content": _document_content(
+            headers, _extract_plaintext(payload), message.get("snippet", "")
+        ),
         # Hard-delete marker (always False for live messages). Deleted/trashed
         # messages are emitted separately with _deleted=True.
         "_deleted": False,
