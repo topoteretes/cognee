@@ -15,7 +15,6 @@ libraries and no live credentials are required, so these run in CI. Coverage:
 """
 
 import base64
-import json
 from types import SimpleNamespace
 
 import pytest
@@ -622,7 +621,7 @@ def test_e2e_changing_labels_backfills_existing_messages(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# GmailQuota: pacing and retries
+# GmailQuota: pacing
 # ---------------------------------------------------------------------------
 class _FakeClock:
     """Deterministic clock whose sleep() just advances time."""
@@ -637,31 +636,6 @@ class _FakeClock:
     def sleep(self, seconds):
         self.sleeps.append(seconds)
         self.now += seconds
-
-
-class _RateLimitError(Exception):
-    """Mimics a googleapiclient HttpError with a JSON reason body."""
-
-    def __init__(self, status, reason=None):
-        super().__init__(f"HTTP {status} {reason}")
-        self.resp = type("Resp", (), {"status": status})()
-        body = {"error": {"errors": [{"reason": reason}] if reason else []}}
-        self.content = json.dumps(body).encode("utf-8")
-
-
-class _FlakyRequest:
-    """Raises the queued errors in order, then returns ``result``."""
-
-    def __init__(self, errors, result="ok"):
-        self._errors = list(errors)
-        self._result = result
-        self.calls = 0
-
-    def execute(self):
-        self.calls += 1
-        if self._errors:
-            raise self._errors.pop(0)
-        return self._result
 
 
 @pytest.fixture
@@ -703,44 +677,6 @@ def test_quota_does_not_wait_within_the_budget(make_quota):
 def test_quota_rejects_a_budget_too_small_for_one_fetch():
     with pytest.raises(ValueError):
         GmailQuota(10)
-
-
-def test_execute_retries_rate_limits_with_backoff_starting_at_one_second(make_quota):
-    quota, clock = make_quota()
-    request = _FlakyRequest(
-        [_RateLimitError(403, "rateLimitExceeded"), _RateLimitError(429), _RateLimitError(503)]
-    )
-
-    assert quota.execute(request, 20) == "ok"
-    assert request.calls == 4
-    backoffs = [s for s in clock.sleeps if s >= 1.0]
-    assert len(backoffs) == 3
-    assert 1.0 <= backoffs[0] < 2.0
-    assert 2.0 <= backoffs[1] < 3.0
-    assert 4.0 <= backoffs[2] < 5.0
-
-
-@pytest.mark.parametrize(
-    "error",
-    [_RateLimitError(404), _RateLimitError(410), _RateLimitError(403, "insufficientPermissions")],
-)
-def test_execute_raises_non_retryable_errors_immediately(error, make_quota):
-    quota, clock = make_quota()
-    request = _FlakyRequest([error])
-
-    with pytest.raises(type(error)):
-        quota.execute(request, 20)
-    assert request.calls == 1
-    assert clock.sleeps == []
-
-
-def test_execute_gives_up_after_the_last_attempt(make_quota):
-    quota, _ = make_quota()
-    request = _FlakyRequest([_RateLimitError(403, "userRateLimitExceeded")] * 20)
-
-    with pytest.raises(_RateLimitError):
-        quota.execute(request, 20)
-    assert request.calls == 8
 
 
 def test_backfill_paces_every_call_through_the_quota(make_quota):

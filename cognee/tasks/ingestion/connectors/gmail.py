@@ -37,9 +37,8 @@ Design
   (added / changed / deleted messages).  The cursor is persisted in dlt's
   per-resource state, so re-running ``remember`` resumes where it left off.
 * **Quota** — every API call is paced against Gmail's per-user quota
-  (6,000 units/minute; fetching one message costs 20 units) and rate-limit
-  errors are retried with Google's recommended exponential backoff. A full
-  backfill is therefore bounded at roughly 250 messages/minute by default.
+  (6,000 units/minute; fetching one message costs 20 units), so a full
+  backfill runs at roughly 250 messages/minute by default.
 * **Forget-on-delete** — messages reported as deleted/trashed by the History
   API are emitted with the ``_deleted`` hard-delete marker.  dlt removes those
   rows from its destination on ``merge``; they then fall out of the freshly
@@ -65,7 +64,6 @@ token file (``token.json``) private, and prefer a dedicated dataset so you can
 from __future__ import annotations
 
 import base64
-import json
 import os
 import time
 from collections.abc import Callable, Iterator
@@ -74,7 +72,6 @@ from typing import Any
 from limits import RateLimitItemPerMinute
 from limits.storage import MemoryStorage
 from limits.strategies import MovingWindowRateLimiter
-from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_exponential_jitter
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import dlt_utils
@@ -90,57 +87,23 @@ _HISTORY_TYPES = ["messageAdded", "messageDeleted", "labelAdded", "labelRemoved"
 
 # Gmail allows 6,000 quota units per user per minute; each method has a fixed
 # cost. https://developers.google.com/workspace/gmail/api/reference/quota
-GMAIL_USER_QUOTA_UNITS_PER_MINUTE = 6_000
-# Stay below the hard limit so other apps on the same account keep working.
+# The default stays below that so other apps on the same account keep working.
 DEFAULT_QUOTA_UNITS_PER_MINUTE = 5_000
 _COST_MESSAGES_GET = 20
 _COST_MESSAGES_LIST = 5
 _COST_HISTORY_LIST = 2
 _COST_GET_PROFILE = 1
-
-# Exponential backoff per Google's guidance: start at >= 1s, double each
-# retry with up to 1s of random jitter, cap at 64s.
-# https://developers.google.com/workspace/gmail/api/guides/handle-errors
-_MAX_ATTEMPTS = 8
-_MAX_BACKOFF_SECONDS = 64.0
-_RATE_LIMIT_REASONS = {"rateLimitExceeded", "userRateLimitExceeded"}
+# googleapiclient retries rate limits (403/429), 5xx and dropped connections
+# with exponential backoff; 404/410 are never retried.
+_NUM_RETRIES = 6
 
 
 # ---------------------------------------------------------------------------
-# Quota pacing and retries
+# Quota pacing
 # ---------------------------------------------------------------------------
-def _error_reason(exc: Exception) -> str | None:
-    """Return the Google error ``reason`` (e.g. ``rateLimitExceeded``), if any."""
-    content = getattr(exc, "content", None)
-    if not content:
-        return None
-    try:
-        data = json.loads(content.decode("utf-8") if isinstance(content, bytes) else content)
-        errors = data["error"].get("errors") or []
-        return errors[0].get("reason") if errors else None
-    except (ValueError, KeyError, TypeError, AttributeError, IndexError):
-        return None
-
-
-def _is_retryable(exc: Exception) -> bool:
-    """Rate limits, server errors and dropped connections are worth retrying.
-
-    Anything else (auth, bad request, 404/410) is raised immediately: a caller
-    treats 404/410 as "message gone", so it must never be delayed or masked.
-    """
-    if isinstance(exc, (ConnectionError, TimeoutError)):
-        return True
-    status = getattr(getattr(exc, "resp", None), "status", None)
-    if status == 429 or (isinstance(status, int) and status >= 500):
-        return True
-    return status == 403 and _error_reason(exc) in _RATE_LIMIT_REASONS
-
-
 class GmailQuota:
-    """Paces Gmail API calls to a per-user quota budget and retries rate limits.
+    """Paces Gmail API calls so no 60-second window exceeds the quota budget.
 
-    Pacing uses a ``limits`` moving window, so no 60-second window spends more
-    than ``units_per_minute``; retries use ``tenacity`` with Google's backoff.
     One instance should be shared by every call made for the same mailbox.
     """
 
@@ -152,10 +115,7 @@ class GmailQuota:
         sleep: Callable[[float], None] = time.sleep,
     ):
         if units_per_minute < _COST_MESSAGES_GET:
-            raise ValueError(
-                f"units_per_minute must be at least {_COST_MESSAGES_GET} "
-                "(the cost of fetching one message)."
-            )
+            raise ValueError(f"units_per_minute must be at least {_COST_MESSAGES_GET}.")
         self._item = RateLimitItemPerMinute(units_per_minute)
         self._limiter = MovingWindowRateLimiter(MemoryStorage())
         self._clock = clock
@@ -165,40 +125,14 @@ class GmailQuota:
         """Block until ``cost`` units fit in the current window, then spend them."""
         while not self._limiter.hit(self._item, "gmail", cost=cost):
             reset_at, _ = self._limiter.get_window_stats(self._item, "gmail")
-            # The window frees up one entry at a time, so this may loop a few
-            # times before ``cost`` units are available.
             self._sleep(max(reset_at - self._clock(), 0.05))
-
-    def execute(self, request: Any, cost: int) -> Any:
-        """Run a googleapiclient request within the quota, retrying rate limits."""
-
-        def _log_retry(retry_state) -> None:
-            logger.warning(
-                "Gmail API call failed (%s); retry %d of %d in %.1fs.",
-                retry_state.outcome.exception(),
-                retry_state.attempt_number,
-                _MAX_ATTEMPTS - 1,
-                retry_state.next_action.sleep,
-            )
-
-        def _attempt() -> Any:
-            self.acquire(cost)
-            return request.execute()
-
-        retrying = Retrying(
-            retry=retry_if_exception(_is_retryable),
-            wait=wait_exponential_jitter(initial=1, max=_MAX_BACKOFF_SECONDS),
-            stop=stop_after_attempt(_MAX_ATTEMPTS),
-            sleep=self._sleep,
-            before_sleep=_log_retry,
-            reraise=True,
-        )
-        return retrying(_attempt)
 
 
 def _execute(request: Any, cost: int, quota: GmailQuota | None) -> Any:
-    """Execute through ``quota`` when given; a bare call otherwise (tests)."""
-    return quota.execute(request, cost) if quota is not None else request.execute()
+    """Wait for quota (when given), then run the request with Google's retries."""
+    if quota is not None:
+        quota.acquire(cost)
+    return request.execute(num_retries=_NUM_RETRIES)
 
 
 # ---------------------------------------------------------------------------
