@@ -92,6 +92,8 @@ class RememberKwargs(TypedDict, total=False):
 
     graph_model: Any
     extractor: Literal["llm", "gliner_demo", "gliner"]
+    gliner_processes: int
+    gliner_threads: int
     node_set: list[str]
     preferred_loaders: list
     incremental_loading: bool
@@ -145,7 +147,15 @@ _ADD_ONLY = frozenset(
     }
 )
 _COGNIFY_ONLY = frozenset(
-    {"graph_model", "extractor", "chunks_per_batch", "config", "temporal_cognify"}
+    {
+        "graph_model",
+        "extractor",
+        "gliner_processes",
+        "gliner_threads",
+        "chunks_per_batch",
+        "config",
+        "temporal_cognify",
+    }
 )
 _SHARED = frozenset(
     {
