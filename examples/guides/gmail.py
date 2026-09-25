@@ -98,12 +98,12 @@ async def main():
     print(result)
     print("Sync stats:", source.cognee_sync_stats)
 
-    answer = await cognee.search(
+    answer = await cognee.recall(
         query_text="Summarize the most important emails in my inbox.",
         query_type=cognee.SearchType.GRAPH_COMPLETION,
         datasets=[DATASET_NAME],
     )
-    print("Inbox summary:", answer)
+    print(answer[0].text)
 
 
 if __name__ == "__main__":
