@@ -2,8 +2,8 @@
 
     python -m pip install "cognee==1.5.4"
     export LLM_API_KEY="YOUR_OPENAI_API_KEY"
-    python examples/demos/company_brain/company_brain_demo.py
-    python examples/demos/company_brain/company_brain_demo.py --recall-only
+    python examples/demos/company_brain/docs_code_conversations/company_brain_demo.py
+    python examples/demos/company_brain/docs_code_conversations/company_brain_demo.py --recall-only
 
 Requires an LLM and embedding provider for text, session learning, and answers.
 Code extraction uses the Enola CLI included with cognee and embeds the

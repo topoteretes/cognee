@@ -7,9 +7,9 @@ notes become one node. The script then checks the result and starts the API serv
 the UI, which Claude Code or Codex can connect to over MCP (see README.md).
 
 Requires: LLM_API_KEY. The UI needs Node.js and npm (or Docker).
-Run: uv run python examples/demos/company_brain/company_brain.py
-     uv run python examples/demos/company_brain/company_brain.py --no-ui
-     uv run python examples/demos/company_brain/company_brain.py --api-port 8010 --ui-port 3010
+Run: uv run python examples/demos/company_brain/multi_source/company_brain.py
+     uv run python examples/demos/company_brain/multi_source/company_brain.py --no-ui
+     uv run python examples/demos/company_brain/multi_source/company_brain.py --api-port 8010 --ui-port 3010
 """
 
 import argparse

@@ -1,7 +1,7 @@
 -- Relational source for the company brain guide: Acorn Analytics' HR and project database.
 -- Regenerate the database with:
---   rm -f examples/demos/company_brain/data/company.db
---   sqlite3 examples/demos/company_brain/data/company.db < examples/demos/company_brain/data/schema.sql
+--   rm -f examples/demos/company_brain/multi_source/data/company.db
+--   sqlite3 examples/demos/company_brain/multi_source/data/company.db < examples/demos/company_brain/multi_source/data/schema.sql
 -- (company_brain.py rebuilds it from this file with Python's sqlite3 when it is missing.)
 --
 -- The tables are normalized. The three *_profiles views join them into one readable
