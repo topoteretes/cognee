@@ -34,6 +34,7 @@ import threading
 import time
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 from cognee.modules.cognify.config import get_cognify_config
@@ -76,6 +77,10 @@ class GlinerNotInstalledError(ImportError):
 CORES_PER_CONCURRENT_BATCH = 2
 BYTES_PER_CONCURRENT_BATCH = 2 * 1024**3  # at DEFAULT_BATCH_SIZE, rounded up
 MEMORY_RESERVE_BYTES = 4 * 1024**3  # left free for the rest of the system
+# Linux containers (Docker --cpus/--memory, Kubernetes limits) enforce CPU and
+# memory through cgroups, which neither torch's thread count nor /proc/meminfo
+# reflects: a pod limited to 4 GB still sees the node's free memory.
+CGROUP_ROOT = Path("/sys/fs/cgroup")
 
 _extractors: dict[str, Any] = {}
 _load_lock = threading.Lock()
@@ -137,21 +142,68 @@ async def get_extractor(model_name: str = DEFAULT_MODEL) -> Any:
     return await asyncio.to_thread(load_extractor, model_name)
 
 
+def _read_cgroup(*names: str) -> str | None:
+    """The first readable cgroup file among ``names`` (v2 name first, then v1)."""
+    for name in names:
+        try:
+            return (CGROUP_ROOT / name).read_text().strip()
+        except OSError:
+            continue
+    return None
+
+
+def container_cpu_limit() -> float | None:
+    """CPUs a cgroup quota grants this process, or None when there is no quota.
+
+    Docker ``--cpus`` and Kubernetes CPU limits are a CFS quota: the process
+    still sees every host CPU, it just gets throttled past the quota.
+    """
+    v2 = _read_cgroup("cpu.max")  # "max 100000" or "200000 100000"
+    if v2:
+        quota, period = v2.split()[:2]
+        return None if quota == "max" else int(quota) / int(period)
+    quota = _read_cgroup("cpu/cpu.cfs_quota_us")
+    period = _read_cgroup("cpu/cpu.cfs_period_us")
+    if quota and period and int(quota) > 0:
+        return int(quota) / int(period)
+    return None
+
+
+def container_memory_free() -> int | None:
+    """Bytes left under a cgroup memory limit, or None when there is no limit."""
+    limit = _read_cgroup("memory.max", "memory/memory.limit_in_bytes")
+    usage = _read_cgroup("memory.current", "memory/memory.usage_in_bytes")
+    # cgroup v1 reports "no limit" as a number near 2**63.
+    if not limit or not usage or limit == "max" or int(limit) >= 2**60:
+        return None
+    return max(0, int(limit) - int(usage))
+
+
 def auto_inference_threads(batch_size: int = DEFAULT_BATCH_SIZE) -> int:
     """How many model batches this machine can run at once, at full speed.
 
-    The CPU bound is half of torch's intra-op thread count (torch sizes that to
-    the physical cores). The memory bound keeps every concurrent batch's
-    activations inside currently available memory, less a reserve, so a
-    busy machine gets fewer threads instead of swapping.
+    The CPU bound is half of the CPUs torch will use: its intra-op thread
+    count, which torch sizes to the physical cores, lowered to a container's
+    CPU quota. The memory bound keeps every concurrent batch's activations
+    inside available memory, less a reserve, where "available" is the tighter
+    of the machine's free memory and a container's remaining limit, so a busy
+    machine or a small pod gets fewer threads instead of swapping or an OOM kill.
     """
     import psutil
     import torch
 
-    cpu_bound = torch.get_num_threads() // CORES_PER_CONCURRENT_BATCH
+    cpus = torch.get_num_threads()
+    quota = container_cpu_limit()
+    if quota is not None:
+        cpus = min(cpus, max(1, int(quota)))
+    cpu_bound = cpus // CORES_PER_CONCURRENT_BATCH
+
+    available = psutil.virtual_memory().available
+    container_free = container_memory_free()
+    if container_free is not None:
+        available = min(available, container_free)
     per_batch = BYTES_PER_CONCURRENT_BATCH * batch_size / DEFAULT_BATCH_SIZE
-    spare = psutil.virtual_memory().available - MEMORY_RESERVE_BYTES
-    memory_bound = 1 + int(max(0, spare) // per_batch)
+    memory_bound = 1 + int(max(0, available - MEMORY_RESERVE_BYTES) // per_batch)
     return max(1, min(cpu_bound, memory_bound))
 
 

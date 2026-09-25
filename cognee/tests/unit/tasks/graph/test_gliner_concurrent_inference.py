@@ -113,8 +113,21 @@ def test_every_batch_keeps_its_single_threaded_members():
 
 
 @pytest.fixture
-def machine(monkeypatch):
-    """Stand-ins for torch and psutil: a machine with a given size."""
+def cgroup(tmp_path, monkeypatch):
+    """A fake /sys/fs/cgroup: write the files a container would have."""
+    monkeypatch.setattr(extractor_module, "CGROUP_ROOT", tmp_path)
+
+    def write(name: str, value: str):
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(value + "\n")
+
+    return write
+
+
+@pytest.fixture
+def machine(monkeypatch, cgroup):
+    """Stand-ins for torch and psutil: a machine with a given size, no container limits."""
 
     def configure(torch_threads: int, available_gib: float):
         monkeypatch.setitem(
@@ -188,3 +201,76 @@ def test_several_threads_share_one_pool(monkeypatch):
     first = extractor_module._inference_pool(16)
     assert first is not None and first._max_workers == 3
     assert extractor_module._inference_pool(32) is first, "one pool per process"
+
+
+def test_no_cgroup_files_means_no_container_limits(cgroup):
+    """macOS, Windows, and Linux outside a container: nothing is read as a limit."""
+    assert extractor_module.container_cpu_limit() is None
+    assert extractor_module.container_memory_free() is None
+
+
+@pytest.mark.parametrize(
+    ("files", "expected"),
+    [
+        ({"cpu.max": "200000 100000"}, 2.0),  # docker run --cpus=2, cgroup v2
+        ({"cpu.max": "150000 100000"}, 1.5),
+        ({"cpu.max": "max 100000"}, None),  # v2, no quota
+        ({"cpu/cpu.cfs_quota_us": "300000", "cpu/cpu.cfs_period_us": "100000"}, 3.0),  # v1
+        ({"cpu/cpu.cfs_quota_us": "-1", "cpu/cpu.cfs_period_us": "100000"}, None),  # v1, none
+    ],
+)
+def test_container_cpu_quota(cgroup, files, expected):
+    for name, value in files.items():
+        cgroup(name, value)
+    assert extractor_module.container_cpu_limit() == expected
+
+
+@pytest.mark.parametrize(
+    ("files", "expected_gib"),
+    [
+        ({"memory.max": str(4 * GIB), "memory.current": str(1 * GIB)}, 3),  # --memory=4g, v2
+        ({"memory.max": "max", "memory.current": str(1 * GIB)}, None),  # v2, no limit
+        (
+            {
+                "memory/memory.limit_in_bytes": str(6 * GIB),
+                "memory/memory.usage_in_bytes": str(2 * GIB),
+            },
+            4,
+        ),  # v1
+        (
+            {
+                "memory/memory.limit_in_bytes": "9223372036854771712",
+                "memory/memory.usage_in_bytes": str(GIB),
+            },
+            None,
+        ),  # v1 reports "no limit" as ~2**63
+        ({"memory.max": str(2 * GIB), "memory.current": str(3 * GIB)}, 0),  # over the limit
+    ],
+)
+def test_container_memory_left(cgroup, files, expected_gib):
+    for name, value in files.items():
+        cgroup(name, value)
+    free = extractor_module.container_memory_free()
+    assert free == (None if expected_gib is None else expected_gib * GIB)
+
+
+def test_a_small_container_on_a_big_host_is_sized_to_the_container(machine, cgroup):
+    """What Docker actually exposes, measured: the host's CPUs and free memory
+    stay visible inside `docker run --cpus=2 --memory=4g`; only cgroups hold the
+    limits. Sizing from the host would run 7 batches in a 4 GB container."""
+    machine(14, 16.6)
+    assert extractor_module.auto_inference_threads() == 7
+    cgroup("cpu.max", "200000 100000")
+    cgroup("memory.max", str(4 * GIB))
+    cgroup("memory.current", str(int(0.2 * GIB)))
+    assert extractor_module.auto_inference_threads() == 1
+
+
+def test_a_container_quota_and_limit_both_bound_the_pool(machine, cgroup):
+    machine(32, 100)
+    cgroup("cpu.max", "800000 100000")  # 8 CPUs: CPU bound 4
+    cgroup("memory.max", str(12 * GIB))
+    cgroup("memory.current", str(1 * GIB))  # 11 GiB left: memory bound 1 + (11 - 4) // 2 = 4
+    assert extractor_module.auto_inference_threads() == 4
+    cgroup("memory.current", str(6 * GIB))  # 6 GiB left: memory bound 1 + 2 // 2 = 2
+    assert extractor_module.auto_inference_threads() == 2
