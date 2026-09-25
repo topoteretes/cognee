@@ -234,7 +234,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
                     ],
                     response_model=response_model,
                     max_retries=self.MAX_RETRIES,
-                    **merged_kwargs,  # ty: ignore[invalid-argument-type]
+                    **merged_kwargs,
                 )
         except (
             ContentFilterFinishReasonError,
