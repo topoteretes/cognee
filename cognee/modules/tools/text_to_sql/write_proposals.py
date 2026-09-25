@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
@@ -85,7 +85,7 @@ def _proposal_to_public(row: ToolWriteProposal) -> dict[str, Any]:
 async def _dry_run_update(engine, sql: str) -> int:
     """Execute the UPDATE in a transaction, capture rowcount, ALWAYS roll back."""
     async with engine.connect() as connection:
-        result = await connection.execute(text(sql))
+        result = await connection.exec_driver_sql(sql)
         affected = result.rowcount
         await connection.rollback()
     return affected
@@ -346,7 +346,7 @@ async def apply_write_proposal(user_id: UUID, proposal_id: UUID) -> dict[str, An
         affected = 0
         try:
             async with write_engine.connect() as db_connection:
-                result = await db_connection.execute(text(row.sql))
+                result = await db_connection.exec_driver_sql(row.sql)
                 affected = result.rowcount
 
                 if affected > config.text_to_sql_max_affected_rows:
