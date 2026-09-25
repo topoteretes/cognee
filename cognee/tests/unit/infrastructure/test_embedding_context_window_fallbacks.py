@@ -227,6 +227,40 @@ async def test_litellm_embedding_splits_batch_on_vertex_instance_limit_error():
 
 
 @pytest.mark.asyncio
+async def test_litellm_embedding_splits_batch_on_openai_array_length_error():
+    import litellm
+
+    with patch(
+        "cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine."
+        "LiteLLMEmbeddingEngine.get_tokenizer",
+        return_value=Mock(),
+    ):
+        from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
+            LiteLLMEmbeddingEngine,
+        )
+
+        engine = LiteLLMEmbeddingEngine(model="test-model", dimensions=2)
+
+    array_length_error = litellm.exceptions.BadRequestError(
+        message="'$.input' is invalid. Please check the API reference: "
+        "https://platform.openai.com/docs/api-reference. array length must be 2048 or less",
+        model="test-model",
+        llm_provider="openai",
+    )
+
+    async def fake_aembedding(**kwargs):
+        if len(kwargs["input"]) > 2:
+            raise array_length_error
+        return Mock(data=[{"embedding": [1.0, 1.0]} for _ in kwargs["input"]])
+
+    with patch("litellm.aembedding", AsyncMock(side_effect=fake_aembedding)) as embed_mock:
+        result = await engine.embed_text(["a", "b", "c", "d"])
+
+    assert result == [[1.0, 1.0]] * 4
+    assert embed_mock.await_count > 1
+
+
+@pytest.mark.asyncio
 async def test_litellm_embedding_splits_batch_on_vertex_model_batch_limit_error():
     import litellm
 
