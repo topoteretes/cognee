@@ -74,9 +74,15 @@ class CloudClient:
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
+            # trust_env: honour HTTP(S)_PROXY / NO_PROXY like every other HTTP
+            # client cognee uses. aiohttp ignores them by default, which in a
+            # proxied environment (corporate egress, Docker Sandboxes' credential
+            # proxy) sends requests around the proxy — a proxy-managed API key
+            # then never gets substituted and the server sees the placeholder.
             self._session = aiohttp.ClientSession(
                 headers={"X-Api-Key": self.api_key},
                 timeout=self.DEFAULT_TIMEOUT,
+                trust_env=True,
             )
         return self._session
 
