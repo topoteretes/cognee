@@ -1057,3 +1057,25 @@ async def test_streamed_graph_matches_preprocess_and_never_sends_text(adapter):
     }
     assert summary["color_maps"]["node_set"] == reference.color_maps["node_set"]
     assert len(links) == len(reference.links)
+
+
+@pytest.mark.asyncio
+async def test_entity_type_names_reads_one_is_a_hop(adapter):
+    """SDK-794: the native lookup maps entities to their EntityType, never outward."""
+    for node_id, name, node_type in [
+        ("alice", "Alice", "Entity"),
+        ("bob", "Bob", "Entity"),
+        ("carol", "Carol", "Entity"),
+        ("person", "Person", "EntityType"),
+    ]:
+        await adapter.add_node(_FakeDataPoint(id=node_id, name=name, type=node_type))
+    await adapter.add_edge("alice", "person", "is_a")
+    await adapter.add_edge("bob", "person", "is_a")
+    await adapter.add_edge("alice", "bob", "knows")
+
+    assert await adapter.get_entity_type_names(["alice", "bob", "carol"]) == {
+        "alice": "Person",
+        "bob": "Person",
+    }
+    assert await adapter.get_entity_type_names(["person"]) == {}
+    assert await adapter.get_entity_type_names([]) == {}
