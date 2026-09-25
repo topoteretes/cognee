@@ -11,7 +11,7 @@ Raw data (str / bytes / file-like / list of the above) continues to
 flow through the permanent add+cognify path unchanged.
 """
 
-from typing import Any, Literal, Union
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
@@ -126,7 +126,7 @@ class SkillRunEntry(BaseModel):
         return value
 
 
-MemoryEntry = Union[QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry]
+MemoryEntry = QAEntry | TraceEntry | FeedbackEntry | SkillRunEntry
 
 
 # Tuple used at runtime for isinstance checks; Union itself isn't
@@ -135,7 +135,16 @@ MEMORY_ENTRY_TYPES = (QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry)
 
 
 RecallScope = Literal[
-    "auto", "graph", "session", "trace", "graph_context", "session_context", "all", "tools", "code"
+    "auto",
+    "graph",
+    "session",
+    "session_first",
+    "trace",
+    "graph_context",
+    "session_context",
+    "all",
+    "tools",
+    "code",
 ]
 
 
@@ -151,6 +160,7 @@ _VALID_SCOPES = {
     "auto",
     "graph",
     "session",
+    "session_first",
     "trace",
     "graph_context",
     "session_context",
@@ -198,6 +208,10 @@ def normalize_scope(scope: str | list[str] | None) -> list[str]:
         expanded = ["graph", "session", "trace", "session_context"]
         if "tools" in scopes:
             expanded.append("tools")
+        # "session_first" is a strategy over sources rather than a source, so
+        # "all" neither implies nor replaces it; carry it through when asked.
+        if "session_first" in scopes:
+            expanded.append("session_first")
         return expanded
 
     # Dedupe while preserving order

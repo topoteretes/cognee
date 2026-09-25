@@ -1,12 +1,11 @@
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, Union
+from typing import Annotated, Any
 from urllib.parse import urlparse
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi import Path as PathParam
-from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -15,6 +14,7 @@ from cognee import datasets
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.api.v1.datasets.dto import DataDTO
 from cognee.api.v1.exceptions import DataNotFoundError
+from cognee.exceptions import CogneeApiError
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import (
     get_authorized_existing_datasets,
@@ -35,6 +35,10 @@ logger = get_logger()
 
 class ErrorResponseDTO(BaseModel):
     message: str
+
+
+class DataCountDTO(OutDTO):
+    count: int
 
 
 # Shared by GET /status and GET /status/progress — both accept the same
@@ -74,6 +78,25 @@ class PipelineRunStatusWithProgress(BaseModel):
     progress: dict[str, Any] | None = Field(
         default=None,
         examples=[{"completed_items": 3, "total_items": 10, "current_stage": "extract_graph"}],
+    )
+
+
+class DataItemProcessingStatusDTO(OutDTO):
+    """One data item's completion state for the requested pipeline."""
+
+    id: UUID
+    name: str
+    completed: bool
+
+
+class DatasetProcessingStatusDTO(OutDTO):
+    """Item-level completion counts for one dataset and one pipeline."""
+
+    total: int = Field(description="Number of data items in the dataset")
+    completed: int = Field(description="Items carrying the per-item completion stamp")
+    pending: int = Field(description="Items without the stamp (total - completed)")
+    items: list[DataItemProcessingStatusDTO] = Field(
+        description="One entry per data item, in the same order as GET /datasets/{id}/data"
     )
 
 
@@ -369,17 +392,40 @@ def get_datasets_router() -> APIRouter:
             description="Dataset UUID, the id field from GET /api/v1/datasets (not the name)",
             examples=["b8a7c3de-4f5a-4b6c-8d9e-0f1a2b3c4d5e"],
         ),
+        limit: int = Query(
+            100,
+            ge=1,
+            le=1000,
+            description="Maximum number of data items to return.",
+        ),
+        offset: int = Query(
+            0,
+            ge=0,
+            le=1_000_000,
+            description="Number of data items to skip before returning results.",
+        ),
         user: User = Depends(get_authenticated_user),
     ):
         """
-        Get all data items in a dataset.
+        Get a page of data items in a dataset.
 
-        This endpoint retrieves all data items (documents, files, etc.) that belong
+        This endpoint retrieves data items (documents, files, etc.) that belong
         to a specific dataset. Each data item includes metadata such as name, type,
         creation time, and storage location.
 
+        Results are paginated. The response is capped at **limit** items (100 by
+        default), so this endpoint stays fast on datasets with many documents; page
+        through with **offset**. Use `GET /{dataset_id}/data/count` for the total.
+        That total is uncapped; offsets above 1,000,000 are rejected, so datasets
+        larger than 1,001,000 items cannot be fully traversed by this endpoint.
+        Concurrent inserts/deletes can shift offsets; this is not a snapshot.
+
         ## Path Parameters
         - **dataset_id** (UUID): The unique identifier of the dataset
+
+        ## Query Parameters
+        - **limit** (int, 1-1000, default 100): Maximum number of items to return
+        - **offset** (int, default 0): Number of items to skip
 
         ## Response
         Returns a list of data objects containing:
@@ -424,26 +470,97 @@ def get_datasets_router() -> APIRouter:
 
         dataset_id = dataset[0].id
 
-        dataset_data = await get_dataset_data(dataset_id=dataset_id)
+        dataset_data = await get_dataset_data(
+            dataset_id=dataset_id, limit=limit, offset=offset, order_by="created_at"
+        )
 
         if dataset_data is None:
             return []
 
-        # Dict literal, not dict(**data, dataset_id=...): Data now carries its
-        # own dataset_id column, and the kwarg form raises TypeError on the
-        # duplicate key. The requested dataset id still wins — the column is
-        # nullable, so the row's value cannot be relied on here.
+        # Build each DataDTO explicitly rather than jsonable_encoder(data) into
+        # a dict. The encoder walks the whole ORM row -- including the large
+        # JSON columns DataDTO does not expose (node_set, pipeline_status,
+        # system_metadata) -- and response_model=list[DataDTO] then re-validated
+        # and re-encoded the result, so every row was serialized three times and
+        # most of that work was thrown away.
+        #
+        # Naming the fields also keeps the dataset_id override safe: the row's
+        # own column is nullable, so the requested id has to win, and validating
+        # the row first would reject a NULL before we could substitute it.
         return [
-            {
-                **jsonable_encoder(data),
-                "dataset_id": dataset_id,
-            }
+            DataDTO(
+                id=data.id,
+                name=data.name,
+                created_at=data.created_at,
+                updated_at=data.updated_at,
+                extension=data.extension,
+                mime_type=data.mime_type,
+                raw_data_location=data.raw_data_location,
+                dataset_id=dataset_id,
+                label=data.label,
+                external_metadata=data.external_metadata,
+                data_size=data.data_size,
+            )
             for data in dataset_data
         ]
 
     @router.get(
+        "/{dataset_id}/data/count",
+        response_model=DataCountDTO,
+        responses={404: {"model": ErrorResponseDTO}},
+    )
+    async def get_dataset_data_count(
+        dataset_id: UUID = PathParam(
+            description="Dataset UUID, the id field from GET /api/v1/datasets (not the name)",
+            examples=["b8a7c3de-4f5a-4b6c-8d9e-0f1a2b3c4d5e"],
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Count the data items in a dataset.
+
+        Exists so callers that only need "how many documents" do not have to
+        fetch the items to count them. `GET /{dataset_id}/data` is paginated,
+        so its length is a page size, not a total.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): The unique identifier of the dataset
+
+        ## Response
+        - **count**: Number of data items in the dataset
+
+        ## Error Codes
+        - **404 Not Found**: Dataset doesn't exist or user doesn't have access
+        - **500 Internal Server Error**: Error counting data
+        """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user,
+            additional_properties={
+                "endpoint": f"GET /v1/datasets/{dataset_id!s}/data/count",
+                "dataset_id": str(dataset_id),
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.modules.data.methods import count_dataset_data
+
+        # Verify user has permission to read dataset
+        dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
+
+        if not dataset:
+            return JSONResponse(
+                status_code=404,
+                content=ErrorResponseDTO(
+                    message=f"Dataset ({dataset_id!s}) not found."
+                ).model_dump(),
+            )
+
+        return DataCountDTO(count=await count_dataset_data(dataset_id=dataset[0].id))
+
+    @router.get(
         "/status",
-        response_model=Union[dict[str, PipelineRunStatus], dict[str, dict[str, PipelineRunStatus]]],
+        response_model=dict[str, PipelineRunStatus] | dict[str, dict[str, PipelineRunStatus]],
     )
     async def get_dataset_status(
         datasets: StatusDatasetIdsQuery = [],
@@ -486,8 +603,8 @@ def get_datasets_router() -> APIRouter:
         this endpoint returns depending on how it's called.
 
         ## Error Codes
-        - **409 Conflict**: Error retrieving status (e.g. requesting a dataset you don't have
-          read permission for)
+        - **403 Forbidden**: The request owner cannot read every requested dataset
+        - **409 Conflict**: An unexpected error occurred while retrieving status
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
@@ -512,6 +629,8 @@ def get_datasets_router() -> APIRouter:
             )
 
             return datasets_statuses
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Error retrieving dataset statuses")
             return JSONResponse(
@@ -521,10 +640,8 @@ def get_datasets_router() -> APIRouter:
 
     @router.get(
         "/status/progress",
-        response_model=Union[
-            dict[str, PipelineRunStatusWithProgress],
-            dict[str, dict[str, PipelineRunStatusWithProgress]],
-        ],
+        response_model=dict[str, PipelineRunStatusWithProgress]
+        | dict[str, dict[str, PipelineRunStatusWithProgress]],
     )
     async def get_dataset_progress(
         datasets: StatusDatasetIdsQuery = [],
@@ -582,6 +699,8 @@ def get_datasets_router() -> APIRouter:
             )
 
             return datasets_progress
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Error retrieving dataset progress")
             return JSONResponse(
@@ -649,6 +768,8 @@ def get_datasets_router() -> APIRouter:
                 return []
 
             counts = await get_datasets_graph_counts(authorized_datasets)
+        except CogneeApiError:
+            raise
         except Exception:
             # Same posture as GET /statuses above and the sibling
             # GET /visualize/brains-summary: a poll that fails transiently is a
@@ -864,5 +985,91 @@ def get_datasets_router() -> APIRouter:
                 session.add(config)
             await session.commit()
         return {"status": "ok"}
+
+    @router.get(
+        "/{dataset_id}/processing-status",
+        response_model=DatasetProcessingStatusDTO,
+        responses={404: {"model": ErrorResponseDTO}},
+    )
+    async def get_dataset_processing_status(
+        dataset_id: UUID = PathParam(
+            description="Dataset UUID, the id field from GET /api/v1/datasets (not the name)",
+            examples=["b8a7c3de-4f5a-4b6c-8d9e-0f1a2b3c4d5e"],
+        ),
+        pipeline: str = Query(
+            "cognify_pipeline",
+            description=(
+                "Pipeline whose per-item completion to count: 'cognify_pipeline'"
+                " (default), 'add_pipeline', or 'code_graph_pipeline'."
+            ),
+            examples=["cognify_pipeline"],
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Get item-level processing status for a dataset.
+
+        `GET /status` reports whether a pipeline *run* is in progress or done for a
+        dataset. This endpoint answers the finer question operators need when
+        triaging incremental loads: which of the dataset's data items carry the
+        per-item completion stamp for a pipeline, and which are still pending.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): The unique identifier of the dataset
+
+        ## Query Parameters
+        - **pipeline** (str, optional): Pipeline name to inspect. Defaults to
+          `cognify_pipeline`.
+
+        ## Response
+        - **total**: Number of data items in the dataset
+        - **completed**: Items whose per-item status for the pipeline is completed
+          (both the legacy string and the dict status representation are recognised)
+        - **pending**: `total - completed`
+        - **items**: `[{id, name, completed}]`, one entry per data item, in the same
+          order as `GET /datasets/{id}/data`. `id` is the data_id accepted by
+          `DELETE /datasets/{id}/data/{data_id}` and `forget(data_id=...)`
+
+        Per-item errored state is not persisted, so it is not reported: a pending
+        item may be untouched, in progress, or failed.
+
+        ## Error Codes
+        - **404 Not Found**: Dataset doesn't exist or user doesn't have access
+        - **409 Conflict**: Error computing the status
+        """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user,
+            additional_properties={
+                "endpoint": f"GET /v1/datasets/{dataset_id!s}/processing-status",
+                "dataset_id": str(dataset_id),
+                "pipeline": pipeline,
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.modules.data.methods import get_dataset_processing_status
+
+        # Verify user has permission to read dataset
+        dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
+
+        if not dataset:
+            return JSONResponse(
+                status_code=404,
+                content=ErrorResponseDTO(
+                    message=f"Dataset ({dataset_id!s}) not found."
+                ).model_dump(),
+            )
+
+        try:
+            return await get_dataset_processing_status(dataset[0].id, pipeline_name=pipeline)
+        except CogneeApiError:
+            raise
+        except Exception:
+            logger.exception("Error retrieving dataset processing status")
+            return JSONResponse(
+                status_code=409,
+                content={"error": "Unable to retrieve dataset processing status."},
+            )
 
     return router

@@ -169,7 +169,8 @@ def main() -> None:
     base_url = f"http://{host}:{port}"
 
     perf_dir = str(Path(__file__).resolve().parent)
-    key_path = tempfile.NamedTemporaryFile(suffix=".key", delete=False).name
+    with tempfile.NamedTemporaryFile(suffix=".key", delete=False) as key_file:
+        key_path = key_file.name
 
     log("=== Bootstrapping: pruning data, creating user & API key ===")
     bootstrap_start = time.time()

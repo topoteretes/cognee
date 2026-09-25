@@ -61,9 +61,9 @@ async def _fake_open_data_file(_path):
 async def _make_engine():
     """Create a throwaway SQLite-backed relational engine and seed one existing
     Data row whose data_size is OLD_SIZE."""
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp.close()
-    engine = SQLAlchemyAdapter(f"sqlite+aiosqlite:///{tmp.name}")
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        db_path = tmp.name
+    engine = SQLAlchemyAdapter(f"sqlite+aiosqlite:///{db_path}")
     await engine.create_database()
 
     async with engine.get_async_session() as session:
@@ -80,7 +80,7 @@ async def _make_engine():
         )
         await session.commit()
 
-    return engine, tmp.name
+    return engine, db_path
 
 
 def _install_mocks(stack, engine):

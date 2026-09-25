@@ -37,6 +37,7 @@ from cognee.shared.logging_utils import get_logger
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
+from ..stored_vector_size import choose_stored_vector_size
 from ..vector_db_interface import VectorDBInterface
 
 logger = get_logger("LanceDBAdapter")
@@ -81,6 +82,9 @@ class IndexSchema(DataPoint):
     chunk_index: int | None = None
     source_chunk_id: str | None = None
     importance_weight: float | None = 0.5
+    # Document external_metadata as JSON text, copied onto chunks at ingest so
+    # hybrid retrieval can surface allowlisted keys straight from the payload.
+    external_metadata: str | None = None
 
     metadata: dict = {"index_fields": ["text"]}
     belongs_to_set: list[str] = []
@@ -387,6 +391,29 @@ class LanceDBAdapter(VectorDBInterface):
         connection = await self.get_connection()
         collection_names = await connection.table_names()
         return collection_name in collection_names
+
+    async def get_stored_vector_size(self) -> int | None:
+        """Width of the vectors already in this store, or None when nothing is stored yet.
+
+        Every table's ``vector`` column is a fixed-size list of the embedding
+        width that built it. Read once per dataset by the dataset context to
+        record the width for rows that predate the recorded embedding model.
+
+        Reads every table rather than stopping at the first: a store built
+        across an ``EMBEDDING_MODEL`` change holds two widths, and which one
+        gets recorded must not depend on listing order (see
+        ``choose_stored_vector_size``).
+        """
+        connection = await self.get_connection()
+        widths = []
+        for table_name in await connection.table_names():
+            schema = await (await connection.open_table(table_name)).schema()
+            if "vector" not in schema.names:
+                continue
+            list_size = getattr(schema.field("vector").type, "list_size", None)
+            if isinstance(list_size, int):
+                widths.append(list_size)
+        return choose_stored_vector_size(widths, self.name)
 
     async def create_collection(self, collection_name: str, payload_schema: BaseModel):
         """Create the LanceDB table for `collection_name` if it does not already exist."""
@@ -1019,6 +1046,36 @@ class LanceDBAdapter(VectorDBInterface):
             for result in results_list
         ]
 
+    SCORE_ID_BATCH_SIZE = 1000
+
+    async def score_by_ids(
+        self, collection_name: str, data_point_ids: list[str], query_vector: list[float]
+    ) -> list[ScoredResult]:
+        ids = list(dict.fromkeys(str(point_id) for point_id in data_point_ids))
+        if not ids:
+            return []
+        collection = await self.get_collection(collection_name)
+        scores = []
+        for start in range(0, len(ids), self.SCORE_ID_BATCH_SIZE):
+            batch = ids[start : start + self.SCORE_ID_BATCH_SIZE]
+            literals = ", ".join("'" + point_id.replace("'", "''") + "'" for point_id in batch)
+            # where() prefilters by default. Bypass ANN so even an indexed table
+            # scores every requested row, including neighbors far from the query.
+            rows = await (
+                collection.vector_search(query_vector)
+                .distance_type("cosine")
+                .where(f"id IN ({literals})")
+                .bypass_vector_index()
+                .select(["id", "_distance"])
+                .limit(len(batch))
+                .to_list()
+            )
+            scores.extend(
+                ScoredResult(id=parse_id(row["id"]), score=float(row["_distance"]), payload=None)
+                for row in rows
+            )
+        return scores
+
     async def search(
         self,
         collection_name: str,
@@ -1392,6 +1449,7 @@ class LanceDBAdapter(VectorDBInterface):
                     chunk_index=getattr(data_point, "chunk_index", None),
                     source_chunk_id=getattr(data_point, "source_chunk_id", None),
                     importance_weight=getattr(data_point, "importance_weight", None),
+                    external_metadata=getattr(data_point, "external_metadata", None),
                     belongs_to_set=(data_point.belongs_to_set or []),
                 )
                 for data_point in data_points
@@ -1500,7 +1558,7 @@ class LanceDBAdapter(VectorDBInterface):
             model_type,
             include_fields={
                 "id": (str, ...),
-                "belongs_to_set": (Optional[list[str]], None),
+                "belongs_to_set": (list[str] | None, None),
             },
             exclude_fields=["metadata"] + related_models_fields,
         )

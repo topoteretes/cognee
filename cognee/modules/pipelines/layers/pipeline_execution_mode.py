@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterable, Awaitable, Callable
-from typing import Any, Union
+from typing import Any
 
 from cognee.modules.data.methods.get_authorized_existing_datasets import (
     get_authorized_existing_datasets,
@@ -9,12 +9,12 @@ from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
 from cognee.modules.users.methods.get_default_user import get_default_user
 
-AsyncGenLike = Union[
-    AsyncIterable[Any],
-    AsyncGenerator[Any, None],
-    Callable[..., AsyncIterable[Any]],
-    Callable[..., AsyncGenerator[Any, None]],
-]
+AsyncGenLike = (
+    AsyncIterable[Any]
+    | AsyncGenerator[Any, None]
+    | Callable[..., AsyncIterable[Any]]
+    | Callable[..., AsyncGenerator[Any, None]]
+)
 
 # Strong refs for fire-and-forget background pipeline tasks. The event loop only
 # keeps weak references to tasks, so without anchoring here Python's gc can collect

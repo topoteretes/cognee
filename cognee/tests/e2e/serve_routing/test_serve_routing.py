@@ -105,7 +105,7 @@ def api_key():
     # during that import. As a plain script the launcher runs first, as intended.
     launcher = Path(__file__).parent / "mock_instance.py"
     log_path = root / "instance.log"
-    log_file = open(log_path, "w")
+    log_file = open(log_path, "w")  # noqa: SIM115 - the subprocess writes to it for its whole lifetime
 
     process = subprocess.Popen(
         [sys.executable, str(launcher), str(root), str(PORT)],

@@ -64,9 +64,11 @@ from cognee.modules.chunking.chunk_policy import (
     IncrementalPlanError,
     stored_chunker_id,
 )
+from cognee.modules.chunking.external_metadata import normalize_external_metadata
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.config import get_cognify_config
+from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.methods import (
     StagedContent,
@@ -127,12 +129,19 @@ class RefusalReason(str, Enum):
     Every refusal used to surface as one free-text message and one log line, so
     a permanent misconfiguration (an incompatible chunker, an unsupported
     backend) looked exactly like a first ingestion. The reason is logged as a
-    structured field so they are separable.
+    structured field and returned in ``UpdateResult.fallback`` so they
+    are separable. The first three come from ``update()`` before this engine
+    is consulted; the rest are this engine's own refusals.
     """
 
+    DISABLED = "disabled"  # the caller passed chunk_level_diff=False
+    CUSTOM_EXTRACTION_CONFIG = "custom_extraction_config"  # graph_model / custom_prompt
+    PER_CALL_DB_CONFIG = "per_call_db_config"  # vector_db_config / graph_db_config
     UNSUPPORTED_BACKEND = "unsupported_backend"
     UNSUPPORTED_CHUNKER = "unsupported_chunker"
-    UNSUPPORTED_METADATA = "unsupported_metadata"
+    UNSUPPORTED_METADATA = (
+        "unsupported_metadata"  # node_set, label, external metadata, content type
+    )
     NO_BASELINE = "no_baseline"
     CHUNKS_NOT_TILING = "chunks_not_tiling"
     UNREADABLE_TEXT = "unreadable_text"
@@ -341,6 +350,9 @@ def _rehydrate_chunk(document: Document, node: dict, chunk_index: int) -> Docume
         importance_weight=node.get("importance_weight", document.importance_weight),
         document_id=str(document.id),
         document_name=document.name,
+        # Stored as JSON text; a graph backend that hands back a dict is
+        # re-serialised so the field survives the MERGE either way.
+        external_metadata=normalize_external_metadata(node.get("external_metadata")),
         truth_alignment=truth_alignment if isinstance(truth_alignment, list) else None,
         truth_epoch=node.get("truth_epoch"),
         ontology_valid=bool(node.get("ontology_valid", False)),
@@ -445,8 +457,15 @@ async def _stage_new_content(data, preferred_loaders) -> StagedContent:
     )
 
 
-def _changed_staged_metadata(data, old_data: Data, staged: StagedContent) -> list[str]:
-    """Return metadata changes that need document-wide full-update handling."""
+def _changed_staged_metadata(old_data: Data, staged: StagedContent) -> list[str]:
+    """Return metadata changes that need document-wide full-update handling.
+
+    The replacement's filename is not one of them: ``data_id`` names the
+    document, so a file sent under another name is still that document, and
+    the publish step writes the new name onto the row. What does need the full
+    path is a change of content type — extension, mime type or loader — since
+    those pick the document class and the chunker that built the baseline.
+    """
     fields = [
         "extension",
         "mime_type",
@@ -454,22 +473,16 @@ def _changed_staged_metadata(data, old_data: Data, staged: StagedContent) -> lis
         "original_mime_type",
         "loader_engine",
     ]
-    # Direct text gets an internal content-derived filename, so its name is
-    # expected to change with its text. User-named uploads and streams are not.
-    source_data = data.data if isinstance(data, DataItem) else data
-    if hasattr(source_data, "filename") or hasattr(source_data, "name"):
-        fields.append("name")
     return [
         field for field in fields if getattr(old_data, field, None) != getattr(staged, field, None)
     ]
 
 
-def _unchanged_result(reindexed: int) -> dict:
+def _unchanged_result(reindexed: int, kept: int) -> dict:
     """The no-op result, shaped like the incremental one.
 
-    The router returns this dict verbatim as the HTTP body, and both the SDK
-    docstring and the route documentation advertise the same keys for either
-    status — so a client reading kept_chunks must not get a KeyError on a no-op.
+    ``update()`` turns both into the same ``UpdateResult.chunks``. Unchanged
+    content keeps every stored chunk, so ``kept`` is the stored count, not zero.
     """
     return {
         "status": "unchanged",
@@ -477,8 +490,9 @@ def _unchanged_result(reindexed: int) -> dict:
         "deleted_chunks": 0,
         "added_chunks": 0,
         "reused_chunks": 0,
-        "kept_chunks": 0,
+        "kept_chunks": kept,
         "reindexed_chunks": reindexed,
+        "total_chunks": kept,
     }
 
 
@@ -505,7 +519,7 @@ async def _repair_unchanged(
         "incremental update: content unchanged, repaired %s",
         ", ".join(bundle.get("repairs") or ["nothing"]),
     )
-    return _unchanged_result(len(shifted))
+    return _unchanged_result(len(shifted), bundle["stored_count"])
 
 
 async def incremental_update(
@@ -568,50 +582,63 @@ async def incremental_update(
         raise IncrementalUpdateNotPossible(
             "no stored processed text for this data item", RefusalReason.NO_BASELINE
         )
+    # Code files and DLT source manifests are built by their own cognify
+    # routes, which write typed nodes and never a document chunk, so there is
+    # nothing to diff: the full rebuild re-runs that route over the new
+    # content. Say so, instead of reporting the missing chunks as "not
+    # cognified yet".
+    route = cognify_route_for(old_data)
+    if route is not CognifyRoute.STANDARD:
+        raise IncrementalUpdateNotPossible(
+            f"document is on the {route.value} cognify route, which keeps no chunks to "
+            "diff; the whole document is rebuilt",
+            RefusalReason.NO_BASELINE,
+        )
 
     # Same per-dataset lock as pipeline runs and delete_data: serialize against
     # concurrent cognify/delete/update on this dataset (re-entrant, so the
     # inner add() pipeline can take it again). Inside, establish the dataset's
     # database context — with backend access control on, graph/vector engines
     # resolve per user+dataset, and a fresh API request arrives without it.
-    async with dataset_lock(dataset.id):
+    async with (
+        dataset_lock(dataset.id),
         # Resolve the dataset's databases as the DATASET OWNER, matching
         # run_tasks and datasets.delete_data. Passing the caller would send a
         # collaborator's update to a different per-user store than the one
         # cognify and delete use for this dataset.
-        async with set_database_global_context_variables(dataset.id, dataset.owner_id):
-            graph_engine = await get_graph_engine()
-            vector_engine = await get_vector_engine_async()
-            if not getattr(graph_engine, "supports_incremental_chunk_updates", False):
-                raise IncrementalUpdateNotPossible(
-                    f"graph backend {type(graph_engine).__name__} does not support "
-                    "chunk-level updates",
-                    RefusalReason.UNSUPPORTED_BACKEND,
-                )
-            if not getattr(vector_engine, "supports_payload_update", False):
-                raise IncrementalUpdateNotPossible(
-                    f"vector backend {type(vector_engine).__name__} does not support "
-                    "payload-only chunk moves",
-                    RefusalReason.UNSUPPORTED_BACKEND,
-                )
-            if not await stores_provenance_in_graph(graph_engine):
-                raise IncrementalUpdateNotPossible(
-                    "the selected graph does not store ownership provenance in-graph",
-                    RefusalReason.UNSUPPORTED_BACKEND,
-                )
-            return await _run_incremental_update(
-                data_id,
-                data,
-                dataset,
-                user,
-                old_data,
-                node_set,
-                preferred_loaders,
-                graph_model,
-                custom_prompt,
-                chunker,
-                policy,
+        set_database_global_context_variables(dataset.id, dataset.owner_id),
+    ):
+        graph_engine = await get_graph_engine()
+        vector_engine = await get_vector_engine_async()
+        if not getattr(graph_engine, "supports_incremental_chunk_updates", False):
+            raise IncrementalUpdateNotPossible(
+                f"graph backend {type(graph_engine).__name__} does not support chunk-level updates",
+                RefusalReason.UNSUPPORTED_BACKEND,
             )
+        if not getattr(vector_engine, "supports_payload_update", False):
+            raise IncrementalUpdateNotPossible(
+                f"vector backend {type(vector_engine).__name__} does not support "
+                "payload-only chunk moves",
+                RefusalReason.UNSUPPORTED_BACKEND,
+            )
+        if not await stores_provenance_in_graph(graph_engine):
+            raise IncrementalUpdateNotPossible(
+                "the selected graph does not store ownership provenance in-graph",
+                RefusalReason.UNSUPPORTED_BACKEND,
+            )
+        return await _run_incremental_update(
+            data_id,
+            data,
+            dataset,
+            user,
+            old_data,
+            node_set,
+            preferred_loaders,
+            graph_model,
+            custom_prompt,
+            chunker,
+            policy,
+        )
 
 
 async def _run_incremental_update(
@@ -641,7 +668,7 @@ async def _run_incremental_update(
     # A no-op with nothing to repair is the only path that writes nothing, and
     # so the only one that records no run.
     if bundle.get("status") == "unchanged" and not bundle.get("repairs"):
-        return _unchanged_result(0)
+        return {**_unchanged_result(0, bundle["stored_count"]), "pipeline_run_id": None}
 
     pipeline_id = generate_pipeline_id(user.id, dataset.id, RUN_PIPELINE_NAME)
     pipeline_run = await log_pipeline_run_start(
@@ -686,7 +713,7 @@ async def _run_incremental_update(
         user.id,
         additional_properties={"dataset_id": str(dataset.id), "data_id": str(data_id), **result},
     )
-    return result
+    return {**result, "pipeline_run_id": pipeline_run.pipeline_run_id}
 
 
 async def _stage_and_plan(
@@ -732,7 +759,7 @@ async def _stage_and_plan(
     new_text = await _read_processed_text(staged.raw_data_location)
     content_unchanged = staged.content_hash == old_data.content_hash and new_text == old_text
 
-    changed_metadata = _changed_staged_metadata(data, old_data, staged)
+    changed_metadata = _changed_staged_metadata(old_data, staged)
     if changed_metadata:
         raise IncrementalUpdateNotPossible(
             f"replacement metadata changed ({', '.join(changed_metadata)})",
@@ -759,6 +786,7 @@ async def _stage_and_plan(
             "repairs": repairs,
             "data_item": old_data,
             "shifted_chunks": shifted,
+            "stored_count": len(stored_chunks),
         }
 
     # Compatibility is a planning question, so answer it before planning. Every
@@ -958,4 +986,5 @@ async def _write_and_publish(
         "reused_chunks": len(reused_chunks),
         "kept_chunks": kept_count,
         "reindexed_chunks": len(shifted_chunks),
+        "total_chunks": kept_count + added_chunks,
     }

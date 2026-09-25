@@ -1,8 +1,16 @@
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from typing import Any
 from uuid import UUID
 
 from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
+from cognee.infrastructure.databases.graph.bounded_neighborhood import (
+    DEFAULT_NEIGHBORHOOD_CHUNK_SIZE,
+    chunk_members,
+    order_members,
+    unique_node_ids,
+    validate_bounded_neighborhood_args,
+)
 from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
     EdgeIdentity,
@@ -21,29 +29,39 @@ EdgeData = tuple[
 Node = tuple[str, NodeData]  # (node_id, properties)
 
 
+_warned_degree_fallbacks: set[type] = set()
+_warned_neighborhood_fallbacks: set[type] = set()
+
+
 class GraphDBInterface(ABC):
     """
-    Define an interface for graph database operations to be implemented by concrete classes.
+    Interface every graph backend implements (Ladybug/Kuzu, Neo4j, Neptune, Turso, Postgres demo).
 
-    Public methods include:
-    - query
-    - add_node
-    - add_nodes
-    - delete_node
-    - delete_nodes
-    - get_node
-    - get_nodes
-    - add_edge
-    - add_edges
-    - delete_graph
-    - get_graph_data
-    - get_graph_metrics
-    - has_edge
-    - has_edges
-    - get_edges
-    - get_neighbors
-    - get_nodeset_subgraph
-    - get_connections
+    Get an instance with ``get_graph_engine()``; never construct adapters directly.
+
+    Contract shared by all adapters:
+
+    * **Ids are strings.** Node ids are ``str(DataPoint.id)``; an edge is identified by
+      ``(source_id, target_id, relationship_name)``.
+    * **Writes are idempotent upserts.** ``add_node``/``add_nodes`` merge on node id and
+      overwrite the stored properties on match; ``add_edge``/``add_edges`` merge on the
+      edge identity and overwrite properties. Re-running a pipeline over the same data
+      therefore never duplicates nodes or edges -- this is what ``DataPoint``'s
+      ``identity_fields`` relies on. Edges whose endpoints do not exist are skipped.
+    * **Deletes are tolerant.** Deleting an id that is not present is a no-op; deleting a
+      node removes its edges (detach delete).
+    * **Writes return ``None``.** Reads return plain tuples/dicts (``Node = (id,
+      properties)``, ``EdgeData = (source_id, target_id, relationship_name,
+      properties)``), never adapter-native objects.
+    * Optional provenance: ``source_ref_key``/``pipeline_run_id`` on the bulk writers stamp
+      graph source-refs in the same statement so ``forget()`` can delete or roll back by
+      document; see ``cognee.infrastructure.databases.provenance``.
+
+    Capability flags (class attributes, checked by callers on the engine instance):
+    ``supports_cypher_queries``, ``supports_per_row_source_refs``,
+    ``supports_incremental_chunk_updates``. A new backend also needs a
+    ``DatasetDatabaseHandlerInterface`` registration to work with
+    ``ENABLE_BACKEND_ACCESS_CONTROL`` (see ``dataset_database_handler/``).
     """
 
     # Whether this backend executes raw Cypher through ``query()``. Declared on
@@ -91,6 +109,9 @@ class GraphDBInterface(ABC):
         """
         Add a single node with specified properties to the graph.
 
+        Idempotent upsert keyed on the node id: an existing node's properties are
+        overwritten, a missing one is created. Returns ``None``.
+
         Parameters:
         -----------
 
@@ -110,6 +131,9 @@ class GraphDBInterface(ABC):
         """
         Add multiple nodes to the graph in a single operation.
 
+        Idempotent upsert keyed on each node id (see ``add_node``); duplicates within
+        ``nodes`` collapse to one row. Returns ``None``.
+
         Parameters:
         -----------
 
@@ -127,6 +151,9 @@ class GraphDBInterface(ABC):
         """
         Delete a specified node from the graph by its ID.
 
+        Removes the node and every edge attached to it. A missing id is a no-op, not an
+        error. Returns ``None``.
+
         Parameters:
         -----------
 
@@ -138,6 +165,8 @@ class GraphDBInterface(ABC):
     async def delete_nodes(self, node_ids: list[str]) -> None:
         """
         Delete multiple nodes from the graph by their identifiers.
+
+        Same semantics as ``delete_node`` for each id, in one statement. Returns ``None``.
 
         Parameters:
         -----------
@@ -495,6 +524,10 @@ class GraphDBInterface(ABC):
         """
         Create a new edge between two nodes in the graph.
 
+        Idempotent upsert keyed on ``(source_id, target_id, relationship_name)``: an
+        existing edge has its properties overwritten. If either endpoint node does not
+        exist the edge is silently not created. Returns ``None``.
+
         Parameters:
         -----------
 
@@ -516,6 +549,9 @@ class GraphDBInterface(ABC):
     ) -> None:
         """
         Add multiple edges to the graph in a single operation.
+
+        Same upsert semantics as ``add_edge`` for each tuple; edges whose endpoints are
+        missing are skipped. Returns ``None``.
 
         Parameters:
         -----------
@@ -542,6 +578,156 @@ class GraphDBInterface(ABC):
         Retrieve all nodes and edges within the graph.
         """
         raise NotImplementedError
+
+    async def get_top_degree_node_ids(self, top_k: int) -> list[str]:
+        """Ids of up to ``top_k`` well-connected nodes, to seed a graph view.
+
+        **Approximate by contract.** An adapter may sample rather than count
+        exactly, and the order of near-equal nodes may differ between calls, so
+        callers must not treat the result as a ranking — only as "some nodes
+        worth starting from". Ranking exactly is what made this unusable: see
+        below.
+
+        ``top_k`` must be positive. Isolated nodes are valid seeds; a graph
+        without edges should still produce a nonempty view if it has nodes.
+
+        Deliberately NOT abstract: every adapter inherits this working
+        implementation, so a community adapter keeps loading. But the default
+        is the expensive one — it reads the whole graph and counts degree in
+        Python, which on a 5.59M-node / 35.6M-edge graph means tens of
+        gigabytes of Python objects to produce ten ids, and got the worker
+        OOM-killed at ~20.8 GB RSS instead of answering.
+
+        This is the seed source for the default (no query, no explicit seed)
+        graph visualization, so it is a hot path, not a corner — which is why
+        the exactness is what gives, not the feature. Note that an exact SQL
+        aggregate is not the answer either: measured on that graph it took 57 s
+        and spilled ~8.5 GB to temp, because it must group 71M endpoint rows
+        into 5.59M distinct ids. Overriding adapters should bound the work,
+        not just move it into the database.
+        """
+        if top_k < 1:
+            raise ValueError("top_k must be >= 1")
+
+        adapter_type = type(self)
+        if adapter_type not in _warned_degree_fallbacks:
+            _warned_degree_fallbacks.add(adapter_type)
+            logger.warning(
+                "%s has no native get_top_degree_node_ids; falling back to a full "
+                "graph read to rank %d seeds. This is O(graph) in memory.",
+                adapter_type.__name__,
+                top_k,
+            )
+        nodes, edges = await self.get_graph_data()
+        if not nodes:
+            return []
+
+        degree: dict[str, int] = {str(node_id): 0 for node_id, _ in nodes}
+        for edge in edges:
+            for endpoint in (str(edge[0]), str(edge[1])):
+                if endpoint in degree:
+                    degree[endpoint] += 1
+
+        ranked = sorted(degree.items(), key=lambda item: item[1], reverse=True)
+        return [node_id for node_id, _ in ranked[:top_k]]
+
+    async def iter_bounded_neighborhood(
+        self,
+        node_ids: list[str],
+        depth: int,
+        max_nodes: int,
+        chunk_size: int = DEFAULT_NEIGHBORHOOD_CHUNK_SIZE,
+        property_keys: list[str] | None = None,
+    ) -> AsyncIterator[tuple[list[Node], list[EdgeData]]]:
+        """The neighbourhood of ``node_ids``, capped at ``max_nodes``, in chunks.
+
+        This is what a graph view reads. ``get_neighborhood`` returns everything
+        within ``depth`` hops, and the default view seeds from the
+        highest-degree nodes: two hops from a hub reach almost the whole graph.
+        On a 13959-node / 33488-edge dataset that meant reading every node with
+        its full properties to draw 1000, and at 20k nodes a single response is
+        over 100 MB.
+
+        **Membership.** At most ``max_nodes`` nodes: the seeds in the given
+        order, then nodes by hop distance. Which nodes of the last admitted hop
+        are kept is the adapter's choice. Native adapters share the budget
+        round robin over the frontier, so one hub cannot take all of it. A seed
+        that is not in the graph takes no slot.
+
+        **Chunks.** Nodes arrive in membership order, at most ``chunk_size`` per
+        chunk. Every edge between two members is yielded exactly once, in the
+        chunk holding its later endpoint, so no chunk refers to a node the
+        caller has not received yet.
+
+        **Consistency.** Membership is decided once, before the first chunk.
+        Content is read per chunk: a node deleted in between is skipped along
+        with its edges, and a node created in between is not included.
+
+        **Properties.** ``property_keys=None`` returns every property. A list
+        returns only those keys, plus ``name`` and ``type``.
+
+        ``depth``, ``max_nodes`` and ``chunk_size`` must be positive and are
+        checked before anything is read.
+
+        Deliberately NOT abstract, for the same reason as
+        ``get_top_degree_node_ids``: a community adapter keeps working. The
+        default honours the whole contract except the bound on the read. It
+        calls ``get_neighborhood``, so the store still returns the full
+        ``depth``-hop neighbourhood, and the cap is applied in Python.
+        Overriding adapters should stop the traversal once they hold
+        ``max_nodes`` ids and read node content one chunk at a time.
+        """
+        validate_bounded_neighborhood_args(depth, max_nodes, chunk_size)
+        seed_ids = unique_node_ids(node_ids)
+        if not seed_ids:
+            return
+
+        adapter_type = type(self)
+        if adapter_type not in _warned_neighborhood_fallbacks:
+            _warned_neighborhood_fallbacks.add(adapter_type)
+            logger.warning(
+                "%s has no native iter_bounded_neighborhood; reading the whole %d-hop "
+                "neighbourhood to keep %d nodes. This is O(neighbourhood) in memory.",
+                adapter_type.__name__,
+                depth,
+                max_nodes,
+            )
+        nodes, edges = await self.get_neighborhood(node_ids=seed_ids, depth=depth)
+        members = order_members(nodes, edges, seed_ids, max_nodes)
+        for chunk in chunk_members(members, edges, chunk_size, property_keys):
+            yield chunk
+
+    async def get_entity_type_names(self, entity_ids: list[str]) -> dict[str, str]:
+        """The EntityType name each of ``entity_ids`` points to through ``is_a``.
+
+        Keyed by entity id; an entity with no ``is_a`` edge is left out. A graph
+        view uses this to label entities whose EntityType node is outside a
+        bounded read, so it reads one hop, never from a type node outward.
+
+        Deliberately NOT abstract, like ``get_top_degree_node_ids``. The default
+        goes through ``get_neighborhood``, which hydrates the entities with all
+        their properties and returns every edge among the returned nodes;
+        overriding adapters should read just the ``is_a`` edges and the target
+        names.
+        """
+        if not entity_ids:
+            return {}
+        nodes, edges = await self.get_neighborhood(
+            node_ids=entity_ids, depth=1, edge_types=["is_a"]
+        )
+        type_names = {
+            str(node_id): properties.get("name")
+            for node_id, properties in nodes
+            if properties.get("type") == "EntityType"
+        }
+        members = {str(entity_id) for entity_id in entity_ids}
+        # get_neighborhood returns every edge among the returned nodes, not only
+        # the traversed ones, so relation and direction are checked here.
+        return {
+            str(edge[0]): type_names[str(edge[1])]
+            for edge in edges
+            if edge[2] == "is_a" and str(edge[0]) in members and type_names.get(str(edge[1]))
+        }
 
     @abstractmethod
     async def get_graph_metrics(self, include_optional: bool = False) -> dict[str, Any]:
@@ -758,35 +944,3 @@ class GraphDBInterface(ABC):
             - limit: Maximum number of triplets to return.
         """
         raise NotImplementedError("get_triplets_batch is not implemented for this adapter")
-
-    async def get_node_frequency_weights(self, node_ids: list[str]) -> dict[str, float]:
-        """
-        Retrieve node frequency weights for multiple node ids.
-        Returns only found node ids.
-        """
-        raise NotImplementedError("get_node_frequency_weights is not implemented for this adapter")
-
-    async def set_node_frequency_weights(
-        self, node_frequency_weights: dict[str, float]
-    ) -> dict[str, bool]:
-        """
-        Persist node frequency weights for multiple node ids.
-        Returns per-id update success.
-        """
-        raise NotImplementedError("set_node_frequency_weights is not implemented for this adapter")
-
-    async def get_edge_frequency_weights(self, edge_object_ids: list[str]) -> dict[str, float]:
-        """
-        Retrieve edge frequency weights for multiple edge_object_ids.
-        Returns only found edge ids.
-        """
-        raise NotImplementedError("get_edge_frequency_weights is not implemented for this adapter")
-
-    async def set_edge_frequency_weights(
-        self, edge_frequency_weights: dict[str, float]
-    ) -> dict[str, bool]:
-        """
-        Persist edge frequency weights for multiple edge_object_ids.
-        Returns per-id update success.
-        """
-        raise NotImplementedError("set_edge_frequency_weights is not implemented for this adapter")

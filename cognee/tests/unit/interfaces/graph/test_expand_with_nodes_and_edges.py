@@ -356,3 +356,17 @@ def test_entity_name_does_not_replace_entity_with_same_extracted_id():
         ("ref", "alpha")
     ]
     assert [entity.name for _, entity in chunk.contains] == ["beta", "alpha"]
+
+
+@pytest.mark.parametrize("empty_type", ["", "   ", "'"])
+def test_a_type_with_no_name_creates_no_entity_type(empty_type):
+    """SDK-794: an EntityType named "" would show as a type with no label."""
+    from cognee.modules.engine.models import EntityType
+
+    chunk = _make_chunk()
+    graph = _make_graph([Node(id="n1", name="Alice", type=empty_type, description="d")], [])
+    data_points = _construct_test_data_points([chunk], [graph])
+
+    assert not [dp for dp in data_points if isinstance(dp, EntityType)]
+    alice = next(dp for dp in data_points if isinstance(dp, Entity))
+    assert alice.is_a is None

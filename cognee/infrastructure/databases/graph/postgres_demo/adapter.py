@@ -11,7 +11,7 @@ us at social@cognee.ai to explore the options.
 
 import asyncio
 import json
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID
@@ -19,6 +19,11 @@ from uuid import UUID
 from sqlalchemy import NullPool, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from cognee.infrastructure.databases.graph.bounded_neighborhood import (
+    DEFAULT_NEIGHBORHOOD_CHUNK_SIZE,
+    unique_node_ids,
+    validate_bounded_neighborhood_args,
+)
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
@@ -702,6 +707,80 @@ class PostgresDemoAdapter(GraphDBInterface):
             for row in result.mappings().all()
         ]
 
+    async def get_entity_type_names(self, entity_ids: list[str]) -> dict[str, str]:
+        """One-hop ``is_a`` lookup: entity id to its EntityType name."""
+        if not entity_ids:
+            return {}
+        async with self.sessionmaker() as session:
+            result = await session.execute(
+                text(
+                    """
+                    SELECT e.source_id, t.name
+                      FROM graph_edge e
+                      JOIN graph_node t ON t.id = e.target_id
+                     WHERE e.source_id = ANY(:ids)
+                       AND e.relationship_name = 'is_a'
+                       AND t.type = 'EntityType'
+                    """
+                ),
+                {"ids": [str(entity_id) for entity_id in entity_ids]},
+            )
+            return {str(row[0]): row[1] for row in result.all() if row[1]}
+
+    # Bound the aggregate to twice this many endpoint rows from one edge sample.
+    _SEED_SAMPLE_ROWS = 200_000
+
+    async def get_top_degree_node_ids(self, top_k: int) -> list[str]:
+        """Approximate degree seeds from one bounded, materialized edge sample.
+
+        An exact aggregate on the reported 5.59M-node / 35.6M-edge graph took
+        57 seconds and spilled about 8.5 GB to temporary storage. Sampling
+        bounds the aggregate without materializing the full graph in Python.
+
+        The physical-prefix sample is not random: ingestion appends edges, so
+        it can systematically miss recent hubs and stay anchored to early data
+        as the graph grows. Both endpoints come from the SAME materialized
+        sample. This is bounded approximate degree, not a freshness guarantee.
+        A limited ID-only query fills sparse samples, including isolated nodes.
+        """
+        if top_k < 1:
+            raise ValueError("top_k must be >= 1")
+
+        async with self.sessionmaker() as session:
+            result = await session.execute(
+                text(
+                    """
+                    WITH sampled_edges AS MATERIALIZED (
+                        SELECT source_id, target_id FROM graph_edge LIMIT :sample
+                    )
+                    SELECT node_id
+                      FROM (
+                            SELECT target_id AS node_id FROM sampled_edges
+                             UNION ALL
+                            SELECT source_id AS node_id FROM sampled_edges
+                           ) endpoints
+                     GROUP BY node_id
+                     ORDER BY count(*) DESC, node_id
+                     LIMIT :top_k
+                    """
+                ),
+                {"sample": self._SEED_SAMPLE_ROWS, "top_k": top_k},
+            )
+            seed_ids = [str(row[0]) for row in result.all()]
+            if len(seed_ids) < top_k:
+                # Include isolated nodes when the edge sample cannot fill the
+                # view. Fetch only missing ids, never full nodes or degrees.
+                # ANY([]) intentionally matches nothing, so NOT includes every
+                # node on an edgeless graph; asyncpg infers the array from id.
+                result = await session.execute(
+                    text(
+                        "SELECT id FROM graph_node WHERE NOT (id = ANY(:seed_ids)) LIMIT :remaining"
+                    ),
+                    {"seed_ids": seed_ids, "remaining": top_k - len(seed_ids)},
+                )
+                return seed_ids + [str(row[0]) for row in result.all()]
+            return seed_ids
+
     async def get_graph_data(
         self,
     ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]:
@@ -897,6 +976,172 @@ class PostgresDemoAdapter(GraphDBInterface):
             nodes = await self._fetch_nodes_by_id(session, subgraph_ids)
             edges = await self._fetch_edges_within(session, subgraph_ids)
             return nodes, edges
+
+    # One hop of the bounded traversal. Each frontier node is read for at most
+    # :max_nodes incident edges, since no node can use more than the whole
+    # budget. New neighbours come back round robin: every frontier node's first
+    # neighbour, then every second one, so one hub cannot take the budget.
+    # Already-reached ids are dropped by the caller with a set: excluding them
+    # here with `<> ALL(:reached)` is linear in the reached count (270 ms at
+    # 4000 ids), and at most len(reached) candidates can be reached ones, so
+    # :max_nodes candidates always leave enough.
+    _BOUNDED_HOP = text("""
+        SELECT candidate.neighbor_id
+          FROM unnest(CAST(:frontier AS text[])) WITH ORDINALITY AS frontier(id, position)
+         CROSS JOIN LATERAL (
+               SELECT incident.neighbor_id, row_number() OVER () AS fan_out_rank
+                 FROM (
+                       SELECT target_id AS neighbor_id FROM graph_edge
+                        WHERE source_id = frontier.id
+                        UNION ALL
+                       SELECT source_id FROM graph_edge
+                        WHERE target_id = frontier.id
+                        LIMIT :max_nodes
+                      ) incident
+               ) candidate
+         GROUP BY candidate.neighbor_id
+         ORDER BY min(candidate.fan_out_rank), min(frontier.position), candidate.neighbor_id
+         LIMIT :max_nodes
+    """)
+
+    # Edges whose later endpoint is in this chunk: one endpoint in :chunk, the
+    # other among the ids already handed out, this chunk included.
+    _CHUNK_EDGES = text("""
+        SELECT source_id, target_id, relationship_name, properties
+          FROM graph_edge
+         WHERE (source_id = ANY(:chunk) AND target_id = ANY(:emitted))
+            OR (target_id = ANY(:chunk) AND source_id = ANY(:emitted))
+    """)
+
+    # Caps one query of a graph view, so a pathological read fails instead of
+    # holding a pooled connection until pool_timeout.
+    _BOUNDED_READ_TIMEOUT_MS = 15_000
+
+    @asynccontextmanager
+    async def _bounded_read_session(self):
+        """A read session for ``iter_bounded_neighborhood``.
+
+        Custom plans are forced because these queries bind id arrays: after
+        five executions asyncpg's prepared statements move to a generic plan
+        that no longer knows the array sizes, which made a 20k-node read 1.6x
+        to 1.9x slower. Both settings end with the transaction.
+        """
+        async with self.sessionmaker() as session:
+            await session.execute(text("SET LOCAL plan_cache_mode = force_custom_plan"))
+            await session.execute(
+                text(f"SET LOCAL statement_timeout = {self._BOUNDED_READ_TIMEOUT_MS}")
+            )
+            yield session
+
+    async def iter_bounded_neighborhood(
+        self,
+        node_ids: list[str],
+        depth: int,
+        max_nodes: int,
+        chunk_size: int = DEFAULT_NEIGHBORHOOD_CHUNK_SIZE,
+        property_keys: list[str] | None = None,
+    ) -> AsyncIterator[
+        tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]
+    ]:
+        """Bounded breadth-first read in SQL, then node content one chunk at a time.
+
+        Membership is ids only: one query per hop, stopping once ``max_nodes``
+        ids are held. A hop returns at most ``len(frontier) * max_nodes``
+        candidate rows, never the whole graph; under a bitmap plan the index
+        scan still visits every index entry of a hub in the frontier, but heap
+        reads stay within that bound. Each chunk then reads its nodes
+        and the edges from them to nodes already handed out, in its own short
+        session, so a slow consumer never holds a pooled connection between
+        chunks. A chunk's edge read covers the incident edges of its nodes, so
+        a hub costs its degree there, not the budget.
+        """
+        validate_bounded_neighborhood_args(depth, max_nodes, chunk_size)
+        seed_ids = unique_node_ids(node_ids)
+        if not seed_ids:
+            return
+
+        async with self._bounded_read_session() as session:
+            members = await self._select_bounded_members(session, seed_ids, depth, max_nodes)
+
+        emitted: list[str] = []
+        for start in range(0, len(members), chunk_size):
+            chunk_ids = members[start : start + chunk_size]
+            async with self._bounded_read_session() as session:
+                nodes = await self._fetch_member_nodes(session, chunk_ids, property_keys)
+                if not nodes:
+                    continue
+                found_ids = [node_id for node_id, _ in nodes]
+                emitted.extend(found_ids)
+                result = await session.execute(
+                    self._CHUNK_EDGES, {"chunk": found_ids, "emitted": emitted}
+                )
+                edges = [
+                    (
+                        row["source_id"],
+                        row["target_id"],
+                        row["relationship_name"],
+                        _decode_properties(row["properties"]),
+                    )
+                    for row in result.mappings().all()
+                ]
+            yield nodes, edges
+
+    async def _select_bounded_members(
+        self, session: AsyncSession, seed_ids: list[str], depth: int, max_nodes: int
+    ) -> list[str]:
+        """Member ids in order: existing seeds, then each hop round robin."""
+        result = await session.execute(
+            text("SELECT id FROM graph_node WHERE id = ANY(:ids)"), {"ids": seed_ids}
+        )
+        existing = {row[0] for row in result.all()}
+        members = [seed_id for seed_id in seed_ids if seed_id in existing][:max_nodes]
+        reached = set(members)
+        frontier = members
+        for _ in range(depth):
+            remaining = max_nodes - len(members)
+            if not frontier or remaining < 1:
+                break
+            result = await session.execute(
+                self._BOUNDED_HOP, {"frontier": frontier, "max_nodes": max_nodes}
+            )
+            frontier = [row[0] for row in result.all() if row[0] not in reached][:remaining]
+            reached.update(frontier)
+            members.extend(frontier)
+        return members
+
+    async def _fetch_member_nodes(
+        self, session: AsyncSession, node_ids: list[str], property_keys: list[str] | None
+    ) -> list[tuple[str, dict[str, Any]]]:
+        """Nodes by id in ``node_ids`` order, optionally cut down to ``property_keys``."""
+        if property_keys is None:
+            nodes = await self._fetch_nodes_by_id(session, node_ids)
+        else:
+            # Projected in SQL, so large properties such as chunk text never leave
+            # the database.
+            result = await session.execute(
+                text("""
+                    SELECT id, name, type,
+                           (SELECT jsonb_object_agg(key, value)
+                              FROM jsonb_each(properties)
+                             WHERE key = ANY(:keys)) AS properties
+                      FROM graph_node
+                     WHERE id = ANY(:ids)
+                """),
+                {"ids": node_ids, "keys": [str(key) for key in property_keys]},
+            )
+            nodes = [
+                (
+                    row["id"],
+                    {
+                        "name": row["name"],
+                        "type": row["type"],
+                        **_decode_properties(row["properties"]),
+                    },
+                )
+                for row in result.mappings().all()
+            ]
+        position = {node_id: index for index, node_id in enumerate(node_ids)}
+        return sorted(nodes, key=lambda node: position[node[0]])
 
     async def delete_graph(self) -> None:
         """Delete all nodes and edges from the graph."""

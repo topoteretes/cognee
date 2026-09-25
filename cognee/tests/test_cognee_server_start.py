@@ -10,10 +10,20 @@ from pathlib import Path
 
 import requests
 
+DEFAULT_USER_EMAIL = "default_user@example.com"
+# The default user has no password until a server started with
+# DEFAULT_USER_PASSWORD sets it once. This test logs in over HTTP, so it pins
+# the value for the server subprocess below.
+DEFAULT_USER_PASSWORD = "default_password"
+
 
 class TestCogneeServerStart(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        # Inherited by the server subprocess started below, which creates the
+        # default user lazily on first use.
+        os.environ["DEFAULT_USER_PASSWORD"] = DEFAULT_USER_PASSWORD
+
         # Start the Cognee server - just check if the server can start without errors
         cls.server_process = subprocess.Popen(
             [
@@ -64,8 +74,8 @@ class TestCogneeServerStart(unittest.TestCase):
         # Login request
         url = "http://127.0.0.1:8000/api/v1/auth/login"
         form_data = {
-            "username": "default_user@example.com",
-            "password": "default_password",
+            "username": DEFAULT_USER_EMAIL,
+            "password": DEFAULT_USER_PASSWORD,
         }
         login_response = requests.post(url, data=form_data, timeout=15)
         login_response.raise_for_status()  # raises on HTTP 4xx/5xx
@@ -86,7 +96,7 @@ class TestCogneeServerStart(unittest.TestCase):
         file = {
             "data": (
                 file_path.name,
-                open(file_path, "rb"),
+                open(file_path, "rb"),  # noqa: SIM115 - requests closes the upload handle
             )
         }
 

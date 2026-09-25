@@ -66,7 +66,7 @@ except ImportError:
 if os.environ.get("DEMO_USE_OLLAMA") != "1" and os.environ.get("LLM_API_KEY"):
     os.environ["OPENAI_API_KEY"] = os.environ["LLM_API_KEY"]
 
-# Pin a gpt-4o-family model for the OpenAI path. cognee's current default (openai/gpt-5-mini)
+# Pin a gpt-4o-family model for the OpenAI path. cognee's current default (openai/gpt-5.6-luna)
 # forces instructor's json_schema_mode, which calls response_model.model_json_schema() and
 # therefore breaks on cognee's str-returning paths (preflight + recall answer generation):
 #   AttributeError: type object 'str' has no attribute 'model_json_schema'
@@ -131,7 +131,7 @@ class _Tee:
         self._log.flush()
 
 
-_LOG_FILE = open(LOG_PATH, "w", encoding="utf-8")
+_LOG_FILE = open(LOG_PATH, "w", encoding="utf-8")  # noqa: SIM115 - tee target for the whole process
 sys.stdout = _Tee(sys.__stdout__, _LOG_FILE)
 sys.stderr = _Tee(sys.__stderr__, _LOG_FILE)
 

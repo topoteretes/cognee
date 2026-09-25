@@ -1,0 +1,262 @@
+{
+  "Sarah from TechSupply Solutions": {
+    "knowledge_graph": {
+      "summary": "TechSupply Solutions quotes Dell Precision 5570 and Lenovo ThinkPad P1 laptops with 3-year warranty, 8% bulk discount and 2-4 week delivery.",
+      "description": "TechSupply Solutions quotes Dell Precision 5570 and Lenovo ThinkPad P1 laptops with 3-year warranty, 8% bulk discount and 2-4 week delivery.",
+      "nodes": [
+        {
+          "id": "techsupply",
+          "name": "TechSupply Solutions",
+          "type": "Vendor",
+          "description": "IT hardware vendor represented by Sarah.",
+          "label": "Vendor"
+        },
+        {
+          "id": "dell_precision_5570",
+          "name": "Dell Precision 5570",
+          "type": "Product",
+          "description": "Enterprise laptop offered at $1,450 with a 3-year warranty.",
+          "label": "Product"
+        },
+        {
+          "id": "lenovo_thinkpad_p1",
+          "name": "Lenovo ThinkPad P1",
+          "type": "Product",
+          "description": "Enterprise laptop offered at $1,550 with a 3-year warranty.",
+          "label": "Product"
+        },
+        {
+          "id": "techsupply_bulk_discount",
+          "name": "8% bulk discount over $50,000",
+          "type": "Discount",
+          "description": "TechSupply Solutions gives 8% off orders over $50,000.",
+          "label": "Discount"
+        },
+        {
+          "id": "techsupply_delivery",
+          "name": "2-3 weeks delivery",
+          "type": "DeliveryTime",
+          "description": "Dell delivered in 2-3 weeks, Lenovo in 3-4 weeks.",
+          "label": "DeliveryTime"
+        }
+      ],
+      "edges": [
+        {
+          "source_node_id": "techsupply",
+          "target_node_id": "dell_precision_5570",
+          "relationship_name": "offers",
+          "description": "TechSupply Solutions offers the Dell Precision 5570 at $1,450."
+        },
+        {
+          "source_node_id": "techsupply",
+          "target_node_id": "lenovo_thinkpad_p1",
+          "relationship_name": "offers",
+          "description": "TechSupply Solutions offers the Lenovo ThinkPad P1 at $1,550."
+        },
+        {
+          "source_node_id": "techsupply",
+          "target_node_id": "techsupply_bulk_discount",
+          "relationship_name": "provides",
+          "description": "TechSupply Solutions gives 8% off orders over $50,000."
+        },
+        {
+          "source_node_id": "techsupply",
+          "target_node_id": "techsupply_delivery",
+          "relationship_name": "delivers_in",
+          "description": "TechSupply Solutions delivers Dell in 2-3 weeks and Lenovo in 3-4 weeks."
+        }
+      ]
+    },
+    "summary": {
+      "summary": "TechSupply Solutions quotes Dell Precision 5570 and Lenovo ThinkPad P1 laptops with 3-year warranty, 8% bulk discount and 2-4 week delivery.",
+      "description": "TechSupply Solutions quotes Dell Precision 5570 and Lenovo ThinkPad P1 laptops with 3-year warranty, 8% bulk discount and 2-4 week delivery."
+    }
+  },
+  "Martin from vendor Office Solutions": {
+    "knowledge_graph": {
+      "summary": "Office Solutions quotes the HP ZBook Power G9 at $1,600 with a 2-year warranty, 6% discount over $60,000 and 4-5 week delivery.",
+      "description": "Office Solutions quotes the HP ZBook Power G9 at $1,600 with a 2-year warranty, 6% discount over $60,000 and 4-5 week delivery.",
+      "nodes": [
+        {
+          "id": "office_solutions",
+          "name": "Office Solutions",
+          "type": "Vendor",
+          "description": "Office equipment vendor represented by Martin.",
+          "label": "Vendor"
+        },
+        {
+          "id": "hp_zbook_power_g9",
+          "name": "HP ZBook Power G9",
+          "type": "Product",
+          "description": "Laptop offered at $1,600 with a 2-year warranty.",
+          "label": "Product"
+        },
+        {
+          "id": "office_bulk_discount",
+          "name": "6% bulk discount over $60,000",
+          "type": "Discount",
+          "description": "Office Solutions gives 6% off orders over $60,000.",
+          "label": "Discount"
+        },
+        {
+          "id": "office_delivery",
+          "name": "4-5 weeks delivery",
+          "type": "DeliveryTime",
+          "description": "Standard delivery 4-5 weeks, 3-4 weeks expedited for $75 per unit.",
+          "label": "DeliveryTime"
+        }
+      ],
+      "edges": [
+        {
+          "source_node_id": "office_solutions",
+          "target_node_id": "hp_zbook_power_g9",
+          "relationship_name": "offers",
+          "description": "Office Solutions offers the HP ZBook Power G9 at $1,600."
+        },
+        {
+          "source_node_id": "office_solutions",
+          "target_node_id": "office_bulk_discount",
+          "relationship_name": "provides",
+          "description": "Office Solutions gives 6% off orders over $60,000."
+        },
+        {
+          "source_node_id": "office_solutions",
+          "target_node_id": "office_delivery",
+          "relationship_name": "delivers_in",
+          "description": "Office Solutions delivers in 4-5 weeks, or 3-4 weeks expedited."
+        }
+      ]
+    },
+    "summary": {
+      "summary": "Office Solutions quotes the HP ZBook Power G9 at $1,600 with a 2-year warranty, 6% discount over $60,000 and 4-5 week delivery.",
+      "description": "Office Solutions quotes the HP ZBook Power G9 at $1,600 with a 2-year warranty, 6% discount over $60,000 and 4-5 week delivery."
+    }
+  },
+  "Previous Purchase Records": {
+    "knowledge_graph": {
+      "summary": "Purchase history rates TechSupply Solutions 5/5 and Office Solutions 2/5.",
+      "description": "Purchase history rates TechSupply Solutions 5/5 and Office Solutions 2/5.",
+      "nodes": [
+        {
+          "id": "techsupply",
+          "name": "TechSupply Solutions",
+          "type": "Vendor",
+          "description": "Past vendor rated 5/5 for desktop computers.",
+          "label": "Vendor"
+        },
+        {
+          "id": "office_solutions",
+          "name": "Office Solutions",
+          "type": "Vendor",
+          "description": "Past vendor rated 2/5 for office furniture.",
+          "label": "Vendor"
+        },
+        {
+          "id": "techsupply_rating",
+          "name": "5/5 rating",
+          "type": "Rating",
+          "description": "Excellent delivery, delivered 2 days early, responsive support.",
+          "label": "Rating"
+        },
+        {
+          "id": "office_rating",
+          "name": "2/5 rating",
+          "type": "Rating",
+          "description": "Delayed delivery by 1 week, poor communication.",
+          "label": "Rating"
+        }
+      ],
+      "edges": [
+        {
+          "source_node_id": "techsupply",
+          "target_node_id": "techsupply_rating",
+          "relationship_name": "rated",
+          "description": "TechSupply Solutions was rated 5/5 on a $35,000 desktop order."
+        },
+        {
+          "source_node_id": "office_solutions",
+          "target_node_id": "office_rating",
+          "relationship_name": "rated",
+          "description": "Office Solutions was rated 2/5 on a $12,000 furniture order."
+        }
+      ]
+    },
+    "summary": {
+      "summary": "Purchase history rates TechSupply Solutions 5/5 and Office Solutions 2/5.",
+      "description": "Purchase history rates TechSupply Solutions 5/5 and Office Solutions 2/5."
+    }
+  },
+  "Procurement Policies and Preferences": {
+    "knowledge_graph": {
+      "summary": "Procurement policy: 3+ year warranty, 30-day max delivery, minimum 5% bulk discount over $50,000, minimum 4/5 vendor rating.",
+      "description": "Procurement policy: 3+ year warranty, 30-day max delivery, minimum 5% bulk discount over $50,000, minimum 4/5 vendor rating.",
+      "nodes": [
+        {
+          "id": "procurement_policy",
+          "name": "Procurement Policy",
+          "type": "Policy",
+          "description": "Company procurement policies and preferences.",
+          "label": "Policy"
+        },
+        {
+          "id": "warranty_rule",
+          "name": "3+ year warranty",
+          "type": "Requirement",
+          "description": "Preferred vendors must have 3+ year warranty coverage.",
+          "label": "Requirement"
+        },
+        {
+          "id": "delivery_rule",
+          "name": "30 days maximum delivery",
+          "type": "Requirement",
+          "description": "Maximum delivery time of 30 days for non-critical items.",
+          "label": "Requirement"
+        },
+        {
+          "id": "discount_rule",
+          "name": "minimum 5% bulk discount over $50,000",
+          "type": "Requirement",
+          "description": "Bulk discount requirement: minimum 5% for orders over $50,000.",
+          "label": "Requirement"
+        },
+        {
+          "id": "rating_rule",
+          "name": "minimum 4/5 vendor rating",
+          "type": "Requirement",
+          "description": "New contracts require a minimum 4/5 vendor rating.",
+          "label": "Requirement"
+        }
+      ],
+      "edges": [
+        {
+          "source_node_id": "procurement_policy",
+          "target_node_id": "warranty_rule",
+          "relationship_name": "requires",
+          "description": "Policy requires 3+ year warranty coverage."
+        },
+        {
+          "source_node_id": "procurement_policy",
+          "target_node_id": "delivery_rule",
+          "relationship_name": "requires",
+          "description": "Policy caps delivery at 30 days for non-critical items."
+        },
+        {
+          "source_node_id": "procurement_policy",
+          "target_node_id": "discount_rule",
+          "relationship_name": "requires",
+          "description": "Policy requires a minimum 5% bulk discount over $50,000."
+        },
+        {
+          "source_node_id": "procurement_policy",
+          "target_node_id": "rating_rule",
+          "relationship_name": "requires",
+          "description": "Policy requires a minimum 4/5 vendor rating for new contracts."
+        }
+      ]
+    },
+    "summary": {
+      "summary": "Procurement policy: 3+ year warranty, 30-day max delivery, minimum 5% bulk discount over $50,000, minimum 4/5 vendor rating.",
+      "description": "Procurement policy: 3+ year warranty, 30-day max delivery, minimum 5% bulk discount over $50,000, minimum 4/5 vendor rating."
+    }
+  }
+}

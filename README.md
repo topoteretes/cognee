@@ -5,7 +5,7 @@
 
   <br />
 
-  <p>Cognee - The Open-Source AI Memory Platform for Agents</p>
+  <p>Cognee - The Free Open-Source AI Memory Platform for Agents</p>
 
   <p align="center">
   <a href="https://www.youtube.com/watch?v=8hmqS2Y5RVQ&t=13s">Demo</a>
@@ -39,7 +39,9 @@
   </a>
 </p>
 
-  <p>Cognee is the open-source AI memory platform that gives AI agents persistent long-term memory across sessions. Ingest data in any format, build a self-hosted knowledge graph, and let every agent recall, connect, and act with full context</p>
+  <p>Cognee is a free open-source AI memory platform that gives AI agents persistent long-term memory across sessions. Turn documents, code, and conversations into a self-hosted knowledge graph your agents can search and reuse.</p>
+
+  <p><strong>Start locally for free without an OpenAI or Anthropic API key.</strong> Build memory from text with local extraction and embedding models. Add a local or hosted LLM when you want more functionality or reach out to us for a production-ready small model pipeline.</p>
 
   <p align="center">
   🌐 This README is also available in:<br />
@@ -71,8 +73,9 @@
 
 | I want to… | Start here |
 | --- | --- |
-| See a memory graph without an API key | [Bundled demo](#try-it-without-an-api-key) |
-| Build with text, code, and session memory | [Python quickstart](#quickstart) |
+| Build memory without an LLM | [Local Python quickstart](#run-locally-without-an-llm) |
+| Explore a prebuilt graph without downloading models | [Bundled demo](#explore-the-bundled-demo) |
+| Generate answers with a local or hosted LLM | [Optional LLM setup](#optional-configure-the-llm) |
 | Give an existing agent memory | [Plugins and MCP](#connect-your-agent) |
 | Run Cognee on my infrastructure | [Deployment options](#deploy-cognee) |
 | Use a managed service | [Cognee Cloud](https://docs.cognee.ai/cognee-cloud/overview) |
@@ -81,20 +84,14 @@
 
 Requires **Python 3.10–3.14**.
 
+
 You can install Cognee with **pip**, **uv**, or your preferred Python package manager.
 
 ```bash
-uv pip install cognee
+uv pip install "cognee[gliner]"
 ```
 
-### Try it without an API key
-
-```bash
-cognee-cli demo
-```
-
-
-### Step 2: Configure the LLM
+### Optional: Configure the LLM
 ```python
 import os
 
@@ -105,35 +102,65 @@ Alternatively, create a `.env` file using our [template](https://github.com/topo
 The default uses OpenAI for language models and embeddings. Processing and generated answers make provider calls. See [installation](https://docs.cognee.ai/getting-started/installation), [other providers](https://docs.cognee.ai/setup-configuration/llm-providers), or [local Ollama models](https://docs.cognee.ai/guides/local-ollama) for other setups.
 
 
+
+
+
+### Run locally without an LLM
+
+
+In step 1, you did "cognee[gliner]" install.
+
+Save this as `quickstart.py` and run `python quickstart.py` if you are feeling old school, or tell your LLM to do it:
+
 ```python
-import cognee
 import asyncio
+
+import cognee
 
 
 async def main():
-    # Store permanently in the knowledge graph (runs add + cognify + improve)
-    await cognee.remember("Cognee turns documents into AI memory.")
+    # Extract a knowledge graph and embed the text with local models.
+    await cognee.remember(
+        "Marie Curie was born in Warsaw and worked at the University of Paris.",
+        dataset_name="local_quickstart",
+    )
 
-    # Store in session memory (fast cache, syncs to graph in background)
-    await cognee.remember("User prefers detailed explanations.", session_id="chat_1")
-
-    # Query with auto-routing (picks best search strategy automatically)
-    results = await cognee.recall("What does Cognee do?")
+    # Retrieve the matching source text; no LLM generates an answer.
+    results = await cognee.recall(
+        "Where was Marie Curie born?",
+        datasets=["local_quickstart"],
+    )
     for result in results:
         print(result)
-
-    # Query session memory first, fall through to graph if needed
-    results = await cognee.recall("What does the user prefer?", session_id="chat_1")
-    for result in results:
-        print(result)
-
-    # Delete when done
-    await cognee.forget(dataset="main_dataset")
 
 
 if __name__ == "__main__":
     asyncio.run(main())
 ```
+
+The same workflow is available from the CLI:
+
+```bash
+cognee-cli remember "Marie Curie was born in Warsaw." -d local_quickstart
+cognee-cli recall "Where was Marie Curie born?" -d local_quickstart
+```
+
+Text ingestion, retrieval, and session storage work without an LLM. LLM-dependent improvement stages skip automatically.
+
+Generated answers and media processing that requires a vision or transcription model need additional LLM configuration.
+
+
+
+### Explore the bundled demo
+
+To explore a prebuilt graph without downloading extraction or embedding models:
+
+```bash
+cognee-cli demo
+```
+
+This command works with the base `pip install cognee` package. It loads bundled sample data and runs keyword search without an API key. Use the local quickstart above to build a graph from your own text.
+
 
 
 ## How Cognee works
@@ -206,7 +233,7 @@ The UI launcher requires Node.js/npm; Docker is needed for its MCP service. See 
 
 ## Explore examples
 
-- [Build a small Company Brain from text, code, and session lessons](examples/demos/company_brain_demo.py).
+- [Build a small Company Brain from text, code, and session lessons](examples/demos/company_brain/company_brain_demo.py).
 - [Import memory from Mem0, Letta, Zep, or Graphiti](https://docs.cognee.ai/examples/migrate-memory-systems) using the COGX exchange format.
 - [Run with local Ollama models](https://docs.cognee.ai/guides/local-ollama), including a local embedding model.
 - [Visualize your knowledge graph](https://docs.cognee.ai/guides/graph-visualization) and inspect its connections.
@@ -227,6 +254,8 @@ docker compose --profile ui --profile mcp up
 ```
 
 The default ports are API **8000**, UI **3000**, and MCP **8001**. For deployment beyond a local demo, configure authentication, persistent storage, and compatible backends using the [permissions guide](https://docs.cognee.ai/setup-configuration/permissions) and [deployment templates](distributed/deploy/README.md). [Cognee Cloud](https://docs.cognee.ai/cognee-cloud/overview) provides the managed option.
+
+The default Docker image does not include GLiNER. To ingest text without an LLM in Docker, add the `gliner` extra to your image; the local quickstart installs it explicitly.
 
 ## Run the Whole Memory Layer on Postgres
 
@@ -253,12 +282,9 @@ For the research behind Cognee's graph/LLM interface, see [Optimizing the Interf
 
 [![Watch Demo](https://img.youtube.com/vi/8hmqS2Y5RVQ/maxresdefault.jpg)](https://www.youtube.com/watch?v=8hmqS2Y5RVQ&t=13s)
 
-- Cognee comes with better incremental load
-- Cognee now supports ingestion of multiple repositories at once
-- Cognee now has better memory usage
-- Cognee now has better conflict resolution
-- Cognee now has ability to call external relational stores
-- Cognee can now ingest from relational databases at scale
+- **[v1.6.0 — Keyless workflows & pipeline reliability](https://github.com/topoteretes/cognee/releases/tag/v1.6.0)** (September 18, 2026): build and search text memory with local models and no cloud LLM key.
+- Local model downloads are announced on first use, and LLM-dependent improvement stages skip when no LLM is configured.
+- Pipeline recovery preserves completed documents after crashes, and datasets track their embedding model to prevent mismatches.
 
 
 ## Community & Support
@@ -285,5 +311,3 @@ We recently published a research paper on optimizing knowledge graphs for LLM re
       url={https://arxiv.org/abs/2505.24478},
 }
 ```
-
-</details>

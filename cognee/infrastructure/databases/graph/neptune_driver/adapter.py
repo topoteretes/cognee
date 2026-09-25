@@ -652,6 +652,12 @@ class NeptuneGraphDB(GraphDBInterface):
             logger.error(f"Failed to delete graph: {error_msg}")
             raise RuntimeError(f"Failed to delete graph: {error_msg}") from e
 
+    async def get_top_degree_node_ids(self, top_k: int) -> list[str]:
+        """Rank a bounded edge sample in the store; include isolated nodes."""
+        from cognee.infrastructure.databases.graph.degree_seeds import cypher_degree_seeds
+
+        return await cypher_degree_seeds(self, top_k, typed=False)
+
     async def get_graph_data(self) -> tuple[list[Node], list[EdgeData]]:
         """
         Retrieve all nodes and edges within the graph.

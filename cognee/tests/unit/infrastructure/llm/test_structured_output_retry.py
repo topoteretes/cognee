@@ -168,9 +168,9 @@ async def test_llm_gateway_converts_quota_errors():
     with (
         patch.object(gateway_module, "get_llm_config", return_value=fake_config),
         patch.object(get_llm_client_module, "get_llm_client", return_value=failing_client),
+        pytest.raises(LLMQuotaExceededError, match="not retryable"),
     ):
-        with pytest.raises(LLMQuotaExceededError, match="not retryable"):
-            await gateway_module.LLMGateway.acreate_structured_output("hi", "system", _Resp)
+        await gateway_module.LLMGateway.acreate_structured_output("hi", "system", _Resp)
 
     assert failing_client.acreate_structured_output.await_count == 1
 

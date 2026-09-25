@@ -45,11 +45,11 @@ def _metadata():
 
 
 async def _make_engine():
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp.close()
-    engine = SQLAlchemyAdapter(f"sqlite+aiosqlite:///{tmp.name}")
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        db_path = tmp.name
+    engine = SQLAlchemyAdapter(f"sqlite+aiosqlite:///{db_path}")
     await engine.create_database()
-    return engine, tmp.name
+    return engine, db_path
 
 
 def _install_mocks(stack, engine, save_mock, open_mock):

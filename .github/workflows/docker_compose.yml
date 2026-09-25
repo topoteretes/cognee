@@ -10,6 +10,10 @@ permissions:
 
 env:
   COGNEE_SKIP_CONNECTION_TEST: 'true'
+  # The default user is created with no password; a server started with this
+  # set gives it the password once. Compose passes it into the container, and
+  # the login steps below use it.
+  DEFAULT_USER_PASSWORD: 'ci-default-user-password'
   # Profiles exercised by the full-stack e2e: the default `cognee` service plus
   # postgres (persistence) and the MCP server.
   COMPOSE_PROFILES: 'postgres,mcp'
@@ -134,11 +138,15 @@ jobs:
         # The suite is decoupled from the `cognee` package: --confcutdir keeps
         # pytest from loading the heavy ancestor conftests, and --no-project
         # keeps uv from syncing the whole project on the runner.
+        # The `mcp` client is pinned to match the server's own
+        # `mcp>=1.24.0,<2.0.0`: unpinned it resolves to 2.x, which dropped the
+        # `streamablehttp_client` alias and yields a 2-tuple of streams rather
+        # than 3, so the e2e client cannot talk to a 1.x server image.
         uv run --no-project \
           --with pytest \
           --with pytest-timeout \
           --with requests \
-          --with mcp \
+          --with "mcp<2" \
           python -m pytest cognee/tests/e2e/docker_compose \
             -p no:cacheprovider \
             --confcutdir=cognee/tests/e2e/docker_compose \
@@ -147,7 +155,7 @@ jobs:
     - name: Verify remember and recall round-trip
       run: |
         TOKEN=$(curl -sf -X POST http://localhost:8000/api/v1/auth/login \
-          -d "username=default_user@example.com&password=default_password" | jq -r .access_token)
+          -d "username=default_user@example.com&password=${DEFAULT_USER_PASSWORD}" | jq -r .access_token)
         [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] || { echo "login failed"; exit 1; }
 
         FACT="The glassblower Odene Marsk crafted the twin cobalt lanterns of the Vellinge lighthouse in 1931."

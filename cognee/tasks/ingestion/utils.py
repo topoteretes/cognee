@@ -66,7 +66,7 @@ async def materialize_stream_for_background(data_item: Any, index: int = 0) -> A
         return data_item
 
     payload = await _read_stream_bytes(stream)
-    buffer = SpooledTemporaryFile(mode="w+b")
+    buffer = SpooledTemporaryFile(mode="w+b")  # noqa: SIM115 - returned to the caller, who owns it
     buffer.write(payload)
     buffer.seek(0)
 

@@ -1,3 +1,14 @@
+"""Build an org chart from typed DataPoints with the low-level run_tasks pipeline, no LLM.
+
+data/companies.json and data/people.json become Company, Department and Person nodes that are
+deduplicated through identity_fields. The pipeline status is printed as it runs, the graph is
+written to .artifacts/, and a GRAPH_COMPLETION search with only_context=True prints the full prompt
+the LLM would receive (retrieval context included) for "Who works for GreenFuture Solutions?".
+
+Requires: an embedding provider (no LLM call is made).
+Run: uv run python examples/demos/custom_pipelines/organizational_hierarchy/organizational_hierarchy_pipeline_example.py
+"""
+
 import asyncio
 import json
 import os
@@ -6,7 +17,7 @@ from uuid import NAMESPACE_OID, UUID, uuid5
 
 from pydantic import BaseModel
 
-from cognee import prune, visualize_graph
+from cognee import SearchType, prune, search, visualize_graph
 from cognee.low_level import DataPoint, setup
 from cognee.modules.data.methods import load_or_create_datasets
 from cognee.modules.users.methods import get_default_user
@@ -108,9 +119,11 @@ async def main():
 
     # Prepare data for pipeline
     companies_file_path = os.path.join(os.path.dirname(__file__), "data", "companies.json")
-    companies = json.loads(open(companies_file_path, "r").read())
+    with open(companies_file_path, "r") as companies_file:
+        companies = json.load(companies_file)
     people_file_path = os.path.join(os.path.dirname(__file__), "data", "people.json")
-    people = json.loads(open(people_file_path, "r").read())
+    with open(people_file_path, "r") as people_file:
+        people = json.load(people_file)
 
     # Run tasks expects a list of data even if it is just one document
     data = [{"companies": companies, "people": people}]
@@ -132,6 +145,20 @@ async def main():
         )
     )
     await visualize_graph(graph_file_path)
+
+    # Ask a question against the graph that was just built. only_context=True
+    # returns the prompt the LLM would receive (retrieval context included)
+    # instead of an answer, so this example needs only an embedding provider
+    # configured - no LLM.
+    results = await search(
+        query_text="Who works for GreenFuture Solutions?",
+        query_type=SearchType.GRAPH_COMPLETION,
+        dataset_ids=datasets[0].id,
+        user=user,
+        only_context=True,
+    )
+    for result in results:
+        print(result.search_result)
 
 
 if __name__ == "__main__":

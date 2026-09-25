@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from cognee import __version__ as cognee_version
+from cognee.exceptions import CogneeApiError
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_authenticated_user
@@ -52,6 +53,65 @@ class ErrorResponse(BaseModel):
     """Generic API error response."""
 
     error: str
+
+
+async def _provenance_scope(user: User) -> tuple[list | None, list | None, list | None]:
+    """Decide what of the provenance graph this caller is entitled to see.
+
+    Returns ``(scope_tenant_ids, scope_user_ids, scope_dataset_ids)``.
+
+    A tenant scope alone answers "what exists in this workspace", which is the
+    right answer only for whoever administers it. For every other member it
+    named datasets (and their files, the ACL edges around them, and the agents
+    and sessions that worked on them) that the member holds no read grant on,
+    while `/datasets` and `/visualize/brains` next to it answered the ACL-scoped
+    question, and named roles and users the member holds no relation to at
+    all, which `/permissions/tenants/{id}/roles` and `.../users` already
+    withhold from a non-administrator. Administrators keep the whole-workspace
+    view the governance UI is built on; everyone else is narrowed to their
+    readable datasets and everything ``get_memory_provenance_graph`` derives
+    from them.
+    """
+    from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
+
+    tenant_id = getattr(user, "tenant_id", None)
+    if tenant_id is None:
+        # No tenant: the OSS/single-user path, where "the caller" is the whole
+        # scope and ownership is already the filter.
+        return None, [user.id], None
+
+    if await _administers_tenant(user, tenant_id):
+        return [tenant_id], None, None
+
+    readable = await get_all_user_permission_datasets(user, "read")
+    return [tenant_id], None, [dataset.id for dataset in readable]
+
+
+async def _administers_tenant(user: User, tenant_id) -> bool:
+    """Whether this caller administers the tenant they belong to.
+
+    Defers to ``has_user_management_permission``, the same check the rest of
+    the read-side API (``get_tenant_roles``, ``get_users_in_tenant``, ...)
+    already uses to decide who sees a whole tenant versus their own slice of
+    it: its owner, plus the role names in ``USER_MANAGEMENT_ALLOWED_ROLE_NAMES``.
+    (A handful of tenant-mutation call sites still check ``tenant.owner_id``
+    directly rather than this helper; that is a narrower, pre-existing split
+    on the write side, not something this endpoint needs to resolve.) That
+    helper signals "no" by raising — pass ``log_level="DEBUG"`` since a plain
+    member failing this check is the expected common case for a read-only
+    view, not a denial worth an ERROR log line — and a tenant row that has
+    gone missing is likewise treated as "not an administrator", the narrower
+    of the two answers.
+    """
+    from cognee.modules.users.exceptions import PermissionDeniedError, TenantNotFoundError
+    from cognee.modules.users.permissions.methods import has_user_management_permission
+
+    try:
+        return await has_user_management_permission(
+            requester_id=user.id, tenant_id=tenant_id, log_level="DEBUG"
+        )
+    except (PermissionDeniedError, TenantNotFoundError):
+        return False
 
 
 def get_schema_router() -> APIRouter:
@@ -125,6 +185,8 @@ def get_schema_router() -> APIRouter:
                 status_code=403,
                 content={"error": "Not authorized to read this dataset"},
             )
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("schema inventory failed")
             return JSONResponse(
@@ -149,6 +211,10 @@ def get_schema_router() -> APIRouter:
     ):
         """Return a caller-scoped HTML memory-provenance visualization.
 
+        A tenant administrator sees the whole workspace; any other member sees
+        only the datasets they hold a read grant on, and the files, grants,
+        agents and sessions hanging off them (see ``_provenance_scope``).
+
         Query parameters:
             include_memory: when true, also folds the extracted memory
                 (entities/relationships) into the provenance view alongside
@@ -165,21 +231,17 @@ def get_schema_router() -> APIRouter:
 
         from cognee.api.v1.visualize import visualize_memory_provenance
 
-        tenant_id = getattr(user, "tenant_id", None)
-        if tenant_id is not None:
-            scope_tenant_ids = [tenant_id]
-            scope_user_ids = None
-        else:
-            scope_tenant_ids = None
-            scope_user_ids = [user.id]
-
         try:
+            scope_tenant_ids, scope_user_ids, scope_dataset_ids = await _provenance_scope(user)
             html = await visualize_memory_provenance(
                 include_memory=include_memory,
                 scope_tenant_ids=scope_tenant_ids,
                 scope_user_ids=scope_user_ids,
+                scope_dataset_ids=scope_dataset_ids,
             )
             return HTMLResponse(html)
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("schema provenance failed")
             return JSONResponse(
@@ -204,8 +266,9 @@ def get_schema_router() -> APIRouter:
     ):
         """Return a caller-scoped memory-provenance graph as a JSON-safe dict.
 
-        Same scoping as `GET /schema/provenance` (tenant when the caller has
-        one, otherwise just the caller) and the same underlying graph —
+        Same scoping as `GET /schema/provenance` (the whole tenant for its
+        administrators, the caller's readable datasets for any other member,
+        just the caller when there is no tenant) and the same underlying graph —
         packaged as a dict instead of an HTML page.
 
         Query parameters:
@@ -224,21 +287,17 @@ def get_schema_router() -> APIRouter:
 
         from cognee.api.v1.visualize import get_memory_provenance_payload
 
-        tenant_id = getattr(user, "tenant_id", None)
-        if tenant_id is not None:
-            scope_tenant_ids = [tenant_id]
-            scope_user_ids = None
-        else:
-            scope_tenant_ids = None
-            scope_user_ids = [user.id]
-
         try:
+            scope_tenant_ids, scope_user_ids, scope_dataset_ids = await _provenance_scope(user)
             payload = await get_memory_provenance_payload(
                 include_memory=include_memory,
                 scope_tenant_ids=scope_tenant_ids,
                 scope_user_ids=scope_user_ids,
+                scope_dataset_ids=scope_dataset_ids,
             )
             return JSONResponse(status_code=200, content=payload)
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("schema provenance json failed")
             return JSONResponse(

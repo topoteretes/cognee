@@ -40,6 +40,7 @@ def _stored_node(text: str, chunk_index: int, **extra) -> dict:
         "ontology_uri": "http://onto/x",
         "version": 3,
         "topological_rank": 5,
+        "external_metadata": '{"created_at": "2024-01-15"}',
     }
     node.update(extra)
     return node
@@ -65,6 +66,7 @@ def test_rehydrate_preserves_every_model_field():
     assert chunk.cut_type == "paragraph_end"
     assert chunk.content_hash  # backfilled from text when the node lacks it
     assert chunk.max_chunk_tokens == 60
+    assert chunk.external_metadata == '{"created_at": "2024-01-15"}'
 
 
 def test_rehydrate_tolerates_missing_and_malformed_fields():
@@ -79,6 +81,22 @@ def test_rehydrate_tolerates_missing_and_malformed_fields():
     assert chunk.importance_weight == document.importance_weight
     assert chunk.version == 1
     assert chunk.max_chunk_tokens is None  # legacy nodes have no recorded budget
+    # A node written before the field existed inherits the document's (here: empty) metadata.
+    assert chunk.external_metadata is None
+
+
+def test_rehydrate_copies_the_stored_external_metadata_not_the_documents():
+    """The stored node wins over the document, and a dict from a graph backend is re-serialised."""
+    document = _document()
+    document.external_metadata = '{"created_at": "2099-01-01"}'
+
+    from_text = _rehydrate_chunk(document, _stored_node("a ", 0), 1)
+    assert from_text.external_metadata == '{"created_at": "2024-01-15"}'
+
+    from_dict = _rehydrate_chunk(
+        document, _stored_node("a ", 0, external_metadata={"created_at": "2024-01-15"}), 1
+    )
+    assert from_dict.external_metadata == '{"created_at": "2024-01-15"}'
 
 
 def test_misindexed_chunks_repairs_only_the_drifted_ones():

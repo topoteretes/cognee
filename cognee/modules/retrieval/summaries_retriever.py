@@ -22,6 +22,9 @@ class SummariesRetriever(BaseRetriever):
     - top_k: int - Number of top summaries to retrieve.
     """
 
+    # Summary search returns raw payloads; skip conversational query rewriting.
+    supports_session_turn_preparation = False
+
     def __init__(self, top_k: int = 5, session_id: str | None = None):
         """Initialize retriever with search parameters."""
         self.top_k = top_k

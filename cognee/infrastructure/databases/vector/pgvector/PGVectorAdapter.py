@@ -1,4 +1,5 @@
 import asyncio
+import re
 from typing import Any, get_type_hints
 from uuid import UUID
 
@@ -25,6 +26,7 @@ from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..exceptions import CollectionNotFoundError
 from ..models.ScoredResult import ScoredResult
+from ..stored_vector_size import choose_stored_vector_size
 from ..vector_db_interface import VectorDBInterface
 from .serialize_data import serialize_data
 
@@ -57,6 +59,9 @@ class IndexSchema(DataPoint):
     chunk_index: int | None = None
     source_chunk_id: str | None = None
     importance_weight: float | None = 0.5
+    # Document external_metadata as JSON text, copied onto chunks at ingest so
+    # hybrid retrieval can surface allowlisted keys straight from the payload.
+    external_metadata: str | None = None
 
     metadata: dict = {"index_fields": ["text"]}
     belongs_to_set: list[str] = []
@@ -253,6 +258,38 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         """
         return await self.embedding_engine.embed_text(data)
 
+    async def get_stored_vector_size(self) -> int | None:
+        """Width of the vectors already in this store, or None when nothing is stored yet.
+
+        Every table's ``vector`` column is declared ``vector(N)`` with the
+        embedding width that built it. Read once per dataset by the dataset
+        context to record the width for rows that predate the recorded
+        embedding model.
+
+        Reads every such column rather than the first: a schema built across an
+        ``EMBEDDING_MODEL`` change holds two widths, and which one gets recorded
+        must not depend on catalog order (see ``choose_stored_vector_size``).
+        """
+        async with self.get_async_session() as session:
+            result = await session.execute(
+                text(
+                    "SELECT format_type(a.atttypid, a.atttypmod) FROM pg_attribute a "
+                    "JOIN pg_class c ON c.oid = a.attrelid "
+                    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE n.nspname = :schema AND a.attname = 'vector' "
+                    "AND NOT a.attisdropped"
+                ),
+                {"schema": self.schema or "public"},
+            )
+            declared_types = result.scalars().all()
+
+        widths = []
+        for declared_type in declared_types:
+            match = re.fullmatch(r"vector\((\d+)\)", declared_type or "")
+            if match:
+                widths.append(int(match.group(1)))
+        return choose_stored_vector_size(widths, self.name)
+
     async def has_collection(self, collection_name: str) -> bool:
         """
         Check if a specified collection exists in the database.
@@ -421,14 +458,13 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         point_dicts = [to_dict(data_point) for data_point in pgvector_data_points]
 
-        async with self._get_write_lock(collection_name):
-            async with self.get_async_session() as session:
-                for start_index in range(0, len(point_dicts), QUERY_BATCH_SIZE):
-                    point_batch = point_dicts[start_index : start_index + QUERY_BATCH_SIZE]
-                    insert_statement = insert(PGVectorDataPoint).values(point_batch)
-                    quoted_table = f'"{collection_name}"'
-                    merged_payload_expr = text(
-                        f"""
+        async with self._get_write_lock(collection_name), self.get_async_session() as session:
+            for start_index in range(0, len(point_dicts), QUERY_BATCH_SIZE):
+                point_batch = point_dicts[start_index : start_index + QUERY_BATCH_SIZE]
+                insert_statement = insert(PGVectorDataPoint).values(point_batch)
+                quoted_table = f'"{collection_name}"'
+                merged_payload_expr = text(
+                    f"""
                                     jsonb_set(
                                         EXCLUDED.payload::jsonb,
                                         '{{belongs_to_set}}',
@@ -441,13 +477,13 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                                         )
                                     )::json
                                     """
-                    )
-                    insert_statement = insert_statement.on_conflict_do_update(
-                        index_elements=["id"],
-                        set_={"payload": merged_payload_expr},
-                    )
-                    await session.execute(insert_statement)
-                await session.commit()
+                )
+                insert_statement = insert_statement.on_conflict_do_update(
+                    index_elements=["id"],
+                    set_={"payload": merged_payload_expr},
+                )
+                await session.execute(insert_statement)
+            await session.commit()
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         """Create the underlying index collection (table) for the given name/property pair."""
@@ -471,6 +507,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     chunk_index=getattr(data_point, "chunk_index", None),
                     source_chunk_id=getattr(data_point, "source_chunk_id", None),
                     importance_weight=getattr(data_point, "importance_weight", None),
+                    external_metadata=getattr(data_point, "external_metadata", None),
                     belongs_to_set=(data_point.belongs_to_set or []),
                 )
                 for data_point in data_points
@@ -574,6 +611,28 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 ScoredResult(id=parse_id(result.id), payload=result.payload, score=0)
                 for result in unique_results
             ]
+
+    async def score_by_ids(
+        self, collection_name: str, data_point_ids: list[str], query_vector: list[float]
+    ) -> list[ScoredResult]:
+        ids = list(dict.fromkeys(str(point_id) for point_id in data_point_ids))
+        if not ids:
+            return []
+        table = await self.get_table(collection_name)
+        scores = []
+        async with self.get_async_session() as session:
+            for start in range(0, len(ids), QUERY_BATCH_SIZE):
+                batch = ids[start : start + QUERY_BATCH_SIZE]
+                rows = await session.execute(
+                    select(
+                        table.c.id, table.c.vector.cosine_distance(query_vector).label("distance")
+                    ).where(table.c.id.in_(batch))
+                )
+                scores.extend(
+                    ScoredResult(id=parse_id(str(row.id)), score=float(row.distance), payload=None)
+                    for row in rows.all()
+                )
+        return scores
 
     async def search(
         self,

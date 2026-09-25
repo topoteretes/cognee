@@ -25,15 +25,15 @@ def get_data_file_path(file_path: str) -> str:
                 fs_path = f"//{parsed.netloc}{fs_path}"
 
         # Normalize the file URI for Windows - handle drive letters correctly
-        if os.name == "nt":  # Windows
+        if (
+            os.name == "nt"  # Windows
+            and fs_path.startswith(("/", "\\"))
+            and len(fs_path) > 2
+            and fs_path[2] == ":"
+            and fs_path[1].isalpha()
+        ):
             # Handle Windows drive letters correctly: /C:/path -> C:/path
-            if (
-                (fs_path.startswith(("/", "\\")))
-                and len(fs_path) > 2
-                and fs_path[2] == ":"
-                and fs_path[1].isalpha()
-            ):
-                fs_path = fs_path[1:]
+            fs_path = fs_path[1:]
 
         return os.path.normpath(fs_path)
 
