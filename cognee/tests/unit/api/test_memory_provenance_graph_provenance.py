@@ -222,3 +222,24 @@ async def test_get_memory_provenance_graph_does_not_fallback_after_graph_error(m
 
     graph_reader.assert_awaited_once_with(dataset_ids=[])
     relational_reader.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_dataset_scope_alone_still_scopes_the_relational_memory_fallback(monkeypatch):
+    """``scope_dataset_ids`` is a scoping argument on its own on the public
+    reader, so it has to count as "scoped" — reading the relational memory
+    tables unfiltered would hand back every dataset's extracted memory."""
+    _patch_empty_relational(monkeypatch)
+    relational_reader = AsyncMock(return_value=None)
+    monkeypatch.setattr(provenance_module, "_read_agents", AsyncMock(return_value=[]))
+    monkeypatch.setattr(provenance_module, "_read_sessions", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        provenance_module, "_read_memory_graph_provenance", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(provenance_module, "_read_memory_relational", relational_reader)
+
+    await provenance_module.get_memory_provenance_graph(
+        include_memory=True, scope_dataset_ids=[uuid4()]
+    )
+
+    relational_reader.assert_awaited_once_with(dataset_ids=[])

@@ -4,8 +4,8 @@ Pull Gmail messages into cognee memory, incrementally, with forget-on-delete.
 
 This example is built on cognee's DLT ingestion subsystem: ``gmail_source``
 returns a ``dlt`` resource that you hand straight to ``cognee.remember``. The
-first run backfills your (label-scoped) inbox; re-running ``remember`` syncs
-only the delta via Gmail's ``historyId``, and messages you delete/trash in
+first run loads every message in the label; re-running ``remember`` fetches
+only what changed since then via Gmail's ``historyId``, and messages you delete/trash in
 Gmail are forgotten from memory on the next sync.
 
 ────────────────────────────────────────────────────────────────────────────
@@ -35,7 +35,7 @@ One-time setup
 
 Run it:
 
-    uv run python examples/demos/gmail_connector_example.py
+    uv run python examples/guides/gmail.py
 """
 
 import asyncio
@@ -47,17 +47,18 @@ from cognee.tasks.ingestion.connectors import gmail_source
 # Keep the inbox in its own dataset so it is easy to inspect and forget.
 DATASET_NAME = "gmail_inbox"
 
-# Routing kwargs shared by every remember() call below.
+# Routing kwargs for remember(). Pass the same ones on every later sync.
 #   write_disposition="merge" is REQUIRED: the add pipeline defaults to
-#     "replace", which would wipe the whole synced inbox on the second sync.
-#   max_rows_per_table=0 disables cognee's per-table read cap so orphan-cleanup
-#     (forget-on-delete) compares against the *entire* synced corpus, not a
-#     50-row window.
+#     "replace", which would wipe the whole synced inbox on the next sync.
+#   max_rows_per_table=0 guarantees no per-table read cap applies (even if
+#     DLT_MAX_ROWS_PER_TABLE is set), so orphan-cleanup (forget-on-delete)
+#     compares against the *entire* synced corpus.
+#   incremental_loading is left at its default (True) so a re-sync only builds
+#     the graph for new or changed messages instead of the whole inbox again.
 GMAIL_REMEMBER_KWARGS = {
     "primary_key": "id",
     "write_disposition": "merge",
     "max_rows_per_table": 0,
-    "incremental_loading": False,
     "self_improvement": False,
 }
 
@@ -77,8 +78,9 @@ async def main():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
-    # Build the source. Scope it to INBOX and (for the demo) cap the backfill so
-    # the first run is quick. Drop ``max_results`` to ingest the whole label.
+    # Build the source. Scope it to INBOX and, for the demo, load only the 25
+    # newest messages so the first run is quick. Drop ``max_results`` to load
+    # the whole label; Gmail's quota allows roughly 250 messages a minute.
     source = gmail_source(
         credentials_path=credentials_path,
         token_path=token_path,
@@ -86,45 +88,22 @@ async def main():
         max_results=25,
     )
 
-    # ── First sync: full backfill ──────────────────────────────────────────
-    print("\n=== Gmail sync #1 (backfill) ===")
+    # ── Sync: load the newest messages ────────────────────────────────────
+    print("\n=== Gmail sync ===")
     result = await cognee.remember(
         source,
         dataset_name=DATASET_NAME,
         **GMAIL_REMEMBER_KWARGS,
     )
     print(result)
+    print("Sync stats:", source.cognee_sync_stats)
 
-    answer = await cognee.search(
+    answer = await cognee.recall(
         query_text="Summarize the most important emails in my inbox.",
         query_type=cognee.SearchType.GRAPH_COMPLETION,
         datasets=[DATASET_NAME],
     )
-    print("Inbox summary:", answer)
-
-    # ── Second sync: incremental delta + forget-on-delete ──────────────────
-    # Re-running with the SAME dataset reuses the persisted historyId cursor:
-    # only messages added/changed since sync #1 are fetched, and anything you
-    # deleted/trashed in Gmail is removed from memory by orphan_cleanup.
-    print("\n=== Gmail sync #2 (incremental) ===")
-    source = gmail_source(
-        credentials_path=credentials_path,
-        token_path=token_path,
-        label_ids=["INBOX"],
-    )
-    result = await cognee.remember(
-        source,
-        dataset_name=DATASET_NAME,
-        **GMAIL_REMEMBER_KWARGS,
-    )
-    print(result)
-
-    answer = await cognee.search(
-        query_text="What changed in my inbox recently?",
-        query_type=cognee.SearchType.GRAPH_COMPLETION,
-        datasets=[DATASET_NAME],
-    )
-    print("Recent changes:", answer)
+    print(answer[0].text)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ from .visualize import (
     visualize_multi_user_graph,
     visualize_graph_json,
     visualize_semantic_json,
+    stream_dataset_graph,
     build_brains_payload,
     build_brains_summary_payload,
     get_live_events,
