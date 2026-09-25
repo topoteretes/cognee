@@ -47,9 +47,9 @@ from cognee.tasks.ingestion.connectors import gmail_source
 # Keep the inbox in its own dataset so it is easy to inspect and forget.
 DATASET_NAME = "gmail_inbox"
 
-# Routing kwargs shared by every remember() call below.
+# Routing kwargs for remember(). Pass the same ones on every later sync.
 #   write_disposition="merge" is REQUIRED: the add pipeline defaults to
-#     "replace", which would wipe the whole synced inbox on the second sync.
+#     "replace", which would wipe the whole synced inbox on the next sync.
 #   max_rows_per_table=0 guarantees no per-table read cap applies (even if
 #     DLT_MAX_ROWS_PER_TABLE is set), so orphan-cleanup (forget-on-delete)
 #     compares against the *entire* synced corpus.
@@ -88,8 +88,8 @@ async def main():
         max_results=25,
     )
 
-    # ── First sync: load the newest messages ──────────────────────────────
-    print("\n=== Gmail sync #1 ===")
+    # ── Sync: load the newest messages ────────────────────────────────────
+    print("\n=== Gmail sync ===")
     result = await cognee.remember(
         source,
         dataset_name=DATASET_NAME,
@@ -104,35 +104,6 @@ async def main():
         datasets=[DATASET_NAME],
     )
     print("Inbox summary:", answer)
-
-    # ── Second sync: only what changed, plus forget-on-delete ─────────────
-    # Syncing again right away finds nothing new, so this step is left for you
-    # to run later (e.g. tomorrow, or on a schedule). Re-running remember() on
-    # the SAME dataset reuses the persisted historyId cursor: only messages
-    # added/changed since the last sync are fetched, and anything you
-    # deleted/trashed in Gmail is removed from memory by orphan_cleanup.
-    #
-    # To try it:
-    #   1. Remove ``max_results`` from sync #1 above. A capped first sync does
-    #      not save a cursor, so the next sync would load everything again.
-    #   2. Remove the prune calls at the top, so the next run keeps sync #1.
-    #   3. Uncomment the block below and run the script again once your inbox
-    #      has changed. "Sync stats" shows how many messages were fetched and
-    #      how many were forgotten.
-    #
-    # print("\n=== Gmail sync #2 ===")
-    # source = gmail_source(
-    #     credentials_path=credentials_path,
-    #     token_path=token_path,
-    #     label_ids=["INBOX"],
-    # )
-    # result = await cognee.remember(
-    #     source,
-    #     dataset_name=DATASET_NAME,
-    #     **GMAIL_REMEMBER_KWARGS,
-    # )
-    # print(result)
-    # print("Sync stats:", source.cognee_sync_stats)
 
 
 if __name__ == "__main__":
