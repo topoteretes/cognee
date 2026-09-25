@@ -32,6 +32,14 @@ from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
 from cognee.modules.data.processing.document_types.Document import Document
 from cognee.modules.engine.utils import generate_node_name
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
+from cognee.modules.retrieval.broad_table import (
+    Table,
+    TableQuery,
+    describe,
+    parse_table,
+    render_row,
+    run_query,
+)
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.shared.logging_utils import get_logger
@@ -81,6 +89,10 @@ BROAD_MAX_LISTED = 10_000
 BROAD_TARGET_PASSAGES = 6
 BROAD_TARGET_PASSAGE_CHARS = 160
 _ENTITY_DESCRIPTION_CHARS = 200
+# The planner sees this much of the corpus (from its start, middle and end) so it names an
+# identity the text actually writes: "Recommendation 3", "H.R. 4418", "INV-2024-00137".
+BROAD_SAMPLE_EXCERPTS = 3
+BROAD_SAMPLE_CHARS = 700
 
 
 class CountPlan(BaseModel):
@@ -106,6 +118,9 @@ class CountPlan(BaseModel):
     # The question counts items in effect, and a later event can end one (a connection
     # removed, an order cancelled after it was placed): such events subtract the item.
     reversible: bool = False
+    # With reversible: the question asks how many items are now in the ended state
+    # ("how many tickets are resolved") rather than still in effect ("still open").
+    counts_ended: bool = False
     # "What share of tickets were escalated": the item is every ticket; this condition
     # marks the subset, and the answer is subset over all, both counted by code.
     ratio_condition: str | None = None
@@ -163,12 +178,14 @@ class Unit:
     # chunk is not read in the same call; and that chunk's id.
     context: str = ""
     previous_id: str = ""
+    # The document the chunk belongs to; empty for a table row.
+    document: str = ""
 
 
 @dataclass
 class CountResult:
     plan: CountPlan
-    method: Literal["graph", "words", "reading", "unsupported"]
+    method: Literal["graph", "words", "reading", "table", "unsupported"]
     total: float
     units: int
     # For a plan with a ratio condition: the number of all items, the total being the subset.
@@ -192,6 +209,8 @@ class CountResult:
     reading_passes: int = 1
     llm_calls: int = 0
     tokens_read: int = 0
+    # For the table method: the query code evaluated over the parsed rows.
+    table_query: TableQuery | None = None
 
 
 def _read_prompt(name: str) -> str:
@@ -257,6 +276,67 @@ def _normalize_key(value: str) -> str:
     if len(words) == 1 and any(token.isdigit() for token in tokens):
         return "-".join(words + [token for token in tokens if token.isdigit()])
     return "-".join(tokens)
+
+
+def _spelling_pattern(term: str) -> str:
+    """A regex for one planned spelling: any whitespace between its words, and any case
+    when it is written in lower case."""
+    body = r"\s+".join(map(re.escape, term.split()))
+    return body if term != term.lower() else f"(?i:{body})"
+
+
+def _corpus_sample(units: list[Unit]) -> str:
+    """Short excerpts from the start, middle and end of the corpus, in document order."""
+    if not units:
+        return ""
+    picks = sorted(
+        {
+            round(i * (len(units) - 1) / max(BROAD_SAMPLE_EXCERPTS - 1, 1))
+            for i in range(BROAD_SAMPLE_EXCERPTS)
+        }
+    )
+    return "\n---\n".join(units[i].text[:BROAD_SAMPLE_CHARS].strip() for i in picks)
+
+
+def _table_of(units: list[Unit]) -> Table | None:
+    """The corpus as one table, when every document in it is delimited records with the
+    same columns; None otherwise (prose, mixed documents, table rows ingested by DLT)."""
+    if not units or any(not unit.document for unit in units):
+        return None
+    texts: dict[str, list[str]] = {}
+    for unit in units:  # units of a document are in chunk order
+        texts.setdefault(unit.document, []).append(unit.text)
+    # Chunks partition their document exactly and may cut mid-line: joined with nothing,
+    # they are the document again, and a record cut in two is whole.
+    tables = [parse_table("".join(parts)) for parts in texts.values()]
+    if any(table is None for table in tables):
+        return None
+    first = tables[0]
+    assert first is not None
+    if any(table is None or table.columns != first.columns for table in tables):
+        return None
+    return Table(columns=first.columns, rows=[row for t in tables if t for row in t.rows])
+
+
+def _groups_are_keys(items: list[ExtractedItem]) -> bool:
+    """Whether the group values are the items' own identifiers: most items that carry both
+    a group and a key write the key inside the group ("H.R. 4418" / "4418")."""
+    both = [item for item in items if item.key and item.group]
+    carried = sum(
+        1 for item in both if _normalize_key(item.key or "") in _normalize_key(item.group or "")
+    )
+    return bool(both) and carried * 2 > len(both)
+
+
+def _same_noun(item: str, attribute: str) -> bool:
+    """Whether a grouping attribute names the item itself ("an incident" / "incident")."""
+
+    def head(phrase: str) -> str:
+        words = re.findall(r"[a-z]+", phrase.lower())
+        words = [w for w in words if w not in ("a", "an", "the", "each", "every")]
+        return words[-1].rstrip("s") if words else ""
+
+    return bool(head(attribute)) and head(item) == head(attribute)
 
 
 def _tail(text: str) -> str:
@@ -351,14 +431,6 @@ def _adopt_labels(keyed: list[tuple[str, ExtractedItem]]) -> list[tuple[str, Ext
     return adopted
 
 
-def _is_wording_key(dedup_key: str) -> bool:
-    """A dedup key that is a title, name or wording and names no identifier or date."""
-    key = dedup_key.lower()
-    wording = re.search(r"\b(title|description|wording|text|name)\b", key)
-    identifier = re.search(r"\b(id|identifier|number|no\.|code|date|tag|hash)\b", key)
-    return bool(wording) and not identifier
-
-
 def _is_label(name: str) -> bool:
     """A handle or an all-capitals form ("@ann", "ORTIZ:") is how a name is rendered in a
     header or a speaker label, not a spelling of it."""
@@ -401,7 +473,7 @@ def _vote(passes: list[ShardItems]) -> ShardItems:
                 continue
             for members in clusters.setdefault(item.unit, []):
                 first = next(iter(members.values()))
-                if n not in members and _same_identity(first.key, item.key):
+                if n not in members and first.key and _same_identity(first.key, item.key):
                     members[n] = item
                     break
             else:
@@ -431,6 +503,59 @@ def _canonical_spelling(names: list[str], used: Counter) -> str:
     longest. A transcript writes "ORTIZ:" on every turn and "Dr. Lena Ortiz" once; the
     tally reads the name."""
     return min(names, key=lambda name: (_is_label(name), -used[name], -len(name), name))
+
+
+def _table_context(result: CountResult) -> str:
+    """What the answer model is told about a count code made over parsed rows."""
+    query = result.table_query
+    assert query is not None
+    lines = [
+        (
+            f"Counted by code over all {result.units} rows of the table the documents hold. "
+            "Exact. Report these numbers; do not recount."
+        ),
+    ]
+    for rule in query.filters:
+        value = f" {rule.value!r}" if rule.value else ""
+        lines.append(f"Filter: {rule.column} {rule.op}{value}")
+    if query.target:
+        found = " or ".join(result.target_names) or "no row"
+        lines.append(f"Rows whose {query.group_by} is {query.target!r}: matched {found}")
+    measure = query.aggregate.replace("_", " ") + (f" of {query.column}" if query.column else "")
+    lines.append(f"TOTAL ({measure}): {_number(result.total)}")
+    if result.groups:
+        lines.append(f"Tally by {query.group_by} ({len(result.groups)} groups):")
+        lines += [
+            f"  {name}: {_number(count)}" for name, count in result.groups[:BROAD_MAX_GROUPS_SHOWN]
+        ]
+    if result.plan.list_items and result.evidence:
+        lines.append(
+            f"The complete list of the {len(result.evidence)} matching rows is appended below "
+            "your answer by code: do not list them yourself."
+        )
+    elif result.evidence:
+        lines.append("Matching rows (first ones):")
+        lines += [f"  - {row}" for row in result.evidence[:BROAD_EVIDENCE_SHOWN]]
+    return "\n".join(lines)
+
+
+def _provenance_note(result: CountResult) -> str:
+    """One line saying how a reading count was obtained, stated by code in every answer: a
+    reading count is exact over what was found, and reading can miss or repeat an item."""
+    if result.method == "table":
+        return f"(Counted by code over all {result.units} rows of the table in the documents.)"
+    if result.method != "reading":
+        return ""
+    note = (
+        f"(Counted by code from the items found while reading all {result.units} chunks; "
+        "an item the reading missed is not included."
+    )
+    if result.unkeyed:
+        note += (
+            f" {result.unkeyed} entries whose identifier could not be read were left out, so "
+            f"the total may be under by up to {result.unkeyed}."
+        )
+    return note + ")"
 
 
 class BroadRetriever(CompletionRetriever):
@@ -468,19 +593,27 @@ class BroadRetriever(CompletionRetriever):
     async def get_retrieved_objects(self, query: str) -> CountResult:
         graph_engine = (await get_unified_engine()).graph
         entities_by_type = await self.load_entities(graph_engine)
-        plan = await self.plan(query, entities_by_type)
+        try:
+            units = await self.load_text_units(graph_engine)
+        except NoDataError:
+            units = []  # a graph with entities but no text; a text count raises below
+        plan = await self.plan(query, entities_by_type, units)
         logger.info("BROAD plan: %s", plan.model_dump())
 
+        table = _table_of(units) if plan.source == "text" and not plan.unsupported else None
+        result: CountResult | None = None
         if plan.unsupported:
             result = CountResult(plan=plan, method="unsupported", total=0, units=0)
         elif plan.source == "entities":
             result = self.count_entities(plan, entities_by_type)
-        else:
-            units = await self.load_text_units(graph_engine)
-            if plan.literal_terms and not (plan.condition or plan.group_by or plan.measure):
-                result = self.count_words(plan, units)
-            else:
-                result = await self.count_by_reading(plan, units)
+        elif not units:
+            raise NoDataError("No data found in the system, please add data first.")
+        elif plan.literal_terms and not (plan.condition or plan.group_by or plan.measure):
+            result = self.count_words(plan, units)
+        elif table is not None:
+            result = await self.count_table(query, plan, table)
+        if result is None:
+            result = await self.count_by_reading(plan, units)
 
         logger.info(
             "BROAD %s count: total=%d over %d units, %d LLM calls, %d tokens read",
@@ -572,6 +705,7 @@ class BroadRetriever(CompletionRetriever):
                         preamble=preamble,
                         context=context,
                         previous_id=previous[0] if previous else "",
+                        document=document,
                     )
                 )
                 previous = (node_id, text)
@@ -585,13 +719,20 @@ class BroadRetriever(CompletionRetriever):
 
     # --- planning ---------------------------------------------------------------
 
-    async def plan(self, query: str, entities_by_type: dict[str, list[Unit]]) -> CountPlan:
+    async def plan(
+        self, query: str, entities_by_type: dict[str, list[Unit]], units: list[Unit] | None = None
+    ) -> CountPlan:
         type_counts = sorted(
             ((name, len(units)) for name, units in entities_by_type.items()),
             key=lambda pair: -pair[1],
         )[:BROAD_MAX_PLANNER_TYPES]
         type_list = "\n".join(f"- {name} ({count} entities)" for name, count in type_counts)
         text_input = f"Question: {query}\n\nEntity types in the graph:\n{type_list or '(none)'}"
+        sample = _corpus_sample(units or [])
+        if sample:
+            text_input += (
+                f"\n\nExcerpts of the corpus (for how it writes things; not all of it):\n{sample}"
+            )
         plan = await LLMGateway.acreate_structured_output(
             text_input=text_input,
             system_prompt=_read_prompt("broad_plan.txt"),
@@ -608,17 +749,27 @@ class BroadRetriever(CompletionRetriever):
                 system_prompt=_read_prompt("broad_plan.txt"),
                 response_model=CountPlan,
             )
+        if plan.dedup_key and re.search(r"\bor\b", plan.dedup_key):
+            # "The title or number" matches nothing when one mention gives the title and
+            # another the number: one retry asks for a single identifier.
+            plan = await LLMGateway.acreate_structured_output(
+                text_input=(
+                    f"{text_input}\n\nYour previous dedup_key {plan.dedup_key!r} names "
+                    "alternatives. Name ONE identifier that the excerpts show every item has "
+                    "(its number or code when it has one), and return the full plan."
+                ),
+                system_prompt=_read_prompt("broad_plan.txt"),
+                response_model=CountPlan,
+            )
         if plan.target and not plan.group_by:
             raise ValueError(
                 f"BROAD planner named a target ({plan.target!r}) without the attribute it is a "
                 "value of (group_by)."
             )
-        if plan.dedup_key and _is_wording_key(plan.dedup_key):
-            # A title repeats for different items ("5,000 euros for travel" twice);
-            # the record's date tells them apart. Only an identifier is unique alone.
-            plan = plan.model_copy(
-                update={"dedup_key": f"{plan.dedup_key}, together with the date it appears under"}
-            )
+        if plan.distinct and plan.group_by and _same_noun(plan.item, plan.group_by):
+            # "How many distinct incidents": grouping incidents by the incident is the
+            # item count itself, and dedup_key already counts each once.
+            plan = plan.model_copy(update={"group_by": None, "distinct": False})
         if plan.distinct and (plan.target or not plan.group_by):
             # "Different X" counts group values. A target question counts that one
             # value's items; with nothing to group by, the different things are the
@@ -657,9 +808,14 @@ class BroadRetriever(CompletionRetriever):
         )
 
     def count_words(self, plan: CountPlan, units: list[Unit]) -> CountResult:
-        """Whole-word, case-sensitive occurrences of the planned spellings in every unit."""
+        """Whole-word occurrences of the planned spellings in every unit.
+
+        A spelling in lower case matches any case ("gross margin" also finds the
+        sentence-initial "Gross margin"); one with capitals matches as written, so a
+        name stays a name. The words of a phrase may be split by a line break.
+        """
         terms = sorted(set(plan.literal_terms), key=len, reverse=True)
-        pattern = re.compile(r"(?<!\w)(?:" + "|".join(map(re.escape, terms)) + r")(?!\w)")
+        pattern = re.compile(r"(?<!\w)(?:" + "|".join(map(_spelling_pattern, terms)) + r")(?!\w)")
         total = 0
         evidence: list[str] = []
         for unit in units:
@@ -669,6 +825,35 @@ class BroadRetriever(CompletionRetriever):
                 evidence.append(" ".join(window.split()))
         return CountResult(
             plan=plan, method="words", total=total, units=len(units), evidence=evidence
+        )
+
+    async def count_table(self, query: str, plan: CountPlan, table: Table) -> CountResult | None:
+        """Answer over parsed rows: one LLM call maps the question onto the columns, code
+        evaluates it over every row. None when the columns cannot answer the question."""
+        table_query = await LLMGateway.acreate_structured_output(
+            text_input=f"Question: {query}\n\nTable:\n{describe(table)}",
+            system_prompt=_read_prompt("broad_table_query.txt"),
+            response_model=TableQuery,
+        )
+        logger.info("BROAD table query: %s", table_query.model_dump())
+        if not table_query.answerable:
+            return None
+        try:
+            answer = run_query(table, table_query)
+        except KeyError as error:
+            logger.warning("BROAD table query unusable (%s); reading instead", error)
+            return None
+        return CountResult(
+            plan=plan.model_copy(update={"list_items": plan.list_items or table_query.list_rows}),
+            method="table",
+            total=answer.total,
+            units=answer.rows,
+            groups=answer.groups,
+            evidence=[render_row(table, row) for row in answer.matched],
+            target_names=answer.target_values,
+            items_listed=len(answer.matched),
+            llm_calls=1,
+            table_query=table_query,
         )
 
     async def count_by_reading(self, plan: CountPlan, units: list[Unit]) -> CountResult:
@@ -714,7 +899,7 @@ class BroadRetriever(CompletionRetriever):
         # units (table rows repeating a value) are different items. With a key,
         # fifty records in one piece may share a templated sentence ("The run
         # failed") and are still fifty items; the key tells them apart.
-        seen: set[tuple[str, int, str]] = set()
+        seen: set[tuple[str, int, str | None, str]] = set()
         items: list[ExtractedItem] = []
         for shard_id, shard_items in read_shards:
             for item in shard_items.items:
@@ -747,26 +932,35 @@ class BroadRetriever(CompletionRetriever):
 
         unkeyed = 0
         entries_read = len(items)
-        if plan.dedup_key:
-            # An entry without its identifier cannot be checked against the ones
-            # already counted. It counts (a model omits keys more often than a
-            # record is halved, and pieces end at sentences), and the answer says how
-            # many such entries there were: the most the count could be over by.
-            unkeyed = sum(1 for item in items if not item.key and not item.undone)
-            items = self.dedup(items, by_group=plan.relation)
+        keyed = sum(1 for item in items if item.key)
+        if plan.dedup_key and keyed * 2 >= len(items):
+            # The key is how these items are written. An entry without it is, as a rule,
+            # a record continued past a chunk boundary, whose identity was read where it
+            # began: it is left out, and the answer says how many were (the most the
+            # count could be under by).
+            unkeyed = sum(1 for item in items if not item.key and item.undone == plan.counts_ended)
+            items = [
+                item
+                for item in self.dedup(
+                    items, by_group=plan.relation, counts_ended=plan.counts_ended
+                )
+                if item.key
+            ]
         else:
+            # No key planned, or one the text does not write (most entries lack it): every
+            # entry is its own occurrence.
             # Without an identity an undone entry cannot name what it undoes.
-            items = [item for item in items if not item.undone]
+            items = [item for item in items if item.undone == plan.counts_ended]
 
         # Each item counts 1, or its stated amount when the plan sums a measure.
         def weight(item: ExtractedItem) -> float:
             return (item.amount or 0) if plan.measure else 1
 
-        group_totals: Counter = Counter()
+        group_totals: dict[str, float] = {}
         for item in items:
             if item.group:
-                group_totals[item.group] += weight(item)
-        groups = group_totals.most_common()
+                group_totals[item.group] = group_totals.get(item.group, 0) + weight(item)
+        groups = sorted(group_totals.items(), key=lambda pair: -pair[1])
         items_listed = len(items)
         target_names: list[str] = []
         if plan.target:
@@ -782,8 +976,19 @@ class BroadRetriever(CompletionRetriever):
             # marked as meeting the condition or not; both counts are code's.
             denominator = len(items)
             items = [item for item in items if item.matches]
-        if plan.distinct and not plan.target:
-            total: float = len(groups)
+        if plan.distinct and not plan.target and _groups_are_keys(items):
+            # Grouped by the item's own identifier ("different bills" by bill number): one
+            # bill written "H.R. 4418" in one place and "HR4418" in another is still one,
+            # which the normalized key knows and the raw group spelling does not.
+            # Groups are the spellings being reconciled, so labels are adopted across them.
+            ungrouped = [
+                (_normalize_key(i.key), i.model_copy(update={"group": None}))
+                for i in items
+                if i.key
+            ]
+            total: float = len({key for key, _ in _adopt_labels(ungrouped)})
+        elif plan.distinct and not plan.target:
+            total = len(groups)
         elif plan.relation and not plan.target:
             # "How many connections were removed": each relation once, not once per
             # participant; the per-participant tally stays for "who has the most".
@@ -819,8 +1024,11 @@ class BroadRetriever(CompletionRetriever):
     # --- reading helpers ------------------------------------------------------------
 
     @staticmethod
-    def dedup(items: list[ExtractedItem], by_group: bool = False) -> list[ExtractedItem]:
-        """One item per (group, key), in first-seen order, minus the items undone later.
+    def dedup(
+        items: list[ExtractedItem], by_group: bool = False, counts_ended: bool = False
+    ) -> list[ExtractedItem]:
+        """One item per (group, key), in first-seen order, minus the items undone later
+        (or, with ``counts_ended``, only the items whose latest entry ended them).
 
         The key identifies the item (the planner defines it as unique across the
         corpus); the group is the value it is counted under, and an item with several
@@ -835,7 +1043,7 @@ class BroadRetriever(CompletionRetriever):
         normalize = _loose_name if by_group else _normalize_key
 
         keyed = [(normalize(item.key), item) for item in items if item.key]
-        unkeyed = [item for item in items if not item.key and not item.undone]
+        unkeyed = [item for item in items if not item.key and item.undone == counts_ended]
         if not by_group:
             keyed = _adopt_labels(keyed)
         # An item's state is decided by its latest entry: opened, resolved, reopened
@@ -851,9 +1059,12 @@ class BroadRetriever(CompletionRetriever):
         amounts: dict[tuple[str, str], float] = {}
         # "Ticket 7 was resolved" with no group ends ticket 7 under whichever group.
         ended_by_key: dict[str, list[tuple[str, int]]] = {}
+        # Only when items are grouped is an entry without a group a recap; ungrouped,
+        # every entry is the item's own.
+        grouped = any(item.group for _, item in keyed)
         for position, (key, item) in enumerate(keyed):
             stamp = (item.when or "", position)
-            if item.group is None and item.undone:
+            if grouped and item.group is None and item.undone:
                 ended_by_key.setdefault(key, []).append(stamp)
                 continue
             identity = (item.group or "", key)
@@ -867,7 +1078,7 @@ class BroadRetriever(CompletionRetriever):
         for identity, entries in states.items():
             entries += [(stamp, True) for stamp in ended_by_key.get(identity[1], [])]
             _, undone = max(entries)
-            if undone or (not identity[0] and identity[1] in keys_with_group):
+            if undone != counts_ended or (not identity[0] and identity[1] in keys_with_group):
                 continue
             item = first[identity]
             if item.matches is not None or matched[identity]:
@@ -1046,6 +1257,13 @@ class BroadRetriever(CompletionRetriever):
         spelling_of = {_loose_name(name): name for name in names}
         spelling_of.update({_loose_name(variant): head for variant, head in canonical.items()})
         by_spelling = sorted({spelling_of[w] for w in wanted if spelling_of.get(w) in names})
+        if not by_spelling:
+            # "John Jay" when the text writes "JAY": a corpus name that is one whole word of
+            # the question's name is it, when it is the only such name.
+            words = {_loose_name(word) for word in target.split() if len(_loose_name(word)) > 2}
+            by_word = [name for name in names if _loose_name(name) in words]
+            if len(by_word) == 1:
+                by_spelling = by_word
         others = [name for name in names if name not in by_spelling]
         if not others:
             return by_spelling
@@ -1085,6 +1303,8 @@ class BroadRetriever(CompletionRetriever):
                 "This question cannot be answered by counting: "
                 f"{plan.unsupported} Say so plainly, and do not give a number."
             )
+        if result.method == "table" and result.table_query:
+            return _table_context(result)
         if result.method == "graph":
             how = (
                 "Counted by code from the knowledge graph: the distinct entities of type "
@@ -1118,6 +1338,9 @@ class BroadRetriever(CompletionRetriever):
             lines.append(f"Condition: {plan.condition}")
         if plan.dedup_key:
             lines.append(f"Repeated mentions of one item removed by: {plan.dedup_key}")
+        if plan.reversible:
+            state = "ended (resolved, closed, removed)" if plan.counts_ended else "still in effect"
+            lines.append(f"Counted: the items whose latest recorded state is {state}")
         if result.reading_passes > 1:
             lines.append(
                 f"(every chunk was read {result.reading_passes} times; an entry counts when "
@@ -1132,8 +1355,8 @@ class BroadRetriever(CompletionRetriever):
             )
         if result.unkeyed:
             lines.append(
-                f"({result.unkeyed} counted entries carried no {plan.dedup_key}, so repeats "
-                "among them could not be removed: the total may be over by up to that many)"
+                f"({result.unkeyed} entries whose {plan.dedup_key} could not be read were left "
+                "out as repeats of counted items: the total may be under by up to that many)"
             )
         lines.append(f"TOTAL: {_number(result.total)}")
         if plan.ratio_condition:
@@ -1191,22 +1414,38 @@ class BroadRetriever(CompletionRetriever):
         return result.evidence
 
     async def get_completion_from_context(
-        self, query: str, retrieved_objects: Any, context: Any | None = None, **kwargs
+        self,
+        query: str,
+        retrieved_objects: Any,
+        context: Any | None = None,
+        effective_query: str | None = None,
+        turn_preparation=None,
     ) -> list[Any]:
-        """The LLM phrases the count; a requested list is appended by code, so none is dropped."""
+        """The LLM phrases the count; code appends how it was obtained and any requested
+        list, so neither depends on the answer model."""
         completions = await super().get_completion_from_context(
-            query, retrieved_objects, context=context, **kwargs
+            query,
+            retrieved_objects,
+            context=context,
+            effective_query=effective_query,
+            turn_preparation=turn_preparation,
         )
+        tail = []
+        note = _provenance_note(retrieved_objects)
+        if note:
+            tail.append(note)
         entries = self.listing(retrieved_objects)
-        if not retrieved_objects.plan.list_items or not entries:
+        if retrieved_objects.plan.list_items and entries:
+            block = [f"Full list ({len(entries)}):"]
+            block += [f"- {entry}" for entry in entries[:BROAD_MAX_LISTED]]
+            if len(entries) > BROAD_MAX_LISTED:
+                block.append(f"... and {len(entries) - BROAD_MAX_LISTED} more")
+            tail.append("\n".join(block))
+        if not tail:
             return completions
-        block = [f"Full list ({len(entries)}):"]
-        block += [f"- {entry}" for entry in entries[:BROAD_MAX_LISTED]]
-        if len(entries) > BROAD_MAX_LISTED:
-            block.append(f"... and {len(entries) - BROAD_MAX_LISTED} more")
-        listing = "\n".join(block)
+        suffix = "\n\n".join(tail)
         return [
-            f"{completion.rstrip()}\n\n{listing}" if isinstance(completion, str) else completion
+            f"{completion.rstrip()}\n\n{suffix}" if isinstance(completion, str) else completion
             for completion in completions
         ]
 

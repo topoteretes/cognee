@@ -586,20 +586,134 @@ def test_a_ratio_flag_holds_if_any_entry_of_the_item_says_so():
 
 
 @pytest.mark.asyncio
-async def test_a_wording_key_gets_the_records_date(monkeypatch):
-    """ "The budget's title" repeats across meetings; the planner's key is widened by code."""
+async def test_distinct_items_grouped_by_themselves_are_the_item_count(monkeypatch):
+    """ "How many distinct incidents" grouped by "incident" would count merged incident
+    numbers as names; the items deduplicated by their key are the answer."""
     _stub_llm(
         monkeypatch,
         lambda model, _: CountPlan(
-            source="text", item="a budget line", measure="euros", dedup_key="the budget's title"
+            source="text",
+            item="an incident",
+            group_by="incident",
+            distinct=True,
+            dedup_key="the incident number",
         ),
     )
 
-    plan = await BroadRetriever().plan("What is the total budget approved?", {})
+    plan = await BroadRetriever().plan("How many distinct incidents are there?", {})
 
-    assert plan.dedup_key == "the budget's title, together with the date it appears under"
-    assert not broad_retriever._is_wording_key("the ticket number")
-    assert not broad_retriever._is_wording_key("the meeting date and the decision's wording")
+    assert (plan.group_by, plan.distinct, plan.dedup_key) == (None, False, "the incident number")
+
+
+@pytest.mark.asyncio
+async def test_a_surname_written_alone_matches_the_full_name(monkeypatch):
+    """ "John Jay" when the text credits "JAY": the only corpus name that is one whole
+    word of the question's name is that person, decided by code."""
+
+    _stub_llm(monkeypatch, lambda model, _: TargetMatch(names=[]))
+
+    matched = await BroadRetriever().match_target(
+        "John Jay", ["JAY", "HAMILTON", "MADISON"], [], {}
+    )
+
+    assert matched == ["JAY"]
+
+
+@pytest.mark.asyncio
+async def test_a_name_or_title_key_is_used_as_planned(monkeypatch):
+    """A reference book names a spell in its lists, its index and its entry: the name
+    is the identity. Code must not widen it with a date the text does not have."""
+    _stub_llm(
+        monkeypatch,
+        lambda model, _: CountPlan(source="text", item="a spell", dedup_key="the spell's name"),
+    )
+
+    plan = await BroadRetriever().plan("How many spells are there?", {})
+
+    assert plan.dedup_key == "the spell's name"
+
+
+def test_a_state_question_can_count_either_side():
+    """ "Still open" and "resolved" read the same entries; the latest entry per ticket
+    decides, and the question picks which state is counted."""
+    items = [
+        ExtractedItem(unit=0, key="T-1", when="2026-01-01", evidence="T-1 opened"),
+        ExtractedItem(unit=1, key="T-1", when="2026-01-03", undone=True, evidence="T-1 resolved"),
+        ExtractedItem(unit=2, key="T-2", when="2026-01-02", evidence="T-2 opened"),
+        ExtractedItem(unit=3, key="T-3", when="2026-01-02", undone=True, evidence="T-3 resolved"),
+        ExtractedItem(unit=4, key="T-3", when="2026-01-05", evidence="T-3 reopened"),
+    ]
+
+    still_open = BroadRetriever.dedup(items)
+    resolved = BroadRetriever.dedup(items, counts_ended=True)
+
+    assert sorted(i.key for i in still_open) == ["T-2", "T-3"]
+    assert [i.key for i in resolved] == ["T-1"]
+
+
+def test_an_ungrouped_ended_entry_is_the_items_own_state():
+    """Without a grouping no entry has a group; a ticket listed only as resolved is a
+    resolved ticket, not a recap of one filed under some group."""
+    items = [
+        ExtractedItem(unit=0, key="T-1", undone=True, evidence="T-1 | resolved"),
+        ExtractedItem(unit=1, key="T-2", evidence="T-2 | open"),
+        ExtractedItem(unit=2, key="T-3", undone=True, evidence="T-3 | resolved"),
+    ]
+
+    assert sorted(i.key for i in BroadRetriever.dedup(items, counts_ended=True)) == ["T-1", "T-3"]
+    assert [i.key for i in BroadRetriever.dedup(items)] == ["T-2"]
+
+
+@pytest.mark.asyncio
+async def test_different_things_grouped_by_their_own_identifier_count_distinct_keys(monkeypatch):
+    """Grouping bills by bill number splits one bill across spellings ("H.R. 4418",
+    "HR 4418") and across passages that give its title instead; its key does not."""
+    items = [
+        ExtractedItem(unit=0, key="H.R. 4418", group="H.R. 4418", evidence="H.R. 4418 passed"),
+        ExtractedItem(unit=1, key="4418", group="HR 4418", evidence="HR 4418"),
+        ExtractedItem(unit=2, key="H.R. 12", group="H.R. 12", evidence="H.R. 12"),
+        ExtractedItem(unit=3, key="H.R. 12", group="A bill to rename a post office", evidence="x"),
+        ExtractedItem(unit=4, key="H.R. 7", group="H.R. 7", evidence="H.R. 7"),
+    ]
+    _stub_llm(
+        monkeypatch,
+        lambda model, _: ShardItems(items=items) if model is ShardItems else NameGroups(groups=[]),
+    )
+    plan = CountPlan(
+        source="text",
+        item="a bill",
+        group_by="bill number",
+        distinct=True,
+        dedup_key="the H.R. number",
+    )
+
+    result = await BroadRetriever().count_by_reading(plan, _units(1))
+
+    assert result.total == 3
+
+
+def test_groups_that_are_other_attributes_are_not_keys():
+    """ "Different customers" groups tickets by customer: the key is the ticket, so the
+    answer stays the number of customers."""
+    items = [
+        ExtractedItem(unit=0, key="T-1", group="Ann", evidence="T-1 Ann"),
+        ExtractedItem(unit=1, key="T-2", group="Ann", evidence="T-2 Ann"),
+        ExtractedItem(unit=2, key="T-3", group="Bo", evidence="T-3 Bo"),
+    ]
+
+    assert not broad_retriever._groups_are_keys(items)
+
+
+def test_a_name_key_collapses_every_mention_of_one_thing():
+    """A table of contents, a running header and the heading itself are one chapter."""
+    items = [
+        ExtractedItem(unit=0, key="Chapter IV", evidence="Contents: Chapter IV"),
+        ExtractedItem(unit=3, key="Chapter IV", evidence="CHAPTER IV. The Rabbit"),
+        ExtractedItem(unit=4, key="chapter iv", evidence="page header: chapter iv"),
+        ExtractedItem(unit=5, key="Chapter V", evidence="CHAPTER V. Advice"),
+    ]
+
+    assert len(BroadRetriever.dedup(items)) == 2
 
 
 @pytest.mark.asyncio
@@ -684,38 +798,46 @@ async def test_a_paper_counts_for_every_author_it_lists(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_unkeyed_entries_count_and_bound_the_possible_overcount(monkeypatch):
-    """An entry without its key cannot be checked for repeats. It counts, and the answer
-    context states how many such entries there were: the most the total is over by."""
+async def test_an_entry_without_its_key_is_left_out_and_the_gap_is_stated(monkeypatch):
+    """A long record continues past a chunk boundary without its heading: the entry read
+    there has no key and is, as a rule, the same item again. It is left out, and the
+    answer says how many were: the most the count could be under by."""
     shard = ShardItems(
         items=[
-            _item(None, "1"),
-            ExtractedItem(unit=0, evidence="an order whose number the model left out"),
-            ExtractedItem(unit=1, evidence="another with no number given"),
+            ExtractedItem(unit=0, key="1", evidence="Paper 1"),
+            ExtractedItem(unit=0, key="2", evidence="Paper 2"),
+            ExtractedItem(unit=0, key="3", evidence="Paper 3"),
+            ExtractedItem(unit=0, evidence="the paper continues without its number"),
         ]
     )
     _stub_llm(monkeypatch, lambda model, _: shard)
-    plan = _plan(dedup_key="the order number")
+    plan = _plan(dedup_key="the paper number")
 
     result = await BroadRetriever().count_by_reading(plan, _units(1))
     context = await BroadRetriever().get_context_from_objects("q", result)
 
-    assert result.total == 3 and result.unkeyed == 2
-    assert "2 counted entries carried no the order number" in context
-    assert "over by up to that many" in context
+    assert result.total == 3 and result.unkeyed == 1
+    assert "under by up to that many" in context
 
 
-def test_a_relation_without_a_target_counts_each_pair_once():
-    """ "How many connections were removed": Arthur–Priya is one connection, listed
-    for both of them."""
-    items = [_item("Arthur", "Priya"), _item("Priya", "Arthur"), _item("Mei", "Priya")]
-    plan = _plan(group_by="member", relation=True, dedup_key="the other member")
+@pytest.mark.asyncio
+async def test_a_key_the_text_does_not_write_counts_every_entry(monkeypatch):
+    """A planned "receipt number" that no entry carries is not how these items are
+    written: each entry is its own occurrence."""
+    shard = ShardItems(
+        items=[
+            ExtractedItem(unit=0, evidence="gave 50 pounds"),
+            ExtractedItem(unit=0, evidence="pledged 100 pounds"),
+            ExtractedItem(unit=0, evidence="handed over 20 pounds"),
+        ]
+    )
+    _stub_llm(monkeypatch, lambda model, _: shard)
 
-    kept = BroadRetriever.dedup(items, by_group=True)
-    pairs = {frozenset((i.group, i.key)) for i in kept}
+    result = await BroadRetriever().count_by_reading(
+        _plan(dedup_key="the receipt number"), _units(1)
+    )
 
-    assert len(kept) == 3 and len(pairs) == 2
-    assert plan.relation  # the total uses the pair count; the groups keep the per-member tally
+    assert (result.total, result.unkeyed) == (3, 0)
 
 
 @pytest.mark.asyncio
@@ -907,7 +1029,7 @@ async def test_every_occurrence_counts_without_a_dedup_key(monkeypatch):
 @pytest.mark.asyncio
 async def test_keyed_items_sharing_a_templated_quote_in_one_piece_all_count(monkeypatch):
     """Fifty experiments in one piece each say "The run failed": distinct keys, distinct
-    items; two keyless entries with the same quote are two occurrences too."""
+    items. Two keyless entries beside them are left out and reported."""
     shard = ShardItems(
         items=[
             *[_item(None, f"EXP-{n}") for n in range(50)],
@@ -923,7 +1045,7 @@ async def test_keyed_items_sharing_a_templated_quote_in_one_piece_all_count(monk
         _plan(dedup_key="the experiment id"), _units(1)
     )
 
-    assert result.total == 52
+    assert (result.total, result.unkeyed) == (50, 2)
 
 
 @pytest.mark.asyncio
@@ -1283,6 +1405,50 @@ async def test_a_count_by_reading_is_never_presented_as_exact():
     assert "Akshats-git: 43" in context
 
 
+def test_a_lower_case_spelling_matches_any_case_and_a_split_line():
+    """ "gross margin" is also written "Gross margin" at the start of a sentence, and a
+    phrase can be cut by a line break in text extracted from a PDF."""
+    units = [
+        Unit(id="a", text="Gross margin rose. Our gross\nmargin guidance holds."),
+        Unit(id="b", text="Off with her head! off with his head, said the Queen."),
+    ]
+    retriever = BroadRetriever()
+
+    margin = retriever.count_words(_plan(literal_terms=["gross margin"]), units)
+    heads = retriever.count_words(
+        _plan(literal_terms=["off with her head", "off with his head"]), units
+    )
+
+    assert (margin.total, heads.total) == (2, 2)
+
+
+def test_a_capitalized_spelling_matches_only_as_written():
+    """A name keeps its capital: "Bill" the person is not every "bill" on the table."""
+    units = [Unit(id="a", text="Bill paid the bill. BILL signed.")]
+
+    result = BroadRetriever().count_words(_plan(literal_terms=["Bill"]), units)
+
+    assert result.total == 1
+
+
+@pytest.mark.asyncio
+async def test_how_a_reading_count_was_made_is_stated_by_code(monkeypatch):
+    """The answer model may drop the caveat; code appends it to every reading answer."""
+
+    async def phrase(self, query, retrieved_objects, context=None, **kwargs):
+        return ["191 spells were found."]
+
+    monkeypatch.setattr(broad_retriever.CompletionRetriever, "get_completion_from_context", phrase)
+    reading = CountResult(plan=_plan(), method="reading", total=191, units=11, unkeyed=4)
+    words = CountResult(plan=_plan(literal_terms=["Alice"]), method="words", total=866, units=9)
+
+    [read_answer] = await BroadRetriever().get_completion_from_context("q", reading)
+    [word_answer] = await BroadRetriever().get_completion_from_context("q", words)
+
+    assert "reading all 11 chunks" in read_answer and "under by up to 4" in read_answer
+    assert word_answer == "191 spells were found."
+
+
 @pytest.mark.asyncio
 async def test_graph_and_word_counts_are_stated_as_exact():
     graph_result = CountResult(
@@ -1352,7 +1518,7 @@ async def test_a_measure_is_never_counted_as_word_mentions(monkeypatch):
         called.append("reading")
         return CountResult(plan=plan, method="reading", total=0, units=0)
 
-    async def plan_stub(query, entities_by_type):
+    async def plan_stub(query, entities_by_type, units=None):
         return plan
 
     async def units(graph_engine):
@@ -1403,9 +1569,9 @@ async def test_no_list_is_appended_unless_asked(monkeypatch):
     _stub_answer(monkeypatch, "42 rows.")
     result = CountResult(plan=_plan(), method="reading", total=42, units=6, evidence=["a", "b"])
 
-    assert await BroadRetriever().get_completion_from_context("q", result, context="c") == [
-        "42 rows."
-    ]
+    [answer] = await BroadRetriever().get_completion_from_context("q", result, context="c")
+
+    assert answer.startswith("42 rows.") and "Full list" not in answer
 
 
 @pytest.mark.asyncio
@@ -1416,7 +1582,7 @@ async def test_nothing_counted_appends_no_empty_list(monkeypatch):
     [answer] = await BroadRetriever().get_completion_from_context("q", result, context="c")
     context = await BroadRetriever().get_context_from_objects("q", result)
 
-    assert answer == "0 issues were assigned to Ashkatosh."
+    assert answer.startswith("0 issues were assigned to Ashkatosh.") and "Full list" not in answer
     assert "appended below" not in context
 
 
