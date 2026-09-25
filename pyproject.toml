@@ -293,9 +293,6 @@ packages = ["cognee", "cognee_db_workers", "kuzu"]
 [tool.uv]
 # Note: exclude newer packages that are less than 2 days old
 exclude-newer = "2 days"
-# Enola releases are deliberately pinned and validated against the code-graph
-# known answers. Allow a newly pinned release to resolve during that 2-day window.
-exclude-newer-package = { enola-cli = "0 days" }
 constraint-dependencies = [
     "protobuf>=5.29.6, !=6.30.*, !=6.31.*, !=6.32.*, !=6.33.1, !=6.33.2, !=6.33.3, !=6.33.4", # protobuf 6.33.5 and higher versions + version 5.29.6
     "pyasn1>=0.6.2",
