@@ -6,19 +6,27 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.models.PrincipalConfiguration import PrincipalConfiguration
 
 
-async def get_principal_configuration(config_id: UUID) -> dict:
+async def get_principal_configuration(config_id: UUID, principal_id: UUID) -> dict:
     """
-    Retrieves a specific Cognee configuration for a principal by its name.
+    Retrieves one of a principal's stored Cognee configurations by its id.
+
+    The lookup is scoped to ``principal_id``: a configuration owned by another
+    principal is treated exactly like a missing one, so a caller cannot read, or
+    probe for, configurations that are not theirs.
 
     Args:
-        config_id (str): The unique identifier of the config.
+        config_id (UUID): The unique identifier of the config.
+        principal_id (UUID): The principal (user/group) the config must belong to.
 
     Returns:
-        dict: The configuration data if found, or an empty dictionary (or None) if not found.
+        dict: The configuration data if found for this principal, otherwise an empty dictionary.
     """
     relational_engine = get_relational_engine()
     async with relational_engine.get_async_session() as session:
-        query = select(PrincipalConfiguration).where(PrincipalConfiguration.id == config_id)
+        query = select(PrincipalConfiguration).where(
+            PrincipalConfiguration.id == config_id,
+            PrincipalConfiguration.owner_id == principal_id,
+        )
 
         result = await session.execute(query)
         config_record = result.scalars().first()
