@@ -131,6 +131,7 @@ async def cognify(
     chunk_attachment: Literal["direct", "all"] | None = None,
     extractor: Literal["llm", "gliner_demo", "gliner"] | None = None,
     ontology_file_path: str | None = None,
+    index_vectors: bool = False,
     **kwargs,
 ):
     """
@@ -236,6 +237,13 @@ async def cognify(
                  generic KnowledgeGraph, so a custom graph_model raises. Raises with
                  temporal_cognify=True, with dry_run=True, or while connected to a
                  remote instance — none of those paths can honour it yet.
+        index_vectors: Also embed the code facts of the code files and code
+                 repositories this run builds (CODE and CODE_REPO routes). Off by
+                 default: SearchType.CODE reads the graph only, and embedding lets
+                 completion search types reach the code. Applies only to items the
+                 run actually builds — an unchanged, already-built item is skipped
+                 by incremental loading and keeps its previous vectors (or none).
+                 Not supported while connected to a remote instance.
 
     Returns:
         Union[dict, list[PipelineRunInfo], DryRunEstimate]:
@@ -370,6 +378,14 @@ async def cognify(
                 "extractor is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose the extractor locally."
             )
+        if index_vectors:
+            # client.cognify() has no index_vectors field; the remote would
+            # silently build graph-only, so an explicit choice has to raise.
+            raise ValueError(
+                "index_vectors is not supported by cognify() while connected to a remote "
+                "Cognee instance. Use remember(..., index_vectors=True) or call "
+                "cognee.disconnect() to cognify locally."
+            )
         return await client.cognify(
             datasets,
             chunk_size=chunk_size,
@@ -491,8 +507,8 @@ async def cognify(
             CognifyRoute.DLT_SOURCE: await get_dlt_tasks(
                 chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
             ),
-            CognifyRoute.CODE: get_code_file_tasks(),
-            CognifyRoute.CODE_REPO: get_code_repo_tasks(),
+            CognifyRoute.CODE: get_code_file_tasks(index_vectors=index_vectors),
+            CognifyRoute.CODE_REPO: get_code_repo_tasks(index_vectors=index_vectors),
         }
 
         def resolve_cognify_tasks(data_item):

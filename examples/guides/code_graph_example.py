@@ -10,10 +10,10 @@ Requirements:
 
 SearchType.CODE does not require an LLM API key or embedding model.
 
-Prefer a one-liner? cognee.remember(repo_path_or_git_url, content_type="code")
-runs this same pipeline in a single call (it also accepts a list of
-repositories, and index_vectors=True to enable embeddings). This example
-assembles the pipeline explicitly so each step stays visible.
+Prefer a one-liner? cognee.remember(repo_path_or_github_url) stores the
+repository and builds the same graph through cognify's CODE_REPO route (pass
+index_vectors=True to also embed the code facts). This example assembles the
+pipeline explicitly so each step stays visible.
 
 For cross-repository paths, generate one Enola append/multi-repository snapshot
 and ingest it into one dataset. Repositories indexed in separate datasets are

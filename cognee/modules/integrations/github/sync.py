@@ -1,18 +1,19 @@
 """Sync a GitHub installation's repositories into the code graph.
 
-Thin orchestration over the existing ``remember(content_type="code")`` path:
-mint a fresh installation token, resolve which repositories to index, and
-hand authenticated clone URLs to the code-graph pipeline. All the heavy
-lifting — clone reuse, snapshot-identity skip on unchanged repos, per-repo
-failure isolation (``raise_on_error=False``) — already lives in
-``resolve_repo_source`` and ``remember``, which is what makes re-running this
-on every webhook cheap and idempotent.
+Thin orchestration: mint a fresh installation token, resolve which
+repositories to index, clone each one with the token, and ``remember`` the
+local clone. ``remember`` stores the clone as one ``code_repo`` row through
+``add()`` and cognify builds it on the CODE_REPO route. Clone reuse lives in
+``resolve_repo_source`` and incremental loading skips an unchanged repo, which
+is what makes re-running this on every webhook cheap and idempotent.
 
-The indexed graph is searchable via ``SearchType.CODE`` (the code route
-produces no chunks or embeddings by design); ``index_vectors`` stays off.
+The token reaches git only through ``resolve_repo_source(credentials=...)``;
+``remember`` sees a local path, so no secret rides the data it stores.
+
+The indexed graph is searchable via ``SearchType.CODE``; code facts are not
+embedded (``index_vectors`` stays off).
 
 One dataset per installation (``github_<org>``), not per repository —
-``remember`` already accepts a list of repo specs targeting one dataset, and
 per-repo datasets would mean one isolated database per repo under backend
 access control.
 """
@@ -47,9 +48,9 @@ def clone_url(full_name: str) -> str:
     """The credential-free https clone URL for a repository.
 
     Deliberately carries no token: auth travels out-of-band as
-    ``repo_credentials`` (injected into git via environment config by
-    ``resolve_repo_source``), so no URL-derived string — clone slugs, result
-    items, logs, git error output — can ever leak a secret.
+    ``resolve_repo_source(credentials=...)`` (injected into git via
+    environment config), so no URL-derived string — clone slugs, stored rows,
+    logs, git error output — can ever leak a secret.
     """
     return f"https://github.com/{full_name}.git"
 
@@ -80,20 +81,22 @@ async def sync_repositories(
 ) -> None:
     """Index ``repo_full_names`` (default: every repo the installation covers).
 
-    Runs the code-graph pipeline to completion — callers are already off the
-    request path (the post-install hook and webhook handling both run
-    detached), so there is nothing to hand off to.
+    Runs each repository to completion — callers are already off the request
+    path (the post-install hook and webhook handling both run detached), so
+    there is nothing to hand off to. A repository that fails (clone, auth,
+    pipeline) is logged and the sync continues with the next one.
 
-    The minted token lives ~1 hour and repos are cloned sequentially as the
-    pipeline reaches them, so a very large installation can outlive the
-    token mid-batch; the affected repos surface as per-repo errors and the
-    next webhook (or manual re-sync) picks them up with a fresh token.
+    The minted token lives ~1 hour and repos are cloned sequentially, so a
+    very large installation can outlive the token mid-batch; the affected
+    repos fail individually and the next webhook (or manual re-sync) picks
+    them up with a fresh token.
     """
     # Imported here, not at module top: this module is imported at API
     # startup (via the adapter registration), and cognee's package root is
     # heavyweight.
     from cognee.api.v1.remember.remember import remember as cognee_remember
     from cognee.modules.users.methods import get_user
+    from cognee.tasks.code_graph.resolve_repo import resolve_repo_source
 
     token, _expires_at = await mint_installation_token(int(credential.provider_account_id))
 
@@ -110,25 +113,38 @@ async def sync_repositories(
     )
     owner = await get_user(credential.user_id)
 
+    dataset_name = dataset_name_for_account(account_login)
     logger.info(
         "Syncing %d GitHub repositories for %s into dataset %s",
         len(repo_full_names),
         account_login,
-        dataset_name_for_account(account_login),
+        dataset_name,
     )
-    result = await cognee_remember(
-        [clone_url(full_name) for full_name in repo_full_names],
-        dataset_name=dataset_name_for_account(account_login),
-        user=owner,
-        content_type="code",
-        repo_credentials=token,
-        # Report a repo that fails (clone, auth, pipeline) as an errored item
-        # and keep syncing the rest, instead of aborting the whole batch.
-        raise_on_error=False,
-    )
-    if getattr(result, "status", None) == "errored":
+    failed: list[str] = []
+    for full_name in repo_full_names:
+        try:
+            repo_path = await resolve_repo_source(clone_url(full_name), credentials=token)
+            result = await cognee_remember(
+                str(repo_path),
+                dataset_name=dataset_name,
+                user=owner,
+                # The code graph is the point of the sync; no session to bridge.
+                self_improvement=False,
+                raise_on_error=False,
+            )
+        except Exception:
+            logger.exception("GitHub sync failed for repository %s", full_name)
+            failed.append(full_name)
+            continue
+        if getattr(result, "status", None) == "errored":
+            logger.warning(
+                "GitHub sync for %s errored: %s", full_name, getattr(result, "error", None)
+            )
+            failed.append(full_name)
+    if failed:
         logger.warning(
-            "GitHub sync for %s finished with errors: %s",
+            "GitHub sync for %s finished with %d failed repositories: %s",
             account_login,
-            getattr(result, "error", None),
+            len(failed),
+            ", ".join(failed),
         )

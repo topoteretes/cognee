@@ -181,7 +181,7 @@ def test_code_repo_clone_url_detects_repository_roots(spec, clone_url):
         # Other hosts need the .git suffix to be treated as a repository.
         "https://git.example.com/team/repo",
         "https://example.com/some/page",
-        # Non-http specs stay explicit (remember(content_type="code")).
+        # Non-http specs are not detected: clone them and pass the directory.
         "git@github.com:org/repo.git",
         "ssh://git@github.com/org/repo",
         "/local/path/repo",

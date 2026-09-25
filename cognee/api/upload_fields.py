@@ -6,8 +6,8 @@ field with a single blank item (Swagger UI's "Try it out" is the common case)
 therefore send one part with an empty value — ``data=""``. FastAPI validates
 form fields before the route handler runs, and ``UploadFile`` rejects a string
 outright, so such a request fails with a 400 the handler never sees, even for
-routes where the uploads are optional (e.g. ``POST /v1/remember`` with
-``content_type="code"``, whose payload is ``raw_data``, not files).
+routes where the uploads are optional (e.g. ``POST /v1/remember`` with a
+repository URL in ``raw_data`` and no files).
 
 ``OptionalUploadFile`` accepts string parts so the handler can drop the blank
 ones itself via :func:`drop_blank_uploads`, mirroring how the routers already

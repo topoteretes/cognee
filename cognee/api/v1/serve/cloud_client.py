@@ -143,22 +143,35 @@ class CloudClient:
         if kwargs.get("import_mode") is not None:
             form.add_field("import_mode", str(kwargs["import_mode"]))
 
-        # Code repos travel as spec strings in the 'raw_data' form field —
-        # the server clones git URLs itself and reads local paths from its own
-        # filesystem (only useful when it shares the caller's filesystem).
-        # Nothing is uploaded.
-        if content_type_kw == "code":
-            specs = data if isinstance(data, list) else [data]
-            for spec in specs:
-                form.add_field("raw_data", str(spec))
-            if kwargs.get("index_vectors"):
-                form.add_field("index_vectors", "true")
+        if kwargs.get("index_vectors"):
+            form.add_field("index_vectors", "true")
+
+        from cognee.tasks.code_graph.resolve_repo import code_repo_clone_url
+
+        sent_repo_url = False
+
+        def _add_string(item: str) -> None:
+            # A GitHub/GitLab repository URL travels in 'raw_data' so the server
+            # clones it and builds the code graph; uploaded as a text file it
+            # would be stored as the URL's text instead.
+            nonlocal sent_repo_url
+            if code_repo_clone_url(item) is not None:
+                form.add_field("raw_data", item)
+                sent_repo_url = True
+                return
+            form.add_field(
+                "data",
+                io.BytesIO(item.encode("utf-8")),
+                filename=_text_upload_filename(item),
+                content_type="text/plain",
+            )
+
         # Skills are local SKILL.md files. The server's add_skills() reads
         # paths from its own filesystem — sending the path string verbatim
         # would have the server look for that path on the POD, not the
         # caller. For content_type="skills", read each SKILL.md and upload
         # its bytes so the server can write them to a tempdir.
-        elif content_type_kw == "skills" and isinstance(data, (str, Path)):
+        if content_type_kw == "skills" and isinstance(data, (str, Path)):
             source = Path(data).expanduser()
             if source.is_file():
                 skill_files = [source] if source.name == "SKILL.md" else []
@@ -176,21 +189,11 @@ class CloudClient:
                 form.add_field("data", skill_path.open("rb"), filename=rel)
         # Handle data — string or file-like objects
         elif isinstance(data, str):
-            form.add_field(
-                "data",
-                io.BytesIO(data.encode("utf-8")),
-                filename=_text_upload_filename(data),
-                content_type="text/plain",
-            )
+            _add_string(data)
         elif isinstance(data, list):
             for item in data:
                 if isinstance(item, str):
-                    form.add_field(
-                        "data",
-                        io.BytesIO(item.encode("utf-8")),
-                        filename=_text_upload_filename(item),
-                        content_type="text/plain",
-                    )
+                    _add_string(item)
                 elif hasattr(item, "read"):
                     name = getattr(item, "name", "upload")
                     form.add_field("data", item, filename=name)
@@ -198,12 +201,12 @@ class CloudClient:
             name = getattr(data, "name", "upload")
             form.add_field("data", data, filename=name)
 
-        # Code ingestion can block on a clone + whole-repo parse; the archive
+        # A repository can block on a clone + whole-repo parse; the archive
         # timeout (no total cap) fits both. Prefer run_in_background=True for
         # large repos regardless.
         timeout = (
             self.UPLOAD_TIMEOUT
-            if kwargs.get("content_type") in ("cogx-archive", "code")
+            if kwargs.get("content_type") == "cogx-archive" or sent_repo_url
             else self.DEFAULT_TIMEOUT
         )
         async with session.post(
