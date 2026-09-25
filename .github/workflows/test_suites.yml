@@ -274,6 +274,10 @@ jobs:
 
   ui-docker-ci-test:
     name: UI Docker CI test
+    if: >-
+      github.repository == 'topoteretes/cognee' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     uses: ./.github/workflows/frontend_docker_build_test.yml
     secrets: inherit
 
