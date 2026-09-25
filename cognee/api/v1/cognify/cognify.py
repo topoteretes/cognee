@@ -12,6 +12,7 @@ from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.config import (
     GLINER_DEMO_EXTRACTOR,
+    ensure_extractor_runtime,
     get_cognify_config,
     resolve_extractor,
 )
@@ -376,6 +377,11 @@ async def cognify(
             custom_prompt=custom_prompt,
             run_in_background=run_in_background,
         )
+
+    # After the argument checks and the remote route: a cognify that raises above,
+    # or runs remotely, must not install anything locally. Awaited, so the pipeline
+    # below never starts before the GLiNER runtime is importable.
+    await ensure_extractor_runtime(resolved_extractor, cognify_config)
 
     import time as _time
 
