@@ -1,4 +1,6 @@
+import asyncio
 import json
+from contextlib import aclosing
 
 from cognee import __version__ as cognee_version
 from cognee.modules.pipelines.models import PipelineContext
@@ -33,8 +35,9 @@ async def run_tasks_with_telemetry(
             | config,
         )
 
-        async for result in run_tasks_base(tasks, data, user, ctx):
-            yield result
+        async with aclosing(run_tasks_base(tasks, data, user, ctx)) as results:
+            async for result in results:
+                yield result
 
         logger.info("Pipeline run completed: `%s`", pipeline_name)
         send_telemetry(
@@ -47,11 +50,16 @@ async def run_tasks_with_telemetry(
             }
             | config,
         )
-    except Exception:
-        logger.exception(
-            "Pipeline run errored: `%s`\n",
-            pipeline_name,
-        )
+    except (Exception, asyncio.CancelledError, GeneratorExit) as exc:
+        # Cancellation and early generator closure inherit from BaseException.
+        # Report the interrupted item, then preserve cancellation/close semantics.
+        if isinstance(exc, Exception):
+            logger.exception(
+                "Pipeline run errored: `%s`\n",
+                pipeline_name,
+            )
+        else:
+            logger.info("Pipeline run interrupted: `%s`", pipeline_name)
         send_telemetry(
             "Pipeline Run Errored",
             user,
