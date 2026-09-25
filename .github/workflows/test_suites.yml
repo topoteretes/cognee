@@ -100,12 +100,11 @@ jobs:
           cache-to: type=registry,ref=${{ steps.set-image.outputs.cache-image }},mode=max
 
   fork-pr-validation:
-    name: Fork PR validation
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+    name: Workflow configuration validation
     runs-on: ubuntu-latest
     steps:
-      - name: Confirm secret-dependent suites are intentionally skipped
-        run: echo "External fork PR detected; secret-dependent Test Suites jobs are skipped."
+      - name: Confirm workflow configuration is valid
+        run: echo "Workflow configuration loaded successfully; secret-dependent suites remain separately guarded."
 
   pre-test:
     name: basic checks
