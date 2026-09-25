@@ -149,41 +149,45 @@ async def _borrowed_engine_adapter(monkeypatch, db_url: str):
 @requires_postgres
 async def test_prune_borrowed_engine_preserves_relational_schema(monkeypatch):
     """The reported bug: prune() must drop collections, not the application schema."""
-    async with _throwaway_database() as db_url:
-        async with _borrowed_engine_adapter(monkeypatch, db_url) as (adapter, relational):
-            await _seed_relational_tables(relational.engine)
-            await adapter.create_collection("Entity_name")
-            await adapter.create_collection("DocumentChunk_text")
+    async with (
+        _throwaway_database() as db_url,
+        _borrowed_engine_adapter(monkeypatch, db_url) as (adapter, relational),
+    ):
+        await _seed_relational_tables(relational.engine)
+        await adapter.create_collection("Entity_name")
+        await adapter.create_collection("DocumentChunk_text")
 
-            before = await _table_names(relational.engine)
-            assert {"Entity_name", "DocumentChunk_text", "users", "datasets"} <= before
+        before = await _table_names(relational.engine)
+        assert {"Entity_name", "DocumentChunk_text", "users", "datasets"} <= before
 
-            await adapter.prune()
+        await adapter.prune()
 
-            after = await _table_names(relational.engine)
-            assert "Entity_name" not in after
-            assert "DocumentChunk_text" not in after
-            assert "users" in after
-            assert "datasets" in after
+        after = await _table_names(relational.engine)
+        assert "Entity_name" not in after
+        assert "DocumentChunk_text" not in after
+        assert "users" in after
+        assert "datasets" in after
 
 
 @pytest.mark.asyncio
 @requires_postgres
 async def test_prune_borrowed_engine_preserves_alembic_version(monkeypatch):
     """Losing alembic_version corrupts migrations, so pin it separately."""
-    async with _throwaway_database() as db_url:
-        async with _borrowed_engine_adapter(monkeypatch, db_url) as (adapter, relational):
-            await _seed_relational_tables(relational.engine)
-            await adapter.create_collection("Entity_name")
+    async with (
+        _throwaway_database() as db_url,
+        _borrowed_engine_adapter(monkeypatch, db_url) as (adapter, relational),
+    ):
+        await _seed_relational_tables(relational.engine)
+        await adapter.create_collection("Entity_name")
 
-            await adapter.prune()
+        await adapter.prune()
 
-            assert "alembic_version" in await _table_names(relational.engine)
-            async with relational.engine.begin() as connection:
-                revision = (
-                    await connection.execute(text("SELECT version_num FROM alembic_version"))
-                ).scalar()
-            assert revision == "deadbeefcafe", "the recorded revision must survive prune"
+        assert "alembic_version" in await _table_names(relational.engine)
+        async with relational.engine.begin() as connection:
+            revision = (
+                await connection.execute(text("SELECT version_num FROM alembic_version"))
+            ).scalar()
+        assert revision == "deadbeefcafe", "the recorded revision must survive prune"
 
 
 @pytest.mark.asyncio
@@ -224,25 +228,27 @@ async def test_prune_owned_engine_still_drops_whole_database(monkeypatch):
 @requires_postgres
 async def test_prune_borrowed_engine_ignores_vector_shaped_relational_tables(monkeypatch):
     """Near misses: tables that do not even reach the collection column shape."""
-    async with _throwaway_database() as db_url:
-        async with _borrowed_engine_adapter(monkeypatch, db_url) as (adapter, relational):
-            async with relational.engine.begin() as connection:
-                # Same column names, no pgvector column type.
-                await connection.execute(
-                    text("CREATE TABLE lookalike (id uuid PRIMARY KEY, payload json, vector text)")
-                )
-                # pgvector column, but not a collection (no payload column).
-                await connection.execute(
-                    text("CREATE TABLE embeddings_sidecar (id uuid PRIMARY KEY, vector vector(4))")
-                )
-            await adapter.create_collection("Entity_name")
+    async with (
+        _throwaway_database() as db_url,
+        _borrowed_engine_adapter(monkeypatch, db_url) as (adapter, relational),
+    ):
+        async with relational.engine.begin() as connection:
+            # Same column names, no pgvector column type.
+            await connection.execute(
+                text("CREATE TABLE lookalike (id uuid PRIMARY KEY, payload json, vector text)")
+            )
+            # pgvector column, but not a collection (no payload column).
+            await connection.execute(
+                text("CREATE TABLE embeddings_sidecar (id uuid PRIMARY KEY, vector vector(4))")
+            )
+        await adapter.create_collection("Entity_name")
 
-            await adapter.prune()
+        await adapter.prune()
 
-            after = await _table_names(relational.engine)
-            assert "Entity_name" not in after
-            assert "lookalike" in after
-            assert "embeddings_sidecar" in after
+        after = await _table_names(relational.engine)
+        assert "Entity_name" not in after
+        assert "lookalike" in after
+        assert "embeddings_sidecar" in after
 
 
 @pytest.mark.asyncio
@@ -255,43 +261,45 @@ async def test_prune_borrowed_engine_spares_exact_shape_application_table(monkey
     classification returned it alongside the genuine collection. Only the
     registered collection may go.
     """
-    async with _throwaway_database() as db_url:
-        async with _borrowed_engine_adapter(monkeypatch, db_url) as (adapter, relational):
-            async with relational.engine.begin() as connection:
-                await connection.execute(
-                    text(
-                        "CREATE TABLE user_embeddings ("
-                        "  id uuid PRIMARY KEY,"
-                        "  payload json,"
-                        "  vector vector(4),"
-                        "  created_at timestamptz DEFAULT now()"
-                        ")"
-                    )
+    async with (
+        _throwaway_database() as db_url,
+        _borrowed_engine_adapter(monkeypatch, db_url) as (adapter, relational),
+    ):
+        async with relational.engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "CREATE TABLE user_embeddings ("
+                    "  id uuid PRIMARY KEY,"
+                    "  payload json,"
+                    "  vector vector(4),"
+                    "  created_at timestamptz DEFAULT now()"
+                    ")"
                 )
-                # The same shape with no extra column: an exact structural twin
-                # of a collection table, and still not one.
-                await connection.execute(
-                    text(
-                        "CREATE TABLE app_embeddings "
-                        "(id uuid PRIMARY KEY, payload json, vector vector(4))"
-                    )
+            )
+            # The same shape with no extra column: an exact structural twin
+            # of a collection table, and still not one.
+            await connection.execute(
+                text(
+                    "CREATE TABLE app_embeddings "
+                    "(id uuid PRIMARY KEY, payload json, vector vector(4))"
                 )
-                await connection.execute(
-                    text("INSERT INTO user_embeddings (id) VALUES (gen_random_uuid())")
-                )
-            await adapter.create_collection("Entity_name")
+            )
+            await connection.execute(
+                text("INSERT INTO user_embeddings (id) VALUES (gen_random_uuid())")
+            )
+        await adapter.create_collection("Entity_name")
 
-            await adapter.prune()
+        await adapter.prune()
 
-            after = await _table_names(relational.engine)
-            assert "Entity_name" not in after, "the registered collection must still be dropped"
-            assert "user_embeddings" in after
-            assert "app_embeddings" in after
-            async with relational.engine.begin() as connection:
-                surviving_rows = (
-                    await connection.execute(text("SELECT count(*) FROM user_embeddings"))
-                ).scalar()
-            assert surviving_rows == 1, "the unrelated table's rows must survive intact"
+        after = await _table_names(relational.engine)
+        assert "Entity_name" not in after, "the registered collection must still be dropped"
+        assert "user_embeddings" in after
+        assert "app_embeddings" in after
+        async with relational.engine.begin() as connection:
+            surviving_rows = (
+                await connection.execute(text("SELECT count(*) FROM user_embeddings"))
+            ).scalar()
+        assert surviving_rows == 1, "the unrelated table's rows must survive intact"
 
 
 @pytest.mark.asyncio
@@ -306,19 +314,21 @@ async def test_prune_borrowed_engine_ignores_marker_on_non_collection_table(monk
         _COLLECTION_OWNERSHIP_MARKER,
     )
 
-    async with _throwaway_database() as db_url:
-        async with _borrowed_engine_adapter(monkeypatch, db_url) as (adapter, relational):
-            async with relational.engine.begin() as connection:
-                await connection.execute(
-                    text("CREATE TABLE audit_log (id uuid PRIMARY KEY, message text)")
-                )
-                await connection.execute(
-                    text(f"COMMENT ON TABLE audit_log IS '{_COLLECTION_OWNERSHIP_MARKER}'")
-                )
+    async with (
+        _throwaway_database() as db_url,
+        _borrowed_engine_adapter(monkeypatch, db_url) as (adapter, relational),
+    ):
+        async with relational.engine.begin() as connection:
+            await connection.execute(
+                text("CREATE TABLE audit_log (id uuid PRIMARY KEY, message text)")
+            )
+            await connection.execute(
+                text(f"COMMENT ON TABLE audit_log IS '{_COLLECTION_OWNERSHIP_MARKER}'")
+            )
 
-            await adapter.prune()
+        await adapter.prune()
 
-            assert "audit_log" in await _table_names(relational.engine)
+        assert "audit_log" in await _table_names(relational.engine)
 
 
 @pytest.mark.asyncio
@@ -329,20 +339,22 @@ async def test_prune_borrowed_engine_leaves_unmarked_collection_in_place(monkeyp
     A collection written by a cognee older than the marker carries no proof, so
     prune leaves it rather than guess.
     """
-    async with _throwaway_database() as db_url:
-        async with _borrowed_engine_adapter(monkeypatch, db_url) as (adapter, relational):
-            await adapter.create_collection("Entity_name")
-            async with relational.engine.begin() as connection:
-                await connection.execute(text('COMMENT ON TABLE "Entity_name" IS NULL'))
+    async with (
+        _throwaway_database() as db_url,
+        _borrowed_engine_adapter(monkeypatch, db_url) as (adapter, relational),
+    ):
+        await adapter.create_collection("Entity_name")
+        async with relational.engine.begin() as connection:
+            await connection.execute(text('COMMENT ON TABLE "Entity_name" IS NULL'))
 
-            async with adapter.engine.begin() as connection:
-                _, owned, unproven = await adapter._classify_schema_tables(connection)
-            assert owned == []
-            assert unproven == ["Entity_name"]
+        async with adapter.engine.begin() as connection:
+            _, owned, unproven = await adapter._classify_schema_tables(connection)
+        assert owned == []
+        assert unproven == ["Entity_name"]
 
-            await adapter.prune()
+        await adapter.prune()
 
-            assert "Entity_name" in await _table_names(relational.engine)
+        assert "Entity_name" in await _table_names(relational.engine)
 
 
 @pytest.mark.asyncio
@@ -353,29 +365,29 @@ async def test_create_collection_backfills_marker_on_pre_marker_table(monkeypatc
     Failing closed would otherwise strand every collection created before the
     marker existed.
     """
-    async with _throwaway_database() as db_url:
-        async with _borrowed_engine_adapter(monkeypatch, db_url) as (adapter, relational):
-            # A collection exactly as a pre-marker cognee left it: right shape,
-            # right name, no ownership comment.
-            async with relational.engine.begin() as connection:
-                await connection.execute(
-                    text(
-                        'CREATE TABLE "Entity_name" '
-                        "(id uuid PRIMARY KEY, payload json, vector vector(4))"
-                    )
+    async with (
+        _throwaway_database() as db_url,
+        _borrowed_engine_adapter(monkeypatch, db_url) as (adapter, relational),
+    ):
+        # A collection exactly as a pre-marker cognee left it: right shape,
+        # right name, no ownership comment.
+        async with relational.engine.begin() as connection:
+            await connection.execute(
+                text(
+                    'CREATE TABLE "Entity_name" '
+                    "(id uuid PRIMARY KEY, payload json, vector vector(4))"
                 )
-                await connection.execute(
-                    text(
-                        "CREATE TABLE user_embeddings (id uuid PRIMARY KEY, payload json, vector vector(4))"
-                    )
-                )
-
-            await adapter.create_collection("Entity_name")
-
-            await adapter.prune()
-
-            after = await _table_names(relational.engine)
-            assert "Entity_name" not in after, "the reopened collection must be claimed and dropped"
-            assert "user_embeddings" in after, (
-                "the backfill must not claim tables cognee never opened"
             )
+            await connection.execute(
+                text(
+                    "CREATE TABLE user_embeddings (id uuid PRIMARY KEY, payload json, vector vector(4))"
+                )
+            )
+
+        await adapter.create_collection("Entity_name")
+
+        await adapter.prune()
+
+        after = await _table_names(relational.engine)
+        assert "Entity_name" not in after, "the reopened collection must be claimed and dropped"
+        assert "user_embeddings" in after, "the backfill must not claim tables cognee never opened"

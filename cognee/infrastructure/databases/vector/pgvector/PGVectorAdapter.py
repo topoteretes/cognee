@@ -906,7 +906,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             async with self.engine.begin() as connection:
                 await self._mark_collection_owned(connection, collection_name)
             self._marked_collections.add(collection_name)
-        except Exception as error:
+        except exc.SQLAlchemyError as error:
             logger.debug(
                 "Could not stamp the ownership marker on collection '%s'; prune() will leave it in place: %s",
                 collection_name,
@@ -997,6 +997,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         in a shared schema, guessing wrong costs someone else their data.
         """
         self._metadata.clear()
+        self._marked_collections.clear()
 
         if self._owns_engine:
             await self.delete_database()
@@ -1025,8 +1026,6 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             )
             for table_name in owned:
                 await connection.execute(text(f'DROP TABLE IF EXISTS "{table_name}" CASCADE'))
-
-        self._marked_collections.clear()
 
     async def run_migrations(self):
         """Run PGVector adapter migrations (currently no-op)."""
