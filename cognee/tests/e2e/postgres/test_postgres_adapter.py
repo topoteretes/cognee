@@ -135,6 +135,26 @@ async def test_add_nodes_upsert(adapter):
 
 
 @pytest.mark.asyncio
+async def test_add_nodes_merges_node_set_tags_on_upsert(adapter):
+    """A node written again from another node set keeps both tags (SDK-801)."""
+    await adapter.add_nodes([_FakeDataPoint(id="t1", name="A", type="T", belongs_to_set=["hr"])])
+    await adapter.add_nodes(
+        [_FakeDataPoint(id="t1", name="A", type="T", belongs_to_set=["tickets", "hr"])]
+    )
+
+    assert sorted((await adapter.get_node("t1"))["belongs_to_set"]) == ["hr", "tickets"]
+
+
+@pytest.mark.asyncio
+async def test_add_nodes_keeps_stored_node_set_tags_when_the_write_has_none(adapter):
+    await adapter.add_nodes([_FakeDataPoint(id="t2", name="A", type="T", belongs_to_set=["hr"])])
+    await adapter.add_nodes([_FakeDataPoint(id="t2", name="B", type="T")])
+
+    node = await adapter.get_node("t2")
+    assert (node["name"], node["belongs_to_set"]) == ("B", ["hr"])
+
+
+@pytest.mark.asyncio
 async def test_duplicate_nodes_and_edges_use_the_last_value(adapter):
     await adapter.add_nodes(
         [

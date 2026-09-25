@@ -84,6 +84,43 @@ def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
             _stamp_provenance_deep(item, pipeline_name, task_name, visited)
 
 
+def _node_set_key(node_set) -> str:
+    """Identity of a ``belongs_to_set`` entry, which is a NodeSet DataPoint or a bare name."""
+    return node_set if isinstance(node_set, str) else getattr(node_set, "name", str(node_set))
+
+
+def _tag_custom_nodes_with_chunk_node_sets(
+    data_chunks: list[DocumentChunk],
+    stored_per_chunk: list[list[DataPoint]],
+) -> None:
+    """Give every stored node of a custom graph the node sets of the chunks it came from.
+
+    The KnowledgeGraph path copies ``chunk.belongs_to_set`` onto each Entity it builds;
+    custom graph models are stored as extracted, so without this their nodes carry no
+    node set and a node-set-filtered search, which reads the NodeSet's 1-hop
+    neighbours, never reaches them.
+
+    Tags are merged per node id across the whole batch before any are assigned: the
+    storage walk keeps only the first object it meets for an id, so a node extracted
+    from chunks with different node sets must carry the union on every copy.
+    """
+    if not any(chunk.belongs_to_set for chunk in data_chunks):
+        return
+
+    node_sets_by_id: dict[str, dict[str, object]] = {}
+    for chunk, stored in zip(data_chunks, stored_per_chunk):
+        for data_point in stored:
+            merged = node_sets_by_id.setdefault(str(data_point.id), {})
+            for node_set in (data_point.belongs_to_set or []) + (chunk.belongs_to_set or []):
+                merged.setdefault(_node_set_key(node_set), node_set)
+
+    for stored in stored_per_chunk:
+        for data_point in stored:
+            merged = node_sets_by_id[str(data_point.id)]
+            if merged:
+                data_point.belongs_to_set = list(merged.values())
+
+
 async def integrate_chunk_graphs(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list,
@@ -134,11 +171,20 @@ async def integrate_chunk_graphs(
         raise InvalidOntologyAdapterError(type(ontology_resolver).__name__)
 
     if not issubclass(graph_model, KnowledgeGraph):
+        # Collected before tagging: once tagged, the walk would also reach the NodeSets.
+        needs_walk = chunk_attachment == "all" or any(chunk.belongs_to_set for chunk in data_chunks)
+        stored_per_chunk = [
+            await collect_stored_data_points(chunk_graph)
+            if needs_walk and isinstance(chunk_graph, DataPoint)
+            else []
+            for chunk_graph in chunk_graphs
+        ]
+        _tag_custom_nodes_with_chunk_node_sets(data_chunks, stored_per_chunk)
         for chunk_index, chunk_graph in enumerate(chunk_graphs):
             if chunk_attachment == "all" and isinstance(chunk_graph, DataPoint):
                 # The field name supplies the "contains" relationship, and the shared
                 # edge-text policy fills the label - no Edge wrapper needed here.
-                data_chunks[chunk_index].contains = await collect_stored_data_points(chunk_graph)
+                data_chunks[chunk_index].contains = stored_per_chunk[chunk_index]
             else:
                 data_chunks[chunk_index].contains = chunk_graph
 

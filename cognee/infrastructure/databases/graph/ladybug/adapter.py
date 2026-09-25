@@ -83,6 +83,18 @@ PROVENANCE_COLUMNS = (
 )
 
 
+def _union_belongs_to_set(*tag_lists) -> list | None:
+    """Order-preserving union of ``belongs_to_set`` arrays; None when every input is empty."""
+    merged: dict[str, Any] = {}
+    for tags in tag_lists:
+        if not isinstance(tags, list):
+            continue
+        for tag in tags:
+            key = tag if isinstance(tag, str) else json.dumps(tag, sort_keys=True, cls=JSONEncoder)
+            merged.setdefault(key, tag)
+    return list(merged.values()) or None
+
+
 def _provenance_fold_clause(alias: str, row: str | None = None) -> str:
     """Cypher ``SET`` fragment that stamps provenance inside the artifact write.
 
@@ -1130,6 +1142,35 @@ class LadybugAdapter(GraphDBInterface):
             logger.error(f"Failed to add node: {e}")
             raise
 
+    async def _merge_stored_belongs_to_set(self, node_params: list[dict]) -> None:
+        """Union each row's belongs_to_set with the stored node's, then serialize its properties.
+
+        The MERGE replaces the whole properties blob, so without this a node written
+        again from another node set would keep only the newest tag. Neo4j, LanceDB and
+        PGVector already merge the same way. Duplicate ids in one batch all get the
+        union of every copy. Callers hold ``_source_ref_change_lock``.
+        """
+        rows = await self.query(
+            "UNWIND $ids AS nid MATCH (n:Node {id: nid}) RETURN n.id, n.properties",
+            {"ids": list({row["id"] for row in node_params})},
+        )
+        tags_by_id: dict[str, list | None] = {}
+        for node_id, raw_properties in rows:
+            try:
+                stored = json.loads(raw_properties) if raw_properties else {}
+            except json.JSONDecodeError:
+                stored = {}
+            tags_by_id[node_id] = stored.get("belongs_to_set")
+        for row in node_params:
+            tags_by_id[row["id"]] = _union_belongs_to_set(
+                tags_by_id.get(row["id"]), row["properties"].get("belongs_to_set")
+            )
+        for row in node_params:
+            properties = row["properties"]
+            if tags_by_id[row["id"]] is not None:
+                properties["belongs_to_set"] = tags_by_id[row["id"]]
+            row["properties"] = json.dumps(properties, cls=JSONEncoder)
+
     async def add_nodes(
         self,
         nodes: list[DataPoint],
@@ -1187,7 +1228,8 @@ class LadybugAdapter(GraphDBInterface):
                 node_params.append(
                     {
                         **core_properties,
-                        "properties": json.dumps(properties, cls=JSONEncoder),
+                        # Serialized once the stored belongs_to_set is merged in.
+                        "properties": properties,
                         "created_at": now,
                         "updated_at": now,
                         # KeyError on a missing id is deliberate: a partial
@@ -1234,10 +1276,12 @@ class LadybugAdapter(GraphDBInterface):
                 # documents of one cognify run wrote a shared entity
                 # concurrently. Folds take the same lock; query() takes the
                 # engine lock inside it, the same order attach/remove use.
-                folds_provenance = per_row_refs or source_ref_key is not None
-                async with self._source_ref_change_lock if folds_provenance else nullcontext():
+                # The belongs_to_set merge below is a read-then-write too, so
+                # every write takes the lock, folded or not.
+                async with self._source_ref_change_lock:
                     for start in range(0, total, _WRITE_CHUNK_SIZE):
                         chunk = node_params[start : start + _WRITE_CHUNK_SIZE]
+                        await self._merge_stored_belongs_to_set(chunk)
                         await self.query(merge_query, {"nodes": chunk, **extra_params})
                         if total > _WRITE_CHUNK_SIZE:
                             logger.info("Merged nodes %d/%d", start + len(chunk), total)

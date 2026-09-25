@@ -65,6 +65,15 @@ def _prepare_node_rows(
         extra = {
             key: value for key, value in properties.items() if key not in {"id", "name", "type"}
         }
+        # Deduplication keeps the last copy; carry every copy's node-set tags onto it.
+        earlier = rows_by_id.get(node_id)
+        if earlier is not None:
+            earlier_tags = json.loads(earlier["properties"]).get("belongs_to_set") or []
+            incoming_tags = extra.get("belongs_to_set") or []
+            if earlier_tags:
+                extra["belongs_to_set"] = list(earlier_tags) + [
+                    tag for tag in incoming_tags if tag not in earlier_tags
+                ]
         rows_by_id[node_id] = {
             "id": node_id,
             "name": sanitize_relational_payload(str(properties.get("name", ""))),
@@ -362,14 +371,35 @@ class PostgresDemoAdapter(GraphDBInterface):
 
         rows = _prepare_node_rows(nodes)
         # Provenance columns are absent here on purpose: a rewrite without a
-        # source ref must not erase existing ownership.
+        # source ref must not erase existing ownership. belongs_to_set is the
+        # union of the stored and incoming arrays, so a node written again from
+        # another node set keeps both tags (Neo4j and PGVector merge the same way).
         upsert = text("""
             INSERT INTO graph_node (id, name, type, properties, created_at, updated_at)
             VALUES (:id, :name, :type, CAST(:properties AS jsonb), now(), now())
             ON CONFLICT (id) DO UPDATE SET
                 name = EXCLUDED.name,
                 type = EXCLUDED.type,
-                properties = EXCLUDED.properties,
+                properties = CASE
+                    WHEN jsonb_typeof(graph_node.properties -> 'belongs_to_set') = 'array'
+                    THEN jsonb_set(
+                        EXCLUDED.properties,
+                        '{belongs_to_set}',
+                        (
+                            SELECT COALESCE(jsonb_agg(DISTINCT tag), '[]'::jsonb)
+                            FROM jsonb_array_elements(
+                                graph_node.properties -> 'belongs_to_set'
+                                || CASE
+                                    WHEN jsonb_typeof(EXCLUDED.properties -> 'belongs_to_set')
+                                        = 'array'
+                                    THEN EXCLUDED.properties -> 'belongs_to_set'
+                                    ELSE '[]'::jsonb
+                                END
+                            ) AS tag
+                        )
+                    )
+                    ELSE EXCLUDED.properties
+                END,
                 updated_at = now()
         """)
         async with self._write_session() as session:

@@ -564,3 +564,91 @@ async def test_chunk_attachment_reaches_integration_by_keyword_only(
     assert mock_integrate.await_args.kwargs["chunk_attachment"] == "all"
     # It must never reach the LLM call, which swallows unknown kwargs silently.
     assert "chunk_attachment" not in mock_extract.await_args.kwargs
+
+
+# --- node sets on custom graph models (SDK-801) ---------------------------------
+
+from cognee.modules.engine.models.node_set import NodeSet  # noqa: E402
+
+
+def _node_set(name):
+    return NodeSet(id=NodeSet.id_for(name), name=name)
+
+
+def _tag_names(data_point):
+    return sorted(tag.name for tag in data_point.belongs_to_set or [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("attachment", [None, "all"])
+async def test_custom_model_nodes_inherit_the_chunk_node_set(attachment):
+    graph, (alice, bob, biking, basketball) = _directory_fixture(_Directory)
+    chunk = _AttachmentChunk(text="Alice likes biking.", belongs_to_set=[_node_set("hr")])
+
+    await integrate_chunk_graphs(
+        [chunk], [graph], _Directory, _mock_resolver(), chunk_attachment=attachment
+    )
+
+    for data_point in (graph, alice, bob, biking, basketball):
+        assert _tag_names(data_point) == ["hr"]
+
+
+@pytest.mark.asyncio
+async def test_custom_model_nodes_link_to_their_node_set_in_the_stored_graph():
+    graph, (alice, _, biking, _) = _directory_fixture(_Directory)
+    hr = _node_set("hr")
+    chunk = _AttachmentChunk(text="Alice likes biking.", belongs_to_set=[hr])
+
+    await integrate_chunk_graphs([chunk], [graph], _Directory, _mock_resolver())
+    nodes, edges = await get_graph_from_model(chunk)
+
+    tagged = {str(source) for source, target, name, _ in edges if name == "belongs_to_set"}
+    assert {str(alice.id), str(biking.id)} <= tagged
+    stored_alice = next(node for node in nodes if str(node.id) == str(alice.id))
+    assert stored_alice.belongs_to_set == ["hr"]
+    assert all(
+        str(target) == str(hr.id) for _, target, name, _ in edges if name == "belongs_to_set"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_node_extracted_under_two_node_sets_carries_both_on_every_copy():
+    # Two chunks, two extractions, one identity: each copy of Alice must hold both
+    # tags, because storage keeps whichever copy it meets first.
+    first, (alice_one, *_) = _directory_fixture(_Directory)
+    second, (alice_two, *_) = _directory_fixture(_Directory)
+    assert alice_one is not alice_two and alice_one.id == alice_two.id
+    chunks = [
+        _AttachmentChunk(text="one", belongs_to_set=[_node_set("hr")]),
+        _AttachmentChunk(text="two", belongs_to_set=[_node_set("tickets")]),
+    ]
+
+    await integrate_chunk_graphs(chunks, [first, second], _Directory, _mock_resolver())
+
+    assert _tag_names(alice_one) == ["hr", "tickets"]
+    assert _tag_names(alice_two) == ["hr", "tickets"]
+
+
+@pytest.mark.asyncio
+async def test_custom_model_nodes_stay_untagged_without_a_node_set():
+    graph, (alice, _, biking, _) = _directory_fixture(_Directory)
+    chunk = _AttachmentChunk(text="Alice likes biking.")
+
+    await integrate_chunk_graphs([chunk], [graph], _Directory, _mock_resolver())
+    _, edges = await get_graph_from_model(chunk)
+
+    assert alice.belongs_to_set is None and biking.belongs_to_set is None
+    assert not [edge for edge in edges if edge[2] == "belongs_to_set"]
+
+
+@pytest.mark.asyncio
+async def test_all_attachment_does_not_link_the_chunk_to_its_node_set():
+    graph, _ = _directory_fixture(_Directory)
+    hr = _node_set("hr")
+    chunk = _AttachmentChunk(text="Alice likes biking.", belongs_to_set=[hr])
+
+    await integrate_chunk_graphs(
+        [chunk], [graph], _Directory, _mock_resolver(), chunk_attachment="all"
+    )
+
+    assert str(hr.id) not in {str(node.id) for node in chunk.contains}

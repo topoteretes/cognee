@@ -3,6 +3,8 @@ the subprocess engine's per-call deadline on large graphs (COG: ladybug
 ingestion of e.g. 30k-fact code graphs previously sent one statement for all
 rows and could never finish)."""
 
+import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -18,7 +20,13 @@ def _adapter_with_mocked_writes():
     adapter = object.__new__(LadybugAdapter)
     adapter.query = AsyncMock(return_value=[])
     adapter.checkpoint = AsyncMock()
+    adapter._source_ref_change_lock = asyncio.Lock()
     return adapter
+
+
+def _node_writes(adapter):
+    """The MERGE calls of add_nodes, without the belongs_to_set reads before each one."""
+    return [call for call in adapter.query.await_args_list if "nodes" in call.args[1]]
 
 
 def _fake_nodes(count):
@@ -38,8 +46,7 @@ async def test_add_nodes_chunks_large_batches():
 
     await adapter.add_nodes(_fake_nodes(total))
 
-    assert adapter.query.await_count == 3
-    chunk_sizes = [len(call.args[1]["nodes"]) for call in adapter.query.await_args_list]
+    chunk_sizes = [len(call.args[1]["nodes"]) for call in _node_writes(adapter)]
     assert chunk_sizes == [_WRITE_CHUNK_SIZE, _WRITE_CHUNK_SIZE, 1]
     adapter.checkpoint.assert_awaited_once()
 
@@ -50,7 +57,7 @@ async def test_add_nodes_small_batch_is_single_statement():
 
     await adapter.add_nodes(_fake_nodes(5))
 
-    assert adapter.query.await_count == 1
+    assert len(_node_writes(adapter)) == 1
 
 
 @pytest.mark.asyncio
@@ -189,3 +196,81 @@ async def test_node_delete_data_and_provenance_chunk_by_id_seek():
     await adapter._write_node_provenance(batch)
     assert adapter.query.await_count == 2
     assert "MATCH (n:Node {id: row.id})" in adapter.query.await_args_list[0].args[0]
+
+
+# --- belongs_to_set merge on node upsert (SDK-801) ------------------------------
+
+
+def _tagged_node(node_id, tags):
+    return SimpleNamespace(id=node_id, name=node_id, type="Node", belongs_to_set=tags)
+
+
+def _adapter_with_stored_tags(stored):
+    """An adapter whose read returns ``stored`` ({id: belongs_to_set}) for the merge."""
+    adapter = _adapter_with_mocked_writes()
+
+    async def query(statement, params=None):
+        if params and "ids" in params:
+            return [
+                [node_id, json.dumps({"belongs_to_set": stored[node_id]})]
+                for node_id in params["ids"]
+                if node_id in stored
+            ]
+        return []
+
+    adapter.query = AsyncMock(side_effect=query)
+    return adapter
+
+
+def _written_tags(adapter):
+    return {
+        row["id"]: json.loads(row["properties"]).get("belongs_to_set")
+        for call in _node_writes(adapter)
+        for row in call.args[1]["nodes"]
+    }
+
+
+@pytest.mark.asyncio
+async def test_add_nodes_merges_incoming_tags_with_the_stored_ones():
+    adapter = _adapter_with_stored_tags({"alice": ["hr"]})
+
+    await adapter.add_nodes([_tagged_node("alice", ["tickets"])])
+
+    assert _written_tags(adapter) == {"alice": ["hr", "tickets"]}
+
+
+@pytest.mark.asyncio
+async def test_add_nodes_keeps_stored_tags_when_the_write_carries_none():
+    adapter = _adapter_with_stored_tags({"alice": ["hr"]})
+
+    await adapter.add_nodes([_tagged_node("alice", None)])
+
+    assert _written_tags(adapter) == {"alice": ["hr"]}
+
+
+@pytest.mark.asyncio
+async def test_add_nodes_unions_tags_of_duplicate_ids_in_one_batch():
+    adapter = _adapter_with_stored_tags({})
+
+    await adapter.add_nodes([_tagged_node("alice", ["hr"]), _tagged_node("alice", ["docs"])])
+
+    assert _written_tags(adapter) == {"alice": ["hr", "docs"]}
+
+
+@pytest.mark.asyncio
+async def test_add_nodes_leaves_untagged_new_nodes_untagged():
+    adapter = _adapter_with_stored_tags({})
+
+    await adapter.add_nodes([_tagged_node("alice", None)])
+
+    assert _written_tags(adapter) == {"alice": None}
+
+
+@pytest.mark.asyncio
+async def test_add_nodes_reads_stored_tags_by_id_seek():
+    adapter = _adapter_with_stored_tags({})
+
+    await adapter.add_nodes([_tagged_node("alice", ["hr"])])
+
+    read = adapter.query.await_args_list[0].args[0]
+    assert "MATCH (n:Node {id: nid})" in read

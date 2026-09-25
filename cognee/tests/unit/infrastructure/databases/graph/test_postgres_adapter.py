@@ -74,6 +74,17 @@ def test_prepare_node_rows_keeps_the_last_duplicate_and_sorts_by_id():
     assert [row["name"] for row in rows] == ["only", "last"]
 
 
+def test_prepare_node_rows_unions_node_set_tags_of_duplicates():
+    rows = _prepare_node_rows(
+        [
+            ("alice", {"name": "Alice", "belongs_to_set": ["hr"]}),
+            ("alice", {"name": "Alice", "belongs_to_set": ["docs", "hr"]}),
+        ]
+    )
+
+    assert [_stored_properties(row)["belongs_to_set"] for row in rows] == [["hr", "docs"]]
+
+
 def test_prepare_node_rows_strips_nul_bytes_from_columns_and_nested_values():
     (row,) = _prepare_node_rows(
         [("i\0d", {"name": "na\0me", "type": "t\0", "nested": {"k\0": ["v\0"]}})]
