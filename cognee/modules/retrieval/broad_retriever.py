@@ -217,6 +217,8 @@ class CountResult:
     tokens_read: int = 0
     # For the table method: the query code evaluated over the parsed rows.
     table_query: TableQuery | None = None
+    # What part of the corpus the count covered, when not all of it.
+    scope: str = ""
 
 
 def _read_prompt(name: str) -> str:
@@ -317,20 +319,21 @@ def _document_texts(units: list[Unit]) -> list[str] | None:
     return ["".join(parts) for parts in texts.values()]
 
 
-def _table_of(units: list[Unit]) -> Table | None:
-    """The corpus as one table, when every document in it is delimited records or JSON
-    records with the same columns; None otherwise (prose, mixed documents, DLT rows)."""
+def _table_of(units: list[Unit]) -> tuple[Table | None, int]:
+    """The corpus's records as one table, and how many documents it leaves out.
+
+    Every document that is delimited or JSON records with the same columns joins the
+    table; the question is offered to it even when other documents are prose, and the
+    answer then says the count covered the table only. None when no document is a table,
+    when tables disagree on their columns, or for DLT rows."""
     texts = _document_texts(units)
     if texts is None:
-        return None
-    tables = [parse_table(text) for text in texts]
-    if any(table is None for table in tables):
-        return None
-    first = tables[0]
-    assert first is not None
-    if any(table is None or table.columns != first.columns for table in tables):
-        return None
-    return Table(columns=first.columns, rows=[row for t in tables if t for row in t.rows])
+        return None, 0
+    tables = [table for table in map(parse_table, texts) if table is not None]
+    if not tables or any(table.columns != tables[0].columns for table in tables):
+        return None, 0
+    rows = [row for table in tables for row in table.rows]
+    return Table(columns=tables[0].columns, rows=rows), len(texts) - len(tables)
 
 
 def _groups_are_keys(items: list[ExtractedItem]) -> bool:
@@ -568,7 +571,8 @@ def _provenance_note(result: CountResult) -> str:
     """One line saying how a reading count was obtained, stated by code in every answer: a
     reading count is exact over what was found, and reading can miss or repeat an item."""
     if result.method == "table":
-        return f"(Counted by code over all {result.units} records in the documents.)"
+        scope = f"; {result.scope}" if result.scope else ""
+        return f"(Counted by code over all {result.units} records in the documents{scope}.)"
     if result.method != "reading":
         return ""
     note = (
@@ -635,9 +639,14 @@ class BroadRetriever(CompletionRetriever):
         elif plan.literal_terms and not (plan.condition or plan.group_by or plan.measure):
             result = self.count_words(plan, units)
         else:
-            table = _table_of(units)
+            table, others = _table_of(units)
             if table is not None:
                 result = await self.count_table(query, plan, table)
+                if result is not None and others:
+                    result.scope = (
+                        f"only the table in the documents; {others} other documents "
+                        "(not tables) were not counted"
+                    )
             else:
                 texts = _document_texts(units)
                 shaped = shaped_lines("\n".join(texts)) if texts else None

@@ -31,6 +31,8 @@ TABLE_VALUE_CHARS = 60
 TABLE_SAMPLE_ROWS = 3
 # Joins the values of a cell that holds several (a JSON list, a line naming three blocks).
 MULTI = "\x1f"
+# A nested JSON object with more keys than this is a map (names to versions), not fields.
+MAP_MIN_KEYS = 12
 
 
 @dataclass
@@ -96,24 +98,71 @@ def _json_table(text: str) -> Table | None:
             data = [json.loads(line) for line in stripped.splitlines() if line.strip()]
         except ValueError:
             return None
-    if isinstance(data, dict):
-        lists = [value for value in data.values() if isinstance(value, list)]
-        data = lists[0] if len(lists) == 1 else None
-    if not isinstance(data, list) or len(data) < TABLE_MIN_ROWS:
+    records = _json_records(data)
+    if records is None:
         return None
-    if not all(isinstance(record, dict) for record in data):
-        return None
-    records = [_flatten(record) for record in data]
     columns = list(dict.fromkeys(key for record in records for key in record))
     return Table(columns=columns, rows=[[record.get(c, "") for c in columns] for record in records])
 
 
-def _flatten(record: dict, prefix: str = "") -> dict[str, str]:
+def _json_records(data: object) -> list[dict[str, str]] | None:
+    """The records a JSON value holds: a list of objects, or a map of objects keyed by an
+    id (a lockfile's packages, an API's paths), at the top or under one field; the largest
+    such collection wins. A map's key becomes the record's "key" field."""
+    candidates: list[list[dict]] = []
+
+    def consider(value: object) -> None:
+        if isinstance(value, list) and value and all(isinstance(v, dict) for v in value):
+            candidates.append(value)
+        elif (
+            isinstance(value, dict)
+            and len(value) >= TABLE_MIN_ROWS
+            and all(isinstance(v, dict) for v in value.values())
+        ):
+            candidates.append([{"key": str(k), **v} for k, v in value.items()])
+
+    consider(data)
+    if isinstance(data, dict):
+        for value in data.values():
+            consider(value)
+    if not candidates:
+        return None
+    largest = max(candidates, key=len)
+    if len(largest) < TABLE_MIN_ROWS:
+        return None
+    maps = _map_fields(largest)
+    return [_flatten(record, maps=maps) for record in largest]
+
+
+def _map_fields(records: list[dict]) -> set[str]:
+    """Nested objects that are maps, not structures: their keys differ from record to
+    record ("dependencies": {"@mantine/core": ..., ...}). A map is kept as its list of
+    keys; a structure ("author": {"login": ...}) is flattened into fields."""
+    keys: dict[str, list[set[str]]] = {}
+    for record in records:
+        for name, value in record.items():
+            if isinstance(value, dict):
+                keys.setdefault(name, []).append(set(value))
+    maps = set()
+    for name, key_sets in keys.items():
+        distinct = len(set().union(*key_sets))
+        typical = max(1, sum(len(k) for k in key_sets) / len(key_sets))
+        # Keys that vary from record to record make a map. A field on too few records to
+        # compare is a map when it has more keys than a structure has fields.
+        varied = distinct > 3 * typical
+        if varied if len(key_sets) >= 3 else typical > MAP_MIN_KEYS:
+            maps.add(name)
+    return maps
+
+
+def _flatten(record: dict, prefix: str = "", maps: set[str] | None = None) -> dict[str, str]:
     flat: dict[str, str] = {}
     for key, value in record.items():
         name = f"{prefix}{key}"
-        if isinstance(value, dict):
-            flat.update(_flatten(value, f"{name}."))
+        if isinstance(value, dict) and maps and name in maps:
+            flat[name] = MULTI.join(str(k) for k in value)
+        elif isinstance(value, dict):
+            flat.update(_flatten(value, f"{name}.", maps))
         elif isinstance(value, list):
             flat[name] = MULTI.join(
                 json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else _text(v)
@@ -329,6 +378,10 @@ def render_row(table: Table, row: list[str]) -> str:
 # the model cover this share of lines; prose has about one shape per line.
 SHAPE_MIN_COMPRESSION = 5
 SHAPE_MIN_COVERAGE = 0.9
+# Lines that begin alike (a timestamp, a host, a level) and end in free text (a log
+# message) are records too: their first two masked tokens repeat this many times over.
+# Prose measures at most 2 here.
+SHAPE_MIN_PREFIX_COMPRESSION = 20
 # Shapes shown to the model at most, commonest first.
 SHAPE_MAX_SHOWN = 300
 
@@ -352,7 +405,9 @@ _SLOT = re.compile(
             (
                 "date",
                 (
-                    rf"\b\d{{4}}-\d{{2}}-\d{{2}}\b|\b\d{{1,2}}/\d{{1,2}}/\d{{2,4}}\b"
+                    # An ISO timestamp is one value: 2026-09-25T19:52:32.908Z.
+                    r"\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?"
+                    rf"|\b\d{{4}}-\d{{2}}-\d{{2}}\b|\b\d{{1,2}}/\d{{1,2}}/\d{{2,4}}\b"
                     rf"|\b\d{{1,2}} {_MONTH} \d{{4}}\b|\b(?:{_WEEKDAY} +)?{_MONTH} +\d{{1,2}}\b"
                 ),
             ),
@@ -404,19 +459,20 @@ def shape_of(text: str) -> Line:
 
 
 def shaped_lines(text: str) -> tuple[list[Line], list[str]] | None:
-    """Every non-empty line with its shape, and the shapes to label (commonest first);
-    None when the lines are not records (too many shapes for the lines)."""
+    """Every non-empty line with its shape, and the shapes to show (commonest first);
+    None when the lines are not records."""
     lines = [shape_of(line) for line in text.splitlines() if line.strip()]
     if len(lines) < TABLE_MIN_ROWS:
         return None
     counts = Counter(line.shape for line in lines)
-    if len(lines) < SHAPE_MIN_COMPRESSION * len(counts):
-        return None
     shapes = [shape for shape, _ in counts.most_common(SHAPE_MAX_SHOWN)]
-    covered = sum(counts[shape] for shape in shapes)
-    if covered < SHAPE_MIN_COVERAGE * len(lines):
-        return None
-    return lines, shapes
+    whole = len(lines) >= SHAPE_MIN_COMPRESSION * len(counts) and sum(
+        counts[shape] for shape in shapes
+    ) >= SHAPE_MIN_COVERAGE * len(lines)
+    prefixes = {" ".join(line.shape.split()[:2]) for line in lines}
+    if whole or len(lines) >= SHAPE_MIN_PREFIX_COMPRESSION * len(prefixes):
+        return lines, shapes
+    return None
 
 
 class LineQuery(BaseModel):

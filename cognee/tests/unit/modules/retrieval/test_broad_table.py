@@ -106,7 +106,7 @@ def test_a_column_the_table_lacks_raises():
         run_query(table, TableQuery(answerable=True, group_by="author"))
 
 
-def test_a_corpus_is_a_table_only_when_every_document_is_one():
+def test_the_tables_in_a_corpus_are_offered_even_beside_prose():
     text = _csv(30)
     half = len(text) // 2
     cut = half  # chunks cut mid-record, as the chunker does
@@ -117,9 +117,13 @@ def test_a_corpus_is_a_table_only_when_every_document_is_one():
 
     prose = Unit(id="c3", text="A long narrative with no records at all.", document="d2")
 
-    assert _table_of(chunks) is not None and len(_table_of(chunks).rows) == 30
-    assert _table_of([*chunks, prose]) is None
-    assert _table_of([Unit(id="r1", text="a,b,c")]) is None  # a DLT row has no document
+    whole, left_out = _table_of(chunks)
+    mixed, beside = _table_of([*chunks, prose])
+
+    assert whole is not None and len(whole.rows) == 30 and left_out == 0
+    assert mixed is not None and len(mixed.rows) == 30 and beside == 1
+    assert _table_of([prose]) == (None, 0)
+    assert _table_of([Unit(id="r1", text="a,b,c")]) == (None, 0)  # a DLT row has no document
 
 
 @pytest.mark.asyncio
@@ -435,3 +439,86 @@ async def test_a_distinct_count_without_a_captured_value_is_retried_not_raised(m
     )
 
     assert result is not None and result.total == 5 and not answers
+
+
+def test_lines_that_begin_alike_are_records_even_when_their_messages_vary():
+    """A log whose messages are free text still starts every line with a timestamp and a
+    host; prose does not start its lines alike."""
+    import random
+
+    from cognee.modules.retrieval.broad_table import shaped_lines
+
+    rng = random.Random(1)
+    words = ["disk", "fan", "usb", "wifi", "sleep", "wake", "thermal", "battery", "audio", "gpu"]
+    log = "\n".join(
+        f"Jul {i % 28 + 1} 10:{i % 60:02d}:00 host-{i % 3}-7 {rng.choice(words)}d[{i}]: "
+        + " ".join(rng.choice(words) for _ in range(rng.randint(3, 9)))
+        for i in range(200)
+    )
+    prose = "\n".join(
+        " ".join(rng.choice(words + ["the", "a", "we", "then"]) for _ in range(rng.randint(5, 12)))
+        for _ in range(200)
+    )
+
+    assert shaped_lines(log) is not None
+    assert shaped_lines(prose) is None
+
+
+@pytest.mark.asyncio
+async def test_a_count_over_the_table_beside_prose_says_what_it_covered(monkeypatch):
+    async def fake(text_input, system_prompt, response_model, **kwargs):
+        return TableQuery(
+            answerable=True, filters=[TableFilter(column="verdict", op="equals", value="yes")]
+        )
+
+    monkeypatch.setattr(broad_retriever.LLMGateway, "acreate_structured_output", fake)
+    table = parse_table(_csv(30))
+    assert table is not None
+
+    result = await BroadRetriever().count_table("q", CountPlan(source="text", item="x"), table)
+    assert result is not None
+    result.scope = (
+        "only the table in the documents; 1 other documents (not tables) were not counted"
+    )
+
+    assert "1 other documents" in broad_retriever._provenance_note(result)
+
+
+def test_a_json_map_of_records_is_a_table_and_nested_maps_stay_one_field():
+    """A lockfile's packages are keyed by path; each package's dependencies are a map of
+    names, which is one list-valued field, not a column per dependency."""
+    import json
+
+    packages = {
+        f"node_modules/p{i}": {
+            "version": f"1.{i}.0",
+            "dev": i % 3 == 0,
+            "dependencies": {f"d{(i + j) % 20}": "^1" for j in range(i % 4)},
+        }
+        for i in range(30)
+    }
+    table = parse_table(json.dumps({"name": "app", "packages": packages}))
+
+    assert table is not None and len(table.rows) == 30
+    assert table.columns == ["key", "version", "dev", "dependencies"]
+    dev = run_query(
+        table,
+        TableQuery(answerable=True, filters=[TableFilter(column="dev", op="equals", value="true")]),
+    )
+    uses_d2 = run_query(
+        table,
+        TableQuery(
+            answerable=True, filters=[TableFilter(column="dependencies", op="equals", value="d2")]
+        ),
+    )
+    assert dev.total == 10 and uses_d2.total == sum(
+        1 for i in range(30) if any((i + j) % 20 == 2 for j in range(i % 4))
+    )
+
+
+def test_an_iso_timestamp_is_one_value():
+    from cognee.modules.retrieval.broad_table import shape_of
+
+    line = shape_of("2026-09-25T19:52:32.9084314Z step finished")
+
+    assert line.shape == "$ step finished" and line.slots[0][0] == "date"
