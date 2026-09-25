@@ -12,7 +12,7 @@ def single_gliner_inference_thread(monkeypatch):
     install. The concurrent path has its own tests in
     test_gliner_concurrent_inference.py.
     """
-    monkeypatch.setattr(extractor_module, "inference_threads", lambda batch_size=16: 1)
+    monkeypatch.setattr(extractor_module, "inference_threads", lambda *_args, **_kwargs: 1)
     extractor_module.reset_inference_pool()
     yield
     extractor_module.reset_inference_pool()

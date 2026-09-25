@@ -88,6 +88,9 @@ class GlinerOptions:
     batch_size: int = DEFAULT_BATCH_SIZE
     window_words: int = DEFAULT_WINDOW_WORDS
     window_overlap_words: int = DEFAULT_WINDOW_OVERLAP_WORDS
+    # None defers to GLINER_INFERENCE_PROCESSES / GLINER_INFERENCE_THREADS.
+    processes: int | None = None
+    threads: int | None = None
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.threshold <= 1.0:
@@ -96,6 +99,10 @@ class GlinerOptions:
             raise ValueError("batch_size must be >= 1")
         if self.window_words < 1 or not 0 <= self.window_overlap_words < self.window_words:
             raise ValueError("window_overlap_words must be >= 0 and smaller than window_words")
+        if self.processes is not None and self.processes < 1:
+            raise ValueError("processes must be >= 1")
+        if self.threads is not None and self.threads < 0:
+            raise ValueError("threads must be >= 0 (0 sizes it to the machine)")
 
 
 @task_summary("Prepared GLiNER schema for {n} document(s)")
@@ -106,6 +113,8 @@ async def prepare_gliner_schema(
     model_name: str = DEFAULT_MODEL,
     threshold: float = DEFAULT_THRESHOLD,
     chunker=TextChunker,
+    inference_processes: int | None = None,
+    inference_threads: int | None = None,
 ) -> list[Document]:
     """Attach one closed schema to each document before it is chunked."""
     extractor = None
@@ -132,6 +141,8 @@ async def prepare_gliner_schema(
                 extractor,
                 sketch,
                 threshold=threshold,
+                processes=inference_processes,
+                threads=inference_threads,
             )
 
         document._gliner_schema = document_schema
@@ -187,6 +198,9 @@ async def extract_graph_and_summarize_with_gliner(
             batch_size=options.batch_size,
             window_words=options.window_words,
             window_overlap_words=options.window_overlap_words,
+            processes=options.processes,
+            threads=options.threads,
+            model_name=options.model_name,
         )
     if len(results) != len(data_chunks):
         raise RuntimeError(f"GLiNER returned {len(results)} results for {len(data_chunks)} chunks")
@@ -226,8 +240,14 @@ def build_gliner_extraction_task(
     config: Config | None = None,
     chunk_attachment: Literal["direct", "all"] | None = None,
     stats: GlinerRunStats | None = None,
+    inference_processes: int | None = None,
+    inference_threads: int | None = None,
 ) -> Task:
     """Build only the GLiNER extract+summarize ``Task``.
+
+    ``inference_processes`` / ``inference_threads`` set how the model batches
+    are spread for this task; None defers to GLINER_INFERENCE_PROCESSES (1) and
+    GLINER_INFERENCE_THREADS (0, sized to the machine).
 
     This is the task ``get_gliner_demo_tasks`` places fourth and the one
     ``get_gliner_demo_tasks`` places in its extraction step. Raises
@@ -241,6 +261,8 @@ def build_gliner_extraction_task(
         batch_size=gliner_batch_size,
         window_words=window_words,
         window_overlap_words=window_overlap_words,
+        processes=inference_processes,
+        threads=inference_threads,
     )
     return Task(
         extract_graph_and_summarize_with_gliner,
@@ -263,6 +285,8 @@ def build_gliner_schema_task(
     threshold: float = DEFAULT_THRESHOLD,
     max_chunk_size: int,
     chunker=TextChunker,
+    inference_processes: int | None = None,
+    inference_threads: int | None = None,
 ) -> Task:
     """Build the document-level schema preparation task."""
     require_gliner2()
@@ -279,6 +303,8 @@ def build_gliner_schema_task(
         model_name=model_name,
         threshold=threshold,
         chunker=chunker,
+        inference_processes=inference_processes,
+        inference_threads=inference_threads,
         needs_llm=False,
     )
 
@@ -303,6 +329,8 @@ async def get_gliner_demo_tasks(
     check_contradictions: bool = False,
     functional_relationships: Collection[str] | None = None,
     stats: GlinerRunStats | None = None,
+    inference_processes: int | None = None,
+    inference_threads: int | None = None,
 ) -> list[Task]:
     """Build the GLiNER cognify task list.
 
@@ -339,6 +367,8 @@ async def get_gliner_demo_tasks(
         threshold=threshold,
         max_chunk_size=max_chunk_size,
         chunker=chunker,
+        inference_processes=inference_processes,
+        inference_threads=inference_threads,
     )
     extraction_task = build_gliner_extraction_task(
         model_name=model_name,
@@ -350,6 +380,8 @@ async def get_gliner_demo_tasks(
         config=config,
         chunk_attachment=chunk_attachment,
         stats=stats,
+        inference_processes=inference_processes,
+        inference_threads=inference_threads,
     )
 
     tasks = [
