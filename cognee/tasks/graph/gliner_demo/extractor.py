@@ -2,9 +2,21 @@
 
 One extractor per model name is loaded lazily and reused for the process; a
 per-call load would dominate runtime. Inference is synchronous torch, so the
-async helpers run it under ``asyncio.to_thread`` and a process-wide lock keeps
-concurrent pipelines from interleaving calls on the shared model (the runtime
-flips the processor's mode on every call).
+async helpers run it under ``asyncio.to_thread``.
+
+Model batches run concurrently on one shared model. A single forward pass keeps
+only 2-3 cores busy, because DeBERTa's small matrices do not spread across
+torch's intra-op pool, so running several batches at once is what uses the rest
+of the CPU. Torch releases the GIL inside its kernels, so threads run truly in
+parallel without a second copy of the model. A process-wide pool bounds the
+concurrency across every pipeline in the process, which also bounds memory:
+each in-flight batch holds its own activations. With one thread, calls are
+serialized behind a lock as before.
+
+Concurrency never changes the output. The long-text path is reproduced step for
+step (the same windows, the same batches of windows in the same order, the same
+merge), and torch keeps its intra-op thread count, so every batch computes
+bit-identical scores whichever thread runs it.
 
 Texts are extracted with ``batch_extract_long``: cognee chunks are cut against
 the embedding model's token budget and routinely exceed the encoder's 512-token
@@ -21,8 +33,10 @@ import os
 import threading
 import time
 from collections.abc import Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+from cognee.modules.cognify.config import get_cognify_config
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.model_download_notice import log_model_load
 
@@ -55,9 +69,20 @@ class GlinerNotInstalledError(ImportError):
         super().__init__(message)
 
 
+# Sizing the inference pool, from measurements on War and Peace (10-core
+# machine, batch_size 16): throughput peaks when concurrent batches equal half
+# of torch's intra-op thread count, and each concurrent batch of 16 windows
+# holds about 1.7 GB of activations on top of the loaded model.
+CORES_PER_CONCURRENT_BATCH = 2
+BYTES_PER_CONCURRENT_BATCH = 2 * 1024**3  # at DEFAULT_BATCH_SIZE, rounded up
+MEMORY_RESERVE_BYTES = 4 * 1024**3  # left free for the rest of the system
+
 _extractors: dict[str, Any] = {}
 _load_lock = threading.Lock()
 _inference_lock = threading.Lock()
+_pool: ThreadPoolExecutor | None = None
+_pool_size: int | None = None
+_pool_lock = threading.Lock()
 
 
 def require_gliner2() -> None:
@@ -112,6 +137,129 @@ async def get_extractor(model_name: str = DEFAULT_MODEL) -> Any:
     return await asyncio.to_thread(load_extractor, model_name)
 
 
+def auto_inference_threads(batch_size: int = DEFAULT_BATCH_SIZE) -> int:
+    """How many model batches this machine can run at once, at full speed.
+
+    The CPU bound is half of torch's intra-op thread count (torch sizes that to
+    the physical cores). The memory bound keeps every concurrent batch's
+    activations inside currently available memory, less a reserve, so a
+    busy machine gets fewer threads instead of swapping.
+    """
+    import psutil
+    import torch
+
+    cpu_bound = torch.get_num_threads() // CORES_PER_CONCURRENT_BATCH
+    per_batch = BYTES_PER_CONCURRENT_BATCH * batch_size / DEFAULT_BATCH_SIZE
+    spare = psutil.virtual_memory().available - MEMORY_RESERVE_BYTES
+    memory_bound = 1 + int(max(0, spare) // per_batch)
+    return max(1, min(cpu_bound, memory_bound))
+
+
+def inference_threads(batch_size: int = DEFAULT_BATCH_SIZE) -> int:
+    """The configured concurrency (GLINER_INFERENCE_THREADS), auto-sized when 0."""
+    configured = get_cognify_config().gliner_inference_threads
+    if configured < 0:
+        raise ValueError(f"GLINER_INFERENCE_THREADS must be >= 0, got {configured}")
+    return configured or auto_inference_threads(batch_size)
+
+
+def _inference_pool(batch_size: int) -> ThreadPoolExecutor | None:
+    """The process-wide pool that runs model batches, or None for one thread.
+
+    Sized once, on first use, and shared by every pipeline in the process, so
+    concurrent documents queue behind one another instead of multiplying the
+    memory in flight.
+    """
+    global _pool, _pool_size
+    with _pool_lock:
+        if _pool_size is None:
+            _pool_size = inference_threads(batch_size)
+            if _pool_size > 1:
+                _pool = ThreadPoolExecutor(_pool_size, thread_name_prefix="gliner")
+            logger.info("GLiNER inference: %d concurrent model batch(es)", _pool_size)
+        return _pool
+
+
+def reset_inference_pool() -> None:
+    """Shut the pool down so the next call sizes a new one (tests, config changes)."""
+    global _pool, _pool_size
+    with _pool_lock:
+        if _pool is not None:
+            _pool.shutdown(wait=True)
+        _pool, _pool_size = None, None
+
+
+def _extract_long_concurrently(
+    extractor: Any,
+    pool: ThreadPoolExecutor,
+    texts: Sequence[str],
+    built: Any,
+    *,
+    threshold: float,
+    batch_size: int,
+    window_words: int,
+    window_overlap_words: int,
+) -> list[Mapping[str, Any]]:
+    """``batch_extract_long`` with its model batches spread over ``pool``.
+
+    Mirrors the runtime's long-text path step for step: the same split into
+    overlapping word windows, the same batches of ``batch_size`` windows in the
+    same order, the same merge. Only the thread that runs each batch differs.
+    """
+    from gliner2.inference.chunking import merge_chunk_results, split_text_into_chunks
+    from gliner2.processing.word_splitter import word_splitter_from
+
+    splitter = word_splitter_from(extractor)
+    windows = [
+        split_text_into_chunks(
+            text,
+            chunk_size=window_words,
+            chunk_overlap=window_overlap_words,
+            word_splitter=splitter,
+        )
+        for text in texts
+    ]
+    window_texts = [window.text for document in windows for window in document]
+
+    def run_batch(batch: list[str]) -> list[dict[str, Any]]:
+        return extractor.batch_extract(
+            batch,
+            built,
+            batch_size=batch_size,
+            threshold=threshold,
+            num_workers=0,
+            format_results=True,
+            include_confidence=True,
+            include_spans=True,
+            max_len=window_words,
+            overlap_policy=OVERLAP_POLICY,
+        )
+
+    batches = [
+        window_texts[start : start + batch_size]
+        for start in range(0, len(window_texts), batch_size)
+    ]
+    window_results = [result for part in pool.map(run_batch, batches) for result in part]
+
+    merged, offset = [], 0
+    scalar_labels = extractor._scalar_entity_labels(built)
+    overlap_policy = extractor._resolved_overlap_policy(OVERLAP_POLICY)
+    for text, document in zip(texts, windows):
+        merged.append(
+            merge_chunk_results(
+                text,
+                document,
+                window_results[offset : offset + len(document)],
+                include_confidence=True,
+                include_spans=True,
+                scalar_entity_labels=scalar_labels,
+                overlap_policy=overlap_policy,
+            )
+        )
+        offset += len(document)
+    return merged
+
+
 def build_gliner_schema(extractor: Any, schema: GlinerSchema) -> Any:
     """Turn a resolved :class:`GlinerSchema` into the runtime's schema builder."""
     builder = extractor.create_schema()
@@ -139,6 +287,18 @@ def extract_batch(
         return [{} for _ in texts]
 
     built = build_gliner_schema(extractor, schema)
+    pool = _inference_pool(batch_size)
+    if pool is not None:
+        return _extract_long_concurrently(
+            extractor,
+            pool,
+            texts,
+            built,
+            threshold=threshold,
+            batch_size=batch_size,
+            window_words=window_words,
+            window_overlap_words=window_overlap_words,
+        )
     with _inference_lock:
         return extractor.batch_extract_long(
             list(texts),
@@ -165,7 +325,8 @@ def extract_once(
         return {}
 
     built = build_gliner_schema(extractor, schema)
-    with _inference_lock:
+
+    def run() -> Mapping[str, Any]:
         return extractor.extract(
             text,
             built,
@@ -174,6 +335,14 @@ def extract_once(
             include_spans=False,
             overlap_policy=OVERLAP_POLICY,
         )
+
+    # Through the same pool as batch extraction, so a schema probe counts
+    # against the same concurrency (and memory) bound.
+    pool = _inference_pool(DEFAULT_BATCH_SIZE)
+    if pool is not None:
+        return pool.submit(run).result()
+    with _inference_lock:
+        return run()
 
 
 async def extract_batch_async(

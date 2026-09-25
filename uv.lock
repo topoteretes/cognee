@@ -1409,6 +1409,7 @@ evals = [
 gliner = [
     { name = "gliner2", extra = ["local"] },
     { name = "protobuf" },
+    { name = "psutil" },
     { name = "sentencepiece" },
     { name = "torch" },
 ]
@@ -1603,6 +1604,7 @@ requires-dist = [
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.0.1,<5" },
     { name = "protego", marker = "extra == 'scraping'", specifier = ">=0.1" },
     { name = "protobuf", marker = "extra == 'gliner'", specifier = ">=5.29.6" },
+    { name = "psutil", marker = "extra == 'gliner'", specifier = ">=5.9" },
     { name = "psycopg2", marker = "extra == 'postgres'", specifier = ">=2.9.10,<3" },
     { name = "psycopg2-binary", marker = "extra == 'postgres-binary'", specifier = ">=2.9.10,<3.0.0" },
     { name = "pydantic", specifier = ">=2.10.5" },
