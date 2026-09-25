@@ -189,3 +189,249 @@ def test_json_lines_are_a_table_and_a_single_object_is_not():
 
     assert parse_table(lines) is not None and len(parse_table(lines).rows) == 25
     assert parse_table(json.dumps({"name": "cognee", "version": "1.0"})) is None
+
+
+# --- line shapes ----------------------------------------------------------------
+
+
+def test_a_log_line_keeps_its_wording_and_masks_its_values():
+    from cognee.modules.retrieval.broad_table import shape_of
+
+    line = shape_of("[Sun Dec 04 04:47:44 2005] [error] mod_jk child workerEnv in error state 6")
+    block = shape_of("081109 203615 INFO Received block blk_-160899 of size 91 from /10.250.10.6")
+
+    assert line.shape == "[$ ^ #] [error] mod_jk child workerEnv in error state #"
+    assert ("code", "blk_-160899") in block.slots and ("dotted", "10.250.10.6") in block.slots
+
+
+def test_a_word_with_digits_is_one_value():
+    """ "test123" is a username and "subdir57" a directory: each is one value, never a
+    word plus a number, and a word without digits stays part of the wording."""
+    from cognee.modules.retrieval.broad_table import shape_of
+
+    user = shape_of("Invalid user test123 from 1.2.3.4")
+    folder = shape_of("Deleting subdir57 now")
+    path = shape_of("Deleting file /data/current/subdir57/blk_9")
+
+    assert user.shape == "Invalid user % from ~" and ("code", "test123") in user.slots
+    assert folder.shape == "Deleting % now"
+    assert path.shape == "Deleting file /" and path.slots == [
+        ("path", "/data/current/subdir57/blk_9")
+    ]
+    assert shape_of("scored in the 12th minute").shape == "scored in the #th minute"
+
+
+def test_prose_has_too_many_shapes_to_be_records():
+    import random
+
+    from cognee.modules.retrieval.broad_table import shaped_lines
+
+    words = [
+        "river",
+        "stone",
+        "quietly",
+        "after",
+        "the",
+        "storm",
+        "we",
+        "walked",
+        "toward",
+        "a",
+        "village",
+        "where",
+        "old",
+        "bells",
+        "rang",
+    ]
+    rng = random.Random(3)
+    prose = "\n".join(
+        " ".join(rng.choice(words) for _ in range(rng.randint(6, 14))) for _ in range(60)
+    )
+    logs = "\n".join(
+        f"Jun {i % 28 + 1} 10:{i % 60:02d}:00 host sshd[{i}]: Failed password for root from 10.0.0.{i % 9}"
+        for i in range(60)
+    )
+
+    assert shaped_lines(prose) is None
+    assert shaped_lines(logs) is not None
+
+
+def _ssh_log() -> str:
+    return "\n".join(
+        (
+            f"Jun {i % 28 + 1} 10:00:0{i % 10} host sshd[{100 + i}]: "
+            + (
+                f"Failed password for root from 10.0.0.{i % 5} port {2000 + i}"
+                if i % 3 == 1
+                else f"Failed password for invalid user u{i % 7} from 10.0.0.{i % 2} port {i}"
+                if i % 3 == 2
+                else "Accepted password for bo"
+            )
+        )
+        for i in range(90)
+    )
+
+
+def test_a_line_query_selects_every_form_of_a_line_and_captures_its_value():
+    """ "Failed password for root" and "... for invalid user u3" are one event in two forms;
+    one expression selects both, and code counts every such line."""
+    from cognee.modules.retrieval.broad_table import LineQuery, matched_table, shaped_lines
+
+    lines, _ = shaped_lines(_ssh_log())
+    query = LineQuery(
+        answerable=True,
+        line_regex=r"Failed password for",
+        value_regex=r"from (\d+\.\d+\.\d+\.\d+)",
+        group=True,
+    )
+
+    table = matched_table(lines, query)
+    tally = run_query(table, TableQuery(answerable=True, group_by="value"))
+
+    assert len(table.rows) == 60
+    assert dict(tally.groups) == {
+        "10.0.0.0": 21,
+        "10.0.0.1": 21,
+        "10.0.0.2": 6,
+        "10.0.0.3": 6,
+        "10.0.0.4": 6,
+    }
+
+
+def test_every_match_on_a_line_is_a_value_and_exclusions_apply():
+    from cognee.modules.retrieval.broad_table import LineQuery, matched_table, shaped_lines
+
+    text = "\n".join(
+        [f"INFO delete blk_{i}a blk_{i}b blk_{i}c" for i in range(10)]
+        + [f"WARN lost blk_{i}a" for i in range(20)]
+        + [f"WARN lost blk_x{i} (test)" for i in range(5)]
+    )
+    lines, _ = shaped_lines(text)
+    blocks = matched_table(
+        lines, LineQuery(answerable=True, line_regex="blk_", value_regex=r"(blk_\w+)")
+    )
+    warns = matched_table(
+        lines, LineQuery(answerable=True, line_regex="^WARN", exclude_regex=r"\(test\)")
+    )
+
+    distinct = run_query(
+        blocks, TableQuery(answerable=True, aggregate="count_distinct", column="value")
+    )
+    assert distinct.total == 45  # 30 on INFO lines, 10 more on WARN, 5 on test lines
+    assert len(warns.rows) == 20
+
+
+def test_an_expression_that_does_not_compile_raises():
+    import re as regex
+
+    from cognee.modules.retrieval.broad_table import LineQuery, matched_table, shaped_lines
+
+    lines, _ = shaped_lines(_ssh_log())
+
+    with pytest.raises(regex.error):
+        matched_table(lines, LineQuery(answerable=True, line_regex="Failed (password"))
+    with pytest.raises(regex.error):
+        matched_table(lines, LineQuery(answerable=True, line_regex="Failed", value_regex="from"))
+
+
+@pytest.mark.asyncio
+async def test_log_lines_are_counted_by_code_after_one_query_call(monkeypatch):
+    from cognee.modules.retrieval.broad_table import LineQuery
+
+    log = _ssh_log()
+    units = [
+        Unit(id="c1", text=log[:2500], document="d"),
+        Unit(id="c2", text=log[2500:], document="d"),
+    ]
+    calls = []
+
+    async def fake(text_input, system_prompt, response_model, **kwargs):
+        calls.append(response_model)
+        if response_model is CountPlan:
+            return CountPlan(source="text", item="a failed password attempt")
+        return LineQuery(answerable=True, line_regex="Failed password")
+
+    monkeypatch.setattr(broad_retriever.LLMGateway, "acreate_structured_output", fake)
+    monkeypatch.setattr(
+        broad_retriever.BroadRetriever, "load_text_units", lambda self, graph: _awaitable(units)
+    )
+    monkeypatch.setattr(
+        broad_retriever.BroadRetriever, "load_entities", lambda self, graph: _awaitable({})
+    )
+    monkeypatch.setattr(
+        broad_retriever,
+        "get_unified_engine",
+        lambda: _awaitable(type("E", (), {"graph": None})()),
+    )
+
+    result = await BroadRetriever().get_retrieved_objects("How many failed password attempts?")
+
+    assert (result.method, result.total, result.units) == ("table", 60, 90)
+    assert calls == [CountPlan, LineQuery]
+
+
+async def _awaitable(value):
+    return value
+
+
+def test_grouping_by_a_value_counts_rows_per_value_even_if_asked_for_distinct():
+    """ "Which IP made the most requests" grouped by IP: distinct IPs per IP is always 1."""
+    table = Table(columns=["ip"], rows=[["a"], ["a"], ["b"]])
+
+    result = run_query(
+        table, TableQuery(answerable=True, aggregate="count_distinct", column="ip", group_by="ip")
+    )
+
+    assert result.groups[0] == ("a", 2)
+
+
+@pytest.mark.asyncio
+async def test_an_expression_matching_nothing_is_retried_with_real_lines(monkeypatch):
+    from cognee.modules.retrieval.broad_table import LineQuery, shaped_lines
+
+    lines, shapes = shaped_lines(_ssh_log())
+    seen = []
+
+    async def fake(text_input, system_prompt, response_model, **kwargs):
+        seen.append(text_input)
+        if len(seen) == 1:
+            return LineQuery(answerable=True, line_regex=r"^\d+ Failed")  # lines start "Jun"
+        return LineQuery(answerable=True, line_regex="Failed password")
+
+    monkeypatch.setattr(broad_retriever.LLMGateway, "acreate_structured_output", fake)
+
+    result = await BroadRetriever().count_lines(
+        "q", CountPlan(source="text", item="x"), lines, shapes
+    )
+
+    assert result is not None and result.total == 60
+    assert "matched none of the 90 lines" in seen[1] and "Jun " in seen[1]
+
+
+@pytest.mark.asyncio
+async def test_a_distinct_count_without_a_captured_value_is_retried_not_raised(monkeypatch):
+    """count_distinct needs a value to count; a query without one is sent back once and,
+    if still unusable, left to the reading path instead of failing the search."""
+    from cognee.modules.retrieval.broad_table import LineQuery, shaped_lines
+
+    lines, shapes = shaped_lines(_ssh_log())
+    answers = [
+        LineQuery(answerable=True, line_regex="Failed", aggregate="count_distinct"),
+        LineQuery(
+            answerable=True,
+            line_regex="Failed",
+            aggregate="count_distinct",
+            value_regex=r"from (\S+) port",
+        ),
+    ]
+
+    async def fake(text_input, system_prompt, response_model, **kwargs):
+        return answers.pop(0)
+
+    monkeypatch.setattr(broad_retriever.LLMGateway, "acreate_structured_output", fake)
+
+    result = await BroadRetriever().count_lines(
+        "q", CountPlan(source="text", item="x"), lines, shapes
+    )
+
+    assert result is not None and result.total == 5 and not answers

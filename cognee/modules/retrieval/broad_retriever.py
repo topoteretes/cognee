@@ -33,18 +33,24 @@ from cognee.modules.data.processing.document_types.Document import Document
 from cognee.modules.engine.utils import generate_node_name
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.broad_table import (
+    Line,
+    LineQuery,
     Table,
     TableQuery,
     describe,
+    describe_shapes,
+    matched_table,
     parse_table,
     render_row,
     run_query,
+    shaped_lines,
 )
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("BroadRetriever")
+
 
 # Small units (table rows, short chunks) are packed into one reading call up to
 # this many tokens. A chunk is never split: one larger than this is read whole,
@@ -298,9 +304,9 @@ def _corpus_sample(units: list[Unit]) -> str:
     return "\n---\n".join(units[i].text[:BROAD_SAMPLE_CHARS].strip() for i in picks)
 
 
-def _table_of(units: list[Unit]) -> Table | None:
-    """The corpus as one table, when every document in it is delimited records with the
-    same columns; None otherwise (prose, mixed documents, table rows ingested by DLT)."""
+def _document_texts(units: list[Unit]) -> list[str] | None:
+    """Each document's text, rebuilt from its chunks; None when a unit has no document
+    (a table row ingested by DLT)."""
     if not units or any(not unit.document for unit in units):
         return None
     texts: dict[str, list[str]] = {}
@@ -308,7 +314,16 @@ def _table_of(units: list[Unit]) -> Table | None:
         texts.setdefault(unit.document, []).append(unit.text)
     # Chunks partition their document exactly and may cut mid-line: joined with nothing,
     # they are the document again, and a record cut in two is whole.
-    tables = [parse_table("".join(parts)) for parts in texts.values()]
+    return ["".join(parts) for parts in texts.values()]
+
+
+def _table_of(units: list[Unit]) -> Table | None:
+    """The corpus as one table, when every document in it is delimited records or JSON
+    records with the same columns; None otherwise (prose, mixed documents, DLT rows)."""
+    texts = _document_texts(units)
+    if texts is None:
+        return None
+    tables = [parse_table(text) for text in texts]
     if any(table is None for table in tables):
         return None
     first = tables[0]
@@ -505,6 +520,16 @@ def _canonical_spelling(names: list[str], used: Counter) -> str:
     return min(names, key=lambda name: (_is_label(name), -used[name], -len(name), name))
 
 
+def _line_query_problem(query: LineQuery) -> str | None:
+    """What makes a line query unusable before it runs: an aggregate over values that it
+    never captures."""
+    if query.answerable and query.aggregate != "count_rows" and not query.value_regex:
+        return f"aggregate {query.aggregate} needs a value_regex that captures the value"
+    if query.answerable and (query.group or query.target) and not query.value_regex:
+        return "grouping or a target needs a value_regex that captures the value"
+    return None
+
+
 def _table_context(result: CountResult) -> str:
     """What the answer model is told about a count code made over parsed rows."""
     query = result.table_query
@@ -543,7 +568,7 @@ def _provenance_note(result: CountResult) -> str:
     """One line saying how a reading count was obtained, stated by code in every answer: a
     reading count is exact over what was found, and reading can miss or repeat an item."""
     if result.method == "table":
-        return f"(Counted by code over all {result.units} rows of the table in the documents.)"
+        return f"(Counted by code over all {result.units} records in the documents.)"
     if result.method != "reading":
         return ""
     note = (
@@ -600,7 +625,6 @@ class BroadRetriever(CompletionRetriever):
         plan = await self.plan(query, entities_by_type, units)
         logger.info("BROAD plan: %s", plan.model_dump())
 
-        table = _table_of(units) if plan.source == "text" and not plan.unsupported else None
         result: CountResult | None = None
         if plan.unsupported:
             result = CountResult(plan=plan, method="unsupported", total=0, units=0)
@@ -610,8 +634,15 @@ class BroadRetriever(CompletionRetriever):
             raise NoDataError("No data found in the system, please add data first.")
         elif plan.literal_terms and not (plan.condition or plan.group_by or plan.measure):
             result = self.count_words(plan, units)
-        elif table is not None:
-            result = await self.count_table(query, plan, table)
+        else:
+            table = _table_of(units)
+            if table is not None:
+                result = await self.count_table(query, plan, table)
+            else:
+                texts = _document_texts(units)
+                shaped = shaped_lines("\n".join(texts)) if texts else None
+                if shaped is not None:
+                    result = await self.count_lines(query, plan, *shaped)
         if result is None:
             result = await self.count_by_reading(plan, units)
 
@@ -825,6 +856,67 @@ class BroadRetriever(CompletionRetriever):
                 evidence.append(" ".join(window.split()))
         return CountResult(
             plan=plan, method="words", total=total, units=len(units), evidence=evidence
+        )
+
+    async def count_lines(
+        self, query: str, plan: CountPlan, lines: list[Line], shapes: list[str]
+    ) -> CountResult | None:
+        """Answer over record-like lines (a log, a templated report): one LLM call sees every
+        line shape and writes expressions that select the lines and capture the value; code
+        runs them over every line. None when the lines cannot answer the question."""
+        text_input = f"Question: {query}\n\nLine shapes:\n{describe_shapes(shapes, lines)}"
+        line_query = await LLMGateway.acreate_structured_output(
+            text_input=text_input,
+            system_prompt=_read_prompt("broad_line_query.txt"),
+            response_model=LineQuery,
+        )
+        problem = _line_query_problem(line_query)
+        table = None
+        if problem is None:
+            try:
+                table = matched_table(lines, line_query) if line_query.answerable else None
+                if table is not None and not table.rows:
+                    problem = f"line_regex matched none of the {len(lines)} lines"
+            except re.error as error:
+                problem = f"an expression does not compile ({error})"
+        if problem:
+            # One retry, shown what went wrong and real lines to match against.
+            samples = "\n".join(line.text for line in lines[:: max(len(lines) // 5, 1)][:5])
+            line_query = await LLMGateway.acreate_structured_output(
+                text_input=f"{text_input}\n\nYour previous expressions failed: {problem}. "
+                f"Real lines, exactly as written:\n{samples}\n\nReturn corrected expressions.",
+                system_prompt=_read_prompt("broad_line_query.txt"),
+                response_model=LineQuery,
+            )
+            try:
+                usable = line_query.answerable and _line_query_problem(line_query) is None
+                table = matched_table(lines, line_query) if usable else None
+            except re.error:
+                table = None
+        logger.info("BROAD line query: %s", line_query.model_dump())
+        if table is None or not table.rows:
+            return None  # nothing selected: reading decides
+        valued = line_query.value_regex is not None
+        table_query = TableQuery(
+            answerable=True,
+            aggregate=line_query.aggregate,
+            column="value" if valued and line_query.aggregate != "count_rows" else None,
+            group_by="value" if valued and (line_query.group or line_query.target) else None,
+            target=line_query.target,
+            list_rows=line_query.list_rows,
+        )
+        answer = run_query(table, table_query)
+        return CountResult(
+            plan=plan.model_copy(update={"list_items": plan.list_items or line_query.list_rows}),
+            method="table",
+            total=answer.total,
+            units=len(lines),
+            groups=answer.groups,
+            evidence=[row[1] for row in answer.matched],
+            target_names=answer.target_values,
+            items_listed=len(answer.matched),
+            llm_calls=1,
+            table_query=table_query,
         )
 
     async def count_table(self, query: str, plan: CountPlan, table: Table) -> CountResult | None:
