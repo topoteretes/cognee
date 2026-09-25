@@ -438,7 +438,15 @@ def full_backfill(
         state.pop("last_history_id", None)
     if baseline_history_id is not None and max_results is None:
         state["last_history_id"] = baseline_history_id
-    logger.info("Full backfill yielded %d message(s).", count)
+    if max_results is None:
+        logger.info("Loaded all %d message(s); the next sync fetches only changes.", count)
+    else:
+        logger.info(
+            "Loaded the newest %d message(s) (max_results=%d); no cursor saved, so the "
+            "next sync loads them again.",
+            count,
+            max_results,
+        )
 
 
 def incremental_fetch(
@@ -491,7 +499,7 @@ def incremental_fetch(
             status = getattr(getattr(exc, "resp", None), "status", None)
             if status == 404 or "404" in str(exc):
                 logger.warning(
-                    "History id %s expired; falling back to full backfill.",
+                    "History id %s expired; loading every message in the label again.",
                     start_history_id,
                 )
                 state.pop("last_history_id", None)

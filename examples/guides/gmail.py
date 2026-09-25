@@ -4,8 +4,8 @@ Pull Gmail messages into cognee memory, incrementally, with forget-on-delete.
 
 This example is built on cognee's DLT ingestion subsystem: ``gmail_source``
 returns a ``dlt`` resource that you hand straight to ``cognee.remember``. The
-first run backfills your (label-scoped) inbox; re-running ``remember`` syncs
-only the delta via Gmail's ``historyId``, and messages you delete/trash in
+first run loads every message in the label; re-running ``remember`` fetches
+only what changed since then via Gmail's ``historyId``, and messages you delete/trash in
 Gmail are forgotten from memory on the next sync.
 
 ────────────────────────────────────────────────────────────────────────────
@@ -78,9 +78,9 @@ async def main():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
-    # Build the source. Scope it to INBOX and (for the demo) cap the backfill so
-    # the first run is quick. Drop ``max_results`` to ingest the whole label;
-    # Gmail's quota limits a full backfill to roughly 250 messages a minute.
+    # Build the source. Scope it to INBOX and, for the demo, load only the 25
+    # newest messages so the first run is quick. Drop ``max_results`` to load
+    # the whole label; Gmail's quota allows roughly 250 messages a minute.
     source = gmail_source(
         credentials_path=credentials_path,
         token_path=token_path,
@@ -88,8 +88,8 @@ async def main():
         max_results=25,
     )
 
-    # ── First sync: full backfill ──────────────────────────────────────────
-    print("\n=== Gmail sync #1 (backfill) ===")
+    # ── First sync: load the newest messages ──────────────────────────────
+    print("\n=== Gmail sync #1 ===")
     result = await cognee.remember(
         source,
         dataset_name=DATASET_NAME,
@@ -105,7 +105,7 @@ async def main():
     )
     print("Inbox summary:", answer)
 
-    # ── Second sync: incremental delta + forget-on-delete ──────────────────
+    # ── Second sync: only what changed, plus forget-on-delete ─────────────
     # Syncing again right away finds nothing new, so this step is left for you
     # to run later (e.g. tomorrow, or on a schedule). Re-running remember() on
     # the SAME dataset reuses the persisted historyId cursor: only messages
@@ -113,14 +113,14 @@ async def main():
     # deleted/trashed in Gmail is removed from memory by orphan_cleanup.
     #
     # To try it:
-    #   1. Remove ``max_results`` from sync #1 above. A capped backfill does not
-    #      record a cursor, so the next sync would be a full backfill again.
+    #   1. Remove ``max_results`` from sync #1 above. A capped first sync does
+    #      not save a cursor, so the next sync would load everything again.
     #   2. Remove the prune calls at the top, so the next run keeps sync #1.
     #   3. Uncomment the block below and run the script again once your inbox
     #      has changed. "Sync stats" shows how many messages were fetched and
     #      how many were forgotten.
     #
-    # print("\n=== Gmail sync #2 (incremental) ===")
+    # print("\n=== Gmail sync #2 ===")
     # source = gmail_source(
     #     credentials_path=credentials_path,
     #     token_path=token_path,
