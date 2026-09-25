@@ -144,10 +144,12 @@ http://localhost:8000 and the UI on http://localhost:3000. Stop it with Ctrl+C.
 
 Open http://localhost:3000 and select the `company_brain` dataset.
 
-- The graph view shows one `Dana Kim` node, connected to the Search team, the Atlas and
+- The mind map shows the extracted entities grouped by type (Person, Team, Project,
+  Customer, Ticket), with one `Dana Kim` node connected to the Search team, the Atlas and
   Harbor projects, ticket T-1041, and her manager Marco Rossi.
-- The document and chunk nodes of each source hang off a `NodeSet` node named after it
-  (`hr_database`, `support_tickets`, `company_docs`).
+- The sources panel lists the three node sets with their documents. The entities are
+  counted under "Uncategorized": node sets tag each source's documents and chunks, not
+  the entities, which are shared by every source that mentions them (see section 3).
 
 To start the servers later without ingesting again, run `cognee-cli -ui`.
 
@@ -158,27 +160,35 @@ pointed at the running API server, so the agent reads the same graph as the UI. 
 `--api-url`, the MCP server opens its own local databases and sees a different, empty
 brain.
 
-Keep `company_brain.py` (or `cognee-cli -ui`) running, then register the MCP server.
+Keep `company_brain.py` (or `cognee-cli -ui`) running, then warm up the MCP server once.
+The first `uvx` run downloads cognee, and even a cached start takes about 20 seconds,
+longer than an agent waits on a first launch:
+
+```bash
+uvx cognee-mcp --help
+```
 
 **Claude Code**
 
 ```bash
-claude mcp add cognee -- uvx cognee-mcp --api-url http://localhost:8000
+claude mcp add --scope user cognee -- uvx cognee-mcp --api-url http://localhost:8000
 claude mcp list        # cognee: ... ✓ Connected
 ```
 
+`--scope user` makes the server available in every project. Without it, `claude mcp add`
+registers it only for the directory you ran it in. If the server still times out on
+start, raise the limit: `MCP_TIMEOUT=60000 claude`.
+
 **Codex**
 
-```bash
-codex mcp add cognee -- uvx cognee-mcp --api-url http://localhost:8000
-```
-
-or add it to `~/.codex/config.toml`:
+Add the server to `~/.codex/config.toml`. Codex waits 10 seconds for an MCP server to
+start by default, so raise `startup_timeout_sec`:
 
 ```toml
 [mcp_servers.cognee]
 command = "uvx"
 args = ["cognee-mcp", "--api-url", "http://localhost:8000"]
+startup_timeout_sec = 60
 ```
 
 Then ask the agent a question that needs all three sources:
@@ -186,9 +196,17 @@ Then ask the agent a question that needs all three sources:
 > Use cognee to recall: who is handling Brightline Retail's open high-priority ticket,
 > which team are they on, and what fix was decided for it?
 
-The agent calls the `recall` tool and should answer: Dana Kim (ticket T-1041), on the
-Search team, who will change the Atlas indexer to read every catalog feed file and
-re-index Brightline Retail by 26 September.
+The agent calls the cognee `recall` tool (`mcp__cognee__recall` in Claude Code) and
+should answer: Dana Kim, on the Search team, who will change the Atlas indexer to read
+every file in the catalog feed and re-index Brightline Retail's catalog; until then
+Brightline can trigger a manual re-index from the admin page.
+
+To check the connection without an interactive session, run Claude Code headless:
+
+```bash
+claude -p "Use the cognee recall tool: which team is Dana Kim on?" \
+  --allowedTools mcp__cognee__recall
+```
 
 If your API server requires authentication (`ENABLE_BACKEND_ACCESS_CONTROL=true`), pass
 a token with `--api-token <token>`.
@@ -258,6 +276,9 @@ database, and the decided fix from the meeting notes.
 - **Port 8000 or 3000 is taken.** Pass `--api-port` and `--ui-port`.
 - **The agent says it found nothing.** Check that the MCP server was registered with
   `--api-url` and the same API port the script prints.
+- **The cognee MCP server fails to connect or times out.** Run `uvx cognee-mcp --help`
+  once to download it, then raise the client's startup timeout (`MCP_TIMEOUT=60000` for
+  Claude Code, `startup_timeout_sec = 60` for Codex).
 
 ## Files
 
