@@ -174,7 +174,7 @@ def test_parse_message_handles_multipart_prefers_text_plain():
             ],
         },
     }
-    assert parse_message(msg)["content"] == "plain wins"
+    assert parse_message(msg)["content"].endswith("\n\nplain wins")
 
 
 def test_parse_message_tolerates_an_empty_payload():
@@ -192,9 +192,15 @@ def test_parse_message_emits_title_and_content_for_document_ingestion():
     row = parse_message(msg)
 
     assert row["title"] == "Invoice #42"
-    assert "From: billing@example.com" in row["content"]
-    assert "To: me@example.com" in row["content"]
-    assert row["content"].endswith("Your invoice is attached.")
+    assert row["content"].split("\n") == [
+        "From: billing@example.com",
+        "To: me@example.com",
+        "Received: 2023-11-14T22:13:20+00:00",
+        "Labels: INBOX",
+        "Thread: t_m4",
+        "",
+        "Your invoice is attached.",
+    ]
 
 
 def test_parse_message_content_falls_back_to_snippet_for_html_only_mail():
@@ -211,7 +217,7 @@ def test_parse_message_content_falls_back_to_snippet_for_html_only_mail():
     }
     row = parse_message(msg)
 
-    assert row["content"] == "Preview of an HTML newsletter"
+    assert row["content"].endswith("\n\nPreview of an HTML newsletter")
 
 
 def test_parsed_message_becomes_a_non_empty_document():

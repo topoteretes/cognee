@@ -67,6 +67,7 @@ import base64
 import os
 import time
 from collections.abc import Callable, Iterator
+from datetime import datetime, timezone
 from typing import Any
 
 from limits import RateLimitItemPerMinute
@@ -249,21 +250,37 @@ def _headers_to_dict(payload: dict | None) -> dict[str, str]:
     return headers
 
 
-def _document_content(headers: dict[str, str], body: str, snippet: str) -> str:
-    """Render the text cognify sees for a message: header lines, then the body.
+def _received_at(message: dict) -> str:
+    """Gmail's ``internalDate`` (ms since epoch) as an ISO timestamp, or ""."""
+    try:
+        millis = int(message.get("internalDate"))
+    except (TypeError, ValueError):
+        return ""
+    return datetime.fromtimestamp(millis / 1000, tz=timezone.utc).isoformat()
+
+
+def _document_content(message: dict, headers: dict[str, str]) -> str:
+    """Render the text cognify sees for a message: metadata lines, then the body.
 
     Document-source rows are turned into text from their ``title``/``content``
-    columns only (see ``resolve_dlt_sources._build_document_data_item``), so the
-    sender, recipients and date must be folded into ``content`` to reach the
-    graph. HTML-only messages have no plain-text body and fall back to the
-    snippet.
+    columns only (see ``resolve_dlt_sources._build_document_data_item``), so
+    every field worth knowing must be folded into ``content`` to reach the
+    graph. The subject is the ``title``. HTML-only messages have no plain-text
+    body and fall back to the snippet (Gmail's short preview of the body).
     """
-    lines = [
-        f"{label}: {headers[key]}"
-        for key, label in (("from", "From"), ("to", "To"), ("cc", "Cc"), ("date", "Date"))
-        if headers.get(key)
-    ]
-    text = body.strip() or snippet.strip()
+    fields = (
+        ("From", headers.get("from")),
+        ("To", headers.get("to")),
+        ("Cc", headers.get("cc")),
+        ("Date", headers.get("date")),
+        ("Received", _received_at(message)),
+        ("Labels", ", ".join(message.get("labelIds") or [])),
+        ("Thread", message.get("threadId")),
+    )
+    lines = [f"{label}: {value}" for label, value in fields if value]
+    text = (
+        _extract_plaintext(message.get("payload")).strip() or (message.get("snippet") or "").strip()
+    )
     if text:
         lines.extend(["", text])
     return "\n".join(lines).strip()
@@ -281,9 +298,7 @@ def parse_message(message: dict) -> dict[str, Any]:
     return {
         "id": message.get("id"),
         "title": headers.get("subject", ""),
-        "content": _document_content(
-            headers, _extract_plaintext(payload), message.get("snippet", "")
-        ),
+        "content": _document_content(message, headers),
         # Hard-delete marker (always False for live messages). Deleted/trashed
         # messages are emitted separately with _deleted=True.
         "_deleted": False,
