@@ -697,6 +697,38 @@ class GraphDBInterface(ABC):
         for chunk in chunk_members(members, edges, chunk_size, property_keys):
             yield chunk
 
+    async def get_entity_type_names(self, entity_ids: list[str]) -> dict[str, str]:
+        """The EntityType name each of ``entity_ids`` points to through ``is_a``.
+
+        Keyed by entity id; an entity with no ``is_a`` edge is left out. A graph
+        view uses this to label entities whose EntityType node is outside a
+        bounded read, so it reads one hop, never from a type node outward.
+
+        Deliberately NOT abstract, like ``get_top_degree_node_ids``. The default
+        goes through ``get_neighborhood``, which hydrates the entities with all
+        their properties and returns every edge among the returned nodes;
+        overriding adapters should read just the ``is_a`` edges and the target
+        names.
+        """
+        if not entity_ids:
+            return {}
+        nodes, edges = await self.get_neighborhood(
+            node_ids=entity_ids, depth=1, edge_types=["is_a"]
+        )
+        type_names = {
+            str(node_id): properties.get("name")
+            for node_id, properties in nodes
+            if properties.get("type") == "EntityType"
+        }
+        members = {str(entity_id) for entity_id in entity_ids}
+        # get_neighborhood returns every edge among the returned nodes, not only
+        # the traversed ones, so relation and direction are checked here.
+        return {
+            str(edge[0]): type_names[str(edge[1])]
+            for edge in edges
+            if edge[2] == "is_a" and str(edge[0]) in members and type_names.get(str(edge[1]))
+        }
+
     @abstractmethod
     async def get_graph_metrics(self, include_optional: bool = False) -> dict[str, Any]:
         """

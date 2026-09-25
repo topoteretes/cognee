@@ -68,6 +68,110 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: uv run python ./cognee/tests/test_cognee_server_start.py
 
+  run-serve-routing-test:
+    name: Serve Routing e2e
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      # Mocked LLM and embeddings: no secrets. The suite starts a real instance
+      # and drives the proxied SDK surface (add, cognify, list_data, update,
+      # search, recall, remember, improve, forget) through cognee.serve() over
+      # real HTTP, so a client/route contract drift fails here — the proxy's
+      # unit tests use mock sessions and cannot catch it.
+      - name: Run serve() routing suite
+        env:
+          ENV: 'dev'
+        run: uv run pytest cognee/tests/e2e/serve_routing/
+
+  run-migration-model-lockstep-guard:
+    name: Migration/Model Lockstep Guard
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      # Standalone lockstep guard: the Alembic chain and the ORM models must
+      # describe the same schema (see the test's docstring). Deliberately its
+      # own check so a break is visible by name, and deliberately secret-free:
+      # it replays migrations onto a local SQLite database only.
+      - name: Run Migration/Model Lockstep Guard
+        run: uv run pytest cognee/tests/e2e/migrations/test_migration_model_lockstep.py -v
+
+  run-bundled-extension-offline:
+    name: Bundled JSON Extension Offline e2e
+    # Deliberately NOT in the ci-image container: the test drives the runner's
+    # docker daemon (fetches real extension binaries from GHCR, then runs the
+    # check in a --network=none container). Secret-free by design.
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+
+      # Real-engine offline proof for every ladybug version pinned in uv.lock:
+      # resolver -> fetched GHCR binaries -> probe -> LOAD by absolute path ->
+      # working JSON function, all with the network disabled. This is the only
+      # check that catches a future ladybug changing its failing-INSTALL error
+      # format, which would silently break bundle selection (the mocked unit
+      # tests feed the probe a canned error string).
+      - name: Run offline bundled-extension e2e
+        run: ./cognee/tests/e2e/bundled_extension/run_offline_e2e.sh
+
+  run-keyless-e2e:
+    name: Keyless e2e — GLiNER + fastembed, no LLM key
+    # Bare runner on purpose: the ci-image carries pre-installed extras and
+    # secrets-shaped config, and this job has to prove the install a new user
+    # gets — core deps only, nothing configured. The first cognify installs the
+    # GLiNER runtime itself (CPU torch + the gliner extra, gliner_demo/install.py).
+    runs-on: ubuntu-22.04
+    env:
+      # The workflow-level skip disables the keyless rerouting as well
+      # (keyless_local_defaults_apply), so it must be off here.
+      COGNEE_SKIP_CONNECTION_TEST: 'false'
+      HF_HOME: ${{ github.workspace }}/.model-cache/huggingface
+      FASTEMBED_CACHE_PATH: ${{ github.workspace }}/.model-cache/fastembed
+    steps:
+      - name: Check out
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.12.x'
+          base-extras: ''
+          extra-dependencies: ''
+
+      # No LLM_API_KEY, no EMBEDDING_*: GRAPH_EXTRACTOR=auto must resolve to
+      # GLiNER and embeddings to fastembed, and add -> cognify -> search ->
+      # visualize -> remember -> recall must all complete without a provider
+      # call. The script scrubs any provider variable that leaks in.
+      # TODO: expand this job — cache the model downloads (~800 MB per run),
+      # add the session-scoped remember/improve path (SDK-691) and the CLI /
+      # REST default search types once they are keyless-aware (SDK-690).
+      - name: Run keyless e2e
+        run: uv run python ./cognee/tests/e2e/keyless/keyless_ingest_check.py
+
+      # A cognify run SIGKILLed after two documents, a second run, then startup
+      # recovery: the two completed documents must survive and the run must be
+      # closed as abandoned. Same keyless GLiNER stack, so it lives here.
+      - name: Run startup recovery crash check
+        run: uv run python ./cognee/tests/e2e/keyless/startup_recovery_crash_check.py
+
   run-telemetry-test:
     name: Run Telemetry Test
     runs-on: ubuntu-22.04
