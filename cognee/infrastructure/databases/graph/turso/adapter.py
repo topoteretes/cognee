@@ -623,6 +623,10 @@ class TursoAdapter(GraphDBInterface):
         """Retrieve subgraph of matching nodes, their neighbors, and interconnecting edges."""
         if not node_name:
             return [], []
+
+        if node_name_filter_operator not in ("OR", "AND"):
+            raise ValueError("node_name_filter_operator must be 'OR' or 'AND'")
+
         label = node_type.__name__
 
         name_ph, name_params = _in_params("nm", node_name)
@@ -656,7 +660,7 @@ class TursoAdapter(GraphDBInterface):
                                OR e.target_id IN (SELECT id FROM primary_nodes)
                         ) sub
                         GROUP BY nbr_id
-                        HAVING COUNT(DISTINCT primary_id) = :primary_count
+                        HAVING COUNT(DISTINCT primary_id) = (SELECT COUNT(*) FROM primary_nodes)
                     )"""
 
         query_str = f"""
@@ -685,9 +689,6 @@ class TursoAdapter(GraphDBInterface):
                     WHERE e.source_id IN (SELECT id FROM all_ids)
                       AND e.target_id IN (SELECT id FROM all_ids)
                 """
-
-        if node_name_filter_operator != "OR":
-            params["primary_count"] = len(node_name)
 
         async with self._session() as session:
             result = await session.execute(text(query_str), params)
