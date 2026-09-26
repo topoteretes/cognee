@@ -64,6 +64,9 @@ class TelemetryAggregateExtractTest(unittest.TestCase):
             "custom/person@example.com",
             "custom/12345678-1234-1234-1234-123456789abc",
             "custom/ak_0123456789abcdef",
+            "/home/alice/models/llama.gguf",
+            "/Users/alice/models/llama.gguf",
+            r"C:\Users\alice\model.gguf",
         ):
             for dimension in ("llm_model", "llm", "graph", "vector", "relational"):
                 with self.subTest(value=value, dimension=dimension):
@@ -131,6 +134,9 @@ class TelemetryAggregateExtractTest(unittest.TestCase):
             "person@example.com",
             "12345678-1234-1234-1234-123456789abc",
             "ak_0123456789abcdef",
+            "/home/alice/models/llama.gguf",
+            "/Users/alice/models/llama.gguf",
+            r"C:\Users\alice\model.gguf",
         ):
             with self.subTest(value=value):
                 path = self.out_dir / "unsafe.csv"
