@@ -18,6 +18,7 @@ together.
 | `TEMPORAL` | `TemporalRetriever` | `temporal_retriever.py` | yes | Time-bounded traversal over the temporal graph |
 | `RAG_COMPLETION` | `CompletionRetriever` | `completion_retriever.py` | yes | Chunk vector search + completion |
 | `TRIPLET_COMPLETION` | `TripletRetriever` | `triplet_retriever.py` | yes | Triplet-embedding search + completion |
+| `BROAD` | `BroadRetriever` | `broad_retriever.py` | yes | Counts ("how many", "who has the most") by code, never by the LLM: records (CSV, JSON, delimited logs) are parsed and queried (`broad_table.py`); prose is read in parallel and the listed items are deduplicated and tallied |
 | `AGENTIC_COMPLETION` | `AgenticRetriever` | `agentic_retriever.py` | yes | Special-cased in the factory (not in the dict): tool loop with `skills`, `tools`, `max_iter` |
 | `CHUNKS` | `ChunksRetriever` | `chunks_retriever.py` | no | Vector search over `DocumentChunk_text` |
 | `CHUNKS_LEXICAL` | `BM25ChunksRetriever` | `bm25_retriever.py` | no | BM25 over chunks (`LexicalRetriever` subclass) |

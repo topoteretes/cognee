@@ -30,6 +30,9 @@ RETURNS_FULL_PROMPT = {
     SearchType.RAG_COMPLETION,
     SearchType.TRIPLET_COMPLETION,
     SearchType.TEMPORAL,
+    # Reading and table queries happen during retrieval; the answer is one prompt from the
+    # pair, over the count code computed.
+    SearchType.BROAD,
 }
 
 # Non-generative types (no template at all) and the opt-outs (templates present, but the
