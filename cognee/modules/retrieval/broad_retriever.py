@@ -637,7 +637,13 @@ class BroadRetriever(CompletionRetriever):
             result = self.count_entities(plan, entities_by_type)
         elif not units:
             raise NoDataError("No data found in the system, please add data first.")
-        elif plan.literal_terms and not (plan.condition or plan.group_by or plan.measure):
+        elif (
+            plan.literal_terms
+            and plan.dedup_key is None
+            and not (plan.condition or plan.group_by or plan.measure)
+        ):
+            # Word matches count occurrences; a keyed item ("reviews that mention film")
+            # counts things that hold a match, which the other lanes do.
             result = self.count_words(plan, units)
         else:
             table, others = _table_of(units)

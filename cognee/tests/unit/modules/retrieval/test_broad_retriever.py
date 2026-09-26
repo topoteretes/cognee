@@ -298,6 +298,30 @@ async def test_word_mentions_are_counted_by_code_across_every_unit(monkeypatch):
     assert calls == [CountPlan]
 
 
+@pytest.mark.asyncio
+async def test_things_that_mention_a_word_are_not_word_occurrences(monkeypatch):
+    """ "How many reviews mention film" counts reviews: one saying it twice counts once."""
+
+    def respond(model, _):
+        if model is CountPlan:
+            return CountPlan(
+                source="text",
+                item="a review mentioning film",
+                literal_terms=["film"],
+                dedup_key="the review text",
+            )
+        return ShardItems(items=[ExtractedItem(unit=0, evidence="a film, a fine film")])
+
+    _stub_llm(monkeypatch, respond)
+    graph = _FakeGraph()
+    graph.text_nodes = [("c1", {"type": "DocumentChunk", "text": "A film, a fine film."})]
+    _use_graph(monkeypatch, graph)
+
+    result = await BroadRetriever().get_retrieved_objects("How many reviews mention film?")
+
+    assert (result.method, result.total) == ("reading", 1)
+
+
 # --- counting by reading ---------------------------------------------------------------
 
 
