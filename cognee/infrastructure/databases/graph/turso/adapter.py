@@ -1,4 +1,16 @@
-"""Turso/libSQL graph adapter using two tables (graph_node, graph_edge) over SQLAlchemy + aiosqlite."""
+"""Turso graph adapter: two tables (graph_node, graph_edge) on the Turso rewrite engine.
+
+Runs on ``pyturso`` through cognee's ``sqlite+cognee_turso://`` SQLAlchemy dialect
+(:mod:`cognee.infrastructure.databases.turso`). The engine rejects a few SQLite
+constructs, which shapes the code below:
+
+* no recursive CTEs — k-hop neighborhoods are expanded one hop per query and
+  connected components are computed in Python (union-find over the edge list);
+* bind parameters must be None, numbers, strings or bytes — raw ``text()``
+  statements bind datetimes through a typed ``bindparam``;
+* under ``TURSO_JOURNAL_MODE=mvcc`` writes run as ``BEGIN CONCURRENT`` and are
+  retried on ``Write-write conflict``; ``initialize()`` runs its DDL exclusively.
+"""
 
 import asyncio
 import json
@@ -8,13 +20,23 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import event, text
+from sqlalchemy import DateTime, bindparam, text
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.databases.turso import (
+    configure_engine,
+    connect_args_for_mode,
+    exclusive_transaction,
+    get_turso_config,
+    retry_on_conflict,
+    turso_url,
+)
 from cognee.infrastructure.engine import DataPoint
+from cognee.modules.engine.models.Timestamp import Timestamp
+from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import get_logger
 
@@ -48,21 +70,49 @@ def _id_subquery(prefix: str, ids: list[str]) -> tuple[str, dict[str, str]]:
     )
 
 
+def _component_sizes(node_ids: list[str], edges: list[tuple[str, str]]) -> list[int]:
+    """Sizes of the connected components (undirected), largest first.
+
+    Union-find over the edge list; every node id is its own set until joined,
+    so isolated nodes are components of size one.
+    """
+    parent: dict[str, str] = {node_id: node_id for node_id in node_ids}
+
+    def find(item: str) -> str:
+        root = item
+        while parent[root] != root:
+            root = parent[root]
+        while parent[item] != root:  # path compression
+            parent[item], item = root, parent[item]
+        return root
+
+    for source_id, target_id in edges:
+        parent.setdefault(source_id, source_id)
+        parent.setdefault(target_id, target_id)
+        root_a, root_b = find(source_id), find(target_id)
+        if root_a != root_b:
+            parent[root_b] = root_a
+
+    sizes: dict[str, int] = {}
+    for node_id in parent:
+        root = find(node_id)
+        sizes[root] = sizes.get(root, 0) + 1
+    return sorted(sizes.values(), reverse=True)
+
+
 class TursoAdapter(GraphDBInterface):
-    """Graph-as-tables adapter backed by Turso/libSQL, accessed via SQLAlchemy async sessions."""
+    """Graph-as-tables adapter on the Turso rewrite engine, accessed via SQLAlchemy async sessions."""
 
     # ``query()`` executes SQL against the graph tables, not Cypher.
     supports_cypher_queries = False
 
     _ALLOWED_FILTER_ATTRS = {"id", "name", "type"}
 
-    def __init__(self, connection_string: str) -> None:
-        """Create engine and sessionmaker for a local libSQL file.
-
-        A libSQL file is a SQLite file, so cognee talks to it through the same
-        aiosqlite driver it already uses for SQLite (``sqlite+aiosqlite:///``).
-        """
-        self.db_uri = connection_string
+    def __init__(self, database_path: str) -> None:
+        """Create engine and sessionmaker for a local Turso database file (or ``:memory:``)."""
+        self.database_path = database_path
+        self.turso_config = get_turso_config()
+        self.db_uri = turso_url(database_path)
         # Properties are serialized to TEXT columns by _serialize_properties, so
         # there is no JSON-typed column for SQLAlchemy to encode — hence no
         # json_serializer, unlike the Postgres adapter with its JSONB columns.
@@ -72,26 +122,14 @@ class TursoAdapter(GraphDBInterface):
         # connections/file handles open to a file that eviction may delete. An
         # in-memory database must instead keep its single connection alive, or the
         # schema vanishes between operations, so leave those on the default pool.
-        engine_kwargs = {} if ":memory:" in self.db_uri else {"poolclass": NullPool}
-        self.engine = create_async_engine(self.db_uri, **engine_kwargs)
-
-        # These PRAGMAs are connection-scoped and a no-op inside a transaction, so
-        # apply them on every new connection via the connect event, mirroring the
-        # relational SqlAlchemyAdapter (issue #2717):
-        #   - foreign_keys: SQLite disables FK enforcement by default; graph_edge's
-        #     ON DELETE CASCADE relies on it.
-        #   - journal_mode=WAL + busy_timeout: concurrent writers wait instead of
-        #     failing with "database is locked".
-        @event.listens_for(self.engine.sync_engine, "connect")
-        def _set_sqlite_pragmas(dbapi_connection, _record):
-            cursor = dbapi_connection.cursor()
-            try:
-                cursor.execute("PRAGMA foreign_keys=ON")
-                cursor.execute("PRAGMA journal_mode=WAL")
-                cursor.execute("PRAGMA synchronous=NORMAL")
-                cursor.execute("PRAGMA busy_timeout=120000")
-            finally:
-                cursor.close()
+        engine_kwargs = {} if ":memory:" in database_path else {"poolclass": NullPool}
+        self.engine = create_async_engine(
+            self.db_uri, connect_args=connect_args_for_mode(self.turso_config), **engine_kwargs
+        )
+        # Connection PRAGMAs (journal mode, busy_timeout, foreign_keys=ON so
+        # graph_edge's ON DELETE CASCADE fires) and, in mvcc mode, the
+        # BEGIN CONCURRENT hook. Connection scoped, so applied on every connect.
+        configure_engine(self.engine, foreign_keys=True, config=self.turso_config)
 
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
         self._write_lock = asyncio.Lock()
@@ -102,8 +140,26 @@ class TursoAdapter(GraphDBInterface):
 
     async def initialize(self) -> None:
         """Create tables and indexes if they do not exist."""
-        async with self.engine.begin() as conn:
+        async with exclusive_transaction(), self.engine.begin() as conn:
             await conn.run_sync(_meta.create_all, checkfirst=True)
+
+    async def _upsert_rows(self, table, index_elements: list[str], rows: list[dict], set_columns):
+        """One committed transaction of chunked ``INSERT ... ON CONFLICT DO UPDATE``."""
+        async with self._session() as session:
+            for i in range(0, len(rows), _WRITE_CHUNK_SIZE):
+                chunk = rows[i : i + _WRITE_CHUNK_SIZE]
+                stmt = sqlite_insert(table).values(chunk)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=index_elements,
+                    set_={column: getattr(stmt.excluded, column) for column in set_columns},
+                )
+                await session.execute(stmt)
+            await session.commit()
+
+    async def _write(self, operation) -> None:
+        """Serialize this adapter's writes and retry the whole transaction on a conflict."""
+        async with self._write_lock:
+            await retry_on_conflict(operation)
 
     @asynccontextmanager
     async def _session(self) -> AsyncIterator[Any]:
@@ -203,21 +259,11 @@ class TursoAdapter(GraphDBInterface):
         # the conflicting row first, which fires graph_edge's ON DELETE CASCADE and
         # would wipe a node's edges every time it is re-added; DO UPDATE edits in
         # place, preserving edges and created_at. Mirrors the Postgres adapter.
-        async with self._write_lock, self._session() as session:
-            for i in range(0, len(rows), _WRITE_CHUNK_SIZE):
-                chunk = rows[i : i + _WRITE_CHUNK_SIZE]
-                stmt = sqlite_insert(_node_table).values(chunk)
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=["id"],
-                    set_={
-                        "name": stmt.excluded.name,
-                        "type": stmt.excluded.type,
-                        "properties": stmt.excluded.properties,
-                        "updated_at": stmt.excluded.updated_at,
-                    },
-                )
-                await session.execute(stmt)
-            await session.commit()
+        await self._write(
+            lambda: self._upsert_rows(
+                _node_table, ["id"], rows, ("name", "type", "properties", "updated_at")
+            )
+        )
 
     async def delete_node(self, node_id: str) -> None:
         """Delete a single node. Delegates to delete_nodes."""
@@ -228,9 +274,15 @@ class TursoAdapter(GraphDBInterface):
         if not node_ids:
             return
         subquery, params = _id_subquery("did", node_ids)
-        async with self._write_lock, self._session() as session:
-            await session.execute(text(f"DELETE FROM graph_node WHERE id IN {subquery}"), params)
-            await session.commit()
+
+        async def delete() -> None:
+            async with self._session() as session:
+                await session.execute(
+                    text(f"DELETE FROM graph_node WHERE id IN {subquery}"), params
+                )
+                await session.commit()
+
+        await self._write(delete)
 
     async def get_node(self, node_id: str) -> dict[str, Any] | None:
         """Retrieve a single node by ID."""
@@ -297,19 +349,14 @@ class TursoAdapter(GraphDBInterface):
         )
 
         # ON CONFLICT DO UPDATE, not INSERT OR REPLACE (see add_nodes for why).
-        async with self._write_lock, self._session() as session:
-            for i in range(0, len(rows), _WRITE_CHUNK_SIZE):
-                chunk = rows[i : i + _WRITE_CHUNK_SIZE]
-                stmt = sqlite_insert(_edge_table).values(chunk)
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=["source_id", "target_id", "relationship_name"],
-                    set_={
-                        "properties": stmt.excluded.properties,
-                        "updated_at": stmt.excluded.updated_at,
-                    },
-                )
-                await session.execute(stmt)
-            await session.commit()
+        await self._write(
+            lambda: self._upsert_rows(
+                _edge_table,
+                ["source_id", "target_id", "relationship_name"],
+                rows,
+                ("properties", "updated_at"),
+            )
+        )
 
     async def has_edge(self, source_id: str, target_id: str, relationship_name: str) -> bool:
         """Check whether a single edge exists."""
@@ -719,33 +766,15 @@ class TursoAdapter(GraphDBInterface):
             mean_degree = (2 * num_edges) / num_nodes if num_nodes else None
             edge_density = num_edges / (num_nodes * (num_nodes - 1)) if num_nodes > 1 else 0
 
-            # SQLite supports recursive CTEs for connected components
-            comp_result = await session.execute(
-                text("""
-                WITH RECURSIVE component AS (
-                    SELECT id AS node_id, id AS comp_root
-                    FROM graph_node
-                    UNION
-                    SELECT
-                        CASE WHEN e.source_id = c.node_id THEN e.target_id ELSE e.source_id END,
-                        c.comp_root
-                    FROM component c
-                    JOIN graph_edge e ON e.source_id = c.node_id OR e.target_id = c.node_id
-                ),
-                node_comp AS (
-                    SELECT node_id, MIN(comp_root) AS comp_id
-                    FROM component
-                    GROUP BY node_id
-                )
-                SELECT comp_id, count(*) AS sz
-                FROM node_comp
-                GROUP BY comp_id
-                ORDER BY sz DESC
-            """)
-            )
-            comp_rows = comp_result.fetchall()
-            num_components = len(comp_rows)
-            component_sizes = [row[1] for row in comp_rows]
+            # The Turso engine has no recursive CTEs (0.7.x), so connected
+            # components are computed here with union-find over the edge list.
+            # Isolated nodes count as components of size one, as before.
+            node_ids = [row[0] for row in await session.execute(text("SELECT id FROM graph_node"))]
+            edge_rows = (
+                await session.execute(text("SELECT source_id, target_id FROM graph_edge"))
+            ).fetchall()
+            component_sizes = _component_sizes(node_ids, edge_rows)
+            num_components = len(component_sizes)
 
             metrics = {
                 "num_nodes": num_nodes,
@@ -788,73 +817,146 @@ class TursoAdapter(GraphDBInterface):
             et_ph, et_params = _in_params("et", edge_types)
             edge_filter = f"AND e.relationship_name IN ({et_ph})"
 
-        # SQLite has no unnest(); seed the recursion from a JSON array (one bound
-        # param, no per-seed variable cap).
-        _seed_subquery, seed_params = _id_subquery("seeds", node_ids)
-
-        query_str = f"""
-            WITH RECURSIVE neighborhood(id, hops) AS (
-                SELECT value AS id, 0 AS hops FROM json_each(:seeds)
-              UNION
-                SELECT CASE WHEN e.source_id = n.id THEN e.target_id
-                            ELSE e.source_id END,
-                       n.hops + 1
-                FROM neighborhood n
-                JOIN graph_edge e ON (e.source_id = n.id OR e.target_id = n.id)
-                    {edge_filter}
-                WHERE n.hops < :depth
-            ),
-            ids AS (SELECT DISTINCT id FROM neighborhood)
-
-            SELECT 'node' AS kind,
-                   gn.id, gn.name, gn.type, gn.properties,
-                   NULL AS source_id, NULL AS target_id,
-                   NULL AS relationship_name, NULL AS edge_properties
-            FROM graph_node gn
-            JOIN ids ON gn.id = ids.id
-
-            UNION ALL
-
-            SELECT 'edge' AS kind,
-                   NULL, NULL, NULL, NULL,
-                   ge.source_id, ge.target_id,
-                   ge.relationship_name, ge.properties
-            FROM graph_edge ge
-            WHERE ge.source_id IN (SELECT id FROM ids)
-              AND ge.target_id IN (SELECT id FROM ids)
-        """
-
-        params: dict[str, Any] = {"depth": depth, **seed_params, **et_params}
-
         async with self._session() as session:
-            result = await session.execute(text(query_str), params)
+            # Breadth-first expansion, one query per hop (the engine has no
+            # recursive CTEs). Each frontier is bound as a single JSON array, so
+            # neither seed count nor hop width hits the variable cap. Edge types
+            # only constrain the traversal, as in the recursive version; the
+            # returned edge set is every edge between the collected nodes.
+            visited = {str(node_id) for node_id in node_ids}
+            frontier = set(visited)
+            for _hop in range(max(depth, 0)):
+                if not frontier:
+                    break
+                frontier_subquery, frontier_params = _id_subquery("frontier", sorted(frontier))
+                result = await session.execute(
+                    text(
+                        f"""
+                        SELECT e.source_id, e.target_id
+                        FROM graph_edge e
+                        WHERE (e.source_id IN {frontier_subquery}
+                               OR e.target_id IN {frontier_subquery})
+                          {edge_filter}
+                        """
+                    ),
+                    {**frontier_params, **et_params},
+                )
+                next_frontier = set()
+                for source_id, target_id in result.fetchall():
+                    for endpoint in (source_id, target_id):
+                        if endpoint not in visited:
+                            visited.add(endpoint)
+                            next_frontier.add(endpoint)
+                frontier = next_frontier
 
+            ids_subquery, ids_params = _id_subquery("ids", sorted(visited))
+            node_result = await session.execute(
+                text(
+                    f"SELECT id, name, type, properties FROM graph_node WHERE id IN {ids_subquery}"
+                ),
+                ids_params,
+            )
             nodes = []
+            for row in node_result.fetchall():
+                data = self._parse_node_row(row)
+                data.pop("id", None)
+                nodes.append((row.id, data))
+
+            edge_result = await session.execute(
+                text(
+                    f"""
+                    SELECT source_id, target_id, relationship_name, properties
+                    FROM graph_edge
+                    WHERE source_id IN {ids_subquery} AND target_id IN {ids_subquery}
+                    """
+                ),
+                ids_params,
+            )
             edges = []
-            for row in result.fetchall():
-                if row.kind == "node":
-                    data = self._parse_node_row(row)
-                    data.pop("id", None)
-                    nodes.append((row.id, data))
-                else:
-                    props = {}
-                    if row.edge_properties is not None:
-                        props = (
-                            row.edge_properties
-                            if isinstance(row.edge_properties, dict)
-                            else json.loads(row.edge_properties)
-                        )
-                    edges.append((row.source_id, row.target_id, row.relationship_name, props))
+            for row in edge_result.fetchall():
+                props = {}
+                if row.properties is not None:
+                    props = (
+                        row.properties
+                        if isinstance(row.properties, dict)
+                        else json.loads(row.properties)
+                    )
+                edges.append((row.source_id, row.target_id, row.relationship_name, props))
 
             return nodes, edges
+
+    # ------------------------------------------------------------------ #
+    # Temporal retrieval (SearchType.TEMPORAL), mirroring the Ladybug/Neo4j
+    # adapters: Timestamp nodes carry ``time_at`` (ms since the epoch) in their
+    # properties; Event nodes sit within two hops of their timestamps.
+    # ------------------------------------------------------------------ #
+    async def collect_time_ids(
+        self,
+        time_from: Timestamp | None = None,
+        time_to: Timestamp | None = None,
+    ) -> list[str]:
+        """Return ids of ``Timestamp`` nodes whose ``time_at`` lies in the inclusive range.
+
+        Either bound may be omitted; with neither, nothing is selected (as in the
+        Ladybug adapter). A Timestamp without a numeric ``time_at`` is skipped.
+        """
+        if not time_from and not time_to:
+            return []
+
+        conditions = ["type = 'Timestamp'", "json_extract(properties, '$.time_at') IS NOT NULL"]
+        params: dict[str, Any] = {}
+        if time_from:
+            conditions.append("CAST(json_extract(properties, '$.time_at') AS INTEGER) >= :lower")
+            params["lower"] = date_to_int(time_from)
+        if time_to:
+            conditions.append("CAST(json_extract(properties, '$.time_at') AS INTEGER) <= :upper")
+            params["upper"] = date_to_int(time_to)
+
+        async with self._session() as session:
+            result = await session.execute(
+                text(f"SELECT id FROM graph_node WHERE {' AND '.join(conditions)}"), params
+            )
+            return [row[0] for row in result.fetchall()]
+
+    async def collect_events(self, ids: list[str] | str) -> list[dict[str, Any]]:
+        """Collect the ``Event`` nodes within one or two hops of ``ids``.
+
+        Same contract as the Ladybug adapter: ``[{"events": [...]}]`` where each
+        event has ``id``, ``name``, ``description`` and, when set, ``location``.
+        ``ids`` may also be the comma-joined string form the Neo4j path produces.
+        """
+        if isinstance(ids, str):
+            ids = [uid.strip().strip("'\"") for uid in ids.split(",") if uid.strip()]
+        seeds = {str(uid) for uid in ids}
+        if not seeds:
+            return [{"events": []}]
+
+        nodes, _ = await self.get_neighborhood(sorted(seeds), depth=2)
+        events = []
+        for node_id, data in nodes:
+            if node_id in seeds or data.get("type") != "Event":
+                continue
+            event: dict[str, Any] = {
+                "id": node_id,
+                "name": data.get("name"),
+                "description": data.get("description"),
+            }
+            if data.get("location"):
+                event["location"] = data["location"]
+            events.append(event)
+        return [{"events": events}]
 
     async def delete_graph(self) -> None:
         """Delete all nodes and edges from the graph."""
         await self.initialize()
-        async with self._write_lock, self._session() as session:
-            await session.execute(text("DELETE FROM graph_edge"))
-            await session.execute(text("DELETE FROM graph_node"))
-            await session.commit()
+
+        async def wipe() -> None:
+            async with self._session() as session:
+                await session.execute(text("DELETE FROM graph_edge"))
+                await session.execute(text("DELETE FROM graph_node"))
+                await session.commit()
+
+        await self._write(wipe)
 
     async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
         """Retrieve a batch of (source, relationship, target) triplets."""
@@ -942,14 +1044,20 @@ class TursoAdapter(GraphDBInterface):
 
         if updates:
             now = datetime.now(timezone.utc)
-            async with self._write_lock, self._session() as session:
-                for update in updates:
-                    await session.execute(
-                        text(
-                            "UPDATE graph_node SET properties = :p, updated_at = :now "
-                            "WHERE id = :id"
-                        ),
-                        {"id": update["id"], "p": update["properties"], "now": now},
-                    )
-                await session.commit()
+            # The engine binds only None/numbers/str/bytes; the typed bindparam
+            # renders the datetime the way the DateTime column stores it.
+            update_stmt = text(
+                "UPDATE graph_node SET properties = :p, updated_at = :now WHERE id = :id"
+            ).bindparams(bindparam("now", type_=DateTime(timezone=True)))
+
+            async def apply_updates() -> None:
+                async with self._session() as session:
+                    for update in updates:
+                        await session.execute(
+                            update_stmt,
+                            {"id": update["id"], "p": update["properties"], "now": now},
+                        )
+                    await session.commit()
+
+            await self._write(apply_updates)
         return

@@ -5,7 +5,7 @@ delete_dataset covers:
 - eviction is by database name (aevict_for_database), matching the generic
   key ensure_graph_memory_cleared's get_graph_engine() resolves, instead of
   the old narrower exact-key evict() that could miss the live cache entry
-- the dataset's libSQL file and its WAL-mode companions (-wal/-shm) are
+- the dataset's database file and its engine companions (-wal/-shm/-log) are
   removed
 - a dataset with no graph_database_name never calls the cache at all
   (nothing to evict by)
@@ -267,7 +267,7 @@ async def test_delete_dataset_evicts_before_removing_file(monkeypatch, tmp_path)
     async def fake_aevict(name):
         call_order.append("evict")
 
-    real_remove = os.remove
+    real_remove = handler_module.remove_database_files
 
     def tracking_remove(path):
         call_order.append("remove")
@@ -276,10 +276,9 @@ async def test_delete_dataset_evicts_before_removing_file(monkeypatch, tmp_path)
     monkeypatch.setattr(
         handler_module, "graph_engine_cache", SimpleNamespace(aevict_for_database=fake_aevict)
     )
-    # Replace the module's os global, not os.remove itself -- handler_module.os
-    # *is* os, so setting an attribute on it would swap the stdlib's remove
-    # process-wide for the duration of the test.
-    monkeypatch.setattr(handler_module, "os", SimpleNamespace(path=os.path, remove=tracking_remove))
+    # The handler removes files through the shared Turso cleanup helper; track
+    # that call (the module-level name it imported) rather than os.remove.
+    monkeypatch.setattr(handler_module, "remove_database_files", tracking_remove)
 
     await TursoGraphDatasetDatabaseHandler.delete_dataset(
         _dataset_database(str(db_path), graph_db_name="dataset-id")
@@ -289,6 +288,7 @@ async def test_delete_dataset_evicts_before_removing_file(monkeypatch, tmp_path)
 
 
 async def test_create_dataset_opens_a_real_graph(tmp_path):
+    pytest.importorskip("turso", reason="pyturso not installed")
     """The other half of COG-6491: cleanup was the visible failure, but the
     same value also builds the connection string, interpolated into
     "sqlite+aiosqlite:///". Nothing else here lets the real engine run, so

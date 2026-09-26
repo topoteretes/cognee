@@ -1,156 +1,130 @@
-"""Unit tests for TursoAdapter — the Turso (libSQL) relational backend.
+"""Unit tests for TursoAdapter — the relational backend on the Turso rewrite engine.
 
-Turso is driven through aiosqlite (a libSQL file is a SQLite file), so the
-adapter is a drop-in for the SQLite backend. These tests exercise the local
-drop-in against a real temporary libSQL/SQLite file, and the remote
-embedded-replica wiring (seed-before-first-use + sync-after-write) with the
-libsql driver stubbed, so no network or real Turso database is needed.
+They run against a real temporary Turso database file through cognee's
+``sqlite+cognee_turso://`` dialect (pyturso), so they prove the rewrite engine is
+the one executing the SQL. No network, no remote Turso database.
 """
 
 import asyncio
-import sys
-import tempfile
-import types
-from pathlib import Path
-from unittest.mock import patch
+import importlib.metadata
 
 import pytest
 from sqlalchemy import text
 
-from cognee.infrastructure.databases.relational.sqlalchemy.TursoAdapter import TursoAdapter
+pytest.importorskip("turso", reason="pyturso not installed")
+
+from cognee.infrastructure.databases.relational.sqlalchemy.TursoAdapter import (
+    TursoAdapter,
+)
+from cognee.infrastructure.databases.turso import get_turso_config
 
 
-def _local_adapter() -> TursoAdapter:
-    """A local (embedded) TursoAdapter backed by a fresh temp libSQL/SQLite file."""
-    db_path = Path(tempfile.mkdtemp()) / "turso_test.db"
-    return TursoAdapter(f"sqlite+aiosqlite:///{db_path}")
+def _make_adapter(tmp_path) -> TursoAdapter:
+    return TursoAdapter(str(tmp_path / "cognee_db"))
 
 
-class TestTursoAdapterLocal:
-    """Local mode is a pure SQLite drop-in: inherit everything, add nothing."""
+def _run(coro):
+    return asyncio.run(coro)
 
-    def test_is_local_and_uses_sqlite_dialect(self):
-        adapter = _local_adapter()
-        assert adapter.is_remote is False
-        # Inheriting the sqlite dialect is what makes every SQLAlchemyAdapter
-        # behavior (and the sqlite-dialect Alembic migrations) apply unchanged.
+
+class TestLocalMode:
+    def test_uses_cognee_turso_dialect(self, tmp_path):
+        adapter = _make_adapter(tmp_path)
         assert adapter.engine.dialect.name == "sqlite"
+        assert adapter.engine.dialect.driver == "cognee_turso"
+        assert adapter.db_path == str(tmp_path / "cognee_db")
+        # Local file: path parsed from the URL exactly like the SQLite branch does.
+        assert adapter.engine.url.database == str(tmp_path / "cognee_db")
 
-    def test_roundtrip_through_inherited_engine(self):
-        adapter = _local_adapter()
+    def test_rewrite_engine_is_the_executing_engine(self, tmp_path):
+        """``turso_version()`` exists only on the Turso rewrite; SQLite has no such function."""
+        adapter = _make_adapter(tmp_path)
 
-        async def scenario():
-            async with adapter.engine.begin() as conn:
-                await conn.execute(text("CREATE TABLE t (v TEXT)"))
-                await conn.execute(text("INSERT INTO t (v) VALUES ('x')"))
+        async def probe():
+            async with adapter.engine.connect() as connection:
+                version = (await connection.execute(text("SELECT turso_version()"))).scalar()
+                pragmas = {
+                    name: (await connection.execute(text(f"PRAGMA {name}"))).scalar()
+                    for name in ("journal_mode", "synchronous", "busy_timeout")
+                }
+            await adapter.engine.dispose()
+            return version, pragmas
+
+        version, pragmas = _run(probe())
+        assert version, "turso_version() returned nothing — not running on the Turso engine"
+        # Every connection PRAGMA of the shared Turso engine policy is in effect.
+        config = get_turso_config()
+        assert pragmas["journal_mode"] == config.turso_journal_mode
+        assert pragmas["synchronous"] in (1, "1", "NORMAL", "normal")
+        assert int(pragmas["busy_timeout"]) == config.turso_busy_timeout_ms
+        assert importlib.metadata.version("pyturso")
+
+    def test_roundtrip_through_inherited_engine(self, tmp_path):
+        adapter = _make_adapter(tmp_path)
+
+        async def roundtrip():
+            async with adapter.engine.begin() as connection:
+                await connection.execute(text("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)"))
+                await connection.execute(text("INSERT INTO t (v) VALUES (:v)"), {"v": "hello"})
             async with adapter.get_async_session() as session:
-                rows = (await session.execute(text("SELECT v FROM t"))).scalars().all()
+                rows = (await session.execute(text("SELECT v FROM t"))).all()
             await adapter.engine.dispose()
             return rows
 
-        assert asyncio.run(scenario()) == ["x"]
+        assert _run(roundtrip()) == [("hello",)]
 
-    def test_sync_and_write_wrapper_are_noops_locally(self):
-        adapter = _local_adapter()
-        calls = []
+    def test_data_persists_across_reopen(self, tmp_path):
+        """A second adapter on the same file sees the committed rows (restart semantics)."""
+        path = tmp_path / "cognee_db"
 
-        async def scenario():
-            await adapter.sync()  # no-op, must not import/require libsql
+        async def write():
+            adapter = TursoAdapter(str(path))
+            async with adapter.engine.begin() as connection:
+                await connection.execute(text("CREATE TABLE t (v TEXT)"))
+                await connection.execute(text("INSERT INTO t VALUES ('kept')"))
+            await adapter.engine.dispose()
 
-            async def fake_write(_self, value):
-                calls.append(value)
-                return value
+        async def read():
+            adapter = TursoAdapter(str(path))
+            async with adapter.engine.connect() as connection:
+                rows = (await connection.execute(text("SELECT v FROM t"))).all()
+            await adapter.engine.dispose()
+            return rows
 
-            # The write wrapper still runs the underlying method locally; the
-            # seed/sync around it are simply no-ops.
-            return await adapter._write(fake_write, "written")
+        _run(write())
+        assert _run(read()) == [("kept",)]
 
-        assert asyncio.run(scenario()) == "written"
-        assert calls == ["written"]
+    def test_create_database_runs_migrations_to_head(self, tmp_path):
+        """The full Alembic chain (sqlite dialect) applies on the rewrite engine."""
+        adapter = _make_adapter(tmp_path)
 
+        async def migrate():
+            await adapter.create_database()
+            async with adapter.engine.connect() as connection:
+                head = (
+                    await connection.execute(text("SELECT version_num FROM alembic_version"))
+                ).all()
+                tables = (
+                    await connection.execute(
+                        text("SELECT count(*) FROM sqlite_master WHERE type = 'table'")
+                    )
+                ).scalar()
+            await adapter.engine.dispose()
+            return head, tables
 
-class TestTursoAdapterRemote:
-    """Remote mode adds embedded-replica sync on top of the same aiosqlite engine."""
+        head, tables = _run(migrate())
+        assert len(head) == 1
+        assert tables > 20
 
-    @pytest.fixture
-    def libsql_stub(self):
-        """Stub libsql_experimental so replica sync needs no network or real Turso."""
-        calls = {"connect": 0, "sync": 0, "close": 0, "last": None, "fail": False}
-
-        class _Conn:
-            def sync(self):
-                if calls["fail"]:
-                    raise RuntimeError("primary unreachable")
-                calls["sync"] += 1
-
-            def close(self):
-                calls["close"] += 1
-
-        def _connect(database, sync_url=None, auth_token=None):
-            calls["connect"] += 1
-            calls["last"] = {
-                "database": database,
-                "sync_url": sync_url,
-                "auth_token": auth_token,
-            }
-            return _Conn()
-
-        stub = types.ModuleType("libsql_experimental")
-        stub.connect = _connect
-        with patch.dict(sys.modules, {"libsql_experimental": stub}):
-            yield calls
-
-    def _remote_adapter(self) -> TursoAdapter:
-        db_path = Path(tempfile.mkdtemp()) / "replica.db"
-        return TursoAdapter(
-            f"sqlite+aiosqlite:///{db_path}",
-            sync_url="libsql://db.turso.io",
-            auth_token="tok",
+    def test_unsupported_connect_args_are_dropped(self, tmp_path):
+        """The SQLite branch passes aiosqlite's ``timeout``; the dialect must swallow it."""
+        adapter = TursoAdapter(
+            str(tmp_path / "cognee_db"), connect_args={"check_same_thread": False}
         )
 
-    def test_no_network_in_constructor(self, libsql_stub):
-        # __init__ must not touch the network/driver (that would block the loop
-        # and hard-fail all DB access when the primary is unreachable).
-        adapter = self._remote_adapter()
-        assert adapter.is_remote is True
-        assert libsql_stub["connect"] == 0
+        async def probe():
+            async with adapter.engine.connect() as connection:
+                return (await connection.execute(text("SELECT 1"))).scalar()
 
-    def test_seeds_replica_once_before_first_use(self, libsql_stub):
-        adapter = self._remote_adapter()
-
-        async def scenario():
-            async with adapter.get_async_session():
-                pass
-            async with adapter.get_async_session():
-                pass
-
-        asyncio.run(scenario())
-        # Seeded exactly once (pull current remote state), passing the wiring through.
-        assert libsql_stub["sync"] == 1
-        assert libsql_stub["last"]["sync_url"] == "libsql://db.turso.io"
-        assert libsql_stub["last"]["auth_token"] == "tok"
-
-    def test_write_syncs_after_the_write(self, libsql_stub):
-        adapter = self._remote_adapter()
-        order = []
-
-        async def fake_write(_self):
-            order.append("write")
-            return "done"
-
-        async def scenario():
-            return await adapter._write(fake_write)
-
-        result = asyncio.run(scenario())
-        assert result == "done"
-        # seed (before) + push (after) => two syncs, each its own open/close.
-        assert libsql_stub["sync"] == 2
-        assert libsql_stub["close"] == 2
-        assert order == ["write"]
-
-    def test_sync_failure_is_non_fatal(self, libsql_stub):
-        adapter = self._remote_adapter()
-        libsql_stub["fail"] = True
-        # A transient sync failure must be swallowed so it never breaks a DB op.
-        asyncio.run(adapter.sync())
-        assert libsql_stub["close"] == 1  # connection still closed despite failure
+        assert _run(probe()) == 1
+        _run(adapter.engine.dispose())

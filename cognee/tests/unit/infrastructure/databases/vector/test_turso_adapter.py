@@ -11,19 +11,19 @@ import pytest
 import pytest_asyncio
 
 try:
-    import libsql_experimental
+    import turso
 
     from cognee.infrastructure.databases.vector.turso.TursoVectorAdapter import (
         TursoVectorAdapter,
     )
     from cognee.infrastructure.engine import DataPoint
 
-    HAS_LIBSQL = True
-except ModuleNotFoundError:
-    HAS_LIBSQL = False
+    HAS_TURSO = True
+except ImportError:
+    HAS_TURSO = False
 
 
-pytestmark = pytest.mark.skipif(not HAS_LIBSQL, reason="libsql-experimental not installed")
+pytestmark = pytest.mark.skipif(not HAS_TURSO, reason="pyturso not installed")
 
 DIM = 4
 
@@ -50,7 +50,7 @@ class _FakeEmbeddingEngine:
         return out
 
 
-if HAS_LIBSQL:
+if HAS_TURSO:
 
     class _Doc(DataPoint):
         text: str
