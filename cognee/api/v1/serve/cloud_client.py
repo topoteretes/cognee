@@ -259,6 +259,8 @@ class CloudClient:
             payload["datasets"] = kwargs["datasets"]
         if kwargs.get("top_k"):
             payload["top_k"] = kwargs["top_k"]
+        if kwargs.get("min_score") is not None:
+            payload["min_score"] = kwargs["min_score"]
         if kwargs.get("system_prompt"):
             payload["system_prompt"] = kwargs["system_prompt"]
         if kwargs.get("node_name"):

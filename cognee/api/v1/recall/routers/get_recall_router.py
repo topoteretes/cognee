@@ -68,6 +68,14 @@ class RecallPayloadDTO(InDTO):
         ),
     )
     top_k: int | None = Field(default=15)
+    min_score: float | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Minimum fused HYBRID_COMPLETION score required for graph context. "
+            "If no chunk reaches the cutoff, recall returns no graph result."
+        ),
+    )
     only_context: bool = Field(
         default=False,
         description=(
@@ -305,6 +313,7 @@ def get_recall_router() -> APIRouter:
                 system_prompt=payload.system_prompt,
                 node_name=payload.node_name,
                 top_k=payload.top_k,
+                min_score=payload.min_score,
                 verbose=payload.verbose,
                 only_context=payload.only_context,
                 session_id=payload.session_id,

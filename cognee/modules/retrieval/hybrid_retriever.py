@@ -73,6 +73,7 @@ class HybridRetriever(BaseRetriever):
         facts_top_k: int | None = 5,
         include_external_metadata: bool = False,
         external_metadata_keys: list[str] | None = None,
+        min_score: float | None = None,
     ):
         self.chunks_top_k = chunks_top_k if chunks_top_k is not None else 5
         self.entities_top_k = entities_top_k if entities_top_k is not None else 5
@@ -96,6 +97,9 @@ class HybridRetriever(BaseRetriever):
         # prompt stay exactly as before.
         self.include_external_metadata = include_external_metadata
         self.external_metadata_keys = list(external_metadata_keys or [])
+        if min_score is not None and (isinstance(min_score, bool) or min_score < 0):
+            raise ValueError("min_score must be a non-negative number or None")
+        self.min_score = float(min_score) if min_score is not None else None
 
     def _use_session_cache(self) -> bool:
         user = session_user.get()
@@ -157,6 +161,7 @@ class HybridRetriever(BaseRetriever):
                 current_truth_epoch=truth.current_truth_epoch,
                 personal_weights=personal_weights,
                 personal_influence=get_base_config().personalization_influence,
+                min_score=self.min_score,
             ),
             self._retrieve_entities_and_facts(query, query_vector),
         )
@@ -165,6 +170,12 @@ class HybridRetriever(BaseRetriever):
             self.include_external_metadata,
             self.external_metadata_keys,
         )
+        # A cutoff is a confidence gate for the complete hybrid result, not only
+        # a chunk filter. Entity and fact lanes have no comparable fused score;
+        # if no fused chunk clears the gate, returning them would still inject
+        # unrelated context into automatic prompt-time recall.
+        if self.min_score is not None and not chunk_objects.get("chunks"):
+            return {"chunks": [], "chunk_summaries": {}, "entities": [], "facts": []}
         return {**chunk_objects, "entities": entities, "facts": facts}
 
     async def _retrieve_entities_and_facts(self, query: str, query_vector: list[float]) -> tuple:
