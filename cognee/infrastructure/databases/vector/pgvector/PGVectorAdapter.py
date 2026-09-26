@@ -29,6 +29,7 @@ from ..models.ScoredResult import ScoredResult
 from ..stored_vector_size import choose_stored_vector_size
 from ..vector_db_interface import VectorDBInterface
 from .serialize_data import serialize_data
+from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 
 logger = get_logger("PGVectorAdapter")
 QUERY_BATCH_SIZE = 1000
@@ -95,7 +96,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Postgres schema this adapter is pinned to ("" = default/public search path).
         # Read by schema-scoped overrides of get_table_names()/delete_database().
         self.schema: str = schema or ""
-        self.VECTOR_DB_LOCK = asyncio.Lock()
+        # Loop-agnostic: the adapter is cached across event loops, and an
+        # asyncio.Lock binds to the first loop that awaits it.
+        self.VECTOR_DB_LOCK = LoopAgnosticLock()
         self._write_locks: dict[str, asyncio.Lock] = {}
         self._metadata = MetaData()
         # True when this adapter created its own engine and must dispose it on close().
@@ -239,7 +242,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
     def _get_write_lock(self, collection_name: str) -> asyncio.Lock:
         if collection_name not in self._write_locks:
-            self._write_locks[collection_name] = asyncio.Lock()
+            self._write_locks[collection_name] = LoopAgnosticLock()
         return self._write_locks[collection_name]
 
     async def embed_data(self, data: list[str]) -> list[list[float]]:
