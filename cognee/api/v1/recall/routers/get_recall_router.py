@@ -68,6 +68,15 @@ class RecallPayloadDTO(InDTO):
         ),
     )
     top_k: int | None = Field(default=15)
+    min_score: float | None = Field(
+        default=None,
+        description=(
+            "Optional HYBRID_COMPLETION cutoff on the hybrid chunk fused score: "
+            "RRF, then importance, truth, and personal factors when those are on. "
+            "Higher is better. Omit to keep top-k. Not a raw RRF value, and not a "
+            "vector distance, so it does not filter SKILLS or CHUNKS."
+        ),
+    )
     only_context: bool = Field(
         default=False,
         description=(
@@ -235,6 +244,9 @@ def get_recall_router() -> APIRouter:
         - **system_prompt** (Optional[str]): System prompt for completion searches
         - **node_name** (Optional[List[str]]): Filter to specific node sets
         - **top_k** (Optional[int]): Maximum results (default: 15)
+        - **min_score** (Optional[float]): HYBRID_COMPLETION chunk fused-score
+          cutoff (RRF times importance and other factors; higher is better).
+          Omit to keep today's top-k behavior.
         - **only_context** (bool): Return what the LLM would have received instead of
           its answer — for completion types each item's text is the user prompt
           (conversation history, question plus retrieval context, session guidance)
@@ -305,6 +317,7 @@ def get_recall_router() -> APIRouter:
                 system_prompt=payload.system_prompt,
                 node_name=payload.node_name,
                 top_k=payload.top_k,
+                min_score=payload.min_score,
                 verbose=payload.verbose,
                 only_context=payload.only_context,
                 session_id=payload.session_id,

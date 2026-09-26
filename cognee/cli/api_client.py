@@ -326,6 +326,7 @@ class CogneeApiClient:
         node_name: list[str] | None = None,
         only_context: bool = False,
         verbose: bool = False,
+        min_score: float | None = None,
     ) -> list:
         # search_type=None (the server default) auto-routes the query; with
         # session_id and no datasets it also searches the session cache first.
@@ -336,6 +337,8 @@ class CogneeApiClient:
             "only_context": only_context,
             "verbose": verbose,
         }
+        if min_score is not None:
+            payload["min_score"] = min_score
         if datasets:
             payload["datasets"] = datasets
         if system_prompt:

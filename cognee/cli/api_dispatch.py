@@ -313,6 +313,7 @@ def _dispatch_recall(client: CogneeApiClient, args: argparse.Namespace) -> None:
         search_type=args.query_type,
         datasets=args.datasets,
         top_k=args.top_k,
+        min_score=getattr(args, "min_score", None),
         system_prompt=getattr(args, "system_prompt", None),
         session_id=args.session_id,
     )

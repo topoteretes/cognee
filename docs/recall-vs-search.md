@@ -49,6 +49,7 @@ Source of truth: `cognee/api/v1/recall/recall.py` and `cognee/api/v1/search/sear
 | omitted `query_type` | Router picks one; `HYBRID_COMPLETION` if routing is off | Always `HYBRID_COMPLETION` |
 | `top_k` | default 15 | default 15 (the CLI's `recall --top-k` defaults to 10) |
 | `only_context=True` | Same as `search()`; pin `query_type` so the hybrid retriever cannot defer to `GRAPH_COMPLETION` behind your back | Returns what the LLM would have received instead of its answer: for completion types the user prompt (history, rendered question and context, session guidance) with the system prompt (the task template) alongside; retrieval-only types return their context |
+| `min_score` | Optional `HYBRID_COMPLETION` cutoff on the hybrid chunk fused score: RRF, then importance, truth, and personal factors when those are on (importance is on by default, so this is not raw RRF). Higher is better. `None` keeps top-k. When the cutoff removes every passage candidate, recall returns nothing. Not applied to `SKILLS` or `CHUNKS`. | Pass the same value in `retriever_specific_config` |
 
 ## Quick reference
 

@@ -75,6 +75,7 @@ class RecallKwargs(TypedDict, total=False):
     retriever_specific_config: dict
     response_model: type
     user: object
+    min_score: float | None
 
 
 def _tokenize(text: str) -> set[str]:
@@ -376,6 +377,7 @@ async def recall(
     tools_trigger: str = "always",
     code_query: dict | None = None,
     user: object | None = None,
+    min_score: float | None = None,
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
 ) -> list[RecallResponse]:
@@ -422,6 +424,17 @@ async def recall(
             (default) or ``"on_empty"`` — go back to the original data source
             only when every other requested source returned nothing, i.e. when
             cognee lacks the context to answer.
+        min_score: Optional cutoff for ``HYBRID_COMPLETION`` chunk hits. The score
+            is RRF, then multiplied by importance, truth, and personal factors
+            when those weights are on (importance is on by default, so a rank-0
+            hit is not the raw ``1/(k+1)`` RRF value). Higher is better.
+            ``None`` keeps the current top-k behavior. A hit is kept when its
+            score is greater than or equal to this value. When the cutoff
+            removes every passage candidate, recall returns nothing instead of
+            injecting unrelated entities or facts. An empty chunk lane that was
+            never a candidate is left alone. This is not a vector distance, so
+            it does not filter ``SKILLS`` or ``CHUNKS``. It does not add a
+            lexical boost for identifiers.
         code_query: Structured operation and arguments for the ``"code"``
             scope (same dict format as ``search(code_query=...)``, e.g.
             ``{"operation": "impact_analysis", "seeds": ["UserService"]}``).
@@ -451,6 +464,18 @@ async def recall(
         retriever_specific_config = {
             **(retriever_specific_config or {}),
             "response_model": response_model,
+        }
+
+    if min_score is not None:
+        configured_score = (retriever_specific_config or {}).get("min_score")
+        if configured_score is not None and configured_score != min_score:
+            raise CogneeValidationError(
+                message="min_score was passed both directly and in "
+                "retriever_specific_config with different values; pass it once."
+            )
+        retriever_specific_config = {
+            **(retriever_specific_config or {}),
+            "min_score": min_score,
         }
 
     # Pass the User through rather than pre-resolving its id: send_telemetry
