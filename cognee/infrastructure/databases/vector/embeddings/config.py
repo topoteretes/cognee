@@ -140,10 +140,10 @@ class EmbeddingConfig(BaseSettings):
             else:
                 logger.warning(
                     "Could not auto-derive embedding_dimensions for "
-                    "provider=%r model=%r. Falling back to %d. If your embedder "
-                    "produces vectors of a different size, set EMBEDDING_DIMENSIONS "
-                    "explicitly — otherwise the first write into the vector store "
-                    "will fail with a shape mismatch.",
+                    "provider=%r model=%r. Using fallback dimension %d. "
+                    "If your embedding model produces vectors of a different size, the first "
+                    "vector write may fail with a dimension mismatch. "
+                    "Configure EMBEDDING_DIMENSIONS explicitly to avoid this.",
                     self.embedding_provider,
                     self.embedding_model,
                     _FALLBACK_DIMENSIONS,
