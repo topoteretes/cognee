@@ -138,7 +138,7 @@ These still ship and are what the memory API calls underneath. Reach for them to
 4. **memify()** - Enrich graph with additional context and rules
 
 Note: Using Low level operations over core is useful in the following contexts.
-1) functional_relationships= is completely unreachable from remember(). So Only cognify can constrain single-target relationships.
+1) Some add()/cognify() options are not accepted by remember(): it routes kwargs through a fixed allow-list (`_ADD_ONLY` / `_COGNIFY_ONLY` / `_SHARED` in `cognee/api/v1/remember/remember.py`) and raises `TypeError: Unexpected keyword arguments` for anything else. Unreachable today: cognify's `functional_relationships` (so only cognify can constrain single-target relationships), `chunk_attachment`, and `ontology_file_path` (remember still takes an ontology via `config={"ontology_config": {"ontology_resolver": RDFLibOntologyResolver(ontology_file=...)}}` or `ONTOLOGY_FILE_PATH`); add's web-scraping options `extraction_rules`, `tavily_config`, `soup_crawler_config`; and the DLT option `column_value_columns`.
 2) remember() hardcodes datasets_arg = [dataset_name]: always exactly one. Use cognify for this: cognify(datasets=["a","b","c"]) or datasets=None (every dataset the user owns.)
 3) remember() always runs add() first. To rebuild a graph over data already in the DB — after forget(memory_only=True), or with a new graph_model/ontology, cognify() is the only path.
 4) add() is like a staging area for cognify(). But remember automatically adds every time.
@@ -312,7 +312,7 @@ Unified interface for multiple LLM providers: OpenAI, Anthropic, Gemini, Ollama,
 Factory pattern for embeddings: `cognee/infrastructure/databases/vector/embeddings/get_embedding_engine.py`
 
 #### Document Loaders
-Support for PDF, DOCX, CSV, images, audio, code files in `cognee/infrastructure/files/`
+Support for PDF, CSV, images, audio, video, code files (DOCX/PPTX and other office formats through the `docs`/`docling` extras) in `cognee/infrastructure/loaders/` — core loaders in `core/`, extras-gated ones in `external/`, registry in `supported_loaders.py`
 
 ## Important Configuration
 
@@ -924,7 +924,7 @@ shutdown = visualization_server(port=8080)  # synchronous; returns a shutdown ca
 - Solution: Always configure both LLM and embedding providers, or ensure valid OpenAI API key
 
 **Permission Denied on Search**
-- Behavior: Returns empty list rather than error (prevents information leakage)
+- Behavior: Without `datasets`, search covers only datasets the user can read, so a user without grants gets an empty list. An explicit dataset id the user cannot read raises `PermissionDeniedError` (HTTP 403). Dataset names resolve only among the user's own datasets, so a shared dataset's name raises `DatasetNotFoundError`; pass its id instead.
 - Solution: Check dataset permissions and user access rights
 
 **Database Connection Issues**

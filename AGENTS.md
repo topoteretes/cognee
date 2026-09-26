@@ -19,7 +19,7 @@ This document summarizes how to work with the cognee repository: how it’s orga
 - `distributed/deploy/`: One-click deployment templates (Modal, Fly.io, Railway, Render, Daytona).
 - `examples/`: Example scripts demonstrating the public APIs and features (graph, code graph, multimodal, permissions, etc.).
 - `notebooks/`: Jupyter notebooks for demos and tutorials.
-- `alembic/`: Database migrations for relational backends.
+- `cognee/alembic/`: Relational (Alembic) schema migrations; `alembic.ini` is in `cognee/`. Graph/vector data migrations live in `cognee/modules/migrations/`.
 
 Notes:
 - Co-locate feature-specific helpers under their respective package (`modules/`, `infrastructure/`, or `tasks/`).

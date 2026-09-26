@@ -17,8 +17,9 @@ echo "Bind address: $BIND_ADDRESS"
 
 # Run migrations through cognee's own migration system rather than raw
 # alembic: it knows a fresh database from an existing one (fresh -> create
-# directories + build the schema from the models + `alembic stamp head`;
-# existing -> apply Alembic deltas + the graph/vector data chain), honors
+# directories + build the schema by running the whole Alembic chain, whose
+# initial revision carries the frozen base schema — no stamp is written;
+# existing -> apply Alembic deltas; both then run the graph/vector data chain), honors
 # ENABLE_AUTO_MIGRATIONS, and needs no working directory. Raw
 # `alembic upgrade head` had none of that: on a fresh volume it died on the
 # missing databases directory and the silent create_all fallback left the
