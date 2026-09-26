@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Collection
 from typing import Any
 from uuid import UUID
 
@@ -31,6 +31,7 @@ Node = tuple[str, NodeData]  # (node_id, properties)
 
 _warned_degree_fallbacks: set[type] = set()
 _warned_neighborhood_fallbacks: set[type] = set()
+_warned_edge_text_fallbacks: set[type] = set()
 
 
 class GraphDBInterface(ABC):
@@ -578,6 +579,47 @@ class GraphDBInterface(ABC):
         Retrieve all nodes and edges within the graph.
         """
         raise NotImplementedError
+
+    async def get_edge_retrieval_texts_in_use(self, edge_texts: Collection[str]) -> set[str]:
+        """The subset of ``edge_texts`` that some edge in the graph still carries.
+
+        An edge's retrieval text is ``get_edge_retrieval_text(edge_text,
+        relationship_name)``: its stored ``edge_text``, falling back to the
+        relationship name. EdgeType nodes and vectors are keyed by that text and
+        shared between edges, so deletes ask this to find out which of the texts
+        they removed are now orphaned.
+
+        Deliberately NOT abstract, like ``get_top_degree_node_ids``: the default
+        reads the whole graph through ``get_graph_data`` to answer a question
+        about a handful of texts. Every delete that removes an edge calls this,
+        and on a 25k-node / 133k-edge Neo4j graph the read took 34 s and held
+        every node and edge in Python at once. Overriding adapters should answer
+        in the store and return only the matching texts.
+        """
+        from cognee.modules.graph.utils.prepare_edges_for_storage import (
+            get_edge_retrieval_text,
+        )
+
+        wanted = {text for text in edge_texts if text}
+        if not wanted:
+            return set()
+
+        adapter_type = type(self)
+        if adapter_type not in _warned_edge_text_fallbacks:
+            _warned_edge_text_fallbacks.add(adapter_type)
+            logger.warning(
+                "%s has no native get_edge_retrieval_texts_in_use; falling back to a "
+                "full graph read. This is O(graph) in memory.",
+                adapter_type.__name__,
+            )
+        _, edges = await self.get_graph_data()
+        in_use: set[str] = set()
+        for edge in edges:
+            properties = edge[3] if len(edge) > 3 and isinstance(edge[3], dict) else {}
+            edge_text = get_edge_retrieval_text(properties.get("edge_text"), edge[2])
+            if edge_text in wanted:
+                in_use.add(edge_text)
+        return in_use
 
     async def get_top_degree_node_ids(self, top_k: int) -> list[str]:
         """Ids of up to ``top_k`` well-connected nodes, to seed a graph view.
