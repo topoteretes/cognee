@@ -165,6 +165,7 @@ async def get_search_type_retriever_instance(
                     "include_external_metadata", False
                 ),
                 "external_metadata_keys": retriever_specific_config.get("external_metadata_keys"),
+                "min_score": retriever_specific_config.get("min_score"),
             },
         ),
         SearchType.TRIPLET_COMPLETION: (

@@ -62,6 +62,16 @@ With --query-type CODE, --code-query selects the code-graph operation and
             help="Maximum number of results (default: 10)",
         )
         parser.add_argument(
+            "--min-score",
+            type=float,
+            default=None,
+            help=(
+                "HYBRID_COMPLETION chunk fused-score cutoff "
+                "(RRF times importance and other factors; higher is better). "
+                "Omit to keep the current top-k behavior."
+            ),
+        )
+        parser.add_argument(
             "--system-prompt",
             help="Custom system prompt file for LLM-based search types",
         )
@@ -126,6 +136,7 @@ With --query-type CODE, --code-query selects the code-graph operation and
                         "query_text": args.query_text,
                         "datasets": args.datasets,
                         "top_k": args.top_k,
+                        "min_score": args.min_score,
                         "system_prompt_path": (args.system_prompt or "answer_simple_question.txt"),
                         **session_kwargs,
                     }

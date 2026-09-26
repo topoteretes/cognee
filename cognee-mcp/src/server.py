@@ -534,6 +534,7 @@ async def recall(
     session_id: str | None = None,
     system_prompt: str | None = None,
     top_k: int = 15,
+    min_score: float | None = None,
 ) -> list:
     """Search memory with auto-routing and session awareness.
 
@@ -568,6 +569,10 @@ async def recall(
         on the server.
     top_k : int
         Maximum results to return (default: 15).
+    min_score : float, optional
+        HYBRID_COMPLETION chunk fused-score cutoff: RRF, then importance,
+        truth, and personal factors when those are on. Higher is better.
+        Omit to keep the current top-k behavior. Not a vector distance.
 
     Returns a one-line memory-hit or empty-state summary followed by the original
     result text. Status markers do not count as hits. Empty-state checks are
@@ -584,6 +589,7 @@ async def recall(
                 session_id=session_id,
                 system_prompt=system_prompt,
                 top_k=normalized_top_k,
+                min_score=min_score,
             )
             empty_state = recall_marker_state(results)
             items = recall_items(results)

@@ -13,9 +13,71 @@ def rank_chunk_summary_pairs(
     current_truth_epoch: int | None = None,
     personal_weights: dict | None = None,
     personal_influence: float = 0.0,
+    min_score: float | None = None,
 ) -> list[dict]:
+    """Rank chunk/summary pairs by the hybrid fused score.
+
+    The score starts as RRF, then importance, truth, and personal factors
+    multiply it when those weights are on. ``min_score`` cuts on that final
+    score (higher is better), not on raw RRF. ``None`` keeps today's
+    top-``limit`` behavior. A hit is kept when its score is greater than or
+    equal to the cutoff.
+    """
+    return _rank_chunk_summary_pairs(
+        pairs,
+        limit,
+        use_importance_weight,
+        use_truth_weight=use_truth_weight,
+        q_coords=q_coords,
+        truth_state_by_id=truth_state_by_id,
+        current_truth_epoch=current_truth_epoch,
+        personal_weights=personal_weights,
+        personal_influence=personal_influence,
+        min_score=min_score,
+    )[0]
+
+
+def rank_chunk_summary_pairs_with_cutoff(
+    pairs: list[dict],
+    limit: int,
+    use_importance_weight: bool,
+    use_truth_weight: bool = False,
+    q_coords: list[float] | None = None,
+    truth_state_by_id: dict | None = None,
+    current_truth_epoch: int | None = None,
+    personal_weights: dict | None = None,
+    personal_influence: float = 0.0,
+    min_score: float | None = None,
+) -> tuple[list[dict], bool]:
+    """Same ranking as ``rank_chunk_summary_pairs``, plus whether the cutoff removed every candidate."""
+    return _rank_chunk_summary_pairs(
+        pairs,
+        limit,
+        use_importance_weight,
+        use_truth_weight=use_truth_weight,
+        q_coords=q_coords,
+        truth_state_by_id=truth_state_by_id,
+        current_truth_epoch=current_truth_epoch,
+        personal_weights=personal_weights,
+        personal_influence=personal_influence,
+        min_score=min_score,
+    )
+
+
+def _rank_chunk_summary_pairs(
+    pairs: list[dict],
+    limit: int,
+    use_importance_weight: bool,
+    use_truth_weight: bool = False,
+    q_coords: list[float] | None = None,
+    truth_state_by_id: dict | None = None,
+    current_truth_epoch: int | None = None,
+    personal_weights: dict | None = None,
+    personal_influence: float = 0.0,
+    min_score: float | None = None,
+) -> tuple[list[dict], bool]:
     if limit <= 0:
-        return []
+        return [], False
 
     rrf_k = _rrf_k(limit)
     ranked = []
@@ -53,7 +115,12 @@ def rank_chunk_summary_pairs(
         ranked.append((final_score, rrf_score, min(ranks), chunk_id, pair))
 
     ranked.sort(key=lambda item: (-item[0], -item[1], item[2], item[3]))
-    return [pair for *_, pair in ranked[:limit]]
+    had_candidates = bool(ranked)
+    if min_score is not None:
+        ranked = [item for item in ranked if item[0] >= min_score]
+    kept = [pair for *_, pair in ranked[:limit]]
+    removed_all = min_score is not None and had_candidates and not kept
+    return kept, removed_all
 
 
 def _rrf_k(chunks_top_k: int) -> int:

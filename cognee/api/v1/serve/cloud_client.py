@@ -289,6 +289,8 @@ class CloudClient:
             payload["tools_trigger"] = kwargs["tools_trigger"]
         if kwargs.get("code_query") is not None:
             payload["code_query"] = kwargs["code_query"]
+        if kwargs.get("min_score") is not None:
+            payload["min_score"] = kwargs["min_score"]
 
         async with session.post(
             f"{self.service_url}/api/v1/recall",
