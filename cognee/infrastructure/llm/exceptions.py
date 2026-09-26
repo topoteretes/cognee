@@ -248,6 +248,20 @@ class MissingSystemPromptPathError(CogneeValidationError):
         super().__init__(message, name)
 
 
+class PromptPathOutsideBaseDirectoryError(CogneeValidationError):
+    """Raised when a prompt file name resolves outside its prompt directory."""
+
+    def __init__(
+        self,
+        name: str = "PromptPathOutsideBaseDirectoryError",
+    ) -> None:
+        message = (
+            "Prompt file must be a file inside the prompt directory; absolute paths and "
+            "'..' segments that leave it are not allowed."
+        )
+        super().__init__(message, name)
+
+
 class MCPSamplingUnavailableError(CogneeValidationError):
     """
     Raised when `LLM_PROVIDER=mcp-sampling` is selected but no host MCP sampling
