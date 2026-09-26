@@ -1,0 +1,551 @@
+name: automation | Docstring Pilot
+
+# Runs the evidence-led docstring pilot on the files selected in
+# .claude/skills/docstring-author/pilot_files.md — one file, or all ten as a
+# matrix (`path: all`) — and opens one draft PR per changed file against dev
+# for review (RES-28). A prepare job validates once and emits the target list;
+# each matrix job then runs the full author -> critic -> guards chain for its
+# file, so every file gets its own ledger, its own summary section, and (in a
+# real run) its own docstring-only draft PR.
+#
+# This is a proof of concept, and the shape is the thing being tested: docstrings
+# written against the code, then independently verified, with a claim ledger in
+# the PR body pairing every favorable claim with evidence a reviewer can open.
+# The question it answers is whether that produces docstring diffs a maintainer
+# would merge — not whether docstrings can be generated at scale.
+#
+# Two skills, one invocation each:
+#
+#   Pass 1  .claude/skills/docstring-author  reads the target and its surrounding
+#           code, writes docstrings, writes no ledger.
+#   Pass 2  .claude/skills/docstring-critic  runs in fresh context with the
+#           author's diff as a patch, re-locates the evidence for every favorable
+#           claim, cuts what it cannot support, and writes the ledger.
+#
+# The passes were one agent run until it became clear that self-critique is the
+# design's weakest joint: an author asked to critique itself remembers which
+# claims it grounded in code and which it inferred while reading, and that memory
+# is exactly what can be confabulated, so it accepts its own unsupported wording.
+# A separate critic has nothing to protect. The cost is the opposite error — it
+# may cut a true claim whose evidence it failed to find — which the ledger's
+# "Reviewer should check" section keeps visible.
+#
+# They are separate skills rather than two sections of one, so the critic never
+# reads the author's marching orders: knowing them invites grading "did the author
+# follow instructions?" instead of "is this claim true?". pilot_files.md is
+# withheld from the critic for the same reason, and lives under docstring-author
+# because the author is its only reader.
+#
+# The cost of two skills is that the shared rules — scope, docstrings-only, what
+# counts as evidence — exist in two copies, and if they drift the critic starts
+# rejecting claims on a standard the author was never held to. The "shared rules
+# are identical" step below makes that a failed run rather than a silent bug: the
+# block is delimited by shared-rules:start/end markers in both files and compared
+# byte for byte. See the RES-28 discussion.
+#
+# Deliberately manual. There is no cron, no push trigger, and no pull_request
+# trigger: the pilot is ten files, so there is nothing for a schedule to watch,
+# and a docstring is not drift that appears on its own. It is also deliberately
+# never auto-merged — an unsupported claim in a docstring is exactly the failure
+# this workflow exists to detect, and only a human review detects it.
+#
+# Two guards make the draft PR cheap to review:
+#
+#   1. tools/check_docstring_pilot_path.py rejects any `path` outside the ten
+#      selected files, before either pass is called, and writes the reason into
+#      the run summary. The automation may not pick new files.
+#   2. tools/check_docstring_pilot_diff.py compares the file's AST before and
+#      after with docstrings stripped, so a code edit smuggled into a
+#      "docstring" run fails the run instead of reaching the PR. It runs after
+#      the critic, so it covers both passes.
+#
+# The tree being edited is always dev; the machinery (skill, allowlist, guards)
+# comes from the triggering ref. That split is what lets this be dispatched from
+# its own feature branch before merging — the docstrings are still dev's, so the
+# PR can never carry a stale rewrite, which is the failure RES-14 hit twice.
+
+on:
+  workflow_dispatch:
+    inputs:
+      path:
+        description: "Pilot file to work on (e.g. cognee/api/v1/search/search.py), or `all` for the full ten-file matrix"
+        required: true
+      dry_run:
+        description: "Show the diff and ledger in the run summary instead of opening a PR."
+        required: false
+        type: boolean
+        default: false
+  # TEMPORARY (RES-28 testing) — REMOVE BEFORE MERGE.
+  # Lets the pilot be exercised from PR #4878 itself, without waiting for the
+  # default-branch registration that workflow_dispatch needs. A pull_request
+  # event carries no inputs, so the prepare job below fans out to ALL TEN
+  # files and FORCES a dry run — a PR-triggered run can never push a branch or
+  # open a PR. That hard gate is the lesson of #4668, where exactly this
+  # trigger, added for exactly this reason, pushed a bot PR against dev from
+  # unmerged code. Cost note: a full ten-file sweep is on the order of $40-80
+  # of API spend, and it fires on EVERY push to a PR touching this file.
+  pull_request:
+    paths:
+      - ".github/workflows/docstring_pilot.yml"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# Queue rather than cancel: a run cancelled between the push and the PR update
+# would leave the draft PR half-refreshed. Keyed on the target file so two
+# dispatches on different pilot files do not block each other.
+concurrency:
+  group: docstring-pilot-${{ github.event_name }}-${{ inputs.path || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Validates once, fans out once: machinery presence, shared-rules parity, and
+  # the mode/target decision all live here so ten matrix jobs cannot disagree
+  # about them — and a bad dispatch fails in seconds on one runner, not ten.
+  prepare:
+    name: Validate and resolve targets
+    # Fork PRs never run this: they have no secrets, and an agent workflow
+    # driven by untrusted YAML is not a check we owe forks.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    outputs:
+      targets: ${{ steps.targets.outputs.targets }}
+      dry_run: ${{ steps.mode.outputs.dry_run }}
+
+    steps:
+      - name: Check out dev
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+          persist-credentials: false
+
+      - name: Check out pilot machinery from the triggering ref
+        uses: actions/checkout@v6
+        with:
+          path: automation-src
+          persist-credentials: false
+
+      # Before Claude is called, so a dispatch from a ref that predates the
+      # pilot fails in seconds with the cause named.
+      - name: Check the pilot machinery is present on this ref
+        run: |
+          missing=""
+          for path in \
+            automation-src/.claude/skills/docstring-author/SKILL.md \
+            automation-src/.claude/skills/docstring-author/pilot_files.md \
+            automation-src/.claude/skills/docstring-critic/SKILL.md \
+            automation-src/tools/check_docstring_pilot_path.py \
+            automation-src/tools/check_docstring_pilot_diff.py; do
+            [ -f "${path}" ] || missing="${missing} ${path#automation-src/}"
+          done
+          if [ -n "${missing}" ]; then
+            echo "::error::Missing on ${GITHUB_REF_NAME}:${missing}"
+            echo "Dispatch this workflow from a ref that carries the docstring pilot skill."
+            exit 1
+          fi
+
+      # Two skills means two copies of the shared rules. Drift between them is the
+      # one real cost of splitting: the critic would start rejecting claims on a
+      # standard the author was never held to, and nothing about the output would
+      # look wrong. Cheaper to fail here than to debug it from a ledger later.
+      - name: Check the shared rules are identical in both skills
+        run: |
+          extract() {
+            sed -n '/<!-- shared-rules:start -->/,/<!-- shared-rules:end -->/p' "$1"
+          }
+          SKILLS=automation-src/.claude/skills
+          # Into RUNNER_TEMP, not the workspace: the diff guard rejects untracked
+          # non-markdown files, and these are scratch, not something an agent wrote.
+          author_shared="${RUNNER_TEMP}/author_shared.txt"
+          critic_shared="${RUNNER_TEMP}/critic_shared.txt"
+          shared_rules_diff="${RUNNER_TEMP}/shared_rules.diff"
+          extract "${SKILLS}/docstring-author/SKILL.md" > "${author_shared}"
+          extract "${SKILLS}/docstring-critic/SKILL.md" > "${critic_shared}"
+
+          if [ ! -s "${author_shared}" ] || [ ! -s "${critic_shared}" ]; then
+            echo "::error::A skill is missing its shared-rules:start/end markers."
+            exit 1
+          fi
+
+          if ! diff -u "${author_shared}" "${critic_shared}" > "${shared_rules_diff}"; then
+            echo "::error::The shared rules have drifted between the two skills."
+            {
+              echo "### Docstring pilot — shared rules have drifted"
+              echo
+              echo "\`docstring-author\` and \`docstring-critic\` carry copies of the same"
+              echo "shared-rules block, and they no longer match. Reconcile them before"
+              echo "running: a critic held to a different standard than the author will"
+              echo "reject sound claims for reasons nobody can see in the output."
+              echo
+              echo '```diff'
+              cat "${shared_rules_diff}"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "Shared rules match ($(wc -l < "${author_shared}") lines)."
+
+      # inputs.* is empty on pull_request events, and `!inputs.dry_run` would
+      # evaluate TRUE there — every downstream step therefore reads the mode
+      # from this job's outputs, never from inputs directly. PR events fan out
+      # to all ten files and are always dry.
+      - name: Resolve run mode and target spec
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "dry_run=true" >> "$GITHUB_OUTPUT"
+            echo "spec=all" >> "$GITHUB_OUTPUT"
+            echo "Pull request event — forced dry run across all ten pilot files."
+          else
+            echo "dry_run=${{ inputs.dry_run }}" >> "$GITHUB_OUTPUT"
+            echo "spec=${{ inputs.path }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # A rejected path must produce zero pull requests, and the reason has to be
+      # readable in the run summary — a bad `path` is a human typo, not a bug.
+      # `all` resolves to the ten files parsed from the same allowlist the author
+      # skill reads, so the matrix cannot drift from the selection.
+      - name: Resolve the target list
+        id: targets
+        run: |
+          if [ "${TARGET_SPEC}" = "all" ]; then
+            python3 automation-src/tools/check_docstring_pilot_path.py \
+              --print-list \
+              --allowlist automation-src/.claude/skills/docstring-author/pilot_files.md \
+              --repo-root .
+          else
+            python3 automation-src/tools/check_docstring_pilot_path.py \
+              --path "${TARGET_SPEC}" \
+              --allowlist automation-src/.claude/skills/docstring-author/pilot_files.md \
+              --repo-root .
+            # `target` was written by the guard; wrap it as a one-element matrix.
+            echo "targets=[\"$(sed -n 's/^target=//p' "$GITHUB_OUTPUT" | tail -1)\"]" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          TARGET_SPEC: ${{ steps.mode.outputs.spec }}
+
+  # One matrix job per target file: the full author -> critic -> guards chain.
+  # fail-fast is off so one file's failure never cancels the other nine, and
+  # max-parallel keeps the burst against the Anthropic API bounded.
+  docstring-pilot:
+    name: ${{ matrix.path }}
+    needs: prepare
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        path: ${{ fromJSON(needs.prepare.outputs.targets) }}
+
+    steps:
+      # Credentials are never persisted into either checkout: an agent with Edit
+      # access runs against this workspace, and nothing there should be able to
+      # read a token off disk. The push and PR steps receive the PAT explicitly.
+      - name: Check out dev
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+          persist-credentials: false
+
+      - name: Check out pilot machinery from the triggering ref
+        uses: actions/checkout@v6
+        with:
+          path: automation-src
+          persist-credentials: false
+
+      # Defense in depth: prepare already validated the list, but each matrix
+      # job re-checks its own file so a job can never act on a target the
+      # guard has not passed. Also emits the normalized `target` output the
+      # rest of this job keys on.
+      - name: Check the path is one of the ten selected files
+        id: target
+        run: |
+          python3 automation-src/tools/check_docstring_pilot_path.py \
+            --path "${TARGET_PATH}" \
+            --allowlist automation-src/.claude/skills/docstring-author/pilot_files.md \
+            --repo-root .
+        env:
+          TARGET_PATH: ${{ matrix.path }}
+
+      - name: Record the tree being edited
+        id: base
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          slug="$(echo "${{ steps.target.outputs.target }}" | sed 's#\.py$##; s#[/_]#-#g')"
+          echo "branch=automation/docstring-pilot/${slug}" >> "$GITHUB_OUTPUT"
+
+      # No cognee environment is needed: the guards are stdlib-only and the agent
+      # reads source rather than running it. uv is here for ruff alone.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      # Bash is not in the allowed tools for either pass: the workflow owns git,
+      # and the guards run as steps rather than as something an agent could
+      # satisfy itself. The author also has no Write — it produces docstrings,
+      # not the ledger, so there is nothing for it to write outside the target.
+      - name: Pass 1 — author docstrings with Claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            Read and follow your skill:
+
+            - `automation-src/.claude/skills/docstring-author/SKILL.md` (your skill)
+            - `automation-src/.claude/skills/docstring-author/pilot_files.md` (why your
+              target was selected)
+
+            - You are **pass 1, the author**.
+            - Target file: `${{ steps.target.outputs.target }}`
+
+            The target has already been checked against the ten selected files, so work
+            on it. Edit only that file and only inside docstrings. Do not write a claim
+            ledger — pass 2 writes it from your diff. Do not create commits or branches.
+
+            Your only tools are Read, Edit, Glob, and Grep. There is no Bash, no Write,
+            and no task list — use Grep for every search, and do not spend turns
+            attempting anything else. Budget your turns: scan the callers and guidance
+            briefly, then get to writing; an exploration pass that never edits is a
+            failed run.
+          claude_args: "--allowed-tools Read,Edit,Glob,Grep --max-turns 100"
+
+      # The critic has no Bash, so it cannot run git diff for itself. Handing it
+      # the patch is what lets it see exactly what the author changed without
+      # seeing why. An empty patch is fine and meaningful: it means the author
+      # proposed nothing, and the critic still writes a ledger saying so.
+      - name: Capture the author's diff for the critic
+        run: |
+          git diff "${{ steps.base.outputs.sha }}" -- "${{ steps.target.outputs.target }}" \
+            > docstring_pilot_diff.patch
+          echo "Author diff: $(wc -l < docstring_pilot_diff.patch) lines."
+          cat docstring_pilot_diff.patch
+
+      - name: Pass 2 — verify claims and write the ledger with Claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            Read and follow your skill:
+
+            - `automation-src/.claude/skills/docstring-critic/SKILL.md` (your skill)
+
+            Do **not** read anything under
+            `automation-src/.claude/skills/docstring-author/`. What the author was told
+            to do is not evidence for whether its claims are true, and its
+            `pilot_files.md` says what each file was picked to demonstrate — which is
+            the expected answer. Reading either tilts you toward grading to the test
+            instead of the evidence.
+
+            - You are **pass 2, the critic**. You did not write these docstrings and have
+              no stake in them.
+            - Target file: `${{ steps.target.outputs.target }}`
+            - The author's diff: `./docstring_pilot_diff.patch` (may be empty)
+            - Claim ledger output: `./docstring_pilot_ledger.md`
+
+            Assess every favorable claim in the patch by locating its evidence in this
+            repository yourself. Cut or rewrite what you cannot support, edit only the
+            target file and only inside docstrings, and write the ledger to the path
+            above. Do not create commits or branches.
+
+            Your only tools are Read, Edit, Write, Glob, and Grep. There is no Bash and
+            no task list — use Grep for every search, and do not spend turns attempting
+            anything else. Verify claims in the order they appear in the patch, and
+            reserve enough turns to write the ledger; a run that verifies everything
+            but writes no ledger is a failed run.
+          claude_args: "--allowed-tools Read,Edit,Write,Glob,Grep --max-turns 80"
+
+      - name: Check the ledger was written
+        run: |
+          if [ ! -s docstring_pilot_ledger.md ]; then
+            echo "::error::No claim ledger at docstring_pilot_ledger.md."
+            {
+              echo "### Docstring pilot — no ledger"
+              echo
+              echo "The critic pass produced no claim ledger, so the run's docstring"
+              echo "changes cannot be reviewed against evidence. Nothing was pushed."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      # Docstring reflow only — the file is already ruff-clean on dev, so any
+      # non-docstring change ruff makes here is caught by the guard below.
+      - name: Format the edited file
+        run: uvx ruff@0.15.11 format "${{ steps.target.outputs.target }}"
+
+      # After both passes, so it covers the critic's edits as well as the
+      # author's. `changed` is false when the critic reverted the author
+      # entirely, which is a legitimate no-change-needed outcome.
+      - name: Check the diff is docstrings only
+        id: diff
+        run: |
+          # automation-src is a second checkout inside this tree, and the patch
+          # is a workflow artifact — both are untracked here and neither is
+          # something an agent wrote, so both are excluded from the stray check.
+          python3 automation-src/tools/check_docstring_pilot_diff.py \
+            --path "${{ steps.target.outputs.target }}" \
+            --base "${{ steps.base.outputs.sha }}" \
+            --repo-root . \
+            --ignore automation-src/ \
+            --ignore docstring_pilot_diff.patch
+
+      # tee, not >>: step summaries are not retrievable through any API, so the
+      # ledger goes to the job log as well, where automation can read it back.
+      - name: Publish the ledger to the run summary
+        run: |
+          {
+            echo "## Docstring pilot — \`${{ steps.target.outputs.target }}\`"
+            echo
+            echo "- Base: \`${{ steps.base.outputs.short_sha }}\` on dev"
+            echo "- Docstrings changed: \`${{ steps.diff.outputs.changed }}\`"
+            echo
+            cat docstring_pilot_ledger.md
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # A pilot file whose docstrings were already good is expected to land here.
+      # The ledger above carries the critic pass's reasoning, which is the actual
+      # result of such a run.
+      - name: Record that no change was needed
+        if: ${{ steps.diff.outputs.changed == 'false' }}
+        run: |
+          {
+            echo
+            echo "### No change needed"
+            echo
+            echo "The run left \`${{ steps.target.outputs.target }}\` unchanged, so no pull"
+            echo "request was created. Either the author proposed nothing or the critic"
+            echo "reverted all of it; the ledger above says which, and why."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Show the diff without pushing
+        if: ${{ steps.diff.outputs.changed == 'true' && needs.prepare.outputs.dry_run == 'true' }}
+        run: |
+          {
+            echo
+            echo "### Dry run — nothing pushed"
+            echo
+            echo '```diff'
+            git --no-pager diff -- "${{ steps.target.outputs.target }}"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit and push the docstring branch
+        id: commit
+        if: ${{ steps.diff.outputs.changed == 'true' && needs.prepare.outputs.dry_run == 'false' }}
+        env:
+          PUSH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+          BRANCH_NAME: ${{ steps.base.outputs.branch }}
+          TARGET: ${{ steps.target.outputs.target }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Recreated from the dev we checked out, every run — no long-lived
+          # branch accumulating merges, so the branch is never behind dev.
+          git checkout -B "${BRANCH_NAME}"
+          git add "${TARGET}"
+
+          # Skip the push, and the PR update, when the branch already carries
+          # exactly this content. Hashing the one file the run may touch means an
+          # unrelated commit to dev cannot invalidate it, so a rerun that reaches
+          # the same wording costs nothing instead of force-pushing over a review
+          # in progress.
+          CONTENT_HASH="$(git rev-parse ":${TARGET}")"
+          PREVIOUS_HASH=""
+          if git fetch origin "${BRANCH_NAME}" 2>/dev/null; then
+            PREVIOUS_HASH="$(git rev-parse "FETCH_HEAD:${TARGET}" 2>/dev/null || true)"
+          fi
+          if [ -n "${PREVIOUS_HASH}" ] && [ "${CONTENT_HASH}" = "${PREVIOUS_HASH}" ]; then
+            echo "Branch already carries this content (${CONTENT_HASH}) — skipping push."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git commit -m "docs: Strengthen docstrings in ${TARGET} (RES-28)"
+          git push --force \
+            "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "${BRANCH_NAME}"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update the draft PR
+        if: ${{ steps.commit.outputs.pushed == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+          HEAD_BRANCH: ${{ steps.base.outputs.branch }}
+          TARGET: ${{ steps.target.outputs.target }}
+          BASE_SHA: ${{ steps.base.outputs.short_sha }}
+        run: |
+          PR_TITLE="docs: Strengthen docstrings in ${TARGET} (RES-28)"
+          {
+            echo "Docstring-only changes to \`${TARGET}\`, produced by the"
+            echo "\`docstring-pilot\` skill and left as a draft for review (RES-28)."
+            echo
+            echo "Two passes: an author wrote the docstrings, then a **separate critic"
+            echo "invocation** re-located the evidence for every favorable claim in the"
+            echo "author's diff and cut what it could not support. The ledger below is"
+            echo "the critic's account, not the author's own — so a claim that survived"
+            echo "it was checked by something with no stake in it."
+            echo
+            echo "The diff is enforced to be docstrings in this one file:"
+            echo "\`tools/check_docstring_pilot_diff.py\` compares the syntax tree before"
+            echo "and after with all docstrings removed, and fails the run on any other"
+            echo "change. **Review the claims, not the mechanics.** If the ledger has a"
+            echo "*Reviewer should check* section, those are claims the critic cut but"
+            echo "suspected were true — where your judgement is worth most."
+            echo
+            echo "- Target: \`${TARGET}\`"
+            echo "- Base: \`${BASE_SHA}\` on \`dev\`"
+            echo "- Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo
+            echo "---"
+            echo
+            cat docstring_pilot_ledger.md
+          } > pr_body.md
+
+          # --state all, not --state open: closing the bot's PR without deleting
+          # its branch would otherwise make the next run open a duplicate. A
+          # closed-but-unmerged PR is reopened and updated instead.
+          EXISTING="$(gh pr list \
+            --head "${HEAD_BRANCH}" \
+            --base dev \
+            --state all \
+            --json number,state \
+            --jq 'map(select(.state != "MERGED")) | .[0] | "\(.number) \(.state)"' \
+            2>/dev/null || true)"
+          PR_NUMBER="${EXISTING%% *}"
+          PR_STATE="${EXISTING##* }"
+
+          if [ -n "${PR_NUMBER}" ] && [ "${PR_NUMBER}" != "null" ]; then
+            if [ "${PR_STATE}" = "CLOSED" ]; then
+              echo "Reopening #${PR_NUMBER} rather than opening a duplicate."
+              gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
+                --method PATCH --field state=open
+            fi
+            # REST instead of 'gh pr edit': the edit command needs read:org for
+            # its GraphQL query, which this repo-scoped PAT does not have. This
+            # never undrafts the PR — marking it ready is a human decision.
+            gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
+              --method PATCH \
+              --field title="${PR_TITLE}" \
+              --field body="$(cat pr_body.md)"
+            echo "Updated draft #${PR_NUMBER}."
+            PR_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/pull/${PR_NUMBER}"
+          else
+            PR_URL="$(gh pr create \
+              --draft \
+              --base dev \
+              --head "${HEAD_BRANCH}" \
+              --title "${PR_TITLE}" \
+              --body-file pr_body.md)"
+          fi
+
+          {
+            echo
+            echo "### Draft pull request"
+            echo
+            echo "${PR_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
