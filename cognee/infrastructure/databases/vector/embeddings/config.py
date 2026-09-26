@@ -170,6 +170,7 @@ class EmbeddingConfig(BaseSettings):
             "embedding_api_key": self.embedding_api_key,
             "embedding_api_version": self.embedding_api_version,
             "embedding_max_completion_tokens": self.embedding_max_completion_tokens,
+            "embedding_batch_size": self.embedding_batch_size,
             "huggingface_tokenizer": self.huggingface_tokenizer,
             "embedding_input_type": self.embedding_input_type,
             "embedding_batch_size": self.embedding_batch_size,
