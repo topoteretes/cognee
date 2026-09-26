@@ -90,9 +90,10 @@ def get_configuration_router() -> APIRouter:
 
         ## Response
         Returns the stored configuration data as a JSON object. Returns an empty object {}
-        with HTTP 200 (not 404) when no configuration with that id exists.
+        with HTTP 200 (not 404) when the authenticated user has no configuration with that id,
+        including when the id belongs to another user's configuration.
         """
-        return await method_get_principal_configuration(config_id=config_id)
+        return await method_get_principal_configuration(config_id=config_id, principal_id=user.id)
 
     @router.get("/get_user_configuration/", response_model=list)
     async def get_user_all_configuration(
