@@ -326,16 +326,33 @@ def test_every_match_on_a_line_is_a_value_and_exclusions_apply():
 
 
 def test_an_expression_that_does_not_compile_raises():
-    import re as regex
-
-    from cognee.modules.retrieval.broad_table import LineQuery, matched_table, shaped_lines
+    from cognee.modules.retrieval.broad_table import (
+        LineQuery,
+        LineQueryError,
+        matched_table,
+        shaped_lines,
+    )
 
     lines, _ = shaped_lines(_ssh_log())
 
-    with pytest.raises(regex.error):
+    with pytest.raises(LineQueryError):
         matched_table(lines, LineQuery(answerable=True, line_regex="Failed (password"))
-    with pytest.raises(regex.error):
+    with pytest.raises(LineQueryError):
         matched_table(lines, LineQuery(answerable=True, line_regex="Failed", value_regex="from"))
+
+
+def test_an_expression_that_backtracks_forever_is_stopped():
+    """A model can write nested repetition; on a long line it would run for minutes."""
+    import time
+
+    from cognee.modules.retrieval.broad_table import Line, LineQuery, LineQueryError, matched_table
+
+    lines = [Line(shape="", slots=[], text="a" * 60 + "!") for _ in range(30)]
+    started = time.monotonic()
+
+    with pytest.raises(LineQueryError):
+        matched_table(lines, LineQuery(answerable=True, line_regex=r"(a|aa)+b"))
+    assert time.monotonic() - started < 2
 
 
 @pytest.mark.asyncio
@@ -545,3 +562,25 @@ def test_an_mbox_archive_is_one_row_per_message():
         ),
     )
     assert by_sender.groups[0] == ("Dev 0", 8) and jira.total == 6
+
+
+def test_mentions_matches_whole_words_and_plurals_contains_matches_parts():
+    table = Table(
+        columns=["text"],
+        rows=[
+            ["Oil prices rise"],
+            ["A foiled plot"],
+            ["Boilermakers win"],
+            ["Rodents found"],
+            ["rodent droppings"],
+        ],
+    )
+
+    def count(op, value):
+        return run_query(
+            table,
+            TableQuery(answerable=True, filters=[TableFilter(column="text", op=op, value=value)]),
+        ).total
+
+    assert count("mentions", "oil") == 1 and count("contains", "oil") == 3
+    assert count("mentions", "rodent") == 2

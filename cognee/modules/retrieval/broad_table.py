@@ -13,10 +13,12 @@ import email.utils
 import io
 import json
 import re
+import time
 from collections import Counter
 from dataclasses import dataclass
 from typing import Literal
 
+import regex
 from pydantic import BaseModel
 
 # Fewer records than this are read as text: a table this small costs little to read.
@@ -48,6 +50,7 @@ class TableFilter(BaseModel):
     op: Literal[
         "equals",
         "not_equals",
+        "mentions",
         "contains",
         "not_contains",
         "starts_with",
@@ -317,6 +320,11 @@ def _keeps(row: list[str], column: int, rule: TableFilter) -> bool:
         return value in cells
     if rule.op == "not_equals":
         return value not in cells
+    if rule.op == "mentions":
+        # Whole words, plural endings included: "oil" is not in "foiled" or "Boilermakers";
+        # "rodent" is in "rodents".
+        pattern = re.compile(rf"(?<!\w){re.escape(value)}(?:s|es)?(?!\w)")
+        return any(pattern.search(cell) for cell in cells)
     if rule.op == "contains":
         return any(value in cell for cell in cells)
     if rule.op == "not_contains":
@@ -556,18 +564,41 @@ def describe_shapes(shapes: list[str], lines: list[Line]) -> str:
     return "\n".join(rows)
 
 
+# Model-written expressions run over every line of a corpus, so a pattern that backtracks
+# badly (nested repetition) could stall the search. They run under the regex module with
+# a limit per line and a budget for the whole scan.
+LINE_MATCH_TIMEOUT_SECONDS = 0.05
+LINE_SCAN_BUDGET_SECONDS = 30.0
+
+
+class LineQueryError(ValueError):
+    """An expression that does not compile, lacks its capture group, or runs too long."""
+
+
 def matched_table(lines: list[Line], query: LineQuery) -> Table:
     """Every line the query's expressions select, as a table of (captured values, line).
-    Raises re.error for an expression that does not compile."""
-    keep = re.compile(query.line_regex)
-    drop = re.compile(query.exclude_regex) if query.exclude_regex else None
-    grab = re.compile(query.value_regex) if query.value_regex else None
+    Raises LineQueryError for an expression that is invalid or runs too long."""
+    try:
+        keep = regex.compile(query.line_regex)
+        drop = regex.compile(query.exclude_regex) if query.exclude_regex else None
+        grab = regex.compile(query.value_regex) if query.value_regex else None
+    except regex.error as error:
+        raise LineQueryError(f"an expression does not compile ({error})") from error
     if grab is not None and grab.groups != 1:
-        raise re.error("value_regex must have exactly one capture group")
+        raise LineQueryError("value_regex must have exactly one capture group")
+    deadline = time.monotonic() + LINE_SCAN_BUDGET_SECONDS
+    limit = LINE_MATCH_TIMEOUT_SECONDS
     rows = []
-    for line in lines:
-        if not keep.search(line.text) or (drop is not None and drop.search(line.text)):
-            continue
-        values = grab.findall(line.text) if grab is not None else []
-        rows.append([MULTI.join(v for v in values if v), line.text])
+    try:
+        for line in lines:
+            if time.monotonic() > deadline:
+                raise LineQueryError("the expressions took too long over the corpus")
+            if not keep.search(line.text, timeout=limit):
+                continue
+            if drop is not None and drop.search(line.text, timeout=limit):
+                continue
+            values = grab.findall(line.text, timeout=limit) if grab is not None else []
+            rows.append([MULTI.join(v for v in values if v), line.text])
+    except TimeoutError as error:
+        raise LineQueryError("an expression backtracks too long on a line") from error
     return Table(columns=["value", "line"], rows=rows)

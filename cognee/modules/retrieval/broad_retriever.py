@@ -35,6 +35,7 @@ from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subcla
 from cognee.modules.retrieval.broad_table import (
     Line,
     LineQuery,
+    LineQueryError,
     Table,
     TableQuery,
     describe,
@@ -886,8 +887,8 @@ class BroadRetriever(CompletionRetriever):
                 table = matched_table(lines, line_query) if line_query.answerable else None
                 if table is not None and not table.rows:
                     problem = f"line_regex matched none of the {len(lines)} lines"
-            except re.error as error:
-                problem = f"an expression does not compile ({error})"
+            except LineQueryError as error:
+                problem = str(error)
         if problem:
             # One retry, shown what went wrong and real lines to match against.
             samples = "\n".join(line.text for line in lines[:: max(len(lines) // 5, 1)][:5])
@@ -900,7 +901,7 @@ class BroadRetriever(CompletionRetriever):
             try:
                 usable = line_query.answerable and _line_query_problem(line_query) is None
                 table = matched_table(lines, line_query) if usable else None
-            except re.error:
+            except LineQueryError:
                 table = None
         logger.info("BROAD line query: %s", line_query.model_dump())
         if table is None or not table.rows:
