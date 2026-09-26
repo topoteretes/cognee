@@ -522,3 +522,26 @@ def test_an_iso_timestamp_is_one_value():
     line = shape_of("2026-09-25T19:52:32.9084314Z step finished")
 
     assert line.shape == "$ step finished" and line.slots[0][0] == "date"
+
+
+def test_an_mbox_archive_is_one_row_per_message():
+    messages = "".join(
+        f"From dev{i % 3}@example.org Mon May  6 10:{i:02d}:00 2024\n"
+        f"From: Dev {i % 3} <dev{i % 3}@example.org>\n"
+        f"To: dev@list.org\nDate: Mon, 6 May 2024 10:{i:02d}:00 +0000\n"
+        f"Subject: {'[jira] ' if i % 4 == 0 else 'Re: '}topic {i}\n\n"
+        f"Body line one.\nFrom the logs we see nothing.\n\n"
+        for i in range(24)
+    )
+    table = parse_table(messages)
+
+    assert table is not None and len(table.rows) == 24
+    by_sender = run_query(table, TableQuery(answerable=True, group_by="from_name"))
+    jira = run_query(
+        table,
+        TableQuery(
+            answerable=True,
+            filters=[TableFilter(column="subject", op="starts_with", value="[jira]")],
+        ),
+    )
+    assert by_sender.groups[0] == ("Dev 0", 8) and jira.total == 6

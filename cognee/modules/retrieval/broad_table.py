@@ -8,6 +8,8 @@ answer (one that needs a free-text column understood) is left to the reading pat
 """
 
 import csv
+import email
+import email.utils
 import io
 import json
 import re
@@ -82,7 +84,45 @@ class TableAnswer:
 
 def parse_table(text: str) -> Table | None:
     """The document as a table, or None when it is not records."""
-    return _json_table(text) or _delimited_table(text)
+    return _json_table(text) or _mail_table(text) or _delimited_table(text)
+
+
+# Characters of each message body kept in an email table: enough to match a phrase.
+MAIL_BODY_CHARS = 2_000
+_MBOX_SEPARATOR = re.compile(r"(?m)^From \S+ .*\n(?=[A-Za-z-]+: )")
+
+
+def _mail_table(text: str) -> Table | None:
+    """An mbox email archive, one row per message: sender, recipients, date, subject,
+    the message it replies to, and the start of its body."""
+    starts = [match.start() for match in _MBOX_SEPARATOR.finditer(text)]
+    if len(starts) < TABLE_MIN_ROWS or starts[0] != 0:
+        return None
+    rows = []
+    for begin, end in zip(starts, [*starts[1:], len(text)]):
+        message = email.message_from_string(text[begin:end].split("\n", 1)[1])
+        name, address = email.utils.parseaddr(message.get("From", ""))
+        body = next(
+            (
+                part.get_payload()
+                for part in message.walk()
+                if part.get_content_type() == "text/plain" and not part.is_multipart()
+            ),
+            "",
+        )
+        rows.append(
+            [
+                name,
+                address,
+                message.get("To", ""),
+                message.get("Date", ""),
+                " ".join((message.get("Subject") or "").split()),
+                message.get("In-Reply-To", ""),
+                str(body)[:MAIL_BODY_CHARS],
+            ]
+        )
+    columns = ["from_name", "from_address", "to", "date", "subject", "in_reply_to", "body"]
+    return Table(columns=columns, rows=rows)
 
 
 def _json_table(text: str) -> Table | None:
