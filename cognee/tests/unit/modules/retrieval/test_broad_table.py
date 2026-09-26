@@ -3,14 +3,41 @@
 import pytest
 
 from cognee.modules.retrieval import broad_retriever
-from cognee.modules.retrieval.broad_retriever import BroadRetriever, CountPlan, Unit, _table_of
+from cognee.modules.retrieval.broad_retriever import (
+    BroadRetriever,
+    Corpus,
+    CountPlan,
+    Unit,
+    _document_texts,
+)
 from cognee.modules.retrieval.broad_table import (
     Table,
     TableFilter,
     TableQuery,
+    TableSummary,
     parse_table,
+    record_lines,
     run_query,
 )
+
+
+def _summary(table: Table) -> TableSummary:
+    summary = TableSummary(columns=table.columns)
+    summary.add(table.rows)
+    return summary
+
+
+async def _count_table(retriever: BroadRetriever, query: str, table: Table):
+    """Count over a corpus holding the table as one CSV document."""
+    text = "\n".join(",".join(f'"{cell}"' for cell in row) for row in [table.columns, *table.rows])
+    corpus = Corpus.of([Unit(id="t", text=text, document="d")])
+    return await retriever.count_table(
+        query, CountPlan(source="text", item="x"), _summary(table), corpus
+    )
+
+
+def _log_corpus(text: str) -> Corpus:
+    return Corpus.of([Unit(id="c", text=text, document="d")])
 
 
 def _csv(rows: int) -> str:
@@ -106,24 +133,29 @@ def test_a_column_the_table_lacks_raises():
         run_query(table, TableQuery(answerable=True, group_by="author"))
 
 
-def test_the_tables_in_a_corpus_are_offered_even_beside_prose():
+@pytest.mark.asyncio
+async def test_the_tables_in_a_corpus_are_offered_even_beside_prose(monkeypatch):
+    async def fake(text_input, system_prompt, response_model, **kwargs):
+        return TableQuery(answerable=True)  # count every row
+
+    monkeypatch.setattr(broad_retriever.LLMGateway, "acreate_structured_output", fake)
     text = _csv(30)
-    half = len(text) // 2
-    cut = half  # chunks cut mid-record, as the chunker does
+    cut = len(text) // 2  # chunks cut mid-record, as the chunker does
     chunks = [
         Unit(id="c1", text=text[:cut], document="d1"),
         Unit(id="c2", text=text[cut:], document="d1"),
     ]
-
     prose = Unit(id="c3", text="A long narrative with no records at all.", document="d2")
+    plan = CountPlan(source="text", item="x")
+    retriever = BroadRetriever()
 
-    whole, left_out = _table_of(chunks)
-    mixed, beside = _table_of([*chunks, prose])
+    whole = await retriever.count_records("q", plan, Corpus.of(chunks))
+    beside = await retriever.count_records("q", plan, Corpus.of([*chunks, prose]))
 
-    assert whole is not None and len(whole.rows) == 30 and left_out == 0
-    assert mixed is not None and len(mixed.rows) == 30 and beside == 1
-    assert _table_of([prose]) == (None, 0)
-    assert _table_of([Unit(id="r1", text="a,b,c")]) == (None, 0)  # a DLT row has no document
+    assert whole is not None and whole.total == 30 and not whole.scope
+    assert beside is not None and beside.total == 30 and "1 other documents" in beside.scope
+    assert await retriever.count_records("q", plan, Corpus.of([prose])) is None
+    assert _document_texts([Unit(id="r1", text="a,b,c")]) is None  # a unit with no document
 
 
 @pytest.mark.asyncio
@@ -135,7 +167,7 @@ async def test_a_question_the_columns_cannot_answer_is_read_instead(monkeypatch)
     table = parse_table(_csv(30))
     assert table is not None
 
-    result = await BroadRetriever().count_table("q", CountPlan(source="text", item="x"), table)
+    result = await _count_table(BroadRetriever(), "q", table)
 
     assert result is None
 
@@ -152,7 +184,7 @@ async def test_a_table_count_is_exact_and_says_so(monkeypatch):
     assert table is not None
     retriever = BroadRetriever()
 
-    result = await retriever.count_table("How many yes?", CountPlan(source="text", item="x"), table)
+    result = await _count_table(retriever, "How many yes?", table)
     assert result is not None
     context = await retriever.get_context_from_objects("How many yes?", result)
 
@@ -256,8 +288,8 @@ def test_prose_has_too_many_shapes_to_be_records():
         for i in range(60)
     )
 
-    assert shaped_lines(prose) is None
-    assert shaped_lines(logs) is not None
+    assert shaped_lines([prose]) is None
+    assert shaped_lines([logs]) is not None
 
 
 def _ssh_log() -> str:
@@ -281,7 +313,7 @@ def test_a_line_query_selects_every_form_of_a_line_and_captures_its_value():
     one expression selects both, and code counts every such line."""
     from cognee.modules.retrieval.broad_table import LineQuery, matched_table, shaped_lines
 
-    lines, _ = shaped_lines(_ssh_log())
+    lines = record_lines(_ssh_log())
     query = LineQuery(
         answerable=True,
         line_regex=r"Failed password for",
@@ -310,7 +342,7 @@ def test_every_match_on_a_line_is_a_value_and_exclusions_apply():
         + [f"WARN lost blk_{i}a" for i in range(20)]
         + [f"WARN lost blk_x{i} (test)" for i in range(5)]
     )
-    lines, _ = shaped_lines(text)
+    lines = record_lines(text)
     blocks = matched_table(
         lines, LineQuery(answerable=True, line_regex="blk_", value_regex=r"(blk_\w+)")
     )
@@ -333,7 +365,7 @@ def test_an_expression_that_does_not_compile_raises():
         shaped_lines,
     )
 
-    lines, _ = shaped_lines(_ssh_log())
+    lines = record_lines(_ssh_log())
 
     with pytest.raises(LineQueryError):
         matched_table(lines, LineQuery(answerable=True, line_regex="Failed (password"))
@@ -345,9 +377,9 @@ def test_an_expression_that_backtracks_forever_is_stopped():
     """A model can write nested repetition; on a long line it would run for minutes."""
     import time
 
-    from cognee.modules.retrieval.broad_table import Line, LineQuery, LineQueryError, matched_table
+    from cognee.modules.retrieval.broad_table import LineQuery, LineQueryError, matched_table
 
-    lines = [Line(shape="", slots=[], text="a" * 60 + "!") for _ in range(30)]
+    lines = ["a" * 60 + "!" for _ in range(30)]
     started = time.monotonic()
 
     with pytest.raises(LineQueryError):
@@ -374,10 +406,12 @@ async def test_log_lines_are_counted_by_code_after_one_query_call(monkeypatch):
 
     monkeypatch.setattr(broad_retriever.LLMGateway, "acreate_structured_output", fake)
     monkeypatch.setattr(
-        broad_retriever.BroadRetriever, "load_text_units", lambda self, graph: _awaitable(units)
+        broad_retriever.BroadRetriever,
+        "open_corpus",
+        lambda self, graph: _awaitable(Corpus.of(units)),
     )
     monkeypatch.setattr(
-        broad_retriever.BroadRetriever, "load_entities", lambda self, graph: _awaitable({})
+        broad_retriever.BroadRetriever, "load_entity_types", lambda self, graph: _awaitable({})
     )
     monkeypatch.setattr(
         broad_retriever,
@@ -410,7 +444,7 @@ def test_grouping_by_a_value_counts_rows_per_value_even_if_asked_for_distinct():
 async def test_an_expression_matching_nothing_is_retried_with_real_lines(monkeypatch):
     from cognee.modules.retrieval.broad_table import LineQuery, shaped_lines
 
-    lines, shapes = shaped_lines(_ssh_log())
+    shaped = shaped_lines([_ssh_log()])
     seen = []
 
     async def fake(text_input, system_prompt, response_model, **kwargs):
@@ -422,7 +456,7 @@ async def test_an_expression_matching_nothing_is_retried_with_real_lines(monkeyp
     monkeypatch.setattr(broad_retriever.LLMGateway, "acreate_structured_output", fake)
 
     result = await BroadRetriever().count_lines(
-        "q", CountPlan(source="text", item="x"), lines, shapes
+        "q", CountPlan(source="text", item="x"), shaped, _log_corpus(_ssh_log())
     )
 
     assert result is not None and result.total == 60
@@ -435,7 +469,7 @@ async def test_a_distinct_count_without_a_captured_value_is_retried_not_raised(m
     if still unusable, left to the reading path instead of failing the search."""
     from cognee.modules.retrieval.broad_table import LineQuery, shaped_lines
 
-    lines, shapes = shaped_lines(_ssh_log())
+    shaped = shaped_lines([_ssh_log()])
     answers = [
         LineQuery(answerable=True, line_regex="Failed", aggregate="count_distinct"),
         LineQuery(
@@ -452,7 +486,7 @@ async def test_a_distinct_count_without_a_captured_value_is_retried_not_raised(m
     monkeypatch.setattr(broad_retriever.LLMGateway, "acreate_structured_output", fake)
 
     result = await BroadRetriever().count_lines(
-        "q", CountPlan(source="text", item="x"), lines, shapes
+        "q", CountPlan(source="text", item="x"), shaped, _log_corpus(_ssh_log())
     )
 
     assert result is not None and result.total == 5 and not answers
@@ -477,8 +511,8 @@ def test_lines_that_begin_alike_are_records_even_when_their_messages_vary():
         for _ in range(200)
     )
 
-    assert shaped_lines(log) is not None
-    assert shaped_lines(prose) is None
+    assert shaped_lines([log]) is not None
+    assert shaped_lines([prose]) is None
 
 
 @pytest.mark.asyncio
@@ -492,7 +526,7 @@ async def test_a_count_over_the_table_beside_prose_says_what_it_covered(monkeypa
     table = parse_table(_csv(30))
     assert table is not None
 
-    result = await BroadRetriever().count_table("q", CountPlan(source="text", item="x"), table)
+    result = await _count_table(BroadRetriever(), "q", table)
     assert result is not None
     result.scope = (
         "only the table in the documents; 1 other documents (not tables) were not counted"
@@ -584,3 +618,51 @@ def test_mentions_matches_whole_words_and_plurals_contains_matches_parts():
 
     assert count("mentions", "oil") == 1 and count("contains", "oil") == 3
     assert count("mentions", "rodent") == 2
+
+
+def test_a_query_over_rows_in_batches_equals_one_over_the_whole_table():
+    """Counts, distinct values, groups and a partial-name target come out the same when
+    rows arrive batch by batch, and the rows kept for listing stop at the limit."""
+    from cognee.modules.retrieval.broad_table import QueryRun
+
+    table = parse_table(_csv(30))
+    assert table is not None
+    queries = [
+        TableQuery(
+            answerable=True, filters=[TableFilter(column="verdict", op="equals", value="yes")]
+        ),
+        TableQuery(answerable=True, aggregate="count_distinct", column="assignee"),
+        TableQuery(answerable=True, group_by="assignee"),
+        TableQuery(answerable=True, group_by="assignee", target="ann"),
+    ]
+    for query in queries:
+        whole = run_query(table, query)
+        run = QueryRun(table.columns, query, keep_rows=5)
+        for start in range(0, len(table.rows), 7):
+            run.add(table.rows[start : start + 7])
+        batched = run.answer()
+        assert (batched.total, batched.groups, batched.target_values) == (
+            whole.total,
+            whole.groups,
+            whole.target_values,
+        )
+        assert batched.matched == whole.matched[:5]
+        assert batched.matched_count == len(whole.matched)
+
+
+def test_a_column_with_too_many_values_is_summarized_not_held():
+    from cognee.modules.retrieval import broad_table
+
+    summary = TableSummary(columns=["id", "kind"])
+    summary.add([[str(n), ["a", "b"][n % 2]] for n in range(50)])
+    original = broad_table.TABLE_TRACKED_VALUES
+    broad_table.TABLE_TRACKED_VALUES = 10
+    try:
+        capped = TableSummary(columns=["id", "kind"])
+        capped.add([[str(n), ["a", "b"][n % 2]] for n in range(50)])
+    finally:
+        broad_table.TABLE_TRACKED_VALUES = original
+
+    assert "- 'id': 50 different values" in broad_table.describe(summary)
+    assert "- 'id': more than 10 different values" in broad_table.describe(capped)
+    assert "- 'kind': 2 different values" in broad_table.describe(capped)

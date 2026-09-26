@@ -2,49 +2,60 @@
 
 A model cannot count a large corpus by reading it: it skims, and a count needs
 every record, not the most similar ones. BROAD never asks a model for a number.
-One LLM call plans the count, then one of three counters runs:
+One LLM call plans the count, then the cheapest counter that can answer runs:
 
 - graph:   distinct things of a type the graph holds ("how many people") are its
            entity nodes, optionally filtered by name. Exact, no LLM calls.
 - words:   how many times a word is written is a whole-word match over every
-           chunk and table row. Exact for the planned spellings, no LLM calls.
-- reading: everything else (events, relations, verdicts). Every chunk and row is
-           read in parallel shards; each call LISTS the matching items with a
-           quote, and code merges name variants, drops repeated mentions and
-           tallies. The tally is exact over what was listed; an item the reading
-           missed is not in it, and the answer says so.
+           chunk. Exact for the planned spellings, no LLM calls.
+- records: documents that are a table (CSV, JSON records, an email archive) or
+           record lines (a log, a templated report) are parsed by code; one LLM
+           call maps the question onto the columns or writes line expressions,
+           and code evaluates them over every record (broad_table.py). Exact.
+- reading: everything else. Every chunk is read in parallel calls; each LISTS the
+           matching items with a quote, and code merges name variants, drops
+           repeated mentions and tallies. The tally is exact over what was listed;
+           an item the reading missed is not in it, and the answer says so.
 
-The final LLM call only phrases the computed numbers.
-"""
+The final LLM call only phrases the computed numbers."""
 
 import asyncio
 import re
 from collections import Counter
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
+from itertools import groupby
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel
+from sqlalchemy import select
 
+from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
+from cognee.modules.data.models import Data
 from cognee.modules.data.processing.document_types.Document import Document
 from cognee.modules.engine.utils import generate_node_name
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.broad_table import (
-    Line,
+    LINE_COLUMNS,
+    LineMatcher,
     LineQuery,
     LineQueryError,
+    QueryRun,
+    ShapedLines,
+    ShapeStats,
     Table,
     TableQuery,
+    TableSummary,
     describe,
     describe_shapes,
-    matched_table,
     parse_table,
+    record_lines,
     render_row,
-    run_query,
-    shaped_lines,
 )
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
@@ -58,15 +69,12 @@ logger = get_logger("BroadRetriever")
 # on its own, so the smallest call is one full chunk as ingestion stored it.
 BROAD_SHARD_TOKENS = 2_000
 BROAD_MAX_PARALLEL_CALLS = 16
-# How many times every chunk is read (one pass = one LLM listing call per chunk).
-# With one pass, what that call lists is what gets counted. With three, each chunk is
-# read three times in parallel and an entry counts only when a majority of the passes
-# listed it: a single pass over a dense chunk misses or doubles an entry now and then,
-# and those slips are not the same entry twice, so the vote removes most of them
-# (football season, gpt-5.6-luna: 8 of 14 exact with one pass, 11 with three). It
-# cannot fix a miss every pass agrees on. Cost and reading calls scale with the number
-# of passes; use an odd number so the majority is never a tie.
-BROAD_READING_PASSES = 1
+# Megabytes of text held in memory at once: the dataset is fetched in batches of whole
+# documents of about this size. Scale it to the machine (retriever_specific_config).
+BROAD_BATCH_MB = 256
+# The most tokens the reading counter may send to the LLM for one question: about 5,000
+# pages. A question that needs more read raises instead (retriever_specific_config).
+BROAD_MAX_READING_TOKENS = 20_000_000
 # A reading call that hangs holds the whole wave: one call stalled for 84 and then
 # for 168 minutes. A call is retried once after this long, then the search fails.
 BROAD_CALL_TIMEOUT_SECONDS = 300
@@ -181,9 +189,9 @@ class Unit:
     name: str = ""
     # First line of the unit's document (e.g. a CSV header) when the unit lacks it.
     preamble: str = ""
-    # The end of the previous chunk of the same document, shown as context when that
-    # chunk is not read in the same call; and that chunk's id.
-    context: str = ""
+    # The previous chunk of the same document (its text, shared, not copied), whose end
+    # is shown as context when that chunk is not read in the same call; and its id.
+    previous_text: str = ""
     previous_id: str = ""
     # The document the chunk belongs to; empty for a table row.
     document: str = ""
@@ -212,8 +220,6 @@ class CountResult:
     # Entries the reading calls returned before repeated mentions were removed: the
     # gap to items_listed is what dedup took out, and the answer states it.
     entries_read: int = 0
-    # Passes over every chunk; above 1, an entry counted when a majority of them listed it.
-    reading_passes: int = 1
     llm_calls: int = 0
     tokens_read: int = 0
     # For the table method: the query code evaluated over the parsed rows.
@@ -307,34 +313,18 @@ def _corpus_sample(units: list[Unit]) -> str:
     return "\n---\n".join(units[i].text[:BROAD_SAMPLE_CHARS].strip() for i in picks)
 
 
-def _document_texts(units: list[Unit]) -> list[str] | None:
-    """Each document's text, rebuilt from its chunks; None when a unit has no document
-    (a table row ingested by DLT)."""
+def _document_texts(units: list[Unit]) -> Iterator[str] | None:
+    """Each document's text, rebuilt from its chunks one document at a time; None when a
+    unit has no document."""
     if not units or any(not unit.document for unit in units):
         return None
-    texts: dict[str, list[str]] = {}
-    for unit in units:  # units of a document are in chunk order
-        texts.setdefault(unit.document, []).append(unit.text)
-    # Chunks partition their document exactly and may cut mid-line: joined with nothing,
-    # they are the document again, and a record cut in two is whole.
-    return ["".join(parts) for parts in texts.values()]
-
-
-def _table_of(units: list[Unit]) -> tuple[Table | None, int]:
-    """The corpus's records as one table, and how many documents it leaves out.
-
-    Every document that is delimited or JSON records with the same columns joins the
-    table; the question is offered to it even when other documents are prose, and the
-    answer then says the count covered the table only. None when no document is a table,
-    when tables disagree on their columns, or for DLT rows."""
-    texts = _document_texts(units)
-    if texts is None:
-        return None, 0
-    tables = [table for table in map(parse_table, texts) if table is not None]
-    if not tables or any(table.columns != tables[0].columns for table in tables):
-        return None, 0
-    rows = [row for table in tables for row in table.rows]
-    return Table(columns=tables[0].columns, rows=rows), len(texts) - len(tables)
+    # Units of a document are contiguous and in chunk order. Chunks partition their
+    # document exactly and may cut mid-line: joined with nothing, they are the document
+    # again, and a record cut in two is whole.
+    return (
+        "".join(unit.text for unit in parts)
+        for _, parts in groupby(units, key=lambda unit: unit.document)
+    )
 
 
 def _groups_are_keys(items: list[ExtractedItem]) -> bool:
@@ -456,66 +446,6 @@ def _is_label(name: str) -> bool:
     return name.startswith("@") or (name.isupper() and any(c.isalpha() for c in name))
 
 
-def _same_identity(a: str, b: str) -> bool:
-    """Two keys written for the same item by different passes ("Matchday 5, Rojas 12'"
-    and "Matchday 5: Rojas, 12th minute"): no digit on one side that the other side
-    contradicts, and one's words within the other's or most of them shared."""
-    a, b = a.lower(), b.lower()
-    da, db = set(re.findall(r"\d+", a)), set(re.findall(r"\d+", b))
-    # One reading may leave a part out ("Matchday 12, Kessler" for "Matchday 12,
-    # Kessler 78'"): the digits of one key must sit inside the other's, never differ.
-    if not (da <= db or db <= da):
-        return False
-    wa, wb = set(re.findall(r"[a-z]+", a)), set(re.findall(r"[a-z]+", b))
-    if not wa or not wb:
-        return True
-    return wa <= wb or wb <= wa or len(wa & wb) / len(wa | wb) >= 0.5
-
-
-def _vote(passes: list[ShardItems]) -> ShardItems:
-    """One listing from several passes over the same shard.
-
-    A keyed item is kept when a majority of passes list it (keys matched loosely,
-    within one unit). Unkeyed entries have no identity across passes, so each unit
-    keeps the pass whose count of them is the median. Aliases are pooled.
-    """
-    if len(passes) == 1:
-        return passes[0]
-    majority = len(passes) // 2 + 1
-    # clusters[unit] = list of (the passes that listed one item, keyed by pass number)
-    clusters: dict[int, list[dict[int, ExtractedItem]]] = {}
-    unkeyed: dict[int, list[list[ExtractedItem]]] = {}
-    for n, reading in enumerate(passes):
-        for item in reading.items:
-            if not item.key:
-                unkeyed.setdefault(item.unit, [[] for _ in passes])[n].append(item)
-                continue
-            for members in clusters.setdefault(item.unit, []):
-                first = next(iter(members.values()))
-                if n not in members and first.key and _same_identity(first.key, item.key):
-                    members[n] = item
-                    break
-            else:
-                clusters[item.unit].append({n: item})
-    items = []
-    for unit_clusters in clusters.values():
-        for members in unit_clusters:
-            if len(members) < majority:
-                continue
-            # The kept entry is the first pass's, under the group spelling most of the
-            # passes used: one pass's "the Wall" must not stand for an item the others
-            # filed under "Leon Fischer", or the name match splits them.
-            kept = next(iter(members.values()))
-            groups = Counter(m.group for m in members.values() if m.group)
-            if groups:
-                items.append(kept.model_copy(update={"group": groups.most_common(1)[0][0]}))
-            else:
-                items.append(kept)
-    for lists in unkeyed.values():
-        items += sorted(lists, key=len)[len(lists) // 2]
-    return ShardItems(items=items, aliases=[a for r in passes for a in r.aliases])
-
-
 def _canonical_spelling(names: list[str], used: Counter) -> str:
     """The spelling a group of variants is tallied under: a name over a label form, then
     the one the corpus uses most (so a nickname does not stand in for the name), then the
@@ -559,7 +489,7 @@ def _table_context(result: CountResult) -> str:
         ]
     if result.plan.list_items and result.evidence:
         lines.append(
-            f"The complete list of the {len(result.evidence)} matching rows is appended below "
+            f"The complete list of the {result.items_listed} matching rows is appended below "
             "your answer by code: do not list them yourself."
         )
     elif result.evidence:
@@ -588,6 +518,135 @@ def _provenance_note(result: CountResult) -> str:
     return note + ")"
 
 
+class BroadLimitError(ValueError):
+    """The dataset is larger than a BROAD limit allows; the message names the setting."""
+
+
+def _units_of(nodes: list, edges: list) -> list[Unit]:
+    """The chunks and table rows among graph nodes as units, in document order.
+
+    One unit per chunk, as ingestion stored it: a chunk is never split or rejoined. A
+    chunk from the middle of a document carries that document's first line (a CSV
+    header lives only in chunk 0) and the previous chunk's text (a record cut in two
+    keeps the heading that names it).
+    """
+    document_of = {
+        str(source): str(target)
+        for source, target, relationship_name, _ in edges
+        if relationship_name == "is_part_of"
+    }
+    parts_of: dict[str, list[tuple[int, str, str]]] = {}
+    for node_id, props in nodes:
+        document = document_of.get(str(node_id))
+        if props.get("type") in BROAD_TEXT_NODE_TYPES and props.get("text") and document:
+            index = int(props.get("chunk_index") or 0)
+            parts_of.setdefault(document, []).append((index, str(node_id), props["text"]))
+    units: list[Unit] = []
+    for document, parts in sorted(parts_of.items()):
+        parts.sort()
+        first_line = parts[0][2].strip().split("\n", 1)[0][:BROAD_PREAMBLE_CHARS]
+        previous: tuple[str, str] | None = None
+        for _, node_id, text in parts:
+            units.append(
+                Unit(
+                    id=node_id,
+                    text=text,
+                    preamble="" if first_line in text else first_line,
+                    previous_text=previous[1] if previous else "",
+                    previous_id=previous[0] if previous else "",
+                    document=document,
+                )
+            )
+            previous = (node_id, text)
+    return units
+
+
+@dataclass
+class Corpus:
+    """A dataset's documents, fetched from the graph in batches of whole documents so the
+    text in memory at once stays near ``batch_chars``, whatever the dataset's size.
+
+    Batches are planned from the stored size of each document (its file size), scaled by
+    how much text a byte turned out to hold in the batches already fetched. A corpus that
+    fits in one batch is fetched once and kept. A single document larger than the budget
+    cannot be split (its records can span chunks), and raises.
+    """
+
+    graph: Any
+    documents: list[str]
+    sizes: dict[str, int]
+    batch_chars: int
+    # Characters of text in the corpus, known once every batch has been fetched.
+    chars: int = 0
+    kept: list[Unit] | None = None
+
+    @classmethod
+    def of(cls, units: list[Unit]) -> "Corpus":
+        """A corpus already in memory, as one batch."""
+        chars = sum(len(unit.text) for unit in units)
+        return cls(graph=None, documents=[], sizes={}, batch_chars=chars, chars=chars, kept=units)
+
+    def fits_one_batch(self) -> bool:
+        known = [self.sizes.get(document, 0) for document in self.documents]
+        return all(known) and sum(known) <= self.batch_chars
+
+    async def fetch(self, documents: list[str]) -> list[Unit]:
+        nodes, edges = await self.graph.get_neighborhood(documents, depth=1)
+        return _units_of(nodes, edges)
+
+    async def batches(self) -> AsyncIterator[list[Unit]]:
+        if self.kept is not None:
+            yield self.kept
+            return
+        if self.fits_one_batch():
+            self.kept = await self.fetch(self.documents)
+            self.chars = sum(len(unit.text) for unit in self.kept)
+            yield self.kept
+            return
+        ratio, chars, start = 1.0, 0, 0
+        while start < len(self.documents):
+            batch = [self.documents[start]]
+            planned = self.sizes.get(batch[0], 0) * ratio
+            while start + len(batch) < len(self.documents):
+                size = self.sizes.get(self.documents[start + len(batch)])
+                if not size or planned + size * ratio > self.batch_chars:
+                    break
+                batch.append(self.documents[start + len(batch)])
+                planned += size * ratio
+            units = await self.fetch(batch)
+            text = sum(len(unit.text) for unit in units)
+            if len(batch) == 1 and text > self.batch_chars:
+                raise BroadLimitError(
+                    f"BROAD: document {batch[0]} holds {text:,} characters of text, more than "
+                    f"one batch of {self.batch_chars:,} (batch_mb). Raise batch_mb in "
+                    "retriever_specific_config to what this machine can hold."
+                )
+            stored = sum(self.sizes.get(document, 0) for document in batch)
+            if stored:
+                ratio = max(ratio, text / stored)
+            chars += text
+            start += len(batch)
+            logger.info(
+                "BROAD batch: %d documents, %d chunks, %d characters", len(batch), len(units), text
+            )
+            yield units
+        self.chars = chars
+
+    async def sample(self) -> list[Unit]:
+        """Units from the corpus's start, middle and end, for the planner: every unit
+        when the corpus fits one batch, else a unit of the first, middle and last document."""
+        if self.kept is not None or self.fits_one_batch():
+            async for units in self.batches():
+                return units
+        picks = sorted({0, len(self.documents) // 2, len(self.documents) - 1})
+        sample: list[Unit] = []
+        for index, pick in enumerate(picks):
+            units = await self.fetch([self.documents[pick]])
+            if units:
+                sample.append(units[[0, len(units) // 2, -1][index] if len(picks) == 3 else 0])
+        return sample
+
+
 class BroadRetriever(CompletionRetriever):
     """Count-and-aggregate search over every unit of a dataset.
 
@@ -597,10 +656,13 @@ class BroadRetriever(CompletionRetriever):
       stored chunk larger than it is read whole, alone, never split.
     - ``max_parallel_calls``: reading calls in flight at once.
     - ``call_timeout``: seconds one reading call may take before it is retried once.
-    - ``reading_passes``: how many times every chunk is read, default 1. Above 1 the
-      passes vote: an entry is counted when a majority of them listed it, so the slips
-      of a single pass over a dense chunk cancel out. Cost scales with the number of
-      passes; use an odd number.
+    - ``batch_mb``: megabytes of text held in memory at once. The dataset is fetched in
+      batches of whole documents of about this size, so any dataset size can be counted;
+      raise it on a machine with more memory, lower it on a smaller one. A document
+      larger than one batch raises.
+    - ``max_reading_tokens``: the most text the reading counter may send to the LLM. A
+      question that needs every chunk read over a larger dataset raises instead of
+      reading (cost and time grow with the dataset); counts made by code have no limit.
     """
 
     def __init__(
@@ -608,34 +670,36 @@ class BroadRetriever(CompletionRetriever):
         shard_tokens: int = BROAD_SHARD_TOKENS,
         call_timeout: float = BROAD_CALL_TIMEOUT_SECONDS,
         max_parallel_calls: int = BROAD_MAX_PARALLEL_CALLS,
-        reading_passes: int = BROAD_READING_PASSES,
+        batch_mb: float = BROAD_BATCH_MB,
+        max_reading_tokens: int = BROAD_MAX_READING_TOKENS,
         **kwargs,
     ):
         super().__init__(**kwargs)
+        if batch_mb <= 0 or max_reading_tokens <= 0:
+            raise ValueError("BROAD batch_mb and max_reading_tokens must be positive")
         self.shard_tokens = shard_tokens
         self.call_timeout = call_timeout
         self.max_parallel_calls = max_parallel_calls
-        if reading_passes < 1:
-            raise ValueError(f"BROAD reading_passes must be at least 1, got {reading_passes}")
-        self.reading_passes = reading_passes
+        self.batch_chars = int(batch_mb * 1_000_000)
+        self.max_reading_tokens = max_reading_tokens
         self.tokenizer = TikTokenTokenizer()
 
     async def get_retrieved_objects(self, query: str) -> CountResult:
         graph_engine = (await get_unified_engine()).graph
-        entities_by_type = await self.load_entities(graph_engine)
-        try:
-            units = await self.load_text_units(graph_engine)
-        except NoDataError:
-            units = []  # a graph with entities but no text; a text count raises below
-        plan = await self.plan(query, entities_by_type, units)
+        entity_types = await self.load_entity_types(graph_engine)
+        corpus = await self.open_corpus(graph_engine)
+        plan = await self.plan(query, entity_types, await corpus.sample())
         logger.info("BROAD plan: %s", plan.model_dump())
 
         result: CountResult | None = None
         if plan.unsupported:
             result = CountResult(plan=plan, method="unsupported", total=0, units=0)
         elif plan.source == "entities":
-            result = self.count_entities(plan, entities_by_type)
-        elif not units:
+            entities = await self.load_entities(
+                graph_engine, {name: entity_types[name] for name in plan.entity_types}
+            )
+            result = self.count_entities(plan, entities)
+        elif not corpus.documents and corpus.kept is None:
             raise NoDataError("No data found in the system, please add data first.")
         elif (
             plan.literal_terms
@@ -644,23 +708,11 @@ class BroadRetriever(CompletionRetriever):
         ):
             # Word matches count occurrences; a keyed item ("reviews that mention film")
             # counts things that hold a match, which the other lanes do.
-            result = self.count_words(plan, units)
+            result = await self.count_words(plan, corpus)
         else:
-            table, others = _table_of(units)
-            if table is not None:
-                result = await self.count_table(query, plan, table)
-                if result is not None and others:
-                    result.scope = (
-                        f"only the table in the documents; {others} other documents "
-                        "(not tables) were not counted"
-                    )
-            else:
-                texts = _document_texts(units)
-                shaped = shaped_lines("\n".join(texts)) if texts else None
-                if shaped is not None:
-                    result = await self.count_lines(query, plan, *shaped)
+            result = await self.count_records(query, plan, corpus)
         if result is None:
-            result = await self.count_by_reading(plan, units)
+            result = await self.count_by_reading(plan, corpus)
 
         logger.info(
             "BROAD %s count: total=%d over %d units, %d LLM calls, %d tokens read",
@@ -672,24 +724,87 @@ class BroadRetriever(CompletionRetriever):
         )
         return result
 
+    async def count_records(
+        self, query: str, plan: CountPlan, corpus: Corpus
+    ) -> CountResult | None:
+        """Count by code when the documents are records: a table (delimited, JSON, email)
+        or record lines (a log, a templated report). None when they are not, or when the
+        records cannot answer the question; reading then decides.
+
+        One pass over the corpus finds the tables and summarizes them (or counts the line
+        shapes of the rest); after the query call, a second pass evaluates the query.
+        Neither pass holds more than one batch of documents."""
+        survey = await self._survey(corpus)
+        if survey is None:
+            return None
+        summary, others, stats = survey
+        if summary is not None:
+            result = await self.count_table(query, plan, summary, corpus)
+            if result is not None and others:
+                result.scope = (
+                    f"only the table in the documents; {others} other documents "
+                    "(not tables) were not counted"
+                )
+            return result
+        shaped = stats.result()
+        return await self.count_lines(query, plan, shaped, corpus) if shaped else None
+
+    async def _survey(self, corpus: Corpus) -> tuple[TableSummary | None, int, ShapeStats] | None:
+        """One pass over the corpus: the summary of its tables and how many documents are
+        not tables, or, when no two tables agree on columns, the shapes of every line.
+        Each document is parsed, summarized and let go (parsed rows take several times the
+        memory of their text; the query pass parses them again). None when a unit has
+        no document."""
+        summary: TableSummary | None = None
+        mixed = False
+        others = 0
+        stats = ShapeStats()
+        async for units in corpus.batches():
+            texts = _document_texts(units)
+            if texts is None:
+                return None
+            for text in texts:
+                table = parse_table(text)
+                if table is None:
+                    others += 1
+                    stats.add(record_lines(text))
+                    continue
+                if summary is None:
+                    summary = TableSummary(columns=table.columns)
+                mixed = mixed or table.columns != summary.columns
+                summary.add(table.rows)
+        if summary is not None and not mixed:
+            return summary, others, stats
+        if mixed:
+            # Tables that disagree on their columns are counted as lines, all of them.
+            stats = ShapeStats()
+            async for units in corpus.batches():
+                for text in _document_texts(units) or []:
+                    stats.add(record_lines(text))
+        return None, others, stats
+
     # --- sources --------------------------------------------------------------
 
-    async def load_entities(self, graph_engine) -> dict[str, list[Unit]]:
-        """Every typed entity in the graph, grouped by its normalized type name."""
-        nodes, edges = await graph_engine.get_filtered_graph_data(
-            [{"type": ["Entity", "EntityType"]}]
-        )
+    async def load_entity_types(self, graph_engine) -> dict[str, str]:
+        """Every entity type in the graph: its name and node id. Its entities are loaded
+        only when the plan counts them."""
+        nodes, _ = await graph_engine.get_filtered_graph_data([{"type": ["EntityType"]}])
+        return {props["name"]: str(node_id) for node_id, props in nodes if props.get("name")}
+
+    async def load_entities(self, graph_engine, types: dict[str, str]) -> dict[str, list[Unit]]:
+        """The entities of the given types (name to type node id), grouped by type name."""
+        nodes, edges = await graph_engine.get_neighborhood(list(types.values()), depth=1)
         props_by_id = {str(node_id): props for node_id, props in nodes}
-        entities_by_type: dict[str, list[Unit]] = {}
+        name_of = {type_id: name for name, type_id in types.items()}
+        entities_by_type: dict[str, list[Unit]] = {name: [] for name in types}
         for source_id, target_id, relationship_name, _ in edges:
-            if relationship_name != "is_a":
-                continue
             entity = props_by_id.get(str(source_id), {})
-            entity_type = props_by_id.get(str(target_id), {})
-            if entity.get("type") != "Entity" or entity_type.get("type") != "EntityType":
+            if relationship_name != "is_a" or entity.get("type") != "Entity":
+                continue
+            if str(target_id) not in name_of:
                 continue
             description = (entity.get("description") or "")[:_ENTITY_DESCRIPTION_CHARS]
-            entities_by_type.setdefault(entity_type["name"], []).append(
+            entities_by_type[name_of[str(target_id)]].append(
                 Unit(
                     id=str(source_id),
                     text=f"{entity['name']}: {description}",
@@ -698,82 +813,43 @@ class BroadRetriever(CompletionRetriever):
             )
         return entities_by_type
 
-    async def load_text_units(self, graph_engine) -> list[Unit]:
-        """Every document chunk and table row in the dataset, in document order.
+    async def open_corpus(self, graph_engine) -> Corpus:
+        """The dataset's documents (ids and stored sizes); their text is fetched in batches.
 
-        Listed from the graph, not found by vector search: a count needs every
-        unit, and similarity plays no part in which units exist. A chunk from the
-        middle of a document carries that document's first line: a CSV ingested
-        as text has its column header only in chunk 0, and without it the model
-        cannot tell one yes/no column from the next.
-        """
+        Listed from the graph, not found by vector search: a count needs every unit, and
+        similarity plays no part in which units exist."""
         document_types = [cls.__name__ for cls in get_all_subclasses(Document)]
-        nodes, edges = await graph_engine.get_filtered_graph_data(
-            [{"type": [*BROAD_TEXT_NODE_TYPES, *document_types]}]
-        )
-        document_of = {
-            str(source): str(target)
-            for source, target, relationship_name, _ in edges
-            if relationship_name == "is_part_of"
-        }
-        chunks = {
-            str(node_id): props
-            for node_id, props in nodes
-            if props.get("type") in BROAD_TEXT_NODE_TYPES and props.get("text")
-        }
-        if not chunks:
-            raise NoDataError("No data found in the system, please add data first.")
-
-        # One unit per chunk, as ingestion stored it: a chunk is never split or
-        # rejoined. A chunk from the middle of a document carries that document's
-        # first line (a CSV header lives only in chunk 0) and the end of the chunk
-        # before it (a record cut in two keeps the heading that names it).
-        parts_of: dict[str, list[tuple[int, str, str]]] = {}
-        units: list[Unit] = []
-        for node_id, props in chunks.items():
-            document = document_of.get(node_id)
-            if document is None:
-                units.append(Unit(id=node_id, text=props["text"]))
-            else:
-                index = int(props.get("chunk_index") or 0)
-                parts_of.setdefault(document, []).append((index, node_id, props["text"]))
-        units.sort(key=lambda unit: unit.id)
-        for document, parts in sorted(parts_of.items()):
-            parts.sort()
-            first_line = parts[0][2].strip().split("\n", 1)[0][:BROAD_PREAMBLE_CHARS]
-            previous: tuple[str, str] | None = None
-            for _, node_id, text in parts:
-                preamble = "" if first_line in text else first_line
-                context = _tail(previous[1]) if previous else ""
-                units.append(
-                    Unit(
-                        id=node_id,
-                        text=text,
-                        preamble=preamble,
-                        context=context,
-                        previous_id=previous[0] if previous else "",
-                        document=document,
-                    )
-                )
-                previous = (node_id, text)
+        nodes, _ = await graph_engine.get_filtered_graph_data([{"type": document_types}])
+        documents = sorted(str(node_id) for node_id, _ in nodes)
+        sizes = await self.document_sizes(documents)
         logger.info(
-            "BROAD units: %d chunks in %d documents, %d table rows",
-            sum(len(parts) for parts in parts_of.values()),
-            len(parts_of),
-            len(chunks) - sum(len(parts) for parts in parts_of.values()),
+            "BROAD corpus: %d documents, %d bytes stored", len(documents), sum(sizes.values())
         )
-        return units
+        return Corpus(
+            graph=graph_engine, documents=documents, sizes=sizes, batch_chars=self.batch_chars
+        )
+
+    async def document_sizes(self, documents: list[str]) -> dict[str, int]:
+        """Each document's stored size in bytes (a document's graph id is its data id)."""
+        engine = get_relational_engine()
+        sizes: dict[str, int] = {}
+        async with engine.get_async_session() as session:
+            for start in range(0, len(documents), 5_000):
+                ids = [UUID(document) for document in documents[start : start + 5_000]]
+                rows = await session.execute(
+                    select(Data.id, Data.data_size).where(Data.id.in_(ids))
+                )
+                sizes.update({str(data_id): size or 0 for data_id, size in rows})
+        return sizes
 
     # --- planning ---------------------------------------------------------------
 
     async def plan(
-        self, query: str, entities_by_type: dict[str, list[Unit]], units: list[Unit] | None = None
+        self, query: str, entity_types: dict[str, str], units: list[Unit] | None = None
     ) -> CountPlan:
-        type_counts = sorted(
-            ((name, len(units)) for name, units in entities_by_type.items()),
-            key=lambda pair: -pair[1],
-        )[:BROAD_MAX_PLANNER_TYPES]
-        type_list = "\n".join(f"- {name} ({count} entities)" for name, count in type_counts)
+        type_list = "\n".join(
+            f"- {name}" for name in sorted(entity_types)[:BROAD_MAX_PLANNER_TYPES]
+        )
         text_input = f"Question: {query}\n\nEntity types in the graph:\n{type_list or '(none)'}"
         sample = _corpus_sample(units or [])
         if sample:
@@ -830,12 +906,12 @@ class BroadRetriever(CompletionRetriever):
             )
         if plan.source == "entities":
             plan.entity_types = [generate_node_name(name) for name in plan.entity_types]
-            unknown = [name for name in plan.entity_types if name not in entities_by_type]
+            unknown = [name for name in plan.entity_types if name not in entity_types]
             if unknown or not plan.entity_types:
                 raise ValueError(f"BROAD planner chose entity types not in the graph: {unknown}")
         return plan
 
-    # --- the three counters -------------------------------------------------------
+    # --- the counters ------------------------------------------------------------
 
     def count_entities(
         self, plan: CountPlan, entities_by_type: dict[str, list[Unit]]
@@ -854,7 +930,7 @@ class BroadRetriever(CompletionRetriever):
             evidence=[unit.text for unit in matching],
         )
 
-    def count_words(self, plan: CountPlan, units: list[Unit]) -> CountResult:
+    async def count_words(self, plan: CountPlan, corpus: Corpus) -> CountResult:
         """Whole-word occurrences of the planned spellings in every unit.
 
         A spelling in lower case matches any case ("gross margin" also finds the
@@ -863,55 +939,80 @@ class BroadRetriever(CompletionRetriever):
         """
         terms = sorted(set(plan.literal_terms), key=len, reverse=True)
         pattern = re.compile(r"(?<!\w)(?:" + "|".join(map(_spelling_pattern, terms)) + r")(?!\w)")
-        total = 0
+        total = units_read = 0
         evidence: list[str] = []
-        for unit in units:
-            for match in pattern.finditer(unit.text):
-                total += 1
-                window = unit.text[max(match.start() - 60, 0) : match.end() + 60]
-                evidence.append(" ".join(window.split()))
+        async for units in corpus.batches():
+            units_read += len(units)
+            for unit in units:
+                for match in pattern.finditer(unit.text):
+                    total += 1
+                    if len(evidence) < BROAD_MAX_LISTED:
+                        window = unit.text[max(match.start() - 60, 0) : match.end() + 60]
+                        evidence.append(" ".join(window.split()))
         return CountResult(
-            plan=plan, method="words", total=total, units=len(units), evidence=evidence
+            plan=plan, method="words", total=total, units=units_read, evidence=evidence
         )
 
     async def count_lines(
-        self, query: str, plan: CountPlan, lines: list[Line], shapes: list[str]
+        self, query: str, plan: CountPlan, shaped: ShapedLines, corpus: Corpus
     ) -> CountResult | None:
         """Answer over record-like lines (a log, a templated report): one LLM call sees every
         line shape and writes expressions that select the lines and capture the value; code
-        runs them over every line. None when the lines cannot answer the question."""
-        text_input = f"Question: {query}\n\nLine shapes:\n{describe_shapes(shapes, lines)}"
+        runs them over every line, batch by batch. None when the lines cannot answer."""
+        text_input = f"Question: {query}\n\nLine shapes:\n{describe_shapes(shaped)}"
         line_query = await LLMGateway.acreate_structured_output(
             text_input=text_input,
             system_prompt=_read_prompt("broad_line_query.txt"),
             response_model=LineQuery,
         )
         problem = _line_query_problem(line_query)
-        table = None
-        if problem is None:
+        run = None
+        if problem is None and line_query.answerable:
             try:
-                table = matched_table(lines, line_query) if line_query.answerable else None
-                if table is not None and not table.rows:
-                    problem = f"line_regex matched none of the {len(lines)} lines"
+                run = await self._run_lines(line_query, corpus)
+                if run.table_rows == 0:
+                    problem = f"line_regex matched none of the {shaped.lines} lines"
             except LineQueryError as error:
                 problem = str(error)
         if problem:
-            # One retry, shown what went wrong and real lines to match against.
-            samples = "\n".join(line.text for line in lines[:: max(len(lines) // 5, 1)][:5])
+            # One retry, shown what went wrong and five real lines spread over the corpus.
+            step = max(shaped.lines // 5, 1)
+            samples = await self._sample_lines(corpus, step)
             line_query = await LLMGateway.acreate_structured_output(
                 text_input=f"{text_input}\n\nYour previous expressions failed: {problem}. "
-                f"Real lines, exactly as written:\n{samples}\n\nReturn corrected expressions.",
+                "Real lines, exactly as written:\n"
+                + "\n".join(samples[:5])
+                + "\n\nReturn corrected expressions.",
                 system_prompt=_read_prompt("broad_line_query.txt"),
                 response_model=LineQuery,
             )
-            try:
-                usable = line_query.answerable and _line_query_problem(line_query) is None
-                table = matched_table(lines, line_query) if usable else None
-            except LineQueryError:
-                table = None
+            run = None
+            if line_query.answerable and _line_query_problem(line_query) is None:
+                try:
+                    run = await self._run_lines(line_query, corpus)
+                except LineQueryError:
+                    run = None
         logger.info("BROAD line query: %s", line_query.model_dump())
-        if table is None or not table.rows:
+        if run is None or run.table_rows == 0:
             return None  # nothing selected: reading decides
+        answer = run.answer()
+        return CountResult(
+            plan=plan.model_copy(update={"list_items": plan.list_items or line_query.list_rows}),
+            method="table",
+            total=answer.total,
+            units=shaped.lines,
+            groups=answer.groups,
+            evidence=[row[1] for row in answer.matched],
+            target_names=answer.target_values,
+            items_listed=answer.matched_count,
+            llm_calls=1,
+            table_query=run.query,
+        )
+
+    async def _run_lines(self, line_query: LineQuery, corpus: Corpus) -> QueryRun:
+        """Run a line query over every record line of the corpus: the lines its
+        expressions select are the rows (captured values, line) of a table query."""
+        matcher = LineMatcher(line_query)
         valued = line_query.value_regex is not None
         table_query = TableQuery(
             answerable=True,
@@ -921,25 +1022,35 @@ class BroadRetriever(CompletionRetriever):
             target=line_query.target,
             list_rows=line_query.list_rows,
         )
-        answer = run_query(table, table_query)
-        return CountResult(
-            plan=plan.model_copy(update={"list_items": plan.list_items or line_query.list_rows}),
-            method="table",
-            total=answer.total,
-            units=len(lines),
-            groups=answer.groups,
-            evidence=[row[1] for row in answer.matched],
-            target_names=answer.target_values,
-            items_listed=len(answer.matched),
-            llm_calls=1,
-            table_query=table_query,
-        )
+        run = QueryRun(LINE_COLUMNS, table_query, keep_rows=BROAD_MAX_LISTED)
+        async for units in corpus.batches():
+            for text in _document_texts(units) or []:
+                run.add(matcher.rows(record_lines(text)))
+        return run
 
-    async def count_table(self, query: str, plan: CountPlan, table: Table) -> CountResult | None:
+    async def _sample_lines(self, corpus: Corpus, step: int) -> list[str]:
+        """Every ``step``-th record line of the corpus."""
+        samples: list[str] = []
+        seen = 0
+        async for units in corpus.batches():
+            for text in _document_texts(units) or []:
+                lines = record_lines(text)
+                samples += [line for i, line in enumerate(lines, seen) if i % step == 0]
+                seen += len(lines)
+        return samples
+
+    async def count_table(
+        self,
+        query: str,
+        plan: CountPlan,
+        summary: TableSummary,
+        corpus: Corpus,
+    ) -> CountResult | None:
         """Answer over parsed rows: one LLM call maps the question onto the columns, code
-        evaluates it over every row. None when the columns cannot answer the question."""
+        evaluates it over every row of the corpus's tables, parsed batch by batch. None
+        when the columns cannot answer the question."""
         table_query = await LLMGateway.acreate_structured_output(
-            text_input=f"Question: {query}\n\nTable:\n{describe(table)}",
+            text_input=f"Question: {query}\n\nTable:\n{describe(summary)}",
             system_prompt=_read_prompt("broad_table_query.txt"),
             response_model=TableQuery,
         )
@@ -947,26 +1058,43 @@ class BroadRetriever(CompletionRetriever):
         if not table_query.answerable:
             return None
         try:
-            answer = run_query(table, table_query)
+            run = QueryRun(summary.columns, table_query, keep_rows=BROAD_MAX_LISTED)
         except KeyError as error:
             logger.warning("BROAD table query unusable (%s); reading instead", error)
             return None
+        async for units in corpus.batches():
+            for text in _document_texts(units) or []:
+                table = parse_table(text)
+                if table is not None:
+                    run.add(table.rows)
+        answer = run.answer()
         return CountResult(
             plan=plan.model_copy(update={"list_items": plan.list_items or table_query.list_rows}),
             method="table",
             total=answer.total,
             units=answer.rows,
             groups=answer.groups,
-            evidence=[render_row(table, row) for row in answer.matched],
+            evidence=[render_row(summary.columns, row) for row in answer.matched],
             target_names=answer.target_values,
-            items_listed=len(answer.matched),
+            items_listed=answer.matched_count,
             llm_calls=1,
             table_query=table_query,
         )
 
-    async def count_by_reading(self, plan: CountPlan, units: list[Unit]) -> CountResult:
-        """List matching items from every shard in parallel, then dedupe, merge and tally."""
-        shards, tokens_read = self.pack_shards(units)
+    async def count_by_reading(self, plan: CountPlan, corpus: Corpus) -> CountResult:
+        """List matching items from every shard in parallel, batch by batch, then dedupe,
+        merge and tally."""
+        if not corpus.chars and corpus.kept is None:
+            corpus.chars = sum(corpus.sizes.values())  # no pass yet: the stored size
+        tokens_estimate = corpus.chars // 4
+        if tokens_estimate > self.max_reading_tokens:
+            raise BroadLimitError(
+                f"BROAD: this question needs every chunk read by an LLM, about "
+                f"{tokens_estimate:,} tokens, more than max_reading_tokens "
+                f"({self.max_reading_tokens:,}). Ask a narrower question (one a table or "
+                "log can answer by code), count a smaller dataset, or raise "
+                "max_reading_tokens in retriever_specific_config."
+            )
         semaphore = asyncio.Semaphore(self.max_parallel_calls)
 
         async def read_once(shard: list[Unit]) -> ShardItems:
@@ -984,21 +1112,25 @@ class BroadRetriever(CompletionRetriever):
                 raise TimeoutError(f"BROAD: reading call for {shard[0].id} timed out twice")
 
         async def read(shard: list[Unit]) -> tuple[str, ShardItems]:
-            passes = await asyncio.gather(*(read_once(shard) for _ in range(self.reading_passes)))
-            voted = _vote(list(passes))
-            if self.reading_passes > 1:
-                logger.info(
-                    "BROAD vote on %s: %s entries per pass, %d kept by majority",
-                    shard[0].id,
-                    [len(r.items) for r in passes],
-                    len(voted.items),
-                )
-            return shard[0].id, voted
+            return shard[0].id, await read_once(shard)
 
-        read_shards = await asyncio.gather(*map(read, shards))
+        read_shards: list[tuple[str, ShardItems]] = []
+        passages: list[str] = []
+        shard_count = tokens_read = units_read = 0
+        async for units in corpus.batches():
+            shards, tokens = self.pack_shards(units)
+            shard_count += len(shards)
+            tokens_read += tokens
+            units_read += len(units)
+            read_shards += await asyncio.gather(*map(read, shards))
+            if plan.target and len(passages) < BROAD_TARGET_PASSAGES:
+                passages += _passages_naming(plan.target, units)
+        if not units_read:
+            raise NoDataError("No data found in the system, please add data first.")
+        passages = passages[:BROAD_TARGET_PASSAGES]
         logger.info(
             "BROAD read %d pieces; items per piece: %s",
-            len(shards),
+            shard_count,
             [len(shard_items.items) for _, shard_items in read_shards],
         )
 
@@ -1075,7 +1207,7 @@ class BroadRetriever(CompletionRetriever):
             # The question's name is matched against the names actually read, so a
             # nickname or partial name finds its person and an unknown name counts zero.
             target_names = await self.match_target(
-                plan.target, [name for name, _ in groups], aliases, canonical or {}, units
+                plan.target, [name for name, _ in groups], aliases, canonical or {}, passages
             )
             items = [item for item in items if item.group in target_names]
         denominator = 0
@@ -1110,7 +1242,7 @@ class BroadRetriever(CompletionRetriever):
             plan=plan,
             method="reading",
             total=total,
-            units=len(units),
+            units=units_read,
             denominator=denominator,
             groups=groups,
             items_listed=items_listed,
@@ -1124,9 +1256,8 @@ class BroadRetriever(CompletionRetriever):
             names_merged=canonical is not None,
             target_names=target_names,
             unkeyed=unkeyed,
-            llm_calls=len(shards) * self.reading_passes,
-            tokens_read=tokens_read * self.reading_passes,
-            reading_passes=self.reading_passes,
+            llm_calls=shard_count,
+            tokens_read=tokens_read,
         )
 
     # --- reading helpers ------------------------------------------------------------
@@ -1272,8 +1403,9 @@ class BroadRetriever(CompletionRetriever):
         in_call = {unit.id for unit in shard}
         for index, unit in enumerate(shard):
             block = f"[unit {index}]\n{unit.text}"
-            if unit.context and unit.previous_id not in in_call:
-                block = f"[end of the previous chunk — context only]\n{unit.context}\n\n{block}"
+            if unit.previous_text and unit.previous_id not in in_call:
+                context = _tail(unit.previous_text)
+                block = f"[end of the previous chunk — context only]\n{context}\n\n{block}"
             if unit.preamble and unit.preamble not in shown:
                 shown.add(unit.preamble)
                 block = f"[document start — context only]\n{unit.preamble}\n\n{block}"
@@ -1347,7 +1479,7 @@ class BroadRetriever(CompletionRetriever):
         names: list[str],
         aliases: list[list[str]],
         canonical: dict[str, str],
-        units: list[Unit] | None = None,
+        passages: list[str] | None = None,
     ) -> list[str]:
         """The names read from the corpus that are the person or thing ``target`` names.
 
@@ -1385,7 +1517,6 @@ class BroadRetriever(CompletionRetriever):
         stated = _stated_aliases(aliases)
         if stated:
             text_input += "\n\nStated in the text to be the same:\n" + "\n".join(stated)
-        passages = _passages_naming(target, units or [])
         if passages:
             text_input += "\n\nPassages where the question's name is written:\n" + "\n".join(
                 f"- {passage}" for passage in passages
@@ -1449,11 +1580,6 @@ class BroadRetriever(CompletionRetriever):
         if plan.reversible:
             state = "ended (resolved, closed, removed)" if plan.counts_ended else "still in effect"
             lines.append(f"Counted: the items whose latest recorded state is {state}")
-        if result.reading_passes > 1:
-            lines.append(
-                f"(every chunk was read {result.reading_passes} times; an entry counts when "
-                "a majority of the passes listed it)"
-            )
         if result.entries_read > result.items_listed:
             # Said out loud so a key that folds different items together is visible
             # in the answer rather than silently shrinking the count.
@@ -1544,10 +1670,13 @@ class BroadRetriever(CompletionRetriever):
             tail.append(note)
         entries = self.listing(retrieved_objects)
         if retrieved_objects.plan.list_items and entries:
-            block = [f"Full list ({len(entries)}):"]
+            # A table's rows are rendered only up to the listing limit; all were matched.
+            table = retrieved_objects.method == "table"
+            count = retrieved_objects.items_listed if table else len(entries)
+            block = [f"Full list ({count}):"]
             block += [f"- {entry}" for entry in entries[:BROAD_MAX_LISTED]]
-            if len(entries) > BROAD_MAX_LISTED:
-                block.append(f"... and {len(entries) - BROAD_MAX_LISTED} more")
+            if count > BROAD_MAX_LISTED:
+                block.append(f"... and {count - BROAD_MAX_LISTED} more")
             tail.append("\n".join(block))
         if not tail:
             return completions

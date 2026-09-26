@@ -8,9 +8,10 @@ from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
 from cognee.modules.retrieval.broad_retriever import (
+    BROAD_BATCH_MB,
     BROAD_CALL_TIMEOUT_SECONDS,
     BROAD_MAX_PARALLEL_CALLS,
-    BROAD_READING_PASSES,
+    BROAD_MAX_READING_TOKENS,
     BROAD_SHARD_TOKENS,
     BroadRetriever,
 )
@@ -301,11 +302,12 @@ async def get_search_type_retriever_instance(
                 "max_parallel_calls": retriever_specific_config.get(
                     "max_parallel_calls", BROAD_MAX_PARALLEL_CALLS
                 ),
-                "reading_passes": retriever_specific_config.get(
-                    "reading_passes", BROAD_READING_PASSES
-                ),
                 "call_timeout": retriever_specific_config.get(
                     "call_timeout", BROAD_CALL_TIMEOUT_SECONDS
+                ),
+                "batch_mb": retriever_specific_config.get("batch_mb", BROAD_BATCH_MB),
+                "max_reading_tokens": retriever_specific_config.get(
+                    "max_reading_tokens", BROAD_MAX_READING_TOKENS
                 ),
             },
         ),

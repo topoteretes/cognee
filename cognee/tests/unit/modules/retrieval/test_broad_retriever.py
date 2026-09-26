@@ -12,6 +12,7 @@ import pytest
 from cognee.modules.retrieval import broad_retriever
 from cognee.modules.retrieval.broad_retriever import (
     BroadRetriever,
+    Corpus,
     CountPlan,
     CountResult,
     ExtractedItem,
@@ -40,7 +41,8 @@ def _units(count: int, words: int = 50) -> list[Unit]:
 
 
 class _FakeGraph:
-    """Answers get_filtered_graph_data for entity and text-unit node types."""
+    """A small graph: entity types with their entities, and one document of chunks and a
+    table row. Answers the type listing and the neighborhood fetch BROAD uses."""
 
     def __init__(self):
         self.entity_nodes = [
@@ -59,17 +61,52 @@ class _FakeGraph:
             ("e1", "e2", "knows", {}),
         ]
         self.text_nodes = [
+            ("d0", {"type": "TextDocument", "name": "doc.txt"}),
             ("c1", {"type": "DocumentChunk", "text": "Chapter one."}),
             ("r1", {"type": "DltRow", "text": "Row Data: assignee: ann"}),
             ("c2", {"type": "DocumentChunk", "text": ""}),
         ]
-        self.text_edges = []
+        self.text_edges = [
+            ("c1", "d0", "is_part_of", {}),
+            ("r1", "d0", "is_part_of", {}),
+            ("c2", "d0", "is_part_of", {}),
+        ]
+
+    def hold(self, chunks):
+        """Replace the text with these chunks, all parts of one document."""
+        self.text_nodes = [("d0", {"type": "TextDocument", "name": "doc.txt"}), *chunks]
+        self.text_edges = [(node_id, "d0", "is_part_of", {}) for node_id, _ in chunks]
+
+    def _all(self):
+        return self.entity_nodes + self.text_nodes, self.entity_edges + self.text_edges
 
     async def get_filtered_graph_data(self, attribute_filters):
         types = attribute_filters[0]["type"]
-        if "Entity" in types:
-            return self.entity_nodes, self.entity_edges
-        return [n for n in self.text_nodes if n[1]["type"] in types], self.text_edges
+        nodes, _ = self._all()
+        return [node for node in nodes if node[1]["type"] in types], []
+
+    async def get_neighborhood(self, node_ids, depth=1, edge_types=None):
+        nodes, edges = self._all()
+        seeds = set(node_ids)
+        kept = (
+            seeds
+            | {s for s, t, _, _ in edges if t in seeds}
+            | {t for s, t, _, _ in edges if s in seeds}
+        )
+        return (
+            [node for node in nodes if node[0] in kept],
+            [edge for edge in edges if edge[0] in kept and edge[1] in kept],
+        )
+
+
+@pytest.fixture(autouse=True)
+def _stored_sizes(monkeypatch):
+    """Every document is small: the corpus fits one batch, as a test corpus does."""
+
+    async def sizes(self, documents):
+        return {document: 1 for document in documents}
+
+    monkeypatch.setattr(BroadRetriever, "document_sizes", sizes)
 
 
 def _use_graph(monkeypatch, graph):
@@ -86,16 +123,21 @@ def _use_graph(monkeypatch, graph):
 
 @pytest.mark.asyncio
 async def test_entities_are_grouped_by_their_type():
-    entities = await BroadRetriever().load_entities(_FakeGraph())
+    graph = _FakeGraph()
+    types = await BroadRetriever().load_entity_types(graph)
+    entities = await BroadRetriever().load_entities(graph, types)
 
+    assert types == {"person": "t-person", "place": "t-place"}
     assert sorted(entities) == ["person", "place"]
     assert [unit.id for unit in entities["person"]] == ["e1", "e2", "e3"]
 
 
 @pytest.mark.asyncio
 async def test_text_units_are_every_chunk_and_table_row_with_text():
-    units = await BroadRetriever().load_text_units(_FakeGraph())
+    corpus = await BroadRetriever().open_corpus(_FakeGraph())
+    units = [unit async for batch in corpus.batches() for unit in batch]
 
+    assert corpus.documents == ["d0"]
     assert sorted(unit.id for unit in units) == ["c1", "r1"]
 
 
@@ -147,14 +189,16 @@ async def test_a_mid_document_chunk_carries_the_first_line_and_the_previous_chun
         return ShardItems(items=[])
 
     _stub_llm(monkeypatch, respond)
-    units = await BroadRetriever().load_text_units(graph)
+    units = await (await BroadRetriever().open_corpus(graph)).sample()
 
     assert [unit.id for unit in units] == ["c0", "c1"]
     assert units[1].preamble == "id,who" and units[1].previous_id == "c0"
-    assert units[1].context == "Episode 21\nHOST: My guest is Pieter Van Dijk."
+    assert broad_retriever._tail(units[1].previous_text) == (
+        "Episode 21\nHOST: My guest is Pieter Van Dijk."
+    )
 
     await BroadRetriever(shard_tokens=8).count_by_reading(
-        CountPlan(source="text", item="a turn"), units
+        CountPlan(source="text", item="a turn"), Corpus.of(units)
     )
     apart = [s for s in seen if "VAN DIJK" in s]
     assert len(apart) == 1 and "[end of the previous chunk — context only]\nEpisode 21" in apart[0]
@@ -162,7 +206,7 @@ async def test_a_mid_document_chunk_carries_the_first_line_and_the_previous_chun
 
     seen.clear()
     await BroadRetriever(shard_tokens=10_000).count_by_reading(
-        CountPlan(source="text", item="a turn"), units
+        CountPlan(source="text", item="a turn"), Corpus.of(units)
     )
     assert len(seen) == 1 and "context only]\nEpisode 21" not in seen[0]  # c0 is in the same call
 
@@ -183,7 +227,7 @@ async def test_a_hung_reading_call_is_retried_once_then_fails(monkeypatch):
 
     monkeypatch.setattr(broad_retriever.LLMGateway, "acreate_structured_output", fake)
 
-    result = await BroadRetriever(call_timeout=0.05).count_by_reading(_plan(), _units(1))
+    result = await BroadRetriever(call_timeout=0.05).count_by_reading(_plan(), Corpus.of(_units(1)))
     assert result.total == 1 and len(attempts) == 2
 
     async def always_hangs(text_input, system_prompt, response_model, **kwargs):
@@ -191,7 +235,7 @@ async def test_a_hung_reading_call_is_retried_once_then_fails(monkeypatch):
 
     monkeypatch.setattr(broad_retriever.LLMGateway, "acreate_structured_output", always_hangs)
     with pytest.raises(TimeoutError, match="timed out twice"):
-        await BroadRetriever(call_timeout=0.05).count_by_reading(_plan(), _units(1))
+        await BroadRetriever(call_timeout=0.05).count_by_reading(_plan(), Corpus.of(_units(1)))
 
 
 # --- planning --------------------------------------------------------------------
@@ -204,7 +248,7 @@ async def test_planner_entity_types_are_normalized_and_validated(monkeypatch):
         lambda model, _: CountPlan(source="entities", entity_types=["Person"], item="a person"),
     )
 
-    plan = await BroadRetriever().plan("How many people?", {"person": _units(3)})
+    plan = await BroadRetriever().plan("How many people?", {"person": "t-person"})
 
     assert plan.entity_types == ["person"]
 
@@ -217,7 +261,7 @@ async def test_planner_choosing_a_missing_type_fails_fast(monkeypatch):
     )
 
     with pytest.raises(ValueError, match="not in the graph"):
-        await BroadRetriever().plan("How many ghosts?", {"person": _units(1)})
+        await BroadRetriever().plan("How many ghosts?", {"person": "t-person"})
 
 
 # --- which counter runs -------------------------------------------------------------
@@ -286,10 +330,12 @@ async def test_word_mentions_are_counted_by_code_across_every_unit(monkeypatch):
 
     _stub_llm(monkeypatch, respond)
     graph = _FakeGraph()
-    graph.text_nodes = [
-        ("c1", {"type": "DocumentChunk", "text": "Moscow burned. They left Moscow's gates."}),
-        ("c2", {"type": "DocumentChunk", "text": "Muscovites and MoscowRiver are not Moscow."}),
-    ]
+    graph.hold(
+        [
+            ("c1", {"type": "DocumentChunk", "text": "Moscow burned. They left Moscow's gates."}),
+            ("c2", {"type": "DocumentChunk", "text": "Muscovites and MoscowRiver are not Moscow."}),
+        ]
+    )
     _use_graph(monkeypatch, graph)
 
     result = await BroadRetriever().get_retrieved_objects("How many times is Moscow mentioned?")
@@ -314,7 +360,7 @@ async def test_things_that_mention_a_word_are_not_word_occurrences(monkeypatch):
 
     _stub_llm(monkeypatch, respond)
     graph = _FakeGraph()
-    graph.text_nodes = [("c1", {"type": "DocumentChunk", "text": "A film, a fine film."})]
+    graph.hold([("c1", {"type": "DocumentChunk", "text": "A film, a fine film."})])
     _use_graph(monkeypatch, graph)
 
     result = await BroadRetriever().get_retrieved_objects("How many reviews mention film?")
@@ -350,7 +396,7 @@ async def test_every_shard_is_read(monkeypatch):
     _stub_llm(monkeypatch, respond)
 
     result = await BroadRetriever(shard_tokens=200).count_by_reading(
-        CountPlan(source="text", item="x"), _units(20)
+        CountPlan(source="text", item="x"), Corpus.of(_units(20))
     )
 
     assert result.llm_calls == len(seen) > 1
@@ -375,7 +421,7 @@ async def test_repeated_mentions_of_one_item_are_counted_once(monkeypatch):
     _stub_llm(monkeypatch, respond)
     plan = CountPlan(source="text", item="a PR", group_by="author", dedup_key="PR number")
 
-    result = await BroadRetriever().count_by_reading(plan, _units(1))
+    result = await BroadRetriever().count_by_reading(plan, Corpus.of(_units(1)))
 
     assert result.total == 2
     assert dict(result.groups) == {"ann": 1, "bob": 1}
@@ -473,7 +519,9 @@ async def test_a_relation_listed_under_one_side_counts_for_both(monkeypatch):
         list_items=True,
     )
 
-    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(plan, _units(6, words=2))
+    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(
+        plan, Corpus.of(_units(6, words=2))
+    )
 
     assert result.total == 2  # Helga and Priya; Mei was removed
     assert dict(result.groups) == {
@@ -570,7 +618,7 @@ async def test_a_reversible_plans_condition_never_filters_state_entries(monkeypa
     _stub_llm(monkeypatch, respond)
     plan = _plan(condition="currently open, not resolved", reversible=True, dedup_key="ticket")
 
-    await BroadRetriever().count_by_reading(plan, _units(1))
+    await BroadRetriever().count_by_reading(plan, Corpus.of(_units(1)))
 
     assert "list EVERY state entry (opened, resolved, reopened, removed)" in seen[0]
     assert "code decides the state from the latest entry" in seen[0]
@@ -589,7 +637,9 @@ async def test_a_percentage_is_two_counts_from_one_pass(monkeypatch):
     _stub_llm(monkeypatch, lambda model, _: shard)
     plan = _plan(ratio_condition="the ticket was escalated", dedup_key="the ticket number")
 
-    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(plan, _units(4, words=2))
+    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(
+        plan, Corpus.of(_units(4, words=2))
+    )
     context = await BroadRetriever().get_context_from_objects("q", result)
 
     assert (result.total, result.denominator) == (2, 4)
@@ -711,7 +761,7 @@ async def test_different_things_grouped_by_their_own_identifier_count_distinct_k
         dedup_key="the H.R. number",
     )
 
-    result = await BroadRetriever().count_by_reading(plan, _units(1))
+    result = await BroadRetriever().count_by_reading(plan, Corpus.of(_units(1)))
 
     assert result.total == 3
 
@@ -752,7 +802,9 @@ async def test_an_average_divides_the_sum_by_the_items_with_an_amount(monkeypatc
     _stub_llm(monkeypatch, lambda model, _: shard)
     plan = _plan(measure="order value", average=True, dedup_key="the order number")
 
-    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(plan, _units(3, words=2))
+    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(
+        plan, Corpus.of(_units(3, words=2))
+    )
 
     assert result.total == 20
 
@@ -816,7 +868,9 @@ async def test_a_paper_counts_for_every_author_it_lists(monkeypatch):
         source="text", item="a paper", group_by="author", target="Ana Kovač", dedup_key="paper"
     )
 
-    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(plan, _units(2, words=2))
+    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(
+        plan, Corpus.of(_units(2, words=2))
+    )
 
     assert result.total == 2 and dict(result.groups)["Ana Kovač"] == 2
 
@@ -837,7 +891,7 @@ async def test_an_entry_without_its_key_is_left_out_and_the_gap_is_stated(monkey
     _stub_llm(monkeypatch, lambda model, _: shard)
     plan = _plan(dedup_key="the paper number")
 
-    result = await BroadRetriever().count_by_reading(plan, _units(1))
+    result = await BroadRetriever().count_by_reading(plan, Corpus.of(_units(1)))
     context = await BroadRetriever().get_context_from_objects("q", result)
 
     assert result.total == 3 and result.unkeyed == 1
@@ -858,7 +912,7 @@ async def test_a_key_the_text_does_not_write_counts_every_entry(monkeypatch):
     _stub_llm(monkeypatch, lambda model, _: shard)
 
     result = await BroadRetriever().count_by_reading(
-        _plan(dedup_key="the receipt number"), _units(1)
+        _plan(dedup_key="the receipt number"), Corpus.of(_units(1))
     )
 
     assert (result.total, result.unkeyed) == (3, 0)
@@ -883,7 +937,7 @@ async def test_stated_aliases_merge_by_code_even_when_the_model_does_not(monkeyp
     _stub_llm(monkeypatch, respond)
     plan = _plan(group_by="member", dedup_key="the connection")
 
-    result = await BroadRetriever().count_by_reading(plan, _units(1))
+    result = await BroadRetriever().count_by_reading(plan, Corpus.of(_units(1)))
 
     assert result.groups == [("Arthur Bennett", 2), ("Yuki Sato", 1)]
 
@@ -910,7 +964,7 @@ async def test_merged_names_are_tallied_under_the_spelling_the_corpus_uses_most(
     _stub_llm(monkeypatch, respond)
     plan = _plan(group_by="scorer", dedup_key="the match and minute")
 
-    result = await BroadRetriever().count_by_reading(plan, _units(1))
+    result = await BroadRetriever().count_by_reading(plan, Corpus.of(_units(1)))
 
     assert result.groups == [("Ciaran Rojas", 5), ("Yusuf Demir", 1)]
 
@@ -945,7 +999,7 @@ async def test_the_answer_states_how_many_listed_entries_dedup_removed(monkeypat
     plan = _plan(dedup_key="the match heading")
     retriever = BroadRetriever()
 
-    result = await retriever.count_by_reading(plan, _units(2))
+    result = await retriever.count_by_reading(plan, Corpus.of(_units(2)))
     context = await retriever.get_context_from_objects("How many draws?", result)
 
     assert result.total == 2
@@ -997,7 +1051,7 @@ async def test_only_read_names_reach_the_model_as_stated_aliases(monkeypatch):
     monkeypatch.setattr(broad_retriever, "_alias_groups", lambda raw: raw)  # force the raw form
     plan = _plan(group_by="contributor", dedup_key="the contribution's number")
 
-    result = await BroadRetriever().count_by_reading(plan, _units(1))
+    result = await BroadRetriever().count_by_reading(plan, Corpus.of(_units(1)))
 
     assert "Stated" not in seen[0]
     assert set(result.groups) == {("Pavel Horák", 1), ("Anna Lund", 1), ("Esme Nkemelu", 1)}
@@ -1011,10 +1065,10 @@ async def test_undone_only_subtracts_when_the_plan_counts_items_in_effect(monkey
     _stub_llm(monkeypatch, lambda model, _: shard)
 
     counted = await BroadRetriever().count_by_reading(
-        _plan(condition="was cancelled", dedup_key="the order number"), _units(1)
+        _plan(condition="was cancelled", dedup_key="the order number"), Corpus.of(_units(1))
     )
     in_effect = await BroadRetriever().count_by_reading(
-        _plan(dedup_key="the order number", reversible=True), _units(1)
+        _plan(dedup_key="the order number", reversible=True), Corpus.of(_units(1))
     )
 
     assert counted.total == 2 and in_effect.total == 0
@@ -1026,7 +1080,8 @@ async def test_an_undone_entry_without_a_dedup_key_is_not_counted(monkeypatch):
     _stub_llm(monkeypatch, lambda model, _: shard if model is ShardItems else NameGroups(groups=[]))
 
     result = await BroadRetriever().count_by_reading(
-        CountPlan(source="text", item="a sale", group_by="seller", reversible=True), _units(1)
+        CountPlan(source="text", item="a sale", group_by="seller", reversible=True),
+        Corpus.of(_units(1)),
     )
 
     assert result.total == 1
@@ -1044,7 +1099,7 @@ async def test_every_occurrence_counts_without_a_dedup_key(monkeypatch):
     _stub_llm(monkeypatch, lambda model, _: shard)
 
     result = await BroadRetriever().count_by_reading(
-        CountPlan(source="text", item="a burning"), _units(1)
+        CountPlan(source="text", item="a burning"), Corpus.of(_units(1))
     )
 
     assert result.total == 3
@@ -1066,7 +1121,7 @@ async def test_keyed_items_sharing_a_templated_quote_in_one_piece_all_count(monk
     _stub_llm(monkeypatch, lambda model, _: shard)
 
     result = await BroadRetriever(shard_tokens=10_000).count_by_reading(
-        _plan(dedup_key="the experiment id"), _units(1)
+        _plan(dedup_key="the experiment id"), Corpus.of(_units(1))
     )
 
     assert (result.total, result.unkeyed) == (50, 2)
@@ -1084,7 +1139,7 @@ async def test_the_extract_spec_asks_for_the_groups_value_never_a_description(mo
 
     _stub_llm(monkeypatch, respond)
 
-    await BroadRetriever().count_by_reading(_plan(group_by="guest"), _units(1))
+    await BroadRetriever().count_by_reading(_plan(group_by="guest"), Corpus.of(_units(1)))
 
     spec = seen[0]
     assert "Grouping attribute (group): guest" in spec
@@ -1106,7 +1161,7 @@ async def test_a_group_written_as_the_attributes_own_word_is_no_group(monkeypatc
     _stub_llm(monkeypatch, lambda model, _: shard if model is ShardItems else NameGroups(groups=[]))
 
     result = await BroadRetriever().count_by_reading(
-        _plan(group_by="guest", dedup_key="the episode"), _units(1)
+        _plan(group_by="guest", dedup_key="the episode"), Corpus.of(_units(1))
     )
 
     assert result.total == 3
@@ -1137,7 +1192,9 @@ async def test_unkeyed_entries_with_identical_quotes_in_one_piece_are_separate_i
     )
     _stub_llm(monkeypatch, lambda model, _: shard if model is ShardItems else NameGroups(groups=[]))
 
-    result = await BroadRetriever().count_by_reading(_plan(group_by="sponsor"), _units(1))
+    result = await BroadRetriever().count_by_reading(
+        _plan(group_by="sponsor"), Corpus.of(_units(1))
+    )
 
     assert result.total == 3
     assert result.groups == [("Ledgerline Accounting", 2), ("Northwind Coffee", 1)]
@@ -1152,7 +1209,8 @@ async def test_identical_quotes_from_different_rows_are_different_items(monkeypa
     _stub_llm(monkeypatch, lambda model, _: shard)
 
     result = await BroadRetriever(shard_tokens=10_000).count_by_reading(
-        CountPlan(source="text", item="a row with worth_reviewing yes"), _units(40, words=2)
+        CountPlan(source="text", item="a row with worth_reviewing yes"),
+        Corpus.of(_units(40, words=2)),
     )
 
     assert result.total == 40
@@ -1178,7 +1236,7 @@ async def test_name_variants_are_merged_before_tallying(monkeypatch):
     _stub_llm(monkeypatch, respond)
     plan = CountPlan(source="text", item="an assignment", group_by="assignee")
 
-    result = await BroadRetriever().count_by_reading(plan, _units(1))
+    result = await BroadRetriever().count_by_reading(plan, Corpus.of(_units(1)))
 
     assert result.groups == [("Akshats-git", 3), ("Megha-gbs", 1)]
 
@@ -1206,7 +1264,7 @@ async def test_aliases_stated_in_the_text_reach_the_merge_step(monkeypatch):
     _stub_llm(monkeypatch, respond)
     plan = CountPlan(source="text", item="an assignment", group_by="assignee")
 
-    await BroadRetriever().count_by_reading(plan, _units(1))
+    await BroadRetriever().count_by_reading(plan, Corpus.of(_units(1)))
 
     assert "Akshats-git = Akshats" in merge_inputs[0]
 
@@ -1244,7 +1302,9 @@ async def test_a_named_target_counts_its_group_under_every_spelling(monkeypatch)
         source="text", item="an issue", group_by="assignee", target="Megha", dedup_key="issue"
     )
 
-    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(plan, _units(4, words=2))
+    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(
+        plan, Corpus.of(_units(4, words=2))
+    )
     context = await BroadRetriever().get_context_from_objects("q", result)
 
     assert result.total == 3
@@ -1284,7 +1344,7 @@ async def test_a_target_the_text_declares_equal_needs_no_model_call(monkeypatch)
     plan = CountPlan(source="text", item="a ticket", group_by="assignee", target="Ann")
     retriever = BroadRetriever(shard_tokens=10_000)
 
-    result = await retriever.count_by_reading(plan, _units(2, words=2))
+    result = await retriever.count_by_reading(plan, Corpus.of(_units(2, words=2)))
     alone = await retriever.match_target("Ann", ["Ann-dev"], [["Ann-dev", "Ann"]], {})
 
     assert result.total == 1 and result.target_names == ["Ann-dev"]
@@ -1308,7 +1368,7 @@ async def test_a_translated_target_is_resolved_by_the_model(monkeypatch):
         source="text", item="a shipment", group_by="origin", target="Deutschland", measure="units"
     )
 
-    result = await BroadRetriever().count_by_reading(plan, _units(1))
+    result = await BroadRetriever().count_by_reading(plan, Corpus.of(_units(1)))
 
     assert result.total == 40 and TargetMatch in models
 
@@ -1326,7 +1386,9 @@ async def test_every_item_of_a_named_target_is_listed(monkeypatch):
         source="text", item="an issue", group_by="assignee", target="Akshats-git", dedup_key="issue"
     )
 
-    result = await BroadRetriever(shard_tokens=100_000).count_by_reading(plan, _units(count, 2))
+    result = await BroadRetriever(shard_tokens=100_000).count_by_reading(
+        plan, Corpus.of(_units(count, 2))
+    )
 
     assert result.total == count
     assert len(result.evidence) == count
@@ -1347,7 +1409,9 @@ async def test_a_named_target_nobody_matches_counts_zero(monkeypatch):
     _stub_llm(monkeypatch, respond)
     plan = CountPlan(source="text", item="an issue", group_by="assignee", target="Ashkatosh")
 
-    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(plan, _units(2, words=2))
+    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(
+        plan, Corpus.of(_units(2, words=2))
+    )
     context = await BroadRetriever().get_context_from_objects("q", result)
 
     assert result.total == 0 and result.evidence == []
@@ -1429,7 +1493,8 @@ async def test_a_count_by_reading_is_never_presented_as_exact():
     assert "Akshats-git: 43" in context
 
 
-def test_a_lower_case_spelling_matches_any_case_and_a_split_line():
+@pytest.mark.asyncio
+async def test_a_lower_case_spelling_matches_any_case_and_a_split_line():
     """ "gross margin" is also written "Gross margin" at the start of a sentence, and a
     phrase can be cut by a line break in text extracted from a PDF."""
     units = [
@@ -1438,19 +1503,20 @@ def test_a_lower_case_spelling_matches_any_case_and_a_split_line():
     ]
     retriever = BroadRetriever()
 
-    margin = retriever.count_words(_plan(literal_terms=["gross margin"]), units)
-    heads = retriever.count_words(
-        _plan(literal_terms=["off with her head", "off with his head"]), units
+    margin = await retriever.count_words(_plan(literal_terms=["gross margin"]), Corpus.of(units))
+    heads = await retriever.count_words(
+        _plan(literal_terms=["off with her head", "off with his head"]), Corpus.of(units)
     )
 
     assert (margin.total, heads.total) == (2, 2)
 
 
-def test_a_capitalized_spelling_matches_only_as_written():
+@pytest.mark.asyncio
+async def test_a_capitalized_spelling_matches_only_as_written():
     """A name keeps its capital: "Bill" the person is not every "bill" on the table."""
     units = [Unit(id="a", text="Bill paid the bill. BILL signed.")]
 
-    result = BroadRetriever().count_words(_plan(literal_terms=["Bill"]), units)
+    result = await BroadRetriever().count_words(_plan(literal_terms=["Bill"]), Corpus.of(units))
 
     assert result.total == 1
 
@@ -1522,7 +1588,9 @@ async def test_a_measure_is_summed_per_item_and_per_group(monkeypatch):
         dedup_key="shipment id",
     )
 
-    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(plan, _units(5, words=2))
+    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(
+        plan, Corpus.of(_units(5, words=2))
+    )
     context = await BroadRetriever().get_context_from_objects("q", result)
 
     assert result.total == 82  # the recap of SHP-1 is not added twice
@@ -1542,15 +1610,11 @@ async def test_a_measure_is_never_counted_as_word_mentions(monkeypatch):
         called.append("reading")
         return CountResult(plan=plan, method="reading", total=0, units=0)
 
-    async def plan_stub(query, entities_by_type, units=None):
+    async def plan_stub(query, entity_types, units=None):
         return plan
-
-    async def units(graph_engine):
-        return _units(1)
 
     monkeypatch.setattr(retriever, "count_by_reading", reading)
     monkeypatch.setattr(retriever, "plan", plan_stub)
-    monkeypatch.setattr(retriever, "load_text_units", units)
     _use_graph(monkeypatch, _FakeGraph())
 
     await retriever.get_retrieved_objects("How many units came from Germany?")
@@ -1669,12 +1733,119 @@ async def test_search_builds_broad_with_its_scan_settings():
     retriever = await get_search_type_retriever_instance(
         SearchType.BROAD,
         "How many?",
-        retriever_specific_config={"shard_tokens": 4000, "max_parallel_calls": 4},
+        retriever_specific_config={
+            "shard_tokens": 4000,
+            "max_parallel_calls": 4,
+            "batch_mb": 64,
+            "max_reading_tokens": 1_000,
+        },
     )
 
     assert isinstance(retriever, BroadRetriever)
     assert retriever.shard_tokens == 4000
     assert retriever.max_parallel_calls == 4
+    assert (retriever.batch_chars, retriever.max_reading_tokens) == (64_000_000, 1_000)
+
+
+# --- a dataset larger than memory --------------------------------------------------------
+
+
+def _documents(graph: _FakeGraph, texts: list[str]) -> None:
+    """One document per text, each a single chunk."""
+    graph.text_nodes, graph.text_edges = [], []
+    for n, text in enumerate(texts):
+        graph.text_nodes += [
+            (f"d{n:03d}", {"type": "TextDocument", "name": f"{n}.txt"}),
+            (f"c{n:03d}", {"type": "DocumentChunk", "chunk_index": 0, "text": text}),
+        ]
+        graph.text_edges.append((f"c{n:03d}", f"d{n:03d}", "is_part_of", {}))
+
+
+@pytest.mark.asyncio
+async def test_a_corpus_larger_than_a_batch_is_fetched_in_batches_and_counted_the_same(
+    monkeypatch,
+):
+    """Batches hold whole documents up to the budget; every document is fetched once per
+    pass, and the count is the one a single batch gives."""
+    graph = _FakeGraph()
+    _documents(graph, [f"Moscow {n}. " * (n % 3 + 1) for n in range(40)])
+    fetched = []
+    neighborhood = graph.get_neighborhood
+
+    async def spy(node_ids, depth=1, edge_types=None):
+        fetched.append(len(node_ids))
+        return await neighborhood(node_ids, depth, edge_types)
+
+    graph.get_neighborhood = spy
+
+    async def sizes(self, documents):
+        return {document: 30 for document in documents}
+
+    monkeypatch.setattr(BroadRetriever, "document_sizes", sizes)
+    plan = _plan(literal_terms=["Moscow"])
+
+    small = await BroadRetriever(batch_mb=0.0001).open_corpus(graph)  # 100 characters
+    batched = await BroadRetriever(batch_mb=0.0001).count_words(plan, small)
+    whole = await BroadRetriever().count_words(plan, await BroadRetriever().open_corpus(graph))
+
+    assert batched.total == whole.total == 79 and batched.units == 40
+    assert len(fetched) > 2 and max(fetched[:-1]) <= 4  # batches, then one fetch of all
+    assert sum(fetched[:-1]) == 40
+
+
+@pytest.mark.asyncio
+async def test_a_document_larger_than_a_batch_raises_and_names_the_setting(monkeypatch):
+    graph = _FakeGraph()
+    _documents(graph, ["short", "x" * 500])
+
+    async def sizes(self, documents):
+        return {document: 400 for document in documents}
+
+    monkeypatch.setattr(BroadRetriever, "document_sizes", sizes)
+    corpus = await BroadRetriever(batch_mb=0.0003).open_corpus(graph)  # 300 characters
+
+    with pytest.raises(broad_retriever.BroadLimitError, match="batch_mb"):
+        await BroadRetriever(batch_mb=0.0003).count_words(_plan(literal_terms=["x"]), corpus)
+
+
+@pytest.mark.asyncio
+async def test_reading_more_than_the_token_limit_raises_before_any_call(monkeypatch):
+    calls = []
+    _stub_llm(monkeypatch, lambda model, _: calls.append(model) or ShardItems(items=[]))
+
+    with pytest.raises(broad_retriever.BroadLimitError, match="max_reading_tokens"):
+        await BroadRetriever(max_reading_tokens=10).count_by_reading(
+            _plan(), Corpus.of(_units(3, words=40))
+        )
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_only_the_planned_types_entities_are_loaded(monkeypatch):
+    """The planner sees type names; an entity count loads that type's entities alone."""
+    fetched = []
+    graph = _FakeGraph()
+    neighborhood = graph.get_neighborhood
+
+    async def spy(node_ids, depth=1, edge_types=None):
+        fetched.append(sorted(node_ids))
+        return await neighborhood(node_ids, depth, edge_types)
+
+    graph.get_neighborhood = spy
+    prompts = []
+
+    def respond(model, text_input):
+        prompts.append(text_input)
+        return CountPlan(source="entities", entity_types=["place"], item="a place")
+
+    _stub_llm(monkeypatch, respond)
+    _use_graph(monkeypatch, graph)
+
+    result = await BroadRetriever().get_retrieved_objects("How many places?")
+
+    assert (result.method, result.total) == ("graph", 1)
+    assert ["t-place"] in fetched and ["t-person"] not in fetched
+    assert "- person\n- place" in prompts[0]
 
 
 @pytest.mark.asyncio
@@ -1705,7 +1876,9 @@ async def test_distinct_names_are_counted_as_groups_and_keys_are_never_merged(mo
         dedup_key="incident id",
     )
 
-    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(plan, _units(3, words=2))
+    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(
+        plan, Corpus.of(_units(3, words=2))
+    )
     context = await BroadRetriever().get_context_from_objects("q", result)
 
     assert result.items_listed == 3  # three different incident ids survive the dedup
@@ -1740,90 +1913,14 @@ async def test_target_match_sees_passages_where_the_name_is_written(monkeypatch)
 
     _stub_llm(monkeypatch, respond)
     retriever = BroadRetriever()
-    matched = await retriever.match_target("Priya Natarajan", ["U03CCC", "U06FFF"], [], {}, units)
+    matched = await retriever.match_target(
+        "Priya Natarajan",
+        ["U03CCC", "U06FFF"],
+        [],
+        {},
+        _passages_naming("Priya Natarajan", units),
+    )
 
     assert matched == ["U03CCC"]
     assert "Passages where the question's name is written:" in prompts[0]
     assert '"real_name": "Priya Natarajan"' in prompts[0]
-
-
-def test_vote_keeps_what_a_majority_of_readings_listed():
-    """Three readings of one shard: an entry two of them list stays, a stray one goes,
-    keys spelled differently for the same item still agree, and unkeyed entries take
-    the median reading per unit."""
-    from cognee.modules.retrieval.broad_retriever import _vote
-
-    def keyed(unit, key, group="Rojas"):
-        return ExtractedItem(unit=unit, key=key, group=group, evidence=key)
-
-    readings = [
-        ShardItems(
-            items=[
-                keyed(0, "Matchday 5, Rojas 12'"),
-                keyed(0, "Matchday 5, Rojas 70'"),
-                keyed(1, "Matchday 9, Demir 3'"),
-            ],
-            aliases=[["Rojas", "the Lighthouse"]],
-        ),
-        ShardItems(
-            items=[keyed(0, "Matchday 5: Rojas, 12th minute"), keyed(0, "Matchday 5, Rojas 70'")]
-        ),
-        ShardItems(items=[keyed(0, "Matchday 5, Rojas 12'"), keyed(0, "Matchday 5, Rojas 44'")]),
-    ]
-    voted = _vote(readings)
-    assert sorted(item.key for item in voted.items) == [
-        "Matchday 5, Rojas 12'",
-        "Matchday 5, Rojas 70'",
-    ]
-    assert voted.aliases == [["Rojas", "the Lighthouse"]]
-
-    # A kept entry carries the group spelling most of its readings used.
-    readings = [
-        ShardItems(items=[keyed(0, "Matchday 2, 55'", group="the Wall")]),
-        ShardItems(items=[keyed(0, "Matchday 2, 55'", group="Leon Fischer")]),
-        ShardItems(items=[keyed(0, "Matchday 2, 55'", group="Leon Fischer")]),
-    ]
-    assert [item.group for item in _vote(readings).items] == ["Leon Fischer"]
-
-    def unkeyed(unit, quote):
-        return ExtractedItem(unit=unit, evidence=quote)
-
-    readings = [
-        ShardItems(items=[unkeyed(0, "a"), unkeyed(0, "b"), unkeyed(0, "c")]),
-        ShardItems(items=[unkeyed(0, "a")]),
-        ShardItems(items=[unkeyed(0, "a"), unkeyed(0, "b")]),
-    ]
-    assert len(_vote(readings).items) == 2
-    assert _vote(readings[:1]) is readings[0]
-
-
-def test_same_identity_needs_the_same_digits():
-    from cognee.modules.retrieval.broad_retriever import _same_identity
-
-    assert _same_identity("Matchday 5, Rojas 12'", "Matchday 5: Rojas, 12th minute")
-    assert not _same_identity("Matchday 5, Rojas 12'", "Matchday 5, Rojas 70'")
-    assert not _same_identity("PR 42", "issue 43")
-    assert _same_identity("PR 42", "pr-42")
-    assert _same_identity("Matchday 12, Kessler", "Matchday 12, Kessler 78'")  # a part left out
-
-
-@pytest.mark.asyncio
-async def test_three_readings_make_three_calls_per_shard_and_the_context_says_so(monkeypatch):
-    calls = []
-
-    def respond(model, text_input):
-        calls.append(model)
-        return (
-            ShardItems(items=[_item("Ann", "1")]) if model is ShardItems else NameGroups(groups=[])
-        )
-
-    _stub_llm(monkeypatch, respond)
-    retriever = BroadRetriever(shard_tokens=10_000, reading_passes=3)
-    result = await retriever.count_by_reading(
-        _plan(group_by="assignee", dedup_key="the id"), _units(2, words=2)
-    )
-
-    assert calls.count(ShardItems) == 3 and result.total == 1 and result.llm_calls == 3
-    assert "read 3 times" in await retriever.get_context_from_objects("q", result)
-    with pytest.raises(ValueError):
-        BroadRetriever(reading_passes=0)

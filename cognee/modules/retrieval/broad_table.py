@@ -15,7 +15,8 @@ import json
 import re
 import time
 from collections import Counter
-from dataclasses import dataclass
+from collections.abc import Iterable
+from dataclasses import dataclass, field
 from typing import Literal
 
 import regex
@@ -81,7 +82,9 @@ class TableAnswer:
     total: float
     rows: int
     groups: list[tuple[str, float]]
+    # The matched rows, up to the limit kept; matched_count is how many matched.
     matched: list[list[str]]
+    matched_count: int
     target_values: list[str]
 
 
@@ -224,34 +227,27 @@ def _text(value: object) -> str:
     return str(value)
 
 
+# The start of a document that picks its separator; only that separator parses it whole.
+TABLE_SAMPLE_CHARS = 65_536
+
+
 def _delimited_table(text: str) -> Table | None:
     """Delimited records (CSV, TSV, pipe- or semicolon-separated) as rows."""
-    best: tuple[float, list[list[str]]] | None = None
+    sample = text[:TABLE_SAMPLE_CHARS]
+    if len(text) > TABLE_SAMPLE_CHARS:
+        sample = sample[: sample.rfind("\n") + 1]  # whole records only
+    best: tuple[float, str] | None = None
     for separator in TABLE_SEPARATORS:
         if text.count(separator) < TABLE_MIN_ROWS * 2:
             continue
-        records = [
-            [cell.strip() for cell in record]
-            for record in csv.reader(io.StringIO(text), delimiter=separator)
-            if any(cell.strip() for cell in record)
-        ]
-        if len(records) < TABLE_MIN_ROWS:
-            continue
-        width, _ = Counter(len(record) for record in records).most_common(1)[0]
-        if width < 3:
-            continue
-        agreement = sum(1 for record in records if len(record) >= width) / len(records)
-        if agreement >= TABLE_MIN_AGREEMENT and (best is None or agreement > best[0]):
-            fitted = [
-                record[: width - 1] + [separator.join(record[width - 1 :])]
-                if len(record) > width
-                else record + [""] * (width - len(record))
-                for record in records
-            ]
-            best = (agreement, fitted)
-    if best is None:
+        # A sample may hold only a few long records; the whole text is held to the minimum.
+        fit = _records_fit(sample, separator, min_rows=2)
+        if fit is not None and (best is None or fit[0] > best[0]):
+            best = (fit[0], separator)
+    fit = _records_fit(text, best[1]) if best is not None else None
+    if fit is None:
         return None
-    records = best[1]
+    records = fit[1]
     # A table has at least two columns whose values vary; templated sentences that happen
     # to share their comma count vary in one place at most.
     varying = sum(1 for i in range(len(records[0])) if len({r[i] for r in records[1:]}) > 1)
@@ -260,6 +256,31 @@ def _delimited_table(text: str) -> Table | None:
     if _is_header(records):
         return Table(columns=records[0], rows=records[1:])
     return Table(columns=[f"column {i + 1}" for i in range(len(records[0]))], rows=records)
+
+
+def _records_fit(
+    text: str, separator: str, min_rows: int = TABLE_MIN_ROWS
+) -> tuple[float, list[list[str]]] | None:
+    """The text split into records of one width, and the share of records that have it;
+    None when too few records agree. A record with more fields than the rest keeps its
+    extra separators in its last field (free text)."""
+    records = [
+        [cell.strip() for cell in record]
+        for record in csv.reader(io.StringIO(text), delimiter=separator)
+        if any(cell.strip() for cell in record)
+    ]
+    if len(records) < min_rows:
+        return None
+    width, _ = Counter(len(record) for record in records).most_common(1)[0]
+    agreement = sum(1 for record in records if len(record) >= width) / len(records)
+    if width < 3 or agreement < TABLE_MIN_AGREEMENT:
+        return None
+    for n, record in enumerate(records):  # in place: a large table is not held twice
+        if len(record) > width:
+            records[n] = record[: width - 1] + [separator.join(record[width - 1 :])]
+        elif len(record) < width:
+            record += [""] * (width - len(record))
+    return agreement, records
 
 
 def _is_header(records: list[list[str]]) -> bool:
@@ -285,24 +306,57 @@ def _values(cell: str) -> list[str]:
     return cell.split(MULTI) if MULTI in cell else [cell]
 
 
-def describe(table: Table) -> str:
+# Different values tracked per column for the query prompt; a column with more (an id, a
+# free-text field) is reported as having more, with its commonest values among those seen.
+TABLE_TRACKED_VALUES = 10_000
+
+
+@dataclass
+class TableSummary:
+    """What the query call is shown about a table, built batch by batch so the rows
+    themselves need not be held: each column's values with their counts, and the first
+    rows."""
+
+    columns: list[str]
+    rows: int = 0
+    values: list[Counter] = field(default_factory=list)
+    capped: list[bool] = field(default_factory=list)
+    first_rows: list[list[str]] = field(default_factory=list)
+
+    def add(self, rows: list[list[str]]) -> None:
+        if not self.values:
+            self.values = [Counter() for _ in self.columns]
+            self.capped = [False for _ in self.columns]
+        self.first_rows += rows[: TABLE_SAMPLE_ROWS - len(self.first_rows)]
+        self.rows += len(rows)
+        for i, counter in enumerate(self.values):
+            for row in rows:
+                for value in _values(row[i]):
+                    if value in counter or len(counter) < TABLE_TRACKED_VALUES:
+                        counter[value] += 1
+                    else:
+                        self.capped[i] = True
+
+
+def describe(summary: TableSummary) -> str:
     """Columns with their commonest values and a few whole rows, for the query call."""
-    lines = [f"{len(table.rows)} rows. Columns:"]
-    for i, name in enumerate(table.columns):
-        values = Counter(value for row in table.rows for value in _values(row[i]))
+    lines = [f"{summary.rows} rows. Columns:"]
+    for i, name in enumerate(summary.columns):
+        values = summary.values[i] if summary.values else Counter()
         shown = len(values) if len(values) <= TABLE_ALL_VALUES else TABLE_TOP_VALUES
         common = ", ".join(
             f"{value[:TABLE_VALUE_CHARS]!r} ({count})" for value, count in values.most_common(shown)
         )
         label = "values" if shown == len(values) else "most common"
-        lines.append(f"- {name!r}: {len(values)} different values; {label}: {common}")
+        different = f"more than {len(values)}" if summary.capped[i] else str(len(values))
+        lines.append(f"- {name!r}: {different} different values; {label}: {common}")
     lines.append("First rows:")
-    for row in table.rows[:TABLE_SAMPLE_ROWS]:
+    for row in summary.first_rows:
         lines.append(
             "  "
             + " | ".join(
                 f"{c}={v.replace(MULTI, ', ')[:TABLE_VALUE_CHARS]!r}"
-                for c, v in zip(table.columns, row)
+                for c, v in zip(summary.columns, row)
             )
         )
     return "\n".join(lines)
@@ -341,75 +395,148 @@ def _keeps(row: list[str], column: int, rule: TableFilter) -> bool:
     return number > limit if rule.op == "greater_than" else number < limit
 
 
-def run_query(table: Table, query: TableQuery) -> TableAnswer:
-    """Evaluate the query over every row. Raises KeyError for a column the table lacks."""
-    if query.group_by and query.aggregate == "count_distinct" and query.column == query.group_by:
-        # Different values of the column being grouped by are one per group: the question
-        # ("which IP made the most requests") counts rows per value.
-        query = query.model_copy(update={"aggregate": "count_rows", "column": None})
-    index = {name: i for i, name in enumerate(table.columns)}
+class _Measure:
+    """One running aggregate: rows counted, values counted distinct, summed or averaged."""
 
-    def column(name: str | None) -> int:
-        if name not in index:
-            raise KeyError(f"BROAD table query names a column the table lacks: {name!r}")
-        return index[name]
+    def __init__(self, aggregate: str, at: int | None):
+        self.aggregate, self.at = aggregate, at
+        self.rows, self.total, self.amounts = 0, 0.0, 0
+        self.distinct: set[str] = set()
 
-    rows = table.rows
-    for rule in query.filters:
-        at = column(rule.column)
-        rows = [row for row in rows if _keeps(row, at, rule)]
+    def add(self, row: list[str]) -> None:
+        self.rows += 1
+        if self.at is None:
+            return
+        if self.aggregate == "count_distinct":
+            self.distinct.update(_fold(v) for v in _values(row[self.at]) if v)
+        else:
+            number = _number(_values(row[self.at])[0])
+            if number is not None:
+                self.total += number
+                self.amounts += 1
 
-    target_values: list[str] = []
-    if query.target:
-        at = column(query.group_by)
-        wanted = _fold(query.target)
-        present = {v for row in rows for v in _values(row[at])}
-        target_values = sorted(v for v in present if _fold(v) == wanted)
-        if not target_values:  # a partial name: "Roman" for "Roman Shkarin"
-            pattern = re.compile(rf"(?<!\w){re.escape(wanted)}(?!\w)")
-            target_values = sorted(v for v in present if pattern.search(_fold(v)))
-        rows = [row for row in rows if set(_values(row[at])) & set(target_values)]
+    def value(self) -> float:
+        if self.aggregate == "count_rows":
+            return self.rows
+        if self.aggregate == "count_distinct":
+            return len(self.distinct)
+        if self.aggregate == "sum":
+            return self.total
+        return self.total / self.amounts if self.amounts else 0
 
-    def measure(selected: list[list[str]]) -> float:
-        if query.aggregate == "count_rows":
-            return len(selected)
-        at = column(query.column)
-        if query.aggregate == "count_distinct":
-            return len({_fold(v) for row in selected for v in _values(row[at]) if v})
-        amounts = [n for n in (_number(_values(row[at])[0]) for row in selected) if n is not None]
-        if query.aggregate == "sum":
-            return sum(amounts)
-        return sum(amounts) / len(amounts) if amounts else 0
 
-    groups: list[tuple[str, float]] = []
-    if query.group_by and not query.target:
-        at = column(query.group_by)
-        members: dict[str, list[list[str]]] = {}
-        spellings: dict[str, Counter] = {}
+class _Selection:
+    """The rows a query keeps and their aggregate; the rows themselves up to a limit."""
+
+    def __init__(self, aggregate: str, at: int | None, keep_rows: int):
+        self.measure = _Measure(aggregate, at)
+        self.matched: list[list[str]] = []
+        self.values: set[str] = set()
+        self.keep_rows = keep_rows
+
+    def add(self, row: list[str]) -> None:
+        self.measure.add(row)
+        if len(self.matched) < self.keep_rows:
+            self.matched.append(row)
+
+
+class QueryRun:
+    """A table query evaluated over rows added batch by batch; the answer is the same as
+    over all the rows at once. Raises KeyError for a column the table lacks."""
+
+    def __init__(self, columns: list[str], query: TableQuery, keep_rows: int):
+        if (
+            query.group_by
+            and query.aggregate == "count_distinct"
+            and query.column == query.group_by
+        ):
+            # Different values of the column being grouped by are one per group: the
+            # question ("which IP made the most requests") counts rows per value.
+            query = query.model_copy(update={"aggregate": "count_rows", "column": None})
+        index = {name: i for i, name in enumerate(columns)}
+
+        def column(name: str | None) -> int:
+            if name not in index:
+                raise KeyError(f"BROAD table query names a column the table lacks: {name!r}")
+            return index[name]
+
+        self.query = query
+        self.filters = [(column(rule.column), rule) for rule in query.filters]
+        measured = column(query.column) if query.aggregate != "count_rows" else None
+        self.grouped = column(query.group_by) if query.group_by or query.target else None
+        self.table_rows = 0
+        self.keep_rows = keep_rows
+        # A target is matched to the values written: exactly when some value is it,
+        # otherwise by whole words ("Roman" for "Roman Shkarin"). Both are kept while
+        # rows stream in; the exact one answers when it matched anything.
+        self.wanted = _fold(query.target) if query.target else None
+        if self.wanted is not None:
+            self.target_at = column(query.group_by)
+            self.word = re.compile(rf"(?<!\w){re.escape(self.wanted)}(?!\w)")
+            self.exact = _Selection(query.aggregate, measured, keep_rows)
+            self.partial = _Selection(query.aggregate, measured, keep_rows)
+        self.all = _Selection(query.aggregate, measured, keep_rows)
+        self.groups: dict[str, _Measure] = {}
+        self.spellings: dict[str, Counter] = {}
+        self.measured = measured
+
+    def add(self, rows: list[list[str]]) -> None:
+        self.table_rows += len(rows)
         for row in rows:
-            for value in _values(row[at]):
-                key = _fold(value)
-                if key:
-                    members.setdefault(key, []).append(row)
-                    spellings.setdefault(key, Counter())[value] += 1
+            if not all(_keeps(row, at, rule) for at, rule in self.filters):
+                continue
+            if self.wanted is not None:
+                values = _values(row[self.target_at])
+                exact = [v for v in values if _fold(v) == self.wanted]
+                word = [v for v in values if self.word.search(_fold(v))]
+                if exact:
+                    self.exact.add(row)
+                    self.exact.values.update(exact)
+                if word:
+                    self.partial.add(row)
+                    self.partial.values.update(word)
+                continue
+            self.all.add(row)
+            if self.grouped is not None:
+                for value in _values(row[self.grouped]):
+                    key = _fold(value)
+                    if key:
+                        self.groups.setdefault(
+                            key, _Measure(self.query.aggregate, self.measured)
+                        ).add(row)
+                        self.spellings.setdefault(key, Counter())[value] += 1
+
+    def answer(self) -> "TableAnswer":
+        selection = self.all
+        if self.wanted is not None:
+            selection = self.exact if self.exact.values else self.partial
         groups = sorted(
-            ((spellings[key].most_common(1)[0][0], measure(m)) for key, m in members.items()),
+            (
+                (self.spellings[key].most_common(1)[0][0], measure.value())
+                for key, measure in self.groups.items()
+            ),
             key=lambda pair: -pair[1],
         )
-    return TableAnswer(
-        total=measure(rows),
-        rows=len(table.rows),
-        groups=groups,
-        matched=rows,
-        target_values=target_values,
-    )
+        return TableAnswer(
+            total=selection.measure.value(),
+            rows=self.table_rows,
+            groups=groups,
+            matched=selection.matched,
+            matched_count=selection.measure.rows,
+            target_values=sorted(selection.values),
+        )
 
 
-def render_row(table: Table, row: list[str]) -> str:
+def run_query(table: Table, query: TableQuery, keep_rows: int = 10_000) -> "TableAnswer":
+    """Evaluate the query over every row of a table held whole."""
+    run = QueryRun(table.columns, query, keep_rows)
+    run.add(table.rows)
+    return run.answer()
+
+
+def render_row(columns: list[str], row: list[str]) -> str:
     return "; ".join(
-        f"{c}: {v.replace(MULTI, ', ')[:TABLE_VALUE_CHARS]}"
-        for c, v in zip(table.columns, row)
-        if v
+        f"{c}: {v.replace(MULTI, ', ')[:TABLE_VALUE_CHARS]}" for c, v in zip(columns, row) if v
     )
 
 
@@ -506,21 +633,77 @@ def shape_of(text: str) -> Line:
     return Line(shape=shape, slots=slots, text=text)
 
 
-def shaped_lines(text: str) -> tuple[list[Line], list[str]] | None:
-    """Every non-empty line with its shape, and the shapes to show (commonest first);
-    None when the lines are not records."""
-    lines = [shape_of(line) for line in text.splitlines() if line.strip()]
-    if len(lines) < TABLE_MIN_ROWS:
-        return None
-    counts = Counter(line.shape for line in lines)
-    shapes = [shape for shape, _ in counts.most_common(SHAPE_MAX_SHOWN)]
-    whole = len(lines) >= SHAPE_MIN_COMPRESSION * len(counts) and sum(
-        counts[shape] for shape in shapes
-    ) >= SHAPE_MIN_COVERAGE * len(lines)
-    prefixes = {" ".join(line.shape.split()[:2]) for line in lines}
-    if whole or len(lines) >= SHAPE_MIN_PREFIX_COMPRESSION * len(prefixes):
-        return lines, shapes
-    return None
+@dataclass
+class ShapedLines:
+    """Record lines summarized for the query call: each shape's count and first line."""
+
+    counts: Counter
+    examples: dict[str, str]
+    lines: int
+
+    @property
+    def shown(self) -> list[str]:
+        """The shapes shown to the model, commonest first."""
+        return [shape for shape, _ in self.counts.most_common(SHAPE_MAX_SHOWN)]
+
+
+# Lines that decide whether the rest is shaped at all: prose fails on its first lines, so
+# a book is not masked line by line to be turned down.
+SHAPE_SAMPLE_LINES = 2_000
+
+
+class ShapeStats:
+    """Line shapes counted as lines stream in, batch by batch; nothing of a line is kept
+    but its shape's count (and the first line of each shape)."""
+
+    def __init__(self) -> None:
+        self.counts: Counter = Counter()
+        self.examples: dict[str, str] = {}
+        self.prefixes: set[str] = set()
+        self.lines = 0
+        self.dropped = False
+
+    def add(self, lines: Iterable[str]) -> None:
+        if self.dropped:
+            return
+        for text in lines:
+            shape = shape_of(text).shape
+            self.counts[shape] += 1
+            self.examples.setdefault(shape, text)
+            self.prefixes.add(" ".join(shape.split()[:2]))
+            self.lines += 1
+            # A sample is judged twice as loosely: repeats grow with the number of lines.
+            if self.lines == SHAPE_SAMPLE_LINES and not self._records(leniency=2):
+                self.dropped = True
+                self.counts, self.examples, self.prefixes = Counter(), {}, set()
+                return
+
+    def _records(self, leniency: int) -> bool:
+        shaped = ShapedLines(self.counts, self.examples, self.lines)
+        covered = sum(self.counts[shape] for shape in shaped.shown)
+        whole = (
+            self.lines * leniency >= SHAPE_MIN_COMPRESSION * len(self.counts)
+            and covered >= SHAPE_MIN_COVERAGE * self.lines
+        )
+        return whole or self.lines * leniency >= SHAPE_MIN_PREFIX_COMPRESSION * len(self.prefixes)
+
+    def result(self) -> ShapedLines | None:
+        """The lines as records, or None when they are not records."""
+        if self.dropped or self.lines < TABLE_MIN_ROWS or not self._records(leniency=1):
+            return None
+        return ShapedLines(self.counts, self.examples, self.lines)
+
+
+def record_lines(text: str) -> list[str]:
+    return [line for line in text.splitlines() if line.strip()]
+
+
+def shaped_lines(texts: list[str]) -> ShapedLines | None:
+    """The documents' lines as records, or None when they are not records."""
+    stats = ShapeStats()
+    for text in texts:
+        stats.add(record_lines(text))
+    return stats.result()
 
 
 class LineQuery(BaseModel):
@@ -542,23 +725,17 @@ class LineQuery(BaseModel):
     list_rows: bool = False
 
 
-def describe_shapes(shapes: list[str], lines: list[Line]) -> str:
-    """Each shape with its line count, one real line, and its slots numbered, for the
-    pointing call."""
-    example: dict[str, Line] = {}
-    counts: Counter = Counter()
-    for line in lines:
-        example.setdefault(line.shape, line)
-        counts[line.shape] += 1
+def describe_shapes(shaped: ShapedLines) -> str:
+    """Each shown shape with its line count, one real line, and its slots numbered."""
     rows = []
-    for index, shape in enumerate(shapes):
-        line = example[shape]
+    for index, shape in enumerate(shaped.shown):
+        line = shape_of(shaped.examples[shape])
         slots = ", ".join(
             f"{n}: {_SYMBOL[kind]} {value[:TABLE_VALUE_CHARS]!r}"
             for n, (kind, value) in enumerate(line.slots)
         )
         rows.append(
-            f"{index}. ({counts[shape]} lines) {shape[:220]}\n"
+            f"{index}. ({shaped.counts[shape]} lines) {shape[:220]}\n"
             f"   e.g. {line.text[:220]}\n   slots: [{slots}]"
         )
     return "\n".join(rows)
@@ -566,39 +743,56 @@ def describe_shapes(shapes: list[str], lines: list[Line]) -> str:
 
 # Model-written expressions run over every line of a corpus, so a pattern that backtracks
 # badly (nested repetition) could stall the search. They run under the regex module with
-# a limit per line and a budget for the whole scan.
+# a limit per line, and a budget for the scan that grows with the lines scanned.
 LINE_MATCH_TIMEOUT_SECONDS = 0.05
 LINE_SCAN_BUDGET_SECONDS = 30.0
+LINE_SCAN_SECONDS_PER_LINE = 0.0003
 
 
 class LineQueryError(ValueError):
     """An expression that does not compile, lacks its capture group, or runs too long."""
 
 
-def matched_table(lines: list[Line], query: LineQuery) -> Table:
-    """Every line the query's expressions select, as a table of (captured values, line).
+class LineMatcher:
+    """A line query's expressions, compiled once and run over lines batch by batch.
     Raises LineQueryError for an expression that is invalid or runs too long."""
-    try:
-        keep = regex.compile(query.line_regex)
-        drop = regex.compile(query.exclude_regex) if query.exclude_regex else None
-        grab = regex.compile(query.value_regex) if query.value_regex else None
-    except regex.error as error:
-        raise LineQueryError(f"an expression does not compile ({error})") from error
-    if grab is not None and grab.groups != 1:
-        raise LineQueryError("value_regex must have exactly one capture group")
-    deadline = time.monotonic() + LINE_SCAN_BUDGET_SECONDS
-    limit = LINE_MATCH_TIMEOUT_SECONDS
-    rows = []
-    try:
-        for line in lines:
-            if time.monotonic() > deadline:
-                raise LineQueryError("the expressions took too long over the corpus")
-            if not keep.search(line.text, timeout=limit):
-                continue
-            if drop is not None and drop.search(line.text, timeout=limit):
-                continue
-            values = grab.findall(line.text, timeout=limit) if grab is not None else []
-            rows.append([MULTI.join(v for v in values if v), line.text])
-    except TimeoutError as error:
-        raise LineQueryError("an expression backtracks too long on a line") from error
-    return Table(columns=["value", "line"], rows=rows)
+
+    def __init__(self, query: LineQuery):
+        try:
+            self.keep = regex.compile(query.line_regex)
+            self.drop = regex.compile(query.exclude_regex) if query.exclude_regex else None
+            self.grab = regex.compile(query.value_regex) if query.value_regex else None
+        except regex.error as error:
+            raise LineQueryError(f"an expression does not compile ({error})") from error
+        if self.grab is not None and self.grab.groups != 1:
+            raise LineQueryError("value_regex must have exactly one capture group")
+        self.started = time.monotonic()
+        self.scanned = 0
+
+    def rows(self, lines: list[str]) -> list[list[str]]:
+        """The selected lines as rows of (captured values, line)."""
+        limit = LINE_MATCH_TIMEOUT_SECONDS
+        rows = []
+        try:
+            for line in lines:
+                self.scanned += 1
+                budget = LINE_SCAN_BUDGET_SECONDS + LINE_SCAN_SECONDS_PER_LINE * self.scanned
+                if time.monotonic() - self.started > budget:
+                    raise LineQueryError("the expressions took too long over the corpus")
+                if not self.keep.search(line, timeout=limit):
+                    continue
+                if self.drop is not None and self.drop.search(line, timeout=limit):
+                    continue
+                values = self.grab.findall(line, timeout=limit) if self.grab is not None else []
+                rows.append([MULTI.join(v for v in values if v), line])
+        except TimeoutError as error:
+            raise LineQueryError("an expression backtracks too long on a line") from error
+        return rows
+
+
+LINE_COLUMNS = ["value", "line"]
+
+
+def matched_table(lines: list[str], query: LineQuery) -> Table:
+    """Every line the query's expressions select, as a table of (captured values, line)."""
+    return Table(columns=LINE_COLUMNS, rows=LineMatcher(query).rows(lines))
