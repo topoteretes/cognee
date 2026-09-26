@@ -90,6 +90,12 @@ async def update(
               Users can only access datasets they have permissions for.
         node_set: Optional list of node identifiers for graph organization and access control.
                  Used for grouping related data points in the knowledge graph.
+                 update() is a PATCH for document metadata: node_set, and the label and
+                 external_metadata of a DataItem, keep their stored values when not
+                 passed; an explicit empty value (node_set=[], label="",
+                 external_metadata={}) clears them; a value replaces them. Passing any
+                 of them runs the full rebuild, since the chunk-level path does not
+                 touch document metadata.
         vector_db_config: Optional configuration for vector database (for custom setups).
                  Chunk-level incremental updates do not support per-call config
                  forwarding: when provided, the update runs full ingestion
@@ -364,7 +370,8 @@ def _full_rebuild_reason(
     data_item_changes_metadata = isinstance(data, DataItem) and (
         data.label is not None or data.external_metadata is not None
     )
-    if node_set or data_item_changes_metadata:
+    # node_set=[] is a request to clear the stored node set, so it counts as a change.
+    if node_set is not None or data_item_changes_metadata:
         return (
             RefusalReason.UNSUPPORTED_METADATA,
             "chunk-level update does not reconcile node_set or document metadata",
