@@ -783,6 +783,29 @@ class BroadRetriever(CompletionRetriever):
                     stats.add(record_lines(text))
         return None, others, stats
 
+    async def _ask(self, text_input: str, prompt: str, response_model: type[Any]) -> Any:
+        """One structured LLM call. A call that hangs holds the whole search (one stalled
+        for 84 and then 168 minutes): past ``call_timeout`` it is retried once, then the
+        search fails."""
+        for attempt in (1, 2):
+            try:
+                return await asyncio.wait_for(
+                    LLMGateway.acreate_structured_output(
+                        text_input=text_input,
+                        system_prompt=_read_prompt(prompt),
+                        response_model=response_model,
+                    ),
+                    self.call_timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "BROAD %s call timed out after %.0fs (attempt %d)",
+                    prompt,
+                    self.call_timeout,
+                    attempt,
+                )
+        raise TimeoutError(f"BROAD: a {prompt} call timed out twice")
+
     # --- sources --------------------------------------------------------------
 
     async def load_entity_types(self, graph_engine) -> dict[str, str]:
@@ -856,33 +879,33 @@ class BroadRetriever(CompletionRetriever):
             text_input += (
                 f"\n\nExcerpts of the corpus (for how it writes things; not all of it):\n{sample}"
             )
-        plan = await LLMGateway.acreate_structured_output(
-            text_input=text_input,
-            system_prompt=_read_prompt("broad_plan.txt"),
-            response_model=CountPlan,
+        plan = await self._ask(
+            text_input,
+            "broad_plan.txt",
+            CountPlan,
         )
         if plan.target and not plan.group_by:
             # A target is a value of some attribute; one retry names the omission.
-            plan = await LLMGateway.acreate_structured_output(
-                text_input=(
+            plan = await self._ask(
+                (
                     f"{text_input}\n\nYour previous plan named the target {plan.target!r} "
                     "without group_by. Set group_by to the attribute that value belongs to "
                     "(a reagent, a cell line, a country, an assignee) and return the full plan."
                 ),
-                system_prompt=_read_prompt("broad_plan.txt"),
-                response_model=CountPlan,
+                "broad_plan.txt",
+                CountPlan,
             )
         if plan.dedup_key and re.search(r"\bor\b", plan.dedup_key):
             # "The title or number" matches nothing when one mention gives the title and
             # another the number: one retry asks for a single identifier.
-            plan = await LLMGateway.acreate_structured_output(
-                text_input=(
+            plan = await self._ask(
+                (
                     f"{text_input}\n\nYour previous dedup_key {plan.dedup_key!r} names "
                     "alternatives. Name ONE identifier that the excerpts show every item has "
                     "(its number or code when it has one), and return the full plan."
                 ),
-                system_prompt=_read_prompt("broad_plan.txt"),
-                response_model=CountPlan,
+                "broad_plan.txt",
+                CountPlan,
             )
         if plan.target and not plan.group_by:
             raise ValueError(
@@ -960,10 +983,10 @@ class BroadRetriever(CompletionRetriever):
         line shape and writes expressions that select the lines and capture the value; code
         runs them over every line, batch by batch. None when the lines cannot answer."""
         text_input = f"Question: {query}\n\nLine shapes:\n{describe_shapes(shaped)}"
-        line_query = await LLMGateway.acreate_structured_output(
-            text_input=text_input,
-            system_prompt=_read_prompt("broad_line_query.txt"),
-            response_model=LineQuery,
+        line_query = await self._ask(
+            text_input,
+            "broad_line_query.txt",
+            LineQuery,
         )
         problem = _line_query_problem(line_query)
         run = None
@@ -978,13 +1001,13 @@ class BroadRetriever(CompletionRetriever):
             # One retry, shown what went wrong and five real lines spread over the corpus.
             step = max(shaped.lines // 5, 1)
             samples = await self._sample_lines(corpus, step)
-            line_query = await LLMGateway.acreate_structured_output(
-                text_input=f"{text_input}\n\nYour previous expressions failed: {problem}. "
+            line_query = await self._ask(
+                f"{text_input}\n\nYour previous expressions failed: {problem}. "
                 "Real lines, exactly as written:\n"
                 + "\n".join(samples[:5])
                 + "\n\nReturn corrected expressions.",
-                system_prompt=_read_prompt("broad_line_query.txt"),
-                response_model=LineQuery,
+                "broad_line_query.txt",
+                LineQuery,
             )
             run = None
             if line_query.answerable and _line_query_problem(line_query) is None:
@@ -1049,10 +1072,10 @@ class BroadRetriever(CompletionRetriever):
         """Answer over parsed rows: one LLM call maps the question onto the columns, code
         evaluates it over every row of the corpus's tables, parsed batch by batch. None
         when the columns cannot answer the question."""
-        table_query = await LLMGateway.acreate_structured_output(
-            text_input=f"Question: {query}\n\nTable:\n{describe(summary)}",
-            system_prompt=_read_prompt("broad_table_query.txt"),
-            response_model=TableQuery,
+        table_query = await self._ask(
+            f"Question: {query}\n\nTable:\n{describe(summary)}",
+            "broad_table_query.txt",
+            TableQuery,
         )
         logger.info("BROAD table query: %s", table_query.model_dump())
         if not table_query.answerable:
@@ -1099,17 +1122,7 @@ class BroadRetriever(CompletionRetriever):
 
         async def read_once(shard: list[Unit]) -> ShardItems:
             async with semaphore:
-                for attempt in (1, 2):
-                    try:
-                        return await asyncio.wait_for(self.extract(plan, shard), self.call_timeout)
-                    except asyncio.TimeoutError:
-                        logger.warning(
-                            "BROAD reading call for %s timed out after %.0fs (attempt %d)",
-                            shard[0].id,
-                            self.call_timeout,
-                            attempt,
-                        )
-                raise TimeoutError(f"BROAD: reading call for {shard[0].id} timed out twice")
+                return await self.extract(plan, shard)
 
         async def read(shard: list[Unit]) -> tuple[str, ShardItems]:
             return shard[0].id, await read_once(shard)
@@ -1410,10 +1423,10 @@ class BroadRetriever(CompletionRetriever):
                 shown.add(unit.preamble)
                 block = f"[document start — context only]\n{unit.preamble}\n\n{block}"
             blocks.append(block)
-        return await LLMGateway.acreate_structured_output(
-            text_input=f"{spec}\n\nSECTION:\n" + "\n\n".join(blocks),
-            system_prompt=_read_prompt("broad_extract.txt"),
-            response_model=ShardItems,
+        return await self._ask(
+            f"{spec}\n\nSECTION:\n" + "\n\n".join(blocks),
+            "broad_extract.txt",
+            ShardItems,
         )
 
     async def merge_name_variants(
@@ -1444,10 +1457,10 @@ class BroadRetriever(CompletionRetriever):
         text_input = "\n".join(sorted(names))
         if stated:
             text_input += "\n\nStated in the text to be the same:\n" + "\n".join(stated)
-        result = await LLMGateway.acreate_structured_output(
-            text_input=text_input,
-            system_prompt=_read_prompt("broad_merge_names.txt"),
-            response_model=NameGroups,
+        result = await self._ask(
+            text_input,
+            "broad_merge_names.txt",
+            NameGroups,
         )
         canonical = {name: name for name in names}
         used = Counter(item.group for item in items if item.group)
@@ -1521,10 +1534,10 @@ class BroadRetriever(CompletionRetriever):
             text_input += "\n\nPassages where the question's name is written:\n" + "\n".join(
                 f"- {passage}" for passage in passages
             )
-        result = await LLMGateway.acreate_structured_output(
-            text_input=text_input,
-            system_prompt=_read_prompt("broad_match_target.txt"),
-            response_model=TargetMatch,
+        result = await self._ask(
+            text_input,
+            "broad_match_target.txt",
+            TargetMatch,
         )
         matched = by_spelling + [name for name in others if name in set(result.names)]
         logger.info(

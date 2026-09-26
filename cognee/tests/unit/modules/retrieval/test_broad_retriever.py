@@ -1924,3 +1924,23 @@ async def test_target_match_sees_passages_where_the_name_is_written(monkeypatch)
     assert matched == ["U03CCC"]
     assert "Passages where the question's name is written:" in prompts[0]
     assert '"real_name": "Priya Natarajan"' in prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_every_broad_llm_call_is_retried_once_when_it_hangs(monkeypatch):
+    """Not only reading calls stall: a hung planner call is retried like any other."""
+    import asyncio as aio
+
+    attempts = []
+
+    async def fake(text_input, system_prompt, response_model, **kwargs):
+        attempts.append(response_model)
+        if len(attempts) == 1:
+            await aio.sleep(10)
+        return CountPlan(source="text", item="a chapter")
+
+    monkeypatch.setattr(broad_retriever.LLMGateway, "acreate_structured_output", fake)
+
+    plan = await BroadRetriever(call_timeout=0.05).plan("How many chapters?", {})
+
+    assert plan.item == "a chapter" and attempts == [CountPlan, CountPlan]
