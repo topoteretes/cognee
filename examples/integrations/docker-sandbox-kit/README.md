@@ -149,4 +149,7 @@ the graph.
 the stored secret accordingly (see the [cognee provider docs](https://docs.cognee.ai/)).
 - For always-on cross-sandbox memory (concurrent agents, no shared workspace),
 run a central cognee API server and point sandboxes at it over the network
-allowlist instead of sharing embedded storage.
+allowlist instead of sharing embedded storage. That is what
+[`brainbox/`](brainbox/README.md) does with the `cognee-memory-remote/` kit:
+a disposable sandbox borrows a scoped, revocable identity on a central brain,
+runs an LLM-free transformation, and pushes the result back.

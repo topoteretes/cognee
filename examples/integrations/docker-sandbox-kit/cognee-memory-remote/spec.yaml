@@ -1,0 +1,82 @@
+# Docker Sandboxes mixin kit: compute on loan from a central cognee brain.
+#
+# Difference from ../cognee-memory: durable memory does NOT live in the
+# sandbox. The sandbox talks to a central cognee API server ("the brain")
+# with a scoped agent identity. No LLM key enters the sandbox — the brain
+# does the LLM work server-side. cognee is still installed locally so the
+# sandbox can run LLM-free transformations (the enola code graph) and
+# `cognee-cli push` the result into the brain as a COGX archive.
+#
+# The brain host and the agent token are NOT declared here on purpose:
+#   - the brain is reached as host.docker.internal:<port>, which the sandbox
+#     proxy evaluates as `localhost:<port>`; the launcher adds a
+#     sandbox-scoped `sbx policy allow network --sandbox <name> localhost:<port>`
+#     so each sandbox is admitted to exactly one port on the host;
+#   - the token is a sandbox-scoped custom secret
+#     (`sbx secret set-custom --sandbox <name> --host localhost ...`); the
+#     sandbox only ever sees the placeholder, the proxy swaps it in the
+#     X-Api-Key header. Substitution happens on the explicit-proxy path, so
+#     HTTP clients must honour HTTP(S)_PROXY (cognee's do).
+#
+# Usage: see ../brainbox/run.sh — it creates a sandbox from this kit, scopes
+# the network rule and the secret, runs a task, and revokes everything.
+schemaVersion: "2"
+kind: mixin
+name: cognee-memory-remote
+version: 0.1.0
+displayName: Cognee Memory (remote brain)
+description: Scoped, revocable access to a central cognee company brain from a disposable sandbox
+sourceURL: https://github.com/topoteretes/cognee
+licenses:
+  - Apache-2.0
+
+environment:
+  variables:
+    # Local scratch state for LLM-free transformations (code graph etc.).
+    # Must be VM-local: embedded LanceDB cannot run on the shared workspace mount.
+    DATA_ROOT_DIRECTORY: /home/agent/.cognee/data
+    SYSTEM_ROOT_DIRECTORY: /home/agent/.cognee/system
+    TELEMETRY_DISABLED: "1"
+    ENABLE_BACKEND_ACCESS_CONTROL: "true"
+    # No LLM/embedding credentials are configured on purpose. Local work is
+    # limited to deterministic routes (code graph) and graph export/push;
+    # anything that needs a model goes to the brain.
+    COGNEE_SKIP_CONNECTION_TEST: "true"
+
+permissions:
+  network:
+    allow:
+      # install-time only (uv tool install cognee)
+      - pypi.org
+      - files.pythonhosted.org
+      # ladybug (embedded graph DB used for local scratch state) fetches
+      # its extensions on first use
+      - extension.ladybugdb.com
+
+setup:
+  install:
+    - command: "mkdir -p /home/agent/.cognee/data /home/agent/.cognee/system"
+      user: "1000"
+      description: Create local scratch directories
+    # Assumes `uv` in the base image (Docker's default sandbox images ship it).
+    - command: "uv tool install cognee"
+      user: "1000"
+      description: Install the cognee CLI (used locally for LLM-free transformations and push)
+
+agentInstructions:
+  content: |
+    ## Company brain (cognee, remote)
+
+    This sandbox has a scoped, revocable identity on the company brain at
+    `$COGNEE_SERVICE_URL`. You can only read the datasets that identity was
+    granted; anything else returns 403. `$COGNEE_API_KEY` is a placeholder —
+    the real key never enters this sandbox.
+
+    - Read the brain:   `cognee-cli --api-url $COGNEE_SERVICE_URL --api-key $COGNEE_API_KEY recall "question"`
+    - Write a result:   `cognee-cli --api-url $COGNEE_SERVICE_URL --api-key $COGNEE_API_KEY remember "text" -d <your output dataset>`
+    - Promote a locally built graph (no LLM):
+                        `cognee-cli push <local dataset> --target-dataset <your output dataset> --url $COGNEE_SERVICE_URL --api-key $COGNEE_API_KEY`
+
+    There is no LLM key in this sandbox. Local `cognee-cli remember` works
+    only for LLM-free routes (code repositories). Use the brain for anything
+    that needs a model. Do not store secrets.
