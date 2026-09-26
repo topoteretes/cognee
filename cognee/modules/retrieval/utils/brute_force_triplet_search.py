@@ -58,6 +58,7 @@ async def get_memory_fragment(
     graph_engine=None,
     neighborhood_depth: int | None = None,
     neighborhood_seed_top_k: int | None = 10,
+    edge_types: list[str] | None = None,
 ) -> CogneeGraph:
     """Creates and initializes a CogneeGraph memory fragment with optional property projections."""
     if properties_to_project is None:
@@ -87,6 +88,7 @@ async def get_memory_fragment(
                 edge_properties_to_project=edge_properties_to_project,
                 seed_node_ids=seed_ids,
                 depth=neighborhood_depth,
+                edge_types=edge_types,
                 triplet_distance_penalty=triplet_distance_penalty,
                 feedback_influence=feedback_influence,
             )
@@ -132,6 +134,7 @@ async def _get_top_triplet_importances(
     neighborhood_depth: int | None = None,
     neighborhood_seed_top_k: int | None = 10,
     personal_weights: dict[str, float] | None = None,
+    edge_types: list[str] | None = None,
 ) -> list[Edge] | list[list[Edge]]:
     """Creates memory fragment (if needed), maps distances, and calculates top triplet importances.
 
@@ -168,6 +171,7 @@ async def _get_top_triplet_importances(
             graph_engine=graph_engine,
             neighborhood_depth=neighborhood_depth,
             neighborhood_seed_top_k=neighborhood_seed_top_k,
+            edge_types=edge_types,
         )
 
         # Score only newly discovered IDs; node_name filters NodeSet membership,
@@ -350,6 +354,7 @@ async def brute_force_triplet_search(
                 neighborhood_depth=neighborhood_depth,
                 neighborhood_seed_top_k=neighborhood_seed_top_k,
                 personal_weights=personal_weights,
+                edge_types=edge_types,
             )
 
             result_count = sum(len(r) for r in results) if query_list_length else len(results)

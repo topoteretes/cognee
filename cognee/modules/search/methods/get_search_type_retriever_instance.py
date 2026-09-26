@@ -36,6 +36,9 @@ from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.search.operations import select_search_type
 from cognee.modules.search.types import SearchType
+from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
+from cognee.modules.retrieval.neighborhood_retriever import NeighborhoodRetriever
+from cognee.context_global_variables import session_user
 
 
 def _hybrid_lane_top_k(config: dict, key: str, search_top_k: int | None) -> int | None:
@@ -205,6 +208,30 @@ async def get_search_type_retriever_instance(
                 "include_references": include_references,
             },
         ),
+
+        SearchType.NEIGHBORHOOD: (
+            NeighborhoodRetriever,
+            {
+                "depth": retriever_specific_config.get("depth", neighborhood_depth or 2),
+                "seed_top_k": retriever_specific_config.get(
+                    "seed_top_k", neighborhood_seed_top_k or 10
+                ),
+                "edge_types": retriever_specific_config.get("edge_types"),
+                "system_prompt_path": system_prompt_path,
+                "top_k": top_k,
+                "node_type": node_type,
+                "node_name": node_name,
+                "node_name_filter_operator": node_name_filter_operator,
+                "system_prompt": system_prompt,
+                "wide_search_top_k": wide_search_top_k,
+                "triplet_distance_penalty": triplet_distance_penalty,
+                "feedback_influence": feedback_influence,
+                "session_id": session_id,
+                "response_model": retriever_specific_config.get("response_model", str),
+                "include_references": include_references,
+            },
+        ),
+
         SearchType.GRAPH_COMPLETION_DECOMPOSITION: (
             GraphCompletionDecompositionRetriever,
             {
