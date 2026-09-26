@@ -220,6 +220,31 @@ async def test_recall_session_context_scope_threads_profile(monkeypatch, api_rec
 
 
 @pytest.mark.asyncio
+async def test_recall_remote_client_forwards_min_score(monkeypatch, api_recall_mod):
+    user = _make_user()
+    captured = {}
+
+    async def dummy_remote_recall(query_text, query_type, **kwargs):
+        captured["min_score"] = kwargs.get("min_score")
+        return []
+
+    serve_state = importlib.import_module("cognee.api.v1.serve.state")
+    monkeypatch.setattr(
+        serve_state, "get_remote_client", lambda: types.SimpleNamespace(recall=dummy_remote_recall)
+    )
+
+    out = await api_recall_mod.recall(
+        query_text="q",
+        session_id="s",
+        user=user,
+        min_score=0.02,
+    )
+
+    assert out == []
+    assert captured["min_score"] == 0.02
+
+
+@pytest.mark.asyncio
 async def test_recall_remote_client_forwards_context_profile(monkeypatch, api_recall_mod):
     user = _make_user()
     captured = {}
