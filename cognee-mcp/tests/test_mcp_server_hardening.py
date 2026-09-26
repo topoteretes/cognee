@@ -98,6 +98,33 @@ def test_cognee_client_auth_schemes():
         os.environ.pop("COGNEE_API_AUTH_SCHEME", None)
 
 
+def test_cognee_client_rejects_unknown_auth_scheme():
+    # An unsupported scheme must be named, not silently downgraded to Bearer.
+    with pytest.raises(ValueError, match="Unsupported API auth scheme"):
+        CogneeClient(
+            api_url="http://localhost:8000",
+            api_token="secret_key",
+            api_auth_scheme="apikey",
+        )
+
+    # argparse guards the CLI flag, but the environment variable reaches the
+    # client unchecked.
+    os.environ["COGNEE_API_AUTH_SCHEME"] = "x_api_key"
+    try:
+        with pytest.raises(ValueError, match="Unsupported API auth scheme"):
+            CogneeClient(api_url="http://localhost:8000", api_token="secret_key")
+    finally:
+        os.environ.pop("COGNEE_API_AUTH_SCHEME", None)
+
+    # Casing and stray whitespace stay acceptable.
+    client = CogneeClient(
+        api_url="http://localhost:8000",
+        api_token="secret_key",
+        api_auth_scheme="  X-Api-Key ",
+    )
+    assert client._get_headers()["X-Api-Key"] == "secret_key"
+
+
 # Tools that the MCP server is expected to expose. Kept as named groups so the
 # contract documents intent rather than just enumerating names. The hardening
 # rule is that the LLM-direct memory API stays minimal (V2: remember/recall/
