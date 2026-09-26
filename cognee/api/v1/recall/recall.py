@@ -579,6 +579,7 @@ async def recall(
                 datasets=datasets,
                 dataset_ids=dataset_ids,
                 top_k=top_k,
+                min_score=min_score,
                 scope=forward_scope,
                 system_prompt=system_prompt,
                 node_name=node_name,
