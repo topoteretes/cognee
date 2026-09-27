@@ -13,13 +13,14 @@ update persists — which both exercises the per-property MERGE syntax (no parse
 crash) and the ON MATCH update.
 """
 
+import contextlib
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 
-from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph.ladybug.adapter import LadybugAdapter
+from cognee.infrastructure.engine import DataPoint
 
 
 class _Node(DataPoint):
@@ -36,10 +37,8 @@ async def adapter(tmp_path):
     try:
         yield a
     finally:
-        try:
+        with contextlib.suppress(Exception):
             await a.close()
-        except Exception:
-            pass
 
 
 @pytest.mark.asyncio
