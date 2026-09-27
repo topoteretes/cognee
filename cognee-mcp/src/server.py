@@ -438,6 +438,15 @@ async def remember(
                 text="Error: file uploads (content_base64) don't support session_id.",
             )
         ]
+    if content_base64 and not (filename or "").strip():
+        # Without a name the upload would be stored as "upload.txt", so a PDF or
+        # DOCX would be ingested as plain text.
+        return [
+            types.TextContent(
+                type="text",
+                text='Error: file uploads (content_base64) need a `filename`, e.g. "report.pdf".',
+            )
+        ]
 
     if content_base64:
         try:

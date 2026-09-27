@@ -562,6 +562,16 @@ class RecordingRememberClient:
             "invalid base64",
             id="malformed_base64",
         ),
+        pytest.param(
+            {"content_base64": "aGk="},
+            "need a `filename`",
+            id="upload_without_filename",
+        ),
+        pytest.param(
+            {"filename": "  ", "content_base64": "aGk="},
+            "need a `filename`",
+            id="upload_with_blank_filename",
+        ),
     ],
 )
 @pytest.mark.asyncio
