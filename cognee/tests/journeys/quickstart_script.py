@@ -73,7 +73,7 @@ def main() -> int:
         report["ok"] = report.get("remember_status") == "completed" and bool(
             report.get("recall_answered")
         )
-    except Exception as error:  # report, don't hide
+    except Exception as error:  # noqa: BLE001 - this script's job is to report any failure as JSON
         report["ok"] = False
         report["exception"] = repr(error)
         report["traceback"] = traceback.format_exc()

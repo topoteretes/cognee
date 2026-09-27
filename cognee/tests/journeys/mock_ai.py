@@ -9,14 +9,18 @@ What is replaced
 * ``LLMGateway.acreate_structured_output`` is swapped for a dispatcher keyed on
   ``response_model``:
 
-  - ``KnowledgeGraph``: replays a pre-authored graph when the chunk contains a
-    known corpus title, otherwise falls back to a heuristic extractor that turns
-    capitalised phrases into entities. Either way the graph is built from the
-    text it was given, so retrieval over it is meaningful.
-  - ``SummarizedContent``: first sentence of the chunk.
-  - ``str`` (answer completions): echoes the *context* section of the prompt,
-    never the question. A must-contain fact can therefore only pass if retrieval
-    actually surfaced it.
+  - ``KnowledgeGraph``: replays a pre-authored graph when the chunk's
+    ``Title:`` line names a known corpus document, otherwise falls back to a
+    heuristic extractor that turns capitalised phrases into entities. Either
+    way the graph is built from the text it was given, so retrieval over it is
+    meaningful. Matching is on the title *line*, not on any mention of the
+    title: corpus documents cross-reference each other, and a mention must not
+    replay another document's graph.
+  - ``SummarizedContent``: the pre-authored summary for a corpus document,
+    else the first sentence of the chunk.
+  - ``str`` (answer completions): echoes the prompt with the question removed.
+    A must-contain fact can therefore only pass if retrieval actually surfaced
+    it, whichever completion template the retriever used.
   - any other Pydantic model: a structurally valid default instance.
 
 * Embeddings become a hashed bag-of-words vector (md5-bucketed, signed,
@@ -35,29 +39,60 @@ so the interrupted-run journey works in both modes.
 from __future__ import annotations
 
 import hashlib
+import importlib
+import itertools
 import math
 import os
 import re
-from typing import Any, Callable, Optional
+import typing
+from collections.abc import Callable
+from typing import Any
 
 _WORD_RE = re.compile(r"[a-z0-9]+(?:'[a-z]+)?")
 _CAPITALISED_PHRASE_RE = re.compile(
     r"\b(?:[A-Z][a-zA-Z0-9'-]+)(?:\s+(?:[A-Z][a-zA-Z0-9'-]+|of|the|and|&))*"
 )
-_STOPWORDS = frozenset(
-    """
+_TITLE_LINE_RE = re.compile(r"^\s*Title:\s*(?P<title>.+?)\s*$", re.MULTILINE)
+# Every completion template renders the question as "The question is: `...`".
+_QUESTION_RE = re.compile(r"The question is:\s*`.*?`", re.DOTALL | re.IGNORECASE)
+_STOPWORD_TEXT = """
     a an the and or but if then of in on at to for from by with about as into like through
     after over between out against during without before under around among is are was were
     be been being have has had do does did will would shall should may might must can could
     it its this that these those he she they them his her their there here what which who
     whom whose why how when where i you we me us my our your not no nor so than too very
-    """.split()
+"""
+_STOPWORDS = frozenset(_STOPWORD_TEXT.split())
+
+_EMBEDDING_ENGINES = (
+    (
+        "cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine",
+        "LiteLLMEmbeddingEngine",
+    ),
+    (
+        "cognee.infrastructure.databases.vector.embeddings.OpenAICompatibleEmbeddingEngine",
+        "OpenAICompatibleEmbeddingEngine",
+    ),
+    (
+        "cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine",
+        "FastembedEmbeddingEngine",
+    ),
+    (
+        "cognee.infrastructure.databases.vector.embeddings.OllamaEmbeddingEngine",
+        "OllamaEmbeddingEngine",
+    ),
 )
 
-_CONTEXT_MARKERS = (
-    "here is the context:",
-    "context:",
+_ENGINE_CACHES = (
+    (
+        "cognee.infrastructure.databases.vector.embeddings.get_embedding_engine",
+        "create_embedding_engine",
+    ),
+    ("cognee.infrastructure.databases.vector.create_vector_engine", "_create_vector_engine"),
 )
+
+# What ``install_*`` replaced, so ``uninstall_all`` can put it back.
+_ORIGINALS: dict[str, Any] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -86,59 +121,37 @@ def hashed_embedding(text: str, dims: int) -> list[float]:
     return [v / norm for v in vector]
 
 
+async def _mock_embed_text(self, text: list[str]) -> list[list[float]]:
+    dims = int(self.get_vector_size())
+    return [hashed_embedding(t, dims) for t in text]
+
+
 def install_mock_embeddings() -> None:
     """Patch every built-in embedding engine so ``embed_text`` hashes locally."""
-    import importlib
-
-    async def _embed_text(self, text: list[str]) -> list[list[float]]:
-        dims = int(self.get_vector_size())
-        return [hashed_embedding(t, dims) for t in text]
-
-    for module_name, class_name in (
-        (
-            "cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine",
-            "LiteLLMEmbeddingEngine",
-        ),
-        (
-            "cognee.infrastructure.databases.vector.embeddings.OpenAICompatibleEmbeddingEngine",
-            "OpenAICompatibleEmbeddingEngine",
-        ),
-        (
-            "cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine",
-            "FastembedEmbeddingEngine",
-        ),
-        (
-            "cognee.infrastructure.databases.vector.embeddings.OllamaEmbeddingEngine",
-            "OllamaEmbeddingEngine",
-        ),
-    ):
+    for module_name, class_name in _EMBEDDING_ENGINES:
         try:
             module = importlib.import_module(module_name)
-        except Exception:  # optional engines may have missing extras
+        except ImportError:  # optional engines may have missing extras
             continue
         engine_class = getattr(module, class_name, None)
-        if engine_class is not None:
-            engine_class.embed_text = _embed_text
+        if engine_class is None:
+            continue
+        _ORIGINALS.setdefault(f"embed:{class_name}", (engine_class, engine_class.embed_text))
+        engine_class.embed_text = _mock_embed_text
 
     _clear_engine_caches()
 
 
 def _clear_engine_caches() -> None:
-    import importlib
-
-    for module_name, attribute in (
-        (
-            "cognee.infrastructure.databases.vector.embeddings.get_embedding_engine",
-            "create_embedding_engine",
-        ),
-        ("cognee.infrastructure.databases.vector.create_vector_engine", "_create_vector_engine"),
-    ):
+    for module_name, attribute in _ENGINE_CACHES:
         try:
             module = importlib.import_module(module_name)
-            target = getattr(module, attribute)
-            target.cache_clear()
-        except Exception:
-            pass
+        except ImportError:
+            continue
+        target = getattr(module, attribute, None)
+        cache_clear = getattr(target, "cache_clear", None)
+        if cache_clear is not None:
+            cache_clear()
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +168,7 @@ def _first_sentence(text: str, limit: int = 240) -> str:
             if parts and parts[0].lower().startswith("title:") and len(parts) > 1:
                 body = marker.join(parts[1:])
             break
-    match = re.search(r"(.+?[.!?])(\s|$)", body.strip(), re.S)
+    match = re.search(r"(.+?[.!?])(\s|$)", body.strip(), re.DOTALL)
     sentence = match.group(1) if match else body.strip()
     return sentence[:limit].strip() or "Summary unavailable."
 
@@ -190,56 +203,51 @@ def heuristic_knowledge_graph(text: str, max_nodes: int = 12):
         Node(id=key, name=name, type="Entity", description=f"{name}, mentioned in the text.")
         for key, name in seen.items()
     ]
-    edges = []
-    keys = list(seen)
-    for source, target in zip(keys, keys[1:]):
-        edges.append(
-            Edge(
-                source_node_id=source,
-                target_node_id=target,
-                relationship_name="mentioned_with",
-                description=None,
-            )
+    edges = [
+        Edge(
+            source_node_id=source,
+            target_node_id=target,
+            relationship_name="mentioned_with",
+            description=None,
         )
+        for source, target in itertools.pairwise(seen)
+    ]
     return KnowledgeGraph(nodes=nodes, edges=edges)
 
 
 def _default_instance(model: Any) -> Any:
     """Build a structurally valid instance of an arbitrary Pydantic model."""
+    from pydantic import BaseModel, ValidationError
+
     if model is str:
         return ""
     if model in (int, float, bool):
         return model()
+    if not (isinstance(model, type) and issubclass(model, BaseModel)):
+        return None
     try:
         return model()
-    except Exception:
+    except ValidationError:
         pass
+    values = {
+        name: _default_for_annotation(field.annotation)
+        for name, field in model.model_fields.items()
+        if field.is_required()
+    }
     try:
-        from pydantic import BaseModel
-
-        if isinstance(model, type) and issubclass(model, BaseModel):
-            values: dict[str, Any] = {}
-            for field_name, field in model.model_fields.items():
-                if not field.is_required():
-                    continue
-                values[field_name] = _default_for_annotation(field.annotation)
-            return model(**values)
-    except Exception:
-        pass
-    try:
-        return model.model_construct()
-    except Exception:
-        return None
+        return model(**values)
+    except ValidationError:
+        return model.model_construct(**values)
 
 
 def _default_for_annotation(annotation: Any) -> Any:
-    import typing
+    from pydantic import BaseModel
 
     origin = typing.get_origin(annotation)
     args = typing.get_args(annotation)
-    if origin in (list, typing.List, set, tuple):
+    if origin in (list, set, tuple):
         return []
-    if origin in (dict, typing.Dict):
+    if origin is dict:
         return {}
     if origin is typing.Union or str(origin) == "types.UnionType":
         non_none = [a for a in args if a is not type(None)]
@@ -254,48 +262,43 @@ def _default_for_annotation(annotation: Any) -> Any:
         return 0.0
     if annotation is bool:
         return False
-    try:
-        from pydantic import BaseModel
-
-        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-            return _default_instance(annotation)
-    except Exception:
-        pass
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return _default_instance(annotation)
     return None
 
 
-def _context_section(prompt: str) -> str:
-    """Return only the retrieved-context part of a completion prompt.
+def title_of(text: str) -> str | None:
+    """The document title named on a ``Title:`` line, if the text has one."""
+    match = _TITLE_LINE_RE.search(text)
+    return match.group("title") if match else None
 
-    The answer templates read "The question is: `q` And here is the context:
-    `ctx`". Echoing the question would let a must-contain fact pass merely
-    because the question mentioned it, so the question is stripped.
+
+def _context_section(prompt: str) -> str:
+    """Return the completion prompt with the question removed.
+
+    Every answer template renders the question as ``The question is: `q```
+    and the retrieved context elsewhere. Echoing the question would let a
+    must-contain fact pass merely because the question mentioned it, so the
+    question is cut out and everything else (the context, whichever template
+    framed it) is returned.
     """
-    lowered = prompt.lower()
-    for marker in _CONTEXT_MARKERS:
-        index = lowered.find(marker)
-        if index != -1:
-            return prompt[index + len(marker) :].strip().strip("`").strip()
-    return prompt
+    return _QUESTION_RE.sub("", prompt).strip()
 
 
 class MockLLM:
     """Deterministic ``acreate_structured_output`` replacement.
 
-    ``graphs`` maps a corpus title to ``{"knowledge_graph": {...}, "summary": {...}}``
-    (the shape used by ``mock_memories.json`` in the perf suite). A chunk that
-    contains the title replays that entry.
+    ``graphs`` maps a corpus title to ``{"knowledge_graph": {...}, "summary": {...}}``.
+    A chunk whose ``Title:`` line is that title replays the entry.
     """
 
-    def __init__(self, graphs: Optional[dict[str, dict]] = None):
+    def __init__(self, graphs: dict[str, dict] | None = None):
         self.graphs = graphs or {}
         self.calls: list[tuple[str, str]] = []  # (response_model name, text head)
 
-    def _match(self, text_input: str) -> Optional[dict]:
-        for title, entry in self.graphs.items():
-            if title in text_input:
-                return entry
-        return None
+    def _match(self, text_input: str) -> dict | None:
+        title = title_of(text_input)
+        return self.graphs.get(title) if title else None
 
     async def __call__(
         self, text_input: str, system_prompt: str, response_model: Any, **kwargs: Any
@@ -323,7 +326,7 @@ class MockLLM:
         return _default_instance(response_model)
 
 
-def install_mock_llm(graphs: Optional[dict[str, dict]] = None) -> MockLLM:
+def install_mock_llm(graphs: dict[str, dict] | None = None) -> MockLLM:
     from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
     mock = MockLLM(graphs)
@@ -331,11 +334,12 @@ def install_mock_llm(graphs: Optional[dict[str, dict]] = None) -> MockLLM:
     async def _acreate(text_input, system_prompt, response_model, **kwargs):
         return await mock(text_input, system_prompt, response_model, **kwargs)
 
+    _ORIGINALS.setdefault("llm", LLMGateway.__dict__["acreate_structured_output"])
     LLMGateway.acreate_structured_output = staticmethod(_acreate)
     return mock
 
 
-def install_all(graphs: Optional[dict[str, dict]] = None) -> MockLLM:
+def install_all(graphs: dict[str, dict] | None = None) -> MockLLM:
     """Install the LLM and embedding mocks and make config happy without keys."""
     os.environ.setdefault("LLM_API_KEY", "mock-key")
     os.environ.setdefault("LLM_PROVIDER", "openai")
@@ -350,6 +354,19 @@ def install_all(graphs: Optional[dict[str, dict]] = None) -> MockLLM:
     return install_mock_llm(graphs)
 
 
+def uninstall_all() -> None:
+    """Restore the real gateway and embedding engines patched by ``install_all``."""
+    from cognee.infrastructure.llm.LLMGateway import LLMGateway
+
+    original_llm = _ORIGINALS.pop("llm", None)
+    if original_llm is not None:
+        LLMGateway.acreate_structured_output = original_llm
+    for key in [k for k in _ORIGINALS if k.startswith("embed:")]:
+        engine_class, original = _ORIGINALS.pop(key)
+        engine_class.embed_text = original
+    _clear_engine_caches()
+
+
 # ---------------------------------------------------------------------------
 # Failure injection (works over the mock or the real gateway)
 # ---------------------------------------------------------------------------
@@ -362,7 +379,7 @@ class LLMFailureInjector:
     extraction so cognify fails mid-pipeline, after ingestion succeeded.
     """
 
-    def __init__(self, error: Exception, predicate: Optional[Callable[[Any], bool]] = None):
+    def __init__(self, error: Exception, predicate: Callable[[Any], bool] | None = None):
         self.error = error
         self.predicate = predicate
         self.armed = False
@@ -374,7 +391,7 @@ class LLMFailureInjector:
 
         return isinstance(response_model, type) and issubclass(response_model, KnowledgeGraph)
 
-    def install(self) -> "LLMFailureInjector":
+    def install(self) -> LLMFailureInjector:
         from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
         original = LLMGateway.acreate_structured_output
@@ -408,6 +425,6 @@ class LLMFailureInjector:
 
 
 def inject_llm_failure(
-    error: Exception, predicate: Optional[Callable[[Any], bool]] = None
+    error: Exception, predicate: Callable[[Any], bool] | None = None
 ) -> LLMFailureInjector:
     return LLMFailureInjector(error, predicate).install()
