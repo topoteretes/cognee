@@ -342,22 +342,17 @@ class FakeCogneeModule:
 
     def __init__(self, result=None, error=None):
         self.calls: list[dict] = []
-        self.seen_payloads: list[bytes] = []
-        self.seen_paths: list[str] = []
+        self.seen_uploads: list[tuple[str, bytes]] = []
         self._result = result
         self._error = error
 
     async def remember(self, **kwargs):
         self.calls.append(kwargs)
         data = kwargs.get("data")
-        # Read through the handed-off path while it is still on disk: the
-        # client deletes it as soon as remember() returns.
-        if isinstance(data, str) and os.path.isfile(data):
-            self.seen_paths.append(data)
-            # A blocking read is fine in a test double: no event loop to
-            # starve, and the file is a few bytes on tmpfs.
-            with open(data, "rb") as handle:
-                self.seen_payloads.append(handle.read())
+        # Uploads arrive as file objects, the same shape the HTTP route passes.
+        for item in data if isinstance(data, list) else []:
+            if hasattr(item, "file"):
+                self.seen_uploads.append((item.filename, item.file.read()))
         if self._error is not None:
             raise self._error
         return self._result
@@ -371,8 +366,8 @@ def _local_client(fake_cognee: FakeCogneeModule) -> CogneeClient:
 
 
 @pytest.mark.asyncio
-async def test_cognee_client_local_remember_writes_upload_to_a_temp_file():
-    """Direct mode materializes the upload on disk under its original name."""
+async def test_cognee_client_local_remember_hands_upload_over_as_a_file_object():
+    """Direct mode passes the upload as a file object under its original name."""
     fake = FakeCogneeModule()
     client = _local_client(fake)
     raw_bytes = b"%PDF-1.4\n\x00\x80\xff quarterly report"
@@ -386,10 +381,10 @@ async def test_cognee_client_local_remember_writes_upload_to_a_temp_file():
     )
 
     assert len(fake.calls) == 1
-    handed_off = fake.calls[0]["data"]
-    assert Path(handed_off).name == "q3-report.pdf"
-    # Bytes survive the base64 -> disk round trip untouched.
-    assert fake.seen_payloads == [raw_bytes]
+    # Not a path: ingestion would apply the local-file settings to one.
+    assert not isinstance(fake.calls[0]["data"], (str, Path))
+    # Bytes survive the base64 round trip untouched.
+    assert fake.seen_uploads == [("q3-report.pdf", raw_bytes)]
     assert fake.calls[0]["dataset_name"] == "ds"
     # File uploads are permanent-memory only, so no session_id is forwarded.
     assert "session_id" not in fake.calls[0]
@@ -413,31 +408,13 @@ async def test_cognee_client_local_remember_sanitizes_upload_filename():
             data=None, dataset_name="ds", filename=supplied, content_base64=payload
         )
 
-        written = Path(fake.calls[0]["data"])
-        assert written.name == expected
-        # The traversal segments must not survive into the staged path.
-        assert ".." not in written.parts
+        # The traversal segments must not survive into the upload's name.
+        assert fake.seen_uploads[0][0] == expected
 
 
 @pytest.mark.asyncio
-async def test_cognee_client_local_remember_cleans_up_the_temp_upload():
-    """The staged file and its directory are removed once ingestion returns."""
-    fake = FakeCogneeModule()
-    client = _local_client(fake)
-    payload = base64.b64encode(b"transient").decode("ascii")
-
-    await client.remember(
-        data=None, dataset_name="ds", filename="scratch.md", content_base64=payload
-    )
-
-    staged = Path(fake.seen_paths[0])
-    assert not staged.exists()
-    assert not staged.parent.exists()
-
-
-@pytest.mark.asyncio
-async def test_cognee_client_local_remember_cleans_up_when_ingestion_fails():
-    """A failing cognify must not leak the staged upload onto disk."""
+async def test_cognee_client_local_remember_propagates_ingestion_failures():
+    """A failing ingestion reaches the caller instead of being swallowed."""
     fake = FakeCogneeModule(error=RuntimeError("cognify exploded"))
     client = _local_client(fake)
     payload = base64.b64encode(b"transient").decode("ascii")
@@ -447,9 +424,50 @@ async def test_cognee_client_local_remember_cleans_up_when_ingestion_fails():
             data=None, dataset_name="ds", filename="scratch.md", content_base64=payload
         )
 
-    staged = Path(fake.seen_paths[0])
-    assert not staged.exists()
-    assert not staged.parent.exists()
+
+@pytest.mark.asyncio
+async def test_cognee_client_local_remember_upload_is_stored_under_allowed_roots(
+    monkeypatch, tmp_path
+):
+    """With COGNEE_ALLOWED_LOCAL_FILE_ROOTS set, the upload's bytes are what gets stored.
+
+    An upload is not a local path, so the allowlist should not touch it. Staged
+    as a temp-file path outside the allowed roots, the path string itself was
+    stored as the document.
+    """
+    save_module = importlib.import_module("cognee.tasks.ingestion.save_data_item_to_storage")
+    allowed_root = tmp_path / "allowed"
+    allowed_root.mkdir()
+    monkeypatch.setenv("COGNEE_ALLOWED_LOCAL_FILE_ROOTS", str(allowed_root))
+
+    stored: list[tuple] = []
+
+    async def capture(data, filename=None, file_extension=None):
+        stored.append((filename, data.read() if hasattr(data, "read") else data))
+        return save_module.StoredFile(file_path="file:///captured")
+
+    monkeypatch.setattr(save_module, "save_data_to_file_detailed", capture)
+
+    class IngestingCognee:
+        """Runs the real storage step add() applies to each item first."""
+
+        async def remember(self, **kwargs):
+            data = kwargs["data"]
+            for item in data if isinstance(data, list) else [data]:
+                await save_module.save_data_item_to_storage_detailed(item)
+
+    client = CogneeClient()
+    client.cognee = IngestingCognee()
+    raw_bytes = b"%PDF-1.4 uploaded bytes"
+
+    await client.remember(
+        data=None,
+        dataset_name="ds",
+        filename="report.pdf",
+        content_base64=base64.b64encode(raw_bytes).decode("ascii"),
+    )
+
+    assert stored == [("report.pdf", raw_bytes)]
 
 
 @pytest.mark.asyncio
@@ -471,7 +489,7 @@ async def test_cognee_client_local_remember_passes_text_through_untouched():
         "session_id": "s-1",
         "custom_prompt": "extract carefully",
     }
-    assert fake.seen_paths == []
+    assert fake.seen_uploads == []
 
 
 @pytest.mark.asyncio
@@ -1178,7 +1196,7 @@ async def test_remember_self_improvement_end_to_end(
             received = fake.calls[0]
             assert received["dataset_name"] == "ds"
             if upload:
-                assert fake.seen_payloads == [b"memory"]
+                assert fake.seen_uploads == [("note.txt", b"memory")]
             else:
                 assert received["data"] == "memory"
         elif session_id:
