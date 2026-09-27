@@ -225,8 +225,8 @@ async def _import_and_confirm(metadata, selection, *, user, keep_synced):
                 text += " Sync selection saved; this server's refresh worker is disabled."
     except SlackHistoryError as error:
         text = str(error)
-    except Exception:  # noqa: BLE001 - detached work reports a private, sanitized failure
-        logger.error("Slack history import failed for team %s", metadata["team_id"])
+    except Exception:  # detached work: traceback to server logs, sanitized text to Slack
+        logger.exception("Slack history import failed for team %s", metadata["team_id"])
         text = "Import did not complete. Check destination permissions and server logs, then retry."
     await post_to_response_url(response_url, {"response_type": "ephemeral", "text": text})
 

@@ -153,9 +153,8 @@ async def sync_due_slack_history():
                 )
             except asyncio.CancelledError:
                 raise
-            except Exception:  # noqa: BLE001 - one connection must not stop other scheduled refreshes
-                # Raw exception messages/content are intentionally not logged.
-                logger.error(
+            except Exception:  # one connection must not stop other scheduled refreshes
+                logger.exception(
                     "Slack history refresh failed for connection %s, dataset %s", credential.id, key
                 )
 
@@ -168,8 +167,8 @@ async def _worker():
             await sync_due_slack_history()
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001 - keep the optional scheduler alive across transient failures
-            logger.error("Slack history scheduler tick failed; will retry")
+        except Exception:  # keep the optional scheduler alive across transient failures
+            logger.exception("Slack history scheduler tick failed; will retry")
 
 
 @asynccontextmanager
