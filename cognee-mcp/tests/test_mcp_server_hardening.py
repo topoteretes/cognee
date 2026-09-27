@@ -1274,3 +1274,44 @@ async def test_api_pipeline_status_omits_an_empty_pipeline_name():
     status_calls = [r for r in requests if r.url.path == "/api/v1/datasets/status"]
     assert status_calls[0].url.params.get_list("pipeline") == []
     assert status_calls[0].url.params.get_list("dataset") == [dataset_id]
+
+
+@pytest.mark.asyncio
+async def test_cognify_status_reports_background_errors_for_a_dataset_never_created(monkeypatch):
+    """A rejected background remember leaves no dataset behind; its error must still show.
+
+    In API mode the usual way remember(background=True) fails is the POST itself
+    being refused, so the dataset never exists server-side. cognify_status is the
+    only place that failure is reported, so its "not found" reply has to carry it.
+    """
+    from src import server
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/remember":
+            return httpx.Response(422, json={"detail": "unsupported file type"})
+        if request.url.path == "/api/v1/datasets/":
+            return httpx.Response(200, json=[])
+        return httpx.Response(200, json={})
+
+    client = CogneeClient(api_url="http://cognee.local")
+    await client.client.aclose()
+    client.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(server, "cognee_client", client)
+    monkeypatch.setattr(server, "_task_errors", {})
+
+    try:
+        # Nothing recorded yet: the reply is the bare "not found" line.
+        before = await server.cognify_status(dataset_name="ds")
+
+        queued = await server.remember(data="hello", dataset_name="ds", background=True)
+        assert "Queued text for dataset 'ds'" in queued[0].text
+        await asyncio.gather(*list(server._background_tasks))
+
+        after = await server.cognify_status(dataset_name="ds")
+    finally:
+        await client.close()
+
+    assert before[0].text == "❌ Dataset 'ds' not found via API"
+    assert after[0].text.startswith("❌ Dataset 'ds' not found via API")
+    assert "Background task errors:" in after[0].text
+    assert "422 Unprocessable Entity" in after[0].text

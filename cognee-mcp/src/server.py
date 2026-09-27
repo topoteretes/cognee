@@ -133,6 +133,22 @@ def _record_task_error(dataset: str, error: str) -> None:
     bucket.append((datetime.now(timezone.utc).isoformat(), error))
 
 
+def _task_errors_text(dataset: str) -> str:
+    """Render a dataset's recorded background errors, newest first ("" if none).
+
+    cognify_status is the only channel remember(background=True) has for
+    reporting failures, so its replies append this block — including the ones
+    that bail out before any pipeline status is read.
+    """
+    dataset_errors = _task_errors.get(dataset)
+    if not dataset_errors:
+        return ""
+    error_lines = ["\n\nBackground task errors:"]
+    for ts, err in sorted(dataset_errors, reverse=True):
+        error_lines.append(f"  [{ts}] {err}")
+    return "\n".join(error_lines)
+
+
 def _transport_security_kwargs(host: str) -> dict:
     """Build the Host/Origin guard kwargs for mcp.http_app() from env and bind host.
 
@@ -853,10 +869,14 @@ async def cognify_status(
                     (d["id"] for d in datasets if d.get("name") == dataset_name), None
                 )
                 if dataset_id is None:
+                    # A background remember whose POST was rejected never
+                    # created the dataset, so this is the reply that most needs
+                    # to carry the recorded error.
                     return [
                         types.TextContent(
                             type="text",
-                            text=f"❌ Dataset '{dataset_name}' not found via API",
+                            text=f"❌ Dataset '{dataset_name}' not found via API"
+                            + _task_errors_text(dataset_name),
                         )
                     ]
             else:
@@ -881,29 +901,15 @@ async def cognify_status(
                     if str(dataset_id) in pipeline_status:
                         status[str(dataset_id)][pipeline_name] = pipeline_status[str(dataset_id)]
 
-            # Append any background task errors
-            status_text = str(status)
-            dataset_errors = _task_errors.get(dataset_name, [])
-            if dataset_errors:
-                error_lines = ["\n\nBackground task errors:"]
-                for ts, err in sorted(dataset_errors, reverse=True):
-                    error_lines.append(f"  [{ts}] {err}")
-                status_text += "\n".join(error_lines)
-
+            status_text = str(status) + _task_errors_text(dataset_name)
             return [types.TextContent(type="text", text=status_text)]
         except NotImplementedError:
             error_msg = "❌ Pipeline status is not available in API mode"
             logger.error(error_msg)
             return [types.TextContent(type="text", text=error_msg)]
         except Exception as e:
-            error_msg = f"❌ Failed to get cognify status: {e!s}"
             # Still report background errors even if pipeline status fails
-            dataset_errors = _task_errors.get(dataset_name, [])
-            if dataset_errors:
-                error_lines = ["\n\nBackground task errors:"]
-                for ts, err in sorted(dataset_errors, reverse=True):
-                    error_lines.append(f"  [{ts}] {err}")
-                error_msg += "\n".join(error_lines)
+            error_msg = f"❌ Failed to get cognify status: {e!s}" + _task_errors_text(dataset_name)
             logger.exception(error_msg)
             return [types.TextContent(type="text", text=error_msg)]
 
