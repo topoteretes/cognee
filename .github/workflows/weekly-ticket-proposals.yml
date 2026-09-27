@@ -7,6 +7,12 @@ name: Weekly ticket proposals
 #   B. cognee-assisted — Claude Code with the cognee memory plugin, after
 #                        indexing this repo into cognee's code graph
 #
+# Each variant writes a full report (run artifact) and a short issue file:
+# two tables with the same rows, one in plain words and one with the
+# file:line evidence. The workflow, not the model, files the issue: a guard
+# (scripts/weekly_tickets/issue_body.py) checks each issue file's shape, caps
+# its length, and the publish job posts the two shaped sections.
+#
 # Required secrets: MOTHERDUCK_TOKEN, ANTHROPIC_API_KEY, LLM_API_KEY
 # Optional secrets: LINEAR_API_KEY (dedup against open tickets)
 
@@ -28,6 +34,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install duckdb
+      - name: Test the issue-body guard
+        run: python cognee/tests/unit/test_weekly_tickets_issue_body.py
       - name: Build weekly digest from MotherDuck
         env:
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
@@ -55,11 +63,23 @@ jobs:
         run: |
           claude -p "$(cat scripts/weekly_tickets/prompt.md)" \
             --dangerously-skip-permissions \
-            --output-format text > proposals-baseline.md
+            --output-format text
+      - name: Shape issue section (tables, length cap)
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          mv proposals-report.md report-baseline.md
+          if [ -f proposals-issue.md ]; then
+            python3 scripts/weekly_tickets/issue_body.py proposals-issue.md issue-baseline.md
+          else
+            echo "_No proposals this week; see the run report._" > issue-baseline.md
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: proposals-baseline
-          path: proposals-baseline.md
+          path: |
+            report-baseline.md
+            issue-baseline.md
 
   cognee-assisted:
     name: "Variant B: cognee plugin + indexed codebase"
@@ -105,11 +125,23 @@ jobs:
           } > /tmp/prompt-cognee.md
           claude -p "$(cat /tmp/prompt-cognee.md)" \
             --dangerously-skip-permissions \
-            --output-format text > proposals-cognee.md
+            --output-format text
+      - name: Shape issue section (tables, length cap)
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          mv proposals-report.md report-cognee.md
+          if [ -f proposals-issue.md ]; then
+            python scripts/weekly_tickets/issue_body.py proposals-issue.md issue-cognee.md
+          else
+            echo "_No proposals this week; see the run report._" > issue-cognee.md
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: proposals-cognee
-          path: proposals-cognee.md
+          path: |
+            report-cognee.md
+            issue-cognee.md
 
   publish:
     needs: [baseline, cognee-assisted]
@@ -118,24 +150,25 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
-      - name: Open comparison issue
+      - name: Open comparison issue (only step that writes to GitHub)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
           {
-            echo "Weekly ticket proposals generated from docs-assistant signal"
-            echo "(MotherDuck: analytics.mintlify_chatbot_conversations, last 7 days)."
+            echo "Ticket proposals from last week's docs-assistant conversations, one section"
+            echo "per analysis variant. Each row is one proposed ticket: plain words first,"
+            echo "then the evidence. Full reports and the digest are in the run artifacts."
             echo
             echo "# Variant A — baseline Claude Code"
             echo
-            cat proposals-baseline.md
+            cat issue-baseline.md
             echo
             echo "---"
             echo
             echo "# Variant B — Claude Code + cognee memory plugin (indexed codebase)"
             echo
-            cat proposals-cognee.md
+            cat issue-cognee.md
           } > issue-body.md
           gh issue create \
             --title "Weekly ticket proposals — $(date -u +%Y-%m-%d)" \
