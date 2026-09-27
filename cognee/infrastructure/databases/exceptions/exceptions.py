@@ -6,6 +6,7 @@ from cognee.exceptions import (
     CogneeSystemError,
     CogneeValidationError,
 )
+from cognee.exceptions.remediation import REMEDIATION_MARKER
 
 
 class DatabaseNotCreatedError(CogneeSystemError):
@@ -132,6 +133,51 @@ class EmbeddingException(CogneeConfigurationError):
         self,
         message: str = "Embedding Exception.",
         name: str = "EmbeddingException",
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ):
+        super().__init__(message, name, status_code)
+
+    def __str__(self):
+        """Append the chained cause so the real provider error survives the 422.
+
+        The engines raise ``EmbeddingException(...) from error`` with a generic
+        message, and the hardcoded 422 alone reads like a provider response.
+        Naming the cause (``TypeName: text``) is what tells the user the actual
+        failure (a 404 for a mis-typed model, a missing package, ...). The base
+        text is rebuilt rather than appended to so the cause lands before any
+        ``Fix:`` remediation suffix.
+        """
+        cause = self.__cause__
+        if cause is None or str(cause) in self.message:
+            return super().__str__()
+        text = (
+            f"{self.name}: {self.message} "
+            f"(caused by {type(cause).__name__}: {cause}) "
+            f"(Status code: {self.status_code})"
+        )
+        if self.remediation:
+            text = f"{text}{REMEDIATION_MARKER}{self.remediation}"
+        return text
+
+
+class EmbeddingConfigurationError(EmbeddingException):
+    """
+    Raised when an embedding failure is deterministic misconfiguration.
+
+    Covers a model the provider does not serve (any 4xx that is not a 408
+    request timeout or 429 rate limit), a HuggingFace repo that cannot be
+    resolved, and a missing optional package (``ImportError``). None of these
+    can clear inside a retry window, so the engines raise this instead of the
+    generic ``EmbeddingException``: it is listed as terminal in the retry
+    decorator, which is what stops the backoff ladder. The original error is
+    embedded in *message* (``TypeName: text``) so the real cause survives the
+    422.
+    """
+
+    def __init__(
+        self,
+        message: str = "Embedding provider or model is misconfigured.",
+        name: str = "EmbeddingConfigurationError",
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
     ):
         super().__init__(message, name, status_code)

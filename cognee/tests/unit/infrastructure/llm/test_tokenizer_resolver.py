@@ -179,6 +179,29 @@ def test_mistral_missing_dependency_falls_back_without_raising(caplog):
     assert any("Falling back" in r.message for r in caplog.records)
 
 
+def test_missing_transformers_names_the_extra_to_install(caplog):
+    # A missing `transformers` package cannot be fixed by HUGGINGFACE_TOKENIZER
+    # (SDK-810), so the fallback warning must name the actual fix: the
+    # cognee[huggingface] extra. The tiktoken fallback behaviour is unchanged.
+    tik = patch(
+        f"{_MODULE}.TikTokenTokenizer", side_effect=lambda **kw: _FakeTokenizer("tiktoken", **kw)
+    )
+    hf = patch(
+        f"{_MODULE}.HuggingFaceTokenizer",
+        side_effect=ModuleNotFoundError("No module named 'transformers'", name="transformers"),
+    )
+    mis = patch(f"{_MODULE}.MistralTokenizer")
+    with caplog.at_level(logging.WARNING), tik, hf, mis:
+        tok = resolve_embedding_tokenizer(provider="ollama", model="BAAI/bge-m3")
+    assert tok.kind == "tiktoken"
+    assert tok.kwargs["model"] is None
+    hits = [r for r in caplog.records if 'pip install "cognee[huggingface]"' in r.message]
+    assert hits, "expected the cognee[huggingface] install hint"
+    # The generic mismatch advice must NOT appear: setting HUGGINGFACE_TOKENIZER
+    # cannot fix a missing package.
+    assert all("HUGGINGFACE_TOKENIZER" not in r.message for r in hits)
+
+
 def test_bare_model_strips_one_provider_tag():
     assert resolver._bare_model("openai/text-embedding-3-large") == "text-embedding-3-large"
     # Splits once, so a multi-segment repo after the provider tag survives.

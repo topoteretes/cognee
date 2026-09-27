@@ -140,8 +140,15 @@ async def test_embedding_connection() -> int:
 
         logger.info("Testing connection to Embedding endpoint...")
         vector_engine = await get_vector_engine_async()
+        embedding_engine = vector_engine.embedding_engine
+        # Prefer a single undecorated attempt when the engine exposes one: a
+        # misconfigured EMBEDDING_MODEL then surfaces its real error (a 404,
+        # a missing package) immediately, instead of the engine's retry ladder
+        # eating the whole preflight window so the failure is misreported as
+        # an "endpoint unreachable" timeout. The timeout stays as a safety net.
+        embed_once = getattr(embedding_engine, "_embed_once", embedding_engine.embed_text)
         embedding_vectors = await asyncio.wait_for(
-            vector_engine.embedding_engine.embed_text(["test"]),
+            embed_once(["test"]),
             timeout=CONNECTION_TEST_TIMEOUT_SECONDS,
         )
 

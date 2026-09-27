@@ -102,6 +102,27 @@ def _load_or_tiktoken_fallback(
     """
     try:
         return build()
+    except ImportError as error:
+        # A missing optional package cannot be fixed by pointing
+        # HUGGINGFACE_TOKENIZER elsewhere, so name the actual fix instead of
+        # the mismatch hint. transformers is by far the common case (any
+        # HuggingFace-repo tokenizer needs it); other ImportErrors name the
+        # module they miss.
+        if "transformers" in (getattr(error, "name", None) or str(error)):
+            hint = (
+                'transformers is not installed. Install it with: pip install "cognee[huggingface]"'
+            )
+        else:
+            hint = f"A required package is missing ({error}). Install the matching cognee extra."
+        logger.warning(
+            "Could not load a matching tokenizer for %s (%s). Falling back to "
+            "TikToken, so token counts are approximate. %s",
+            context,
+            error,
+            hint,
+            exc_info=True,
+        )
+        return TikTokenTokenizer(model=None, max_completion_tokens=max_completion_tokens)
     except Exception as error:
         logger.warning(
             "Could not load a matching tokenizer for %s (%s). Falling back to "

@@ -10,6 +10,7 @@ from .exceptions import (
     UnsupportedGraphOperation,
     UnsupportedProvenanceCapability,
     DatabaseNotCreatedError,
+    EmbeddingConfigurationError,
     EmbeddingContextWindowTooSmallError,
     EmbeddingCredentialsError,
     EmbeddingException,

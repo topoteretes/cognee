@@ -11,11 +11,14 @@ import numpy as np
 from tenacity import (
     before_sleep_log,
     retry,
+    stop_after_attempt,
     stop_after_delay,
     wait_exponential_jitter,
 )
 
+from cognee.exceptions import CogneeApiError
 from cognee.infrastructure.databases.exceptions import (
+    EmbeddingConfigurationError,
     EmbeddingContextWindowTooSmallError,
     EmbeddingException,
 )
@@ -63,6 +66,53 @@ _EMBED_LENGTH_ERROR_RE = re.compile(
 # style model string, since litellm derives the provider from either.
 _PROVIDERS_WITHOUT_DIMENSIONS_SUPPORT = {"nvidia_nim"}
 
+# 4xx statuses that ARE worth retrying: a request timeout and a rate limit both
+# clear on their own. Every other 4xx is a deterministic client error.
+_TRANSIENT_4XX_STATUSES = frozenset({408, 429})
+
+# HuggingFace model-resolution failures, matched by class name so
+# huggingface_hub stays an optional import here. HFValidationError is a
+# malformed repo id; RepositoryNotFoundError a repo that does not exist.
+_HF_RESOLUTION_ERROR_NAMES = frozenset({"HFValidationError", "RepositoryNotFoundError"})
+
+
+def _configuration_error_evidence(error: BaseException) -> str | None:
+    """Name the deterministic configuration cause in ``error``'s chain, or None.
+
+    The cause-walking mirror of ``overload_evidence`` in
+    ``cognee.infrastructure.llm.overload_policy``, but for the opposite class of
+    failure: errors that can never clear inside a retry window. Recognised:
+
+    * a missing optional package (``ImportError`` / ``ModuleNotFoundError``,
+      e.g. ``transformers`` for a locally-served HuggingFace model);
+    * a HuggingFace repo that cannot be resolved (``HFValidationError`` /
+      ``RepositoryNotFoundError``, by name);
+    * any HTTP 4xx except 408/429, read from the ``status_code`` attribute
+      litellm/openai error classes carry.
+
+    Rate limits, 5xx, timeouts and connection errors are deliberately NOT
+    matched — those stay retryable. Cognee's own exceptions are skipped too:
+    their ``status_code`` is REST labeling, not a provider response. The chain
+    is walked because litellm and local model servers wrap the terminal error
+    (a ``ModuleNotFoundError`` typically arrives inside a litellm ``APIError``).
+    """
+    seen: set = set()
+    node: BaseException | None = error
+    while node is not None and id(node) not in seen and len(seen) < 20:
+        if not isinstance(node, CogneeApiError):
+            if isinstance(node, ImportError) or type(node).__name__ in _HF_RESOLUTION_ERROR_NAMES:
+                return f"{type(node).__name__}: {node}"
+            status_code = getattr(node, "status_code", None)
+            if (
+                isinstance(status_code, int)
+                and 400 <= status_code < 500
+                and status_code not in _TRANSIENT_4XX_STATUSES
+            ):
+                return f"{type(node).__name__}: {node}"
+        seen.add(id(node))
+        node = node.__cause__ or node.__context__
+    return None
+
 
 def _uses_nvidia_nim(provider: str | None, model: str | None) -> bool:
     """Whether this engine is actually talking to NVIDIA NIM.
@@ -101,8 +151,6 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
     model: str
     dimensions: int
     mock: bool
-
-    MAX_RETRIES = 5
 
     def __init__(
         self,
@@ -156,18 +204,27 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
     @observe(as_type="embeddings")
     @retry(
-        stop=stop_after_delay(128),
+        # The delay cap bounds wall clock; the attempt cap additionally bounds
+        # the number of doomed requests when individual attempts return fast.
+        stop=stop_after_delay(128) | stop_after_attempt(8),
         wait=wait_exponential_jitter(2, 128),
         # Skip the retry chain for terminal error classes. Authentication /
-        # authorization / not-found errors will never succeed on a retry, so
-        # the previous behaviour of running the full backoff ladder wasted
-        # ~2 minutes of user wall clock on a mis-typed API key. Superset of
-        # the LLM adapter exclusion set (adds PermissionDeniedError); see
+        # authorization / not-found / bad-request / configuration errors will
+        # never succeed on a retry, so the previous behaviour of running the
+        # full backoff ladder wasted ~2 minutes of user wall clock on a
+        # mis-typed API key or EMBEDDING_MODEL. Superset of the LLM adapter
+        # exclusion set (adds PermissionDeniedError); see
         # cognee/infrastructure/llm/structured_output_framework/litellm_instructor/llm/openai/adapter.py.
-        # Budget exhaustion is terminal as well, but it is classified by
-        # predicate rather than by class: see embeddings/retry_config.py.
+        # BadRequestError is safe to list wholesale: the over-length 400s that
+        # ARE recoverable never reach tenacity — the handler below recovers
+        # them in place (split + pool) — so any BadRequestError that propagates
+        # is a genuinely bad request. Budget exhaustion is terminal as well,
+        # but it is classified by predicate rather than by class: see
+        # embeddings/retry_config.py.
         retry=embedding_retry_condition(
+            EmbeddingConfigurationError,
             EmbeddingContextWindowTooSmallError,
+            litellm.exceptions.BadRequestError,
             litellm.exceptions.NotFoundError,
             litellm.exceptions.AuthenticationError,
             litellm.exceptions.PermissionDeniedError,
@@ -194,6 +251,20 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         --------
 
             - List[List[float]]: A list of vectors representing the embedded texts.
+        """
+        return await self._embed_once(text)
+
+    async def _embed_once(self, text: list[str]) -> list[list[float]]:
+        """Single embedding attempt with error classification, but no retry.
+
+        The body of :meth:`embed_text` without the tenacity decorator. The
+        connection preflight (``test_embedding_connection`` in
+        ``cognee.infrastructure.llm.utils``) calls this so a misconfigured
+        EMBEDDING_MODEL surfaces its real error (a 404, a missing package)
+        immediately instead of spending the preflight timeout inside the
+        backoff ladder and reporting a fake "endpoint unreachable" timeout.
+        Note: the split/pool recovery below recurses through the decorated
+        :meth:`embed_text`, so recovery keeps its retry protection either way.
         """
 
         sanitized_text_input = sanitize_embedding_text_inputs(text)
@@ -351,9 +422,22 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             # already bypasses the handlers below and propagates unwrapped.)
             raise
 
-        except litellm.exceptions.NotFoundError as e:
-            logger.error(f"Embedding error with model {self.model}: {e!s}")
-            raise EmbeddingException(f"Failed to index data points using model {self.model}") from e
+        except litellm.exceptions.NotFoundError as error:
+            # Terminal: the provider does not serve this model or route (404).
+            # Must reach tenacity unwrapped so ``embedding_retry_condition``
+            # can short-circuit the backoff ladder — wrapping it in
+            # EmbeddingException used to defeat the decorator's exclusion, so
+            # a mis-typed EMBEDDING_MODEL retried for the full 128s and then
+            # surfaced as a generic 422. Mirrors the auth branch above;
+            # keeping the litellm class (and its message) intact also lets
+            # the CLI's first-run remediation match it.
+            logger.error(
+                "Embedding model or route not found (model='%s'): %s. "
+                "Check EMBEDDING_MODEL and EMBEDDING_ENDPOINT.",
+                str(self.model),
+                str(error),
+            )
+            raise
 
         except Exception as error:
             # A proxy spend cap lands here, either as litellm's own
@@ -363,7 +447,29 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             # message below, which points at the wrong problem entirely.
             raise_if_budget_exhausted(error)
 
-            # Fall back to a clear, actionable message for connectivity/misconfiguration issues
+            # Deterministic misconfiguration (a missing package, an unresolvable
+            # HuggingFace repo, a non-transient 4xx) used to be wrapped in the
+            # retryable EmbeddingException below, so every terminal failure ran
+            # the full backoff ladder before surfacing as a generic 422.
+            # Classify it instead: EmbeddingConfigurationError is excluded at
+            # the decorator, and its message carries the real cause.
+            evidence = _configuration_error_evidence(error)
+            if evidence is not None:
+                logger.error(
+                    "Embedding failed with a non-retryable configuration error: %s. "
+                    "EMBEDDING_MODEL='%s', EMBEDDING_ENDPOINT='%s'.",
+                    evidence,
+                    str(self.model),
+                    str(self.endpoint),
+                )
+                raise EmbeddingConfigurationError(
+                    f"Embedding failed with a non-retryable error ({evidence}). "
+                    "Verify EMBEDDING_MODEL, EMBEDDING_PROVIDER and EMBEDDING_ENDPOINT."
+                ) from error
+
+            # Fall back to a clear, actionable message for connectivity/misconfiguration
+            # issues. Still retryable: anything not classified terminal above is
+            # treated as transient (5xx, connection resets, provider hiccups).
             logger.error(
                 "Error embedding text: %s. EMBEDDING_ENDPOINT='%s'.",
                 str(error),

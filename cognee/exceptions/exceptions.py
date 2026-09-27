@@ -39,15 +39,26 @@ class CogneeApiError(Exception):
         self.status_code = status_code
         self.remediation = remediation
 
-        # Automatically log the exception details
+        # Automatically log the exception details. The message is included so
+        # the auto-log names the actual failure: "EmbeddingException raised
+        # (Status code: 422)" alone reads like a provider 422 response, when
+        # the status code is only cognee's own REST labeling.
         if log and (log_level == "ERROR"):
-            logger.error("%s raised (Status code: %s)", self.name, self.status_code)
+            logger.error(
+                "%s raised (Status code: %s): %s", self.name, self.status_code, self.message
+            )
         elif log and (log_level == "WARNING"):
-            logger.warning("%s raised (Status code: %s)", self.name, self.status_code)
+            logger.warning(
+                "%s raised (Status code: %s): %s", self.name, self.status_code, self.message
+            )
         elif log and (log_level == "INFO"):
-            logger.info("%s raised (Status code: %s)", self.name, self.status_code)
+            logger.info(
+                "%s raised (Status code: %s): %s", self.name, self.status_code, self.message
+            )
         elif log and (log_level == "DEBUG"):
-            logger.debug("%s raised (Status code: %s)", self.name, self.status_code)
+            logger.debug(
+                "%s raised (Status code: %s): %s", self.name, self.status_code, self.message
+            )
 
         super().__init__(self.message, self.name)
 

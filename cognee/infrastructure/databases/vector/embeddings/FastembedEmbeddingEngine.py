@@ -85,14 +85,11 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
     - model: The name of the embedding model.
     - dimensions: The dimensionality of the embeddings.
     - mock: A flag indicating whether to use mocking instead of the actual embedding model.
-    - MAX_RETRIES: The maximum number of retries for embedding operations.
     """
 
     model: str
     dimensions: int
     mock: bool
-
-    MAX_RETRIES = 5
 
     def __init__(
         self,

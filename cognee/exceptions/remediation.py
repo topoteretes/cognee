@@ -89,6 +89,30 @@ _TABLE: tuple[tuple[tuple[str, ...], str], ...] = (
         ),
     ),
     (
+        # Real errors: litellm's "litellm.NotFoundError: OpenAIException - The
+        # model `text-embeddin-3-large` does not exist..." (OpenAI error code
+        # "model_not_found"), and the engine's own EmbeddingConfigurationError
+        # message, which embeds that provider text. Needles avoid the bare
+        # "notfounderror"/"does not exist" phrasings so cognee's own
+        # EntityNotFoundError never matches this row.
+        ("litellm.notfounderror", "model_not_found", "model not found"),
+        (
+            "The provider does not serve the configured model. Check "
+            "EMBEDDING_MODEL / LLM_MODEL for typos and confirm the model is "
+            "available on your account or endpoint."
+        ),
+    ),
+    (
+        # Real error: ModuleNotFoundError("No module named 'transformers'"),
+        # raised when a HuggingFace-served embedding model is configured but
+        # the optional extra is not installed.
+        ("no module named 'transformers'",),
+        (
+            "The configured embedding model needs the transformers package. "
+            'Install it with: pip install "cognee[huggingface]"'
+        ),
+    ),
+    (
         ("ontology file not found",),
         (
             "The --ontology-file path does not exist. Pass an absolute "
