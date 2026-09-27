@@ -1,11 +1,12 @@
 import hashlib
 import os
-from cognee.shared.logging_utils import get_logger
 import pathlib
+
 import pytest
 
 import cognee
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 

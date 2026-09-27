@@ -18,7 +18,7 @@ MCP_ROOT = Path(__file__).resolve().parents[1]  # cognee-mcp/
 if str(MCP_ROOT) not in sys.path:
     sys.path.insert(0, str(MCP_ROOT))
 
-import src.server as server  # noqa: E402
+from src import server  # noqa: E402
 from src.tool_registry import DEFAULT_TAG, MEMORY_TAG  # noqa: E402
 
 SYNTHETIC_TOOLS = {"search_tools", "call_tool"}
@@ -242,7 +242,7 @@ async def test_usage_logging_name_survives_the_registry_wrapper():
     async def fake_log(**kwargs):
         calls.append(kwargs)
 
-    import cognee.shared.usage_logger as usage_logger
+    from cognee.shared import usage_logger
 
     original_log = usage_logger._log_usage_async
     original_config = usage_logger.get_cache_config

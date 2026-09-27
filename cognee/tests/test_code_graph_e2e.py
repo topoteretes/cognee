@@ -1,6 +1,6 @@
 """E2E test: code ingestion -> enola code graph -> SearchType.CODE (SDK-395).
 
-Runs the REAL enola binary (pinned release, auto-installed on first use) over
+Runs the REAL enola binary (the enola-cli wheel included with cognee) over
 a small pinned repository that ships with the test suite, against the default
 embedded databases (Ladybug graph + SQLite), with NO LLM or embedding
 configuration. It covers what the unit tests in tests/unit/tasks/code_graph
@@ -18,6 +18,8 @@ Verifies:
   impact_analysis) through both search() and recall()
 - re-ingesting the unchanged repo is a no-op (same node/edge counts, same
   snapshot id)
+- every remembered repository is one Data row whose id the result carries, and
+  forget(data_id=...) removes exactly that repository's graph (SDK-783)
 - add(<project dir>) + cognify() routes the repo down the CODE_REPO route and
   produces the same typed graph
 - forget(everything=True) leaves no datasets or graph state behind
@@ -27,20 +29,29 @@ ingestion because enola writes its .enola/ snapshot into the scanned tree.
 """
 
 import asyncio
+import importlib.metadata
 import json
 import os
 import pathlib
 import shutil
 import tempfile
+from uuid import UUID
 
 import cognee
 from cognee import SearchType
 from cognee.api.v1.datasets.datasets import datasets
+from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.modules.data.methods.get_dataset_processing_status import (
+    get_dataset_processing_status,
+)
 from cognee.modules.retrieval.code_retriever import CODE_NODE_TYPES
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.code_graph import ENOLA_PINNED_VERSION
+
+# The enola version cognee runs is the enola-cli wheel pinned in pyproject.toml;
+# the known answers below are pinned to it.
+ENOLA_PINNED_VERSION = importlib.metadata.version("enola-cli")
 
 logger = get_logger()
 
@@ -52,9 +63,12 @@ COGNIFY_DATASET = "code_graph_e2e_cognify"
 
 # --- Known answers, pinned to the fixture + ENOLA_PINNED_VERSION ------------
 # If enola is bumped and these change, update them deliberately. Last
-# re-verified against enola 0.4.12 (which additionally emits the README as
-# document/section symbols, an `extraction` coverage fact, and the
-# pyproject's declared package as `pkg:pypi/requests`).
+# re-verified against enola 0.4.19: it emits the README as document/section
+# symbols, an `extraction` coverage fact, the pyproject's declared package as
+# `pkg:pypi/requests`, and (since 0.4.14) a module-level `module-edge:` dependency
+# fact per resolved package import. File-level import facts such as
+# `main -> inventory.store` now carry the imported file path as their target and
+# no resolved module id; the resolved `imports` edge lives on the module-edge fact.
 
 EXPECTED_MODULES = {".", "inventory"}
 
@@ -115,9 +129,13 @@ ALLOWED_NODE_TYPES = set(CODE_NODE_TYPES) | {"CodeRepository"}
 # --- Helpers -----------------------------------------------------------------
 
 
-def _copy_fixture(destination_root: str) -> pathlib.Path:
-    """Copy the pinned fixture; enola writes .enola/ into the tree it scans."""
-    target = pathlib.Path(destination_root) / FIXTURE_DIR.name
+def _copy_fixture(destination_root: str, name: str = FIXTURE_DIR.name) -> pathlib.Path:
+    """Copy the pinned fixture; enola writes .enola/ into the tree it scans.
+
+    The directory name is the repository name, which scopes the fact node ids:
+    two copies under the same name would share one set of nodes.
+    """
+    target = pathlib.Path(destination_root) / name
     shutil.copytree(FIXTURE_DIR, target)
     return target
 
@@ -216,9 +234,10 @@ def _assert_typed_code_graph(nodes: dict, edges: list, repo_name: str) -> None:
     )
 
     imports = {(name_of[s], name_of[t]) for s, t, rel, _ in edges if rel == "imports"}
-    # enola resolves this import's target to the top-level package module.
-    assert ("main -> inventory.store", "inventory") in imports, (
-        f"Missing 'imports' edge from 'main -> inventory.store' to module 'inventory'; "
+    # enola resolves the package import from main.py to the top-level module
+    # `inventory` on a module-level dependency fact (see the known-answers note).
+    assert ("module-edge: . -> inventory", "inventory") in imports, (
+        f"Missing 'imports' edge from 'module-edge: . -> inventory' to module 'inventory'; "
         f"imports present: {sorted(imports)}"
     )
 
@@ -362,6 +381,8 @@ async def main():
         )
         assert result.pipeline_run_id, "remember() reported no pipeline_run_id"
         assert (repo_path / ".enola" / "facts.jsonl").is_file(), "enola snapshot was not written"
+        first_data_id = result.items[0].get("id")
+        assert first_data_id, f"remember() returned no data id for the repository: {result.items}"
 
         nodes, edges = await _graph_snapshot()
         _assert_typed_code_graph(nodes, edges, repo_name=repo_path.name)
@@ -391,7 +412,95 @@ async def main():
         assert second_snapshot_id == first_snapshot_id, (
             "Snapshot id changed although the repository did not"
         )
+        assert result.items[0].get("id") == first_data_id, (
+            "Re-remembering the same repository minted a new data id"
+        )
         await _assert_code_search(REMEMBER_DATASET)
+
+        # --- 3b. One Data row per repo; forget(data_id) drops only it (SDK-783)
+        user = await get_default_user()
+        remember_dataset = next(
+            ds for ds in await datasets.list_datasets(user=user) if ds.name == REMEMBER_DATASET
+        )
+
+        # A changed repository refreshes its row in place: same id, new manifest.
+        (repo_data_row,) = await datasets.list_data(remember_dataset.id, user=user)
+        (repo_path / "inventory" / "audit.py").write_text("def audit():\n    return True\n")
+        result = await cognee.remember(
+            str(repo_path), dataset_name=REMEMBER_DATASET, content_type="code"
+        )
+        assert result.status == "completed", result.error
+        assert result.items[0].get("id") == first_data_id, "A changed repo minted a new data id"
+        (refreshed_row,) = await datasets.list_data(remember_dataset.id, user=user)
+        assert refreshed_row.content_hash != repo_data_row.content_hash, (
+            "Re-remembering a changed repository kept its old manifest"
+        )
+        assert (
+            _system_metadata(refreshed_row)["file_count"]
+            == _system_metadata(repo_data_row)["file_count"] + 1
+        )
+        async with set_database_global_context_variables(remember_dataset.id, user.id):
+            nodes, _edges = await _graph_snapshot()
+        assert "inventory/audit.audit" in _named(_by_type(nodes, "CodeSymbol")), (
+            "The changed repository refreshed its row but not its graph"
+        )
+
+        # An unchanged repository whose re-sync fails keeps its stamps: its graph
+        # is still built, so a later cognify() of the dataset must not pick the
+        # row up again (it would rerun enola, or fail when the clone is gone).
+        import cognee.modules.run_custom_pipeline as custom_pipeline_module
+
+        real_run_custom_pipeline = custom_pipeline_module.run_custom_pipeline
+
+        async def _failing_code_graph_run(*_args, **_kwargs):
+            raise RuntimeError("simulated code graph failure")
+
+        custom_pipeline_module.run_custom_pipeline = _failing_code_graph_run
+        try:
+            result = await cognee.remember(
+                str(repo_path),
+                dataset_name=REMEMBER_DATASET,
+                content_type="code",
+                raise_on_error=False,
+            )
+        finally:
+            custom_pipeline_module.run_custom_pipeline = real_run_custom_pipeline
+        assert result.status == "errored", result
+        assert result.items[0].get("id") == first_data_id, result.items
+        processing = await get_dataset_processing_status(remember_dataset.id)
+        assert processing["pending"] == 0, (
+            f"A failed re-sync of an unchanged repository dropped its cognify stamp: {processing}"
+        )
+
+        second_repo_path = _copy_fixture(os.path.join(scratch_root, "second"), name="second_repo")
+        result = await cognee.remember(
+            str(second_repo_path), dataset_name=REMEMBER_DATASET, content_type="code"
+        )
+        assert result.status == "completed", result.error
+        second_data_id = result.items[0].get("id")
+
+        data_rows = await datasets.list_data(remember_dataset.id, user=user)
+        assert {str(row.id) for row in data_rows} == {first_data_id, second_data_id}, (
+            f"Expected one Data row per remembered repository, got {[row.name for row in data_rows]}"
+        )
+        assert all(_system_metadata(row).get("source") == "code_repo" for row in data_rows)
+        # Stamped as cognified (a later cognify() of the dataset has nothing to
+        # redo) and in the code graph pipeline's own per-item slot.
+        for pipeline_name in ("cognify_pipeline", "code_graph_pipeline"):
+            processing = await get_dataset_processing_status(remember_dataset.id, pipeline_name)
+            assert processing["pending"] == 0, (
+                f"Repositories left pending for {pipeline_name}: {processing}"
+            )
+
+        await cognee.forget(data_id=UUID(first_data_id), dataset_id=remember_dataset.id)
+
+        async with set_database_global_context_variables(remember_dataset.id, user.id):
+            nodes, edges = await _graph_snapshot()
+        # Exactly one repository left, fully linked, no dangling edges: the
+        # forgotten repository's nodes and edges are all gone.
+        _assert_typed_code_graph(nodes, edges, repo_name=second_repo_path.name)
+        remaining_rows = await datasets.list_data(remember_dataset.id, user=user)
+        assert [str(row.id) for row in remaining_rows] == [second_data_id]
 
         # --- 4. add(<project dir>) + cognify(): the CODE_REPO route -----------
         # cognify() runs the LLM/embedding connection test unconditionally,
@@ -402,7 +511,6 @@ async def main():
         cognify_repo_path = _copy_fixture(os.path.join(scratch_root, "cognify"))
         await cognee.add(str(cognify_repo_path), dataset_name=COGNIFY_DATASET)
 
-        user = await get_default_user()
         cognify_dataset = next(
             ds for ds in await datasets.list_datasets(user=user) if ds.name == COGNIFY_DATASET
         )
@@ -427,6 +535,17 @@ async def main():
         nodes, edges = await _graph_snapshot()
         _assert_typed_code_graph(nodes, edges, repo_name=cognify_repo_path.name)
         await _assert_code_search(COGNIFY_DATASET)
+
+        # Re-adding the changed project reaches ingestion's content check, so the
+        # next cognify() rebuilds its graph instead of skipping it as done.
+        (cognify_repo_path / "inventory" / "audit.py").write_text("def audit():\n    return True\n")
+        await cognee.add(str(cognify_repo_path), dataset_name=COGNIFY_DATASET)
+        await cognee.cognify(datasets=[COGNIFY_DATASET])
+        async with set_database_global_context_variables(cognify_dataset.id, user.id):
+            nodes, _edges = await _graph_snapshot()
+        assert "inventory/audit.audit" in _named(_by_type(nodes, "CodeSymbol")), (
+            "add() of a changed code project kept its old manifest and graph"
+        )
 
         # --- 5. Teardown leaves nothing behind --------------------------------
         await cognee.forget(everything=True)

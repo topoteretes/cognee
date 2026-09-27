@@ -13,7 +13,6 @@ import uuid
 
 import httpx
 import pytest
-
 from mcp_harness import mcp_client_session, run_mcp_http_container
 
 pytestmark = pytest.mark.deployment
@@ -193,17 +192,19 @@ def test_allowed_hosts_env_permits_configured_host(mcp_image):
     """
     allowed_host = "cognee-mcp.test"
 
-    with run_mcp_http_container(
-        mcp_image,
-        extra_env={"MCP_ALLOWED_HOSTS": f"{allowed_host}:*"},
-    ) as container:
-        with httpx.Client(timeout=10) as client:
-            allowed_status = _post_initialize_status(
-                client, container.mcp_url, f"{allowed_host}:{container.host_port}"
-            )
-            rejected_status = _post_initialize_status(
-                client, container.mcp_url, "still-not-allowed.example.com"
-            )
+    with (
+        run_mcp_http_container(
+            mcp_image,
+            extra_env={"MCP_ALLOWED_HOSTS": f"{allowed_host}:*"},
+        ) as container,
+        httpx.Client(timeout=10) as client,
+    ):
+        allowed_status = _post_initialize_status(
+            client, container.mcp_url, f"{allowed_host}:{container.host_port}"
+        )
+        rejected_status = _post_initialize_status(
+            client, container.mcp_url, "still-not-allowed.example.com"
+        )
 
     assert rejected_status in HOST_REJECTION_CODES, (
         f"Unlisted Host was not rejected (status {rejected_status})"

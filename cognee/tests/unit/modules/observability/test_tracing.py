@@ -1,26 +1,26 @@
 """Unit tests for the cognee tracing / observability module."""
 
 import os
+
 import pytest
 
+from cognee.modules.observability.trace_context import (
+    clear_traces,
+    disable_tracing,
+    enable_tracing,
+    get_all_traces,
+    get_last_trace,
+    is_tracing_enabled,
+)
 from cognee.modules.observability.tracing import (
     CogneeSpanExporter,
     CogneeTrace,
+    get_exporter,
+    get_tracer,
     redact_secrets,
     setup_tracing,
     shutdown_tracing,
-    get_tracer,
-    get_exporter,
 )
-from cognee.modules.observability.trace_context import (
-    enable_tracing,
-    disable_tracing,
-    is_tracing_enabled,
-    get_last_trace,
-    get_all_traces,
-    clear_traces,
-)
-
 
 # ---------------------------------------------------------------------------
 # Redaction tests
@@ -109,9 +109,9 @@ class TestCogneeSpanExporter:
 
     def test_multiple_traces(self):
         try:
+            from opentelemetry import context as otel_context
             from opentelemetry.sdk.trace import TracerProvider
             from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-            from opentelemetry import context as otel_context
         except ImportError:
             pytest.skip("opentelemetry-sdk not installed")
 
@@ -287,7 +287,7 @@ class TestTracingLifecycle:
 
     def test_enable_disable(self):
         try:
-            import opentelemetry  # noqa: F401
+            import opentelemetry
         except ImportError:
             pytest.skip("opentelemetry-sdk not installed")
 
@@ -313,7 +313,7 @@ class TestTracingLifecycle:
 
     def test_full_lifecycle(self):
         try:
-            import opentelemetry  # noqa: F401
+            import opentelemetry
         except ImportError:
             pytest.skip("opentelemetry-sdk not installed")
 
@@ -348,7 +348,7 @@ class TestSetupTracing:
 
     def test_setup_returns_tracer(self):
         try:
-            import opentelemetry  # noqa: F401
+            import opentelemetry
         except ImportError:
             pytest.skip("opentelemetry-sdk not installed")
 
@@ -357,7 +357,7 @@ class TestSetupTracing:
 
     def test_setup_with_console(self):
         try:
-            import opentelemetry  # noqa: F401
+            import opentelemetry
         except ImportError:
             pytest.skip("opentelemetry-sdk not installed")
 
@@ -366,7 +366,7 @@ class TestSetupTracing:
 
     def test_exporter_available_after_setup(self):
         try:
-            import opentelemetry  # noqa: F401
+            import opentelemetry
         except ImportError:
             pytest.skip("opentelemetry-sdk not installed")
 

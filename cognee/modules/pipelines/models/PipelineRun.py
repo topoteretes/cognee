@@ -1,11 +1,15 @@
 import enum
-from uuid import uuid4
 from datetime import datetime, timezone
-from sqlalchemy import Boolean, Column, DateTime, Enum, Index, Integer, JSON, String, UUID
+from uuid import uuid4
+
+from sqlalchemy import JSON, UUID, Boolean, Column, DateTime, Enum, Index, Integer, String
+
 from cognee.infrastructure.databases.relational import Base
 
 
 class PipelineRunStatus(enum.Enum):
+    # No longer written. Kept for rows that already carry it; dropping a value
+    # from a native Postgres enum is not worth a migration.
     DATASET_PROCESSING_INITIATED = "DATASET_PROCESSING_INITIATED"
     DATASET_PROCESSING_STARTED = "DATASET_PROCESSING_STARTED"
     DATASET_PROCESSING_COMPLETED = "DATASET_PROCESSING_COMPLETED"
@@ -22,6 +26,11 @@ class OperationOutcome(str, enum.Enum):
 
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    # A terminal row for a call that ran nothing: improve records it when a
+    # lost lock claim (or an all-skipped run) means no stage executed, so
+    # readers that gate on "succeeded" — the stage-8 improve watermark —
+    # never treat the no-op as work that happened.
+    NOOP = "noop"
 
 
 class PipelineRun(Base):
@@ -38,14 +47,13 @@ class PipelineRun(Base):
             "pipeline_name",
             "created_at",
         ),
+        # Readers of this table page newest-first with id as the tiebreaker
+        # (ORDER BY created_at DESC, id DESC) or range-scan a created_at window,
+        # so the two columns are indexed together. Composite, not created_at
+        # alone: without id, OFFSET paging re-serves rows sharing a timestamp.
+        # Mirrored by migration c4e8a1f6b3d7 for databases created before it.
+        Index("ix_pipeline_runs_created_at_id", "created_at", "id"),
     )
-
-    # Readers of this table page newest-first with id as the tiebreaker
-    # (ORDER BY created_at DESC, id DESC) or range-scan a created_at window,
-    # so the two columns are indexed together. Composite, not created_at
-    # alone: without id, OFFSET paging re-serves rows sharing a timestamp.
-    # Mirrored by migration c4e8a1f6b3d7 for databases created before it.
-    __table_args__ = (Index("ix_pipeline_runs_created_at_id", "created_at", "id"),)
 
     id = Column(UUID, primary_key=True, default=uuid4)
 
@@ -68,7 +76,7 @@ class PipelineRun(Base):
     operation_name = Column(String, index=True)
     started_at = Column(DateTime(timezone=True))
     ended_at = Column(DateTime(timezone=True))
-    outcome = Column(String, index=True)  # OperationOutcome values: "succeeded" / "failed"
+    outcome = Column(String, index=True)  # OperationOutcome values: "succeeded" / "failed" / "noop"
     error_class = Column(String)  # exception class name, e.g. "DatasetNotFoundError"
     tokens_in = Column(Integer)  # NULL = not measured; 0 = measured zero
     tokens_out = Column(Integer)

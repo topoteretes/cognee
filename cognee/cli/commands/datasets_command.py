@@ -3,10 +3,10 @@ import asyncio
 import json
 from uuid import UUID
 
-from cognee.cli.reference import SupportsCliCommand
-from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
+from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.exceptions import CliCommandException
+from cognee.cli.reference import SupportsCliCommand
 
 
 class DatasetsCommand(SupportsCliCommand):
@@ -88,15 +88,15 @@ Subcommands:
             fmt.echo(f"{'ID':<38} {'Name':<30} {'Created'}")
             fmt.echo("-" * 90)
             for d in ds:
-                fmt.echo(f"{str(d.id):<38} {d.name:<30} {d.created_at}")
+                fmt.echo(f"{d.id!s:<38} {d.name:<30} {d.created_at}")
 
         asyncio.run(run())
 
     def _create(self, args: argparse.Namespace) -> None:
         async def run():
             from cognee.cli.user_resolution import resolve_cli_user
-            from cognee.modules.data.methods import create_dataset, get_datasets_by_name
             from cognee.infrastructure.databases.relational import get_relational_engine
+            from cognee.modules.data.methods import create_dataset, get_datasets_by_name
             from cognee.modules.users.permissions.methods import give_permission_on_dataset
 
             user = await resolve_cli_user(getattr(args, "user_id", None))
@@ -129,7 +129,7 @@ Subcommands:
             fmt.echo(f"{'ID':<38} {'Name':<30} {'Type':<15} {'Created'}")
             fmt.echo("-" * 110)
             for d in items:
-                fmt.echo(f"{str(d.id):<38} {d.name:<30} {d.mime_type:<15} {d.created_at}")
+                fmt.echo(f"{d.id!s:<38} {d.name:<30} {d.mime_type:<15} {d.created_at}")
 
         asyncio.run(run())
 
@@ -177,10 +177,11 @@ Subcommands:
 
     def _delete(self, args: argparse.Namespace) -> None:
         dataset_id = UUID(args.dataset_id)
-        if not args.force:
-            if not fmt.confirm(f"Delete dataset {dataset_id}? This cannot be undone"):
-                fmt.echo("Cancelled.")
-                return
+        if not args.force and not fmt.confirm(
+            f"Delete dataset {dataset_id}? This cannot be undone"
+        ):
+            fmt.echo("Cancelled.")
+            return
 
         async def run():
             import cognee

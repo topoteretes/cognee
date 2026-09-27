@@ -1,0 +1,149 @@
+{
+  "Audi is known for its modern designs": {
+    "knowledge_graph": {
+      "summary": "German car manufacturers: Audi (modern design, Quattro), BMW (performance), Mercedes-Benz (luxury and safety).",
+      "description": "German car manufacturers: Audi (modern design, Quattro), BMW (performance), Mercedes-Benz (luxury and safety).",
+      "nodes": [
+        {
+          "id": "audi",
+          "name": "Audi",
+          "type": "CarManufacturer",
+          "description": "German brand known for modern design, precision engineering and the Quattro all-wheel-drive system.",
+          "label": "CarManufacturer"
+        },
+        {
+          "id": "bmw",
+          "name": "BMW",
+          "type": "CarManufacturer",
+          "description": "Bayerische Motoren Werke, known for performance and driving pleasure.",
+          "label": "CarManufacturer"
+        },
+        {
+          "id": "mercedes_benz",
+          "name": "Mercedes-Benz",
+          "type": "CarManufacturer",
+          "description": "German brand synonymous with luxury, quality and innovative safety features.",
+          "label": "CarManufacturer"
+        },
+        {
+          "id": "quattro",
+          "name": "Quattro all-wheel-drive",
+          "type": "Technology",
+          "description": "Audi's all-wheel-drive system.",
+          "label": "Technology"
+        },
+        {
+          "id": "germany",
+          "name": "Germany",
+          "type": "Country",
+          "description": "Home country of Audi, BMW and Mercedes-Benz.",
+          "label": "Country"
+        }
+      ],
+      "edges": [
+        {
+          "source_node_id": "audi",
+          "target_node_id": "quattro",
+          "relationship_name": "known_for",
+          "description": "Audi is known for the Quattro all-wheel-drive system."
+        },
+        {
+          "source_node_id": "audi",
+          "target_node_id": "germany",
+          "relationship_name": "based_in",
+          "description": "Audi is a German car manufacturer."
+        },
+        {
+          "source_node_id": "bmw",
+          "target_node_id": "germany",
+          "relationship_name": "based_in",
+          "description": "BMW is a German car manufacturer."
+        },
+        {
+          "source_node_id": "mercedes_benz",
+          "target_node_id": "germany",
+          "relationship_name": "based_in",
+          "description": "Mercedes-Benz is a German car manufacturer."
+        }
+      ]
+    },
+    "summary": {
+      "summary": "German car manufacturers: Audi (modern design, Quattro), BMW (performance), Mercedes-Benz (luxury and safety).",
+      "description": "German car manufacturers: Audi (modern design, Quattro), BMW (performance), Mercedes-Benz (luxury and safety)."
+    }
+  },
+  "Apple is renowned for its innovative consumer electronics": {
+    "knowledge_graph": {
+      "summary": "US technology companies: Apple (iPhone, Mac), Google (search, Android), Microsoft (Windows).",
+      "description": "US technology companies: Apple (iPhone, Mac), Google (search, Android), Microsoft (Windows).",
+      "nodes": [
+        {
+          "id": "apple",
+          "name": "Apple",
+          "type": "TechnologyCompany",
+          "description": "US company known for the iPhone, iPad, Mac and Apple Watch.",
+          "label": "TechnologyCompany"
+        },
+        {
+          "id": "google",
+          "name": "Google",
+          "type": "TechnologyCompany",
+          "description": "US company founded in 1998; search, advertising, cloud and Android.",
+          "label": "TechnologyCompany"
+        },
+        {
+          "id": "microsoft",
+          "name": "Microsoft",
+          "type": "TechnologyCompany",
+          "description": "US software company known for Windows and Office.",
+          "label": "TechnologyCompany"
+        },
+        {
+          "id": "iphone",
+          "name": "iPhone",
+          "type": "Product",
+          "description": "Apple's smartphone.",
+          "label": "Product"
+        },
+        {
+          "id": "android",
+          "name": "Android",
+          "type": "Product",
+          "description": "Google's mobile operating system.",
+          "label": "Product"
+        },
+        {
+          "id": "windows",
+          "name": "Windows",
+          "type": "Product",
+          "description": "Microsoft's operating system.",
+          "label": "Product"
+        }
+      ],
+      "edges": [
+        {
+          "source_node_id": "apple",
+          "target_node_id": "iphone",
+          "relationship_name": "produces",
+          "description": "Apple produces the iPhone."
+        },
+        {
+          "source_node_id": "google",
+          "target_node_id": "android",
+          "relationship_name": "produces",
+          "description": "Google produces the Android mobile operating system."
+        },
+        {
+          "source_node_id": "microsoft",
+          "target_node_id": "windows",
+          "relationship_name": "produces",
+          "description": "Microsoft produces the Windows operating system."
+        }
+      ]
+    },
+    "summary": {
+      "summary": "US technology companies: Apple (iPhone, Mac), Google (search, Android), Microsoft (Windows).",
+      "description": "US technology companies: Apple (iPhone, Mac), Google (search, Android), Microsoft (Windows)."
+    }
+  }
+}

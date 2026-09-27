@@ -15,13 +15,13 @@ blocking path raises — is a bug here, not a quirk of streaming.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 import litellm
 
-from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 from cognee.infrastructure.llm.streaming.token_sink import TokenSink
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 
 logger = get_logger("stream_completion")
 
@@ -32,9 +32,9 @@ async def stream_text_completion(
     model: str,
     system_prompt: str,
     text_input: str,
-    api_key: Optional[str] = None,
-    endpoint: Optional[str] = None,
-    api_version: Optional[str] = None,
+    api_key: str | None = None,
+    endpoint: str | None = None,
+    api_version: str | None = None,
     adapter_name: str = "LLM",
     **merged_kwargs: Any,
 ) -> str:
@@ -112,7 +112,7 @@ async def stream_text_completion(
             if aclose is not None:
                 try:
                     await aclose()
-                except Exception:  # noqa: BLE001 - cleanup must not mask the real error
+                except Exception:  # cleanup must not mask the real error
                     logger.debug("Failed to close LLM stream", exc_info=True)
 
     # An empty result is returned, never raised. The blocking path is

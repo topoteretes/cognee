@@ -5,7 +5,7 @@ that survived so it never references a dropped chunk. Keys the retriever carries
 module does not own are taken from the primary result unchanged.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 from cognee.modules.retrieval.hybrid.results import empty_hybrid_result, result_id
 from cognee.modules.retrieval.utils.merge_results import conversational_reserve, merge_ranked
@@ -14,8 +14,8 @@ _DERIVED_KEYS = frozenset(empty_hybrid_result())
 
 
 def merge_hybrid_results(
-    primary: Optional[dict],
-    secondary: Optional[dict],
+    primary: dict | None,
+    secondary: dict | None,
     *,
     chunks_limit: int,
     entities_limit: int,

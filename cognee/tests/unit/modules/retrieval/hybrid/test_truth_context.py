@@ -6,7 +6,6 @@ from cognee.context_global_variables import current_dataset_id
 from cognee.modules.retrieval.hybrid.truth import TruthContext, build_truth_context
 from cognee.modules.truth_subspace.models import TruthCentroidPayload
 
-
 QUERY_VECTOR = [1.0, 0.0, 0.0]
 
 

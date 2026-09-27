@@ -19,7 +19,7 @@ empty store; the constant ``'{}'`` default keeps ``ADD COLUMN`` metadata-only
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from sqlalchemy import text
 

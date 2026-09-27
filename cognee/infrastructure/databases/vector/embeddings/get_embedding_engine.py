@@ -1,9 +1,14 @@
-from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_context_config
+from functools import lru_cache
+
+from cognee.infrastructure.databases.vector.embeddings.config import (
+    get_embedding_context_config,
+    resolve_embedding_defaults,
+)
 from cognee.infrastructure.llm.config import (
     get_llm_context_config,
 )
+
 from .EmbeddingEngine import EmbeddingEngine
-from functools import lru_cache
 
 
 def get_embedding_engine() -> EmbeddingEngine:
@@ -22,11 +27,12 @@ def get_embedding_engine() -> EmbeddingEngine:
     """
     config = get_embedding_context_config()
     llm_config = get_llm_context_config()
+    provider, model, dimensions = resolve_embedding_defaults(config, llm_config)
     # Embedding engine has to be a singleton based on configuration to ensure too many requests won't be sent to HuggingFace
     return create_embedding_engine(
-        config.embedding_provider,
-        config.embedding_model,
-        config.embedding_dimensions,
+        provider,
+        model,
+        dimensions,
         config.embedding_max_completion_tokens,
         config.embedding_endpoint,
         config.embedding_api_key,

@@ -3,10 +3,10 @@ import os
 import pytest
 
 import cognee
-from cognee.modules.users.methods import get_default_user
-from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
-from cognee.shared.logging_utils import setup_logging, ERROR
 from cognee.api.v1.search import SearchType
+from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
+from cognee.modules.users.methods import get_default_user
+from cognee.shared.logging_utils import ERROR, setup_logging
 
 
 class LanceDBTestDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):

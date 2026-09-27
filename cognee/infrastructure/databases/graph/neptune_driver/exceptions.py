@@ -3,13 +3,14 @@
 This module defines custom exceptions for Neptune Analytics operations.
 """
 
+from fastapi import status
+
 from cognee.exceptions import (
+    CogneeConfigurationError,
     CogneeSystemError,
     CogneeTransientError,
     CogneeValidationError,
-    CogneeConfigurationError,
 )
-from fastapi import status
 
 
 class NeptuneAnalyticsError(CogneeSystemError):

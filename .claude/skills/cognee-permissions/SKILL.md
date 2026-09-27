@@ -148,7 +148,7 @@ than query it.
 | `POST/DELETE /permissions/users/{user_id}/roles` | add/remove a user to/from a role |
 | `POST /permissions/users/{user_id}/tenants` | add a user to a tenant |
 | `GET /permissions/tenants/{tenant_id}/roles/{role_id}/users` | members of a role (self-visible to members) |
-| `GET /permissions/tenants/{tenant_id}/roles/users/{user_id}` | a user's roles |
+| `GET /permissions/tenants/{tenant_id}/roles/users/{user_id}` | a user's roles in that tenant (404 if not a member) |
 | `GET /permissions/tenants/{tenant_id}/users` | users in a tenant |
 | `GET /permissions/tenants/me` | the caller's tenants |
 

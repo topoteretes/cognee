@@ -14,10 +14,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from cognee.modules.preflight import config_preflight
 from cognee.modules.preflight import (
     ProviderConfigMismatchError,
     check_provider_config,
+    config_preflight,
     reset_preflight_state,
     validate_provider_config,
 )
@@ -64,6 +64,15 @@ class TestOnlyLLMConfiguredTrap:
         # default OpenAI embedder by design.
         assert check_provider_config(llm(provider="openai"), embeddings()) == []
 
+    def test_non_openai_provider_without_a_key_is_fine(self):
+        # No key of any kind: embeddings resolve to the local fastembed default
+        # instead of OpenAI, so nothing is sent to the OpenAI endpoint and there
+        # is no key to mis-send. (The LLM-free pipeline it runs needs no LLM.)
+        problems = check_provider_config(
+            llm(provider="anthropic", api_key=None), embeddings(), needs_llm=False
+        )
+        assert problems == []
+
     def test_non_openai_llm_with_configured_embeddings_is_fine(self):
         problems = check_provider_config(
             llm(provider="anthropic"),
@@ -93,6 +102,16 @@ class TestOnlyEmbeddingsConfiguredTrap:
         )
         assert len(problems) == 1
         assert "LLM_API_KEY" in problems[0]
+
+    def test_missing_llm_key_is_fine_when_the_pipeline_needs_no_llm(self):
+        # needs_llm=False (e.g. the gliner extractor with contradiction
+        # detection off): ingestion needs embeddings, not an LLM.
+        problems = check_provider_config(
+            llm(provider="openai", api_key=None),
+            embeddings(provider="fastembed", model="BAAI/bge-small-en-v1.5"),
+            needs_llm=False,
+        )
+        assert problems == []
 
     def test_whitespace_llm_key_counts_as_missing(self):
         problems = check_provider_config(
@@ -133,10 +152,62 @@ class TestFullyConfiguredAndUnconfigured:
         assert problems == []
 
     def test_nothing_configured_is_not_a_preflight_problem(self):
-        # No key at all on pure defaults is the existing LLMAPIKeyNotSetError
-        # path — the preflight only owns the *inconsistency* traps.
+        # No key at all on pure defaults is keyless ingestion (local GLiNER +
+        # fastembed) — the preflight only owns the *inconsistency* traps.
         problems = check_provider_config(llm(api_key=None), embeddings())
         assert problems == []
+
+
+class TestLlmAvailable:
+    def test_key_bearing_provider_needs_a_key(self):
+        from cognee.modules.preflight import llm_available
+
+        assert llm_available(llm(provider="openai", api_key=None)) is False
+        assert llm_available(llm(provider="openai", api_key="   ")) is False
+        assert llm_available(llm(provider="openai", api_key="sk-test")) is True
+
+    def test_keyless_providers_are_available_without_a_key(self):
+        from cognee.modules.preflight import llm_available
+
+        assert llm_available(llm(provider="bedrock", api_key=None)) is True
+        assert llm_available(llm(provider="llama_cpp", api_key=None)) is True
+        assert llm_available(llm(provider="azure", api_key=None, managed_identity=True)) is True
+
+    @pytest.mark.parametrize("session, expected", [(object(), True), (None, False)])
+    def test_mcp_sampling_requires_a_live_session(self, monkeypatch, session, expected):
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.mcp_sampling import (
+            session_context,
+        )
+        from cognee.modules.preflight import llm_available
+
+        monkeypatch.setattr(session_context, "get_sampling_session", lambda: session)
+
+        assert llm_available(llm(provider="mcp-sampling", api_key=None)) is expected
+
+
+class TestKeylessLocalDefaultsApply:
+    @pytest.fixture(autouse=True)
+    def preflight_enabled(self, monkeypatch):
+        for var in ("COGNEE_SKIP_PREFLIGHT", "COGNEE_SKIP_CONNECTION_TEST", "MOCK_EMBEDDING"):
+            monkeypatch.delenv(var, raising=False)
+
+    def test_no_key_means_local_models(self):
+        from cognee.modules.preflight import keyless_local_defaults_apply
+
+        assert keyless_local_defaults_apply(llm(api_key=None)) is True
+        assert keyless_local_defaults_apply(llm(api_key="sk-test")) is False
+        assert keyless_local_defaults_apply(llm(provider="bedrock", api_key=None)) is False
+
+    @pytest.mark.parametrize(
+        "var", ["COGNEE_SKIP_PREFLIGHT", "COGNEE_SKIP_CONNECTION_TEST", "MOCK_EMBEDDING"]
+    )
+    def test_disabled_preflight_never_reroutes(self, monkeypatch, var):
+        # The e2e suites run a mocked LLM with no key and MOCK_EMBEDDING=true;
+        # they must keep the LLM task list and the configured embedder.
+        from cognee.modules.preflight import keyless_local_defaults_apply
+
+        monkeypatch.setenv(var, "true")
+        assert keyless_local_defaults_apply(llm(api_key=None)) is False
 
 
 class TestValidateProviderConfig:
@@ -170,6 +241,22 @@ class TestValidateProviderConfig:
         validate_provider_config()
         validate_provider_config()
         assert len(calls) == 1
+
+    def test_llm_free_pass_does_not_cover_a_later_llm_requiring_call(self, monkeypatch):
+        monkeypatch.delenv("COGNEE_SKIP_PREFLIGHT", raising=False)
+        monkeypatch.delenv("COGNEE_SKIP_CONNECTION_TEST", raising=False)
+        monkeypatch.delenv("MOCK_EMBEDDING", raising=False)
+        calls = []
+        monkeypatch.setattr(
+            config_preflight,
+            "check_provider_config",
+            lambda *a, **k: calls.append(k["needs_llm"]) or [],
+        )
+        validate_provider_config(needs_llm=False)
+        validate_provider_config(needs_llm=True)  # stricter shape: must re-run
+        validate_provider_config(needs_llm=True)
+        validate_provider_config(needs_llm=False)  # covered by the True pass
+        assert calls == [False, True]
 
     @pytest.mark.parametrize(
         "env_var", ["COGNEE_SKIP_PREFLIGHT", "COGNEE_SKIP_CONNECTION_TEST", "MOCK_EMBEDDING"]

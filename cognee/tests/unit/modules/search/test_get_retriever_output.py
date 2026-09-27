@@ -8,11 +8,10 @@ import pytest
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.session.session_manager import SessionTurnPreparation
 from cognee.modules.engine.models.node_set import NodeSet
-from cognee.modules.retrieval.context_preview import ContextPreview
 from cognee.modules.retrieval.session_aware_completion import count_retrieved_objects
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
 from cognee.modules.search.models.EvidenceReference import EvidenceReference
-from cognee.modules.search.types import ContextFormat, SearchType
+from cognee.modules.search.types import SearchType
 
 # Resolve the module object explicitly. The package __init__ re-exports the
 # `get_retriever_output` function under the same name as this submodule, so a
@@ -280,107 +279,15 @@ def _only_context_patches(retriever):
     )
 
 
-@pytest.mark.asyncio
-async def test_only_context_default_format_builds_no_preview():
-    """Existing only_context callers must pay nothing and see nothing new."""
-    retriever = _OnlyContextRetriever()
-    graph_patch, retriever_patch = _only_context_patches(retriever)
-    with (
-        graph_patch,
-        retriever_patch,
-        patch.object(
-            get_retriever_output_module,
-            "build_context_preview",
-            new_callable=AsyncMock,
-        ) as preview,
-    ):
-        result = await get_retriever_output(SearchType.GRAPH_COMPLETION, "why?", only_context=True)
-
-    preview.assert_not_awaited()
-    assert result.context == "node1 -- rel -- node2"
-    assert result.result == "node1 -- rel -- node2"
-    assert result.session_context is None
-    assert result.user_prompt is None
+# The (user_prompt, system_prompt) pair the builder hands back.
+FULL_PROMPT = ("The question is: `why?` ... node1 -- rel -- node2", "history\nTASK:answer")
 
 
 @pytest.mark.asyncio
-async def test_only_context_prompt_format_populates_the_envelope():
-    retriever = _OnlyContextRetriever()
-    graph_patch, retriever_patch = _only_context_patches(retriever)
-    with (
-        graph_patch,
-        retriever_patch,
-        patch.object(
-            get_retriever_output_module,
-            "build_context_preview",
-            new_callable=AsyncMock,
-            return_value=ContextPreview(
-                session_context="## Active session guidance\n- be terse",
-                user_prompt="The question is: `why?`",
-                system_prompt="history\nTASK:answer",
-            ),
-        ) as preview,
-    ):
-        result = await get_retriever_output(
-            SearchType.GRAPH_COMPLETION,
-            "why?",
-            only_context=True,
-            context_format=ContextFormat.PROMPT,
-        )
-
-    assert preview.await_args.kwargs == {
-        "query": "why?",
-        "context": "node1 -- rel -- node2",
-        "session_id": None,
-        "shared_history": None,
-    }
-    assert result.question == "why?"
-    assert result.session_context == "## Active session guidance\n- be terse"
-    assert result.user_prompt == "The question is: `why?`"
-    assert result.system_prompt == "history\nTASK:answer"
-    assert result.result["question"] == "why?"
-    assert result.result["context"] == "node1 -- rel -- node2"
-
-
-@pytest.mark.asyncio
-async def test_prompt_format_is_ignored_when_only_context_is_off():
-    """A normal completion already sends the prompt; there is nothing to preview."""
-    retriever = _DeterministicRetriever()
-    graph_patch, retriever_patch = _only_context_patches(retriever)
-    with (
-        graph_patch,
-        retriever_patch,
-        patch.object(
-            get_retriever_output_module,
-            "build_context_preview",
-            new_callable=AsyncMock,
-        ) as preview,
-    ):
-        result = await get_retriever_output(
-            SearchType.CODE, "Checkout", context_format=ContextFormat.PROMPT
-        )
-
-    preview.assert_not_awaited()
-    assert result.completion == {"operation": "query_facts", "facts": []}
-
-
-@pytest.mark.asyncio
-async def test_unknown_context_format_is_rejected_before_retrieval():
-    """One shared rule at every entry point: the same error, and no wasted retrieval."""
-    retriever = _OnlyContextRetriever()
-    graph_patch, retriever_patch = _only_context_patches(retriever)
-    with graph_patch, retriever_patch as factory:
-        with pytest.raises(CogneeValidationError) as excinfo:
-            await get_retriever_output(
-                SearchType.GRAPH_COMPLETION, "why?", only_context=True, context_format="bogus"
-            )
-
-    assert excinfo.value.name == "InvalidContextFormatError"
-    factory.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_prompt_preview_receives_the_fan_outs_shared_history():
+async def test_only_context_result_is_the_full_llm_input_built_from_the_retrieved_context():
+    """The builder gets the retriever, the raw query, the context it produced, and the
+    caller's session_id plus the fan-out's shared history; its string becomes `result`
+    while the bare context stays addressable on `context`."""
     retriever = _OnlyContextRetriever()
     graph_patch, retriever_patch = _only_context_patches(retriever)
     shared = object()
@@ -389,22 +296,76 @@ async def test_prompt_preview_receives_the_fan_outs_shared_history():
         retriever_patch,
         patch.object(
             get_retriever_output_module,
-            "build_context_preview",
+            "build_only_context_prompt",
             new_callable=AsyncMock,
-            return_value=ContextPreview(),
-        ) as preview,
+            return_value=FULL_PROMPT,
+        ) as builder,
     ):
-        await get_retriever_output(
+        result = await get_retriever_output(
             SearchType.GRAPH_COMPLETION,
             "why?",
             only_context=True,
-            context_format="prompt",
             session_id="s1",
             shared_history=shared,
         )
 
-    assert preview.await_args.kwargs["session_id"] == "s1"
-    assert preview.await_args.kwargs["shared_history"] is shared
+    assert builder.await_args.args == (retriever,)
+    assert builder.await_args.kwargs == {
+        "query": "why?",
+        "context": "node1 -- rel -- node2",
+        "session_id": "s1",
+        "shared_history": shared,
+    }
+    assert result.only_context is True
+    assert result.completion is None
+    assert result.context == "node1 -- rel -- node2"
+    assert result.user_prompt == FULL_PROMPT[0]
+    assert result.system_prompt == FULL_PROMPT[1]
+    assert result.result == FULL_PROMPT[0]
+
+
+@pytest.mark.asyncio
+async def test_only_context_falls_back_to_the_bare_context_when_no_prompt_is_built():
+    """Non-generative retrievers, opt-outs and empty retrievals: the builder says None."""
+    retriever = _OnlyContextRetriever()
+    graph_patch, retriever_patch = _only_context_patches(retriever)
+    with (
+        graph_patch,
+        retriever_patch,
+        patch.object(
+            get_retriever_output_module,
+            "build_only_context_prompt",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+    ):
+        result = await get_retriever_output(SearchType.GRAPH_COMPLETION, "why?", only_context=True)
+
+    assert result.user_prompt is None
+    assert result.system_prompt is None
+    assert result.result == "node1 -- rel -- node2"
+
+
+@pytest.mark.asyncio
+async def test_no_prompt_is_built_when_only_context_is_off():
+    """A real completion already sends the prompt; there is nothing to render."""
+    retriever = _DeterministicRetriever()
+    graph_patch, retriever_patch = _only_context_patches(retriever)
+    with (
+        graph_patch,
+        retriever_patch,
+        patch.object(
+            get_retriever_output_module,
+            "build_only_context_prompt",
+            new_callable=AsyncMock,
+        ) as builder,
+    ):
+        result = await get_retriever_output(SearchType.CODE, "Checkout")
+
+    builder.assert_not_awaited()
+    assert result.user_prompt is None
+    assert result.system_prompt is None
+    assert result.completion == {"operation": "query_facts", "facts": []}
 
 
 @pytest.mark.asyncio
@@ -731,9 +692,8 @@ async def test_nodeset_scope_stays_on_hybrid_and_forwards_node_name():
 async def test_hybrid_rejects_graph_only_knobs(kwargs, match):
     retriever = _DeterministicRetriever()
     graph, factory, session = _factory_and_session_patches(retriever)
-    with graph, factory as factory_mock, session:
-        with pytest.raises(CogneeValidationError, match=match):
-            await get_retriever_output(SearchType.HYBRID_COMPLETION, "q", **kwargs)
+    with graph, factory as factory_mock, session, pytest.raises(CogneeValidationError, match=match):
+        await get_retriever_output(SearchType.HYBRID_COMPLETION, "q", **kwargs)
 
     factory_mock.assert_not_awaited()
 
