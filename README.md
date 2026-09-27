@@ -42,7 +42,7 @@
   <p>Cognee is a free open-source AI memory platform that gives AI agents persistent long-term memory across sessions. Turn documents, code, and conversations into a self-hosted knowledge graph your agents can search and reuse.</p>
 
   <p><strong>Runs locally for free — no API key required.</strong><br />
-  Add a local or hosted LLM when you want generated answers.</p>
+  We rely on small models.</p>
 
   <p align="center">
   🌐 This README is also available in:<br />
