@@ -165,17 +165,13 @@ class TestCliMain:
         assert result == 1
         # The friendly console message is still printed.
         mock_fmt_error.assert_any_call("boom from dispatch")
-        # The full exception is now logged with exc_info=True. cognee uses
-        # structlog, which renders exc_info=True as the complete traceback in the
-        # log, so the real root cause survives even when --debug is off.
-        mock_logger.error.assert_called_once()
-        call_args, call_kwargs = mock_logger.error.call_args
-        assert call_kwargs.get("exc_info") is True, (
-            "dispatch failure must be logged with exc_info=True so the full traceback is captured"
-        )
-        # The logged exception is the one dispatch raised.
-        assert len(call_args) >= 2 and isinstance(call_args[1], RuntimeError)
-        assert "boom from dispatch" in str(call_args[1])
+        # The full exception is now logged via logger.exception(), which cognee's
+        # structlog setup renders as the complete traceback in the log, so the
+        # real root cause survives even when --debug is off.
+        # logger.exception() attaches the active exception (the RuntimeError
+        # dispatch raised) as the traceback, so the message itself stays short.
+        mock_logger.exception.assert_called_once()
+        assert "Delegated command failed" in mock_logger.exception.call_args.args[0]
 
     def test_version_argument(self):
         """Test that version argument is properly configured"""

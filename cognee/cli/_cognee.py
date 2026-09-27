@@ -382,7 +382,7 @@ def main() -> int:
             # exception (type + traceback) so delegated-command failures stay
             # diagnosable in CI/production even when --debug is off.
             # See issue #3335.
-            logger.error("Delegated command failed: %s", ex, exc_info=True)
+            logger.exception("Delegated command failed")
             fmt.error(str(ex))
             if debug.is_debug_enabled():
                 raise
