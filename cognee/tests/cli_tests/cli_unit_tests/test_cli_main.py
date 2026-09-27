@@ -136,6 +136,43 @@ class TestCliMain:
         with pytest.raises(ValueError, match="Inner error"):
             main()
 
+    def test_main_api_dispatch_failure_logs_traceback(self):
+        """A delegated-command failure logs the full traceback even without --debug.
+
+        Regression test for #3335: the CLI used to print only str(ex) and drop the
+        exception type and traceback unless debug mode was on, which made failures
+        in CI/production hard to trace to the real cause. The friendly console
+        message and exit code are unchanged.
+        """
+        with (
+            patch("cognee.cli._cognee.logger") as mock_logger,
+            patch("cognee.cli.echo.error") as mock_fmt_error,
+            patch("cognee.cli.debug.is_debug_enabled", return_value=False),
+            patch("cognee.cli.api_dispatch.can_dispatch", return_value=True),
+            patch("cognee.cli.api_dispatch.dispatch") as mock_dispatch,
+            patch("cognee.cli._cognee._create_parser") as mock_create_parser,
+        ):
+            mock_dispatch.side_effect = RuntimeError("boom from dispatch")
+            mock_parser = MagicMock()
+            mock_parser.parse_args.return_value = argparse.Namespace(
+                command="add", api_url="http://localhost:8000"
+            )
+            mock_create_parser.return_value = (mock_parser, {})
+
+            result = main()
+
+        # Exit code is unchanged.
+        assert result == 1
+        # The friendly console message is still printed.
+        mock_fmt_error.assert_any_call("boom from dispatch")
+        # The full exception is now logged via logger.exception(), which cognee's
+        # structlog setup renders as the complete traceback in the log, so the
+        # real root cause survives even when --debug is off.
+        # logger.exception() attaches the active exception (the RuntimeError
+        # dispatch raised) as the traceback, so the message itself stays short.
+        mock_logger.exception.assert_called_once()
+        assert "Delegated command failed" in mock_logger.exception.call_args.args[0]
+
     def test_version_argument(self):
         """Test that version argument is properly configured"""
         parser, _ = _create_parser()
