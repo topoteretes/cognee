@@ -18,22 +18,71 @@ import duckdb
 
 THEMES = {
     "docker / deployment": ["docker", "deploy", "kubernetes", "helm", "container"],
-    "local / self-hosted setup": ["local", "self-host", "install", "setup", "quick start", "getting started"],
-    "llm / model config": ["llm", "ollama", "openai", "model", "api key", "gemini", "anthropic", "azure", "embedding"],
+    "local / self-hosted setup": [
+        "local",
+        "self-host",
+        "install",
+        "setup",
+        "quick start",
+        "getting started",
+    ],
+    "llm / model config": [
+        "llm",
+        "ollama",
+        "openai",
+        "model",
+        "api key",
+        "gemini",
+        "anthropic",
+        "azure",
+        "embedding",
+    ],
     "search / retrieval": ["search", "retriev", "query", "rag"],
     "datasets / data mgmt": ["dataset", "delete", "prune", "forget"],
     "graph / ontology": ["graph", "ontolog", "entity", "entities", "node", "edge"],
-    "backend databases": ["neo4j", "postgres", "pgvector", "qdrant", "lancedb", "kuzu", "database", "sqlite"],
+    "backend databases": [
+        "neo4j",
+        "postgres",
+        "pgvector",
+        "qdrant",
+        "lancedb",
+        "kuzu",
+        "database",
+        "sqlite",
+    ],
     "mcp / agents": ["mcp", "claude", "agent", "cursor", "copilot"],
     "memory / sessions": ["memory", "remember", "session", "recall"],
     "pipelines / ingestion": ["cognify", "pipeline", "ingest", "chunk", "upload"],
-    "errors / not working": ["error", "fail", "not work", "stuck", "exception", "traceback", "401", "404", "422", "429", "500"],
+    "errors / not working": [
+        "error",
+        "fail",
+        "not work",
+        "stuck",
+        "exception",
+        "traceback",
+        "401",
+        "404",
+        "422",
+        "429",
+        "500",
+    ],
     "pricing / cloud / auth": ["pricing", "cost", "cloud", "token", "auth", "login"],
 }
 
 ERROR_MARKERS = [
-    "error", "fail", "not work", "stuck", "doesn't", "problem",
-    "traceback", "exception", "401", "404", "422", "429", "500",
+    "error",
+    "fail",
+    "not work",
+    "stuck",
+    "doesn't",
+    "problem",
+    "traceback",
+    "exception",
+    "401",
+    "404",
+    "422",
+    "429",
+    "500",
 ]
 
 
@@ -57,9 +106,7 @@ def fetch_docs_digest(con, since):
         for theme, keywords in THEMES.items()
     }
 
-    error_reports = [
-        t[:400] for t in titles if any(m in t.lower() for m in ERROR_MARKERS)
-    ][:60]
+    error_reports = [t[:400] for t in titles if any(m in t.lower() for m in ERROR_MARKERS)][:60]
 
     return total, theme_counts, error_reports
 
@@ -84,7 +131,11 @@ def fetch_open_linear_titles():
         with urllib.request.urlopen(req, timeout=30) as resp:
             nodes = json.load(resp)["data"]["issues"]["nodes"]
         return [f"{n['identifier']}: {n['title']}" for n in nodes]
-    except Exception as e:  # noqa: BLE001 - best effort, digest still useful without it
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        # Best effort: the digest is still useful without the dedup list.
+        # OSError covers urllib.error.URLError/HTTPError and socket timeouts;
+        # ValueError covers malformed JSON; KeyError/TypeError an unexpected
+        # (e.g. GraphQL "errors"-only) response shape.
         print(f"warning: could not fetch Linear issues: {e}", file=sys.stderr)
         return None
 
