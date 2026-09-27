@@ -7,10 +7,12 @@ from traceback import format_exc
 import uvicorn
 from fastapi import FastAPI, Request, status
 from fastapi.encoders import jsonable_encoder
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # Registers the GitHub and Linear integrations with the integrations registry
 # as import side effects. Slack registers via its router imports above; GitHub
@@ -66,7 +68,10 @@ from cognee.exceptions import CogneeApiError, remediation_for
 from cognee.modules.users.authentication.redact_websocket_query_secrets import (
     install_websocket_query_param_redaction,
 )
-from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
+from cognee.modules.users.methods.get_authenticated_user import (
+    _AUTH_REASON,
+    REQUIRE_AUTHENTICATION,
+)
 from cognee.shared.logging_utils import get_logger, setup_logging
 
 # Ensure application logging is configured for container stdout/stderr
@@ -285,6 +290,38 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
         status_code=400,
         content=jsonable_encoder({"detail": exc.errors(), "body": exc.body}),
     )
+
+
+# fastapi-users rejects an unauthenticated request with a bare
+# ``HTTPException(401)`` whose detail is the stock "Unauthorized" — it says
+# nothing about WHY authentication is on (with no env vars set the posture
+# defaults to multi-tenant, so a fresh ``docker run`` 401s on every /api/v1
+# call with no explanation). Enrich exactly that generic body with the
+# posture already resolved at startup so the caller can fix it without
+# reading the source. 401s that carry a specific detail (e.g.
+# LOGIN_BAD_CREDENTIALS on /auth/login) pass through untouched.
+GENERIC_401_HELP = (
+    f"Authentication required (auth posture: {_AUTH_REASON}). "
+    "For single-user local use, set ENABLE_BACKEND_ACCESS_CONTROL=false and restart. "
+    "To keep authentication and log in instead, set DEFAULT_USER_PASSWORD to make the "
+    "default account loginable — see docs/minimal-docker-compose.md."
+)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def explain_generic_401(request: Request, exc: StarletteHTTPException):
+    if (
+        exc.status_code == status.HTTP_401_UNAUTHORIZED
+        and exc.detail in (None, "Unauthorized")
+        and request.url.path.startswith("/api/v1/")
+    ):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": GENERIC_401_HELP},
+            headers=getattr(exc, "headers", None),
+        )
+    # Everything else keeps FastAPI's stock HTTPException behavior.
+    return await http_exception_handler(request, exc)
 
 
 @app.exception_handler(CogneeApiError)
