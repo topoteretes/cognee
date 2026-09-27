@@ -1,0 +1,143 @@
+name: Weekly ticket proposals
+
+# Once a week: read the docs-assistant pain from MotherDuck, root-cause it
+# against this codebase with Claude Code, and open a GitHub issue with
+# proposed tickets. Runs two variants so we can compare their output:
+#   A. baseline        — plain Claude Code over the checkout
+#   B. cognee-assisted — Claude Code with the cognee memory plugin, after
+#                        indexing this repo into cognee's code graph
+#
+# Required secrets: MOTHERDUCK_TOKEN, ANTHROPIC_API_KEY, LLM_API_KEY
+# Optional secrets: LINEAR_API_KEY (dedup against open tickets)
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install duckdb
+      - name: Build weekly digest from MotherDuck
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+        run: python scripts/weekly_tickets/fetch_context.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest
+          path: digest.md
+
+  baseline:
+    name: "Variant A: baseline (no cognee plugin)"
+    needs: digest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: digest
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Analyze and propose tickets
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          claude -p "$(cat scripts/weekly_tickets/prompt.md)" \
+            --dangerously-skip-permissions \
+            --output-format text > proposals-baseline.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: proposals-baseline
+          path: proposals-baseline.md
+
+  cognee-assisted:
+    name: "Variant B: cognee plugin + indexed codebase"
+    needs: digest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: digest
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Claude Code and cognee
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          pip install cognee cognee-cli
+      - name: Install the cognee memory plugin
+        # Adjust the marketplace/plugin name if it differs in your setup.
+        run: |
+          claude plugin marketplace add topoteretes/cognee-integrations
+          claude plugin install cognee-memory@cognee-integrations
+      - name: Index this repository into cognee's code graph
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: |
+          cognee-cli index-code . || cognee-cli remember --content-type code .
+      - name: Analyze and propose tickets (cognee-assisted)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: |
+          {
+            cat scripts/weekly_tickets/prompt.md
+            echo
+            echo "## Additional instruction for this run"
+            echo "The cognee memory plugin is installed and this repository is"
+            echo "indexed in cognee's code graph. Prefer cognee search"
+            echo "(cognee-code / cognee-search skills) for structural questions:"
+            echo "callers, impact analysis, where an exception class is raised"
+            echo "and consumed. Fall back to grep only when the graph has no"
+            echo "answer."
+          } > /tmp/prompt-cognee.md
+          claude -p "$(cat /tmp/prompt-cognee.md)" \
+            --dangerously-skip-permissions \
+            --output-format text > proposals-cognee.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: proposals-cognee
+          path: proposals-cognee.md
+
+  publish:
+    needs: [baseline, cognee-assisted]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Open comparison issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          {
+            echo "Weekly ticket proposals generated from docs-assistant signal"
+            echo "(MotherDuck: analytics.mintlify_chatbot_conversations, last 7 days)."
+            echo
+            echo "# Variant A — baseline Claude Code"
+            echo
+            cat proposals-baseline.md
+            echo
+            echo "---"
+            echo
+            echo "# Variant B — Claude Code + cognee memory plugin (indexed codebase)"
+            echo
+            cat proposals-cognee.md
+          } > issue-body.md
+          gh issue create \
+            --title "Weekly ticket proposals — $(date -u +%Y-%m-%d)" \
+            --label "ticket-proposals" \
+            --body-file issue-body.md
