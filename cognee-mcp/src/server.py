@@ -144,7 +144,8 @@ def _transport_security_kwargs(host: str) -> dict:
             Host/Origin header validation. Useful for LAN or Docker deployments.
         MCP_ALLOWED_HOSTS: Comma-separated additional Host header patterns
             (e.g. "192.168.1.50:*,myserver.local:*"). Appended to the
-            localhost defaults. Requires the ":*" port glob suffix.
+            localhost defaults. Requires the ":*" port glob suffix. The
+            matching http:// and https:// origins are allowed as well.
     """
     disable = os.getenv("MCP_DISABLE_DNS_REBINDING_PROTECTION", "false").lower() == "true"
 
@@ -158,11 +159,12 @@ def _transport_security_kwargs(host: str) -> dict:
     # binds to 0.0.0.0 or a LAN IP, we must provide the full allowed list
     # ourselves and turn the guard on unconditionally.
     localhost_hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
-    localhost_origins = ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"]
 
     allowed_hosts = localhost_hosts + extra_hosts
-    # Derive origins from extra hosts so users don't need to set both.
-    allowed_origins = localhost_origins + [f"http://{h}" for h in extra_hosts]
+    # Derive origins from the hosts so users don't need to set both. Each host
+    # is trusted under https too: behind a TLS-terminating proxy the browser
+    # sends an https Origin while the request itself arrives over http.
+    allowed_origins = [f"{scheme}://{h}" for h in allowed_hosts for scheme in ("http", "https")]
 
     if host not in ("127.0.0.1", "localhost", "::1") or extra_hosts:
         logger.info(
