@@ -3,23 +3,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from cognee.modules.search.exceptions import UnsupportedSearchTypeError
-from cognee.modules.search.types import SearchType
-from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
-from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.code_retriever import CodeRetriever
+from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
+    GraphCompletionContextExtensionRetriever,
+)
+from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
 from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
     DecompositionMode,
     GraphCompletionDecompositionRetriever,
 )
-from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
-from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
-    GraphCompletionContextExtensionRetriever,
-)
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
+from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
-from cognee.modules.retrieval.code_retriever import CodeRetriever
+from cognee.modules.search.exceptions import UnsupportedSearchTypeError
+from cognee.modules.search.types import SearchType
 
 
 class _DummyCommunityRetriever:
@@ -218,6 +218,8 @@ async def test_hybrid_completion_retriever_receives_config():
             "text_summaries_top_k": 0,
             "use_importance_weight": False,
             "facts_top_k": 4,
+            "include_external_metadata": True,
+            "external_metadata_keys": ["created_at", "source_id"],
         },
     )
 
@@ -233,6 +235,8 @@ async def test_hybrid_completion_retriever_receives_config():
     assert retriever_instance.text_summaries_top_k == 0
     assert retriever_instance.use_importance_weight is False
     assert retriever_instance.facts_top_k == 4
+    assert retriever_instance.include_external_metadata is True
+    assert retriever_instance.external_metadata_keys == ["created_at", "source_id"]
 
 
 @pytest.mark.asyncio
@@ -252,6 +256,9 @@ async def test_hybrid_completion_caps_default_channel_limits():
     assert retriever_instance.use_importance_weight is True
     assert retriever_instance.facts_top_k == 10
     assert retriever_instance.include_references is False
+    # Metadata surfacing is opt-in: off, with an empty allowlist, unless asked for.
+    assert retriever_instance.include_external_metadata is False
+    assert retriever_instance.external_metadata_keys == []
 
 
 @pytest.mark.asyncio

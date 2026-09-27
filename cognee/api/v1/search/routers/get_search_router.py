@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, List, Optional, Union
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
@@ -11,11 +11,14 @@ from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse, InDTO, OutDTO
 from cognee.exceptions import CogneeApiError
 from cognee.modules.search.operations import get_history
-from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
+from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee.shared.utils import send_telemetry
+
+logger = get_logger()
 
 
 # Note: Datasets sent by name will only map to datasets owned by the request sender
@@ -30,7 +33,7 @@ class SearchPayloadDTO(InDTO):
             " (auto-select), AGENTIC_COMPLETION (enables skills/tools/max_iter)."
         ),
     )
-    datasets: Optional[list[str]] = Field(
+    datasets: list[str] | None = Field(
         default=None,
         examples=[["default_dataset"]],
         description=(
@@ -38,7 +41,7 @@ class SearchPayloadDTO(InDTO):
             " use dataset_ids for datasets shared with you."
         ),
     )
-    dataset_ids: Optional[list[UUID]] = Field(
+    dataset_ids: list[UUID] | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -51,10 +54,10 @@ class SearchPayloadDTO(InDTO):
         examples=["What is in the document?"],
         description="The question to answer. Required; there is no default query.",
     )
-    system_prompt: Optional[str] = Field(
+    system_prompt: str | None = Field(
         default="Answer the question using the provided context. Be as brief as possible."
     )
-    node_name: Optional[list[str]] = Field(
+    node_name: list[str] | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -62,25 +65,26 @@ class SearchPayloadDTO(InDTO):
             " (the node_set values used during add/remember)."
         ),
     )
-    top_k: Optional[int] = Field(default=15)
-    only_context: bool = Field(default=False)
-    context_format: ContextFormat = Field(
-        default=ContextFormat.CONTEXT,
-        examples=[ContextFormat.CONTEXT.value],
+    top_k: int | None = Field(default=15)
+    only_context: bool = Field(
+        default=False,
         description=(
-            "Shape of an only_context result. 'context' returns the bare retrieval"
-            " context; 'prompt' returns the full envelope a completion would have"
-            " received — session guidance, conversation history, and the rendered"
-            " user and system prompts. The session layer comes from session_id"
-            " (the default session when omitted). Ignored unless only_context is true."
+            "Return what the LLM would have received instead of its answer. For"
+            " completion search types the result is the user prompt (conversation"
+            " history, then question plus retrieval context through the retriever's"
+            " template, then the session guidance block); the system prompt (the"
+            " retriever's task template) is system_prompt_result with verbose=true. The session layer comes from"
+            " session_id (the default session when omitted). Retrieval-only types"
+            " return their context. No LLM call is made and nothing is written to the"
+            " session."
         ),
     )
-    session_id: Optional[str] = Field(
+    session_id: str | None = Field(
         default=None,
         examples=[None],
         description=(
             "Session whose history and guidance feed the completion (or the"
-            " only_context prompt preview). Omit to use the default session."
+            " only_context prompt). Omit to use the default session."
         ),
     )
     verbose: bool = Field(
@@ -89,7 +93,7 @@ class SearchPayloadDTO(InDTO):
             "Return detailed result information including the graph representation when available."
         ),
     )
-    skills: Optional[list[str]] = Field(
+    skills: list[str] | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -97,7 +101,7 @@ class SearchPayloadDTO(InDTO):
             " Requires search_type=AGENTIC_COMPLETION; leave null otherwise."
         ),
     )
-    tools: Optional[list[str]] = Field(
+    tools: list[str] | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -105,7 +109,7 @@ class SearchPayloadDTO(InDTO):
             " Requires search_type=AGENTIC_COMPLETION."
         ),
     )
-    max_iter: Optional[int] = Field(
+    max_iter: int | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -117,7 +121,7 @@ class SearchPayloadDTO(InDTO):
         default=False,
         description="Attach source references to completion-type results.",
     )
-    code_query: Optional[dict[str, Any]] = Field(
+    code_query: dict[str, Any] | None = Field(
         default=None,
         description=(
             "Structured arguments for search_type=CODE. Set operation to query_facts, "
@@ -138,11 +142,12 @@ def get_search_router() -> APIRouter:
         user: str
         created_at: datetime
         # Null when the search was not scoped to a single dataset.
-        dataset_id: Optional[UUID] = None
+        dataset_id: UUID | None = None
 
     @router.get(
         "",
-        response_model=List[SearchHistoryItem],
+        summary="List the caller's recent search history",
+        response_model=list[SearchHistoryItem],
         responses={
             403: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
@@ -176,7 +181,10 @@ def get_search_router() -> APIRouter:
             history = await get_history(user.id, limit=0)
 
             return history
+        except CogneeApiError:
+            raise
         except Exception as error:
+            logger.exception("get_search_router.get_search_history failed, returning HTTP 500")
             return JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 content=ErrorResponse(
@@ -187,7 +195,8 @@ def get_search_router() -> APIRouter:
 
     @router.post(
         "",
-        response_model=Union[List[SearchResult], List],
+        summary="Search (low level): run one SearchType over the caller's datasets",
+        response_model=list[SearchResult] | list,
         responses={
             403: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
@@ -211,9 +220,8 @@ def get_search_router() -> APIRouter:
         - **system_prompt** Optional[str]: System prompt to be used for Completion type searches in Cognee
         - **node_name** Optional[list[str]]: Filter results to specific node_sets defined in the add pipeline (for targeted search).
         - **top_k** (Optional[int]): Maximum number of results to return (default: 15)
-        - **only_context** bool: Set to true to only return context Cognee will be sending to LLM in Completion type searches. This will be returned instead of LLM calls for completion type searches.
-        - **context_format** str: Shape of an only_context result — "context" (default, the bare retrieval context) or "prompt" (the full envelope a completion would receive: session guidance, conversation history, and the rendered user and system prompts).
-        - **session_id** (Optional[str]): Session whose history and guidance feed the completion or the prompt preview; the default session when omitted.
+        - **only_context** bool: Return what the LLM would have received instead of its answer. For completion type searches the result is the user prompt (conversation history, then question plus retrieval context through the retriever's template, then the session guidance block); the system prompt (the retriever's task template) is `system_prompt_result` with verbose=true. Retrieval-only types return their context. No LLM call is made.
+        - **session_id** (Optional[str]): Session whose history and guidance feed the completion or the only_context prompt; the default session when omitted.
         - **verbose** (bool): Return detailed result information including the graph representation when available (default: false)
         - **skills** (Optional[List[str]]): Skill names to load into the agentic retriever (AGENTIC_COMPLETION only)
         - **tools** (Optional[List[str]]): Tool whitelist for AGENTIC_COMPLETION searches
@@ -250,7 +258,6 @@ def get_search_router() -> APIRouter:
                 "node_name": len(payload.node_name or []),
                 "top_k": payload.top_k,
                 "only_context": payload.only_context,
-                "context_format": payload.context_format,
                 "session_id": payload.session_id,
                 "verbose": payload.verbose,
                 "skills": payload.skills,
@@ -278,7 +285,6 @@ def get_search_router() -> APIRouter:
                 top_k=payload.top_k,
                 verbose=payload.verbose,
                 only_context=payload.only_context,
-                context_format=payload.context_format,
                 session_id=payload.session_id,
                 skills=payload.skills,
                 tools=payload.tools,
@@ -295,6 +301,7 @@ def get_search_router() -> APIRouter:
             # returns them to the caller.
             raise
         except Exception as error:
+            logger.exception("get_search_router.search failed, returning HTTP 500")
             return JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 content=ErrorResponse(

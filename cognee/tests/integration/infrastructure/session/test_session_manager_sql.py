@@ -2,10 +2,10 @@
 
 import asyncio
 import tempfile
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import select
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAdapter
 from cognee.infrastructure.databases.cache.sql.tables import cache_qa_entries

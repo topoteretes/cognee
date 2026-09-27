@@ -231,7 +231,7 @@ class FSCacheAdapter(CacheDBInterface):
                 entries.append(qa_entry)
                 self._save_entries(session_key, entries)
         except Exception as e:
-            error_msg = f"Unexpected error while adding Q&A to diskcache: {str(e)}"
+            error_msg = f"Unexpected error while adding Q&A to diskcache: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -311,7 +311,7 @@ class FSCacheAdapter(CacheDBInterface):
         except SessionQAEntryValidationError:
             raise
         except Exception as e:
-            error_msg = f"Unexpected error while updating Q&A in diskcache: {str(e)}"
+            error_msg = f"Unexpected error while updating Q&A in diskcache: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -333,7 +333,7 @@ class FSCacheAdapter(CacheDBInterface):
         except SessionQAEntryValidationError:
             raise
         except Exception as e:
-            error_msg = f"Unexpected error while clearing feedback: {str(e)}"
+            error_msg = f"Unexpected error while clearing feedback: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -353,7 +353,7 @@ class FSCacheAdapter(CacheDBInterface):
                 self._save_entries(session_key, entries)
                 return True
         except Exception as e:
-            error_msg = f"Unexpected error while deleting Q&A from diskcache: {str(e)}"
+            error_msg = f"Unexpected error while deleting Q&A from diskcache: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -378,7 +378,7 @@ class FSCacheAdapter(CacheDBInterface):
             return qa_existed or trace_existed or context_existed
 
         except Exception as e:
-            error_msg = f"Unexpected error while deleting session from diskcache: {str(e)}"
+            error_msg = f"Unexpected error while deleting session from diskcache: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -388,7 +388,7 @@ class FSCacheAdapter(CacheDBInterface):
             self.cache.expire()
             return self.cache.get(key)
         except Exception as e:
-            error_msg = f"Unexpected error while getting value from diskcache: {str(e)}"
+            error_msg = f"Unexpected error while getting value from diskcache: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -397,7 +397,7 @@ class FSCacheAdapter(CacheDBInterface):
         try:
             self.cache.set(key, value, expire=ttl)
         except Exception as e:
-            error_msg = f"Unexpected error while setting value in diskcache: {str(e)}"
+            error_msg = f"Unexpected error while setting value in diskcache: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -406,7 +406,7 @@ class FSCacheAdapter(CacheDBInterface):
         try:
             self.cache.delete(key)
         except Exception as e:
-            error_msg = f"Unexpected error while deleting value from diskcache: {str(e)}"
+            error_msg = f"Unexpected error while deleting value from diskcache: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -443,7 +443,7 @@ class FSCacheAdapter(CacheDBInterface):
                 entries.append(trace_entry)
                 self._save_entries(trace_key, entries)
         except Exception as e:
-            error_msg = f"Unexpected error while appending agent trace step to diskcache: {str(e)}"
+            error_msg = f"Unexpected error while appending agent trace step to diskcache: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -480,7 +480,7 @@ class FSCacheAdapter(CacheDBInterface):
                 entries.append(entry_dump)
                 self._save_entries(context_key, entries)
         except Exception as e:
-            error_msg = f"Unexpected error while adding session context to diskcache: {str(e)}"
+            error_msg = f"Unexpected error while adding session context to diskcache: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -504,7 +504,7 @@ class FSCacheAdapter(CacheDBInterface):
                         return True
                 return False
         except Exception as e:
-            error_msg = f"Unexpected error while updating session context in diskcache: {str(e)}"
+            error_msg = f"Unexpected error while updating session context in diskcache: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -523,7 +523,7 @@ class FSCacheAdapter(CacheDBInterface):
                 return True
         except Exception as e:
             error_msg = (
-                f"Unexpected error while deleting session context entry from diskcache: {str(e)}"
+                f"Unexpected error while deleting session context entry from diskcache: {e!s}"
             )
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
@@ -537,7 +537,7 @@ class FSCacheAdapter(CacheDBInterface):
                 self.cache.delete(context_key)
             return existed
         except Exception as e:
-            error_msg = f"Unexpected error while deleting session context from diskcache: {str(e)}"
+            error_msg = f"Unexpected error while deleting session context from diskcache: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -551,7 +551,7 @@ class FSCacheAdapter(CacheDBInterface):
             self.cache.expire()
 
         except Exception as e:
-            error_msg = f"Unexpected error while pruning diskcache: {str(e)}"
+            error_msg = f"Unexpected error while pruning diskcache: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -566,7 +566,6 @@ class FSCacheAdapter(CacheDBInterface):
         This method is a no-op to satisfy the interface.
         """
         logger.warning("Usage logging not supported in FSCacheAdapter, skipping")
-        pass
 
     async def get_usage_logs(self, user_id: str, limit: int = 100):
         """

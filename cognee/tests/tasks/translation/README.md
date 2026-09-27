@@ -76,16 +76,13 @@ from cognee.tasks.translation import translate_text
 
 # Configure translation (optional - defaults to LLM provider)
 cognee.config.set_translation_config(
-    provider="llm",           # Uses configured LLM (default)
-    target_language="en",     # Target language code
-    confidence_threshold=0.7  # Minimum confidence for language detection
+    provider="llm",  # Uses configured LLM (default)
+    target_language="en",  # Target language code
+    confidence_threshold=0.7,  # Minimum confidence for language detection
 )
 
 # Translate text directly
-result = await translate_text(
-    text="Bonjour le monde",
-    target_language="en"
-)
+result = await translate_text(text="Bonjour le monde", target_language="en")
 print(result.translated_text)  # "Hello world"
 ```
 

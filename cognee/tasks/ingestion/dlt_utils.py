@@ -1,7 +1,6 @@
 """Shared utilities for DLT ingestion."""
 
 import json
-from typing import Optional
 
 # A dlt source sets this attribute to opt into the "document" ingestion path:
 # each row becomes a text document that flows through normal cognify (LLM entity
@@ -11,14 +10,54 @@ from typing import Optional
 # own nature rather than the shared engine hard-coding connector names.
 DOCUMENT_SOURCE_ATTR = "cognee_document_source"
 
+# Opt-in namespace for connectors whose incremental state must survive
+# alternating destination datasets. Unrelated DLT sources keep their contract.
+PIPELINE_SCOPE_ATTR = "cognee_pipeline_scope"
 
-def document_source_tag(item) -> Optional[str]:
+
+def pipeline_name_for_source(source, dataset_name: str) -> str:
+    from hashlib import sha256
+
+    scope = getattr(source, PIPELINE_SCOPE_ATTR, None)
+    if not isinstance(scope, str) or not scope:
+        return "ingest_dlt_source"
+    digest = sha256(json.dumps([dataset_name, scope]).encode()).hexdigest()[:32]
+    return f"ingest_dlt_{digest}"
+
+
+# Community/cloud hosts can refuse unsafe older cores before ingestion starts.
+# Version 1 scopes cleanup by staging table and handles a confirmed empty table.
+DOCUMENT_SYNC_VERSION = 1
+
+
+def guarded_rows(rows, check_active=None):
+    """Check authorization before each extraction step and before publishing it.
+
+    Hosts run extraction on a worker thread and supply a synchronous bridge to
+    their credential store. Standalone SDK sources need no such callback.
+    """
+    iterator = iter(rows)
+    while True:
+        if check_active is not None:
+            check_active()
+        try:
+            row = next(iterator)
+        except StopIteration:
+            if check_active is not None:
+                check_active()
+            return
+        if check_active is not None:
+            check_active()
+        yield row
+
+
+def document_source_tag(item) -> str | None:
     """Return the document-source tag a dlt source opted into, else ``None``."""
     tag = getattr(item, DOCUMENT_SOURCE_ATTR, None)
     return tag if isinstance(tag, str) and tag else None
 
 
-def metadata_source(metadata) -> Optional[str]:
+def metadata_source(metadata) -> str | None:
     """Extract the ``source`` field from system metadata.
 
     Accepts a dict, a JSON string, or an object with a ``system_metadata``

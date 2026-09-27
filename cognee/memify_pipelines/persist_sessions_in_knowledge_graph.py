@@ -1,22 +1,19 @@
-from typing import Optional, List
-
 from cognee import memify
 from cognee.context_global_variables import set_session_user_context_variable
 from cognee.exceptions import CogneeValidationError
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.data.methods import get_authorized_existing_datasets
-from cognee.shared.logging_utils import get_logger
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
-from cognee.tasks.memify import extract_user_sessions, cognify_session
-from cognee.modules.data.constants import DEFAULT_DATASET_NAME
-
+from cognee.shared.logging_utils import get_logger
+from cognee.tasks.memify import cognify_session, extract_user_sessions
 
 logger = get_logger("persist_sessions_in_knowledge_graph")
 
 
 async def persist_sessions_in_knowledge_graph_pipeline(
     user: User,
-    session_ids: Optional[List[str]] = None,
+    session_ids: list[str] | None = None,
     dataset: str = DEFAULT_DATASET_NAME,
     run_in_background: bool = False,
 ):
@@ -24,7 +21,8 @@ async def persist_sessions_in_knowledge_graph_pipeline(
     Persist user sessions into the knowledge graph via memify pipeline.
 
     Reads session data via SessionManager (caching must be enabled). Each session
-    is cognified and added to the graph with node_set "user_sessions_from_cache".
+    is cognified and added to the graph with the ``USER_SESSIONS_NODE_SET`` node set
+    (``cognee.modules.improve.constants``).
 
     Args:
         user: Authenticated user with write access to the dataset.
@@ -40,14 +38,14 @@ async def persist_sessions_in_knowledge_graph_pipeline(
 
     if not dataset_to_write:
         raise CogneeValidationError(
-            message=f"User (id: {str(user.id)}) does not have write access to dataset: {dataset}",
+            message=f"User (id: {user.id!s}) does not have write access to dataset: {dataset}",
             log=False,
         )
 
-    extraction_tasks = [Task(extract_user_sessions, session_ids=session_ids)]
+    extraction_tasks = [Task(extract_user_sessions, session_ids=session_ids, needs_llm=False)]
 
     enrichment_tasks = [
-        Task(cognify_session, dataset_id=dataset_to_write[0].id, user=user),
+        Task(cognify_session, dataset_id=dataset_to_write[0].id, user=user, needs_llm=False),
     ]
 
     # No set_database_global_context_variables scope around memify: the pipeline

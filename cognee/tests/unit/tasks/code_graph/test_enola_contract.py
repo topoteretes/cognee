@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from cognee.modules.retrieval.code_retriever import CODE_NODE_TYPES, _KIND_BY_TYPE
+from cognee.modules.retrieval.code_retriever import _KIND_BY_TYPE, CODE_NODE_TYPES
 from cognee.tasks.code_graph.enola import (
     SUPPORTED_FORMAT_VERSIONS,
     EnolaSnapshotError,

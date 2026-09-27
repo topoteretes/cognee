@@ -1,8 +1,9 @@
 import asyncio
 from functools import reduce
-from typing import List, Optional, Any
-from cognee.shared.logging_utils import get_logger
+from typing import Any
+
 from cognee.modules.retrieval.base_retriever import BaseRetriever
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.codingagents.coding_rule_associations import get_existing_rules
 
 logger = get_logger("CodingRulesRetriever")
@@ -11,11 +12,12 @@ logger = get_logger("CodingRulesRetriever")
 class CodingRulesRetriever(BaseRetriever):
     """Retriever for handling codeing rule based searches."""
 
-    def __init__(self, rules_nodeset_name: Optional[List[str]] = None):
-        if isinstance(rules_nodeset_name, list) or rules_nodeset_name is None:
-            if not rules_nodeset_name:
-                # If there is no provided nodeset set to coding_agent_rules
-                rules_nodeset_name = ["coding_agent_rules"]
+    def __init__(self, rules_nodeset_name: list[str] | None = None):
+        if (
+            isinstance(rules_nodeset_name, list) or rules_nodeset_name is None
+        ) and not rules_nodeset_name:
+            # If there is no provided nodeset set to coding_agent_rules
+            rules_nodeset_name = ["coding_agent_rules"]
 
         self.rules_nodeset_name = rules_nodeset_name
         """Initialize retriever with search parameters."""

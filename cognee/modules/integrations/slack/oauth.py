@@ -15,7 +15,7 @@ Slack's own signing secret to them, plus everything that IS Slack-specific
 (the authorize/token-exchange endpoints, bot scopes, response shape).
 """
 
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 import aiohttp

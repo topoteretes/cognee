@@ -8,22 +8,25 @@ Test Coverage:
 - test_delete_data_nodes_and_edges_removes_from_all_systems: Verify complete cleanup
 """
 
+import logging
 import os
 import pathlib
+from contextlib import AsyncExitStack
+from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
+
 import pytest
 import pytest_asyncio
-from uuid import UUID, uuid4, uuid5, NAMESPACE_OID
+from sqlalchemy import select
 
 import cognee
-from contextlib import AsyncExitStack
 from cognee.context_global_variables import set_database_global_context_variables
-from cognee.infrastructure.locks import dataset_lock
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.relational.create_relational_engine import (
     create_relational_engine,
 )
-from cognee.modules.data.methods import create_dataset, create_authorized_dataset
+from cognee.infrastructure.locks import dataset_lock
+from cognee.modules.data.methods import create_authorized_dataset, create_dataset
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.graph.methods import (
     delete_data_nodes_and_edges,
@@ -32,12 +35,10 @@ from cognee.modules.graph.methods import (
     get_orphaned_nodeset_labels_for_dataset,
     get_shared_slugs_losing_dataset_anchor,
 )
-from cognee.modules.graph.models import Node, Edge
+from cognee.modules.graph.models import Edge, Node
 from cognee.modules.users.methods import get_default_user
-from cognee.shared.logging_utils import get_logger
-from sqlalchemy import select
 
-logger = get_logger()
+logger = logging.getLogger(__name__)
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -50,7 +51,7 @@ async def _dispose_relational_engine_after_test():
         if engine is not None:
             await engine.dispose(close=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _dispose_relational_engine_after_test", exc_info=True)
 
     create_relational_engine.cache_clear()
 

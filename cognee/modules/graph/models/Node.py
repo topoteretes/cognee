@@ -1,11 +1,12 @@
 from datetime import datetime, timezone
+
 from sqlalchemy import (
+    JSON,
+    UUID,
     DateTime,
     Index,
     # event,
     Text,
-    JSON,
-    UUID,
 )
 
 # from sqlalchemy.schema import DDL

@@ -217,7 +217,7 @@ class LocalFileStorage(Storage):
                     f"Requested file: '{file_path}'"
                 )
 
-        with open(full_file_path, mode=mode, *args, **kwargs) as file:
+        with open(full_file_path, mode, *args, **kwargs) as file:
             file = FileBufferedReader(file, name=Path(full_file_path).as_uri())
 
             try:

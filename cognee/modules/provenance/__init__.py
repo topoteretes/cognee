@@ -32,4 +32,4 @@ Three env flags govern three of these systems and must not be mixed up:
 from .manager import ProvenanceBatch, ProvenanceManager, get_provenance_manager
 from .models import ProvenanceEntry
 
-__all__ = ["ProvenanceBatch", "ProvenanceManager", "get_provenance_manager", "ProvenanceEntry"]
+__all__ = ["ProvenanceBatch", "ProvenanceEntry", "ProvenanceManager", "get_provenance_manager"]

@@ -1,6 +1,7 @@
 """Unit tests for TursoAdapter using an in-memory SQLite database."""
 
 import json
+
 import pytest
 import pytest_asyncio
 
@@ -173,7 +174,7 @@ async def test_get_neighborhood(adapter):
     await adapter.add_edge("n1", "n2", "KNOWS")
     await adapter.add_edge("n2", "n3", "KNOWS")
 
-    nodes, edges = await adapter.get_neighborhood(["n1"], depth=1)
+    nodes, _edges = await adapter.get_neighborhood(["n1"], depth=1)
     node_ids = {n[0] for n in nodes}
     # depth=1: n1 and its direct neighbor n2
     assert "n1" in node_ids
@@ -312,12 +313,12 @@ async def test_factory_returns_turso_adapter_and_rejects_remote(tmp_path):
     )
 
     db_path = str(tmp_path / "graph.db")
-    kwargs = dict(
-        graph_database_provider="turso",
-        graph_file_path="",
-        graph_database_url=db_path,
-        graph_database_key="",
-    )
+    kwargs = {
+        "graph_database_provider": "turso",
+        "graph_file_path": "",
+        "graph_database_url": db_path,
+        "graph_database_key": "",
+    }
     engine = create_graph_engine(**kwargs)
     try:
         assert isinstance(engine, TursoAdapter)

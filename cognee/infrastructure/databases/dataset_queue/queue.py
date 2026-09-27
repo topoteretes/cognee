@@ -50,11 +50,12 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
+from collections.abc import Callable
 from contextlib import asynccontextmanager
-from typing import Any, Callable, Dict, Set
+from typing import Any
 
-from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 
 logger = get_logger("DatasetQueue")
 
@@ -66,7 +67,7 @@ TRUE_VALUES = frozenset({"1", "true", "yes", "on", "y", "t"})
 class DatasetQueueSettings:
     """Effective runtime settings for the dataset queue."""
 
-    __slots__ = ("enabled", "max_concurrent", "idle_ttl_seconds")
+    __slots__ = ("enabled", "idle_ttl_seconds", "max_concurrent")
 
     def __init__(self, enabled: bool, max_concurrent: int, idle_ttl_seconds: float = 600.0) -> None:
         self.enabled = enabled
@@ -113,7 +114,7 @@ def _make_release(semaphore: asyncio.Semaphore) -> Callable[[], None]:
 class SlotEntry:
     """A single acquired slot with a nesting depth counter."""
 
-    __slots__ = ("release", "depth")
+    __slots__ = ("depth", "release")
 
     def __init__(self, release: Callable[[], None], depth: int = 1) -> None:
         self.release = release
@@ -151,10 +152,10 @@ class DatasetQueue:
         # ``slot_key`` is ``"ds:<dataset_id>"`` for ``ensure_slot`` and
         # ``"acquire:<unique>"`` for ``acquire()``. A task may hold multiple
         # entries; all are released together when the task finishes.
-        self._task_slots: Dict[int, Dict[str, SlotEntry]] = {}
+        self._task_slots: dict[int, dict[str, SlotEntry]] = {}
         # Track which tasks already have a done-callback registered so we
         # don't register multiple cleanup handlers for a single task.
-        self._registered_tasks: Set[int] = set()
+        self._registered_tasks: set[int] = set()
 
     # ------------------------------------------------------ active datasets
     def active_dataset_ids(self) -> set:
@@ -348,7 +349,7 @@ class DatasetQueue:
                 if reaped:
                     logger.debug("Idle reaper closed %d subprocess engine(s)", reaped)
             except Exception:
-                logger.error("Idle reaper sweep failed", exc_info=True)
+                logger.exception("Idle reaper sweep failed")
 
     def _evict_subprocess_engines(self) -> None:
         """Evict this context's subprocess-mode engines from their caches.

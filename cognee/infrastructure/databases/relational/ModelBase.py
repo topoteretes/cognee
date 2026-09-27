@@ -1,5 +1,5 @@
-from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.ext.asyncio import AsyncAttrs
+from sqlalchemy.orm import DeclarativeBase
 
 
 class Base(AsyncAttrs, DeclarativeBase):
@@ -9,5 +9,3 @@ class Base(AsyncAttrs, DeclarativeBase):
     The Base class provides the foundation for creating ORM-mapped classes and manages the
     mapping of classes to database tables.
     """
-
-    pass

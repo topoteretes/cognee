@@ -115,7 +115,7 @@ class SlackIntegration(OAuthIntegration):
                 ) as response,
             ):
                 payload = await response.json()
-        except Exception:
+        except Exception:  # a failed revoke must never block disconnect
             logger.exception(
                 "Slack auth.revoke request failed for account %s", credential.provider_account_id
             )

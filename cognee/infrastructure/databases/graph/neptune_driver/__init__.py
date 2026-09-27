@@ -10,6 +10,6 @@ from . import exceptions
 
 __all__ = [
     "NeptuneGraphDB",
-    "neptune_utils",
     "exceptions",
+    "neptune_utils",
 ]

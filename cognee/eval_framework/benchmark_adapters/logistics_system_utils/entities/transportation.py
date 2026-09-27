@@ -8,7 +8,6 @@ from cognee.eval_framework.benchmark_adapters.logistics_system_utils.entities.en
     TransportMode,
 )
 
-
 transport_possible_values = {
     "region": [region.label for region in Region],
     "temperature_controlled": [True, False],

@@ -1,14 +1,15 @@
-from typing import Optional
+from dataclasses import dataclass
 from uuid import UUID
-from cognee.cli.exceptions import CliCommandException
-from cognee.infrastructure.databases.exceptions.exceptions import EntityNotFoundError
+
 from sqlalchemy import select
 from sqlalchemy.sql import func
+
+from cognee.cli.exceptions import CliCommandException
+from cognee.infrastructure.databases.exceptions.exceptions import EntityNotFoundError
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.data.models import Dataset, Data
-from cognee.modules.users.models import User
+from cognee.modules.data.models import Data, Dataset
 from cognee.modules.users.methods import get_user
-from dataclasses import dataclass
+from cognee.modules.users.models import User
 
 
 @dataclass
@@ -19,7 +20,7 @@ class DeletionCountsPreview:
 
 
 async def get_deletion_counts(
-    dataset_name: Optional[str] = None, user_id: Optional[UUID] = None, all_data: bool = False
+    dataset_name: str | None = None, user_id: UUID | None = None, all_data: bool = False
 ) -> DeletionCountsPreview:
     """
     Calculates the number of items that will be deleted based on the provided arguments.

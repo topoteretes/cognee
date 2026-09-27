@@ -35,5 +35,5 @@ If you notice that `cognify()` is running but your final queries yield empty sea
 
 1. **Verify your Model**: Ensure you are using one of the recommended models (e.g., `llama3.1:8b`).
 2. **Check Temperature**: Extraction runs at temperature `0.0` by default on Ollama, for deterministic output formatting. If you set `LLM_TEMPERATURE` to something higher, lower it back to `0.0` in your `.env`.
-3. **Verify API Connection**: Ensure Ollama is running and accessible (usually at `http://localhost:11434/v1`).
+3. **Verify API Connection**: Ensure Ollama is running and that `LLM_ENDPOINT` is the bare host, `http://localhost:11434`. The default `litellm_native` framework appends Ollama's own API paths, so the `/v1` form returns a 404. Use `http://localhost:11434/v1` only with `STRUCTURED_OUTPUT_FRAMEWORK="instructor"`.
 4. **Inspect Logging**: Check the console log outputs. If Cognee catches validation errors during extraction, they will be reported as warnings.

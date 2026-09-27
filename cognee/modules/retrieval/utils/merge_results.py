@@ -7,12 +7,12 @@ these helpers; nothing here knows what a retriever's objects mean.
 """
 
 from collections.abc import Callable, Hashable
-from typing import Any, Optional
+from typing import Any
 
 from cognee.modules.retrieval.hybrid.results import display_value, result_id
 
 
-def conversational_reserve(limit: Optional[int]) -> int:
+def conversational_reserve(limit: int | None) -> int:
     """Slots held for results only the conversational lane found.
 
     Reserves roughly a third of the budget. Nothing is reserved below three slots: one
@@ -66,11 +66,11 @@ def _rank_key(record: list) -> tuple[int, int]:
 
 
 def merge_ranked(
-    primary: Optional[list],
-    secondary: Optional[list],
+    primary: list | None,
+    secondary: list | None,
     *,
-    identity: Callable[[Any], Optional[Hashable]] = result_id,
-    limit: Optional[int] = None,
+    identity: Callable[[Any], Hashable | None] = result_id,
+    limit: int | None = None,
     secondary_reserve: int = 0,
 ) -> list:
     """Merge two ranked lists, strongest agreement first.

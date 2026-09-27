@@ -47,9 +47,11 @@ def test_accepts_real_slack_response_urls(url):
     [
         (
             "https://hooks.slack.com/services/T0/B0/tok",
-            "Incoming Webhook: same host, and it "
-            "accepts the exact body this module sends, so a forged payload would exfiltrate "
-            "the answer into an attacker's workspace",
+            (
+                "Incoming Webhook: same host, and it "
+                "accepts the exact body this module sends, so a forged payload would exfiltrate "
+                "the answer into an attacker's workspace"
+            ),
         ),
         ("https://hooks.slack.com.evil.com/commands/x", "suffix host"),
         ("https://hooks.slack.com@evil.com/commands/x", "userinfo host"),

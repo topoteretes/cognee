@@ -64,10 +64,13 @@ class _FakeSessionContext:
 async def test_revoke_remote_does_nothing_without_an_access_token():
     credential = _fake_credential()
     with (
-        patch("cognee.modules.integrations.slack.adapter.decrypt_token_payload", return_value={}),
+        patch(
+            "cognee.modules.integrations.slack.adapter.decrypt_token_payload",
+            return_value={},
+        ),
+        # No aiohttp session should even be opened.
         patch("aiohttp.ClientSession") as session_cls,
     ):
-        # No aiohttp session should even be opened.
         await integration.revoke_remote(credential)
         session_cls.assert_not_called()
 
@@ -123,8 +126,8 @@ async def test_refresh_is_a_noop_without_a_refresh_token():
     with (
         patch(
             "cognee.modules.integrations.slack.adapter.decrypt_token_payload",
-            return_value={"access_token": "xoxb-secret"},
-        ),  # no refresh_token
+            return_value={"access_token": "xoxb-secret"},  # no refresh_token
+        ),
         patch("aiohttp.ClientSession") as session_cls,
     ):
         await integration.refresh(credential)

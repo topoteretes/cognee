@@ -29,25 +29,20 @@ import concurrent.futures
 import logging
 import os
 from contextlib import asynccontextmanager
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 
-from cognee.infrastructure.databases.exceptions import EntityNotFoundError
-
-from cognee.version import get_cognee_version
 from cognee.context_global_variables import (
     backend_access_control_enabled,
     set_database_global_context_variables,
 )
-from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.data.methods.get_dataset_databases import get_dataset_databases
-from cognee.modules.users.models import DatasetDatabase
-
 from cognee.modules.migrations.migration import (
     Migration,
     MigrationContext,
@@ -60,6 +55,8 @@ from cognee.modules.migrations.registry import MIGRATIONS
 from cognee.modules.migrations.versions.adapter_storage_migration import (
     migrate as _run_adapter_storage_migration,
 )
+from cognee.modules.users.models import DatasetDatabase
+from cognee.version import get_cognee_version
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +68,7 @@ logger = logging.getLogger(__name__)
 _GLOBAL_MIGRATION_LOCK_KEY = 0x636F676E6565_01  # "cognee" + 01
 
 
-def _file_lock_path(db_engine, key: int) -> Optional[str]:
+def _file_lock_path(db_engine, key: int) -> str | None:
     """Lock-file path next to the SQLite database, one per ``key``.
 
     All processes on the same store resolve the same file for a given ``key``
@@ -169,7 +166,7 @@ async def migration_lock():
 
 async def _apply(
     context: MigrationContext,
-    stored_revision: Optional[str],
+    stored_revision: str | None,
     target_revision: str = "head",
     stamp=None,
 ) -> list[str]:
@@ -188,9 +185,7 @@ async def _apply(
     return applied
 
 
-def _downgrade_span(
-    stored_revision: Optional[str], target_revision: Optional[str]
-) -> list[Migration]:
+def _downgrade_span(stored_revision: str | None, target_revision: str | None) -> list[Migration]:
     """Validate and return the migrations to revert (may be []).
 
     Raises (unknown stored revision, irreversible span, target ahead of
@@ -216,7 +211,7 @@ async def _revert_span(context: MigrationContext, span: list[Migration], stamp) 
     return reverted
 
 
-async def _stamp_dataset(db_engine, dataset_id: UUID, revision: Optional[str]) -> None:
+async def _stamp_dataset(db_engine, dataset_id: UUID, revision: str | None) -> None:
     """Write the revision on a dataset_database row (short transaction)."""
     async with db_engine.get_async_session() as session:
         record = await session.get(DatasetDatabase, dataset_id)
@@ -225,7 +220,7 @@ async def _stamp_dataset(db_engine, dataset_id: UUID, revision: Optional[str]) -
             await session.commit()
 
 
-async def _stamp_global(db_engine, revision: Optional[str]) -> None:
+async def _stamp_global(db_engine, revision: str | None) -> None:
     """Write the revision on the global_database_version row."""
     async with db_engine.get_async_session() as session:
         record = await session.get(GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID)
@@ -247,7 +242,7 @@ async def _record_dataset_failure(db_engine, dataset_id: UUID, error: Exception)
             if record is not None:
                 record.migration_last_error = _error_text(error)
                 await session.commit()
-    except Exception:  # noqa: BLE001 - never let bookkeeping mask the real failure
+    except Exception:  # never let bookkeeping mask the real failure
         logger.exception("Could not persist migration failure for dataset '%s'.", dataset_id)
 
 
@@ -259,11 +254,11 @@ async def _record_global_failure(db_engine, error: Exception) -> None:
             if record is not None:
                 record.global_migration_last_error = _error_text(error)
                 await session.commit()
-    except Exception:  # noqa: BLE001 - never let bookkeeping mask the real failure
+    except Exception:  # never let bookkeeping mask the real failure
         logger.exception("Could not persist global migration failure.")
 
 
-async def _read_deployment_version() -> Optional[str]:
+async def _read_deployment_version() -> str | None:
     """The deployment's recorded Cognee version, or ``None`` if never recorded.
 
     Read BEFORE ``_record_deployment_version`` overwrites it, so a version change
@@ -400,7 +395,7 @@ async def _run_global_migrations(
 
 async def _migrate_dataset(
     db_engine, row, current_version: str, version_changed: bool, target: str
-) -> Optional[dict]:
+) -> dict | None:
     """Run pending migrations for one dataset's database pair.
 
     The caller (run_database_migrations) holds the single migration lock for the
@@ -450,7 +445,7 @@ async def _migrate_dataset(
                     record.cognee_version = current_version
                     record.migration_last_error = None
                     await session.commit()
-        except Exception:  # noqa: BLE001 - audit only
+        except Exception:  # audit only
             logger.exception(
                 "Could not record audit fields for dataset '%s' (migrations applied fine).",
                 row.dataset_id,
@@ -541,7 +536,7 @@ async def run_database_migrations(target: str = "head") -> list[dict]:
     return summaries
 
 
-async def _downgrade_dataset(db_engine, row, target: Optional[str]) -> Optional[dict]:
+async def _downgrade_dataset(db_engine, row, target: str | None) -> dict | None:
     """Revert migrations for one dataset's database pair.
 
     The caller holds the single migration lock for the whole dataset loop. Fast
@@ -580,8 +575,8 @@ async def _downgrade_dataset(db_engine, row, target: Optional[str]) -> Optional[
 
 
 async def downgrade_database_migrations(
-    target_revision: Optional[str] = None,
-    dataset_ids: Optional[list[UUID]] = None,
+    target_revision: str | None = None,
+    dataset_ids: list[UUID] | None = None,
 ) -> list[dict]:
     """Revert data migrations back to ``target_revision``.
 
@@ -670,7 +665,7 @@ async def downgrade_database_migrations(
 
 async def stamp_revisions(
     target: str,
-    dataset_ids: Optional[list[UUID]] = None,
+    dataset_ids: list[UUID] | None = None,
 ) -> list[dict]:
     """Set the stored revision WITHOUT running any migration (alembic `stamp`).
 

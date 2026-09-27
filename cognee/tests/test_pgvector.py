@@ -1,19 +1,22 @@
 import os
 import pathlib
+
 import cognee
 from cognee.infrastructure.files.storage import get_storage_config
-from cognee.modules.search.operations import get_history
-from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.models import Data
+from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
 
 async def test_local_file_deletion(data_text, file_location, dataset_1_id, dataset_2_id):
-    from sqlalchemy import select
     import hashlib
+
+    from sqlalchemy import select
+
     from cognee.infrastructure.databases.relational import get_relational_engine
 
     engine = get_relational_engine()

@@ -22,7 +22,7 @@ stricter limits, which the history client honors.
 
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from cognee.modules.integrations.credentials import decrypt_token_payload
 from cognee.modules.integrations.slack.home import publish_home_view
@@ -91,5 +91,5 @@ async def _publish_home_view(team_id: str, slack_user_id: str | None) -> None:
         access_token = decrypt_token_payload(credential).get("access_token")
         if access_token:
             await publish_home_view(access_token, slack_user_id)
-    except Exception:
+    except Exception:  # a broken Home tab must never fail the event ack
         logger.exception("Failed to publish App Home view for team %s", team_id)

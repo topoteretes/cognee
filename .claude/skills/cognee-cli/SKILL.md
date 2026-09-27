@@ -7,8 +7,9 @@ description: Use when the user wants to drive cognee from the terminal with cogn
 
 `cognee-cli` ships with the package (entry point in `cognee/cli/_cognee.py`;
 each command lives in `cognee/cli/commands/`). Every command has
-`--help` with examples — prefer that over guessing flags. Needs
-`LLM_API_KEY` configured, same as the SDK.
+`--help` for its flags, but only a few (`memify`, `eval`, `serve`, `push`,
+`migrate`) include usage examples — for the memory commands use the examples
+in this file. Needs `LLM_API_KEY` configured, same as the SDK.
 
 ## Core flow
 
@@ -36,12 +37,16 @@ and `empty_dataset` used to do separately.
 > prompts `Delete ALL data from cognee? [y/N]` first, so switching to `forget`
 > silently drops that safety net — script it with care.
 
-Search types match exactly 7 of the SDK's `SearchType` enum (`cognee/modules/search/types/SearchType.py`), those 7 being chosen in (`cognee/cli/config.py:SEARCH_TYPE_CHOICES`):
-GRAPH_COMPLETION, RAG_COMPLETION, CHUNKS, SUMMARIES, CODE, CYPHER, GRAPH_REPORT
-Others must be reached from the SDK, not CLI; e.g. call cognee.recall with `query_type=SearchType.TEMPORAL`
+`--query-type` accepts 10 of the SDK's 20 `SearchType` values — the list in
+`cognee/cli/config.py:SEARCH_TYPE_CHOICES`: HYBRID_COMPLETION, GRAPH_COMPLETION,
+RAG_COMPLETION, CHUNKS, CHUNKS_LEXICAL, SUMMARIES, CODE, CYPHER, GRAPH_REPORT,
+SKILLS. The rest (TEMPORAL, TRIPLET_COMPLETION, GRAPH_COMPLETION_COT,
+AGENTIC_COMPLETION, NATURAL_LANGUAGE, …) are SDK-only, e.g.
+`cognee.recall(q, query_type=SearchType.TEMPORAL)`.
 
-Note the CLI defaults `--query-type` to `GRAPH_COMPLETION`, whereas the SDK's
-`cognee.recall()` auto-routes when `query_type` is omitted.
+When `--query-type` is omitted the CLI uses `HYBRID_COMPLETION`
+(`DEFAULT_SEARCH_TYPE`), whereas the SDK's `cognee.recall()` auto-routes
+between search types. `--top-k` defaults to 10 on the CLI and 15 in the SDK.
 
 ## Session memory and enrichment
 
@@ -58,10 +63,14 @@ cognee-cli improve -d my_project             # enrich/index the graph (no sessio
 cognee-cli feedback ...                      # attach feedback to results
 ```
 
-`improve` also takes `--node-name`, `--feedback-alpha` (default 0.1), and
-`--background`/`-b`. `remember`/`improve` build their graphs through
-`cognify()`, so cognify-level settings (e.g. `CONTRADICTION_DETECTION=true`)
-apply to them too.
+`improve` also takes `--node-name`, `--feedback-alpha` (learning rate in
+(0, 1]; default `IMPROVE_FEEDBACK_ALPHA`, 0.1), `--build-global-context-index`,
+`--build-truth-subspace` (both opt-in stages; the truth subspace needs
+`-s`), and `--background`/`-b`. It prints one line per stage — name, status
+(`completed` / `already_completed` / `skipped` / `errored`) and the skip
+reason (e.g. `no_session_ids`, `lock_held`, `triplet_embedding_disabled`).
+`remember`/`improve` build their graphs through `cognify()`, so cognify-level
+settings (e.g. `CONTRADICTION_DETECTION=true`) apply to them too.
 
 ## Legacy / lower-level commands
 

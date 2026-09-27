@@ -1,4 +1,3 @@
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import select
@@ -7,7 +6,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models import Data
 
 
-async def resolve_data_id(dataset_id: UUID, data_id: UUID) -> Optional[UUID]:
+async def resolve_data_id(dataset_id: UUID, data_id: UUID) -> UUID | None:
     """Resolve a caller-supplied data_id to the canonical row id in a dataset.
 
     Users hold data_ids in external mappings, so every id ever issued keeps

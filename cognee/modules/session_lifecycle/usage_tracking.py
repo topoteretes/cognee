@@ -6,11 +6,11 @@ Call sites that know the active session_id wrap their work in
 opts in) calls ``record_llm_call`` after each LLM completion. The
 tracker accumulates into the ``SessionRecord`` row.
 
-Token counts are exact for the instructor and litellm_native
+Token counts are exact for the litellm_native and legacy
 structured-output paths — ``LLMGateway`` reads real
 ``prompt_tokens``/``completion_tokens`` off the raw provider response
-(instructor attaches it internally; the litellm_native adapter attaches
-it explicitly, see ``_attach_raw_response``) and passes them as
+(the legacy framework attaches it internally; the litellm_native adapter
+attaches it explicitly, see ``_attach_raw_response``) and passes them as
 ``tokens_in_override``/``tokens_out_override`` below (see
 ``LLMGateway._exact_usage_from_result``). BAML and the plain-string path
 that skips structured output don't expose that raw response, so calls
@@ -20,20 +20,18 @@ enough for the dashboard's "are we spending?" question on those paths.
 
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from typing import Optional
 from uuid import UUID as UUIDType
-
-from cognee.shared.logging_utils import get_logger
 
 # Submodule import on purpose: avoids the cognee.modules.operations
 # package-init chain from this low-level module.
 from cognee.modules.operations.usage_accumulator import get_active_operation_usage
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("session_usage")
 
 
 # (session_id, user_id) when active, else None.
-_active_session: ContextVar[Optional[tuple[str, UUIDType]]] = ContextVar(
+_active_session: ContextVar[tuple[str, UUIDType] | None] = ContextVar(
     "cognee_session_usage_target", default=None
 )
 
@@ -61,9 +59,13 @@ def _estimate_tokens(text: str) -> int:
 # Rough per-model pricing for cost estimates. Longest-prefix match (see below),
 # so a model id need only start with a key; unknown models cost $0 and callers
 # warn. USD per 1M tokens (input, output) at each provider's base tier; verified
-# against the official pricing pages July 2026.
+# against the official pricing pages September 2026.
 _PRICING_PER_M_TOKENS = {
     # OpenAI — https://developers.openai.com/api/docs/pricing
+    "gpt-5.6-astra": (10.00, 50.00),
+    "gpt-5.6-sol": (4.00, 20.00),
+    "gpt-5.6-terra": (2.00, 12.00),
+    "gpt-5.6-luna": (0.20, 1.20),
     "gpt-5.5": (5.00, 30.00),
     "gpt-5.5-pro": (30.00, 180.00),
     "gpt-5.4": (2.50, 15.00),
@@ -117,7 +119,7 @@ _PRICING_PER_M_TOKENS = {
 _PRICING_SORTED = sorted(_PRICING_PER_M_TOKENS.items(), key=lambda kv: -len(kv[0]))
 
 
-def _estimate_cost_usd(model: Optional[str], tokens_in: int, tokens_out: int) -> float:
+def _estimate_cost_usd(model: str | None, tokens_in: int, tokens_out: int) -> float:
     if not model:
         return 0.0
     # Normalize: strip provider prefix ("openai/gpt-4o" → "gpt-4o"), drop date suffix.
@@ -128,7 +130,7 @@ def _estimate_cost_usd(model: Optional[str], tokens_in: int, tokens_out: int) ->
     return 0.0
 
 
-def estimate_cost_usd(model: Optional[str], tokens_in: int, tokens_out: int) -> float:
+def estimate_cost_usd(model: str | None, tokens_in: int, tokens_out: int) -> float:
     """Estimate USD cost for a model using Cognee's rough pricing table.
 
     Unrecognized models cost $0 — callers that surface the number should say so.
@@ -140,9 +142,9 @@ async def record_llm_call(
     *,
     input_text: str,
     output_text: str,
-    model: Optional[str] = None,
-    tokens_in_override: Optional[int] = None,
-    tokens_out_override: Optional[int] = None,
+    model: str | None = None,
+    tokens_in_override: int | None = None,
+    tokens_out_override: int | None = None,
 ) -> None:
     """If there's an active session, accumulate this call's usage into it.
 
@@ -183,4 +185,4 @@ async def record_llm_call(
             model=model,
         )
     except Exception as exc:
-        logger.debug("record_llm_call: accumulate failed (%s)", exc)
+        logger.debug("record_llm_call: accumulate failed (%s)", exc, exc_info=True)
