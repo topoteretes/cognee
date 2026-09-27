@@ -41,7 +41,8 @@
 
   <p>Cognee is a free open-source AI memory platform that gives AI agents persistent long-term memory across sessions. Turn documents, code, and conversations into a self-hosted knowledge graph your agents can search and reuse.</p>
 
-  <p><strong>Start locally for free without an OpenAI or Anthropic API key.</strong> Build memory from text with local extraction and embedding models. Add a local or hosted LLM when you want more functionality or reach out to us for a production-ready small model pipeline.</p>
+  <p><strong>Runs locally for free — no API key required.</strong><br />
+  We rely on free small models that use your CPU.</p>
 
   <p align="center">
   🌐 This README is also available in:<br />
@@ -132,6 +133,8 @@ cognee-cli recall "Where was Marie Curie born?" -d local_quickstart
 Text ingestion, retrieval, and session storage work without an LLM. LLM-dependent improvement stages skip automatically.
 
 Generated answers and media processing that requires a vision or transcription model need additional LLM configuration.
+
+The bundled GLiNER extractor is a demo of Cognee's small-model pipeline. For a production-ready version with higher accuracy and broader label coverage, [reach out to us](mailto:social@cognee.ai).
 
 ### Optional: Configure the LLM
 
