@@ -1,17 +1,17 @@
 import os
-from urllib.parse import urlparse
-from typing import Any, List, Tuple
-from pathlib import Path
 import tempfile
-
-from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
-from cognee.modules.ingestion.exceptions import IngestionError
-from cognee.infrastructure.loaders import get_loader_engine
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.files.utils.open_data_file import open_data_file
-from cognee.infrastructure.utils.run_async import run_async
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.loaders import get_loader_engine
+from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
+from cognee.infrastructure.utils.run_async import run_async
+from cognee.modules.ingestion.exceptions import IngestionError
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -47,9 +47,9 @@ async def pull_from_s3(file_path, destination_file) -> None:
 
 async def data_item_to_text_file(
     data_item_path: str,
-    preferred_loaders: dict[str, dict[str, Any]] = None,
+    preferred_loaders: dict[str, dict[str, Any]] | None = None,
     **loader_kwargs: Any,
-) -> Tuple[str, LoaderInterface]:
+) -> tuple[str, LoaderInterface]:
     """Run the loader engine on a data item's file.
 
     ``loader_kwargs`` (ingestion context: dataset_name, dataset_id, user,
@@ -70,7 +70,7 @@ async def data_item_to_text_file(
             # create it with delete=False, close our handle first, and clean it up
             # ourselves. (Mirrors the delete=False pattern used by the SQLAlchemy and
             # ladybug S3 temp-file paths.)
-            temp_file = tempfile.NamedTemporaryFile(
+            temp_file = tempfile.NamedTemporaryFile(  # noqa: SIM115 - closed below after the write; delete=False keeps the path
                 mode="wb", suffix=path_info.suffix, delete=False
             )
             try:

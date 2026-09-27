@@ -5,7 +5,8 @@ from .create_dataset import create_dataset
 from .get_dataset import get_dataset
 from .get_datasets import get_datasets
 from .get_datasets_by_name import get_datasets_by_name
-from .get_dataset_data import get_dataset_data
+from .get_dataset_data import get_dataset_data, count_dataset_data
+from .get_dataset_processing_status import get_dataset_processing_status
 from .get_authorized_dataset import get_authorized_dataset
 from .get_authorized_dataset_by_name import get_authorized_dataset_by_name
 from .get_data import get_data
@@ -23,6 +24,7 @@ from .publish_updated_data import (
     mark_data_processed,
     merged_external_metadata,
     publish_updated_data,
+    reset_data_pipeline_status,
 )
 
 # Delete

@@ -24,7 +24,7 @@ ripple into another's.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from cognee.api.v1.search.search import search as cognee_search
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
@@ -54,7 +54,7 @@ async def handle_agent_session(credential: IntegrationCredential, payload: dict[
 
     try:
         access_token = access_token_for(credential)
-    except Exception:  # noqa: BLE001 - a bad stored payload must not crash the detached handler
+    except Exception:  # a bad stored payload must not crash the detached handler
         logger.exception(
             "Linear agent session %s: no usable token for organization %s",
             agent_session_id,
@@ -68,7 +68,7 @@ async def handle_agent_session(credential: IntegrationCredential, payload: dict[
         await create_agent_activity(
             access_token, agent_session_id, {"type": "thought", "body": _ACK_THOUGHT}
         )
-    except Exception:  # noqa: BLE001 - a failed ack degrades the display; a missing response would kill the turn
+    except Exception:  # a failed ack degrades the display; a missing response would kill the turn
         logger.exception("Linear agent session %s: acknowledgement failed", agent_session_id)
 
     try:
@@ -76,13 +76,13 @@ async def handle_agent_session(credential: IntegrationCredential, payload: dict[
         await create_agent_activity(
             access_token, agent_session_id, {"type": "response", "body": answer}
         )
-    except Exception:  # noqa: BLE001 - every failure must end the turn in an error activity, not a raise
+    except Exception:  # every failure must end the turn in an error activity, not a raise
         logger.exception("Linear agent session %s: answering failed", agent_session_id)
         try:
             await create_agent_activity(
                 access_token, agent_session_id, {"type": "error", "body": _ERROR_BODY}
             )
-        except Exception:  # noqa: BLE001 - best effort; nothing left to do but log
+        except Exception:  # best effort; nothing left to do but log
             logger.exception(
                 "Linear agent session %s: error activity delivery failed", agent_session_id
             )
@@ -170,7 +170,7 @@ async def _answer(credential: IntegrationCredential, payload: dict[str, Any]) ->
     return "\n\n".join(facts)
 
 
-def _extract_fact(result: Any) -> Optional[str]:
+def _extract_fact(result: Any) -> str | None:
     """Pull the answer text out of one ``cognee.search()`` result.
 
     Despite the ``List[SearchResult]`` type hint, the public ``search()``

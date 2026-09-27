@@ -1,20 +1,20 @@
 import os
 import pathlib
-from typing import List
+from contextlib import AsyncExitStack
 from uuid import UUID, uuid4
+
 from pydantic import BaseModel
 
 import cognee
 from cognee.api.v1.datasets import datasets
-from contextlib import AsyncExitStack
 from cognee.context_global_variables import set_database_global_context_variables
-from cognee.infrastructure.locks import dataset_lock
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.engine.operations.setup import setup
-from cognee.modules.users.models import User
 from cognee.modules.users.methods import create_user
+from cognee.modules.users.models import User
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage import add_data_points
@@ -53,7 +53,7 @@ async def main():
 
     class Person(DataPoint):
         name: str
-        works_for: List[Organization]
+        works_for: list[Organization]
         metadata: dict = {"index_fields": ["name"]}
 
     companyA = ForProfit(name="Company A")

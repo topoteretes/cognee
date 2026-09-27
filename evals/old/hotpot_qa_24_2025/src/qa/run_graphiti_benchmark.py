@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run Graphiti QA benchmark."""
 
-from qa.qa_benchmark_graphiti import QABenchmarkGraphiti, GraphitiConfig
+from qa.qa_benchmark_graphiti import GraphitiConfig, QABenchmarkGraphiti
 
 
 def main():

@@ -33,8 +33,7 @@ _ENV_PINS = {
 for _key, _value in _ENV_PINS.items():
     os.environ.setdefault(_key, _value)
 
-from cognee.tests.journeys import _support  # noqa: E402
-from cognee.tests.journeys import mock_ai  # noqa: E402
+from cognee.tests.journeys import _support, mock_ai  # noqa: E402
 
 _MOCK_STATE: dict = {"llm": None}
 
@@ -44,7 +43,9 @@ def _install_ai_mocks():
     """Swap LLM and embeddings for deterministic stand-ins in mock mode.
 
     A fixture rather than import-time code so collecting this directory alongside
-    other suites does not patch anything until a journey actually runs.
+    other suites does not patch anything until a journey actually runs; the
+    patches are removed again when the session ends so later suites in the same
+    process see the real gateway.
     """
     if _support.IS_MOCK and _MOCK_STATE["llm"] is None:
         # Keys are never used, but config validation wants them present.
@@ -53,6 +54,9 @@ def _install_ai_mocks():
                 _support.mock_graphs(_support.load_documents())
             )
     yield _MOCK_STATE["llm"]
+    if _MOCK_STATE["llm"] is not None:
+        mock_ai.uninstall_all()
+        _MOCK_STATE["llm"] = None
 
 
 def pytest_configure(config):
@@ -83,8 +87,7 @@ def questions() -> list[_support.Question]:
     return _support.load_questions()
 
 
-async def _reset_engines_and_prune() -> None:
-    import cognee
+def _clear_engine_caches() -> None:
     from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
@@ -95,15 +98,28 @@ async def _reset_engines_and_prune() -> None:
     _create_vector_engine.cache_clear()
     create_relational_engine.cache_clear()
 
+
+async def _reset_engines_and_prune() -> None:
+    import cognee
+
+    _clear_engine_caches()
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
 
 @pytest_asyncio.fixture
 async def clean_env(tmp_path):
-    """Fresh data + system roots under tmp_path, pruned before and after."""
+    """Fresh data + system roots under tmp_path, pruned before and after.
+
+    The previous roots are restored on teardown so the journey does not leave
+    global config pointing into a temporary directory for later tests.
+    """
     import cognee
+    from cognee.base_config import get_base_config
     from cognee.modules.engine.operations.setup import setup as engine_setup
+
+    base_config = get_base_config()
+    previous_roots = (base_config.data_root_directory, base_config.system_root_directory)
 
     root = Path(tmp_path)
     cognee.config.data_root_directory(str(root / "data"))
@@ -114,6 +130,9 @@ async def clean_env(tmp_path):
         yield root
     finally:
         await _reset_engines_and_prune()
+        cognee.config.data_root_directory(previous_roots[0])
+        cognee.config.system_root_directory(previous_roots[1])
+        _clear_engine_caches()
 
 
 @pytest_asyncio.fixture

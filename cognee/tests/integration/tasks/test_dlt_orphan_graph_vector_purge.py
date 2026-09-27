@@ -19,6 +19,7 @@ credentials, no network.
 """
 
 import hashlib
+import logging
 import pathlib
 
 import pytest
@@ -34,6 +35,8 @@ from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.users.methods import get_default_user
+
+logger = logging.getLogger(__name__)
 
 DATASET = "dlt_purge_ac_ds"
 
@@ -90,7 +93,7 @@ async def clean_env(tmp_path, monkeypatch):
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in clean_env", exc_info=True)
 
 
 def _mock_llm():
@@ -181,6 +184,7 @@ async def _store_counts(dataset):
         try:
             vec = await (await ve.get_collection("DltRow_text")).count_rows()
         except Exception:
+            logger.debug("Ignoring exception in _store_counts", exc_info=True)
             vec = 0
     return len(nodes), vec
 
@@ -188,7 +192,7 @@ async def _store_counts(dataset):
 @pytest.mark.asyncio
 async def test_deleted_row_purged_from_per_dataset_stores_on_resync(clean_env):
     user = await get_default_user()
-    kwargs = dict(primary_key="id", write_disposition="merge", max_rows_per_table=0)
+    kwargs = {"primary_key": "id", "write_disposition": "merge", "max_rows_per_table": 0}
 
     with _mock_llm():
         # Ingest two rows through the real add + cognify pipeline (per-dataset DB).
@@ -290,7 +294,7 @@ async def test_legacy_content_addressed_manifest_purged_on_first_resync(clean_en
         return await real_get_unique_data_id(identifier, user)
 
     user = await get_default_user()
-    kwargs = dict(primary_key="id", write_disposition="merge", max_rows_per_table=0)
+    kwargs = {"primary_key": "id", "write_disposition": "merge", "max_rows_per_table": 0}
     rows = [
         {"id": "a", "body": "alpha runbook restart the payments service", "_deleted": False},
         {"id": "b", "body": "beta onboarding request vpn access from it", "_deleted": False},

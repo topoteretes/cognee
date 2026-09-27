@@ -1,5 +1,10 @@
+import logging
+
 import modal
+
 from modal_apps.modal_image import image
+
+logger = logging.getLogger(__name__)
 
 APP_NAME = "volume-reader"
 VOLUME_NAME = "qa-benchmarks"
@@ -50,6 +55,7 @@ def get_answers_files(benchmark_folder: str):
         print("📭 Answers folder is empty or doesn't exist")
         return []
     except Exception as e:
+        logger.debug("Falling back to [] after error in get_answers_files", exc_info=True)
         print(f"❌ Error reading answers folder: {e}")
         return []
 
@@ -62,12 +68,13 @@ def get_answers_files(benchmark_folder: str):
 )
 def calculate_qa_metrics(benchmark_folder: str, filename: str):
     """Calculate QA metrics for a JSON file using cognee evaluation framework."""
+    import asyncio
     import json
     import os
-    import asyncio
+
     import cognee
-    from cognee.eval_framework.evaluation.run_evaluation_module import run_evaluation
     from cognee.eval_framework.eval_config import EvalConfig
+    from cognee.eval_framework.evaluation.run_evaluation_module import run_evaluation
 
     answers_folder = f"/{VOLUME_NAME}/{benchmark_folder}/answers"
     deepeval_folder = f"/{VOLUME_NAME}/{benchmark_folder}/deepeval_evaluated"
@@ -191,11 +198,12 @@ def calculate_qa_metrics(benchmark_folder: str, filename: str):
     except json.JSONDecodeError as e:
         print(f"❌ Invalid JSON in {filename}: {e}")
     except Exception as e:
+        logger.debug("Ignoring exception in calculate_qa_metrics", exc_info=True)
         print(f"❌ Error processing {filename}: {e}")
 
 
 @app.local_entrypoint()
-def main(benchmark_folder: str = None, limit: int = None):
+def main(benchmark_folder: str | None = None, limit: int | None = None):
     """Entry point that triggers evaluation for a specific benchmark folder."""
     print(f"🚀 Starting evaluation for benchmark folder: {benchmark_folder}")
     print(f"📏 Processing limit: {limit if limit else 'all'} files")

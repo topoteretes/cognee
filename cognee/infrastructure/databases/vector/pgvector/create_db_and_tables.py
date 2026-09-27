@@ -1,7 +1,8 @@
 from sqlalchemy import text
 
-from ..get_vector_engine import get_vector_engine_async, get_vectordb_context_config
 from cognee.context_global_variables import backend_access_control_enabled
+
+from ..get_vector_engine import get_vector_engine_async, get_vectordb_context_config
 
 
 async def create_db_and_tables():

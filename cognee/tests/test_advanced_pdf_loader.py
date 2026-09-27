@@ -1,5 +1,6 @@
 import sys
-from unittest.mock import patch, MagicMock, AsyncMock, mock_open
+from unittest.mock import AsyncMock, MagicMock, mock_open, patch
+
 import pytest
 
 from cognee.infrastructure.loaders.external.advanced_pdf_loader import AdvancedPdfLoader
@@ -98,7 +99,7 @@ async def test_load_success_with_unstructured(
 
     # Verify partition_pdf is called with the correct parameters
     mock_partition_pdf.assert_called_once()
-    call_args, call_kwargs = mock_partition_pdf.call_args
+    _call_args, call_kwargs = mock_partition_pdf.call_args
     assert call_kwargs.get("filename") == test_file_path
     assert call_kwargs.get("strategy") == "auto"  # Default strategy
 

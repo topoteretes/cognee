@@ -15,7 +15,7 @@ from uuid import UUID
 
 import pytest
 
-from cognee.api.v1.visualize.visualize import fetch_visualization_data  # noqa: F401
+from cognee.api.v1.visualize.visualize import fetch_visualization_data
 
 visualize_module = sys.modules["cognee.api.v1.visualize.visualize"]
 

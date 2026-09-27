@@ -1,8 +1,9 @@
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 import sys
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
+
+import pytest
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
@@ -11,10 +12,10 @@ from cognee.modules.engine.models import Triplet
 from cognee.modules.graph.utils import ensure_default_edge_properties
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.tasks.storage.add_data_points import (
-    add_data_points,
     InvalidDataPointsInAddDataPointsError,
-    _extract_embeddable_text_from_datapoint,
     _create_triplets_from_graph,
+    _extract_embeddable_text_from_datapoint,
+    add_data_points,
 )
 
 adp_module = sys.modules["cognee.tasks.storage.add_data_points"]
@@ -94,7 +95,7 @@ async def test_add_data_points_indexes_nodes_and_edges(
 
     mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
     mock_dedup.side_effect = lambda n, e: (n, e)
-    unified, graph_engine, vector_engine = _make_unified_mock()
+    unified, graph_engine, _vector_engine = _make_unified_mock()
     mock_get_unified.return_value = unified
 
     result = await add_data_points([dp1, dp2], custom_edges=custom_edges)
@@ -134,7 +135,7 @@ async def test_a_failed_graph_write_indexes_no_vectors(
     dp1 = SimplePoint(text="first")
     mock_get_graph.side_effect = [([dp1], [])]
     mock_dedup.side_effect = lambda n, e: (n, e)
-    unified, graph_engine, vector_engine = _make_unified_mock()
+    unified, graph_engine, _vector_engine = _make_unified_mock()
     mock_get_unified.return_value = unified
     graph_engine.add_nodes.side_effect = RuntimeError("graph is down")
 
@@ -161,7 +162,7 @@ async def test_add_data_points_indexes_triplets_when_enabled(
 
     mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
     mock_dedup.side_effect = lambda n, e: (n, e)
-    unified, graph_engine, vector_engine = _make_unified_mock()
+    unified, _graph_engine, _vector_engine = _make_unified_mock()
     mock_get_unified.return_value = unified
 
     await add_data_points([dp1, dp2], embed_triplets=True)
@@ -185,7 +186,7 @@ async def test_add_data_points_with_empty_list(
     mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges
 ):
     mock_dedup.side_effect = lambda n, e: (n, e)
-    unified, graph_engine, vector_engine = _make_unified_mock()
+    unified, graph_engine, _vector_engine = _make_unified_mock()
     mock_get_unified.return_value = unified
 
     result = await add_data_points([])
@@ -207,7 +208,7 @@ async def test_add_data_points_with_single_datapoint(
     dp = SimplePoint(text="single")
     mock_get_graph.side_effect = [([dp], [])]
     mock_dedup.side_effect = lambda n, e: (n, e)
-    unified, graph_engine, vector_engine = _make_unified_mock()
+    unified, _graph_engine, _vector_engine = _make_unified_mock()
     mock_get_unified.return_value = unified
 
     result = await add_data_points([dp])
@@ -260,11 +261,11 @@ async def test_add_data_points_graph_provenance_folds_provenance_and_skips_ledge
     mock_upsert_edges,
 ):
     from cognee.infrastructure.databases.provenance import (
-        make_source_ref_key,
         GRAPH_DELETE_MODE_GRAPH_PROVENANCE,
         GRAPH_DELETE_MODE_KEY,
         GRAPH_PROVENANCE_VERSION,
         GRAPH_PROVENANCE_VERSION_KEY,
+        make_source_ref_key,
     )
 
     dp1 = SimplePoint(text="first")
@@ -275,7 +276,7 @@ async def test_add_data_points_graph_provenance_folds_provenance_and_skips_ledge
     mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
     mock_dedup.side_effect = lambda n, e: (n, e)
 
-    unified, graph_engine, vector_engine = _make_unified_mock()
+    unified, graph_engine, _vector_engine = _make_unified_mock()
     # Marked graph-provenance: stores_provenance_in_graph -> True (both marker fields).
     graph_engine.get_graph_metadata = AsyncMock(
         return_value={
@@ -434,12 +435,12 @@ async def test_add_data_points_graph_provenance_hybrid_attaches_after_write(
     """A hybrid backend cannot fold provenance into its combined node+vector
     write, so it stamps via the separate attach pass (the retained fallback)."""
     from cognee.infrastructure.databases.provenance import (
-        EdgeIdentity,
-        make_source_ref_key,
         GRAPH_DELETE_MODE_GRAPH_PROVENANCE,
         GRAPH_DELETE_MODE_KEY,
         GRAPH_PROVENANCE_VERSION,
         GRAPH_PROVENANCE_VERSION_KEY,
+        EdgeIdentity,
+        make_source_ref_key,
     )
     from cognee.infrastructure.databases.unified.capabilities import EngineCapability
 
@@ -451,7 +452,7 @@ async def test_add_data_points_graph_provenance_hybrid_attaches_after_write(
     mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
     mock_dedup.side_effect = lambda n, e: (n, e)
 
-    unified, graph_engine, vector_engine = _make_unified_mock()
+    unified, graph_engine, _vector_engine = _make_unified_mock()
     unified.has_capability = MagicMock(side_effect=lambda cap: cap == EngineCapability.HYBRID_WRITE)
     graph_engine.get_graph_metadata = AsyncMock(
         return_value={
@@ -507,7 +508,7 @@ async def test_add_data_points_old_graph_uses_ledger_and_skips_attach(
     mock_dedup.side_effect = lambda n, e: (n, e)
 
     # Default mock is NOT graph-provenance (empty metadata + non-empty graph).
-    unified, graph_engine, vector_engine = _make_unified_mock()
+    unified, graph_engine, _vector_engine = _make_unified_mock()
     mock_get_unified.return_value = unified
     mock_get_session.return_value = _AsyncCM(AsyncMock())
 
@@ -806,7 +807,7 @@ async def test_add_data_points_with_empty_custom_edges(
     dp = SimplePoint(text="test")
     mock_get_graph.side_effect = [([dp], [])]
     mock_dedup.side_effect = lambda n, e: (n, e)
-    unified, graph_engine, vector_engine = _make_unified_mock()
+    unified, graph_engine, _vector_engine = _make_unified_mock()
     mock_get_unified.return_value = unified
 
     result = await add_data_points([dp], custom_edges=[])
@@ -836,7 +837,7 @@ async def test_add_data_points_hybrid_write_path(
 
     mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
     mock_dedup.side_effect = lambda n, e: (n, e)
-    unified, graph_engine, vector_engine = _make_unified_mock()
+    unified, graph_engine, _vector_engine = _make_unified_mock()
     unified.has_capability = MagicMock(side_effect=lambda cap: cap == EngineCapability.HYBRID_WRITE)
     mock_get_unified.return_value = unified
 

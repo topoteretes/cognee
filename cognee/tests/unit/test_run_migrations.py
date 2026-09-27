@@ -217,9 +217,9 @@ class TestStartupMigrationsBootstrap(unittest.TestCase):
                 "cognee.infrastructure.databases.relational.get_relational_engine",
                 return_value=db_engine,
             ),
+            self.assertRaises(startup.MigrationError),
         ):
-            with self.assertRaises(startup.MigrationError):
-                asyncio.run(startup.run_migrations())
+            asyncio.run(startup.run_migrations())
 
         db_engine.create_database.assert_not_awaited()
         self.assertFalse(startup._startup_migrations_done)

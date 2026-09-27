@@ -1,15 +1,17 @@
 import logging
 import os
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock
-from cognee.infrastructure.llm.ollama_support import (
-    normalize_model_name,
-    classify_model,
-    emit_warning,
-    _warned_models,
-)
+
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.ollama_support import (
+    _warned_models,
+    classify_model,
+    emit_warning,
+    normalize_model_name,
+)
 
 
 @pytest.mark.parametrize(
@@ -111,8 +113,7 @@ async def test_local_ollama_example_executes_offline(monkeypatch):
 
     @staticmethod
     async def _mock_acreate(text_input, system_prompt, response_model, **kwargs):
-        from cognee.shared.data_models import KnowledgeGraph, SummarizedContent
-        from cognee.shared.data_models import Node, Edge
+        from cognee.shared.data_models import Edge, KnowledgeGraph, Node, SummarizedContent
 
         if response_model is KnowledgeGraph or (
             isinstance(response_model, type) and issubclass(response_model, KnowledgeGraph)

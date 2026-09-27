@@ -1,9 +1,10 @@
-from typing import Any, Optional, List, Union
-from cognee.shared.logging_utils import get_logger
+from typing import Any
+
 from cognee.infrastructure.databases.unified import get_unified_engine
+from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("ChunksRetriever")
 
@@ -20,10 +21,15 @@ class ChunksRetriever(BaseRetriever):
     not given.
     """
 
+    # Chunk search returns raw payloads and never calls an LLM, so the conversational
+    # session-turn analysis would add a pre-retrieval LLM round trip to an otherwise
+    # sub-second, deterministic path. Opt out, like the other non-generative retrievers.
+    supports_session_turn_preparation = False
+
     def __init__(
         self,
-        top_k: Optional[int] = 5,
-        node_name: Optional[List[str]] = None,
+        top_k: int | None = 5,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
     ):
         """
@@ -46,7 +52,7 @@ class ChunksRetriever(BaseRetriever):
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
-    ) -> Union[List[str], List[dict]]:
+    ) -> list[str] | list[dict]:
         """
         Generates a completion using document chunks context.
         In case of the Chunks Retriever, we do not generate a completion, we just return

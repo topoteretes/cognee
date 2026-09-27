@@ -1,4 +1,4 @@
-from cognee.modules.engine.models import Interval, Event
+from cognee.modules.engine.models import Event, Interval
 from cognee.modules.engine.utils.generate_timestamp_datapoint import generate_timestamp_datapoint
 
 

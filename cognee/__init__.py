@@ -86,6 +86,10 @@ from .api.v1 import (
 )
 from .memory import MemoryEntry, QAEntry, TraceEntry, FeedbackEntry
 
+# Background work: wait for fire-and-forget tasks (background remember, the
+# session-to-graph improve bridge) before the process exits.
+from cognee.infrastructure.background_tasks import wait_for_background_tasks
+
 # Memory migration (cognee.migration has the provider sources:
 # Mem0Source, ZepSource/GraphitiSource, LettaSource, COGXArchiveSource)
 from . import migration
@@ -107,6 +111,6 @@ from .api.v1.tools import tools
 
 # Relational DB models
 from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord
-import cognee.modules.migrations.models  # noqa: F401  (registers global_database_version)
-import cognee.modules.tools.models  # noqa: F401  (registers tool_connections)
-import cognee.modules.provenance.edge_evidence.models  # noqa: F401  (registers provenance_edge_evidence)
+import cognee.modules.migrations.models  # registers global_database_version
+import cognee.modules.tools.models  # registers tool_connections
+import cognee.modules.provenance.edge_evidence.models  # registers provenance_edge_evidence

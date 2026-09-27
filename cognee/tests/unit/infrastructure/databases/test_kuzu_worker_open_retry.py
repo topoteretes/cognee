@@ -7,12 +7,11 @@ helper is driven with a fake stand-in.
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
-import cognee_db_workers.harness as harness
-from cognee_db_workers import kuzu_worker
-
-import sys
+from cognee_db_workers import harness, kuzu_worker
 
 # These tests construct subprocess workers explicitly, so the
 # *_SUBPROCESS_ENABLED=false the Windows CI jobs set cannot keep them from

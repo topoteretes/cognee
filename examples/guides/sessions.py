@@ -1,4 +1,15 @@
+"""Show session-scoped memory by passing session_id to recall across follow-up questions.
+
+Three facts are remembered, then "What does she do for work?" is asked as a follow-up inside the
+same session (where "she" resolves to Alice from the previous turn) and again in a fresh session,
+where the pronoun cannot be resolved.
+
+Requires: LLM_API_KEY.
+Run: uv run python examples/guides/sessions.py
+"""
+
 import asyncio
+
 import cognee
 from cognee import SearchType
 

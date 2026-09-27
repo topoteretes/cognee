@@ -19,18 +19,32 @@ something" is never a pass here.
 `COGNEE_JOURNEY_MODE=mock` (default) swaps the two AI calls for deterministic
 stand-ins from `mock_ai.py`:
 
-- The LLM replays pre-authored knowledge graphs for corpus documents, extracts
-  capitalised phrases for anything else, and answers by echoing the retrieved
-  context (never the question). A fact can only pass if retrieval surfaced it.
+- The LLM replays the pre-authored knowledge graph and summary of the corpus
+  document named on a chunk's `Title:` line (a mere mention of another
+  document's title must not replay that document — the corpus cross-references
+  itself on purpose), extracts capitalised phrases for anything else, and
+  answers by echoing the prompt with the question cut out. A fact can only pass
+  if retrieval surfaced it, whichever completion template framed the context.
 - Embeddings are hashed bag-of-words vectors, so vector search ranks by shared
   vocabulary. Deterministic across processes and machines.
 
-No network, no secrets. This tier runs on every PR, including forks.
+No network, no secrets. This tier runs on every PR, including forks. Because
+it is deterministic, the correctness journey holds every path to **30/30** in
+this mode; a lost question is a regression and the scorecard names it.
 
 `COGNEE_JOURNEY_MODE=llm` uses the real providers from the environment. The
 correctness journey switches to threshold assertions and additionally enforces
 `forbidden` tokens: a concise answer must not cite facts from unrelated
 documents.
+
+## How results are scored
+
+Only retrieved *content* is scored — chunk texts, summaries, completions,
+session answers — never the result envelope (ids, timestamps, dataset fields),
+and every gold token is matched as a whole token. `41` therefore cannot pass on
+the hex of a UUID or the digits of a `created_at`, and a fact cannot pass
+because the question mentioned it. Helpers: `_support.content_text` and
+`_support.contains_token`.
 
 ## Running
 
@@ -44,9 +58,13 @@ COGNEE_JOURNEY_QUICKSTART=1 pytest cognee/tests/journeys -m quickstart
 # real LLM
 COGNEE_JOURNEY_MODE=llm pytest cognee/tests/journeys -m "journey and not quickstart"
 
-# accept an intentional route-table change
+# accept an intentional route-table change (the only way the snapshot is written)
 COGNEE_UPDATE_API_SNAPSHOT=1 pytest cognee/tests/journeys/test_http_api_journey.py
 ```
+
+The route snapshot is compared against the routes `dev` actually serves, so a
+branch that is behind `dev` fails it after another PR adds a route: merge `dev`,
+regenerate, commit the snapshot diff.
 
 ## Golden corpus
 
@@ -56,8 +74,11 @@ Each document carries the knowledge graph and summary the mock LLM replays for
 it. `golden_corpus/questions.json` holds 30 questions with `expected_any`
 tokens (any one satisfies) and `forbidden` tokens from other documents.
 
-Add a document by appending to both files; keep texts to a single chunk and
-give each new entity a distinctive name so hashed embeddings separate it.
+Add a document by appending to both files; keep texts to a single chunk, start
+them with a `Title:` line that matches the document's `title` exactly (that is
+how the mock finds the graph to replay), and give each new entity a
+distinctive name so hashed embeddings separate it. Pick `expected_any` tokens
+that do not appear in the question and, where possible, in no other document.
 
 ## Why questions run in their own sessions
 

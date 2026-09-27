@@ -22,10 +22,10 @@ import pytest
 from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
     SQLAlchemyAdapter,
 )
-from cognee.modules.data.models import Data, Dataset
 from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
+from cognee.modules.data.models import Data, Dataset
 from cognee.modules.ingestion import StoredFile
-from cognee.tasks.ingestion.carried_source import CarriedSource, CARRIED_SOURCE_KEY
+from cognee.tasks.ingestion.carried_source import CARRIED_SOURCE_KEY, CarriedSource
 
 ingest_module = importlib.import_module("cognee.tasks.ingestion.ingest_data")
 
@@ -45,11 +45,11 @@ def _metadata():
 
 
 async def _make_engine():
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp.close()
-    engine = SQLAlchemyAdapter(f"sqlite+aiosqlite:///{tmp.name}")
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        db_path = tmp.name
+    engine = SQLAlchemyAdapter(f"sqlite+aiosqlite:///{db_path}")
     await engine.create_database()
-    return engine, tmp.name
+    return engine, db_path
 
 
 def _install_mocks(stack, engine, save_mock, open_mock):
@@ -110,7 +110,7 @@ async def test_carried_item_is_not_saved_or_read_again():
         }
     )
     save_mock = AsyncMock(side_effect=AssertionError("item was uploaded a second time"))
-    open_mock = lambda *_a, **_k: (_ for _ in ()).throw(  # noqa: E731
+    open_mock = lambda *_a, **_k: (_ for _ in ()).throw(
         AssertionError("item was read back from storage")
     )
 
@@ -127,9 +127,11 @@ async def test_path_item_reuses_wrapper_metadata_after_identity_changes():
     # id() published by the wrapper no longer matches — but the stored path
     # does, and the metadata must be reused rather than the file re-read.
     wrapper_saw = "/tmp/doc.txt"  # the string the wrapper inspected
-    # Built at runtime: a compile-time concat would be constant-folded into the
-    # same interned object, silently reintroducing the id() match.
-    task_receives = "".join(["/tmp/doc", ".txt"])
+    # Built at runtime from a variable: a literal or a compile-time concat is
+    # constant-folded into the same interned object (ruff's FLY002 rewrites a
+    # static join into exactly that), silently reintroducing the id() match.
+    path_parts = ["/tmp/doc", ".txt"]
+    task_receives = "".join(path_parts)
     assert wrapper_saw == task_receives and wrapper_saw is not task_receives
 
     ctx = SimpleNamespace(
@@ -142,7 +144,7 @@ async def test_path_item_reuses_wrapper_metadata_after_identity_changes():
     )
     # The pass-through save is I/O-free and returns the path with no metadata.
     save_mock = AsyncMock(return_value=StoredFile(file_path="/tmp/doc.txt", metadata=None))
-    open_mock = lambda *_a, **_k: (_ for _ in ()).throw(  # noqa: E731
+    open_mock = lambda *_a, **_k: (_ for _ in ()).throw(
         AssertionError("metadata was recomputed by re-reading the file")
     )
 

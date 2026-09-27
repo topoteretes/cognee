@@ -25,7 +25,7 @@ EXPECTED = ("wren",)
 
 
 def _texts(results) -> str:
-    return _support.result_text(results)
+    return _support.content_text(results)
 
 
 def _sources(results) -> set[str]:

@@ -13,9 +13,11 @@ import asyncio
 import hashlib
 import json
 import os
+import platform
 import shutil
+import sysconfig
 from pathlib import Path
-from typing import Any, Optional, Tuple, Union
+from typing import Any
 
 from fastapi import status
 
@@ -24,7 +26,10 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("enola")
 
-ENOLA_INSTALL_URL = "https://github.com/enola-labs/enola#installation"
+INSTALL_HINT = (
+    "The code graph feature needs the `enola-cli` package, which is included with cognee. "
+    "Reinstall cognee to restore it."
+)
 
 # Snapshot artifact format generations this reader understands (receipt.json
 # ``format_version``, written since enola 0.4.10). Additive vocabulary — new
@@ -55,11 +60,7 @@ _SUBPROCESS_ENV_OVERRIDES = {"ENOLA_NO_UPDATE_CHECK": "1", "ENOLA_NO_PROMPTS": "
 class EnolaNotInstalledError(CogneeConfigurationError):
     def __init__(
         self,
-        message: str = (
-            "The enola binary was not found. Install it from "
-            f"{ENOLA_INSTALL_URL} and make sure it is on PATH, "
-            "or point the ENOLA_PATH environment variable at the binary."
-        ),
+        message: str = INSTALL_HINT,
         name: str = "EnolaNotInstalledError",
         status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
     ):
@@ -76,20 +77,36 @@ class EnolaSnapshotError(CogneeSystemError):
         super().__init__(message, name, status_code)
 
 
+def _environment_scripts_binary() -> str | None:
+    """The enola binary the ``enola-cli`` wheel installs next to this interpreter.
+
+    The wheel puts the binary in the environment's scripts directory. That
+    directory is on PATH when the environment is activated, but not when the
+    interpreter is run by path (a container entrypoint, a service unit, a
+    scheduler), so look there directly before consulting PATH.
+    """
+    scripts_dir = sysconfig.get_path("scripts")
+    if not scripts_dir:
+        return None
+    suffix = ".exe" if platform.system().lower() == "windows" else ""
+    candidate = Path(scripts_dir) / f"enola{suffix}"
+    if candidate.is_file() and os.access(candidate, os.X_OK):
+        return str(candidate)
+    return None
+
+
 def find_enola_binary() -> str:
-    """Locate the enola binary via ENOLA_PATH, falling back to PATH lookup."""
+    """Locate the enola binary: ENOLA_PATH, then this environment's scripts
+    directory (where the ``enola-cli`` wheel installs it), then PATH."""
     env_path = os.environ.get("ENOLA_PATH")
     if env_path:
         if os.path.isfile(env_path):
             return env_path
         raise EnolaNotInstalledError(
-            message=(
-                f"ENOLA_PATH is set to '{env_path}' but no file exists there. "
-                f"Install enola from {ENOLA_INSTALL_URL} or fix ENOLA_PATH."
-            )
+            message=f"ENOLA_PATH is set to '{env_path}' but no file exists there. {INSTALL_HINT}"
         )
 
-    binary = shutil.which("enola")
+    binary = _environment_scripts_binary() or shutil.which("enola")
     if binary:
         return binary
 
@@ -97,24 +114,15 @@ def find_enola_binary() -> str:
 
 
 async def run_enola_generate(
-    repo_path: Union[str, Path],
+    repo_path: str | Path,
     timeout: float = 600.0,
 ) -> Path:
     """Run `enola --generate` in repo_path and return the snapshot directory.
 
-    When the binary is missing (and ENOLA_PATH is not explicitly set), the
-    pinned release is downloaded and installed automatically; see
-    install_enola.py. Disable with ENOLA_AUTO_INSTALL=false.
+    Raises EnolaNotInstalledError when no binary is found; nothing is
+    downloaded at runtime (the binary ships with cognee's core dependencies).
     """
-    binary = None
-    try:
-        binary = find_enola_binary()
-    except EnolaNotInstalledError:
-        from cognee.tasks.code_graph.install_enola import auto_install_enabled, install_enola
-
-        if os.environ.get("ENOLA_PATH") or not auto_install_enabled():
-            raise
-        binary = await asyncio.to_thread(install_enola)
+    binary = find_enola_binary()
     repo_path = Path(repo_path)
 
     if not repo_path.is_dir():
@@ -174,8 +182,8 @@ async def run_enola_generate(
 
 
 def parse_enola_snapshot(
-    snapshot_dir: Union[str, Path],
-) -> Tuple[list, Optional[dict]]:
+    snapshot_dir: str | Path,
+) -> tuple[list, dict | None]:
     """Parse facts.jsonl (streamed line by line) and receipt.json from a snapshot dir.
 
     Blank and corrupt lines are skipped with a warning counter. A missing or
@@ -236,9 +244,9 @@ def parse_enola_snapshot(
 
 
 def validate_receipt(
-    receipt: Optional[dict],
-    snapshot_dir: Union[str, Path],
-    fact_count: Optional[int] = None,
+    receipt: dict | None,
+    snapshot_dir: str | Path,
+    fact_count: int | None = None,
 ) -> None:
     """Reject unsupported artifact formats and surface extraction-quality signals.
 
@@ -315,7 +323,7 @@ def is_enola_id(value: Any) -> bool:
     )
 
 
-def relation_target_id(relation: Any) -> Optional[str]:
+def relation_target_id(relation: Any) -> str | None:
     """The writer-resolved target identity of a relation (``target_id``), or None.
 
     enola emits it only when the target resolves unambiguously (same-repo
@@ -396,7 +404,7 @@ def _synthesize_insight_facts(snapshot_dir: Path) -> list:
     return facts
 
 
-def snapshot_identity(snapshot_dir: Union[str, Path], receipt: Optional[dict]) -> Optional[str]:
+def snapshot_identity(snapshot_dir: str | Path, receipt: dict | None) -> str | None:
     """Stable identity of a snapshot's content, used for incremental skip.
 
     Prefers receipt.json's snapshot_id — a SHA-256 over enola's byte-stable
@@ -416,7 +424,7 @@ def snapshot_identity(snapshot_dir: Union[str, Path], receipt: Optional[dict]) -
         return None
 
 
-def normalize_relation(relation: dict) -> Optional[Tuple[str, str]]:
+def normalize_relation(relation: dict) -> tuple[str, str] | None:
     """Extract (relation_type, target_name) from a relation object, or None.
 
     Probes the alternate key spellings enola may use; returns None when either

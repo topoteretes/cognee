@@ -1,10 +1,11 @@
-from typing import Any, Optional
+from typing import Any
+
 from fastapi.encoders import jsonable_encoder
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
+from cognee.modules.retrieval.exceptions import CypherSearchError, SearchTypeNotSupported
 from cognee.modules.retrieval.utils.completion import generate_completion
-from cognee.modules.retrieval.exceptions import SearchTypeNotSupported, CypherSearchError
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("CypherSearchRetriever")
@@ -27,7 +28,7 @@ class CypherSearchRetriever(BaseRetriever):
         self,
         user_prompt_path: str = "context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
     ):
         """Initialize retriever with optional custom prompt paths."""
         self.user_prompt_path = user_prompt_path
@@ -83,7 +84,7 @@ class CypherSearchRetriever(BaseRetriever):
         return None
 
     async def get_completion_from_context(
-        self, query: str, retrieved_objects: Any, context: Optional[Any] = None
+        self, query: str, retrieved_objects: Any, context: Any | None = None
     ) -> Any:
         """
         Returns the graph connections context.

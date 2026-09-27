@@ -16,7 +16,6 @@ import json
 import os
 import sys
 import time
-import traceback
 
 FACT = (
     "Title: Quickstart note\n\nGrace Hopper wrote the first compiler, called A-0, in 1952 while "
@@ -39,6 +38,28 @@ def main() -> int:
             {"name": name, "elapsed_s": round(time.monotonic() - started, 2), **fields}
         )
 
+    async def run() -> None:
+        import cognee
+
+        step("import_cognee", version=getattr(cognee, "__version__", "unknown"))
+
+        result = await cognee.remember(FACT, dataset_name="quickstart")
+        step("remember", status=result.status, dataset_id=str(result.dataset_id))
+        report["remember_status"] = result.status
+        if result.status != "completed":
+            report["remember_error"] = getattr(result, "error", None)
+            return
+
+        results = await cognee.recall(QUESTION, datasets=["quickstart"], session_id="quickstart-1")
+        texts = [getattr(r, "text", str(r)) for r in results]
+        step("recall", count=len(results))
+        report["recall_texts"] = texts
+        report["recall_answered"] = any(
+            any(token in t.lower() for token in EXPECTED) for t in texts
+        )
+
+    # The report is printed whatever happens; an exception still propagates, so
+    # its traceback reaches stderr and the exit code is non-zero.
     try:
         if args.mode == "mock":
             sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -47,40 +68,15 @@ def main() -> int:
             mock_ai.install_all()
             step("mocks_installed")
 
-        import cognee
-
-        step("import_cognee", version=getattr(cognee, "__version__", "unknown"))
-
-        async def run() -> None:
-            result = await cognee.remember(FACT, dataset_name="quickstart")
-            step("remember", status=result.status, dataset_id=str(result.dataset_id))
-            report["remember_status"] = result.status
-            if result.status != "completed":
-                report["remember_error"] = getattr(result, "error", None)
-                return
-
-            results = await cognee.recall(
-                QUESTION, datasets=["quickstart"], session_id="quickstart-1"
-            )
-            texts = [getattr(r, "text", str(r)) for r in results]
-            step("recall", count=len(results))
-            report["recall_texts"] = texts
-            report["recall_answered"] = any(
-                any(token in t.lower() for token in EXPECTED) for t in texts
-            )
-
         asyncio.run(run())
         report["ok"] = report.get("remember_status") == "completed" and bool(
             report.get("recall_answered")
         )
-    except Exception as error:  # report, don't hide
-        report["ok"] = False
-        report["exception"] = repr(error)
-        report["traceback"] = traceback.format_exc()
-
-    report["total_elapsed_s"] = round(time.monotonic() - started, 2)
-    print(json.dumps(report, default=str))
-    return 0 if report.get("ok") else 1
+    finally:
+        report.setdefault("ok", False)
+        report["total_elapsed_s"] = round(time.monotonic() - started, 2)
+        print(json.dumps(report, default=str))
+    return 0 if report["ok"] else 1
 
 
 if __name__ == "__main__":
