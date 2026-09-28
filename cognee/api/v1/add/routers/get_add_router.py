@@ -136,7 +136,6 @@ def get_add_router() -> APIRouter:
         - **datasetId** (Optional[UUID]): UUID of an already existing dataset
         - **node_set** Optional[list[str]]: List of node identifiers used to organize and filter
           data points in the knowledge graph. Not an access-control mechanism.
-                 Used for grouping related data points in the knowledge graph.
         - **run_in_background** (Optional[bool]): Run add pipeline asynchronously (default: False).
 
         Either datasetName or datasetId must be provided.

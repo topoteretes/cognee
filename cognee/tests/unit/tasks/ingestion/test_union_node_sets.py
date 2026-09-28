@@ -60,3 +60,15 @@ def test_the_union_reaches_document_belongs_to_set():
     update_node_set(document)
 
     assert {node.name for node in document.belongs_to_set} == {"call:x", "notion:ws:root"}
+
+
+def test_union_dedupes_on_the_node_set_id_key():
+    assert _union_node_sets(["notion:A B"], ["notion:a_b", "notion:c"]) == [
+        "notion:A B",
+        "notion:c",
+    ]
+
+
+def test_a_string_node_set_is_one_name_not_characters():
+    assert _union_node_sets("notion:x", ["notion:y"]) == ["notion:x", "notion:y"]
+    assert _union_node_sets(None, "notion:x") == ["notion:x"]

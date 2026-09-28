@@ -159,10 +159,13 @@ async def ingest_dlt_source(
     # reserved column emitted without a json type hint) is not a document and
     # must never be read as one — completed_jobs above adds it regardless of
     # parentage, so it has to be filtered back out here.
+    retired_tables: set[str] = set()
     if document_source_tag(dlt_source):
-        loaded_tables = _skip_child_tables_for_document_mode(
+        kept_tables = _skip_child_tables_for_document_mode(
             loaded_tables, pipeline.default_schema.tables, getattr(dlt_source, "name", "")
         )
+        retired_tables = loaded_tables - kept_tables
+        loaded_tables = kept_tables
 
     # Validate load_info for failed jobs
     if load_info is not None:
@@ -207,7 +210,7 @@ async def ingest_dlt_source(
             message=f"Failed to read rows from DLT database '{dlt_db_name}': {e}"
         ) from e
 
-    return DltRows(row_data_list, loaded_tables=filtered_schema)
+    return DltRows(row_data_list, loaded_tables=filtered_schema, retired_tables=retired_tables)
 
 
 async def _extract_dlt_schema(

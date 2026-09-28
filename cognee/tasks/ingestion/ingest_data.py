@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
@@ -121,19 +122,28 @@ def _union_node_sets(
 ) -> list[str] | None:
     """Combine the call-level node_set with a DataItem's own node_set.
 
-    Call-first, order-preserving, deduplicated. With no item-level node_set
-    this returns ``call_node_set`` untouched (not even deduped) — a caller
-    passing a call-level node_set with its own duplicates keeps seeing the
-    same behavior as before this field existed.
+    Call-first, order-preserving, deduplicated on the NodeSet id key, so two
+    spellings that map to one graph node keep only the first. With no
+    item-level node_set this returns ``call_node_set`` untouched (not even
+    deduped), exactly as before this field existed. A bare string on either
+    side is one name, never iterated character by character.
     """
     if not item_node_set:
         return call_node_set
 
-    seen: set[str] = set()
+    def as_names(node_set: list[str] | str | None) -> list[str]:
+        if node_set is None:
+            return []
+        if isinstance(node_set, str):
+            return [node_set]
+        return list(node_set)
+
+    seen: set[UUID] = set()
     combined: list[str] = []
-    for name in list(call_node_set or []) + list(item_node_set):
-        if name not in seen:
-            seen.add(name)
+    for name in as_names(call_node_set) + as_names(item_node_set):
+        key = generate_node_id(f"NodeSet:{name}")
+        if key not in seen:
+            seen.add(key)
             combined.append(name)
     return combined or None
 

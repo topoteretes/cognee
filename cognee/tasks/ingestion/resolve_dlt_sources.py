@@ -10,9 +10,11 @@ normal cognify — by declaring a document-source tag (see
 dlt_utils.document_source_tag)."""
 
 import json
+import math
 import os
 import shutil
 import tempfile
+import unicodedata
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse
@@ -227,6 +229,9 @@ async def resolve_dlt_sources(
         )
         loaded_tables = getattr(rows, "loaded_tables", {row.table_name for row in rows})
         document_scopes.update((source_tag, table) for table in loaded_tables)
+        # Retired child tables yield no fresh rows, so cleanup forgets the empty
+        # documents an older core built from them.
+        document_scopes.update((source_tag, table) for table in getattr(rows, "retired_tables", ()))
         # Dataset-scoped ids with the pre-scoping adoption probe: rows are
         # dataset-scoped with id as primary key, so a dataset-free
         # derivation would pin the same id when one source loads into two
@@ -710,7 +715,7 @@ def _validate_row_node_set(raw: Any, source_tag: str) -> tuple[list[str] | None,
     elif isinstance(raw, str):
         try:
             parsed = json.loads(raw)
-        except json.JSONDecodeError:
+        except (ValueError, RecursionError):
             candidates = [raw]
         else:
             candidates = parsed if isinstance(parsed, list) else [raw]
@@ -726,7 +731,12 @@ def _validate_row_node_set(raw: Any, source_tag: str) -> tuple[list[str] | None,
             dropped = True
             continue
         name = candidate.strip()
-        if not name or "," in name or not name.startswith(prefix):
+        if (
+            not name
+            or "," in name
+            or not name.startswith(prefix)
+            or any(unicodedata.category(char) == "Cc" for char in name)
+        ):
             dropped = True
             continue
         if len(name) > NODE_SET_MAX_NAME_LENGTH:
@@ -768,7 +778,7 @@ def _validate_row_structure(raw: Any) -> tuple[dict | None, str | None]:
     elif isinstance(raw, str):
         try:
             candidate = json.loads(raw)
-        except json.JSONDecodeError:
+        except (ValueError, RecursionError):
             return None, "structure_value"
         if not isinstance(candidate, dict):
             return None, "structure_value"
@@ -783,6 +793,8 @@ def _validate_row_structure(raw: Any) -> tuple[dict | None, str | None]:
         if not isinstance(value, _STRUCTURE_SCALAR_TYPES):
             return None, "structure_value"
         if isinstance(value, str) and len(value) > STRUCTURE_MAX_VALUE_LENGTH:
+            return None, "structure_value"
+        if isinstance(value, float) and not math.isfinite(value):
             return None, "structure_value"
     if len(json.dumps(candidate, default=str).encode("utf-8")) > STRUCTURE_MAX_SERIALIZED_BYTES:
         return None, "structure_value"

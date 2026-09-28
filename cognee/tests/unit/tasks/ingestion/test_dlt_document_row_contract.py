@@ -82,3 +82,29 @@ class TestSkipChildTablesForDocumentMode:
             )
         assert kept == {"notion_pages"}
         assert "data_type" not in caplog.text
+
+
+def test_non_finite_floats_drop_the_structure():
+    from cognee.tasks.ingestion.resolve_dlt_sources import _validate_row_structure
+
+    for raw in ('{"a": NaN}', '{"a": Infinity}', '{"a": 1e999}', {"a": float("nan")}):
+        assert _validate_row_structure(raw) == (None, "structure_value")
+
+
+def test_deeply_nested_json_is_dropped_not_raised():
+    from cognee.tasks.ingestion.resolve_dlt_sources import (
+        _validate_row_node_set,
+        _validate_row_structure,
+    )
+
+    deep = "[" * 200000 + "]" * 200000
+    assert _validate_row_structure(deep) == (None, "structure_value")
+    assert _validate_row_node_set(deep, "notion") == (None, "node_set_value")
+
+
+def test_control_characters_drop_the_name():
+    from cognee.tasks.ingestion.resolve_dlt_sources import _validate_row_node_set
+
+    names, issue = _validate_row_node_set(["notion:a\x00b", "notion:c\x07", "notion:ok"], "notion")
+    assert names == ["notion:ok"]
+    assert issue == "node_set_value"
