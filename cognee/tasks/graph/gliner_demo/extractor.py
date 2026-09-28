@@ -10,8 +10,13 @@ torch's intra-op pool, so running several batches at once is what uses the rest
 of the CPU. Torch releases the GIL inside its kernels, so threads run truly in
 parallel without a second copy of the model. A process-wide pool bounds the
 concurrency across every pipeline in the process, which also bounds memory:
-each in-flight batch holds its own activations. With one thread, calls are
-serialized behind a lock as before.
+each in-flight batch holds its own activations. With one thread, a call runs
+its batches one after another.
+
+Calls on the shared model need no lock. The runtime's per-call state changes
+are idempotent for inference (eval mode, ``is_training=False``), and this was
+checked directly: two pipelines cognified at once with the lock removed, calls
+overlapping on the model, produced a graph identical to the sequential one.
 
 Concurrency never changes the output. The long-text path is reproduced step for
 step (the same windows, the same batches of windows in the same order, the same
@@ -84,7 +89,6 @@ CGROUP_ROOT = Path("/sys/fs/cgroup")
 
 _extractors: dict[str, Any] = {}
 _load_lock = threading.Lock()
-_inference_lock = threading.Lock()
 _pool: ThreadPoolExecutor | None = None
 _pool_size: int | None = None
 _pool_lock = threading.Lock()
@@ -351,18 +355,17 @@ def extract_batch(
             window_words=window_words,
             window_overlap_words=window_overlap_words,
         )
-    with _inference_lock:
-        return extractor.batch_extract_long(
-            list(texts),
-            built,
-            batch_size=batch_size,
-            threshold=threshold,
-            include_confidence=True,
-            include_spans=True,
-            chunk_size=window_words,
-            chunk_overlap=window_overlap_words,
-            overlap_policy=OVERLAP_POLICY,
-        )
+    return extractor.batch_extract_long(
+        list(texts),
+        built,
+        batch_size=batch_size,
+        threshold=threshold,
+        include_confidence=True,
+        include_spans=True,
+        chunk_size=window_words,
+        chunk_overlap=window_overlap_words,
+        overlap_policy=OVERLAP_POLICY,
+    )
 
 
 def extract_once(
@@ -393,8 +396,7 @@ def extract_once(
     pool = _inference_pool(DEFAULT_BATCH_SIZE)
     if pool is not None:
         return pool.submit(run).result()
-    with _inference_lock:
-        return run()
+    return run()
 
 
 async def extract_batch_async(
