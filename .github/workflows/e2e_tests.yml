@@ -136,7 +136,8 @@ jobs:
     name: Keyless e2e — GLiNER + fastembed, no LLM key
     # Bare runner on purpose: the ci-image carries pre-installed extras and
     # secrets-shaped config, and this job has to prove the install a new user
-    # gets — core deps plus `cognee[gliner]`, nothing configured.
+    # gets — core deps only, nothing configured. The first cognify installs the
+    # GLiNER runtime itself (CPU torch + the gliner extra, gliner_demo/install.py).
     runs-on: ubuntu-22.04
     env:
       # The workflow-level skip disables the keyless rerouting as well
@@ -153,7 +154,7 @@ jobs:
         with:
           python-version: '3.12.x'
           base-extras: ''
-          extra-dependencies: gliner
+          extra-dependencies: ''
 
       # No LLM_API_KEY, no EMBEDDING_*: GRAPH_EXTRACTOR=auto must resolve to
       # GLiNER and embeddings to fastembed, and add -> cognify -> search ->

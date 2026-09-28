@@ -8,7 +8,11 @@
 #     any output contains identifier-shaped values or denylisted columns.
 #   - Step "analyze" (Claude) gets NO warehouse credentials and a restricted
 #     tool allowlist: it can only read the aggregate CSVs, the repo, and call
-#     `gh issue` / `gh pr` for duplicate detection.
+#     read-only `gh issue` / `gh pr` subcommands for duplicate detection.
+#   - Step "file issue" is the ONLY step that writes to GitHub. It posts the
+#     short issue file Claude wrote, after a guard checks its shape and caps
+#     its length (.github/scripts/telemetry_issue_body.py); the full report
+#     stays in the run artifact.
 #
 # Required repository secrets: MOTHERDUCK_TOKEN (read-only token recommended),
 # ANTHROPIC_API_KEY.
@@ -54,8 +58,10 @@ jobs:
       - name: Install duckdb client
         run: pip install "duckdb>=1.1"
 
-      - name: Test aggregate extraction and privacy guards
-        run: python cognee/tests/unit/test_telemetry_aggregate_extract.py
+      - name: Test aggregate extraction, privacy guards and issue-body guard
+        run: |
+          python cognee/tests/unit/test_telemetry_aggregate_extract.py
+          python cognee/tests/unit/test_telemetry_issue_body.py
 
       - name: Extract anonymized aggregates (only step with warehouse access)
         env:
@@ -73,14 +79,14 @@ jobs:
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code
 
-      - name: Analyze with Claude Code (no warehouse access)
+      - name: Analyze with Claude Code (no warehouse access, read-only gh)
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ github.token }}
         run: |
           claude -p "$(cat .github/scripts/telemetry_insights_prompt.md)" \
             --permission-mode acceptEdits \
-            --allowedTools "Read,Glob,Grep,Write,Bash(gh issue:*),Bash(gh pr:*),Bash(git log:*),Bash(git show:*)" \
+            --allowedTools "Read,Glob,Grep,Write,Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(git log:*),Bash(git show:*)" \
             --max-turns 80
 
       - name: Upload report artifact
@@ -88,6 +94,26 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: telemetry-insights-report-${{ github.run_id }}
-          path: telemetry-insights-report.md
+          path: |
+            telemetry-insights-report.md
+            telemetry-insights-issue.md
           if-no-files-found: warn
           retention-days: 90
+
+      - name: Shape issue body (title, findings tables, length cap)
+        id: issue_body
+        if: hashFiles('telemetry-insights-issue.md') != ''
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python .github/scripts/telemetry_issue_body.py telemetry-insights-issue.md telemetry-insights-issue-body.md
+
+      - name: File issue (only step that writes to GitHub)
+        if: steps.issue_body.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: ${{ steps.issue_body.outputs.title }}
+        run: |
+          gh issue create \
+            --title "$TITLE" \
+            --label telemetry-insights \
+            --body-file telemetry-insights-issue-body.md

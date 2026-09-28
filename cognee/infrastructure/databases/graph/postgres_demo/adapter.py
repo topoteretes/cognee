@@ -707,6 +707,26 @@ class PostgresDemoAdapter(GraphDBInterface):
             for row in result.mappings().all()
         ]
 
+    async def get_entity_type_names(self, entity_ids: list[str]) -> dict[str, str]:
+        """One-hop ``is_a`` lookup: entity id to its EntityType name."""
+        if not entity_ids:
+            return {}
+        async with self.sessionmaker() as session:
+            result = await session.execute(
+                text(
+                    """
+                    SELECT e.source_id, t.name
+                      FROM graph_edge e
+                      JOIN graph_node t ON t.id = e.target_id
+                     WHERE e.source_id = ANY(:ids)
+                       AND e.relationship_name = 'is_a'
+                       AND t.type = 'EntityType'
+                    """
+                ),
+                {"ids": [str(entity_id) for entity_id in entity_ids]},
+            )
+            return {str(row[0]): row[1] for row in result.all() if row[1]}
+
     # Bound the aggregate to twice this many endpoint rows from one edge sample.
     _SEED_SAMPLE_ROWS = 200_000
 

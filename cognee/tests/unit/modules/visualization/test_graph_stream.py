@@ -531,3 +531,70 @@ async def test_slow_clients_do_not_hold_dataset_slots(monkeypatch):
     await asyncio.gather(*clients)
 
     assert waited < 0.1, f"another dataset waited {waited:.2f} s behind slow clients"
+
+
+class _TypedEngine(_Engine):
+    """alice is_a person, bob is_a person; the type lookup always fails."""
+
+    def __init__(self):
+        super().__init__(
+            [
+                ("alice", {"name": "Alice", "type": "Entity"}),
+                ("person", {"name": "Person", "type": "EntityType"}),
+                ("bob", {"name": "Bob", "type": "Entity"}),
+            ],
+            [("alice", "person", "is_a", {}), ("bob", "person", "is_a", {})],
+        )
+        self.lookups = 0
+
+    async def get_entity_type_names(self, entity_ids):
+        self.lookups += 1
+        raise RuntimeError("no native type lookup")
+
+
+@pytest.mark.asyncio
+async def test_after_a_failed_lookup_the_summary_types_entities_like_the_json_path():
+    """SDK-794: alice is sent before her type node; the summary corrects her."""
+    from cognee.modules.visualization.preprocessor import preprocess
+    from cognee.modules.visualization.subgraph_data import fetch_visualization_graph_data
+
+    engine = _TypedEngine()
+    events = [event async for event in _events(engine, seed_node_ids=["alice"], chunk_size=1)]
+
+    streamed = {}
+    for name, data in events:
+        if name == "chunk":
+            streamed.update({node["id"]: node["entity_type"] for node in data["nodes"]})
+    assert streamed["alice"] == "Entity"  # her is_a link came in a later chunk
+    for name, data in events:
+        if name == "summary":
+            for node_id, entry in data["nodes"].items():
+                streamed[node_id] = entry.get("entity_type", streamed[node_id])
+
+    graph_data = await fetch_visualization_graph_data(
+        engine, seed_node_ids=["alice"], neighborhood_depth=1
+    )
+    json_types = {node["id"]: node["entity_type"] for node in preprocess(graph_data).nodes}
+    assert streamed == json_types == {"alice": "Person", "person": "EntityType"}
+
+
+@pytest.mark.asyncio
+async def test_a_failed_type_lookup_is_not_retried_for_every_chunk():
+    engine = _TypedEngine()
+    # Depth 2 puts alice and bob, both entities, in separate chunks.
+    events = [
+        event
+        async for event in _events(
+            engine, seed_node_ids=["alice"], neighborhood_depth=2, chunk_size=1
+        )
+    ]
+    assert sum(name == "chunk" for name, _ in events) == 3
+    assert engine.lookups == 1
+
+
+@pytest.mark.asyncio
+async def test_the_summary_adds_entity_type_only_where_it_corrects_a_chunk():
+    events = [event async for event in _events(_Engine(*_star()))]
+    for name, data in events:
+        if name == "summary":
+            assert all("entity_type" not in entry for entry in data["nodes"].values())

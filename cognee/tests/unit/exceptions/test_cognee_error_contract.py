@@ -75,6 +75,8 @@ SAMPLE_ARGUMENTS = {
     "provider": "sample-provider",
     "search_type": "sample-search",
     "status_code": 400,
+    # GlinerInstallError: which install step failed (lock, metadata, installer, torch, ...).
+    "step": "sample-step",
     # EmbeddingDimensionMismatchError: the model that built a dataset vs the configured one.
     "stored_model": "sample-provider/old-model",
     "stored_dimensions": 384,
