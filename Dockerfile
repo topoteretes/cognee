@@ -8,7 +8,7 @@
 # Pinned by digest so a compromised :latest tag cannot inject binaries into
 # the shipped image — same digest as scripts/fetch_ladybug_json_extension.sh,
 # which documents how to refresh both together on a ladybug bump.
-FROM ghcr.io/ladybugdb/extension-repo@sha256:180c83fb190e9d6ef8d324850b192db26794ab7cb866a38813a45365f14bd46d AS ladybug-extensions
+FROM ghcr.io/ladybugdb/extension-repo@sha256:dfecdeb1d31ff8aa53e2e62b6d9fa3a722ebeb53b5d0a2643064eb59579e23f7 AS ladybug-extensions
 RUN mkdir -p /bundle && cd /usr/share/nginx/html && \
     for f in v*/linux_*/json/libjson.lbug_extension; do \
         d="/bundle/${f%/json/libjson.lbug_extension}"; \
@@ -91,7 +91,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     /app/.venv/bin/python -m cognee.tasks.graph.gliner_demo.install
 
-FROM python:3.12-slim-bookworm@sha256:782412e85d0f0984994c290652577d4018aff08145c85b262bb63dc0c7522254
+FROM python:3.14-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56
 
 RUN apt-get update && apt-get install -y \
     libpq5 \
