@@ -121,13 +121,17 @@ async def test_code_summary_falls_back_through_real_native_adapter(monkeypatch):
         patch("litellm.acompletion", fake_acompletion),
         patch.object(gateway_module, "get_llm_config", return_value=config),
         patch.object(native_factory, "get_native_client", return_value=adapter),
-        patch(
-            "cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter.llm_retry_stop_condition",
+        # @retry bound its stop condition when the adapter module was imported, so
+        # patching the module-level name has no effect. Patch the live Retrying object.
+        patch.object(
+            NativeLiteLLMAdapter.acreate_structured_output.retry,
+            "stop",
             lambda retry_state: True,
         ),
     ):
         result = await extract_summary_module.extract_code_summary("def f(): pass")
 
     assert result.high_level_summary == "Mock code summary"
-    # The self-correction loop ran to exhaustion before the fallback kicked in.
-    assert fake_acompletion.call_count >= 3
+    # One outer attempt whose self-correction loop ran to exhaustion. More calls
+    # would mean the tenacity retry around it was not disabled.
+    assert fake_acompletion.call_count == 3

@@ -119,10 +119,11 @@ Each script names the simpler guide it builds on and states what it adds.
 
 Every demo lives in a topic folder.
 
-### [`company_brain/`](demos/company_brain/) — the README onboarding tour
+### [`company_brain/`](demos/company_brain/) — one memory for a whole company
 | Script | Demonstrates |
 |---|---|
-| [`company_brain_demo.py`](demos/company_brain/company_brain_demo.py) | A text fact, a code graph, and a rule stated in a session — distilled, then answered from a fresh session |
+| [`docs_code_conversations/company_brain_demo.py`](demos/company_brain/docs_code_conversations/company_brain_demo.py) | The README onboarding tour: a text fact, a code graph, and a rule stated in a session — distilled, then answered from a fresh session |
+| [`multi_source/company_brain.py`](demos/company_brain/multi_source/company_brain.py) | A relational database, a ticket export and meeting notes linked by a custom graph model, served in the UI, queried from Claude Code or Codex over MCP ([guide](demos/company_brain/multi_source/README.md)) |
 
 ### [`comprehensive_example/`](demos/comprehensive_example/) — everything at once
 | Script | Demonstrates |

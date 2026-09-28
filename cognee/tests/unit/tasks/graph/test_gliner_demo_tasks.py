@@ -1029,37 +1029,34 @@ def test_resolve_extractor_auto_follows_the_llm_key():
 
 
 def test_resolve_extractor_auto_reads_the_keyless_rule_by_default():
-    from cognee.modules.cognify import config as cognify_config_module
     from cognee.modules.cognify.config import resolve_extractor
 
     with (
         patch("cognee.modules.preflight.keyless_local_defaults_apply", return_value=False) as rule,
-        patch.object(cognify_config_module.importlib.util, "find_spec", return_value=object()),
+        patch("importlib.util.find_spec", return_value=object()),
     ):
         assert resolve_extractor(None, _config_with_extractor("auto")) == "llm"
     rule.assert_called_once_with()
     with (
         patch("cognee.modules.preflight.keyless_local_defaults_apply", return_value=True),
-        patch.object(cognify_config_module.importlib.util, "find_spec", return_value=object()),
+        patch("importlib.util.find_spec", return_value=object()),
     ):
         assert resolve_extractor(None, _config_with_extractor("auto")) == "gliner_demo"
 
 
-def test_resolve_extractor_auto_without_key_needs_gliner2_installed():
-    """Keyless ingestion fails fast with the install hint when gliner2 is missing."""
-    from cognee.modules.cognify.config import (
-        KeylessExtractorNotInstalledError,
-        resolve_extractor,
-    )
+def test_resolve_extractor_never_installs_the_gliner_runtime():
+    """Resolution is a decision only; cognify awaits ensure_extractor_runtime to install."""
+    from cognee.modules.cognify.config import resolve_extractor
 
     with (
         patch("importlib.util.find_spec", return_value=None),
-        pytest.raises(KeylessExtractorNotInstalledError, match="cognee\\[gliner\\]"),
+        patch("cognee.tasks.graph.gliner_demo.install.install_gliner_runtime") as install,
     ):
-        resolve_extractor(None, _config_with_extractor("auto"), llm_configured=False)
-    # The explicit setting is left to the gliner task list's own guard.
-    with patch("importlib.util.find_spec", return_value=None):
-        assert resolve_extractor("gliner_demo", _config_with_extractor("auto")) == "gliner_demo"
+        auto = _config_with_extractor("auto")
+        assert resolve_extractor(None, auto, llm_configured=False) == "gliner_demo"
+        assert resolve_extractor("gliner_demo", auto, llm_configured=True) == "gliner_demo"
+        assert resolve_extractor(None, auto, llm_configured=True) == "llm"
+    install.assert_not_called()
 
 
 def test_default_pipeline_needs_llm_formula():
