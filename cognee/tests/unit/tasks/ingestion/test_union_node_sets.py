@@ -72,3 +72,7 @@ def test_union_dedupes_on_the_node_set_id_key():
 def test_a_string_node_set_is_one_name_not_characters():
     assert _union_node_sets("notion:x", ["notion:y"]) == ["notion:x", "notion:y"]
     assert _union_node_sets(None, "notion:x") == ["notion:x"]
+
+
+def test_union_drops_empty_names():
+    assert _union_node_sets(["x"], ["", "  ", "y"]) == ["x", "y"]

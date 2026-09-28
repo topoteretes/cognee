@@ -108,3 +108,28 @@ def test_control_characters_drop_the_name():
     names, issue = _validate_row_node_set(["notion:a\x00b", "notion:c\x07", "notion:ok"], "notion")
     assert names == ["notion:ok"]
     assert issue == "node_set_value"
+
+
+def test_invisible_and_unencodable_characters_drop_the_name():
+    from cognee.tasks.ingestion.resolve_dlt_sources import _validate_row_node_set
+
+    bad = [
+        "notion:\ud800",
+        "notion:a\u200bb",
+        "notion:\u202ex",
+        "notion:a\u2028b",
+        "notion:\ufeffx",
+    ]
+    names, issue = _validate_row_node_set(bad + ["notion:ok"], "notion")
+    assert names == ["notion:ok"]
+    assert issue == "node_set_value"
+    assert _validate_row_node_set('["notion:\\ud800x"]', "notion") == (None, "node_set_value")
+
+
+def test_a_name_empty_after_the_prefix_is_dropped():
+    from cognee.tasks.ingestion.resolve_dlt_sources import _validate_row_node_set
+
+    assert _validate_row_node_set(["notion:", "notion:   ", "notion:\xa0"], "notion") == (
+        None,
+        "node_set_value",
+    )

@@ -134,13 +134,22 @@ async def ingest_dlt_source(
         # the remote file. Scope by the CURRENT resource, never the pipeline's
         # whole accumulated schema, which can also contain Gmail/other folders.
         retained_tables: set[str] = set()
+        schema_child_tables: set[str] = set()
         if document_source_tag(dlt_source):
             resources = getattr(dlt_source, "resources", None)
             resource_names = set(resources.selected) if resources is not None else {dlt_source.name}
+            schema_tables = pipeline.default_schema.tables
             retained_tables = {
                 name
-                for name, table in pipeline.default_schema.tables.items()
+                for name, table in schema_tables.items()
                 if table.get("resource") in resource_names and not table.get("parent")
+            }
+            # Child tables stay in the schema after a source stops nesting the
+            # column, so they are known here even on runs with no job for them.
+            schema_child_tables = {
+                name
+                for name, table in schema_tables.items()
+                if table.get("parent") and _root_table(name, schema_tables) in retained_tables
             }
 
     # Scope the read-back to the tables this source actually loaded. The
@@ -164,7 +173,7 @@ async def ingest_dlt_source(
         kept_tables = _skip_child_tables_for_document_mode(
             loaded_tables, pipeline.default_schema.tables, getattr(dlt_source, "name", "")
         )
-        retired_tables = loaded_tables - kept_tables
+        retired_tables = (loaded_tables - kept_tables) | schema_child_tables
         loaded_tables = kept_tables
 
     # Validate load_info for failed jobs
@@ -319,6 +328,18 @@ def _row_content_hash(row_dict: dict) -> str:
         if not (key in _RESERVED_HASH_EXEMPT_COLUMNS and value is None)
     }
     return hashlib.md5(json.dumps(hashable, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _root_table(name: str, schema_tables: dict) -> str:
+    """Follow dlt ``parent`` links up to the top-level table of ``name``."""
+    seen: set[str] = set()
+    while name not in seen:
+        seen.add(name)
+        parent = schema_tables.get(name, {}).get("parent")
+        if not parent:
+            return name
+        name = parent
+    return name
 
 
 def _skip_child_tables_for_document_mode(

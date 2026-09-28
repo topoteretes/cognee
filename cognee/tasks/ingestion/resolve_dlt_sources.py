@@ -696,6 +696,11 @@ def _clean(value: Any) -> str:
     return str(value).strip() if value is not None else ""
 
 
+# Control, format (zero-width, bidi), surrogate and line/paragraph separators:
+# invisible or unencodable characters that make look-alike or crashing names.
+_REJECTED_NAME_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
+
+
 def _validate_row_node_set(raw: Any, source_tag: str) -> tuple[list[str] | None, str | None]:
     """Validate a row's ``cognee_node_set`` column value.
 
@@ -735,7 +740,8 @@ def _validate_row_node_set(raw: Any, source_tag: str) -> tuple[list[str] | None,
             not name
             or "," in name
             or not name.startswith(prefix)
-            or any(unicodedata.category(char) == "Cc" for char in name)
+            or not name[len(prefix) :].strip()
+            or any(unicodedata.category(char) in _REJECTED_NAME_CATEGORIES for char in name)
         ):
             dropped = True
             continue

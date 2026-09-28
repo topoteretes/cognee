@@ -141,6 +141,8 @@ def _union_node_sets(
     seen: set[UUID] = set()
     combined: list[str] = []
     for name in as_names(call_node_set) + as_names(item_node_set):
+        if not isinstance(name, str) or not name.strip():
+            continue
         key = generate_node_id(f"NodeSet:{name}")
         if key not in seen:
             seen.add(key)
