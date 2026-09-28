@@ -20,6 +20,10 @@ class DataItem:
     # Data.system_metadata — never merged with user external_metadata.
     system_metadata: dict | None = field(default=None)
     data_id: UUID | None = None
+    # Item-level node_set (e.g. a document-mode dlt row's own labels). Unioned
+    # with the call-level node_set in ingest_data, not merged here — this
+    # field only carries the item's own contribution.
+    node_set: list[str] | None = None
 
 
 def parse_labels(labels: str | None) -> list[str | None] | None:

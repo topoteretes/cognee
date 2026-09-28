@@ -13,7 +13,12 @@ from cognee.infrastructure.databases.relational.config import get_relational_con
 from cognee.modules.data.models import Data
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.dlt_row_data import DltRowData, DltRows
-from cognee.tasks.ingestion.dlt_utils import pipeline_name_for_source
+from cognee.tasks.ingestion.dlt_utils import (
+    NODE_SET_COLUMN,
+    STRUCTURE_COLUMN,
+    document_source_tag,
+    pipeline_name_for_source,
+)
 from cognee.tasks.ingestion.exceptions.exceptions import (
     DLTIngestionError,
     InvalidDLTArgumentError,
@@ -128,8 +133,6 @@ async def ingest_dlt_source(
         # cognify or a removed local item must be recoverable without editing
         # the remote file. Scope by the CURRENT resource, never the pipeline's
         # whole accumulated schema, which can also contain Gmail/other folders.
-        from cognee.tasks.ingestion.dlt_utils import document_source_tag
-
         retained_tables: set[str] = set()
         if document_source_tag(dlt_source):
             resources = getattr(dlt_source, "resources", None)
@@ -150,6 +153,16 @@ async def ingest_dlt_source(
         for package in load_info.load_packages:
             for job in package.jobs.get("completed_jobs", []):
                 loaded_tables.add(job.job_file_info.table_name)
+
+    # A document row is exactly one line of the source's own table; a dlt
+    # child table (its own nesting for a list- or dict-valued column, e.g. a
+    # reserved column emitted without a json type hint) is not a document and
+    # must never be read as one — completed_jobs above adds it regardless of
+    # parentage, so it has to be filtered back out here.
+    if document_source_tag(dlt_source):
+        loaded_tables = _skip_child_tables_for_document_mode(
+            loaded_tables, pipeline.default_schema.tables, getattr(dlt_source, "name", "")
+        )
 
     # Validate load_info for failed jobs
     if load_info is not None:
@@ -283,6 +296,60 @@ def _quote_identifier(name: str) -> str:
     # Escape any embedded double-quotes (defensive — regex above disallows them)
     escaped = name.replace('"', '""')
     return f'"{escaped}"'
+
+
+_RESERVED_HASH_EXEMPT_COLUMNS = {NODE_SET_COLUMN, STRUCTURE_COLUMN}
+
+
+def _row_content_hash(row_dict: dict) -> str:
+    """Hash a dlt row's non-bookkeeping columns (``_dlt_*`` already stripped).
+
+    The two reserved columns (node_set/structure) are excluded from the hash
+    input when their value is ``None`` — so a table that merely has the
+    column defined (NULL on every row) hashes identically to a table that
+    never had it. A row that actually sets one of these columns still gets a
+    fresh hash when the value changes, same as any other column.
+    """
+    hashable = {
+        key: value
+        for key, value in row_dict.items()
+        if not (key in _RESERVED_HASH_EXEMPT_COLUMNS and value is None)
+    }
+    return hashlib.md5(json.dumps(hashable, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _skip_child_tables_for_document_mode(
+    loaded_tables: set[str], schema_tables: dict, source_name: str
+) -> set[str]:
+    """Exclude dlt child tables from a document-mode source's loaded tables.
+
+    dlt normalizes a list- or dict-of-records column into a child table
+    keyed to its parent; a document row is exactly one line of the parent
+    table, so a child table is never itself a document. Logs one warning per
+    skipped table (never row values), with a hint when the name matches dlt's
+    ``{parent}__{column}`` naming for one of the two reserved columns — the
+    usual cause is the source emitting that column without a json type hint.
+    """
+    kept = set()
+    for table in loaded_tables:
+        if schema_tables.get(table, {}).get("parent"):
+            hint = ""
+            if table.endswith((f"__{NODE_SET_COLUMN}", f"__{STRUCTURE_COLUMN}")):
+                column = table.rsplit("__", 1)[-1]
+                hint = (
+                    f" This looks like the reserved column '{column}' emitted without a "
+                    f"json type hint; declare it with columns={{'{column}': "
+                    "{'data_type': 'json'}} on the resource."
+                )
+            logger.warning(
+                "Source '%s': skipped dlt child table '%s' in document mode.%s",
+                source_name,
+                table,
+                hint,
+            )
+        else:
+            kept.add(table)
+    return kept
 
 
 def _compute_schema_hash(schema_info) -> str:
@@ -429,9 +496,7 @@ async def _read_single_table(
             if "_dlt_" in k:
                 row_dict.pop(k)
 
-        content_hash = hashlib.md5(
-            json.dumps(row_dict, sort_keys=True, default=str).encode()
-        ).hexdigest()
+        content_hash = _row_content_hash(row_dict)
 
         row_data_list.append(
             DltRowData(

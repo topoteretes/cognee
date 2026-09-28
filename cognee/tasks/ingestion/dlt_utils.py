@@ -27,7 +27,26 @@ def pipeline_name_for_source(source, dataset_name: str) -> str:
 
 # Community/cloud hosts can refuse unsafe older cores before ingestion starts.
 # Version 1 scopes cleanup by staging table and handles a confirmed empty table.
-DOCUMENT_SYNC_VERSION = 1
+# Version 2 adds the per-row contract: a row may carry its own node_set
+# (NODE_SET_COLUMN) and an opaque structure dict (STRUCTURE_COLUMN), and dlt
+# child tables are skipped rather than ingested as documents.
+DOCUMENT_SYNC_VERSION = 2
+
+# Reserved columns a document-mode row may use to carry graph metadata
+# alongside title/content/url/id (see
+# resolve_dlt_sources._build_document_data_item). Both are optional; neither
+# is interpreted by core except node_set, which classify_documents reads like
+# any other node_set once it lands in external_metadata.
+NODE_SET_COLUMN = "cognee_node_set"
+STRUCTURE_COLUMN = "cognee_structure"
+
+# Caps for the reserved columns above, enforced in
+# resolve_dlt_sources._validate_row_node_set / _validate_row_structure.
+NODE_SET_MAX_NAME_LENGTH = 200
+NODE_SET_MAX_NAMES_PER_ROW = 20
+STRUCTURE_MAX_KEYS = 50
+STRUCTURE_MAX_VALUE_LENGTH = 1000
+STRUCTURE_MAX_SERIALIZED_BYTES = 8000
 
 
 def guarded_rows(rows, check_active=None):

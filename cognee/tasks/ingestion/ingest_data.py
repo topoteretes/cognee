@@ -113,6 +113,28 @@ def _source_uri_from_input(data_item: Any) -> str | None:
     return None
 
 
+def _union_node_sets(
+    call_node_set: list[str] | None, item_node_set: list[str] | None
+) -> list[str] | None:
+    """Combine the call-level node_set with a DataItem's own node_set.
+
+    Call-first, order-preserving, deduplicated. With no item-level node_set
+    this returns ``call_node_set`` untouched (not even deduped) — a caller
+    passing a call-level node_set with its own duplicates keeps seeing the
+    same behavior as before this field existed.
+    """
+    if not item_node_set:
+        return call_node_set
+
+    seen: set[str] = set()
+    combined: list[str] = []
+    for name in list(call_node_set or []) + list(item_node_set):
+        if name not in seen:
+            seen.add(name)
+            combined.append(name)
+    return combined or None
+
+
 async def ingest_data(
     data: Any,
     dataset_name: str,
@@ -324,6 +346,7 @@ async def ingest_data(
             item_data_id = None
             item_external_metadata = None
             item_system_metadata = None
+            item_node_set = None
 
             if isinstance(data_item, DataItem):
                 underlying_data = data_item.data
@@ -331,6 +354,9 @@ async def ingest_data(
                 item_data_id = data_item.data_id
                 item_external_metadata = data_item.external_metadata
                 item_system_metadata = data_item.system_metadata
+                item_node_set = data_item.node_set
+
+            effective_node_set = _union_node_sets(node_set, item_node_set)
 
             # Retrieve cached intermediate results from pre-loop to avoid re-processing
             cached = precomputed_items.get(id(data_item), {})
@@ -415,8 +441,8 @@ async def ingest_data(
                     ext_metadata["_cognee"] = cognee_metadata
                 cognee_metadata.setdefault("source_uri", source_uri)
 
-            if node_set:
-                ext_metadata["node_set"] = node_set
+            if effective_node_set:
+                ext_metadata["node_set"] = effective_node_set
 
             if data_point is not None:
                 # Content-change detection: reset pipeline_status when content changed
@@ -465,7 +491,7 @@ async def ingest_data(
                 # and break every later cognify of the dataset.
                 if item_system_metadata is not None or content_changed:
                     data_point.system_metadata = item_system_metadata
-                data_point.node_set = json.dumps(node_set) if node_set else None
+                data_point.node_set = json.dumps(effective_node_set) if effective_node_set else None
                 data_point.tenant_id = user.tenant_id if user.tenant_id else None
                 # Absent means "leave unchanged": a re-ingest without a label
                 # (current_label None) must not clear a previously stored one.
@@ -497,7 +523,7 @@ async def ingest_data(
                     raw_content_hash=storage_file_metadata["content_hash"],
                     external_metadata=ext_metadata,
                     system_metadata=item_system_metadata,
-                    node_set=json.dumps(node_set) if node_set else None,
+                    node_set=json.dumps(effective_node_set) if effective_node_set else None,
                     data_size=original_file_metadata["file_size"],
                     tenant_id=user.tenant_id if user.tenant_id else None,
                     pipeline_status={},

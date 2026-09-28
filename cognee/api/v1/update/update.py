@@ -88,8 +88,8 @@ async def update(
         user: User object for authentication and permissions. Uses default user if None.
               Default user: "default_user@example.com" (created automatically on first use).
               Users can only access datasets they have permissions for.
-        node_set: Optional list of node identifiers for graph organization and access control.
-                 Used for grouping related data points in the knowledge graph.
+        node_set: Optional list of node identifiers used to organize and filter data points
+                 in the knowledge graph. Not an access-control mechanism.
         vector_db_config: Optional configuration for vector database (for custom setups).
                  Chunk-level incremental updates do not support per-call config
                  forwarding: when provided, the update runs full ingestion
@@ -362,7 +362,7 @@ def _full_rebuild_reason(
         return RefusalReason.DISABLED, "chunk_level_diff=False was requested"
 
     data_item_changes_metadata = isinstance(data, DataItem) and (
-        data.label is not None or data.external_metadata is not None
+        data.label is not None or data.external_metadata is not None or data.node_set is not None
     )
     if node_set or data_item_changes_metadata:
         return (
