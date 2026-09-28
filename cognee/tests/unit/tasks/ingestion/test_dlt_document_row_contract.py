@@ -133,3 +133,20 @@ def test_a_name_empty_after_the_prefix_is_dropped():
         None,
         "node_set_value",
     )
+
+
+def test_joiners_between_visible_characters_are_kept():
+    from cognee.tasks.ingestion.resolve_dlt_sources import _validate_row_node_set
+
+    persian = "notion:\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645"
+    family = "notion:\U0001f468\u200d\U0001f469\u200d\U0001f467"
+    names, issue = _validate_row_node_set([persian, family], "notion")
+    assert names == [persian, family]
+    assert issue is None
+
+
+def test_joiners_at_the_edges_or_next_to_spaces_drop_the_name():
+    from cognee.tasks.ingestion.resolve_dlt_sources import _validate_row_node_set
+
+    bad = ["notion:\u200dx", "notion:x\u200c", "notion:a \u200c b", "notion:a\u200c\u200cb"]
+    assert _validate_row_node_set(bad, "notion") == (None, "node_set_value")

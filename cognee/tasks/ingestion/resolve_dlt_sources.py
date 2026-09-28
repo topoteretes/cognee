@@ -701,6 +701,31 @@ def _clean(value: Any) -> str:
 _REJECTED_NAME_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
 
 
+# ZWNJ/ZWJ are ordinary orthography (Persian, Arabic) and emoji glue when they
+# join two visible characters; anywhere else they are just invisible.
+_JOINERS = frozenset({"\u200c", "\u200d"})
+
+
+def _is_joinable(char: str) -> bool:
+    # Letters, marks, numbers and symbols (emoji are So); not punctuation or space.
+    return unicodedata.category(char)[0] in "LMNS"
+
+
+def _has_rejected_character(name: str) -> bool:
+    for index, char in enumerate(name):
+        if unicodedata.category(char) not in _REJECTED_NAME_CATEGORIES:
+            continue
+        if (
+            char in _JOINERS
+            and 0 < index < len(name) - 1
+            and _is_joinable(name[index - 1])
+            and _is_joinable(name[index + 1])
+        ):
+            continue
+        return True
+    return False
+
+
 def _validate_row_node_set(raw: Any, source_tag: str) -> tuple[list[str] | None, str | None]:
     """Validate a row's ``cognee_node_set`` column value.
 
@@ -741,7 +766,7 @@ def _validate_row_node_set(raw: Any, source_tag: str) -> tuple[list[str] | None,
             or "," in name
             or not name.startswith(prefix)
             or not name[len(prefix) :].strip()
-            or any(unicodedata.category(char) in _REJECTED_NAME_CATEGORIES for char in name)
+            or _has_rejected_character(name)
         ):
             dropped = True
             continue

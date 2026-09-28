@@ -143,7 +143,11 @@ def _union_node_sets(
     for name in as_names(call_node_set) + as_names(item_node_set):
         if not isinstance(name, str) or not name.strip():
             continue
-        key = generate_node_id(f"NodeSet:{name}")
+        try:
+            key = generate_node_id(f"NodeSet:{name}")
+        except UnicodeEncodeError:
+            # A lone surrogate cannot become a NodeSet id; drop it, not the item.
+            continue
         if key not in seen:
             seen.add(key)
             combined.append(name)

@@ -66,7 +66,7 @@ def get_update_router() -> APIRouter:
         node_set: list[str] | None = Form(
             default=[""],
             examples=[["user_memories"]],
-            description="Node identifiers for graph organization and access control.",
+            description="Node identifiers used to organize and filter data points in the graph.",
         ),
         chunk_level_diff: bool = Query(
             default=True,

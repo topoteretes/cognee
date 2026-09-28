@@ -76,3 +76,7 @@ def test_a_string_node_set_is_one_name_not_characters():
 
 def test_union_drops_empty_names():
     assert _union_node_sets(["x"], ["", "  ", "y"]) == ["x", "y"]
+
+
+def test_union_skips_a_name_that_cannot_become_a_node_set_id():
+    assert _union_node_sets(["x\ud800", "x"], ["notion:y"]) == ["x", "notion:y"]
