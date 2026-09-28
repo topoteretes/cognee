@@ -654,6 +654,10 @@ def _build_document_data_item(
     does no validation of its own. ``structure`` is nested under
     ``system_metadata["structure"]`` so it can never collide with the fixed
     keys set below.
+    ``literal_text=True`` because ``content`` is provider data cognee did not
+    write: an untitled row (no "# title" prefix) whose content happens to be
+    just a URL or an existing local path must still be stored as that text,
+    not fetched or read as if the caller had passed it directly to ``add()``.
     """
     row_data = row.row_data
     title = _clean(row_data.get("title"))
@@ -678,6 +682,7 @@ def _build_document_data_item(
         system_metadata=system_metadata,
         data_id=data_id,
         node_set=node_set or None,
+        literal_text=True,
     )
 
 
