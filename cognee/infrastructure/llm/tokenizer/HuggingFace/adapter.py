@@ -26,8 +26,9 @@ class HuggingFaceTokenizer(TokenizerInterface):
         self.model = model
         self.max_completion_tokens = max_completion_tokens
 
-        # Import here to make it an optional dependency
-        from transformers import AutoTokenizer  # ty:ignore[unresolved-import]
+        # Imported here, not at module level: transformers takes ~0.6s to import, and
+        # the resolver imports this module on every `import cognee`.
+        from transformers import AutoTokenizer
 
         self.tokenizer = AutoTokenizer.from_pretrained(model)
 

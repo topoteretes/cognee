@@ -38,11 +38,11 @@ pre-commit install
 - **langchain** - LangChain integration
 - **llama-index** - LlamaIndex integration
 - **anthropic** - Anthropic Claude models
-- **ollama** - Ollama local models
+- **ollama** - Empty compatibility extra (transformers, which it used to add, is now a core dependency)
 - **mistral** - Mistral AI models
 - **groq** - Groq API support
 - **llama-cpp** - Llama.cpp local inference
-- **huggingface** - HuggingFace transformers
+- **huggingface** - Empty compatibility extra (transformers is now a core dependency)
 - **aws** - S3 storage backend
 - **redis** - Redis caching
 - **baml** - BAML structured output
