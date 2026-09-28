@@ -70,6 +70,15 @@ def fastembed_model_cached(model: str) -> tuple[bool, str, str | None]:
     return any(path.exists() for path in candidates), str(cache_dir), size_hint
 
 
+def fastembed_model_max_tokens(embedding_model) -> int | None:
+    """The token limit the loaded fastembed model truncates input at, from its own
+    tokenizer; None when fastembed does not expose one."""
+    tokenizer = getattr(getattr(embedding_model, "model", None), "tokenizer", None)
+    truncation = getattr(tokenizer, "truncation", None)
+    limit = truncation.get("max_length") if isinstance(truncation, dict) else None
+    return limit if isinstance(limit, int) and limit > 0 else None
+
+
 class FastembedEmbeddingEngine(EmbeddingEngine):
     """
     Manages the embedding process using a specified model to generate text embeddings.
@@ -103,8 +112,6 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
     ):
         self.model = model
         self.dimensions = dimensions
-        self.max_completion_tokens = max_completion_tokens
-        self.tokenizer = self.get_tokenizer()
         self.batch_size = batch_size
         cached, cache_dir, size_hint = fastembed_model_cached(model)
         log_model_load(
@@ -116,6 +123,20 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             location_var="FASTEMBED_CACHE_PATH",
         )
         self.embedding_model = TextEmbedding(model_name=model)
+        # The chunker sizes chunks from this value. fastembed truncates input past the
+        # model's own limit without raising (so the context-window fallback in embed_text
+        # never fires), which embedded only the head of each chunk when the configured
+        # limit was larger than the model's.
+        model_limit = fastembed_model_max_tokens(self.embedding_model)
+        self.max_completion_tokens = min(
+            max_completion_tokens, model_limit or max_completion_tokens
+        )
+        if self.max_completion_tokens < max_completion_tokens:
+            logger.info(
+                f"Embedding model {model} reads at most {model_limit} tokens; chunks are "
+                f"limited to that instead of the configured {max_completion_tokens}."
+            )
+        self.tokenizer = self.get_tokenizer()
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
         if isinstance(enable_mocking, bool):
