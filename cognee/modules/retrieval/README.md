@@ -17,6 +17,7 @@ together.
 | `GRAPH_SUMMARY_COMPLETION` | `GraphSummaryCompletionRetriever` | `graph_summary_completion_retriever.py` | yes | Graph context built from summaries |
 | `TEMPORAL` | `TemporalRetriever` | `temporal_retriever.py` | yes | Time-bounded traversal over the temporal graph |
 | `RAG_COMPLETION` | `CompletionRetriever` | `completion_retriever.py` | yes | Chunk vector search + completion |
+| `BROAD` | `BroadRetriever` | `broad_retriever.py` | yes | Questions over a whole dataset (counts, totals, lists, lookups): a small dataset is shown whole; a large one is loaded into SQLite (`broad_store.py`) and answered by one model-written query |
 | `TRIPLET_COMPLETION` | `TripletRetriever` | `triplet_retriever.py` | yes | Triplet-embedding search + completion |
 | `AGENTIC_COMPLETION` | `AgenticRetriever` | `agentic_retriever.py` | yes | Special-cased in the factory (not in the dict): tool loop with `skills`, `tools`, `max_iter` |
 | `CHUNKS` | `ChunksRetriever` | `chunks_retriever.py` | no | Vector search over `DocumentChunk_text` |

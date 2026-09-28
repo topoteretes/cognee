@@ -7,6 +7,11 @@ from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
+from cognee.modules.retrieval.broad_retriever import (
+    BROAD_BATCH_MB,
+    BROAD_CONTEXT_TOKENS,
+    BroadRetriever,
+)
 
 # Retrievers
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
@@ -116,6 +121,20 @@ async def get_search_type_retriever_instance(
                 "top_k": top_k,
                 "node_name": node_name,
                 "node_name_filter_operator": node_name_filter_operator,
+            },
+        ),
+        # No top_k: BROAD reads the whole dataset (SDK-324).
+        SearchType.BROAD: (
+            BroadRetriever,
+            {
+                "system_prompt_path": "broad_answer.txt",
+                "system_prompt": system_prompt,
+                "session_id": session_id,
+                "response_model": retriever_specific_config.get("response_model", str),
+                "context_tokens": retriever_specific_config.get(
+                    "context_tokens", BROAD_CONTEXT_TOKENS
+                ),
+                "batch_mb": retriever_specific_config.get("batch_mb", BROAD_BATCH_MB),
             },
         ),
         SearchType.RAG_COMPLETION: (
