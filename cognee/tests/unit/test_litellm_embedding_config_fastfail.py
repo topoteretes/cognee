@@ -70,9 +70,8 @@ def _engine(monkeypatch, side_effect):
             model="text-embedding-3-large",
             response=_response(422),
         ),
-        ModuleNotFoundError("No module named 'transformers'", name="transformers"),
     ],
-    ids=["not_found_404", "bad_request_400", "unprocessable_422", "missing_package"],
+    ids=["not_found_404", "bad_request_400", "unprocessable_422"],
 )
 async def test_terminal_error_makes_one_attempt_and_keeps_its_class(monkeypatch, error):
     engine, calls = _engine(monkeypatch, lambda _: error)
@@ -81,6 +80,72 @@ async def test_terminal_error_makes_one_attempt_and_keeps_its_class(monkeypatch,
         await engine.embed_text(["hello world"])
 
     assert calls["count"] == 1
+
+
+def _litellm_missing_sdk() -> litellm.exceptions.APIConnectionError:
+    """What litellm raises for a bedrock model without boto3 (checked against litellm).
+
+    litellm raises its APIConnectionError (status 500) while handling the ImportError, so
+    the ImportError is the error's ``__context__``; ``__cause__`` is None.
+    """
+    try:
+        raise ImportError("Missing boto3 to call bedrock. Run 'pip install boto3'.")
+    except ImportError:
+        try:
+            raise litellm.exceptions.APIConnectionError(
+                message="litellm.APIConnectionError: Missing boto3 to call bedrock.",
+                llm_provider="bedrock",
+                model="amazon.titan-embed-text-v2:0",
+            )
+        except litellm.exceptions.APIConnectionError as error:
+            return error
+
+
+@pytest.mark.asyncio
+async def test_missing_provider_sdk_behind_litellm_makes_one_attempt(monkeypatch):
+    """A missing provider SDK is terminal even though litellm reports it as a 500."""
+    wrapped = _litellm_missing_sdk()
+    assert isinstance(wrapped.__context__, ImportError) and wrapped.__cause__ is None
+    engine, calls = _engine(monkeypatch, lambda _: wrapped)
+
+    with pytest.raises(ImportError, match="boto3") as exc_info:
+        await engine.embed_text(["hello world"])
+
+    assert calls["count"] == 1
+    assert engine.model in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_missing_package_raised_directly_makes_one_attempt(monkeypatch):
+    engine, calls = _engine(
+        monkeypatch, lambda _: ModuleNotFoundError("No module named 'boto3'", name="boto3")
+    )
+
+    with pytest.raises(ImportError, match="boto3"):
+        await engine.embed_text(["hello world"])
+
+    assert calls["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_connection_error_without_a_missing_package_is_still_retried(monkeypatch):
+    """Only an ImportError behind litellm's APIConnectionError is terminal, not the class itself."""
+
+    def _connection_reset_then_auth(call: int) -> Exception:
+        if call == 1:
+            return litellm.exceptions.APIConnectionError(
+                message="Connection reset by peer",
+                llm_provider="openai",
+                model="text-embedding-3-large",
+            )
+        return _auth_error()
+
+    engine, calls = _engine(monkeypatch, _connection_reset_then_auth)
+
+    with pytest.raises(litellm.exceptions.AuthenticationError):
+        await engine.embed_text(["hello world"])
+
+    assert calls["count"] == 2
 
 
 @pytest.mark.asyncio

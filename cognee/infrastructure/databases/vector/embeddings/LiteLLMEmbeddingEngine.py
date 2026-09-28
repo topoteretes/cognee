@@ -64,6 +64,24 @@ _EMBED_LENGTH_ERROR_RE = re.compile(
 _PROVIDERS_WITHOUT_DIMENSIONS_SUPPORT = {"nvidia_nim"}
 
 
+def _missing_package_error(error: Exception) -> ImportError | None:
+    """The ImportError behind ``error`` when embedding failed on a missing package, else None.
+
+    litellm does not raise the ImportError itself: a provider SDK that is not installed
+    (``boto3`` for bedrock / sagemaker, ``google-auth`` for vertex_ai) surfaces as an
+    ``APIConnectionError`` (status 500) raised while handling it, so the ImportError is
+    that error's ``__context__``, not its ``__cause__``. Only this one level of
+    litellm's own wrapping is inspected, not the whole chain.
+    """
+    if isinstance(error, ImportError):
+        return error
+    if isinstance(error, litellm.exceptions.APIConnectionError) and isinstance(
+        error.__context__, ImportError
+    ):
+        return error.__context__
+    return None
+
+
 def _uses_nvidia_nim(provider: str | None, model: str | None) -> bool:
     """Whether this engine is actually talking to NVIDIA NIM.
 
@@ -380,11 +398,17 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             # message below, which points at the wrong problem entirely.
             raise_if_budget_exhausted(error)
 
-            # A missing optional package cannot clear on a retry: re-raise it
-            # unwrapped so the exclusion list above stops the ladder.
-            if isinstance(error, ImportError):
-                logger.error("Embedding failed: a required package is missing: %s", str(error))
-                raise
+            # A missing package cannot clear on a retry. Raise it as an ImportError,
+            # which the exclusion list above treats as terminal, naming the package.
+            missing_package = _missing_package_error(error)
+            if missing_package is not None:
+                logger.error(
+                    "Embedding failed: a required package is missing: %s", str(missing_package)
+                )
+                raise ImportError(
+                    f"Embedding with model '{self.model}' needs a package that is not "
+                    f"installed: {missing_package}"
+                ) from missing_package
 
             # Fall back to a clear, actionable message for connectivity/misconfiguration
             # issues. The provider's error is part of the message: the generic text
