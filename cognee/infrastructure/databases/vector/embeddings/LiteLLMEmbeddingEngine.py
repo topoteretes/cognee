@@ -102,8 +102,6 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
     dimensions: int
     mock: bool
 
-    MAX_RETRIES = 5
-
     def __init__(
         self,
         model: str | None = "openai/text-embedding-3-large",
