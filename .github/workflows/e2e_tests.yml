@@ -6,6 +6,13 @@ permissions:
 on:
   workflow_call:
     inputs:
+      has-secrets:
+        # False on fork PRs, where GitHub withholds repository secrets. Jobs
+        # that need a real LLM/embedding key skip instead of failing on an
+        # empty key. Other callers leave the default and run everything.
+        required: false
+        type: boolean
+        default: true
       python-version:
         required: false
         type: string
@@ -42,6 +49,7 @@ env:
 jobs:
   run-server-start-test:
     name: Server Start Test
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -187,14 +195,11 @@ jobs:
 
       - name: Run Telemetry Tests
         env:
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_ARGS: ${{ secrets.LLM_ARGS }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          LLM_MODEL: "openai/gpt-4o-mini"
+          LLM_API_KEY: "mock-not-used"
           EMBEDDING_DIMENSIONS: 300
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_MODEL: "openai/text-embedding-3-large"
+          EMBEDDING_API_KEY: "mock-not-used"
         run: uv run python ./cognee/tests/test_telemetry.py
 
   run-incremental-update-matrix:
@@ -290,6 +295,7 @@ jobs:
 
   run-pipeline-error-propagation-test:
     name: Pipeline Error Propagation Test
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -316,6 +322,7 @@ jobs:
 
   run-cogx-roundtrip-test:
     name: COGX Roundtrip Test
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -342,6 +349,7 @@ jobs:
 
   run-external-source-import-test:
     name: External Source Import Test (Zep export -> COGX import -> search)
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -368,6 +376,7 @@ jobs:
 
   run-deduplication-test:
     name: Deduplication Test
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-latest
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     defaults:
@@ -414,6 +423,7 @@ jobs:
 
   run-dlt-mixed-input-test:
     name: DLT Mixed Input E2E Test
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -477,6 +487,7 @@ jobs:
 
   run-s3-bucket-test:
       name: S3 Bucket Test
+      if: ${{ inputs.has-secrets }}
       runs-on: ubuntu-22.04
       container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
       steps:
@@ -509,6 +520,7 @@ jobs:
 
   test-parallel-databases:
     name: Test using different async databases in parallel in Cognee
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -538,6 +550,7 @@ jobs:
 
   test-dataset-database-handler:
     name: Test dataset database handlers in Cognee
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -564,6 +577,7 @@ jobs:
 
   test-dataset-database-deletion:
     name: Test dataset database deletion in Cognee
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -590,6 +604,7 @@ jobs:
 
   test-dataset-deletion-when-left-empty:
     name: Test dataset deletion when last piece of data deleted
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -616,6 +631,7 @@ jobs:
 
   test-permissions:
     name: Test permissions with different situations in Cognee
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -645,6 +661,7 @@ jobs:
 
   test-agent-memory:
     name: Test agent memory end-to-end in Cognee
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -675,6 +692,7 @@ jobs:
 
   test-multi-tenancy:
     name: Test multi tenancy with different situations in Cognee
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -701,6 +719,7 @@ jobs:
 
   test-data-label:
     name: Test adding of label for data in Cognee
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -727,6 +746,7 @@ jobs:
 
   test-delete-permission:
     name: Test delete permission assigned from dataset owner
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -752,6 +772,7 @@ jobs:
 
   test-deletion-on-default-graph-non-mocked:
     name: Delete default graph data test (non-mocked)
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -779,6 +800,7 @@ jobs:
 
   test-delete-two-documents-empty-store:
     name: Delete two documents, verify incremental empty store (Ladybug/LanceDB)
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -807,6 +829,7 @@ jobs:
 
   test-delete-two-documents-empty-store-postgres:
     name: Delete two documents, verify incremental empty store (Postgres + PGVector)
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-latest
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     defaults:
@@ -872,6 +895,7 @@ jobs:
 
   test-delete-two-documents-empty-store-neo4j:
     name: Delete two documents, verify incremental empty store (Neo4j/LanceDB)
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     steps:
       - name: Check out
@@ -912,6 +936,7 @@ jobs:
   # Neo4j jobs - NO container (uses setup_neo4j docker action)
   test-deletion-on-default-graph_with_legacy_data_1_neo4j:
     name: Delete default graph with legacy data test 1 in Neo4j case
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     steps:
       - name: Check out
@@ -946,6 +971,7 @@ jobs:
 
   test-deletion-on-default-graph_with_legacy_data_2:
     name: Delete default graph with legacy data test 2
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -974,6 +1000,7 @@ jobs:
 
   test-delete-two-users-with-legacy-data:
     name: Delete data from two users operating on different datasets
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -1000,6 +1027,7 @@ jobs:
 
   test-delete-two-users-on-same-dataset:
     name: Delete data from two users operating on same dataset
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -1025,6 +1053,7 @@ jobs:
 
   test-delete-dataset-default:
     name: Delete dataset in Kuzu graph case
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -1051,6 +1080,7 @@ jobs:
   # Neo4j job - NO container (uses setup_neo4j docker action)
   test-delete-dataset-neo4j:
     name: Delete dataset in Neo4j graph case
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     steps:
       - name: Check out
@@ -1083,6 +1113,7 @@ jobs:
 
   test-graph-edges:
     name: Test graph edge ingestion
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -1112,6 +1143,7 @@ jobs:
 
   run_concurrent_subprocess_access_test:
     name: Concurrent Subprocess access test
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-latest
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     defaults:
@@ -1181,6 +1213,7 @@ jobs:
 
   test-entity-extraction:
     name: Test Entity Extraction
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -1210,6 +1243,7 @@ jobs:
 
   run_conversation_sessions_test_redis:
     name: Conversation sessions test (Redis)
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-latest
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     defaults:
@@ -1279,6 +1313,7 @@ jobs:
 
   run_conversation_sessions_test_fs:
     name: Conversation sessions test (FS)
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-latest
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     defaults:
@@ -1337,6 +1372,7 @@ jobs:
 
   run_conversation_sessions_test_postgres:
     name: Conversation sessions test (Postgres)
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-latest
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     defaults:
@@ -1392,6 +1428,7 @@ jobs:
 
   run_conversation_sessions_test_sqlite:
     name: Conversation sessions test (SQLite)
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-latest
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     defaults:
@@ -1425,6 +1462,7 @@ jobs:
 
   run-feedback-weights-pipeline-smoke-kuzu:
     name: Feedback Weights Pipeline Smoke Test (Kuzu)
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-latest
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     defaults:
@@ -1482,6 +1520,7 @@ jobs:
 
   run-feedback-weights-pipeline-smoke-neo4j:
     name: Feedback Weights Pipeline Smoke Test (Neo4j)
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     steps:
       - name: Check out
@@ -1519,6 +1558,7 @@ jobs:
 
   run-feedback-weights-pipeline-smoke-kuzu-redis:
     name: Feedback Weights Pipeline Smoke Test (Kuzu + Redis)
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-latest
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     defaults:
@@ -1586,6 +1626,7 @@ jobs:
 
   run-feedback-weights-pipeline-smoke-neo4j-redis:
     name: Feedback Weights Pipeline Smoke Test (Neo4j + Redis)
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     services:
       redis:
@@ -1635,6 +1676,7 @@ jobs:
 
   run-graph-model-from-schema-test:
     name: Test Graph Model Generation From Schema
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -1665,6 +1707,7 @@ jobs:
 
   run-custom-model-test:
     name: Test Custom Model Cognify
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -1695,6 +1738,7 @@ jobs:
 
   run-custom-model-relationships-test:
     name: Test Custom Model Relationships Cognify
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -1724,6 +1768,7 @@ jobs:
 
   run-dataset-queue-test:
     name: Test Dataset Queues Cognee
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -1753,6 +1798,7 @@ jobs:
 
   run-dataset-queue-buildup-test:
     name: Test Dataset Queue Buildup Cognee
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container:  ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -1783,6 +1829,7 @@ jobs:
 
   run_usage_logger_test:
     name: Usage logger test (API/MCP)
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-latest
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     defaults:
@@ -1842,6 +1889,7 @@ jobs:
 
   run_conditional_auth_test:
     name: Conditional Authentication Test
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-latest
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     defaults:
@@ -1874,6 +1922,7 @@ jobs:
 
   run_backend_auth_tests:
     name: Backend Authentication Tests
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-latest
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     defaults:
@@ -1974,6 +2023,7 @@ jobs:
 
   backwards-compatibility-sqlite:
     name: Backwards compatibility — SQLite + LanceDB + Kuzu
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
 
     env:
@@ -2048,6 +2098,7 @@ jobs:
 
   backwards-compatibility-postgres:
     name: Backwards compatibility — PostgreSQL + PGVector + Kuzu
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
 
     services:
@@ -2264,6 +2315,7 @@ jobs:
 
   test-concurrent-cognify:
     name: Concurrent cognify on one dataset end-to-end (SQLite + LanceDB)
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
