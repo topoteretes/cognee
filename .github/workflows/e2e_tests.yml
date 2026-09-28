@@ -2204,6 +2204,8 @@ jobs:
 
   test-adapter-caching:
     name: Test Vector and Graph Adapter Caching
+    # Every job in adapter_caching_tests.yml reads the LLM/embedding keys.
+    if: ${{ inputs.has-secrets }}
     uses: ./.github/workflows/adapter_caching_tests.yml
     with:
       python-version: ${{ inputs.python-version }}
