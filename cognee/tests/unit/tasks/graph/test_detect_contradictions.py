@@ -192,6 +192,43 @@ async def test_flags_contradiction_as_graph_edge():
 
 
 @pytest.mark.asyncio
+async def test_duplicate_contradictions_write_one_edge_per_pair():
+    # Two detected conflicts resolving to the same (source, target) pair must
+    # become ONE contradicts edge: duplicate rows in a single add_edges batch
+    # crash ladybug 0.19.0 (issue #5221).
+    chunks = [_summary([_entity("alice"), _entity("1990")])]
+    engine = _mock_graph_engine()
+
+    llm_result = ContradictionList(
+        contradictions=[
+            Contradiction(first_fact_id="F0", second_fact_id="F1", reason="First.", confidence=0.9),
+            Contradiction(
+                first_fact_id="F0", second_fact_id="F1", reason="Second.", confidence=0.8
+            ),
+        ]
+    )
+
+    with (
+        _patched_config(),
+        patch.object(dc_module, "get_graph_engine", new_callable=AsyncMock, return_value=engine),
+        patch.object(
+            dc_module.LLMGateway,
+            "acreate_structured_output",
+            new_callable=AsyncMock,
+            return_value=llm_result,
+        ),
+    ):
+        await detect_contradictions(chunks)
+
+    engine.add_edges.assert_awaited_once()
+    added_edges = engine.add_edges.await_args.args[0]
+    assert len(added_edges) == 1
+    source, target, relationship, properties = added_edges[0]
+    assert (source, target, relationship) == ("1985", "1990", "contradicts")
+    assert properties["reason"] == "First."  # first occurrence kept
+
+
+@pytest.mark.asyncio
 async def test_low_confidence_contradiction_is_not_flagged():
     chunks = [_summary([_entity("alice"), _entity("1990")])]
     engine = _mock_graph_engine()

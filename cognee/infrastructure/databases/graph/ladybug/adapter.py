@@ -2059,6 +2059,16 @@ class LadybugAdapter(GraphDBInterface):
             per_row_refs = isinstance(source_ref_key, dict)
             fold_fields = _per_row_fold_fields(pipeline_run_id) if per_row_refs else None
 
+            # Duplicate (from, to, relationship_name) rows in one UNWIND+MERGE
+            # statement crash ladybug 0.19.0 (assertion in csr_node_group.cpp
+            # or SIGSEGV, issue #5221), so collapse them before the statement.
+            # Last occurrence wins, matching what sequential MERGE ... ON MATCH
+            # SET would have produced; first-seen order of each key is kept.
+            unique_edges: dict[tuple[str, str, str], tuple] = {}
+            for edge in edges:
+                unique_edges[(str(edge[0]), str(edge[1]), str(edge[2]))] = edge
+            edges = list(unique_edges.values())
+
             edge_params = [
                 {
                     "from_id": from_node,
