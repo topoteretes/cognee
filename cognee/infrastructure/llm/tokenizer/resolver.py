@@ -103,12 +103,19 @@ def _load_or_tiktoken_fallback(
     try:
         return build()
     except Exception as error:
+        # A missing package cannot be fixed by pointing HUGGINGFACE_TOKENIZER
+        # elsewhere; the error itself names the package to install.
+        hint = (
+            "Install the missing package to count with the model's own tokenizer."
+            if isinstance(error, ImportError)
+            else _MISMATCH_HINT
+        )
         logger.warning(
             "Could not load a matching tokenizer for %s (%s). Falling back to "
             "TikToken, so token counts are approximate. %s",
             context,
             error,
-            _MISMATCH_HINT,
+            hint,
             exc_info=True,
         )
         return TikTokenTokenizer(model=None, max_completion_tokens=max_completion_tokens)

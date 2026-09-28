@@ -179,6 +179,40 @@ def test_mistral_missing_dependency_falls_back_without_raising(caplog):
     assert any("Falling back" in r.message for r in caplog.records)
 
 
+def test_missing_package_warning_does_not_suggest_huggingface_tokenizer(caplog):
+    # HUGGINGFACE_TOKENIZER only chooses which tokenizer to load, so it cannot fix
+    # a missing package (SDK-810); the warning must not point at it.
+    tik = patch(
+        f"{_MODULE}.TikTokenTokenizer", side_effect=lambda **kw: _FakeTokenizer("tiktoken", **kw)
+    )
+    hf = patch(
+        f"{_MODULE}.HuggingFaceTokenizer",
+        side_effect=ModuleNotFoundError("No module named 'transformers'", name="transformers"),
+    )
+    mis = patch(f"{_MODULE}.MistralTokenizer")
+    with caplog.at_level(logging.WARNING), tik, hf, mis:
+        tok = resolve_embedding_tokenizer(provider="fastembed", model="BAAI/bge-small-en-v1.5")
+    assert tok.kind == "tiktoken"
+    warnings = [r.message for r in caplog.records if "Falling back" in r.message]
+    assert warnings, "expected the fallback warning"
+    assert "Install the missing package" in warnings[0]
+    assert "HUGGINGFACE_TOKENIZER" not in warnings[0]
+
+
+def test_transformers_is_a_core_dependency():
+    # The HuggingFace tokenizer imports transformers, and HuggingFace-repo embedding
+    # models (fastembed, the keyless default, included) need it. It must not move back
+    # into an optional extra, or plain installs fall back to TikToken again.
+    import re
+    from pathlib import Path
+
+    tomllib = pytest.importorskip("tomllib")  # stdlib from Python 3.11
+    pyproject = Path(__file__).resolve().parents[5] / "pyproject.toml"
+    dependencies = tomllib.loads(pyproject.read_text())["project"]["dependencies"]
+    names = {re.split(r"[<>=!~\[; ]", spec, maxsplit=1)[0].lower() for spec in dependencies}
+    assert "transformers" in names
+
+
 def test_bare_model_strips_one_provider_tag():
     assert resolver._bare_model("openai/text-embedding-3-large") == "text-embedding-3-large"
     # Splits once, so a multi-segment repo after the provider tag survives.

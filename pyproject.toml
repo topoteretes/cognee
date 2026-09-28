@@ -39,6 +39,10 @@ dependencies = [
     # at first use never has to change a package the running process has imported.
     "huggingface-hub>=0.34,<1",
     "tokenizers>=0.22,<=0.23.0",
+    # Core so HuggingFace-repo embedding models (fastembed, the keyless default, and
+    # Ollama / OpenAI-compatible models with HUGGINGFACE_TOKENIZER) count tokens with
+    # their own tokenizer; without it the resolver fell back to TikToken. <5 for gliner2.
+    "transformers>=4.46.3,<5",
     "tiktoken>=0.8.0,<1.0.0",
     # <1.97.0: 1.97.0 fails to build litellm.types.utils.Message on Python 3.10 (unresolved
     # forward ref) and 1.98.0+ import typing.NotRequired (3.11+). See BerriAI/litellm#38202.
@@ -157,8 +161,10 @@ langchain = [
     "langchain-core>=1.2.5"
 ]
 llama-index = ["llama-index-core>=0.14.20,<0.15"]
-huggingface = ["transformers>=4.46.3,<6"]
-ollama = ["transformers>=4.46.3,<6"]
+# transformers is a core dependency. The empty extra keeps `cognee[huggingface]` installable.
+huggingface = []
+# transformers is a core dependency. The empty extra keeps `cognee[ollama]` installable.
+ollama = []
 mistral = ["mistral-common>=1.5.2,<2", "mistralai>=1.9.10,<2"]
 anthropic = ["anthropic>=0.27"]
 azure = ["azure-identity>=1.15.0,<2"]
