@@ -81,9 +81,10 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
-      - name: Memory correctness, sessions, lifecycle, idempotency, HTTP API
+      - name: Memory correctness, sessions, lifecycle, idempotency, HTTP API, extras resolution
         run: |
           uv run pytest cognee/tests/journeys -m "journey and not quickstart" \
+            --ignore=cognee/tests/journeys/test_mcp_journey.py \
             -v --timeout=4800 -p no:cacheprovider -W ignore
 
   quickstart:
@@ -107,3 +108,59 @@ jobs:
         run: |
           uv run pytest cognee/tests/journeys/test_quickstart.py -m quickstart \
             -v --timeout=1500 -p no:cacheprovider -W ignore
+
+  mcp:
+    name: MCP as a client uses it (${{ inputs.mode }} LLM, stdio + HTTP)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Spawn cognee-mcp over stdio and HTTP, remember and recall through the tools
+        run: |
+          uv run --with "fastmcp>=3.4.0,<4.0.0" --with "mcp>=1.24.0,<2.0.0" \
+            pytest cognee/tests/journeys/test_mcp_journey.py \
+            -v --timeout=1500 -p no:cacheprovider -W ignore
+
+  extras-install:
+    name: Install smoke — cognee[${{ matrix.extras }}]
+    # Provider-independent, so only the mock-mode caller (the PR gate) runs it.
+    if: ${{ inputs.mode == 'mock' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        extras:
+          - "neo4j,neptune,postgres,postgres-binary,turso,redis,tracing,aws"
+          - "anthropic,azure,groq,mistral,ollama,posthog,debug,notebook"
+          - "fastembed,huggingface,codegraph,rapidocr"
+          - "docs,langchain,llama-index,graphiti"
+          - "docling,docling-full"
+          - "dlt,gmail,scraping,evals,deepeval,baml,dev"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Build the wheel, install each extra into an empty venv, import what it enables
+        env:
+          COGNEE_JOURNEY_EXTRAS: '1'
+          COGNEE_EXTRAS: ${{ matrix.extras }}
+        run: |
+          uv run pytest cognee/tests/journeys/test_extras_install_smoke.py -k installs_and_imports \
+            -v --timeout=2400 -p no:cacheprovider -W ignore
