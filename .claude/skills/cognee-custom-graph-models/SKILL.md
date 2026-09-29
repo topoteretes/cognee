@@ -54,7 +54,7 @@ edges.
 
 | Key | What it does |
 |---|---|
-| `identity_fields` | The node id is derived from these field values (normalized: lowercased, spaces to `_`). The same entity from two chunks or two runs becomes **one node**. |
+| `identity_fields` | The node id is derived from these field values (normalized: lowercased, spaces to `_`, apostrophes removed). The same entity from two chunks or two runs becomes **one node**. |
 | `index_fields` | Each field gets a vector collection named `<ClassName>_<field>`, so recall can find the node. |
 | `transparent` | The node is not stored; its children take its place. Use it for a root container like `PeopleGraph`. |
 
@@ -142,8 +142,10 @@ Python classes for those.
   extraction cannot fill"** → an unsupported `FromIdentity` or `Edge`
   spelling. These are raised when the model is converted during
   extraction, not at class definition, so they appear mid-pipeline.
-- **String endpoints fail for classes defined inside a function.** Define
-  models at module level.
+- **String endpoints resolve only to the owning model itself or a
+  module-level class.** A string naming another class defined inside a
+  function raises `InvalidReferenceTypeError`, so define models at module
+  level.
 - **Field names that collide with DataPoint's own fields** (`id`, `type`,
   `version`, `metadata`, `created_at`, `belongs_to_set`, …) are stripped
   from what the LLM sees. Rename them.
@@ -152,8 +154,9 @@ Python classes for those.
   under its own class name.
 - **Write a `custom_prompt`.** Without one the generic knowledge-graph
   prompt is used; your schema reaches the LLM only as structured output.
-- **Not with GLiNER.** `extractor="gliner"` raises with a custom
-  `graph_model`.
+- **Not with GLiNER.** `extractor="gliner_demo"` (alias `"gliner"`) raises
+  with a custom `graph_model`, and so does the default `GRAPH_EXTRACTOR=auto`
+  when no LLM key is configured (it resolves to `gliner_demo`).
 - **Remote mode drops it.** After `cognee.serve(url)`, `remember()` and
   `cognify()` do not forward `graph_model`; the server builds a generic
   graph.

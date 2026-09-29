@@ -38,6 +38,8 @@ all take `user=`.
 The caller must hold `share` on the dataset. Share **by dataset id**:
 
 ```python
+from uuid import UUID
+
 from cognee.modules.users.permissions.methods import (
     authorized_give_permission_on_datasets,
     authorized_revoke_permission_on_datasets,
@@ -45,12 +47,12 @@ from cognee.modules.users.permissions.methods import (
 
 await authorized_give_permission_on_datasets(
     bob.id,                 # principal: a user, role, or tenant id
-    [res.dataset_id],       # dataset ids
+    [UUID(res.dataset_id)], # dataset ids (RememberResult.dataset_id is a str)
     "read",                 # "read" | "write" | "delete" | "share"
     alice.id,               # the owner making the grant
 )
 
-await cognee.recall("...", user=bob, dataset_ids=[res.dataset_id])   # by id
+await cognee.recall("...", user=bob, dataset_ids=[UUID(res.dataset_id)])   # by id (must be a UUID)
 ```
 
 Bob must address Alice's dataset by **id**: dataset *names* resolve only
@@ -71,16 +73,20 @@ await select_tenant(user_id=bob.id, tenant_id=tenant_id)
 
 alice = await get_user(alice.id)   # reload after changing the active tenant
 res = await cognee.remember(text, dataset_name="acme_docs", user=alice)
-await authorized_give_permission_on_datasets(role_id, [res.dataset_id], "read", alice.id)
+await authorized_give_permission_on_datasets(role_id, [UUID(res.dataset_id)], "read", alice.id)
 ```
 
 - A user acts inside one **active tenant** (`select_tenant`; `None` is the
   personal space). Datasets are created in the active tenant.
-- You can only grant a role or tenant access to datasets **in that
-  tenant**. A dataset created in the personal space cannot be shared with a
-  tenant's role; recreate it with the tenant active.
-- A role's members get the role's grants; a tenant's members get the
-  tenant's grants.
+- The granter can only share datasets in **their current active tenant**
+  (others raise `PermissionDeniedError`). The principal's tenant is not
+  checked: granting a personal dataset to a role while the granter is in
+  personal space succeeds, but is useless to the role's members, who only
+  see datasets of their active tenant. Create the dataset with the tenant
+  active.
+- A role's or tenant's members get its grants only while that tenant is
+  their active tenant (`select_tenant`, then reload the user). While a
+  tenant is active, personal datasets are not visible.
 
 Full walkthrough: `examples/demos/permissions/user_permissions_and_access_control_example.py`
 (also `tenant_role_setup_example.py`, `tenant_role_constraints_example.py`).
@@ -116,9 +122,11 @@ Full walkthrough: `examples/demos/permissions/user_permissions_and_access_contro
 - `true` (default): multi-tenant. API calls require auth, every dataset
   operation is permission-checked, and each user+dataset gets isolated graph
   and vector databases.
-- `false`: single-user. Permission checks always pass, there is no
-  isolation, and **every user reads and writes the same shared databases**.
-  Use it only for a single-user deployment.
+- `false`: single-user storage. ACL checks still run, but they only gate
+  which dataset ids may be named: retrieval runs over the shared graph and
+  vector databases, so other users' content is not filtered out. **Every
+  user reads and writes the same shared databases**. Use it only for a
+  single-user deployment.
 
 Authentication follows the switch unless `REQUIRE_AUTHENTICATION` is set.
 `REQUIRE_AUTHENTICATION=true` with access control off keeps logins but not
@@ -134,12 +142,15 @@ isolation; `REQUIRE_AUTHENTICATION=false` with access control on is ignored
 - **Denied is not the same as empty.**
   - Asking for a dataset **id** you cannot read raises
     `PermissionDeniedError` (HTTP 403).
-  - Asking for a dataset **name** that is not yours raises
-    `DatasetNotFoundError`, even if it was shared with you. Use the id.
+  - On recall/search, a dataset **name** that is not yours raises
+    `DatasetNotFoundError`, even if it is shared with you. On writes
+    (remember/add/cognify) it silently creates a new dataset of your own
+    with that name. Use the id.
   - Passing **no datasets** searches only what you can read, so a user with
     no grants simply gets `[]`.
-- **Grants need `share`**, and role/tenant grants need the dataset to be in
-  that tenant; otherwise `PermissionDeniedError`.
+- **Grants need `share`** on a dataset in the granter's active tenant;
+  otherwise `PermissionDeniedError`. The principal's tenant is not checked,
+  so a grant can succeed yet be invisible to its members (see above).
 - **Reload the user after `select_tenant`** (`get_user(id)`): an old `User`
   object still carries the previous active tenant.
 - **Same name, different datasets.** Dataset ids are per owner and tenant,
@@ -183,9 +194,11 @@ Grants come from:
 
 ### Where it is enforced
 
-Every entry point resolves datasets through
+Most entry points resolve datasets through
 `get_authorized_existing_datasets(datasets, permission, user)`
-(`cognee/modules/data/methods/`):
+(`cognee/modules/data/methods/`); all of them end in
+`get_specific_user_permission_datasets` / `get_all_user_permission_datasets`
+(`cognee/modules/users/permissions/methods/`):
 
 | Operation | Permission |
 |---|---|

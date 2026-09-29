@@ -9,7 +9,7 @@ together.
 
 | SearchType | Retriever | Module | LLM answer? | Notes |
 |---|---|---|---|---|
-| `HYBRID_COMPLETION` | `HybridRetriever` | `hybrid_retriever.py` | yes | Default. Chunk + entity (+ global-context) lanes. Defers to `GRAPH_COMPLETION` when given a custom `node_type` or when the chunk collection is missing (`search/methods/hybrid_deferral.py`) |
+| `HYBRID_COMPLETION` | `HybridRetriever` | `hybrid_retriever.py` | yes | Default. Chunk + entity (+ global-context) lanes. Defers to `GRAPH_COMPLETION` for a custom `node_type`, `node_name` with `node_type=None`, `neighborhood_depth`, `feedback_influence > 0`, or a missing chunk collection (`search/methods/hybrid_deferral.py`) |
 | `GRAPH_COMPLETION` | `GraphCompletionRetriever` | `graph_completion_retriever.py` | yes | Triplet search + neighbourhood expansion; base for the variants below |
 | `GRAPH_COMPLETION_COT` | `GraphCompletionCotRetriever` | `graph_completion_cot_retriever.py` | yes | Chain-of-thought rounds |
 | `GRAPH_COMPLETION_CONTEXT_EXTENSION` | `GraphCompletionContextExtensionRetriever` | `graph_completion_context_extension_retriever.py` | yes | Iteratively widens context |

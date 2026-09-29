@@ -8,7 +8,7 @@ description: Use when the user wants to drive cognee from the terminal with cogn
 `cognee-cli` ships with the package (entry point in `cognee/cli/_cognee.py`;
 each command lives in `cognee/cli/commands/`). Every command has
 `--help` for its flags, but only a few (`memify`, `eval`, `serve`, `push`,
-`upgrade`) include usage examples — for the memory commands use the examples
+`upgrade`, `downgrade`, `stamp`) include usage examples — for the memory commands use the examples
 in this file. Needs `LLM_API_KEY` configured, same as the SDK.
 
 ## Core flow
@@ -118,7 +118,8 @@ cognee-cli downgrade <slug|base>      # REWRITES DATA; revision is required,
                                       # prompts unless --force; --dataset <uuid>
                                       # (repeatable) limits it
 cognee-cli stamp <head|base|slug>     # set the stored revision WITHOUT running
-                                      # anything (repairs drifted bookkeeping)
+                                      # anything; prompts unless --force;
+                                      # --dataset <uuid> (repeatable) limits it
 ```
 
 The positional revision is always a **data-chain slug**; the relational
