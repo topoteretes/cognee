@@ -15,13 +15,14 @@ A query runs read-only in SQLite, and the model phrases its result. Code appends
 answer was reached, and the full result when it has more than one row.
 """
 
+import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from itertools import groupby
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -51,8 +52,9 @@ BROAD_TEXT_NODE_TYPES = ("DocumentChunk", "DltRow")
 # Text longer than this many characters per token of the budget cannot fit in any script,
 # so its tokens are not counted.
 _MAX_CHARS_PER_TOKEN = 6
-# Chunks a reading search returns, per token of the budget (a chunk is rarely shorter).
-_CHUNKS_PER_TOKEN = 1 / 50
+# Chunks each reading search returns: enough to fill the budget when a chunk holds at
+# least this many tokens.
+_MIN_CHUNK_TOKENS = 256
 
 
 class BroadLimitError(ValueError):
@@ -67,10 +69,13 @@ class DecisionSmall(BaseModel):
 
 
 class DecisionLarge(BaseModel):
-    """Only the store's schema is shown: compute the answer with SQL, or ask to read."""
+    """Only the store's schema is shown: compute the answer with SQL, or ask to read.
+    ``search_queries`` are phrasings of the passage that would answer the question, used
+    to find the parts read."""
 
     sql: str | None = None
     needs_reading: bool = False
+    search_queries: list[str] = Field(default_factory=list)
 
 
 @dataclass
@@ -162,6 +167,26 @@ class Corpus:
 
 def _documents_of(units: list[Unit]) -> list[tuple[str, list[Unit]]]:
     return [(document, list(parts)) for document, parts in groupby(units, key=lambda u: u.document)]
+
+
+def _merged(ranked: list[list]) -> list:
+    """Several ranked lists as one: the first of each, then the second of each, ..."""
+    return (
+        [r for tier in zip(*ranked) for r in tier]
+        if len(ranked) > 1
+        else ranked[0]
+        if ranked
+        else []
+    )
+
+
+def _reads_text(sql: str | None) -> bool:
+    return bool(sql) and re.search(r"\blines\b", sql, re.IGNORECASE) is not None
+
+
+def _found_nothing(rows: list[tuple]) -> bool:
+    """No rows, or one row of nothing but zeros and NULLs."""
+    return not rows or (len(rows) == 1 and all(v in (None, 0, "", "0") for v in rows[0]))
 
 
 def _result_table(columns: list[str], rows: list[tuple], limit: int) -> str:
@@ -278,8 +303,17 @@ class BroadRetriever(CompletionRetriever):
         else:
             prompt = f"Question: {query}\n\nThe record store of the dataset:\n{schema}"
             decision = await self._ask(prompt, "broad_decide_large.txt", DecisionLarge)
-            if decision.sql is None:
-                return await self.read_most_similar(query)
+            phrasings = [query, *decision.search_queries]
+            if decision.sql is None or decision.needs_reading:
+                return await self.read_most_similar(query, phrasings)
+            found = await self.run_query(query, prompt, decision.sql, store, False)
+            if found.route == "sql" and _reads_text(found.sql) and _found_nothing(found.rows):
+                # A word match that finds nothing does not show the text lacks the answer.
+                logger.info("BROAD query over the text found nothing; reading instead")
+                reading = await self.read_most_similar(query, phrasings)
+                reading.note = f"(A query over the text found nothing: {found.sql}) " + reading.note
+                return reading
+            return found
         return await self.run_query(query, prompt, decision.sql, store, whole is not None)
 
     async def run_query(
@@ -319,22 +353,31 @@ class BroadRetriever(CompletionRetriever):
             rows=rows,
         )
 
-    async def read_most_similar(self, query: str) -> BroadContext:
+    async def read_most_similar(
+        self, query: str, phrasings: list[str] | None = None
+    ) -> BroadContext:
         """Fill one prompt with the chunks most similar to the question: one bounded vector
-        search that returns their text."""
-        limit = max(1, int(self.context_tokens * _CHUNKS_PER_TOKEN))
+        search per phrasing, their results merged rank by rank."""
+        limit = max(1, self.context_tokens // _MIN_CHUNK_TOKENS)
+        vector = (await get_unified_engine()).vector
         try:
-            found = await (await get_unified_engine()).vector.search(
-                "DocumentChunk_text", query, query_vector=None, limit=limit, include_payload=True
-            )
+            ranked = [
+                await vector.search(
+                    "DocumentChunk_text", text, query_vector=None, limit=limit, include_payload=True
+                )
+                for text in dict.fromkeys(t.strip() for t in (phrasings or [query]) if t.strip())
+            ]
         except CollectionNotFoundError as error:
             raise BroadLimitError(
                 "BROAD: the question needs the text read, the dataset is larger than "
                 "context_tokens, and it has no chunk embeddings to choose the most relevant "
                 "parts. Raise context_tokens in retriever_specific_config."
             ) from error
-        parts, used = [], 0
-        for result in found:
+        parts, used, seen = [], 0, set()
+        for result in _merged(ranked):
+            if result.id in seen:
+                continue
+            seen.add(result.id)
             text = str((result.payload or {}).get("text", ""))
             tokens = len(self.tokenizer.extract_tokens(text))
             if text and used + tokens <= self.context_tokens:

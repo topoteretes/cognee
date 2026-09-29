@@ -104,3 +104,14 @@ def test_only_one_read_only_select_runs(store):
 
 def test_norm_folds_case_and_accents():
     assert norm("  Ünal  ÖZTÜRK ") == "unal ozturk"
+
+
+def test_the_schema_shows_how_a_text_is_laid_out(store):
+    book = "CONTENTS\nCHAPTER I\nCHAPTER II\n\nCHAPTER I\nIt was a dark night, the kind that hides everything.\n\nCHAPTER II\nMorning came late."
+    store.add_document("book.txt", book)
+
+    schema = store.describe("How many chapters?")
+
+    assert "Start of document 'book.txt':" in schema and "1: CONTENTS" in schema
+    assert "Heading-like lines (5;" in schema and "line 2 'CHAPTER I'" in schema
+    assert "appear more than once (2 different texts): 'CHAPTER I' x2, 'CHAPTER II' x2" in schema

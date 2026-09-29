@@ -127,25 +127,69 @@ async def test_on_a_small_dataset_the_retry_may_answer_instead(monkeypatch):
     assert (found.route, found.answer) == ("answer", "3")
 
 
+class _Vector:
+    """Every search returns the same nine chunks; the searches are recorded."""
+
+    def __init__(self):
+        self.searches = []
+
+    async def search(self, collection, query_text, query_vector=None, limit=None, **kw):
+        self.searches.append((collection, query_text, limit, kw.get("include_payload")))
+        return [
+            SimpleNamespace(id=f"c{n}", payload={"text": f"part {n} " + "word " * 30})
+            for n in range(9)
+        ]
+
+
 @pytest.mark.asyncio
-async def test_reading_fills_one_prompt_from_one_bounded_vector_search(monkeypatch):
-    searches = []
-
-    class Vector:
-        async def search(self, collection, query_text, query_vector=None, limit=None, **kw):
-            searches.append((collection, limit, kw.get("include_payload")))
-            return [
-                SimpleNamespace(payload={"text": f"part {n} " + "word " * 30}) for n in range(9)
-            ]
-
-    _use(monkeypatch, {"story": "word " * 5_000}, vector=Vector())
-    _llm(monkeypatch, [DecisionLarge(needs_reading=True)])
+async def test_reading_fills_one_prompt_from_bounded_vector_searches(monkeypatch):
+    vector = _Vector()
+    _use(monkeypatch, {"story": "word " * 5_000}, vector=vector)
+    _llm(monkeypatch, [DecisionLarge(needs_reading=True, search_queries=["a storm", "a wreck"])])
 
     found = await BroadRetriever(context_tokens=100).get_retrieved_objects("What happens?")
 
-    assert found.route == "reading" and searches == [("DocumentChunk_text", 2, True)]
-    assert "part 0" in found.text and "part 5" not in found.text
+    assert found.route == "reading"
+    assert [(q, limit, p) for _, q, limit, p in vector.searches] == [
+        ("What happens?", 1, True),
+        ("a storm", 1, True),
+        ("a wreck", 1, True),
+    ]
+    assert found.text.count("part 0") == 1 and "part 5" not in found.text  # merged, no repeats
     assert "most similar" in found.note
+
+
+@pytest.mark.asyncio
+async def test_a_text_query_that_finds_nothing_falls_back_to_reading(monkeypatch):
+    vector = _Vector()
+    _use(monkeypatch, {"story": "word " * 5_000}, vector=vector)
+    _llm(
+        monkeypatch,
+        [
+            DecisionLarge(
+                sql="SELECT COUNT(*) FROM lines WHERE text LIKE '%married%'",
+                search_queries=["a wedding"],
+            )
+        ],
+    )
+
+    found = await BroadRetriever(context_tokens=100).get_retrieved_objects("Who married?")
+
+    assert found.route == "reading" and len(vector.searches) == 2
+    assert (
+        found.note.startswith("(A query over the text found nothing:")
+        and "most similar" in found.note
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_table_query_that_finds_nothing_is_an_answer(monkeypatch):
+    _use(monkeypatch, {"scores": _scores(3_000)})
+    _llm(monkeypatch, [DecisionLarge(sql='SELECT COUNT(*) FROM "scores" WHERE "goals" = 9')])
+
+    found = await BroadRetriever(context_tokens=200).get_retrieved_objects("Nine goals?")
+
+    assert found.route == "sql" and found.rows == [(0,)]
 
 
 @pytest.mark.asyncio

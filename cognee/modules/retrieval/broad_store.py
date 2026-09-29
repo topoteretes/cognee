@@ -39,6 +39,18 @@ LINE_VALUES = 8
 # shapes per line (prose has about one shape per line).
 TEMPLATED_SHAPE_SHARE = 0.2
 SHOWN_SHAPES = 40
+# How the text is laid out, shown to the model: the first lines of a few documents, and
+# the short lines that look like headings (a chapter or section title, a name, a label).
+PREVIEW_DOCUMENTS = 3
+PREVIEW_LINES = 12
+HEADING_CHARS = 80
+SHOWN_HEADINGS = 10
+SHOWN_REPEATS = 8
+_HEADING = regex.compile(
+    r"^(chapter|book|part|section|act|scene|volume|canto|letter|epilogue|prologue|preface|"
+    r"introduction|appendix|article|\d+[.)]?|[ivxlc]+[.)]?)(\b|$)",
+    regex.IGNORECASE,
+)
 # What the model is shown of each table.
 SAMPLE_ROWS = 3
 TOP_VALUES = 8
@@ -276,6 +288,13 @@ def parse_dlt_row(text: str) -> tuple[str, dict[str, str], list[str]] | None:
     return head.group(1).strip(), fields, foreign_keys
 
 
+def _is_heading(line: str) -> bool:
+    """A short line that looks like a heading: in capitals, or opening with a chapter, part,
+    section or number word."""
+    letters = [c for c in line if c.isalpha()]
+    return bool(letters) and (all(c.isupper() for c in letters) or _HEADING.match(line) is not None)
+
+
 def shape_of(line: str) -> tuple[str, list[str]]:
     """The line with its values masked (@ a name, # anything holding a digit), and the
     values in order."""
@@ -446,7 +465,56 @@ class RecordStore:
             )
         else:
             text += f"({shapes} different shapes: free text, not templated)\n"
-        return text + self._sample(f"SELECT * FROM lines LIMIT {SAMPLE_ROWS}")
+        return text + self._layout() + self._sample(f"SELECT * FROM lines LIMIT {SAMPLE_ROWS}")
+
+    def _layout(self) -> str:
+        """The first lines of a few documents, the heading-like lines, and the short lines
+        that repeat: how the text is laid out, which no query can tell from counts."""
+        out = []
+        documents = self.connection.execute(
+            f"SELECT DISTINCT document FROM lines ORDER BY document LIMIT {PREVIEW_DOCUMENTS}"
+        ).fetchall()
+        for (document,) in documents:
+            head = self.connection.execute(
+                "SELECT line_no, text FROM lines WHERE document = ? ORDER BY line_no LIMIT ?",
+                (document, PREVIEW_LINES),
+            ).fetchall()
+            out.append(
+                f"Start of document {document!r}:\n"
+                + "\n".join(f"  {n}: {t[: VALUE_CHARS * 2]}" for n, t in head)
+            )
+        short = self.connection.execute(
+            "SELECT line_no, text FROM lines WHERE length(text) <= ? ORDER BY line_no",
+            (HEADING_CHARS,),
+        ).fetchall()
+        headings = [(n, t) for n, t in short if _is_heading(t)]
+        if headings:
+            shown = headings[:SHOWN_HEADINGS]
+            more = (
+                f" ... and {len(headings) - len(shown)} more" if len(headings) > len(shown) else ""
+            )
+            out.append(
+                f"Heading-like lines ({len(headings)}; a short line in capitals or starting with "
+                "a chapter, part, section or number word): "
+                + ", ".join(f"line {n} {t!r}" for n, t in shown)
+                + more
+            )
+        repeats = self.connection.execute(
+            "SELECT text, COUNT(*) FROM lines WHERE length(text) <= ? GROUP BY text "
+            f"HAVING COUNT(*) > 1 ORDER BY 2 DESC, MIN(line_no) LIMIT {SHOWN_REPEATS}",
+            (HEADING_CHARS,),
+        ).fetchall()
+        distinct_repeated = self.connection.execute(
+            "SELECT COUNT(*) FROM (SELECT text FROM lines WHERE length(text) <= ? "
+            "GROUP BY text HAVING COUNT(*) > 1)",
+            (HEADING_CHARS,),
+        ).fetchone()[0]
+        if repeats:
+            out.append(
+                f"Short lines that appear more than once ({distinct_repeated} different texts): "
+                + ", ".join(f"{t!r} x{c}" for t, c in repeats)
+            )
+        return "\n".join(out) + "\n"
 
     @staticmethod
     def _question_words(question: str) -> list[str]:
