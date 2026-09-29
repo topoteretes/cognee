@@ -18,13 +18,14 @@ answer was reached, and the full result when it has more than one row.
 import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from itertools import groupby
+from itertools import groupby, pairwise
 from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 
+from cognee.context_global_variables import current_dataset_id
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
@@ -48,6 +49,12 @@ BROAD_CONTEXT_TOKENS = 30_000
 BROAD_READING_TOKENS = 12_000
 # Megabytes of text held in memory at once while the store is built.
 BROAD_BATCH_MB = 256
+# A dataset up to this many megabytes is loaded into the store whole; a larger one is
+# represented by the parts most similar to the question, up to this size.
+BROAD_STORE_MB = 32
+# The least text a chunk is assumed to hold, when deciding how many to ask the vector
+# store for; a chunk is rarely shorter.
+_MIN_CHUNK_CHARS = 1_000
 # Rows of a query result shown to the answer model; the full result is appended by code.
 BROAD_RESULT_ROWS_SHOWN = 200
 BROAD_TEXT_NODE_TYPES = ("DocumentChunk", "DltRow")
@@ -95,6 +102,8 @@ class BroadContext:
     text: str
     # How the answer was reached, appended to it by code.
     note: str
+    # What the store held when the dataset was too large to load whole; empty otherwise.
+    coverage: str = ""
     answer: str | None = None
     sql: str | None = None
     columns: list[str] = field(default_factory=list)
@@ -209,6 +218,10 @@ class BroadRetriever(CompletionRetriever):
     - ``reading_tokens``: the size of the prompt the reading route fills with the parts of
       the text most similar to the question.
     - ``batch_mb``: megabytes of text held in memory at once while the store is built.
+    - ``store_mb``: a dataset up to this size is loaded into the store whole, so counts are
+      exact; a larger one is represented by the parts most similar to the question, up to
+      this size, and the answer says so. Bounds the work per question however large the
+      dataset.
     """
 
     def __init__(
@@ -216,21 +229,50 @@ class BroadRetriever(CompletionRetriever):
         context_tokens: int = BROAD_CONTEXT_TOKENS,
         reading_tokens: int = BROAD_READING_TOKENS,
         batch_mb: float = BROAD_BATCH_MB,
+        store_mb: float = BROAD_STORE_MB,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        if context_tokens <= 0 or reading_tokens <= 0 or batch_mb <= 0:
-            raise ValueError("BROAD context_tokens, reading_tokens and batch_mb must be positive")
+        if min(context_tokens, reading_tokens, batch_mb, store_mb) <= 0:
+            raise ValueError(
+                "BROAD context_tokens, reading_tokens, batch_mb and store_mb must be positive"
+            )
         self.context_tokens = context_tokens
         self.reading_tokens = reading_tokens
         self.batch_chars = int(batch_mb * 1_000_000)
+        self.store_chars = int(store_mb * 1_000_000)
         self.tokenizer = TikTokenTokenizer()
 
     async def get_retrieved_objects(self, query: str) -> BroadContext:
         engine = await get_unified_engine()
-        corpus = await self.open_corpus(engine.graph)
         store = RecordStore()
         try:
+            total = await self.dataset_size()
+            corpus = None
+            if total is None:
+                corpus = await self.open_corpus(engine.graph)
+                total = sum(corpus.sizes.values())
+            if total > self.store_chars:
+                chars, parts = await self.build_most_similar(store, engine.vector, query)
+                if not chars:
+                    raise NoDataError("No data found in the system, please add data first.")
+                coverage = (
+                    f"the {parts:,} parts of the dataset most similar to the question "
+                    f"({chars / 1e6:.1f} MB of {total / 1e6:,.0f} MB; the rest was not searched)"
+                )
+                logger.warning(
+                    "BROAD dataset holds %.0f MB, more than store_mb (%.0f MB): the store holds %s. "
+                    "Raise store_mb in retriever_specific_config to search more.",
+                    total / 1e6,
+                    self.store_chars / 1e6,
+                    coverage,
+                )
+                found = await self.decide(query, store, None)
+                found.coverage = coverage
+                if found.route == "sql":
+                    found.note = found.note.replace("over the whole dataset", f"over {coverage}")
+                return found
+            corpus = corpus or await self.open_corpus(engine.graph)
             whole, chars = await self.build(store, corpus)
             if not chars:
                 raise NoDataError("No data found in the system, please add data first.")
@@ -239,6 +281,18 @@ class BroadRetriever(CompletionRetriever):
             return await self.decide(query, store, whole if fits else None)
         finally:
             store.close()
+
+    async def dataset_size(self) -> int | None:
+        """The stored size in bytes of the dataset being searched, from one query over its
+        data records; None when no dataset is in context."""
+        dataset = current_dataset_id.get()
+        if dataset is None:
+            return None
+        async with get_relational_engine().get_async_session() as session:
+            total = await session.scalar(
+                select(func.coalesce(func.sum(Data.data_size), 0)).where(Data.dataset_id == dataset)
+            )
+        return int(total or 0)
 
     # --- loading ----------------------------------------------------------------------
 
@@ -289,6 +343,49 @@ class BroadRetriever(CompletionRetriever):
                     whole.append(f"=== Document: {name} ===\n{text}")
         fits = chars <= self.context_tokens * _MAX_CHARS_PER_TOKEN
         return ("\n\n".join(whole) if fits else ""), chars
+
+    async def build_most_similar(self, store: RecordStore, vector, query: str) -> tuple[int, int]:
+        """Fill the store with the chunks most similar to the question, up to store_mb of
+        text: one vector search per text collection, the best matches kept until the size is
+        reached. A chunk's payload names its document and position, so no graph call is
+        needed. Returns the characters and parts loaded."""
+        limit = max(1, self.store_chars // _MIN_CHUNK_CHARS)
+        found = []
+        for kind in BROAD_TEXT_NODE_TYPES:
+            try:
+                results = await vector.search(
+                    f"{kind}_text", query, query_vector=None, limit=limit, include_payload=True
+                )
+            except CollectionNotFoundError:
+                continue
+            found += [(kind, result) for result in results]
+        found.sort(key=lambda pair: pair[1].score)
+        by_document: dict[tuple[str, str], list[tuple[int, str, str]]] = {}
+        chars = parts = 0
+        for kind, result in found:
+            payload = result.payload or {}
+            text = str(payload.get("text", ""))
+            if not text or chars + len(text) > self.store_chars:
+                continue
+            chars += len(text)
+            parts += 1
+            document = str(payload.get("document_id") or result.id)
+            name = str(payload.get("document_name") or document)
+            index = int(payload.get("chunk_index") or 0)
+            by_document.setdefault((name, document), []).append((index, text, kind))
+        for (name, _), pieces in sorted(by_document.items()):
+            pieces.sort()
+            rows = [text for _, text, kind in pieces if kind == "DltRow"]
+            if rows:
+                store.add_dlt_rows(rows)
+                continue
+            # Parts that are not adjacent in their document are separated by a line break.
+            text = pieces[0][1] + "".join(
+                ("" if current[0] == previous[0] + 1 else "\n") + current[1]
+                for previous, current in pairwise(pieces)
+            )
+            store.add_document(name, text)
+        return chars, parts
 
     # --- deciding and answering ---------------------------------------------------------
 

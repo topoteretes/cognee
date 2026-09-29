@@ -11,6 +11,7 @@ from cognee.modules.retrieval.broad_retriever import (
     BROAD_BATCH_MB,
     BROAD_CONTEXT_TOKENS,
     BROAD_READING_TOKENS,
+    BROAD_STORE_MB,
     BroadRetriever,
 )
 
@@ -139,6 +140,7 @@ async def get_search_type_retriever_instance(
                     "reading_tokens", BROAD_READING_TOKENS
                 ),
                 "batch_mb": retriever_specific_config.get("batch_mb", BROAD_BATCH_MB),
+                "store_mb": retriever_specific_config.get("store_mb", BROAD_STORE_MB),
             },
         ),
         SearchType.RAG_COMPLETION: (

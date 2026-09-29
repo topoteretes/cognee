@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.modules.retrieval import broad_retriever
 from cognee.modules.retrieval.broad_retriever import (
     BroadRetriever,
@@ -31,18 +32,22 @@ class _Graph:
         return [node for node in self.nodes if node[1]["type"] in types], []
 
     async def get_neighborhood(self, ids, depth=1, edge_types=None):
-        keep = set(ids) | {s for s, t, _, _ in self.edges if t in ids}
+        self.lookups = getattr(self, "lookups", []) + [(list(ids), edge_types)]
+        keep = set(ids)
+        keep |= {s for s, t, _, _ in self.edges if t in ids} | {
+            t for s, t, _, _ in self.edges if s in ids
+        }
         return [n for n in self.nodes if n[0] in keep], [e for e in self.edges if e[0] in keep]
 
 
-def _use(monkeypatch, texts: dict[str, str], vector=None):
+def _use(monkeypatch, texts: dict[str, str], vector=None, size: int = 10):
     engine = SimpleNamespace(graph=_Graph(texts), vector=vector)
 
     async def unified():
         return engine
 
     async def sizes(self, documents):
-        return {document: 10 for document in documents}
+        return {document: size for document in documents}
 
     monkeypatch.setattr(broad_retriever, "get_unified_engine", unified)
     monkeypatch.setattr(BroadRetriever, "document_sizes", sizes)
@@ -217,3 +222,37 @@ def test_the_settings_are_positive():
         BroadRetriever(context_tokens=0)
     with pytest.raises(ValueError):
         BroadRetriever(reading_tokens=0)
+
+
+@pytest.mark.asyncio
+async def test_a_dataset_over_store_mb_is_represented_by_its_most_similar_parts(monkeypatch):
+    texts = {"a": "alpha line\n" * 3, "b": "beta line\n" * 3}
+
+    class Vector:
+        async def search(self, collection, query_text, query_vector=None, limit=None, **kw):
+            if collection != "DocumentChunk_text":
+                raise CollectionNotFoundError("none")
+            payload = lambda doc: {
+                "text": texts[doc],
+                "document_id": f"d-{doc}",
+                "document_name": doc,
+                "chunk_index": 0,
+            }
+            return [  # b is the better match (lower distance); the 40-char store holds one chunk
+                SimpleNamespace(id="c1", score=0.1, payload=payload("b")),
+                SimpleNamespace(id="c0", score=0.5, payload=payload("a")),
+            ]
+
+    _use(monkeypatch, texts, vector=Vector(), size=30)  # 60 bytes stored > 40-char store
+
+    async def no_dataset(self):
+        return None  # fall back to the documents' stored sizes
+
+    monkeypatch.setattr(BroadRetriever, "dataset_size", no_dataset)
+    _llm(monkeypatch, [DecisionLarge(sql="SELECT COUNT(*), MIN(document) FROM lines")])
+
+    found = await BroadRetriever(store_mb=0.00004).get_retrieved_objects("beta?")
+
+    assert found.route == "sql" and found.rows == [(3, "b")]  # only b's three lines were loaded
+    assert "1 parts of the dataset most similar" in found.coverage
+    assert "over the 1 parts of the dataset most similar" in found.note
