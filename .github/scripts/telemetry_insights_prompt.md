@@ -12,7 +12,7 @@ You are running inside a scheduled GitHub Action for the cognee repository. Your
 - `pipeline_error_types_daily.csv` — day, version, exception_type (the Python class of the error that ended a run — `CancelledError` is a cancelled run, `AbandonedPipelineRunError` a run closed by startup recovery after its process died; `unknown` is an event from a build before the field), errors (one per failed data item), runs (distinct failed runs; 0 for builds before `pipeline_run_id`), distinct_identities
 - `sdk_exec_outcomes_daily.csv` — day, version, operation (search/add/cognify), started/completed/errored
 - `api_endpoint_daily.csv` — day, endpoint route, version, events, distinct_identities (the FastAPI surface)
-- `provider_stack_daily.csv` — day, llm/embedding/graph/vector/relational provider (+ llm_model, embedding_model, graph_extractor `llm`/`gliner_demo` — the keyless default shows as embedding fastembed + extractor gliner_demo), version, completed_runs, identities
+- `provider_stack_daily.csv` — day, llm/embedding/graph/vector/relational provider (+ llm_model, llm_configured, embedding_model, graph_extractor `llm`/`gliner_demo` — the keyless default shows as embedding fastembed + extractor gliner_demo; `llm_configured=false` means no usable LLM key, so that row's llm provider/model are only the unused default, not an LLM in use; `unknown` is a build before the field), version, completed_runs, identities
 - `search_type_daily.csv` — day, SearchType enum, version, events
 - `version_lifecycle.csv` — version, self_hosted, first_seen/last_seen, events, identities
 

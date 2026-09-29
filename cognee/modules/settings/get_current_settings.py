@@ -18,11 +18,13 @@ from cognee.infrastructure.databases.vector.embeddings.config import (
 from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.modules.cognify.config import EXTRACTORS, get_cognify_config, resolve_extractor_name
+from cognee.modules.preflight import llm_available
 
 
 class LLMConfig(TypedDict):
     model: str
     provider: str
+    configured: bool
 
 
 class EmbeddingSettings(TypedDict):
@@ -83,6 +85,10 @@ def get_current_settings() -> SettingsDict:
         "llm": {
             "provider": llm_config.llm_provider,
             "model": llm_config.llm_model,
+            # provider/model are the configured values even when no key is set, so
+            # a keyless install reports the unused default. ``configured`` says
+            # whether that LLM is usable: the same rule that picks the keyless path.
+            "configured": llm_available(llm_config),
         },
         "embedding": {
             "provider": embedding_provider,

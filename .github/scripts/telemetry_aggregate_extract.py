@@ -96,6 +96,13 @@ _ORIGIN = "coalesce(json_extract_string(properties, '$.telemetry_origin'), 'unkn
 _VERSION = "coalesce(regexp_replace(cognee_version, '-local$', ''), 'unknown')"
 # Pipeline error class (``exception_type``): a Python class name. Anything that
 # is not one identifier is bucketed, so an unexpected value cannot stop the export.
+# Whether the LLM was usable (a key set, or a provider that needs none). A keyless
+# install still reports the default llm provider/model; this tells the two apart.
+# Rows from builds before the field are 'unknown'.
+_LLM_CONFIGURED = (
+    "CASE json_extract_string(properties, '$.llm.configured') "
+    "WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE 'unknown' END"
+)
 # A run's random id (``pipeline_run_id``): joins the per-item events of one run.
 _RUN_ID = "json_extract_string(properties, '$.pipeline_run_id')"
 _EXCEPTION_TYPE = (
@@ -202,6 +209,7 @@ QUERIES: dict[str, str] = {
         SELECT ingestion_date AS day,
                {_provider_dimension("llm.provider")} AS llm_provider,
                {_provider_dimension("llm.model", max_length=60)} AS llm_model,
+               {_LLM_CONFIGURED} AS llm_configured,
                {_provider_dimension("embedding.provider")} AS embedding_provider,
                {_provider_dimension("embedding.model", max_length=60)} AS embedding_model,
                {_provider_dimension("graph_extractor")} AS graph_extractor,
