@@ -73,6 +73,8 @@ async def resolve_chunk_size(chunk_size: int | None) -> int:
     """
     if not chunk_size:
         return await get_max_chunk_tokens()
+    if chunk_size < 0:
+        raise ValueError(f"chunk_size must be a positive number of tokens, got {chunk_size}")
 
     from cognee.infrastructure.databases.vector import get_vector_engine_async
 

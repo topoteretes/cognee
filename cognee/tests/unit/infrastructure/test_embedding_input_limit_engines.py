@@ -44,9 +44,11 @@ BGE = "BAAI/bge-small-en-v1.5"
 
 
 def _hf_tokenizer(model_max_length: int) -> HuggingFaceTokenizer:
-    """A resolved HuggingFace tokenizer whose model reports ``model_max_length``."""
+    """A resolved HuggingFace tokenizer whose model reports ``model_max_length``
+    and adds no special tokens (so the limit is used as is)."""
     tokenizer = HuggingFaceTokenizer.__new__(HuggingFaceTokenizer)
     tokenizer.tokenizer = MagicMock(model_max_length=model_max_length)
+    tokenizer.tokenizer.num_special_tokens_to_add.return_value = 0
     return tokenizer
 
 
@@ -62,18 +64,20 @@ def _fastembed_engine(monkeypatch, configured, truncation):
         patch.object(fastembed_module, "resolve_embedding_tokenizer", return_value=MagicMock()),
     ):
         text_embedding.return_value.model.tokenizer.truncation = truncation
+        text_embedding.return_value.model.tokenizer.num_special_tokens_to_add.return_value = 2
         return FastembedEmbeddingEngine(model=BGE, dimensions=4, max_completion_tokens=configured)
 
 
 @pytest.mark.parametrize(
     ("configured", "expected"),
-    [(None, 512), (8191, 512), (256, 256)],
+    [(None, 510), (8191, 510), (256, 256)],
     ids=["default_cap_lowered", "explicit_cap_lowered", "cap_below_model_kept"],
 )
 def test_fastembed_limit_comes_from_the_loaded_model(monkeypatch, configured, expected):
+    # 512 is what the model reads, 2 of them its own [CLS]/[SEP].
     engine = _fastembed_engine(monkeypatch, configured, {"max_length": 512})
 
-    assert engine.model_input_limit == 512
+    assert engine.model_input_limit == 510
     assert engine.max_completion_tokens == expected
 
 
@@ -370,6 +374,12 @@ async def test_resolve_chunk_size_uses_the_automatic_size_when_none_is_given():
     with patch.object(llm_utils, "get_max_chunk_tokens", AsyncMock(return_value=512)):
         assert await llm_utils.resolve_chunk_size(None) == 512
         assert await llm_utils.resolve_chunk_size(0) == 512
+
+
+@pytest.mark.asyncio
+async def test_resolve_chunk_size_rejects_a_negative_size():
+    with pytest.raises(ValueError, match="chunk_size"):
+        await llm_utils.resolve_chunk_size(-1)
 
 
 @pytest.mark.asyncio

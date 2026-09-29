@@ -43,6 +43,11 @@ def test_litellm_input_limit_knows_hosted_models_by_any_spelling():
     assert litellm_input_limit("mistral/mistral-embed", "mistral") == 8192
 
 
+def test_litellm_input_limit_ignores_chat_model_entries():
+    # A bare name can match a chat model; its max_tokens is an output limit.
+    assert litellm_input_limit("gpt-4o", "openai") is None
+
+
 def test_litellm_input_limit_is_none_for_unknown_models():
     # (No ``ollama`` case: for that provider litellm asks the local Ollama server,
     # so the answer depends on what is running on the machine.)
@@ -51,19 +56,27 @@ def test_litellm_input_limit_is_none_for_unknown_models():
     assert litellm_input_limit(None) is None
 
 
-def test_huggingface_tokenizer_limit_reads_model_max_length():
+def test_huggingface_tokenizer_limit_reads_model_max_length_less_special_tokens():
     tokenizer = HuggingFaceTokenizer.__new__(HuggingFaceTokenizer)
     tokenizer.tokenizer = MagicMock(model_max_length=512)
-    assert huggingface_tokenizer_limit(tokenizer) == 512
+    tokenizer.tokenizer.num_special_tokens_to_add.return_value = 2  # [CLS] and [SEP]
+    assert huggingface_tokenizer_limit(tokenizer) == 510
+
+    # transformers fills in VERY_LARGE_INTEGER when the repo declares no limit.
+    from transformers.tokenization_utils_base import VERY_LARGE_INTEGER
+
+    tokenizer.tokenizer = MagicMock(model_max_length=VERY_LARGE_INTEGER)
+    assert huggingface_tokenizer_limit(tokenizer) is None
 
     # A TikToken fallback says nothing about the embedding model.
     assert huggingface_tokenizer_limit(TikTokenTokenizer(model=None)) is None
 
 
-def test_fastembed_input_limit_reads_the_loaded_tokenizer_truncation():
+def test_fastembed_input_limit_reads_the_loaded_tokenizer_truncation_less_special_tokens():
     model = MagicMock()
     model.model.tokenizer.truncation = {"max_length": 512, "direction": "right"}
-    assert fastembed_input_limit(model) == 512
+    model.model.tokenizer.num_special_tokens_to_add.return_value = 2
+    assert fastembed_input_limit(model) == 510
 
     model.model.tokenizer.truncation = None
     assert fastembed_input_limit(model) is None
@@ -133,7 +146,7 @@ def test_effective_limit_keeps_a_cap_below_the_model_limit():
     )
 
 
-def test_effective_limit_keeps_the_cap_and_says_so_when_the_model_is_unknown(caplog):
+def test_effective_limit_keeps_the_cap_and_warns_when_the_model_is_unknown(caplog):
     with caplog.at_level(logging.INFO):
         assert effective_input_limit(configured=None, model_limit=None, model="m", source="t") == (
             DEFAULT_EMBEDDING_INPUT_CAP
@@ -143,8 +156,7 @@ def test_effective_limit_keeps_the_cap_and_says_so_when_the_model_is_unknown(cap
         )
 
     unknown = [r for r in caplog.records if "Could not determine" in r.message]
-    assert len(unknown) == 2 and all(r.levelno == logging.INFO for r in unknown)
-    assert not any(r.levelno >= logging.WARNING for r in caplog.records)
+    assert len(unknown) == 2 and all(r.levelno == logging.WARNING for r in unknown)
 
 
 def test_default_cap_is_4096():

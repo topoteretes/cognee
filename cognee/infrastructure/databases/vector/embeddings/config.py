@@ -116,7 +116,7 @@ class EmbeddingConfig(BaseSettings):
     # DEFAULT_EMBEDDING_INPUT_CAP (4096); the engine lowers the effective limit to
     # the model's own input limit when that is known and smaller (see
     # embeddings/input_limit.py).
-    embedding_max_completion_tokens: int | None = None
+    embedding_max_completion_tokens: int | None = Field(default=None, gt=0)
     embedding_batch_size: int | None = None
     # Total data points allowed in flight to the embedding engine during indexing.
     # Concurrent embedding requests = max(1, this // embedding_batch_size).

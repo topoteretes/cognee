@@ -61,21 +61,48 @@ def litellm_input_limit(model: str | None, provider: str | None = None) -> int |
             # a self-hosted one, so it stays at debug.
             logger.debug("litellm has no model info for %r", candidate, exc_info=True)
             continue
-        limit = sane_limit(info.get("max_input_tokens")) or sane_limit(info.get("max_tokens"))
+        # A bare name can also match a chat model, whose max_tokens is an
+        # output limit; only an embedding entry's input limit counts.
+        if info.get("mode") != "embedding":
+            continue
+        limit = sane_limit(info.get("max_input_tokens"))
         if limit is not None:
             return limit
     return None
+
+
+def _minus_special_tokens(limit: int | None, tokenizer) -> int | None:
+    """``limit`` less the special tokens the model adds around the text.
+
+    The model's limit includes the ``[CLS]``/``[SEP]`` it adds itself, while
+    chunks are counted without them, so a chunk filled to the limit would
+    overflow by that many tokens.
+    """
+    if limit is None:
+        return None
+    try:
+        special = tokenizer.num_special_tokens_to_add(False)
+    except (AttributeError, TypeError):
+        # Not a tokenizers/transformers tokenizer: nothing known to subtract.
+        return limit
+    return sane_limit(limit - special) if isinstance(special, int) else limit
 
 
 def huggingface_tokenizer_limit(tokenizer) -> int | None:
     """``model_max_length`` of a resolved HuggingFace tokenizer, or None.
 
     Only a HuggingFaceTokenizer carries the model's own limit; TikToken and
-    Mistral fallbacks say nothing about the embedding model.
+    Mistral fallbacks say nothing about the embedding model. transformers fills
+    in ``VERY_LARGE_INTEGER`` when the repo declares no limit, which means unknown.
     """
     if not isinstance(tokenizer, HuggingFaceTokenizer):
         return None
-    return sane_limit(getattr(tokenizer.tokenizer, "model_max_length", None))
+    from transformers.tokenization_utils_base import VERY_LARGE_INTEGER
+
+    limit = sane_limit(getattr(tokenizer.tokenizer, "model_max_length", None))
+    if limit is None or limit >= VERY_LARGE_INTEGER:
+        return None
+    return _minus_special_tokens(limit, tokenizer.tokenizer)
 
 
 def fastembed_input_limit(embedding_model) -> int | None:
@@ -84,7 +111,7 @@ def fastembed_input_limit(embedding_model) -> int | None:
     truncation = getattr(tokenizer, "truncation", None)
     if not isinstance(truncation, dict):
         return None
-    return sane_limit(truncation.get("max_length"))
+    return _minus_special_tokens(sane_limit(truncation.get("max_length")), tokenizer)
 
 
 def ollama_input_limit(endpoint: str | None, model: str | None, api_key: str | None) -> int | None:
@@ -129,16 +156,18 @@ def effective_input_limit(
     ``configured`` is ``EMBEDDING_MAX_COMPLETION_TOKENS`` (None when unset, which
     means ``DEFAULT_EMBEDDING_INPUT_CAP``). A configured value above what the
     model accepts is a misconfiguration and is reported as a WARNING; the default
-    being lowered is expected and logged at INFO, as is a model whose limit no
-    source knows.
+    being lowered is expected and logged at INFO; a model whose limit no source
+    knows is a WARNING, since it may truncate silently.
     """
     cap = configured if configured else DEFAULT_EMBEDDING_INPUT_CAP
 
     if model_limit is None:
-        logger.info(
+        # A WARNING, not INFO: a model that accepts less than the cap may cut
+        # the input without an error, and only the operator can rule that out.
+        logger.warning(
             "Could not determine how many tokens embedding model %r accepts; chunks are "
-            "limited to %s tokens (EMBEDDING_MAX_COMPLETION_TOKENS). Set it to the "
-            "model's input limit if that is lower.",
+            "limited to %s tokens (EMBEDDING_MAX_COMPLETION_TOKENS). If the model accepts "
+            "fewer, set it to the model's limit, or text beyond it may be dropped.",
             model,
             cap,
         )
