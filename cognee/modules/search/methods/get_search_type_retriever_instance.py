@@ -10,6 +10,7 @@ from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
 from cognee.modules.retrieval.broad_retriever import (
     BROAD_BATCH_MB,
     BROAD_CONTEXT_TOKENS,
+    BROAD_READING_TOKENS,
     BroadRetriever,
 )
 
@@ -133,6 +134,9 @@ async def get_search_type_retriever_instance(
                 "response_model": retriever_specific_config.get("response_model", str),
                 "context_tokens": retriever_specific_config.get(
                     "context_tokens", BROAD_CONTEXT_TOKENS
+                ),
+                "reading_tokens": retriever_specific_config.get(
+                    "reading_tokens", BROAD_READING_TOKENS
                 ),
                 "batch_mb": retriever_specific_config.get("batch_mb", BROAD_BATCH_MB),
             },

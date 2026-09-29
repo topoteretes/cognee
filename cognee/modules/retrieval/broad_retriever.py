@@ -42,8 +42,10 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("BroadRetriever")
 
 # A dataset up to this many tokens is shown to the model whole; a larger one is answered
-# through the record store. Also the size of the prompt the reading route fills.
+# through the record store.
 BROAD_CONTEXT_TOKENS = 30_000
+# The size of the prompt the reading route fills with the parts most similar to the question.
+BROAD_READING_TOKENS = 12_000
 # Megabytes of text held in memory at once while the store is built.
 BROAD_BATCH_MB = 256
 # Rows of a query result shown to the answer model; the full result is appended by code.
@@ -203,21 +205,24 @@ class BroadRetriever(CompletionRetriever):
     Settings (optional, passed through ``retriever_specific_config``):
 
     - ``context_tokens``: a dataset up to this size is shown to the model whole; above it,
-      the question is answered through the record store. The reading route fills a prompt
-      of this size.
+      the question is answered through the record store.
+    - ``reading_tokens``: the size of the prompt the reading route fills with the parts of
+      the text most similar to the question.
     - ``batch_mb``: megabytes of text held in memory at once while the store is built.
     """
 
     def __init__(
         self,
         context_tokens: int = BROAD_CONTEXT_TOKENS,
+        reading_tokens: int = BROAD_READING_TOKENS,
         batch_mb: float = BROAD_BATCH_MB,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        if context_tokens <= 0 or batch_mb <= 0:
-            raise ValueError("BROAD context_tokens and batch_mb must be positive")
+        if context_tokens <= 0 or reading_tokens <= 0 or batch_mb <= 0:
+            raise ValueError("BROAD context_tokens, reading_tokens and batch_mb must be positive")
         self.context_tokens = context_tokens
+        self.reading_tokens = reading_tokens
         self.batch_chars = int(batch_mb * 1_000_000)
         self.tokenizer = TikTokenTokenizer()
 
@@ -358,7 +363,7 @@ class BroadRetriever(CompletionRetriever):
     ) -> BroadContext:
         """Fill one prompt with the chunks most similar to the question: one bounded vector
         search per phrasing, their results merged rank by rank."""
-        limit = max(1, self.context_tokens // _MIN_CHUNK_TOKENS)
+        limit = max(1, self.reading_tokens // _MIN_CHUNK_TOKENS)
         vector = (await get_unified_engine()).vector
         try:
             ranked = [
@@ -380,15 +385,15 @@ class BroadRetriever(CompletionRetriever):
             seen.add(result.id)
             text = str((result.payload or {}).get("text", ""))
             tokens = len(self.tokenizer.extract_tokens(text))
-            if text and used + tokens <= self.context_tokens:
+            if text and used + tokens <= self.reading_tokens:
                 parts.append(text)
                 used += tokens
         logger.warning(
             "BROAD cannot read the whole dataset: only the %d chunks most similar to the "
-            "question fit context_tokens (%d). To read more, raise context_tokens in "
+            "question fit reading_tokens (%d). To read more, raise reading_tokens in "
             "retriever_specific_config.",
             len(parts),
-            self.context_tokens,
+            self.reading_tokens,
         )
         note = (
             f"(Answered from the {len(parts)} parts of the dataset most similar to the "

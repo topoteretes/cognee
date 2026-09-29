@@ -147,7 +147,9 @@ async def test_reading_fills_one_prompt_from_bounded_vector_searches(monkeypatch
     _use(monkeypatch, {"story": "word " * 5_000}, vector=vector)
     _llm(monkeypatch, [DecisionLarge(needs_reading=True, search_queries=["a storm", "a wreck"])])
 
-    found = await BroadRetriever(context_tokens=100).get_retrieved_objects("What happens?")
+    found = await BroadRetriever(context_tokens=100, reading_tokens=100).get_retrieved_objects(
+        "What happens?"
+    )
 
     assert found.route == "reading"
     assert [(q, limit, p) for _, q, limit, p in vector.searches] == [
@@ -173,7 +175,9 @@ async def test_a_text_query_that_finds_nothing_falls_back_to_reading(monkeypatch
         ],
     )
 
-    found = await BroadRetriever(context_tokens=100).get_retrieved_objects("Who married?")
+    found = await BroadRetriever(context_tokens=100, reading_tokens=100).get_retrieved_objects(
+        "Who married?"
+    )
 
     assert found.route == "reading" and len(vector.searches) == 2
     assert (
@@ -211,3 +215,5 @@ async def test_a_result_of_several_rows_is_appended_in_full(monkeypatch):
 def test_the_settings_are_positive():
     with pytest.raises(ValueError):
         BroadRetriever(context_tokens=0)
+    with pytest.raises(ValueError):
+        BroadRetriever(reading_tokens=0)
