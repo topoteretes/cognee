@@ -175,19 +175,19 @@ User → Dataset → Data hierarchy with permission-based filtering. Enable with
 | Layer | Backend | Isolated per user+dataset? | Notes |
 |---|---|---|---|
 | Graph | Ladybug/Kuzu (default) | ✅ | embedded, one database per dataset |
-| Graph | Neo4j | ✅ | one Neo4j database per dataset inside the DBMS — requires an edition with multi-database support (Enterprise/Aura). A second handler, `neo4j_aura_dev`, provisions a whole Aura instance per dataset; dev/PoC only, not production-ready |
-| Graph | Postgres | ✅ | graph-on-Postgres is itself a demo feature (see warning above) |
+| Graph | Neo4j | ✅ | default handler `neo4j`: one Neo4j database per dataset inside the DBMS — requires an edition with multi-database support (Enterprise/Aura). Two alternates: `neo4j_community` runs one Docker container per dataset, because Community edition serves exactly one database per server (needs Docker); `neo4j_aura_dev` provisions a whole Aura instance per dataset — dev/PoC only, not production-ready |
+| Graph | Postgres | ✅ | default handler `postgres_graph`: one Postgres database per dataset. `postgres_graph_shared` instead gives each dataset a schema (`ds_<dataset_id>`) in cognee's main database, so no `CREATE DATABASE` privilege is needed. graph-on-Postgres is itself a demo feature (see warning above) |
 | Graph | Turso | ✅ | |
 | Graph | Neptune, ladybug-remote | ❌ | requires `ENABLE_BACKEND_ACCESS_CONTROL=false` |
 | Vector | LanceDB (default) | ✅ | |
-| Vector | PGVector | ✅ | |
+| Vector | PGVector | ✅ | default handler `pgvector`: one Postgres database per dataset. `pgvector_shared` uses a schema (`ds_<dataset_id>`) in cognee's main database instead — no `CREATE DATABASE` privilege needed |
 | Vector | Turso | ✅ | |
 | Vector | Neptune Analytics | ❌ | requires `ENABLE_BACKEND_ACCESS_CONTROL=false` |
 | Vector | Community adapters (ChromaDB, Qdrant, …) | ❌ | unless the adapter registers a handler via `use_dataset_database_handler()` |
 | Relational | SQLite / Postgres | n/a — always shared | one relational DB holds users, ACLs, and the dataset-database registry; it is never isolated per dataset |
 
 How it works:
-- The handler is selected automatically from the configured provider (`GraphConfig.fill_derived` and the vector-config equivalent) — you never set it by hand for in-tree backends.
+- A default handler is derived from the configured provider (`GraphConfig.fill_derived` and the vector-config equivalent), so in-tree backends work with no handler setting at all. An explicit `GRAPH_DATASET_DATABASE_HANDLER` / `VECTOR_DATASET_DATABASE_HANDLER` is never overwritten by that derivation — that is how you reach the non-default handlers named above (`neo4j_community`, `neo4j_aura_dev`, `postgres_graph_shared`, `pgvector_shared`), each of which also requires its matching provider.
 - **Both** the graph and vector backends must support isolation. If either doesn't, cognee raises an `EnvironmentError` naming the unsupported handler — with the flag on (its default), an unsupported backend is a hard error, not a silent fallback to shared databases. The fix is switching backends or setting `ENABLE_BACKEND_ACCESS_CONTROL=false`.
 - New backends gain multi-tenancy by registering a `DatasetDatabaseHandlerInterface` implementation in the registry (or at runtime via `use_dataset_database_handler()`).
 
