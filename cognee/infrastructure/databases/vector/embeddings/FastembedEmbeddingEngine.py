@@ -201,10 +201,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
                 "max tokens",
             )
             if any(pattern in error_str for pattern in context_error_patterns):
-                try:
-                    return await self._embed_in_parts(original_texts)
-                except EmbeddingContextWindowTooSmallError:
-                    raise EmbeddingContextWindowTooSmallError from error
+                return await self._embed_in_parts(original_texts)
 
             logger.error(f"Embedding error in FastembedEmbeddingEngine: {error!s}")
             raise EmbeddingException(
