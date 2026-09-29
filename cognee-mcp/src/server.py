@@ -534,6 +534,8 @@ async def recall(
     session_id: str | None = None,
     system_prompt: str | None = None,
     top_k: int = 15,
+    scope: str | None = None,
+    code_query: dict | None = None,
 ) -> list:
     """Search memory with auto-routing and session awareness.
 
@@ -568,6 +570,20 @@ async def recall(
         on the server.
     top_k : int
         Maximum results to return (default: 15).
+    scope : str, optional
+        Comma-separated memory sources to include: 'graph', 'session',
+        'session_first', 'trace', 'session_context', 'tools', 'code', 'all',
+        'auto'. Defaults to 'auto' (session first when session_id is set,
+        else graph). 'tools' and 'code' are explicit opt-in only. 'code' runs
+        a deterministic code-graph query and tags results source='code'.
+    code_query : dict, optional
+        'code' scope only: structured operation and arguments for the
+        deterministic code-graph query, e.g. {"operation": "query_facts",
+        "property": "language", "limit": 500}. Supported operations:
+        query_facts, explore, traverse, find_path, impact_analysis, insights,
+        architecture, delta. When omitted, 'code' scope runs an 'explore'
+        seeded with the query text. Requires exact node names/IDs or
+        structured filters, not natural-language questions.
 
     Returns a one-line memory-hit or empty-state summary followed by the original
     result text. Status markers do not count as hits. Empty-state checks are
@@ -577,6 +593,9 @@ async def recall(
         try:
             normalized_top_k = validate_top_k(top_k)
             dataset_list = parse_csv_list(datasets)
+            scope_list = parse_csv_list(scope)
+            if code_query is not None and not isinstance(code_query, dict):
+                raise ValueError("code_query must be a JSON object (dict).")
             results = await cognee_client.recall(
                 query_text=query,
                 search_type=search_type,
@@ -584,6 +603,8 @@ async def recall(
                 session_id=session_id,
                 system_prompt=system_prompt,
                 top_k=normalized_top_k,
+                scope=scope_list or None,
+                code_query=code_query,
             )
             empty_state = recall_marker_state(results)
             items = recall_items(results)

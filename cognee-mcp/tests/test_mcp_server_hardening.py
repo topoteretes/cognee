@@ -748,6 +748,8 @@ async def test_mcp_recall_forwards_system_prompt(monkeypatch):
         "session_id": "session-1",
         "system_prompt": "Answer with provenance.",
         "top_k": 5,
+        "scope": None,
+        "code_query": None,
     }
 
 
