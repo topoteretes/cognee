@@ -37,7 +37,7 @@ from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
 )
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
-    effective_input_limit,
+    init_input_limit,
     litellm_input_limit,
     sane_limit,
 )
@@ -109,13 +109,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         # so it has no effect on servers that ignore unknown fields.
         self.input_type = input_type
         self.tokenizer = self.get_tokenizer()
-        self.model_input_limit = self.input_limit()
-        self.max_completion_tokens = effective_input_limit(
-            configured=max_completion_tokens,
-            model_limit=self.model_input_limit,
-            model=self.model,
-            source="litellm model table or the model's tokenizer",
-        )
+        init_input_limit(self, max_completion_tokens)
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false").lower()
         self.mock = enable_mocking in ("true", "1", "yes")
@@ -302,7 +296,9 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         """
         return self.batch_size
 
-    def input_limit(self) -> int | None:
+    input_limit_source = "litellm model table or the model's tokenizer"
+
+    async def input_limit(self) -> int | None:
         """A self-hosted server names no limit; the served model id is usually a
         HuggingFace repo (its tokenizer knows) or a hosted model litellm knows."""
         return litellm_input_limit(self.model) or sane_limit(self.tokenizer.model_input_limit)

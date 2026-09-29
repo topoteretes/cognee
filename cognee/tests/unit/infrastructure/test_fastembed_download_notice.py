@@ -64,11 +64,6 @@ def _engine(monkeypatch, tmp_path):
         patch.object(FastembedEmbeddingEngine, "get_tokenizer", return_value=MagicMock()),
     ):
         text_embedding.list_supported_models.return_value = REGISTRY
-        # A loaded fastembed model reports its input limit through its tokenizer
-        # (SDK-868); without it the engine warns that the limit is unknown.
-        tokenizer = text_embedding.return_value.model.tokenizer
-        tokenizer.truncation = {"max_length": 512}
-        tokenizer.num_special_tokens_to_add.return_value = 2
         FastembedEmbeddingEngine(model=MODEL, dimensions=384)
         text_embedding.assert_called_once_with(model_name=MODEL)
 

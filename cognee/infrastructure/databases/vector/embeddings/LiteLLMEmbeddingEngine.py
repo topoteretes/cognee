@@ -21,7 +21,7 @@ from cognee.infrastructure.databases.exceptions import (
 )
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
-    effective_input_limit,
+    init_input_limit,
     litellm_input_limit,
     sane_limit,
 )
@@ -128,13 +128,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         self.model = model
         self.dimensions = dimensions
         self.tokenizer = self.get_tokenizer()
-        self.model_input_limit = self.input_limit()
-        self.max_completion_tokens = effective_input_limit(
-            configured=max_completion_tokens,
-            model_limit=self.model_input_limit,
-            model=model,
-            source="litellm model table or the model's tokenizer",
-        )
+        init_input_limit(self, max_completion_tokens)
         self.retry_count = 0
         self.batch_size = batch_size
         # Required by some providers (e.g. NVIDIA NIM's nv-embed family) to
@@ -404,7 +398,9 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         """
         return self.batch_size
 
-    def input_limit(self) -> int | None:
+    input_limit_source = "litellm model table or the model's tokenizer"
+
+    async def input_limit(self) -> int | None:
         """litellm's model table knows the hosted models; a HuggingFace-repo model
         served elsewhere (vLLM, TEI, ...) at least carries its limit on its tokenizer."""
         return litellm_input_limit(self.model, self.provider) or sane_limit(

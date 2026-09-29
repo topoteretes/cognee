@@ -8,7 +8,8 @@ with the providers mocked, and ``effective_input_limit`` with its log levels.
 """
 
 import logging
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -19,7 +20,9 @@ from cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine 
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     DEFAULT_EMBEDDING_INPUT_CAP,
     effective_input_limit,
+    init_input_limit,
     litellm_input_limit,
+    resolve_input_limit,
     sane_limit,
 )
 from cognee.infrastructure.databases.vector.embeddings.OllamaEmbeddingEngine import (
@@ -79,16 +82,17 @@ def _fastembed_engine_with(embedding_model) -> FastembedEmbeddingEngine:
     return engine
 
 
-def test_fastembed_input_limit_reads_the_loaded_tokenizer_truncation_less_special_tokens():
+@pytest.mark.asyncio
+async def test_fastembed_input_limit_reads_the_loaded_tokenizer_truncation_less_special_tokens():
     model = MagicMock()
     model.model.tokenizer.truncation = {"max_length": 512, "direction": "right"}
     model.model.tokenizer.num_special_tokens_to_add.return_value = 2
-    assert _fastembed_engine_with(model).input_limit() == 510
+    assert await _fastembed_engine_with(model).input_limit() == 510
 
     model.model.tokenizer.truncation = None
-    assert _fastembed_engine_with(model).input_limit() is None
+    assert await _fastembed_engine_with(model).input_limit() is None
 
-    assert _fastembed_engine_with(object()).input_limit() is None
+    assert await _fastembed_engine_with(object()).input_limit() is None
 
 
 def _ollama_engine_with(endpoint, model) -> OllamaEmbeddingEngine:
@@ -97,14 +101,15 @@ def _ollama_engine_with(endpoint, model) -> OllamaEmbeddingEngine:
     return engine
 
 
-def test_ollama_input_limit_reads_context_length_from_api_show(monkeypatch):
+@pytest.mark.asyncio
+async def test_ollama_input_limit_reads_context_length_from_api_show(monkeypatch):
     monkeypatch.setenv("LLM_API_KEY", "key")
     response = MagicMock()
     response.json.return_value = {
         "model_info": {"general.architecture": "qwen3", "qwen3.context_length": 40960}
     }
-    with patch.object(httpx, "post", return_value=response) as post:
-        limit = _ollama_engine_with(
+    with patch.object(httpx.AsyncClient, "post", AsyncMock(return_value=response)) as post:
+        limit = await _ollama_engine_with(
             "http://localhost:11434/api/embed", "qwen3-embedding"
         ).input_limit()
 
@@ -114,24 +119,46 @@ def test_ollama_input_limit_reads_context_length_from_api_show(monkeypatch):
     assert post.call_args.kwargs["headers"] == {"Authorization": "Bearer key"}
 
 
-def test_ollama_input_limit_is_none_when_the_server_cannot_answer(monkeypatch):
+@pytest.mark.asyncio
+async def test_ollama_input_limit_is_none_when_the_server_cannot_answer(monkeypatch):
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     native = "http://localhost:11434/api/embed"
-    with patch.object(httpx, "post", side_effect=httpx.ConnectError("refused")):
-        assert _ollama_engine_with(native, "m").input_limit() is None
+    refused = AsyncMock(side_effect=httpx.ConnectError("refused"))
+    with patch.object(httpx.AsyncClient, "post", refused):
+        assert await _ollama_engine_with(native, "m").input_limit() is None
 
     response = MagicMock()
     response.raise_for_status.side_effect = httpx.HTTPStatusError(
         "404", request=None, response=None
     )
-    with patch.object(httpx, "post", return_value=response):
-        assert _ollama_engine_with(native, "not-pulled").input_limit() is None
+    with patch.object(httpx.AsyncClient, "post", AsyncMock(return_value=response)):
+        assert await _ollama_engine_with(native, "not-pulled").input_limit() is None
 
     # Not an Ollama-shaped endpoint: nothing to ask.
-    with patch.object(httpx, "post") as post:
-        assert _ollama_engine_with("http://proxy/v1/embeddings", "m").input_limit() is None
-        assert _ollama_engine_with(None, "m").input_limit() is None
+    with patch.object(httpx.AsyncClient, "post", AsyncMock()) as post:
+        assert await _ollama_engine_with("http://proxy/v1/embeddings", "m").input_limit() is None
+        assert await _ollama_engine_with(None, "m").input_limit() is None
     post.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_resolve_input_limit_asks_the_provider_once_and_applies_the_result():
+    engine = SimpleNamespace(
+        model="m", input_limit_source="test", input_limit=AsyncMock(return_value=512)
+    )
+    init_input_limit(engine, configured=None)
+    assert engine.max_completion_tokens == DEFAULT_EMBEDDING_INPUT_CAP  # the cap, until resolved
+
+    assert await resolve_input_limit(engine) == 512
+    assert await resolve_input_limit(engine) == 512
+    assert engine.model_input_limit == 512 and engine.max_completion_tokens == 512
+    engine.input_limit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_resolve_input_limit_leaves_an_engine_without_the_method_alone():
+    legacy = SimpleNamespace(max_completion_tokens=1234)  # a third-party adapter
+    assert await resolve_input_limit(legacy) == 1234
 
 
 def test_effective_limit_lowers_the_default_cap_to_the_model_at_info(caplog):

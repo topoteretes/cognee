@@ -28,10 +28,14 @@ async def get_max_chunk_tokens() -> int:
     """
     # NOTE: Import must be done in function to avoid circular import issue
     from cognee.infrastructure.databases.vector import get_vector_engine_async
+    from cognee.infrastructure.databases.vector.embeddings.input_limit import (
+        resolve_input_limit,
+    )
     from cognee.infrastructure.llm.config import get_llm_context_config
 
     # Calculate max chunk size based on the following formula
     embedding_engine = (await get_vector_engine_async()).embedding_engine
+    await resolve_input_limit(embedding_engine)
 
     # Resolve the LLM token ceiling from configuration alone — building an LLM
     # client here would eagerly instantiate the legacy framework's adapter
@@ -77,13 +81,16 @@ async def resolve_chunk_size(chunk_size: int | None) -> int:
         raise ValueError(f"chunk_size must be a positive number of tokens, got {chunk_size}")
 
     from cognee.infrastructure.databases.vector import get_vector_engine_async
+    from cognee.infrastructure.databases.vector.embeddings.input_limit import (
+        resolve_input_limit,
+    )
 
     embedding_engine = (await get_vector_engine_async()).embedding_engine
-    limit = embedding_engine.max_completion_tokens
+    limit = await resolve_input_limit(embedding_engine)
     if chunk_size <= limit:
         return chunk_size
 
-    model_limit = getattr(embedding_engine, "model_input_limit", None)
+    model_limit = embedding_engine.model_input_limit
     if (chunk_size, limit) in _chunk_size_warnings_issued:
         return limit
     _chunk_size_warnings_issued.add((chunk_size, limit))
@@ -191,9 +198,15 @@ async def test_embedding_connection() -> int:
     try:
         # NOTE: Vector engine import must be done in function to avoid circular import issue
         from cognee.infrastructure.databases.vector import get_vector_engine_async
+        from cognee.infrastructure.databases.vector.embeddings.input_limit import (
+            resolve_input_limit,
+        )
 
         logger.info("Testing connection to Embedding endpoint...")
         vector_engine = await get_vector_engine_async()
+        # Learn the model's input limit up front, so its log line appears at
+        # startup and the first chunk-size resolution finds it ready.
+        await resolve_input_limit(vector_engine.embedding_engine)
         embedding_vectors = await asyncio.wait_for(
             vector_engine.embedding_engine.embed_text(["test"]),
             timeout=CONNECTION_TEST_TIMEOUT_SECONDS,

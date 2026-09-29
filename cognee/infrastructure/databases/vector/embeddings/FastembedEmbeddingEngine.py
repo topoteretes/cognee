@@ -30,7 +30,7 @@ from cognee.infrastructure.databases.exceptions import (
 )
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
-    effective_input_limit,
+    init_input_limit,
     sane_limit,
 )
 from cognee.infrastructure.databases.vector.embeddings.utils import (
@@ -119,14 +119,8 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         )
         self.embedding_model = TextEmbedding(model_name=model)
         # fastembed truncates input at the model's own limit without an error, so
-        # chunks must never be sized past it.
-        self.model_input_limit = self.input_limit()
-        self.max_completion_tokens = effective_input_limit(
-            configured=max_completion_tokens,
-            model_limit=self.model_input_limit,
-            model=model,
-            source="fastembed model tokenizer",
-        )
+        # chunks must never be sized past it: see input_limit().
+        init_input_limit(self, max_completion_tokens)
         self.tokenizer = self.get_tokenizer()
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
@@ -210,7 +204,9 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
 
         return handle_embedding_response(original_texts, embeddings, self.dimensions)
 
-    def input_limit(self) -> int | None:
+    input_limit_source = "fastembed model tokenizer"
+
+    async def input_limit(self) -> int | None:
         """How many tokens of text the loaded model embeds, from its own tokenizer:
         the length it truncates at, less the special tokens it adds itself, since
         text is counted without them. None if fastembed does not expose it."""

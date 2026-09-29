@@ -1,13 +1,15 @@
 """Each embedding engine embeds by ``min(cap, model limit)``, and never cuts input silently.
 
-Per engine: where the model's limit comes from, that the default cap (4096) is
-lowered to it, that an explicit ``EMBEDDING_MAX_COMPLETION_TOKENS`` above it is
-lowered with a warning, and that an unknown model keeps the cap. Then the two
-silent-truncation providers: fastembed embeds an over-length text in parts
-instead of letting the model cut it, and Ollama is asked to reject over-length
-input (``truncate: false``) so the existing split path runs. Finally the chunk
-size a pipeline runs with: an explicit ``chunk_size`` above the limit is lowered
-with a warning. Providers are mocked; nothing here loads a model or a server.
+Per engine: where ``input_limit()`` gets the model's limit, that the default cap
+(4096) is lowered to it, that an explicit ``EMBEDDING_MAX_COMPLETION_TOKENS`` above
+it is lowered with a warning, and that an unknown model keeps the cap. The limit
+is resolved once, asynchronously, by ``resolve_input_limit`` (the constructor only
+records the cap). Then the two silent-truncation providers: fastembed embeds an
+over-length text in parts instead of letting the model cut it, and Ollama is asked
+to reject over-length input (``truncate: false``) so the existing split path runs.
+Finally the chunk size a pipeline runs with: an explicit ``chunk_size`` above the
+limit is lowered with a warning. Providers are mocked; nothing here loads a model
+or a server.
 """
 
 import logging
@@ -25,6 +27,7 @@ from cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine 
 )
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     DEFAULT_EMBEDDING_INPUT_CAP,
+    resolve_input_limit,
 )
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
@@ -43,8 +46,8 @@ BGE = "BAAI/bge-small-en-v1.5"
 
 
 def _hf_tokenizer(model_max_length: int) -> HuggingFaceTokenizer:
-    """A resolved HuggingFace tokenizer whose model reports ``model_max_length``
-    and adds no special tokens (so the limit is used as is)."""
+    """A resolved HuggingFace tokenizer whose repo declares ``model_max_length``
+    and whose model adds no special tokens (so the limit is used as is)."""
     tokenizer = HuggingFaceTokenizer.__new__(HuggingFaceTokenizer)
     tokenizer.tokenizer = MagicMock(init_kwargs={"model_max_length": model_max_length})
     tokenizer.tokenizer.num_special_tokens_to_add.return_value = 0
@@ -62,29 +65,32 @@ def _fastembed_engine(monkeypatch, configured, truncation):
         patch.object(fastembed_module, "TextEmbedding") as text_embedding,
         patch.object(fastembed_module, "resolve_embedding_tokenizer", return_value=MagicMock()),
     ):
-        text_embedding.return_value.model.tokenizer.truncation = truncation
-        text_embedding.return_value.model.tokenizer.num_special_tokens_to_add.return_value = 2
+        tokenizer = text_embedding.return_value.model.tokenizer
+        tokenizer.truncation = truncation
+        tokenizer.num_special_tokens_to_add.return_value = 2  # [CLS] and [SEP]
         return FastembedEmbeddingEngine(model=BGE, dimensions=4, max_completion_tokens=configured)
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("configured", "expected"),
     [(None, 510), (8191, 510), (256, 256)],
     ids=["default_cap_lowered", "explicit_cap_lowered", "cap_below_model_kept"],
 )
-def test_fastembed_limit_comes_from_the_loaded_model(monkeypatch, configured, expected):
+async def test_fastembed_limit_comes_from_the_loaded_model(monkeypatch, configured, expected):
     # 512 is what the model reads, 2 of them its own [CLS]/[SEP].
     engine = _fastembed_engine(monkeypatch, configured, {"max_length": 512})
 
+    assert await resolve_input_limit(engine) == expected
     assert engine.model_input_limit == 510
-    assert engine.max_completion_tokens == expected
 
 
-def test_fastembed_unknown_model_limit_keeps_the_cap(monkeypatch):
+@pytest.mark.asyncio
+async def test_fastembed_unknown_model_limit_keeps_the_cap(monkeypatch):
     engine = _fastembed_engine(monkeypatch, None, None)
 
+    assert await resolve_input_limit(engine) == DEFAULT_EMBEDDING_INPUT_CAP
     assert engine.model_input_limit is None
-    assert engine.max_completion_tokens == DEFAULT_EMBEDDING_INPUT_CAP
 
 
 @pytest.mark.asyncio
@@ -118,7 +124,7 @@ async def test_fastembed_embeds_over_length_text_in_parts_instead_of_cutting_it(
 async def test_fastembed_batch_with_one_over_length_item_returns_one_vector_per_input(monkeypatch):
     engine = _fastembed_engine(monkeypatch, None, {"max_length": 512})
     engine.embedding_model.model.tokenizer.encode_batch = lambda texts: [
-        SimpleNamespace(overflowing=[1] if len(text) > 1000 else []) for text in texts
+        SimpleNamespace(overflowing=[1] if len(text) > 2500 else []) for text in texts
     ]
     engine.embedding_model.embed = lambda texts, **kwargs: [np.ones(4) for _ in texts]
 
@@ -141,12 +147,13 @@ async def test_fastembed_length_check_failure_does_not_break_embedding(monkeypat
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("configured", "expected"),
     [(None, DEFAULT_EMBEDDING_INPUT_CAP), (8191, 8191), (9000, 8191)],
     ids=["default_cap_below_model", "explicit_at_model", "explicit_above_model_lowered"],
 )
-def test_litellm_limit_for_a_hosted_model_comes_from_litellms_table(configured, expected):
+async def test_litellm_limit_for_a_hosted_model_comes_from_litellms_table(configured, expected):
     engine = LiteLLMEmbeddingEngine(
         model="openai/text-embedding-3-large",
         provider="openai",
@@ -154,18 +161,20 @@ def test_litellm_limit_for_a_hosted_model_comes_from_litellms_table(configured, 
         max_completion_tokens=configured,
     )
 
+    assert await resolve_input_limit(engine) == expected
     assert engine.model_input_limit == 8191
-    assert engine.max_completion_tokens == expected
 
 
-def test_litellm_explicit_cap_above_the_model_warns(caplog):
+@pytest.mark.asyncio
+async def test_litellm_explicit_cap_above_the_model_warns(caplog):
+    engine = LiteLLMEmbeddingEngine(
+        model="openai/text-embedding-3-large",
+        provider="openai",
+        dimensions=4,
+        max_completion_tokens=9000,
+    )
     with caplog.at_level(logging.WARNING):
-        LiteLLMEmbeddingEngine(
-            model="openai/text-embedding-3-large",
-            provider="openai",
-            dimensions=4,
-            max_completion_tokens=9000,
-        )
+        await resolve_input_limit(engine)
 
     assert any(
         "EMBEDDING_MAX_COMPLETION_TOKENS=9000" in r.message and r.levelno == logging.WARNING
@@ -173,7 +182,8 @@ def test_litellm_explicit_cap_above_the_model_warns(caplog):
     )
 
 
-def test_litellm_limit_for_a_self_hosted_repo_comes_from_its_tokenizer():
+@pytest.mark.asyncio
+async def test_litellm_limit_for_a_self_hosted_repo_comes_from_its_tokenizer():
     with patch(
         "cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine."
         "resolve_embedding_tokenizer",
@@ -181,11 +191,12 @@ def test_litellm_limit_for_a_self_hosted_repo_comes_from_its_tokenizer():
     ):
         engine = LiteLLMEmbeddingEngine(model=f"hosted_vllm/{BGE}", provider="custom", dimensions=4)
 
+    assert await resolve_input_limit(engine) == 512
     assert engine.model_input_limit == 512
-    assert engine.max_completion_tokens == 512
 
 
-def test_litellm_unknown_model_keeps_the_cap():
+@pytest.mark.asyncio
+async def test_litellm_unknown_model_keeps_the_cap():
     with patch(
         "cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine."
         "resolve_embedding_tokenizer",
@@ -195,8 +206,8 @@ def test_litellm_unknown_model_keeps_the_cap():
             model="my-private-embedder", provider="custom", dimensions=4
         )
 
+    assert await resolve_input_limit(engine) == DEFAULT_EMBEDDING_INPUT_CAP
     assert engine.model_input_limit is None
-    assert engine.max_completion_tokens == DEFAULT_EMBEDDING_INPUT_CAP
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +215,8 @@ def test_litellm_unknown_model_keeps_the_cap():
 # ---------------------------------------------------------------------------
 
 
-def test_openai_compatible_limit_comes_from_the_served_repos_tokenizer():
+@pytest.mark.asyncio
+async def test_openai_compatible_limit_comes_from_the_served_repos_tokenizer():
     with patch(
         "cognee.infrastructure.databases.vector.embeddings.OpenAICompatibleEmbeddingEngine."
         "resolve_embedding_tokenizer",
@@ -212,11 +224,12 @@ def test_openai_compatible_limit_comes_from_the_served_repos_tokenizer():
     ):
         engine = OpenAICompatibleEmbeddingEngine(model=BGE, dimensions=4)
 
+    assert await resolve_input_limit(engine) == 512
     assert engine.model_input_limit == 512
-    assert engine.max_completion_tokens == 512
 
 
-def test_openai_compatible_hosted_model_name_uses_litellms_table():
+@pytest.mark.asyncio
+async def test_openai_compatible_hosted_model_name_uses_litellms_table():
     with patch(
         "cognee.infrastructure.databases.vector.embeddings.OpenAICompatibleEmbeddingEngine."
         "resolve_embedding_tokenizer",
@@ -226,11 +239,12 @@ def test_openai_compatible_hosted_model_name_uses_litellms_table():
             model="text-embedding-3-small", dimensions=4, max_completion_tokens=9000
         )
 
+    assert await resolve_input_limit(engine) == 8191
     assert engine.model_input_limit == 8191
-    assert engine.max_completion_tokens == 8191
 
 
-def test_openai_compatible_unknown_model_keeps_the_cap():
+@pytest.mark.asyncio
+async def test_openai_compatible_unknown_model_keeps_the_cap():
     with patch(
         "cognee.infrastructure.databases.vector.embeddings.OpenAICompatibleEmbeddingEngine."
         "resolve_embedding_tokenizer",
@@ -238,8 +252,8 @@ def test_openai_compatible_unknown_model_keeps_the_cap():
     ):
         engine = OpenAICompatibleEmbeddingEngine(model="default", dimensions=4)
 
+    assert await resolve_input_limit(engine) == DEFAULT_EMBEDDING_INPUT_CAP
     assert engine.model_input_limit is None
-    assert engine.max_completion_tokens == DEFAULT_EMBEDDING_INPUT_CAP
 
 
 # ---------------------------------------------------------------------------
@@ -247,23 +261,18 @@ def test_openai_compatible_unknown_model_keeps_the_cap():
 # ---------------------------------------------------------------------------
 
 
-def _ollama_engine(
-    monkeypatch, configured, model_limit, endpoint="http://localhost:11434/api/embed"
-):
+def _ollama_engine(monkeypatch, configured, endpoint="http://localhost:11434/api/embed"):
     monkeypatch.setenv("MOCK_EMBEDDING", "false")
-    with (
-        patch.object(OllamaEmbeddingEngine, "input_limit", return_value=model_limit) as lookup,
-        patch.object(OllamaEmbeddingEngine, "get_tokenizer", return_value=MagicMock()),
-    ):
-        engine = OllamaEmbeddingEngine(
+    with patch.object(OllamaEmbeddingEngine, "get_tokenizer", return_value=MagicMock()):
+        return OllamaEmbeddingEngine(
             model="nomic-embed-text",
             dimensions=4,
             max_completion_tokens=configured,
             endpoint=endpoint,
         )
-    return engine, lookup
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("configured", "model_limit", "expected"),
     [
@@ -274,12 +283,16 @@ def _ollama_engine(
     ],
     ids=["default_cap_lowered", "explicit_cap_lowered", "cap_below_model", "unknown_keeps_cap"],
 )
-def test_ollama_limit_comes_from_api_show(monkeypatch, configured, model_limit, expected):
-    engine, lookup = _ollama_engine(monkeypatch, configured, model_limit)
+async def test_ollama_limit_comes_from_api_show(monkeypatch, configured, model_limit, expected):
+    lookup = AsyncMock(return_value=model_limit)
+    with patch.object(OllamaEmbeddingEngine, "input_limit", lookup):
+        engine = _ollama_engine(monkeypatch, configured)
+        assert lookup.await_count == 0, "the constructor must not ask the server"
+
+        assert await resolve_input_limit(engine) == expected
 
     assert engine.model_input_limit == model_limit
-    assert engine.max_completion_tokens == expected
-    lookup.assert_called_once()
+    lookup.assert_awaited_once()
 
 
 class _FakeAiohttpResponse:
@@ -298,7 +311,7 @@ class _FakeAiohttpResponse:
 
 @pytest.mark.asyncio
 async def test_ollama_asks_the_server_to_reject_over_length_input(monkeypatch):
-    engine, _ = _ollama_engine(monkeypatch, None, 512)
+    engine = _ollama_engine(monkeypatch, None)
     payloads = []
 
     def _fake_post(self, url, *, json, **kwargs):
@@ -315,7 +328,7 @@ async def test_ollama_asks_the_server_to_reject_over_length_input(monkeypatch):
 @pytest.mark.asyncio
 async def test_ollama_does_not_send_truncate_to_an_openai_shaped_endpoint(monkeypatch):
     """A LiteLLM proxy or /v1 endpoint rejects unknown fields, so truncate stays Ollama-only."""
-    engine, _ = _ollama_engine(monkeypatch, None, None, endpoint="http://proxy:4000/v1/embeddings")
+    engine = _ollama_engine(monkeypatch, None, endpoint="http://proxy:4000/v1/embeddings")
     payloads = []
 
     def _fake_post(self, url, *, json, **kwargs):
@@ -333,7 +346,7 @@ async def test_ollama_does_not_send_truncate_to_an_openai_shaped_endpoint(monkey
 async def test_ollama_over_length_rejection_is_embedded_in_parts_without_an_error_log(
     monkeypatch, caplog
 ):
-    engine, _ = _ollama_engine(monkeypatch, None, 512)
+    engine = _ollama_engine(monkeypatch, None)
     rejected = {"count": 0}
 
     def _fake_post(self, url, *, json, **kwargs):
@@ -362,8 +375,12 @@ def _fresh_chunk_size_warnings(monkeypatch):
 
 
 def _vector_engine_with(limit: int, model_limit: int | None, model: str = BGE):
+    """A vector engine whose embedding engine already has its limit resolved."""
     engine = SimpleNamespace(
-        max_completion_tokens=limit, model_input_limit=model_limit, model=model
+        max_completion_tokens=limit,
+        model_input_limit=model_limit,
+        model=model,
+        input_limit_resolved=True,
     )
     return AsyncMock(return_value=SimpleNamespace(embedding_engine=engine))
 
