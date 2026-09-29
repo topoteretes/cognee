@@ -150,7 +150,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             self._owns_engine = True
         elif db_name1 != db_name2:
             # A different database name is sufficient isolation regardless of access-control
-            # mode, so honor VECTOR_DB_URL instead of borrowing the relational engine.
+            # mode, so honor VECTOR_DB_NAME instead of borrowing the relational engine.
             super().__init__(
                 connection_string=self.db_uri,
                 connect_args=effective_connect_args,
@@ -158,7 +158,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             )
             self._owns_engine = True
         elif relational_db.engine.dialect.name == "postgresql":
-            # If postgreSQL is used and not backend access control we must use the same engine and sessionmaker
+            # Same PostgreSQL database as the relational engine: reuse its engine and sessionmaker
             self.engine = relational_db.engine
             self.sessionmaker = relational_db.sessionmaker
         else:
@@ -922,7 +922,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             raise SharedDatabasePruneError(
                 "PGVector cannot be pruned independently while it shares the relational "
                 "PostgreSQL database. Use prune_system(metadata=True) to delete the shared "
-                "database, or configure VECTOR_DB_URL with a different dedicated database name."
+                "database (this also deletes users, datasets and permissions), or set "
+                "VECTOR_DB_NAME to a different, dedicated database."
             )
 
         self._metadata.clear()

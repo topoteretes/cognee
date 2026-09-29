@@ -70,12 +70,6 @@ async def prune_system(graph=True, vector=True, metadata=True, cache=True):
     #       delete all graph and vector databases if called. It should only be used in development or testing environments.
 
     async def _prune():
-        if graph and not backend_access_control_enabled():
-            graph_engine = await get_graph_engine()
-            await graph_engine.delete_graph()
-        elif graph and backend_access_control_enabled():
-            await prune_graph_databases()
-
         if vector and not backend_access_control_enabled():
             vector_engine = await get_vector_engine_async()
             try:
@@ -89,6 +83,14 @@ async def prune_system(graph=True, vector=True, metadata=True, cache=True):
                 )
         elif vector and backend_access_control_enabled():
             await prune_vector_databases()
+
+        # Graph runs after vector: a refused vector prune (shared PGVector database)
+        # must raise before anything irreversible has been deleted.
+        if graph and not backend_access_control_enabled():
+            graph_engine = await get_graph_engine()
+            await graph_engine.delete_graph()
+        elif graph and backend_access_control_enabled():
+            await prune_graph_databases()
 
         if graph:
             _create_graph_engine.cache_clear()

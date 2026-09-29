@@ -65,3 +65,34 @@ async def test_vector_only_prune_propagates_shared_database_refusal(monkeypatch)
             metadata=False,
             cache=False,
         )
+
+
+@pytest.mark.asyncio
+async def test_shared_database_refusal_leaves_graph_untouched(monkeypatch):
+    vector_engine = Mock()
+    vector_engine.prune = AsyncMock(side_effect=SharedDatabasePruneError)
+    graph_engine = Mock()
+    graph_engine.delete_graph = AsyncMock()
+
+    monkeypatch.setattr(prune_system_module, "backend_access_control_enabled", lambda: False)
+    monkeypatch.setattr(
+        prune_system_module,
+        "get_vector_engine_async",
+        AsyncMock(return_value=vector_engine),
+    )
+    monkeypatch.setattr(
+        prune_system_module,
+        "get_graph_engine",
+        AsyncMock(return_value=graph_engine),
+    )
+    monkeypatch.setattr(prune_system_module, "record_operation", _record_operation)
+
+    with pytest.raises(SharedDatabasePruneError):
+        await prune_system_module.prune_system(
+            graph=True,
+            vector=True,
+            metadata=False,
+            cache=False,
+        )
+
+    graph_engine.delete_graph.assert_not_awaited()
