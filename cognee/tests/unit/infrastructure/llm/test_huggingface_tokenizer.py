@@ -24,6 +24,12 @@ class _FastTokenizer:
         assert add_special_tokens is False, "counts must not include CLS/SEP"
         return SimpleNamespace(tokens=_TOKENS)
 
+    def no_truncation(self):
+        pass
+
+    def no_padding(self):
+        pass
+
 
 def _no_transformers():
     """Make ``import transformers`` fail, so a stray import shows up as an error."""
@@ -41,6 +47,28 @@ def test_counts_with_tokenizers_and_never_imports_transformers():
         assert tokenizer.extract_tokens("hello world") == _TOKENS
     dl.assert_called_once_with("BAAI/bge-small-en-v1.5", "tokenizer.json")
     load.assert_called_once_with("/cache/tokenizer.json")
+
+
+def test_ignores_truncation_and_padding_saved_in_tokenizer_json():
+    # sentence-transformers/all-MiniLM-L6-v2 ships tokenizer.json with truncation
+    # and fixed padding at 128, which made every text count as 128 tokens.
+    from tokenizers import Tokenizer
+    from tokenizers.models import WordLevel
+    from tokenizers.pre_tokenizers import Whitespace
+
+    saved = Tokenizer(WordLevel({"word": 0, "[PAD]": 1, "[UNK]": 2}, unk_token="[UNK]"))
+    saved.pre_tokenizer = Whitespace()
+    saved.enable_truncation(max_length=8)
+    saved.enable_padding(length=8, pad_id=1, pad_token="[PAD]")
+
+    with (
+        _no_transformers(),
+        patch("huggingface_hub.hf_hub_download", return_value="/cache/tokenizer.json"),
+        patch("tokenizers.Tokenizer.from_file", return_value=saved),
+    ):
+        tokenizer = HuggingFaceTokenizer(model="sentence-transformers/all-MiniLM-L6-v2")
+        assert tokenizer.count_tokens("word") == 1
+        assert tokenizer.count_tokens("word " * 20) == 20
 
 
 def test_falls_back_to_auto_tokenizer_when_transformers_is_installed():

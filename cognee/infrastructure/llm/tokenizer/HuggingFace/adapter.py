@@ -30,6 +30,12 @@ def _load_tokenize(model: str) -> Callable[[str], list[str]]:
         from transformers import AutoTokenizer
 
         return AutoTokenizer.from_pretrained(model).tokenize
+    # Some repos save truncation and fixed-length padding in tokenizer.json
+    # (sentence-transformers/all-MiniLM-L6-v2: both at 128), which encode() then
+    # applies, so every text would count as 128 tokens. AutoTokenizer.tokenize
+    # never applied them; counting must see the whole text, unpadded.
+    tokenizer.no_truncation()
+    tokenizer.no_padding()
     return lambda text: tokenizer.encode(text, add_special_tokens=False).tokens
 
 
