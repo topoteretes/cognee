@@ -17,6 +17,9 @@ Resolution, by embedding provider:
 * ``mistral``           -> ``MistralTokenizer`` for the model.
 * ``fastembed``         -> the model's own HuggingFace tokenizer (BGE/MiniLM are
   wordpiece), instead of the old hardcoded ``gpt-4o`` BPE tokenizer.
+  ``HuggingFaceTokenizer`` loads it with the ``tokenizers`` library (a core
+  dependency); transformers is optional and only used for repos with no
+  ``tokenizer.json``.
 * ollama / openai-compatible / custom / other -> an explicit
   ``HUGGINGFACE_TOKENIZER`` override if set, otherwise the embedding model's own
   HuggingFace repo.
@@ -41,6 +44,10 @@ _MISMATCH_HINT = (
     "Token counts drive chunk sizing and the --dry-run estimate, so a tokenizer "
     "that does not match the embedding model will mis-size chunks. Set "
     "HUGGINGFACE_TOKENIZER to a tokenizer matching your embedding model to fix this."
+)
+_MISSING_PACKAGE_HINT = (
+    "Token counts drive chunk sizing and the --dry-run estimate. Install the missing "
+    "package to count with the model's own tokenizer."
 )
 
 
@@ -103,12 +110,15 @@ def _load_or_tiktoken_fallback(
     try:
         return build()
     except Exception as error:
+        # A missing package is not fixed by pointing HUGGINGFACE_TOKENIZER elsewhere;
+        # the error itself names the package to install.
+        hint = _MISSING_PACKAGE_HINT if isinstance(error, ImportError) else _MISMATCH_HINT
         logger.warning(
             "Could not load a matching tokenizer for %s (%s). Falling back to "
             "TikToken, so token counts are approximate. %s",
             context,
             error,
-            _MISMATCH_HINT,
+            hint,
             exc_info=True,
         )
         return TikTokenTokenizer(model=None, max_completion_tokens=max_completion_tokens)

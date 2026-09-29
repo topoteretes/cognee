@@ -179,6 +179,27 @@ def test_mistral_missing_dependency_falls_back_without_raising(caplog):
     assert any("Falling back" in r.message for r in caplog.records)
 
 
+def test_missing_package_warning_does_not_suggest_huggingface_tokenizer(caplog):
+    # HUGGINGFACE_TOKENIZER only chooses which tokenizer to load, so it cannot fix
+    # a missing package (SDK-810); the warning must name the package instead.
+    tik = patch(
+        f"{_MODULE}.TikTokenTokenizer", side_effect=lambda **kw: _FakeTokenizer("tiktoken", **kw)
+    )
+    hf = patch(
+        f"{_MODULE}.HuggingFaceTokenizer",
+        side_effect=ImportError("could not load tokenizer.json, and transformers is not installed"),
+    )
+    mis = patch(f"{_MODULE}.MistralTokenizer")
+    with caplog.at_level(logging.WARNING), tik, hf, mis:
+        tok = resolve_embedding_tokenizer(provider="fastembed", model="BAAI/bge-small-en-v1.5")
+    assert tok.kind == "tiktoken"
+    warnings = [r.message for r in caplog.records if "Falling back" in r.message]
+    assert warnings, "expected the fallback warning"
+    assert "transformers is not installed" in warnings[0]
+    assert "Install the missing package" in warnings[0]
+    assert "HUGGINGFACE_TOKENIZER" not in warnings[0]
+
+
 def test_bare_model_strips_one_provider_tag():
     assert resolver._bare_model("openai/text-embedding-3-large") == "text-embedding-3-large"
     # Splits once, so a multi-segment repo after the provider tag survives.

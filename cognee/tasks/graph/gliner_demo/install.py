@@ -185,7 +185,9 @@ def _import_runtime(installer: str) -> None:
 
     Proves the install works in this process (a package can be findable yet fail to
     import), and keeps the first, slow import of freshly installed torch (several
-    seconds) off the caller's event loop: later imports hit ``sys.modules``.
+    seconds) off the caller's event loop: later imports hit ``sys.modules``. Also
+    catches a transformers imported before torch existed: it caches "no torch" at
+    import and gliner2 would fail later with a misleading "PyTorch not found".
     """
     try:
         import torch
@@ -196,6 +198,21 @@ def _import_runtime(installer: str) -> None:
             "verify",
             installer,
         ) from error
+    if "transformers" in sys.modules and not _transformers_sees_torch():
+        raise GlinerInstallError(
+            "transformers was imported into this process before PyTorch was installed, and "
+            "it checks for PyTorch only once, at import, so gliner2 cannot load its model "
+            "here. PyTorch is installed now: restart the process.",
+            "verify",
+            installer,
+        )
+
+
+def _transformers_sees_torch() -> bool:
+    """Whether an already-imported transformers detected torch at its import."""
+    from transformers.utils import is_torch_available
+
+    return bool(is_torch_available())
 
 
 def _install_rest(command: list[str], requirements: list[str], installer: str) -> None:

@@ -1,11 +1,41 @@
+import importlib.util
+from collections.abc import Callable
 from typing import Any
 
 from ..tokenizer_interface import TokenizerInterface
 
 
+def _load_tokenize(model: str) -> Callable[[str], list[str]]:
+    """Return ``text -> tokens`` for a HuggingFace repo, without special tokens.
+
+    The repo's ``tokenizer.json`` (the fast tokenizer every current embedding model
+    ships) is loaded with the ``tokenizers`` library. A repo without one needs
+    ``transformers.AutoTokenizer`` to build the tokenizer from its slow files, which
+    is tried only when transformers is already installed. It is never imported
+    otherwise: transformers decides once, at import, whether PyTorch is present, so
+    importing it before the GLiNER auto-installer adds torch leaves gliner2 unable to
+    load its model in this process (SDK-810).
+    """
+    from huggingface_hub import hf_hub_download
+    from tokenizers import Tokenizer
+
+    try:
+        tokenizer = Tokenizer.from_file(hf_hub_download(model, "tokenizer.json"))
+    except Exception as error:
+        if importlib.util.find_spec("transformers") is None:
+            raise ImportError(
+                f"could not load tokenizer.json for {model!r} ({error}), and transformers, "
+                "which can build the tokenizer from the repo's other files, is not installed"
+            ) from error
+        from transformers import AutoTokenizer
+
+        return AutoTokenizer.from_pretrained(model).tokenize
+    return lambda text: tokenizer.encode(text, add_special_tokens=False).tokens
+
+
 class HuggingFaceTokenizer(TokenizerInterface):
     """
-    Implements a tokenizer using the Hugging Face Transformers library.
+    Counts tokens with a HuggingFace repo's own tokenizer (see ``_load_tokenize``).
 
     Public methods include:
     - extract_tokens
@@ -15,7 +45,6 @@ class HuggingFaceTokenizer(TokenizerInterface):
     Instance variables include:
     - model: str
     - max_completion_tokens: int
-    - tokenizer: AutoTokenizer
     """
 
     def __init__(
@@ -25,11 +54,7 @@ class HuggingFaceTokenizer(TokenizerInterface):
     ) -> None:
         self.model = model
         self.max_completion_tokens = max_completion_tokens
-
-        # Import here to make it an optional dependency
-        from transformers import AutoTokenizer  # ty:ignore[unresolved-import]
-
-        self.tokenizer = AutoTokenizer.from_pretrained(model)
+        self._tokenize = _load_tokenize(model)
 
     def extract_tokens(self, text: str) -> list[Any]:
         """
@@ -45,8 +70,7 @@ class HuggingFaceTokenizer(TokenizerInterface):
 
             - List[Any]: A list of tokens extracted from the input text.
         """
-        tokens = self.tokenizer.tokenize(text)
-        return tokens
+        return self._tokenize(text)
 
     def count_tokens(self, text: str) -> int:
         """
@@ -62,7 +86,7 @@ class HuggingFaceTokenizer(TokenizerInterface):
 
             - int: The total number of tokens in the input text.
         """
-        return len(self.tokenizer.tokenize(text))
+        return len(self._tokenize(text))
 
     def decode_single_token(self, token: int) -> str:
         """

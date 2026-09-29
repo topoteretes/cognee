@@ -6,7 +6,7 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -163,6 +163,37 @@ def test_install_raises_when_the_runtime_is_still_not_importable(tmp_path):
     with pytest.raises(install.GlinerInstallError, match="cannot import it") as raised:
         _install(tmp_path, present=set(), installed_after=False)
     assert (raised.value.step, raised.value.installer) == ("verify", "pip")
+
+
+def test_verify_rejects_a_transformers_that_was_imported_before_torch():
+    # transformers caches torch availability at import; installing torch afterwards
+    # leaves gliner2 failing with "PyTorch not found" (SDK-810). Say so, and how to fix it.
+    with (
+        patch.dict(sys.modules, {"torch": ModuleType("torch"), "gliner2": _gliner2_stub()}),
+        patch.dict(sys.modules, {"transformers": ModuleType("transformers")}),
+        patch.object(install, "_transformers_sees_torch", return_value=False),
+        pytest.raises(install.GlinerInstallError, match="restart the process") as raised,
+    ):
+        install._import_runtime("pip")
+    assert (raised.value.step, raised.value.installer) == ("verify", "pip")
+
+
+def test_verify_passes_when_transformers_is_absent_or_sees_torch():
+    with patch.dict(sys.modules, {"torch": ModuleType("torch"), "gliner2": _gliner2_stub()}):
+        with patch.dict(sys.modules):
+            sys.modules.pop("transformers", None)
+            install._import_runtime("pip")
+        with (
+            patch.dict(sys.modules, {"transformers": ModuleType("transformers")}),
+            patch.object(install, "_transformers_sees_torch", return_value=True),
+        ):
+            install._import_runtime("pip")
+
+
+def _gliner2_stub():
+    module = ModuleType("gliner2")
+    module.AutoExtractor = object
+    return module
 
 
 def test_a_successful_install_suggests_the_extra(tmp_path, caplog):
