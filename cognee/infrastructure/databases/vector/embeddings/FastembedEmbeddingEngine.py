@@ -297,10 +297,6 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             A tokenizer object configured for the specified model and maximum token size.
         """
         logger.debug("Loading tokenizer for FastembedEmbeddingEngine...")
-        tokenizer = resolve_embedding_tokenizer(
-            provider="fastembed",
-            model=self.model,
-            max_completion_tokens=self.max_completion_tokens,
-        )
+        tokenizer = resolve_embedding_tokenizer(provider="fastembed", model=self.model)
         logger.debug("Tokenizer loaded for FastembedEmbeddingEngine")
         return tokenizer

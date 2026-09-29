@@ -31,18 +31,10 @@ logger = get_logger()
 # lowered further to the model's own limit when that is known and smaller.
 DEFAULT_EMBEDDING_INPUT_CAP = 4096
 
-# Tokenizers with no real limit report a sentinel (transformers uses 2**31 or
-# 1e30). Anything this large is not a model limit.
-_MAX_PLAUSIBLE_LIMIT = 1_000_000
-
-_OLLAMA_SHOW_TIMEOUT_SECONDS = 3.0
-
 
 def sane_limit(value) -> int | None:
-    """``value`` as a token limit, or None when it is not a plausible one."""
-    if isinstance(value, bool) or not isinstance(value, int):
-        return None
-    if value <= 0 or value > _MAX_PLAUSIBLE_LIMIT:
+    """``value`` as a token limit: a positive int, else None."""
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         return None
     return value
 
@@ -108,18 +100,10 @@ def ollama_input_limit(endpoint: str | None, model: str | None, api_key: str | N
         return None
     import httpx
 
-    from cognee.shared.utils import create_secure_ssl_context
-
     show_url = f"{endpoint.split('/api/', 1)[0]}/api/show"
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:
-        response = httpx.post(
-            show_url,
-            json={"model": model},
-            headers=headers,
-            timeout=_OLLAMA_SHOW_TIMEOUT_SECONDS,
-            verify=create_secure_ssl_context(),
-        )
+        response = httpx.post(show_url, json={"model": model}, headers=headers)
         response.raise_for_status()
         model_info = response.json().get("model_info") or {}
     except Exception:

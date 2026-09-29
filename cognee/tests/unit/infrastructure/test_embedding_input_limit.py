@@ -13,7 +13,6 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from cognee.infrastructure.databases.vector.embeddings import input_limit
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     DEFAULT_EMBEDDING_INPUT_CAP,
     effective_input_limit,
@@ -27,11 +26,10 @@ from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
 
 
-def test_sane_limit_rejects_sentinels_and_non_limits():
+def test_sane_limit_accepts_only_a_positive_int():
     assert sane_limit(512) == 512
     assert sane_limit(0) is None
     assert sane_limit(-1) is None
-    assert sane_limit(2**31) is None  # transformers' "no limit" sentinel
     assert sane_limit(True) is None
     assert sane_limit("512") is None
     assert sane_limit(None) is None
@@ -57,9 +55,6 @@ def test_huggingface_tokenizer_limit_reads_model_max_length():
     tokenizer = HuggingFaceTokenizer.__new__(HuggingFaceTokenizer)
     tokenizer.tokenizer = MagicMock(model_max_length=512)
     assert huggingface_tokenizer_limit(tokenizer) == 512
-
-    tokenizer.tokenizer = MagicMock(model_max_length=2147483648)  # sentinel
-    assert huggingface_tokenizer_limit(tokenizer) is None
 
     # A TikToken fallback says nothing about the embedding model.
     assert huggingface_tokenizer_limit(TikTokenTokenizer(model=None)) is None
@@ -154,4 +149,3 @@ def test_effective_limit_keeps_the_cap_and_says_so_when_the_model_is_unknown(cap
 
 def test_default_cap_is_4096():
     assert DEFAULT_EMBEDDING_INPUT_CAP == 4096
-    assert input_limit._MAX_PLAUSIBLE_LIMIT > 131072
