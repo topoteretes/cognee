@@ -1,0 +1,83 @@
+# Temporary: checks that the AGENTS.md fix makes .claude/skills reachable through
+# .agents/skills on Windows. Runs only on its own branch; delete after use.
+name: Windows skills link test
+
+on:
+  push:
+    branches: [tmp/sdk-789-windows-skills-link-test]
+
+# The automatic GITHUB_TOKEN gets no permissions. No secrets or vars are used.
+permissions: {}
+
+jobs:
+  windows-link:
+    runs-on: windows-latest
+    env:
+      BRANCH: feature/sdk-789-add-agent-skills-for-complex-sdk-features
+    steps:
+      - name: Write the test script
+        shell: pwsh
+        run: |
+          @'
+          param([string]$Engine, [string]$Symlinks)
+          $ErrorActionPreference = "Stop"
+          function Check($ok, $msg) { if (-not $ok) { throw "FAIL: $msg" } ; Write-Host "  ok: $msg" }
+
+          Write-Host "=== $Engine, core.symlinks=$Symlinks ($($PSVersionTable.PSEdition) $($PSVersionTable.PSVersion)) ==="
+          $dir = Join-Path $env:RUNNER_TEMP "clone-$Engine-$Symlinks"
+          git clone -q --depth 1 --branch $env:BRANCH -c core.symlinks=$Symlinks https://github.com/topoteretes/cognee.git $dir
+          if ($LASTEXITCODE -ne 0) { throw "clone failed" }
+          Set-Location $dir
+
+          $item = Get-Item .agents\skills -Force
+          Write-Host "  before: container=$($item.PSIsContainer) linktype=$($item.LinkType) attributes=$($item.Attributes)"
+
+          if ($Symlinks -eq "false") {
+            Check (-not $item.PSIsContainer) ".agents\skills is a plain file after clone"
+            $stub = (Get-Content .agents\skills -Raw).Trim()
+            Check ($stub -eq "../.claude/skills") ".agents\skills holds '$stub'"
+
+            # Run the exact command from AGENTS.md.
+            $cmd = 'Remove-Item .agents\skills; New-Item -ItemType Junction -Path .agents\skills -Target "$PWD\.claude\skills"; git update-index --skip-worktree .agents/skills'
+            Check ((Get-Content AGENTS.md -Raw).Contains($cmd)) "AGENTS.md contains the tested command verbatim"
+            Invoke-Expression $cmd | Out-Null
+            Check ($LASTEXITCODE -eq 0) "the command ran"
+            $item = Get-Item .agents\skills -Force
+            Write-Host "  after: linktype=$($item.LinkType) target=$($item.Target)"
+            Check ($item.LinkType -eq "Junction") ".agents\skills is a junction"
+            Check ((git ls-files -v .agents/skills) -like "S *") "git marks .agents/skills skip-worktree"
+          } else {
+            Check ($item.LinkType -eq "SymbolicLink") ".agents\skills is a real symlink"
+          }
+
+          $claude = @(Get-ChildItem .claude\skills -Directory | ForEach-Object Name) | Sort-Object
+          $agents = @(Get-ChildItem .agents\skills -Directory | ForEach-Object Name) | Sort-Object
+          Check ($agents.Count -gt 0) "$($agents.Count) skill folders visible through .agents\skills"
+          Check ((Compare-Object $claude $agents) -eq $null) "same skill list as .claude\skills"
+          foreach ($name in $agents) {
+            $head = Get-Content (Join-Path ".agents\skills\$name" "SKILL.md") -TotalCount 3
+            Check (($head -join "`n") -match "name: $name") "read .agents\skills\$name\SKILL.md"
+          }
+
+          $status = git status --porcelain
+          Check ([string]::IsNullOrEmpty($status)) "git status is clean"
+
+          Add-Content .agents\skills\cognee-cli\SKILL.md "probe"
+          $status = (git status --porcelain) -join "; "
+          Check ($status -eq " M .claude/skills/cognee-cli/SKILL.md") "an edit through the link changes .claude\skills ($status)"
+          git checkout -q -- .claude/skills/cognee-cli/SKILL.md
+          Check ([string]::IsNullOrEmpty((git status --porcelain))) "git status is clean again"
+          Write-Host "PASS: $Engine, core.symlinks=$Symlinks"
+          '@ | Set-Content "$env:RUNNER_TEMP\check.ps1"
+
+      - name: Windows PowerShell 5.1, default git (symlinks off)
+        shell: powershell
+        run: '& "$env:RUNNER_TEMP\check.ps1" -Engine powershell -Symlinks false'
+
+      - name: PowerShell 7, default git (symlinks off)
+        shell: pwsh
+        run: '& "$env:RUNNER_TEMP\check.ps1" -Engine pwsh -Symlinks false'
+
+      - name: Developer Mode route (symlinks on)
+        shell: pwsh
+        run: '& "$env:RUNNER_TEMP\check.ps1" -Engine pwsh -Symlinks true'
