@@ -54,6 +54,12 @@ class _FakeLanceQuery:
         self.where_value = value
         return self
 
+    def refine_factor(self, _factor):
+        return self
+
+    def bypass_vector_index(self):
+        return self
+
     def select(self, _columns):
         return self
 
