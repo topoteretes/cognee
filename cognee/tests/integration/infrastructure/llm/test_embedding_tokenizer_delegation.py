@@ -7,6 +7,10 @@ These tests lock in the *wiring*: if an engine re-hardcodes a tokenizer in its
 matching test fails. Engines are built with ``__new__`` and only the attributes
 ``get_tokenizer`` reads are set, so no network, API keys, or optional deps are
 touched.
+
+The engine's token limit is not part of the call: it is resolved after the
+tokenizer (a HuggingFace tokenizer is one of its sources, SDK-868), and the
+tokenizers do not use it.
 """
 
 from unittest.mock import patch
@@ -44,7 +48,6 @@ def test_fastembed_delegates_to_resolver():
     engine = _engine(
         FastembedEmbeddingEngine,
         model="BAAI/bge-small-en-v1.5",
-        max_completion_tokens=256,
     )
     with patch(
         f"{_BASE}.FastembedEmbeddingEngine.resolve_embedding_tokenizer",
@@ -54,7 +57,6 @@ def test_fastembed_delegates_to_resolver():
     mock.assert_called_once_with(
         provider="fastembed",
         model="BAAI/bge-small-en-v1.5",
-        max_completion_tokens=256,
     )
 
 
@@ -63,7 +65,6 @@ def test_litellm_delegates_and_strips_vllm_prefix():
         LiteLLMEmbeddingEngine,
         provider="openai",
         model="hosted_vllm/BAAI/bge-m3",
-        max_completion_tokens=100,
     )
     with patch(
         f"{_BASE}.LiteLLMEmbeddingEngine.resolve_embedding_tokenizer",
@@ -73,7 +74,6 @@ def test_litellm_delegates_and_strips_vllm_prefix():
     mock.assert_called_once_with(
         provider="openai",
         model="BAAI/bge-m3",  # the hosted_vllm/ routing prefix is stripped first
-        max_completion_tokens=100,
     )
 
 
@@ -81,7 +81,6 @@ def test_ollama_delegates_with_override():
     engine = _engine(
         OllamaEmbeddingEngine,
         model="avr/sfr-embedding-mistral:latest",
-        max_completion_tokens=512,
         huggingface_tokenizer_name="Salesforce/SFR-Embedding-Mistral",
     )
     with patch(
@@ -92,7 +91,6 @@ def test_ollama_delegates_with_override():
     mock.assert_called_once_with(
         provider="ollama",
         model="avr/sfr-embedding-mistral:latest",
-        max_completion_tokens=512,
         huggingface_tokenizer="Salesforce/SFR-Embedding-Mistral",
     )
 
@@ -101,7 +99,6 @@ def test_openai_compatible_delegates_to_resolver():
     engine = _engine(
         OpenAICompatibleEmbeddingEngine,
         model="BAAI/bge-m3",
-        max_completion_tokens=128,
     )
     with patch(
         f"{_BASE}.OpenAICompatibleEmbeddingEngine.resolve_embedding_tokenizer",
@@ -111,5 +108,4 @@ def test_openai_compatible_delegates_to_resolver():
     mock.assert_called_once_with(
         provider="openai_compatible",
         model="BAAI/bge-m3",
-        max_completion_tokens=128,
     )

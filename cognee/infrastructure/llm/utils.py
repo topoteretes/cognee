@@ -28,10 +28,14 @@ async def get_max_chunk_tokens() -> int:
     """
     # NOTE: Import must be done in function to avoid circular import issue
     from cognee.infrastructure.databases.vector import get_vector_engine_async
+    from cognee.infrastructure.databases.vector.embeddings.input_limit import (
+        resolve_input_limit,
+    )
     from cognee.infrastructure.llm.config import get_llm_context_config
 
     # Calculate max chunk size based on the following formula
     embedding_engine = (await get_vector_engine_async()).embedding_engine
+    await resolve_input_limit(embedding_engine)
 
     # Resolve the LLM token ceiling from configuration alone — building an LLM
     # client here would eagerly instantiate the legacy framework's adapter
@@ -54,6 +58,63 @@ async def get_max_chunk_tokens() -> int:
     max_chunk_tokens = min(embedding_engine.max_completion_tokens, llm_cutoff_point)
 
     return max_chunk_tokens
+
+
+# (chunk_size, limit) pairs already warned about: a pipeline resolves the size in
+# more than one place, and one warning per process says everything the next would.
+_chunk_size_warnings_issued: set[tuple[int, int]] = set()
+
+
+async def resolve_chunk_size(chunk_size: int | None) -> int:
+    """The chunk size a pipeline runs with: the caller's, capped at what can be embedded.
+
+    ``None`` (or 0) means the automatic size from :func:`get_max_chunk_tokens`. An
+    explicit value is kept unless it exceeds the embedding engine's token limit --
+    the model's own input limit, or ``EMBEDDING_MAX_COMPLETION_TOKENS`` when that
+    is lower -- in which case it is lowered to that limit with a warning: text past
+    the limit would be dropped from the embedding, or rejected by the provider.
+    The LLM half-context rule only applies to the automatic size.
+    """
+    if not chunk_size:
+        return await get_max_chunk_tokens()
+    if chunk_size < 0:
+        raise ValueError(f"chunk_size must be a positive number of tokens, got {chunk_size}")
+
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
+    from cognee.infrastructure.databases.vector.embeddings.input_limit import (
+        resolve_input_limit,
+    )
+
+    embedding_engine = (await get_vector_engine_async()).embedding_engine
+    limit = await resolve_input_limit(embedding_engine)
+    if chunk_size <= limit:
+        return chunk_size
+
+    model_limit = embedding_engine.model_input_limit
+    if (chunk_size, limit) in _chunk_size_warnings_issued:
+        return limit
+    _chunk_size_warnings_issued.add((chunk_size, limit))
+    if limit == model_limit:
+        logger.warning(
+            "chunk_size=%s exceeds what embedding model %r accepts (%s tokens of text); using %s. "
+            "Text beyond the model's limit would be dropped from the embedding.",
+            chunk_size,
+            embedding_engine.model,
+            model_limit,
+            limit,
+        )
+    else:
+        logger.warning(
+            "chunk_size=%s exceeds EMBEDDING_MAX_COMPLETION_TOKENS (%s); using %s. Raise "
+            "EMBEDDING_MAX_COMPLETION_TOKENS to allow larger chunks%s.",
+            chunk_size,
+            limit,
+            limit,
+            f" (embedding model {embedding_engine.model!r} accepts up to {model_limit} tokens of text)"
+            if model_limit is not None
+            else "",
+        )
+    return limit
 
 
 def get_model_max_completion_tokens(model_name: str) -> int | None:
@@ -137,9 +198,15 @@ async def test_embedding_connection() -> int:
     try:
         # NOTE: Vector engine import must be done in function to avoid circular import issue
         from cognee.infrastructure.databases.vector import get_vector_engine_async
+        from cognee.infrastructure.databases.vector.embeddings.input_limit import (
+            resolve_input_limit,
+        )
 
         logger.info("Testing connection to Embedding endpoint...")
         vector_engine = await get_vector_engine_async()
+        # Learn the model's input limit up front, so its log line appears at
+        # startup and the first chunk-size resolution finds it ready.
+        await resolve_input_limit(vector_engine.embedding_engine)
         embedding_vectors = await asyncio.wait_for(
             vector_engine.embedding_engine.embed_text(["test"]),
             timeout=CONNECTION_TEST_TIMEOUT_SECONDS,
