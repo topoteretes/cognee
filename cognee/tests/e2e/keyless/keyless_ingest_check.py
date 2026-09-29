@@ -101,6 +101,18 @@ async def main() -> None:
 
     graph = await get_graph_engine()
     nodes, edges = await graph.get_graph_data()
+    # The default fastembed model reads 512 tokens (2 of them the [CLS]/[SEP] it
+    # adds itself) and truncates the rest without an error (SDK-868), so the
+    # engine's limit must be the model's own and every chunk must fit inside it.
+    from cognee.infrastructure.databases.vector.embeddings.input_limit import (
+        resolve_input_limit,
+    )
+
+    assert await resolve_input_limit(engine) == 510
+    assert engine.model_input_limit == 510, engine.model_input_limit
+    chunk_sizes = [n[1]["chunk_size"] for n in nodes if n[1].get("type") == "DocumentChunk"]
+    assert chunk_sizes and max(chunk_sizes) <= engine.max_completion_tokens, chunk_sizes
+    print(f"chunks: {len(chunk_sizes)}, largest {max(chunk_sizes)} tokens (limit 510)")
     entities = sorted(
         {n[1].get("name") for n in nodes if n[1].get("type") == "Entity" and n[1].get("name")}
     )
