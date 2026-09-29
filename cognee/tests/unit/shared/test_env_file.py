@@ -188,8 +188,16 @@ def test_a_pinned_file_is_not_topped_up_from_the_working_directory(monkeypatch, 
     Settings classes used to declare ``env_file=".env"`` and open the working
     directory's file themselves, so a key missing from the pinned file came from
     ``./.env`` for them while ``os.getenv`` readers saw nothing (SDK-781 again).
+
+    The probe borrows ``LLMConfig``'s real ``model_config`` without its validators,
+    which reject a partial LLM setup and so depend on whatever LLM_* variables the
+    host happens to have (the ollama CI job sets an endpoint and key).
     """
     from cognee.infrastructure.llm.config import LLMConfig
+
+    class Probe(BaseSettings):
+        llm_model: str = "default"
+        model_config = LLMConfig.model_config
 
     project = tmp_path / "project"
     project.mkdir()
@@ -204,7 +212,7 @@ def test_a_pinned_file_is_not_topped_up_from_the_working_directory(monkeypatch, 
     env_file.load_env_file()
 
     assert os.getenv("LLM_MODEL") is None
-    assert LLMConfig().llm_model != "openai/FROM-CWD-ENV"
+    assert Probe().llm_model == "default"
 
 
 def test_no_cognee_settings_class_opens_its_own_env_file():
