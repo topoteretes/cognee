@@ -40,6 +40,13 @@ OP_TABLE_SCHEMA = 126
 OP_TABLE_COMPACT_FRAGMENTS = 127
 # kwargs: retention_seconds, max_versions
 OP_TABLE_PRUNE_VERSIONS = 128
+# handle_id; returns list[dict] with name, index_type and columns per index.
+# lancedb's IndexConfig is a Rust-backed object that does not pickle.
+OP_TABLE_LIST_INDICES = 129
+# handle_id; args: (column, config_class_name, config_fields). The config is a
+# ``lancedb.index`` dataclass, sent as its class name and fields and built
+# again in the worker.
+OP_TABLE_CREATE_INDEX = 133  # 130-132 are the builder roots below
 
 # Builder ops. args: (root_args, chain_steps, terminal_name, terminal_args,
 # terminal_kwargs) where root_args is the tuple passed to the root call
