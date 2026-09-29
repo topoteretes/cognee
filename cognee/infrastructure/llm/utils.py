@@ -89,7 +89,7 @@ async def resolve_chunk_size(chunk_size: int | None) -> int:
     _chunk_size_warnings_issued.add((chunk_size, limit))
     if limit == model_limit:
         logger.warning(
-            "chunk_size=%s exceeds what embedding model %r accepts (%s tokens); using %s. "
+            "chunk_size=%s exceeds what embedding model %r accepts (%s tokens of text); using %s. "
             "Text beyond the model's limit would be dropped from the embedding.",
             chunk_size,
             embedding_engine.model,
@@ -103,7 +103,7 @@ async def resolve_chunk_size(chunk_size: int | None) -> int:
             chunk_size,
             limit,
             limit,
-            f" (embedding model {embedding_engine.model!r} accepts up to {model_limit} tokens)"
+            f" (embedding model {embedding_engine.model!r} accepts up to {model_limit} tokens of text)"
             if model_limit is not None
             else "",
         )

@@ -100,7 +100,7 @@ def effective_input_limit(
 
     if cap <= model_limit:
         logger.debug(
-            "Embedding model %r accepts %s tokens (%s); chunks are limited to %s tokens.",
+            "Embedding model %r accepts %s tokens of text (%s); chunks are limited to %s tokens.",
             model,
             model_limit,
             source,
@@ -111,7 +111,7 @@ def effective_input_limit(
     if configured:
         logger.warning(
             "EMBEDDING_MAX_COMPLETION_TOKENS=%s exceeds what embedding model %r accepts "
-            "(%s tokens, %s). Chunks are limited to %s tokens; text beyond that would be "
+            "(%s tokens of text, %s). Chunks are limited to %s tokens; text beyond that would be "
             "dropped from the embedding.",
             configured,
             model,
@@ -121,8 +121,8 @@ def effective_input_limit(
         )
     else:
         logger.info(
-            "Embedding model %r accepts %s tokens (%s); chunks are limited to that instead "
-            "of the default %s.",
+            "Embedding model %r accepts %s tokens of text (%s); chunks are limited to that "
+            "instead of the default %s.",
             model,
             model_limit,
             source,
