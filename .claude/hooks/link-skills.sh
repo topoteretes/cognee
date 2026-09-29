@@ -31,9 +31,11 @@ esac
 
 # Two things can sit here: the text placeholder git wrote instead of the symlink,
 # or a junction left dangling by a moved checkout. MSYS surfaces a junction as a
-# symlink, so `rm -f` unlinks either without following it; `rmdir` is the
-# fallback for a plain empty directory. Never `rm -rf` -- on a live junction that
-# would descend into .agents/skills and delete the real skill files.
+# symlink, so `rm -f` unlinks either one without following it into
+# .agents/skills; `rmdir` covers only a plain empty directory, since Git Bash
+# refuses a junction with "Not a directory". Deliberately not `rm -rf`: it would
+# not follow a junction either, but it would silently erase a real directory
+# committed here -- which the check below is meant to report, not destroy.
 rm -f "$link" 2>/dev/null || :
 if [ -e "$link" ] || [ -L "$link" ]; then
   rmdir "$link" 2>/dev/null || :

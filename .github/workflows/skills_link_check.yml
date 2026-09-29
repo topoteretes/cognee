@@ -71,12 +71,18 @@ jobs:
       - name: A dangling junction is rebuilt, not abandoned
         working-directory: repo with space
         run: |
-          # What a moved checkout leaves behind: a junction pointing nowhere. Build
-          # it from a real directory and then delete that directory, rather than
-          # pointing mklink at a path that does not exist yet. Clearing the live
-          # junction first is scaffolding, so use Windows' own rmdir rather than
-          # whichever primitive the hook happens to rely on.
+          # A moved checkout leaves a junction pointing at its old absolute path:
+          # the entry still exists but resolves to nothing. Reproduce that.
+
+          # Scaffolding, so clear the live junction with Windows' own rmdir
+          # rather than whichever primitive the hook relies on — a broken setup
+          # must not read as a hook failure.
           cmd //c rmdir '.claude\skills'
+
+          # New-Item refuses a target that does not exist, so aim the junction at
+          # a real directory and delete that directory afterwards. (`mklink /J`
+          # would take a missing target, but needs MSYS_NO_PATHCONV to survive
+          # Git Bash, which then breaks the `//c` that gets it to cmd.)
           mkdir -p .agents/tmp-junction-target
           SKILLS_LINK="$(cygpath -w "$PWD/.claude/skills")" \
           SKILLS_TARGET="$(cygpath -w "$PWD/.agents/tmp-junction-target")" \
