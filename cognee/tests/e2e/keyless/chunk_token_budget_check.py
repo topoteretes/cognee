@@ -13,12 +13,13 @@ model actually sees, truncation enabled at its window).
 
 Run: ``python cognee/tests/e2e/keyless/chunk_token_budget_check.py [fastembed model]``
 
-With no argument the keyless default (BAAI/bge-small-en-v1.5) is used; the CI job
+With no argument the keyless default (BAAI/bge-small-en-v1.5) is used. The CI job
 also runs it with ``snowflake/snowflake-arctic-embed-xs``, whose tokenizer.json
-stores truncation at 512, so a counter that honoured it would report at most 512
-tokens for any document. (Models with fixed-length padding stored, such as
-all-MiniLM-L6-v2 and gte-base, cannot serve here: fastembed keeps that padding
-and fails on a batch mixing texts above and below its length.)
+stores truncation at 512 (a counter that honoured it would report at most 512
+tokens for any document), and with ``sentence-transformers/all-MiniLM-L6-v2``,
+whose tokenizer.json stores truncation and a fixed padding length of 128 (every
+text would count as 128 tokens, and fastembed, left with that padding, fails on
+a batch mixing texts above and below it).
 """
 
 import asyncio
@@ -97,6 +98,7 @@ async def main() -> None:
 
     nodes, _ = await (await get_graph_engine()).get_graph_data()
     chunks = [props for _, props in nodes if props.get("type") == "DocumentChunk"]
+    chunk_ids = {str(node_id) for node_id, props in nodes if props.get("type") == "DocumentChunk"}
     if len(chunks) < 5:
         problems.append(f"expected a multi-chunk document, got {len(chunks)} chunks")
 
@@ -118,6 +120,17 @@ async def main() -> None:
             problems.append(
                 f"chunk {chunk['chunk_index']}: chunker counted {believed}, tokenizer says {truth}"
             )
+
+    # Every chunk must have been embedded: its id must come back from the vector store.
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
+
+    vector_engine = await get_vector_engine_async()
+    hits = await vector_engine.search(
+        collection_name="DocumentChunk_text", query_text="Alice", limit=len(chunks) + 5
+    )
+    missing = chunk_ids - {str(hit.id) for hit in hits}
+    if missing:
+        problems.append(f"{len(missing)} of {len(chunks)} chunks have no stored embedding")
     assert not problems, "\n".join(problems)
 
     stored = sum(len(oracle.tokenize(chunk["text"])) for chunk in chunks)
