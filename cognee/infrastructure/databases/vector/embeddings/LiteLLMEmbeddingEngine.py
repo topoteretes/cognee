@@ -64,24 +64,6 @@ _EMBED_LENGTH_ERROR_RE = re.compile(
 _PROVIDERS_WITHOUT_DIMENSIONS_SUPPORT = {"nvidia_nim"}
 
 
-def _missing_package_error(error: Exception) -> ImportError | None:
-    """The ImportError behind ``error`` when embedding failed on a missing package, else None.
-
-    litellm does not raise the ImportError itself: a provider SDK that is not installed
-    (``boto3`` for bedrock / sagemaker, ``google-auth`` for vertex_ai) surfaces as an
-    ``APIConnectionError`` (status 500) raised while handling it, so the ImportError is
-    that error's ``__context__``, not its ``__cause__``. Only this one level of
-    litellm's own wrapping is inspected, not the whole chain.
-    """
-    if isinstance(error, ImportError):
-        return error
-    if isinstance(error, litellm.exceptions.APIConnectionError) and isinstance(
-        error.__context__, ImportError
-    ):
-        return error.__context__
-    return None
-
-
 def _uses_nvidia_nim(provider: str | None, model: str | None) -> bool:
     """Whether this engine is actually talking to NVIDIA NIM.
 
@@ -175,8 +157,8 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
         # Skip the retry chain for terminal error classes. Authentication /
-        # authorization / not-found / bad-request / unprocessable errors and a
-        # missing package will never succeed on a retry, so the previous
+        # authorization / not-found / bad-request / unprocessable errors will
+        # never succeed on a retry, so the previous
         # behaviour of running the full backoff ladder wasted ~2 minutes of
         # user wall clock on a mis-typed API key or EMBEDDING_MODEL. The
         # handlers below re-raise these unwrapped, which is what lets this list
@@ -184,8 +166,9 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         # over-length 400s are recovered in place (split + pool) and never
         # reach tenacity. Superset of the LLM adapter exclusion set; see
         # cognee/infrastructure/llm/structured_output_framework/litellm_instructor/llm/openai/adapter.py.
-        # Budget exhaustion is terminal as well, but it is classified by
-        # predicate rather than by class: see embeddings/retry_config.py.
+        # Budget exhaustion and a missing provider SDK are terminal as well, but
+        # they are classified by predicate rather than by class, because the
+        # wrapping hides the class: see embeddings/retry_config.py.
         retry=embedding_retry_condition(
             EmbeddingContextWindowTooSmallError,
             litellm.exceptions.BadRequestError,
@@ -193,7 +176,6 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             litellm.exceptions.UnprocessableEntityError,
             litellm.exceptions.AuthenticationError,
             litellm.exceptions.PermissionDeniedError,
-            ImportError,
             asyncio.CancelledError,
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
@@ -397,18 +379,6 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             # so the failure is not buried under the endpoint-and-settings
             # message below, which points at the wrong problem entirely.
             raise_if_budget_exhausted(error)
-
-            # A missing package cannot clear on a retry. Raise it as an ImportError,
-            # which the exclusion list above treats as terminal, naming the package.
-            missing_package = _missing_package_error(error)
-            if missing_package is not None:
-                logger.error(
-                    "Embedding failed: a required package is missing: %s", str(missing_package)
-                )
-                raise ImportError(
-                    f"Embedding with model '{self.model}' needs a package that is not "
-                    f"installed: {missing_package}"
-                ) from missing_package
 
             # Fall back to a clear, actionable message for connectivity/misconfiguration
             # issues. The provider's error is part of the message: the generic text

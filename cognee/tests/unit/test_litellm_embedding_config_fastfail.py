@@ -108,11 +108,10 @@ async def test_missing_provider_sdk_behind_litellm_makes_one_attempt(monkeypatch
     assert isinstance(wrapped.__context__, ImportError) and wrapped.__cause__ is None
     engine, calls = _engine(monkeypatch, lambda _: wrapped)
 
-    with pytest.raises(ImportError, match="boto3") as exc_info:
+    with pytest.raises(EmbeddingException, match="boto3"):
         await engine.embed_text(["hello world"])
 
     assert calls["count"] == 1
-    assert engine.model in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -121,7 +120,7 @@ async def test_missing_package_raised_directly_makes_one_attempt(monkeypatch):
         monkeypatch, lambda _: ModuleNotFoundError("No module named 'boto3'", name="boto3")
     )
 
-    with pytest.raises(ImportError, match="boto3"):
+    with pytest.raises(EmbeddingException, match="boto3"):
         await engine.embed_text(["hello world"])
 
     assert calls["count"] == 1
