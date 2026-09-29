@@ -70,11 +70,45 @@ or write.
 | Goal | Use |
 |---|---|
 | Turn an existing relational database into a graph | `migrate_relational_database(graph_db, schema)` (`cognee/tasks/ingestion/migrate_relational_database.py`), with the source DB set by `MIGRATION_DB_PROVIDER` / `_PATH` / `_NAME` / `_HOST` / `_PORT` / `_USERNAME` / `_PASSWORD`. Examples: `examples/demos/ingestion_and_migration/` |
-| Export a dataset's memory | `await cognee.export(dataset, format=...)`: `"pydantic"` (in memory, default), or a file in `"cogx"`, `"json"`, `"graphml"`, `"cypher"` |
-| Import from another memory system (Mem0, Zep/Graphiti, Letta, LangMem, a COGX archive) | Build a `MemorySource` (`cognee/modules/migration/sources/`) and pass it to `await cognee.remember(source, dataset_name=...)` |
+| Back up a dataset, or move it to another cognee instance | A COGX archive, see below |
+| Export a dataset's graph for other tools | `await cognee.export(dataset, format=...)`: `"json"`, `"graphml"` or `"cypher"` write a file (one way: cognee can't import them back); `"pydantic"` (default) returns typed DataPoint objects in memory |
+| Import from another memory system (Mem0, Zep/Graphiti, Letta, LangMem) | Build a `MemorySource` (`cognee/modules/migration/sources/`) and pass it to `await cognee.remember(source, dataset_name=...)` |
 
 There is no tool that moves a whole deployment from one database backend to
 another.
+
+#### COGX archives
+
+COGX (Cognee eXchange, `cognee/modules/migration/cogx.py`) is cognee's
+portable memory format and the only export format cognee can import back.
+An archive is a directory with a `manifest.json` (COGX version, source
+system, the dataset's data-migration revision) and one JSONL file per record
+kind (`documents`, `episodes`, `entities`, `facts`, `memories`,
+`memory_blocks`), plus `nodes.jsonl` with the raw graph nodes. The Mem0,
+Zep, Letta and LangMem importers also translate into COGX records first.
+
+Use it to back up and restore a dataset, or to copy one to another cognee
+instance:
+
+```python
+from cognee.migration import COGXArchiveSource
+
+await cognee.export("my_dataset", format="cogx", destination="backup_cogx")
+await cognee.remember(COGXArchiveSource("backup_cogx"), dataset_name="my_dataset")
+```
+
+- A restore defaults to `mode="preserve"`: the archived graph is written
+  back as-is, with no LLM calls. `mode="hybrid"` also re-cognifies the raw
+  content; `mode="re-derive"` ignores the archived graph and extracts again
+  (costs LLM tokens).
+- `cognee.push()` / `cognee-cli push` does the same to Cognee Cloud: it
+  exports to COGX, packs it as a `.cogx.tar.gz` and uploads it, and the
+  receiving instance restores it (preserve mode unless you pass `mode=`).
+- `export(..., include_permissions=True)` also writes `permissions.json`
+  with the dataset owner and ACL grants, **including password hashes**, so
+  the restore recreates working accounts. Treat that archive as a secret.
+- An archive written by a newer major COGX version is rejected with a
+  `ValueError`; upgrade cognee on the importing side.
 
 ## Pitfalls
 
