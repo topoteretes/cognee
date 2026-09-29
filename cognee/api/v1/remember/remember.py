@@ -1244,7 +1244,7 @@ async def remember(
                 "Call cognee.disconnect() to estimate locally."
             )
 
-        from cognee.infrastructure.llm import get_max_chunk_tokens
+        from cognee.infrastructure.llm import resolve_chunk_size
         from cognee.modules.chunking.TextChunker import TextChunker
         from cognee.modules.cognify.estimator import estimate_remember_dry_run
         from cognee.shared.data_models import KnowledgeGraph
@@ -1252,7 +1252,7 @@ async def remember(
         return await estimate_remember_dry_run(
             data,
             chunker=chunker or TextChunker,
-            chunk_size=chunk_size or await get_max_chunk_tokens(),
+            chunk_size=await resolve_chunk_size(chunk_size),
             graph_model=kwargs.get("graph_model") or KnowledgeGraph,
             custom_prompt=custom_prompt,
         )

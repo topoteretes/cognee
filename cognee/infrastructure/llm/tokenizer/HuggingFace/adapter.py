@@ -88,6 +88,18 @@ class HuggingFaceTokenizer(TokenizerInterface):
         """
         return len(self._tokenize(text))
 
+    @property
+    def model_input_limit(self) -> int | None:
+        """The input limit the model's repo declares (``model_max_length``), less the
+        special tokens the model adds itself, since text is counted without them.
+        None when the repo declares no limit (transformers then substitutes a
+        placeholder, so the declared value is read from ``init_kwargs``).
+        """
+        limit = self.tokenizer.init_kwargs.get("model_max_length")
+        if not isinstance(limit, int) or limit <= 0:
+            return None
+        return limit - self.tokenizer.num_special_tokens_to_add(pair=False)
+
     def decode_single_token(self, token: int) -> str:
         """
         Attempt to decode a single token from its encoding, which is not implemented in this
