@@ -1,7 +1,6 @@
 import os
 from functools import lru_cache
 
-from fastapi import status
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.exceptions import CogneeConfigurationError
@@ -86,20 +85,13 @@ def _log_gliner_demo_notice_once() -> None:
 
 
 class KeylessExtractorNotInstalledError(CogneeConfigurationError):
-    """The GLiNER demo extractor is needed, its runtime is missing, and auto-install is off.
-
-    A 422, not a 500: the deployment is missing an extra, a key, or the
-    auto-install opt-in, which the caller fixes — the same class of problem as
-    ``LLMAPIKeyNotSetError``. On 1.6.0's GA day seven deployments hit this as a
-    500 and two never got a pipeline to run.
-    """
+    """The GLiNER demo extractor is needed, its runtime is missing, and auto-install is off."""
 
     def __init__(self):
         super().__init__(
             "Cognify would extract the graph with the local GLiNER demo model, but its "
             "runtime (gliner2 + torch) is not installed and GLINER_AUTO_INSTALL is false.",
             "KeylessExtractorNotInstalledError",
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             remediation=(
                 'Install cognee with the GLiNER extra: pip install "cognee[gliner]" '
                 "(or set LLM_API_KEY to extract with an LLM)."

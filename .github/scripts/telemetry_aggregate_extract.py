@@ -92,15 +92,6 @@ _IDENT = (
 _ORIGIN = "coalesce(json_extract_string(properties, '$.telemetry_origin'), 'unknown')"
 # Normalized version: strip the -local suffix so builds compare cleanly.
 _VERSION = "coalesce(regexp_replace(cognee_version, '-local$', ''), 'unknown')"
-# How the deployment is installed: the explicit ``install_kind`` enum every
-# event carries since SDK-775 (docker / git / package). Older rows only have the
-# -local version suffix, which means "pyproject.toml adjacent" — true for git
-# checkouts AND the official Docker image — so they are labelled for exactly
-# what the suffix proves, not read as "self-hosted".
-_INSTALL_KIND = (
-    "coalesce(json_extract_string(properties, '$.install_kind'), "
-    "CASE WHEN cognee_version LIKE '%-local' THEN 'git-or-docker' ELSE 'package' END)"
-)
 # Pipeline error class (``exception_type``): a Python class name. Anything that
 # is not one identifier is bucketed, so an unexpected value cannot stop the export.
 _EXCEPTION_TYPE = (
@@ -121,7 +112,7 @@ QUERIES: dict[str, str] = {
     "daily_event_volumes": f"""
         SELECT ingestion_date AS day, tracking_event, {_VERSION} AS version,
                {_ORIGIN} AS origin,
-               {_INSTALL_KIND} AS install_kind,
+               (cognee_version LIKE '%-local') AS self_hosted,
                count(*) AS events,
                count(DISTINCT {_IDENT}) AS distinct_identities
         FROM analytics.main.pipeline_events
@@ -204,7 +195,7 @@ QUERIES: dict[str, str] = {
     # Version lifecycle within the window (adoption/abandonment).
     "version_lifecycle": f"""
         SELECT {_VERSION} AS version,
-               {_INSTALL_KIND} AS install_kind,
+               (cognee_version LIKE '%-local') AS self_hosted,
                min(ingestion_date) AS first_seen,
                max(ingestion_date) AS last_seen,
                count(*) AS events,

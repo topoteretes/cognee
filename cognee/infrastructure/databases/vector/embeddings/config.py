@@ -1,6 +1,5 @@
 from functools import lru_cache
 
-from fastapi import status
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -31,23 +30,15 @@ DEFAULT_LOCAL_EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 
 
 class KeylessEmbedderNotInstalledError(CogneeConfigurationError):
-    """No LLM key is configured and the local embedder's package is missing.
-
-    A 422, not a 500: a missing dependency or key is the caller's to fix, like
-    ``LLMAPIKeyNotSetError`` and ``KeylessExtractorNotInstalledError``.
-    """
+    """No LLM key is configured and the local embedder's package is missing."""
 
     def __init__(self):
         super().__init__(
             "No LLM API key is configured, so embeddings would run on the local fastembed "
             f"model {DEFAULT_LOCAL_EMBEDDING_MODEL}, but the `fastembed` package (a cognee "
-            "dependency) is not importable.",
+            "dependency) is not importable. Reinstall it with: pip install fastembed, or set "
+            "LLM_API_KEY to embed with the OpenAI default.",
             "KeylessEmbedderNotInstalledError",
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            remediation=(
-                "Reinstall it with: pip install fastembed — or set LLM_API_KEY to embed with "
-                "the OpenAI default."
-            ),
         )
 
 

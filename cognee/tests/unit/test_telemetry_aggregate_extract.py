@@ -69,21 +69,6 @@ class TelemetryAggregateExtractTest(unittest.TestCase):
             [tracking_event, version, json.dumps(properties), user],
         )
 
-    def test_install_kind_prefers_the_explicit_field_and_labels_legacy_rows_honestly(self):
-        self._insert_event("Pipeline Run Started", "1.6.0-local", {"install_kind": "docker"})
-        self._insert_event("Pipeline Run Started", "1.5.4-local", {})
-        self._insert_event("Pipeline Run Started", "1.5.4", {})
-        for query in ("daily_event_volumes", "version_lifecycle"):
-            with self.subTest(query=query):
-                kinds = {(row["version"], row["install_kind"]) for row in self._rows(query)}
-                # A -local suffix only proves pyproject.toml was adjacent, which the
-                # official Docker image satisfies too — never labelled "self-hosted".
-                self.assertEqual(
-                    kinds,
-                    {("1.6.0", "docker"), ("1.5.4", "git-or-docker"), ("1.5.4", "package")},
-                )
-                self.assertNotIn("self_hosted", self._rows(query)[0])
-
     def test_error_types_are_class_names_or_buckets(self):
         self._insert_event("Pipeline Run Errored", "1.6.0", {"exception_type": "ValueError"})
         self._insert_event("Pipeline Run Errored", "1.6.0", {"exception_type": "ValueError"}, "b")
