@@ -180,3 +180,62 @@ def test_a_deleted_working_directory_does_not_break_import(monkeypatch, tmp_path
     beside_package = _write_env(tmp_path / "no-package-env", "from-package-side")
 
     assert env_file.resolve_env_file() == str(beside_package)
+
+
+def test_a_pinned_file_is_not_topped_up_from_the_working_directory(monkeypatch, tmp_path):
+    """With COGNEE_ENV_FILE set, a settings class must not read ./.env for the gaps.
+
+    Settings classes used to declare ``env_file=".env"`` and open the working
+    directory's file themselves, so a key missing from the pinned file came from
+    ``./.env`` for them while ``os.getenv`` readers saw nothing (SDK-781 again).
+    """
+    from cognee.infrastructure.llm.config import LLMConfig
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".env").write_text("LLM_MODEL=openai/FROM-CWD-ENV\n")
+    pinned = tmp_path / "config" / "cognee.env"
+    pinned.parent.mkdir()
+    pinned.write_text(f"{KEY}=from-pinned\n")
+    monkeypatch.chdir(project)
+    monkeypatch.setenv(env_file.ENV_FILE_VARIABLE, str(pinned))
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+
+    env_file.load_env_file()
+
+    assert os.getenv("LLM_MODEL") is None
+    assert LLMConfig().llm_model != "openai/FROM-CWD-ENV"
+
+
+def test_no_cognee_settings_class_opens_its_own_env_file():
+    """Every settings class reads the process environment the resolver filled."""
+    package = Path(env_file.__file__).resolve().parent.parent
+    offenders = [
+        f"{path.relative_to(package.parent)}:{number}"
+        for path in package.rglob("*.py")
+        if "tests" not in path.relative_to(package).parts
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if "SettingsConfigDict(" in line and "env_file=" in line
+    ]
+
+    assert offenders == []
+
+
+def test_persisted_config_goes_to_the_loaded_file(monkeypatch, tmp_path):
+    """cognee.config setters persist into the file this process loaded."""
+    from cognee.api.v1.config.config import _persist_env_var
+
+    pinned = tmp_path / "config" / "cognee.env"
+    pinned.parent.mkdir()
+    pinned.write_text(f"{KEY}=from-pinned\n")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setenv(env_file.ENV_FILE_VARIABLE, str(pinned))
+    env_file.load_env_file()
+
+    path, created = _persist_env_var("COGNEE_ENVFILE_TEST_PERSIST", "yes")
+
+    assert (path, created) == (str(pinned), False)
+    assert "COGNEE_ENVFILE_TEST_PERSIST='yes'" in pinned.read_text()
+    assert not (elsewhere / ".env").exists()

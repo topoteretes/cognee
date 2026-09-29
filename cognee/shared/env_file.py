@@ -1,11 +1,14 @@
 """Find and load the one ``.env`` file cognee runs with.
 
-Cognee reads settings two ways: settings classes (``BaseSettings`` with
-``env_file=".env"``) and plain ``os.getenv`` at the point of use. Both must see
-the same file with the same precedence, so the file is resolved here once and
-loaded into the process environment with ``override=True`` — the file wins over
-variables already present in the shell, which is what users expect from a
-project ``.env`` and what preset shell variables kept breaking.
+Cognee reads settings two ways: settings classes (``BaseSettings``) and plain
+``os.getenv`` at the point of use. Both must see the same file with the same
+precedence, so the file is resolved here once and loaded into the process
+environment with ``override=True`` — the file wins over variables already
+present in the shell, which is what users expect from a project ``.env`` and
+what preset shell variables kept breaking. The settings classes therefore set
+no ``env_file`` of their own: they read the process environment only, and a
+``.env`` they opened themselves would be ``./.env``, not necessarily the file
+resolved here (``COGNEE_ENV_FILE``, a parent directory, the package side).
 
 Where the file comes from, in order:
 
