@@ -20,6 +20,11 @@ from cognee.infrastructure.databases.exceptions import (
     EmbeddingException,
 )
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
+from cognee.infrastructure.databases.vector.embeddings.input_limit import (
+    effective_input_limit,
+    huggingface_tokenizer_limit,
+    litellm_input_limit,
+)
 from cognee.infrastructure.databases.vector.embeddings.retry_config import (
     embedding_retry_condition,
 )
@@ -112,7 +117,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         api_key: str | None = None,
         endpoint: str | None = None,
         api_version: str | None = None,
-        max_completion_tokens: int = 512,
+        max_completion_tokens: int | None = None,
         batch_size: int = 100,
         input_type: str | None = None,
     ):
@@ -122,8 +127,18 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         self.provider = provider
         self.model = model
         self.dimensions = dimensions
-        self.max_completion_tokens = max_completion_tokens
         self.tokenizer = self.get_tokenizer()
+        # litellm's table knows the hosted models; a HuggingFace-repo model served
+        # elsewhere (vLLM, TEI, ...) at least carries its limit on its tokenizer.
+        self.model_input_limit = litellm_input_limit(
+            model, provider
+        ) or huggingface_tokenizer_limit(self.tokenizer)
+        self.max_completion_tokens = effective_input_limit(
+            configured=max_completion_tokens,
+            model_limit=self.model_input_limit,
+            model=model,
+            source="litellm model table or the model's tokenizer",
+        )
         self.retry_count = 0
         self.batch_size = batch_size
         # Required by some providers (e.g. NVIDIA NIM's nv-embed family) to
@@ -408,10 +423,6 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         logger.debug(f"Loading tokenizer for model {self.model}...")
         # Strip the vLLM routing prefix so the bare HuggingFace repo is resolvable.
         model = self.model.replace("hosted_vllm/", "")
-        tokenizer = resolve_embedding_tokenizer(
-            provider=self.provider,
-            model=model,
-            max_completion_tokens=self.max_completion_tokens,
-        )
+        tokenizer = resolve_embedding_tokenizer(provider=self.provider, model=model)
         logger.debug(f"Tokenizer loaded for model: {self.model}")
         return tokenizer

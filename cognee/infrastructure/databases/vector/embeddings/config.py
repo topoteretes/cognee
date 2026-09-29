@@ -112,7 +112,11 @@ class EmbeddingConfig(BaseSettings):
     )
     embedding_api_key: str | None = None
     embedding_api_version: str | None = None
-    embedding_max_completion_tokens: int | None = 8191
+    # Cap on the tokens a chunk (or anything else) is embedded with. Unset means
+    # DEFAULT_EMBEDDING_INPUT_CAP (4096); the engine lowers the effective limit to
+    # the model's own input limit when that is known and smaller (see
+    # embeddings/input_limit.py).
+    embedding_max_completion_tokens: int | None = None
     embedding_batch_size: int | None = None
     # Total data points allowed in flight to the embedding engine during indexing.
     # Concurrent embedding requests = max(1, this // embedding_batch_size).

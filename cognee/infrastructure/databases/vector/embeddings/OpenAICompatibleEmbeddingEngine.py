@@ -36,6 +36,11 @@ from cognee.infrastructure.databases.exceptions import (
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
 )
+from cognee.infrastructure.databases.vector.embeddings.input_limit import (
+    effective_input_limit,
+    huggingface_tokenizer_limit,
+    litellm_input_limit,
+)
 from cognee.infrastructure.databases.vector.embeddings.retry_config import (
     embedding_retry_condition,
 )
@@ -87,7 +92,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         self,
         model: str | None = "default",
         dimensions: int = 3072,
-        max_completion_tokens: int = 8191,
+        max_completion_tokens: int | None = None,
         endpoint: str | None = "http://localhost:8080",
         api_key: str | None = "no-key-required",
         batch_size: int = 36,
@@ -95,7 +100,6 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
     ):
         self.model = model or "default"
         self.dimensions = dimensions
-        self.max_completion_tokens = max_completion_tokens
         self.endpoint = endpoint or "http://localhost:8080"
         self.api_key = api_key or "no-key-required"
         self.batch_size = batch_size
@@ -105,6 +109,17 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         # so it has no effect on servers that ignore unknown fields.
         self.input_type = input_type
         self.tokenizer = self.get_tokenizer()
+        # A self-hosted server names no limit; the served model id is usually a
+        # HuggingFace repo (its tokenizer knows) or a hosted model litellm knows.
+        self.model_input_limit = litellm_input_limit(self.model) or huggingface_tokenizer_limit(
+            self.tokenizer
+        )
+        self.max_completion_tokens = effective_input_limit(
+            configured=max_completion_tokens,
+            model_limit=self.model_input_limit,
+            model=self.model,
+            source="litellm model table or the model's tokenizer",
+        )
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false").lower()
         self.mock = enable_mocking in ("true", "1", "yes")
@@ -298,8 +313,4 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         model's own tokenizer and warns/falls back safely on mismatch (issue #3646).
         """
         logger.debug("Loading tokenizer for OpenAICompatibleEmbeddingEngine...")
-        return resolve_embedding_tokenizer(
-            provider="openai_compatible",
-            model=self.model,
-            max_completion_tokens=self.max_completion_tokens,
-        )
+        return resolve_embedding_tokenizer(provider="openai_compatible", model=self.model)

@@ -29,6 +29,10 @@ from cognee.infrastructure.databases.exceptions import (
     EmbeddingException,
 )
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
+from cognee.infrastructure.databases.vector.embeddings.input_limit import (
+    effective_input_limit,
+    fastembed_input_limit,
+)
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     handle_embedding_response,
     sanitize_embedding_text_inputs,
@@ -98,13 +102,11 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         self,
         model: str | None = "openai/text-embedding-3-large",
         dimensions: int | None = 3072,
-        max_completion_tokens: int = 512,
+        max_completion_tokens: int | None = None,
         batch_size: int = 100,
     ):
         self.model = model
         self.dimensions = dimensions
-        self.max_completion_tokens = max_completion_tokens
-        self.tokenizer = self.get_tokenizer()
         self.batch_size = batch_size
         cached, cache_dir, size_hint = fastembed_model_cached(model)
         log_model_load(
@@ -116,6 +118,16 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             location_var="FASTEMBED_CACHE_PATH",
         )
         self.embedding_model = TextEmbedding(model_name=model)
+        # fastembed truncates input at the model's own limit without an error, so
+        # chunks must never be sized past it.
+        self.model_input_limit = fastembed_input_limit(self.embedding_model)
+        self.max_completion_tokens = effective_input_limit(
+            configured=max_completion_tokens,
+            model_limit=self.model_input_limit,
+            model=model,
+            source="fastembed model tokenizer",
+        )
+        self.tokenizer = self.get_tokenizer()
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
         if isinstance(enable_mocking, bool):
@@ -158,6 +170,12 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         original_texts = text if isinstance(text, list) else [text]
         sanitized_text = sanitize_embedding_text_inputs(original_texts)
 
+        # fastembed cuts input past the model's limit without an error, so an
+        # over-length text is caught here and embedded in overlapping parts, the
+        # same recovery the other engines run when their provider rejects it.
+        if not self.mock and self._exceeds_model_limit(sanitized_text):
+            return await self._embed_in_parts(original_texts)
+
         try:
             if self.mock:
                 embeddings = [[0.0] * self.dimensions for _ in sanitized_text]
@@ -183,30 +201,10 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
                 "max tokens",
             )
             if any(pattern in error_str for pattern in context_error_patterns):
-                if len(original_texts) > 1:
-                    mid = math.ceil(len(original_texts) / 2)
-                    left_vecs, right_vecs = await asyncio.gather(
-                        self.embed_text(original_texts[:mid]),
-                        self.embed_text(original_texts[mid:]),
-                    )
-                    embeddings = left_vecs + right_vecs
-                    return handle_embedding_response(original_texts, embeddings, self.dimensions)
-
-                if len(original_texts) == 1:
-                    s = original_texts[0]
-                    third = len(s) // 3
-                    if third == 0:
-                        raise EmbeddingContextWindowTooSmallError from error
-                    left_part, right_part = s[: third * 2], s[third:]
-                    (left_vec,), (right_vec,) = await asyncio.gather(
-                        self.embed_text([left_part]),
-                        self.embed_text([right_part]),
-                    )
-                    pooled = (np.array(left_vec) + np.array(right_vec)) / 2
-                    embeddings = [pooled.tolist()]
-                    return handle_embedding_response(original_texts, embeddings, self.dimensions)
-
-                return handle_embedding_response(original_texts, embeddings, self.dimensions)
+                try:
+                    return await self._embed_in_parts(original_texts)
+                except EmbeddingContextWindowTooSmallError:
+                    raise EmbeddingContextWindowTooSmallError from error
 
             logger.error(f"Embedding error in FastembedEmbeddingEngine: {error!s}")
             raise EmbeddingException(
@@ -214,6 +212,57 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             ) from error
 
         return handle_embedding_response(original_texts, embeddings, self.dimensions)
+
+    def _exceeds_model_limit(self, texts: list[str]) -> bool:
+        """Whether the model's tokenizer would truncate any of ``texts``.
+
+        The tokenizer keeps the cut-off part as ``overflowing`` pieces, so this
+        is the model's own verdict, not an estimate. A tokenizer that cannot
+        answer (an unexpected fastembed internals layout) means "no", which keeps
+        the pre-fix behaviour rather than raising.
+        """
+        tokenizer = getattr(getattr(self.embedding_model, "model", None), "tokenizer", None)
+        if tokenizer is None:
+            return False
+        try:
+            return any(encoding.overflowing for encoding in tokenizer.encode_batch(texts))
+        except Exception:
+            logger.debug("Could not check input length with the fastembed tokenizer", exc_info=True)
+            return False
+
+    async def _embed_in_parts(self, original_texts: list[str]) -> list[list[float]]:
+        """Embed over-length input in parts: a batch is split in two, a single text
+        into two overlapping halves whose embeddings are pooled. Each part goes back
+        through :meth:`embed_text`, which splits further while it is still too long.
+        """
+        if len(original_texts) > 1:
+            mid = math.ceil(len(original_texts) / 2)
+            left_vecs, right_vecs = await asyncio.gather(
+                self.embed_text(original_texts[:mid]),
+                self.embed_text(original_texts[mid:]),
+            )
+            return handle_embedding_response(
+                original_texts, left_vecs + right_vecs, self.dimensions
+            )
+
+        s = original_texts[0]
+        third = len(s) // 3
+        if third == 0:
+            raise EmbeddingContextWindowTooSmallError
+        logger.debug(
+            "Text of %s characters exceeds what %s embeds at once (%s tokens); embedding "
+            "it as two overlapping parts.",
+            len(s),
+            self.model,
+            self.max_completion_tokens,
+        )
+        left_part, right_part = s[: third * 2], s[third:]
+        (left_vec,), (right_vec,) = await asyncio.gather(
+            self.embed_text([left_part]),
+            self.embed_text([right_part]),
+        )
+        pooled = (np.array(left_vec) + np.array(right_vec)) / 2
+        return handle_embedding_response(original_texts, [pooled.tolist()], self.dimensions)
 
     def get_vector_size(self) -> int:
         """

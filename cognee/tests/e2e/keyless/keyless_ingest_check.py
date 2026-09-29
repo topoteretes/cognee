@@ -101,6 +101,14 @@ async def main() -> None:
 
     graph = await get_graph_engine()
     nodes, edges = await graph.get_graph_data()
+    # The default fastembed model reads 512 tokens and truncates the rest without
+    # an error (SDK-868), so the engine's limit must be the model's own and every
+    # chunk must fit inside it.
+    assert engine.model_input_limit == 512, engine.model_input_limit
+    assert engine.max_completion_tokens == 512, engine.max_completion_tokens
+    chunk_sizes = [n[1]["chunk_size"] for n in nodes if n[1].get("type") == "DocumentChunk"]
+    assert chunk_sizes and max(chunk_sizes) <= engine.max_completion_tokens, chunk_sizes
+    print(f"chunks: {len(chunk_sizes)}, largest {max(chunk_sizes)} tokens (limit 512)")
     entities = sorted(
         {n[1].get("name") for n in nodes if n[1].get("type") == "Entity" and n[1].get("name")}
     )
