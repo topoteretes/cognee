@@ -179,25 +179,23 @@ def test_mistral_missing_dependency_falls_back_without_raising(caplog):
     assert any("Falling back" in r.message for r in caplog.records)
 
 
-def test_missing_package_warning_does_not_suggest_huggingface_tokenizer(caplog):
-    # HUGGINGFACE_TOKENIZER only chooses which tokenizer to load, so it cannot fix
-    # a missing package (SDK-810); the warning must name the package instead.
+def test_missing_transformers_names_the_extra(caplog):
+    # Without transformers, HUGGINGFACE_TOKENIZER cannot help; the warning must
+    # name the extra to install instead.
     tik = patch(
         f"{_MODULE}.TikTokenTokenizer", side_effect=lambda **kw: _FakeTokenizer("tiktoken", **kw)
     )
     hf = patch(
         f"{_MODULE}.HuggingFaceTokenizer",
-        side_effect=ImportError("could not load tokenizer.json, and transformers is not installed"),
+        side_effect=ModuleNotFoundError("No module named 'transformers'", name="transformers"),
     )
     mis = patch(f"{_MODULE}.MistralTokenizer")
     with caplog.at_level(logging.WARNING), tik, hf, mis:
-        tok = resolve_embedding_tokenizer(provider="fastembed", model="BAAI/bge-small-en-v1.5")
+        tok = resolve_embedding_tokenizer(provider="openai_compatible", model="BAAI/bge-m3")
     assert tok.kind == "tiktoken"
-    warnings = [r.message for r in caplog.records if "Falling back" in r.message]
-    assert warnings, "expected the fallback warning"
-    assert "transformers is not installed" in warnings[0]
-    assert "Install the missing package" in warnings[0]
-    assert "HUGGINGFACE_TOKENIZER" not in warnings[0]
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("cognee[huggingface]" in m for m in messages)
+    assert not any("Set HUGGINGFACE_TOKENIZER" in m for m in messages)
 
 
 def test_bare_model_strips_one_provider_tag():

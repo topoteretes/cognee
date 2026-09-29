@@ -45,9 +45,9 @@ _MISMATCH_HINT = (
     "that does not match the embedding model will mis-size chunks. Set "
     "HUGGINGFACE_TOKENIZER to a tokenizer matching your embedding model to fix this."
 )
-_MISSING_PACKAGE_HINT = (
-    "Token counts drive chunk sizing and the --dry-run estimate. Install the missing "
-    "package to count with the model's own tokenizer."
+# HUGGINGFACE_TOKENIZER cannot help when the library that loads it is missing.
+_TRANSFORMERS_HINT = (
+    'transformers is not installed. Install it with: pip install "cognee[huggingface]"'
 )
 
 
@@ -110,15 +110,13 @@ def _load_or_tiktoken_fallback(
     try:
         return build()
     except Exception as error:
-        # A missing package is not fixed by pointing HUGGINGFACE_TOKENIZER elsewhere;
-        # the error itself names the package to install.
-        hint = _MISSING_PACKAGE_HINT if isinstance(error, ImportError) else _MISMATCH_HINT
+        missing = isinstance(error, ImportError) and (error.name or "").startswith("transformers")
         logger.warning(
             "Could not load a matching tokenizer for %s (%s). Falling back to "
             "TikToken, so token counts are approximate. %s",
             context,
             error,
-            hint,
+            _TRANSFORMERS_HINT if missing else _MISMATCH_HINT,
             exc_info=True,
         )
         return TikTokenTokenizer(model=None, max_completion_tokens=max_completion_tokens)

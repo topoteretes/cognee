@@ -33,7 +33,7 @@ class CognifyConfig(BaseSettings):
     # for environments installed at build time.
     gliner_auto_install: bool = True
     gliner_torch_index_url: str = "https://download.pytorch.org/whl/cpu"
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     def to_dict(self) -> dict:
         return {

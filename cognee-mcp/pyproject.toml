@@ -92,7 +92,9 @@ exclude-newer = "2 days"
 # third-party packages; applying it to our own package meant a release-day
 # `uv lock` silently resolved cognee to the *previous* release, which is how
 # the lock drifted to 1.2.2 while the image was tagged 1.4.1 (issue #4360).
-exclude-newer-package = { cognee = "0 days" }
+# enola-cli is exempt for the same reason as in the root pyproject.toml: cognee
+# pins an exact, validated release, often one published the same day.
+exclude-newer-package = { cognee = "0 days", enola-cli = "0 days" }
 
 [project.scripts]
 cognee = "src:main"

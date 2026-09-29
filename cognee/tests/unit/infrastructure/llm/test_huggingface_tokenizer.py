@@ -97,6 +97,7 @@ def test_raises_naming_both_the_missing_file_and_transformers_when_neither_helps
     assert "tokenizer.json" in message and "org/slow-tokenizer-only" in message
     assert "no tokenizer.json" in message  # the underlying cause
     assert "transformers" in message and "not installed" in message
+    assert raised.value.name == "transformers"  # what the resolver's hint keys on
 
 
 def test_find_spec_is_the_real_one():

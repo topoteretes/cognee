@@ -23,9 +23,11 @@ def _load_tokenize(model: str) -> Callable[[str], list[str]]:
         tokenizer = Tokenizer.from_file(hf_hub_download(model, "tokenizer.json"))
     except Exception as error:
         if importlib.util.find_spec("transformers") is None:
+            # name="transformers": the resolver's fallback warning then names the extra.
             raise ImportError(
                 f"could not load tokenizer.json for {model!r} ({error}), and transformers, "
-                "which can build the tokenizer from the repo's other files, is not installed"
+                "which can build the tokenizer from the repo's other files, is not installed",
+                name="transformers",
             ) from error
         from transformers import AutoTokenizer
 
