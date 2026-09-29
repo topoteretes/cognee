@@ -18,7 +18,7 @@ from cognee.infrastructure.databases.exceptions import EmbeddingException
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     effective_input_limit,
-    ollama_input_limit,
+    sane_limit,
 )
 from cognee.infrastructure.databases.vector.embeddings.retry_config import (
     embedding_retry_condition,
@@ -37,6 +37,35 @@ from cognee.shared.utils import create_secure_ssl_context
 logger = get_logger("OllamaEmbeddingEngine")
 
 observe = get_observe()
+
+
+def ollama_input_limit(endpoint: str | None, model: str | None, api_key: str | None) -> int | None:
+    """The model's context length from Ollama's ``/api/show``, or None.
+
+    Ollama embeds up to the model's ``context_length``. Anything that stops the
+    lookup, from a server that is down to an endpoint that is not Ollama-shaped,
+    gives None: the cap then stands, and ``truncate: false`` on every embed request
+    still turns an over-length input into an error instead of a silent cut.
+    """
+    if not endpoint or not model or "/api/" not in endpoint:
+        return None
+    import httpx
+
+    show_url = f"{endpoint.split('/api/', 1)[0]}/api/show"
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    try:
+        response = httpx.post(show_url, json={"model": model}, headers=headers)
+        response.raise_for_status()
+        model_info = response.json().get("model_info") or {}
+    except Exception:
+        logger.debug(
+            "Could not read the context length of %r from %s", model, show_url, exc_info=True
+        )
+        return None
+    for key, value in model_info.items():
+        if key.endswith(".context_length"):
+            return sane_limit(value)
+    return None
 
 
 class OllamaEmbeddingEngine(EmbeddingEngine):

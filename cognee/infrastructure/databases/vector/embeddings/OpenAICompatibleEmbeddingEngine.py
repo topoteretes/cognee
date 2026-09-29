@@ -38,8 +38,8 @@ from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
 )
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     effective_input_limit,
-    huggingface_tokenizer_limit,
     litellm_input_limit,
+    sane_limit,
 )
 from cognee.infrastructure.databases.vector.embeddings.retry_config import (
     embedding_retry_condition,
@@ -111,8 +111,8 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         self.tokenizer = self.get_tokenizer()
         # A self-hosted server names no limit; the served model id is usually a
         # HuggingFace repo (its tokenizer knows) or a hosted model litellm knows.
-        self.model_input_limit = litellm_input_limit(self.model) or huggingface_tokenizer_limit(
-            self.tokenizer
+        self.model_input_limit = litellm_input_limit(self.model) or sane_limit(
+            self.tokenizer.model_input_limit
         )
         self.max_completion_tokens = effective_input_limit(
             configured=max_completion_tokens,

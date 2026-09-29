@@ -22,8 +22,8 @@ from cognee.infrastructure.databases.exceptions import (
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     effective_input_limit,
-    huggingface_tokenizer_limit,
     litellm_input_limit,
+    sane_limit,
 )
 from cognee.infrastructure.databases.vector.embeddings.retry_config import (
     embedding_retry_condition,
@@ -130,9 +130,9 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         self.tokenizer = self.get_tokenizer()
         # litellm's table knows the hosted models; a HuggingFace-repo model served
         # elsewhere (vLLM, TEI, ...) at least carries its limit on its tokenizer.
-        self.model_input_limit = litellm_input_limit(
-            model, provider
-        ) or huggingface_tokenizer_limit(self.tokenizer)
+        self.model_input_limit = litellm_input_limit(model, provider) or sane_limit(
+            self.tokenizer.model_input_limit
+        )
         self.max_completion_tokens = effective_input_limit(
             configured=max_completion_tokens,
             model_limit=self.model_input_limit,

@@ -47,7 +47,7 @@ def _hf_tokenizer(model_max_length: int) -> HuggingFaceTokenizer:
     """A resolved HuggingFace tokenizer whose model reports ``model_max_length``
     and adds no special tokens (so the limit is used as is)."""
     tokenizer = HuggingFaceTokenizer.__new__(HuggingFaceTokenizer)
-    tokenizer.tokenizer = MagicMock(model_max_length=model_max_length)
+    tokenizer.tokenizer = MagicMock(init_kwargs={"model_max_length": model_max_length})
     tokenizer.tokenizer.num_special_tokens_to_add.return_value = 0
     return tokenizer
 

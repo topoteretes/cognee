@@ -8,20 +8,18 @@ accept less truncate the input without an error, so on fastembed's default model
 
 The effective limit is now ``min(cap, model limit)``: the cap is
 ``EMBEDDING_MAX_COMPLETION_TOKENS`` (``DEFAULT_EMBEDDING_INPUT_CAP`` when unset),
-the model limit comes from the best source each provider has:
+and each engine reads the model limit from the best source its provider has
+(fastembed's loaded tokenizer, Ollama's ``/api/show``, litellm's model table, or
+the model's HuggingFace tokenizer). The lookups live with their engines; this
+module holds the cap, the litellm table lookup two engines share, and the rule
+that combines cap and model limit.
 
-* fastembed: the loaded model's own tokenizer truncation;
-* litellm providers: litellm's model table (``max_input_tokens``);
-* Ollama: the model's ``context_length`` from ``/api/show``;
-* any HuggingFace-repo model: the tokenizer's ``model_max_length``, as a fallback.
-
-When no source knows the model, the cap stands and an INFO line says the limit
+When no source knows the model, the cap stands and a WARNING says the limit
 could not be verified.
 """
 
 import litellm
 
-from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -68,79 +66,6 @@ def litellm_input_limit(model: str | None, provider: str | None = None) -> int |
         limit = sane_limit(info.get("max_input_tokens"))
         if limit is not None:
             return limit
-    return None
-
-
-def _minus_special_tokens(limit: int | None, tokenizer) -> int | None:
-    """``limit`` less the special tokens the model adds around the text.
-
-    The model's limit includes the ``[CLS]``/``[SEP]`` it adds itself, while
-    chunks are counted without them, so a chunk filled to the limit would
-    overflow by that many tokens.
-    """
-    if limit is None:
-        return None
-    try:
-        special = tokenizer.num_special_tokens_to_add(False)
-    except (AttributeError, TypeError):
-        # Not a tokenizers/transformers tokenizer: nothing known to subtract.
-        return limit
-    return sane_limit(limit - special) if isinstance(special, int) else limit
-
-
-def huggingface_tokenizer_limit(tokenizer) -> int | None:
-    """``model_max_length`` of a resolved HuggingFace tokenizer, or None.
-
-    Only a HuggingFaceTokenizer carries the model's own limit; TikToken and
-    Mistral fallbacks say nothing about the embedding model. transformers fills
-    in ``VERY_LARGE_INTEGER`` when the repo declares no limit, which means unknown.
-    """
-    if not isinstance(tokenizer, HuggingFaceTokenizer):
-        return None
-    from transformers.tokenization_utils_base import VERY_LARGE_INTEGER
-
-    limit = sane_limit(getattr(tokenizer.tokenizer, "model_max_length", None))
-    if limit is None or limit >= VERY_LARGE_INTEGER:
-        return None
-    return _minus_special_tokens(limit, tokenizer.tokenizer)
-
-
-def fastembed_input_limit(embedding_model) -> int | None:
-    """The limit a loaded fastembed model truncates at, from its own tokenizer, or None."""
-    tokenizer = getattr(getattr(embedding_model, "model", None), "tokenizer", None)
-    truncation = getattr(tokenizer, "truncation", None)
-    if not isinstance(truncation, dict):
-        return None
-    return _minus_special_tokens(sane_limit(truncation.get("max_length")), tokenizer)
-
-
-def ollama_input_limit(endpoint: str | None, model: str | None, api_key: str | None) -> int | None:
-    """The model's context length from Ollama's ``/api/show``, or None.
-
-    Ollama embeds up to the model's ``context_length`` (its ``num_ctx`` default for
-    embeddings). Anything that stops the lookup, from a server that is down to an
-    endpoint that is not Ollama-shaped, gives None: the cap then stands, and the
-    ``truncate: false`` on every embed request still turns an over-length input
-    into an error instead of a silent cut.
-    """
-    if not endpoint or not model or "/api/" not in endpoint:
-        return None
-    import httpx
-
-    show_url = f"{endpoint.split('/api/', 1)[0]}/api/show"
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    try:
-        response = httpx.post(show_url, json={"model": model}, headers=headers)
-        response.raise_for_status()
-        model_info = response.json().get("model_info") or {}
-    except Exception:
-        logger.debug(
-            "Could not read the context length of %r from %s", model, show_url, exc_info=True
-        )
-        return None
-    for key, value in model_info.items():
-        if key.endswith(".context_length"):
-            return sane_limit(value)
     return None
 
 

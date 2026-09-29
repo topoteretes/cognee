@@ -13,14 +13,17 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
+from cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine import (
+    fastembed_input_limit,
+)
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     DEFAULT_EMBEDDING_INPUT_CAP,
     effective_input_limit,
-    fastembed_input_limit,
-    huggingface_tokenizer_limit,
     litellm_input_limit,
-    ollama_input_limit,
     sane_limit,
+)
+from cognee.infrastructure.databases.vector.embeddings.OllamaEmbeddingEngine import (
+    ollama_input_limit,
 )
 from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
@@ -56,20 +59,18 @@ def test_litellm_input_limit_is_none_for_unknown_models():
     assert litellm_input_limit(None) is None
 
 
-def test_huggingface_tokenizer_limit_reads_model_max_length_less_special_tokens():
+def test_huggingface_tokenizer_knows_its_models_limit_less_special_tokens():
     tokenizer = HuggingFaceTokenizer.__new__(HuggingFaceTokenizer)
-    tokenizer.tokenizer = MagicMock(model_max_length=512)
+    tokenizer.tokenizer = MagicMock(init_kwargs={"model_max_length": 512})
     tokenizer.tokenizer.num_special_tokens_to_add.return_value = 2  # [CLS] and [SEP]
-    assert huggingface_tokenizer_limit(tokenizer) == 510
+    assert tokenizer.model_input_limit == 510
 
-    # transformers fills in VERY_LARGE_INTEGER when the repo declares no limit.
-    from transformers.tokenization_utils_base import VERY_LARGE_INTEGER
-
-    tokenizer.tokenizer = MagicMock(model_max_length=VERY_LARGE_INTEGER)
-    assert huggingface_tokenizer_limit(tokenizer) is None
+    # A repo that declares no limit (transformers substitutes a placeholder).
+    tokenizer.tokenizer = MagicMock(init_kwargs={})
+    assert tokenizer.model_input_limit is None
 
     # A TikToken fallback says nothing about the embedding model.
-    assert huggingface_tokenizer_limit(TikTokenTokenizer(model=None)) is None
+    assert TikTokenTokenizer(model=None).model_input_limit is None
 
 
 def test_fastembed_input_limit_reads_the_loaded_tokenizer_truncation_less_special_tokens():

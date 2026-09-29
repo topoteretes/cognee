@@ -31,7 +31,7 @@ from cognee.infrastructure.databases.exceptions import (
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     effective_input_limit,
-    fastembed_input_limit,
+    sane_limit,
 )
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     handle_embedding_response,
@@ -72,6 +72,22 @@ def fastembed_model_cached(model: str) -> tuple[bool, str, str | None]:
     if hub_repo:
         candidates.append(cache_dir / f"models--{hub_repo.replace('/', '--')}")
     return any(path.exists() for path in candidates), str(cache_dir), size_hint
+
+
+def fastembed_input_limit(embedding_model) -> int | None:
+    """How many tokens of text the loaded fastembed model embeds, or None.
+
+    Read from the model's own tokenizer: the length it truncates at, less the
+    special tokens it adds itself, since text is counted without them.
+    """
+    tokenizer = getattr(getattr(embedding_model, "model", None), "tokenizer", None)
+    truncation = getattr(tokenizer, "truncation", None)
+    if not isinstance(truncation, dict):
+        return None
+    limit = sane_limit(truncation.get("max_length"))
+    if limit is None:
+        return None
+    return sane_limit(limit - tokenizer.num_special_tokens_to_add(False))
 
 
 class FastembedEmbeddingEngine(EmbeddingEngine):
