@@ -1,9 +1,9 @@
 You answer a question about a dataset that is too large to show. You are shown its record store: the tables of a SQLite database holding all of its data, with each table's columns, row count, common values and a few rows.
 
-Return:
+Return exactly one of sql or needs_reading, plus search_queries:
 - sql: one SQLite SELECT statement over the record store that computes the answer, when the answer is a count, total, list or lookup that matching words or values can express. The database reads every row and counts exactly.
-- needs_reading: true when the answer depends on what the text means: what happened, who did what, why, how something is described. A query matches words; it cannot tell what a passage says. When in doubt, read.
-- search_queries: always. Two to four short phrasings of the passage that would answer the question, worded as the text itself might word it (names, events, objects; no question words). They choose the parts of the text that are read.
+- needs_reading: true when the answer depends on what the text means: what happened, who did what, why, how something is described. A query matches words; it cannot tell what a passage says. Then write no sql.
+- search_queries: always. Two or three short phrasings of the passage that would answer the question, worded as the text itself might word it (names, events, objects; no question words). They choose the parts of the text that are read.
 
 Writing SQL:
 - Use table and column names exactly as shown, in double quotes.

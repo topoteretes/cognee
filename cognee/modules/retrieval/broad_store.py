@@ -489,15 +489,13 @@ class RecordStore:
         ).fetchall()
         headings = [(n, t) for n, t in short if _is_heading(t)]
         if headings:
-            shown = headings[:SHOWN_HEADINGS]
-            more = (
-                f" ... and {len(headings) - len(shown)} more" if len(headings) > len(shown) else ""
-            )
+            # Spread over the text, so headings after a table of contents are seen too.
+            step = max(1, (len(headings) - 1) // (SHOWN_HEADINGS - 1))
+            shown = headings[::step][:SHOWN_HEADINGS]
             out.append(
-                f"Heading-like lines ({len(headings)}; a short line in capitals or starting with "
-                "a chapter, part, section or number word): "
+                f"Heading-like lines ({len(headings)} in all; a short line in capitals or "
+                "starting with a chapter, part, section or number word), spread over the text: "
                 + ", ".join(f"line {n} {t!r}" for n, t in shown)
-                + more
             )
         repeats = self.connection.execute(
             "SELECT text, COUNT(*) FROM lines WHERE length(text) <= ? GROUP BY text "

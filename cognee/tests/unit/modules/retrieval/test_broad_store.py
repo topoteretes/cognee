@@ -113,5 +113,5 @@ def test_the_schema_shows_how_a_text_is_laid_out(store):
     schema = store.describe("How many chapters?")
 
     assert "Start of document 'book.txt':" in schema and "1: CONTENTS" in schema
-    assert "Heading-like lines (5;" in schema and "line 2 'CHAPTER I'" in schema
+    assert "Heading-like lines (5 in all" in schema and "line 2 'CHAPTER I'" in schema
     assert "appear more than once (2 different texts): 'CHAPTER I' x2, 'CHAPTER II' x2" in schema
