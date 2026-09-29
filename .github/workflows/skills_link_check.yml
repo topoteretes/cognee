@@ -4,6 +4,13 @@ name: Skills link check
 # .claude/skills is a git symlink to it. On a default Windows clone git writes
 # that symlink as a text file; the SessionStart hook in .claude/settings.json
 # replaces it with a junction. This workflow proves both paths work.
+#
+# Everything here is deterministic and secret-free, so it also runs on fork
+# PRs. Checking discovery by asking a live Claude session to list its skills
+# needs ANTHROPIC_API_KEY, which forks never get, and grades the result with a
+# substring match on model prose — a check that fails for contributors and
+# flakes for everyone. Reading the files through .claude/skills tests the one
+# thing this layout can actually break.
 
 on:
   pull_request:
@@ -46,19 +53,47 @@ jobs:
           test -f .claude/skills/cognee-cli/SKILL.md
           cmd //c dir .claude | grep -i "<JUNCTION>"
 
-      - name: Git status stays clean
+      - name: Git status stays clean, and `git add -A` adds nothing
         working-directory: repo with space
         run: |
-          status="$(git status --porcelain)"
+          status="$(git status --porcelain -uall)"
           echo "$status"
           test -z "$status"
+          git add -A
+          staged="$(git diff --cached --name-only)"
+          echo "$staged"
+          test -z "$staged"
 
       - name: Second run is a no-op
         working-directory: repo with space
         run: test -z "$(CLAUDE_PROJECT_DIR="$PWD" bash .claude/hooks/link-skills.sh)"
 
-  claude-discovery:
-    name: Claude Code finds the skills (${{ matrix.os }})
+      - name: A dangling junction is rebuilt, not abandoned
+        working-directory: repo with space
+        run: |
+          # What a moved checkout leaves behind: a junction pointing nowhere. Build
+          # it from a real directory and then delete that directory, rather than
+          # pointing mklink at a path that does not exist yet. Clearing the live
+          # junction first is scaffolding, so use Windows' own rmdir rather than
+          # whichever primitive the hook happens to rely on.
+          cmd //c rmdir '.claude\skills'
+          mkdir -p .agents/tmp-junction-target
+          SKILLS_LINK="$(cygpath -w "$PWD/.claude/skills")" \
+          SKILLS_TARGET="$(cygpath -w "$PWD/.agents/tmp-junction-target")" \
+            powershell.exe -NoProfile -NonInteractive -Command \
+            'New-Item -ItemType Junction -Path $env:SKILLS_LINK -Target $env:SKILLS_TARGET | Out-Null'
+          rmdir .agents/tmp-junction-target
+          test ! -d .claude/skills
+
+          out="$(CLAUDE_PROJECT_DIR="$PWD" bash .claude/hooks/link-skills.sh)"
+          echo "hook output: $out"
+          echo "$out" | grep -q '"reloadSkills":true'
+          test -f .claude/skills/cognee-cli/SKILL.md
+          # The relink must never have followed the old junction into the target.
+          test -f .agents/skills/cognee-cli/SKILL.md
+
+  skills-resolve:
+    name: Skills resolve through .claude/skills (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -74,22 +109,39 @@ jobs:
 
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
-      - name: Install Claude Code
-        run: npm install -g @anthropic-ai/claude-code
+      - name: Run the SessionStart hook
+        run: CLAUDE_PROJECT_DIR="$PWD" bash .claude/hooks/link-skills.sh
 
-      - name: Ask a fresh session which repo skills it has
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      - name: Every skill is readable through .claude/skills
         run: |
-          out="$(claude -p --model haiku \
-            "List, comma-separated, the names of every skill available to you. Output only the names.")"
-          echo "$out"
-          missing=0
+          shopt -s nullglob
+          found=0
+          failed=0
           for dir in .agents/skills/*/; do
             name="$(basename "$dir")"
-            if ! echo "$out" | grep -q "$name"; then
-              echo "::error::skill $name not discovered"
-              missing=1
+            found=$((found + 1))
+            linked=".claude/skills/$name/SKILL.md"
+            if [ ! -f "$linked" ]; then
+              echo "::error::$linked is not readable"
+              failed=1
+              continue
+            fi
+            # Same bytes, not a stale second copy someone committed by hand.
+            if ! cmp -s "$dir/SKILL.md" "$linked"; then
+              echo "::error::$linked differs from $dir/SKILL.md"
+              failed=1
+            fi
+            # Agents match on the frontmatter name; a mismatch makes the skill
+            # undiscoverable under the directory it lives in.
+            declared="$(sed -n 's/^name: *//p' "$linked" | head -1)"
+            if [ "$declared" != "$name" ]; then
+              echo "::error::$linked declares name '$declared', expected '$name'"
+              failed=1
             fi
           done
-          exit $missing
+          if [ "$found" -eq 0 ]; then
+            echo "::error::no skills found under .agents/skills"
+            exit 1
+          fi
+          echo "checked $found skill(s)"
+          exit $failed
