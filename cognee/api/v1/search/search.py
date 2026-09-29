@@ -212,9 +212,10 @@ async def search(
         - **SUMMARIES**: Fast, returns pre-computed summaries
         - **CODE**: Deterministic and model-free; request cost scales with the selected code graph
         - **FEELING_LUCKY**: Variable speed, uses LLM + search type selection intelligently
-        - **top_k**: Default 15, applied per dataset. HYBRID_COMPLETION caps each lane at
-          10; widen it with the `chunks_top_k` / `entities_top_k` / `facts_top_k` keys in
-          `retriever_specific_config`.
+        - **top_k**: Default 15, applied per dataset. HYBRID_COMPLETION gives each lane
+          `min(top_k, 10)`, so values above 10 do not widen it; set the lanes directly with
+          the `chunks_top_k` / `entities_top_k` / `facts_top_k` keys in
+          `retriever_specific_config` (not capped).
         - **datasets**: Specify datasets to improve speed and relevance
 
     Next Steps After Search:

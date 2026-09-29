@@ -7,8 +7,9 @@ description: Use when the user wants to drive cognee from the terminal with cogn
 
 `cognee-cli` ships with the package (entry point in `cognee/cli/_cognee.py`;
 each command lives in `cognee/cli/commands/`). Every command has
-`--help` for its flags, but only a few (`memify`, `eval`, `serve`, `push`,
-`upgrade`, `downgrade`, `stamp`) include usage examples — for the memory commands use the examples
+`--help` for its flags, but only a few (`demo`, `memify`, `eval`, `serve`,
+`push`, `upgrade`, `downgrade`, `stamp`, and `search` with one CODE example)
+include usage examples — for the memory commands use the examples
 in this file. Needs `LLM_API_KEY` configured, same as the SDK.
 
 ## Core flow

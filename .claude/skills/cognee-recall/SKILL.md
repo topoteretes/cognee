@@ -125,8 +125,9 @@ and appends hits with `source="skills"`. Disable with
 - **Permissions change what you get back.** With no `datasets`, recall
   searches only datasets the user can read, so a user without grants gets
   one `source="system"` `memory_warming_up` marker from a graph-only recall
-  (`[]` when session sources are included, with `only_context=True`, or
-  with `RECALL_WARMUP_SHORTCIRCUIT=false`). Asking for a dataset **id** the user cannot read raises
+  (with `only_context=True` or `RECALL_WARMUP_SHORTCIRCUIT=false` it gets
+  `[]`; with session sources included only the graph lane is empty, and
+  session and trace hits still come back). Asking for a dataset **id** the user cannot read raises
   `PermissionDeniedError` (HTTP 403). Dataset **names** resolve only among
   the user's own datasets, so a name that is not theirs (even one shared
   with them) raises `DatasetNotFoundError`; use `dataset_ids` for shared
@@ -137,9 +138,12 @@ and appends hits with `source="skills"`. Disable with
   `error_message`) instead of results; a multi-source recall just returns
   no graph results. Wait for the
   remember to finish, or check why it failed.
-- **Hybrid silently becomes graph completion** when you pass a custom
-  `node_type`, `node_name` with `node_type=None`, `neighborhood_depth`, `feedback_influence > 0`, or the chunk
-  collection is missing. `wide_search_top_k` and `triplet_distance_penalty`
+- **Hybrid silently becomes graph completion** when you pass
+  `neighborhood_depth` or `feedback_influence > 0` (including a nonzero
+  `DEFAULT_FEEDBACK_INFLUENCE`), or the chunk collection is missing.
+  `node_name` stays on hybrid, which filters to that node set. `search()`
+  also defers for a custom `node_type` or `node_name` with `node_type=None`;
+  `recall()` has no `node_type`. `wide_search_top_k` and `triplet_distance_penalty`
   with hybrid raise `InvalidHybridSearchConfig`; pin
   `GRAPH_COMPLETION` to use them.
 - **`SKILLS` and `AGENTIC_COMPLETION` need exactly one dataset.** For
@@ -152,8 +156,9 @@ and appends hits with `source="skills"`. Disable with
 - **`code_query` without `scope="code"` raises**, and `scope="tools"` also
   needs `TOOL_CALLS_ENABLED=true`.
 - **Latency.** Most completion types make one LLM call; COT,
-  DECOMPOSITION, CONTEXT_EXTENSION, GRAPH_SUMMARY_COMPLETION and TEMPORAL
-  make more. NATURAL_LANGUAGE makes one (no answer call) and retries only on
+  DECOMPOSITION, CONTEXT_EXTENSION, GRAPH_SUMMARY_COMPLETION, TEMPORAL,
+  FEELING_LUCKY (one call to pick the type, then the chosen type's) and
+  AGENTIC_COMPLETION (a loop of up to `max_iter`, default 6) make more. NATURAL_LANGUAGE makes one (no answer call) and retries only on
   an empty or failed query, up to 3 attempts. With `CACHING` and
   `AUTO_FEEDBACK` on (defaults), each answered turn adds one analysis call,
   even without a `session_id`. Set

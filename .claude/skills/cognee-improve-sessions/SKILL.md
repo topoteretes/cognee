@@ -137,7 +137,8 @@ There is no debounce timer: held-back entries wait for the next
   run one at a time: a second call returns at once with every stage
   `skipped: lock_held`. If it shares a session with the running one, it sets
   `rerun_requested=True` and the holder runs up to 2 extra passes (3 passes
-  in total, `IMPROVE_MAX_RERUN_PASSES`; see `rerun_passes`). The lock is per process only; multiple API workers do not
+  in total; see `rerun_passes`). The bound is `IMPROVE_MAX_RERUN_PASSES`, a
+  constant in `cognee/api/v1/improve/improve.py`, not an env var. The lock is per process only; multiple API workers do not
   share it.
 - **Sessions bridge once.** Q&A and trace persistence are tracked per user
   and session, not per dataset, so bridging a session into dataset A and

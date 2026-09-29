@@ -80,13 +80,14 @@ await authorized_give_permission_on_datasets(role_id, [UUID(res.dataset_id)], "r
   personal space). Datasets are created in the active tenant.
 - The granter can only share datasets in **their current active tenant**
   (others raise `PermissionDeniedError`). The principal's tenant is not
-  checked: granting a personal dataset to a role while the granter is in
-  personal space succeeds, but is useless to the role's members, who only
-  see datasets of their active tenant. Create the dataset with the tenant
-  active.
-- A role's or tenant's members get its grants only while that tenant is
-  their active tenant (`select_tenant`, then reload the user). While a
-  tenant is active, personal datasets are not visible.
+  checked: a grant to a role on a personal dataset (or one from another
+  tenant) succeeds, and its members see it only while their active
+  tenant is the dataset's tenant (personal space for a personal dataset).
+  To share inside a tenant, create the dataset with that tenant active.
+- Members of a role or tenant get its grants. A granted dataset is
+  visible only while the member's active tenant is the dataset's tenant
+  (`select_tenant`, then reload the user); a personal dataset is visible
+  only in personal space.
 
 Full walkthrough: `examples/demos/permissions/user_permissions_and_access_control_example.py`
 (also `tenant_role_setup_example.py`, `tenant_role_constraints_example.py`).
@@ -150,7 +151,8 @@ isolation; `REQUIRE_AUTHENTICATION=false` with access control on is ignored
     no grants simply gets `[]`.
 - **Grants need `share`** on a dataset in the granter's active tenant;
   otherwise `PermissionDeniedError`. The principal's tenant is not checked,
-  so a grant can succeed yet be invisible to its members (see above).
+  so a grant can succeed yet be visible to its members only in the
+  dataset's tenant (see above).
 - **Reload the user after `select_tenant`** (`get_user(id)`): an old `User`
   object still carries the previous active tenant.
 - **Same name, different datasets.** Dataset ids are per owner and tenant,

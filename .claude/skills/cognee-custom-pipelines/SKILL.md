@@ -131,7 +131,8 @@ subgraph) to the first task. Registered task names:
 `improve()` also forwards `extraction_tasks` / `enrichment_tasks` to memify,
 but only inside its enrichment stage. With custom tasks that stage skips
 the `TRIPLET_EMBEDDING` gate and the has-the-graph-changed check, so they
-run on every improve (unless the stage is disabled or the lock is held).
+run on every improve (unless the stage is disabled, the lock is held, or
+the fatal `persist_session_qa` stage errors and stops the run first).
 
 ### Check status
 

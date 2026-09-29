@@ -107,8 +107,10 @@ With access control on (the default), each dataset has its own databases.
 `DATASET_QUEUE_MAX_CONCURRENT` (default 6, from `DATABASE_MAX_LRU_CACHE_SIZE`)
 caps how many datasets are processed at once in one process, and
 `SUBPROCESS_IDLE_TTL_SECONDS` (600) keeps idle database workers warm.
-`DATASET_QUEUE_ENABLED` (default true) enforces that cap, tears down
-subprocess engines on scope exit and pins in-use engines against eviction.
+`DATASET_QUEUE_ENABLED` (default true) enforces that cap, releases
+subprocess engines when a dataset's last scope exits (they stay warm for
+`SUBPROCESS_IDLE_TTL_SECONDS` and close at once only when it is 0) and pins
+in-use engines against eviction.
 Setting it false removes the cap rather than disabling parallelism, and
 risks file-lock leaks and engine eviction under parallel load, so keep it
 on.
