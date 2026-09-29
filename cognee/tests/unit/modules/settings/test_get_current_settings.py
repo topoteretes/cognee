@@ -39,3 +39,13 @@ def test_keyless_install_reports_the_demo_extractor_without_touching_the_runtime
     payload = settings_module.get_current_settings()
 
     assert payload["graph_extractor"] == "gliner_demo"
+
+
+def test_llm_block_says_whether_the_llm_is_usable(monkeypatch):
+    """A keyless install reports the default llm provider/model; ``configured``
+    tells a usable LLM from an unused default."""
+    monkeypatch.setattr(settings_module, "llm_available", lambda *_: False)
+    assert settings_module.get_current_settings()["llm"]["configured"] is False
+
+    monkeypatch.setattr(settings_module, "llm_available", lambda *_: True)
+    assert settings_module.get_current_settings()["llm"]["configured"] is True
