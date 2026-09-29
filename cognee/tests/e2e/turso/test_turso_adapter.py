@@ -262,6 +262,44 @@ async def test_remove_belongs_to_set_tags(adapter):
 
 
 @pytest.mark.asyncio
+async def test_delete_edge_triples(adapter):
+    from cognee.infrastructure.databases.provenance.delete_data import EdgeIdentity
+
+    await adapter.add_node("n1", {"name": "Alice", "type": "Person"})
+    await adapter.add_node("n2", {"name": "Bob", "type": "Person"})
+    await adapter.add_edge("n1", "n2", "KNOWS")
+    await adapter.add_edge("n1", "n2", "belongs_to_set")
+
+    await adapter.delete_edge_triples(
+        [EdgeIdentity(source_id="n1", target_id="n2", relationship_name="belongs_to_set")]
+    )
+
+    edges = await adapter.get_edges("n1")
+    assert len(edges) == 1
+    assert edges[0][1] == "KNOWS"
+    # Endpoint nodes survive; only the edge is gone.
+    assert await adapter.get_node("n1") is not None
+    assert await adapter.get_node("n2") is not None
+
+
+@pytest.mark.asyncio
+async def test_delete_edge_triples_missing_edge_is_a_noop(adapter):
+    """Deleting an edge identity that does not exist must not raise."""
+    from cognee.infrastructure.databases.provenance.delete_data import EdgeIdentity
+
+    await adapter.add_node("n1", {"name": "Alice", "type": "Person"})
+    await adapter.delete_edge_triples(
+        [EdgeIdentity(source_id="n1", target_id="missing", relationship_name="belongs_to_set")]
+    )
+    assert await adapter.get_node("n1") is not None
+
+
+@pytest.mark.asyncio
+async def test_delete_edge_triples_empty_list_is_a_noop(adapter):
+    await adapter.delete_edge_triples([])
+
+
+@pytest.mark.asyncio
 async def test_get_filtered_graph_data_empty_values_matches_nothing(adapter):
     """An empty filter value list matches nothing without an "IN ()" syntax error."""
     await adapter.add_node("n1", {"name": "Alice", "type": "Person"})

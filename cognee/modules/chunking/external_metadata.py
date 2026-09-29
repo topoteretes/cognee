@@ -57,3 +57,18 @@ def decode_external_metadata(value: Any) -> dict | None:
     except ValueError:
         return None
     return parsed if isinstance(parsed, dict) and parsed else None
+
+
+def node_set_names_from_external_metadata(value: Any) -> list[str] | None:
+    """The ``node_set`` tag names declared on ``external_metadata``, or ``None``.
+
+    Accepts the same shapes as ``decode_external_metadata`` (a ``dict`` or its
+    JSON text). Returns ``None`` when there is nothing to tag with: no
+    metadata, no ``node_set`` key, or a ``node_set`` value that is not a list.
+    A malformed tag reads as "no tag", never as an ingestion error.
+    """
+    metadata = decode_external_metadata(value)
+    if metadata is None:
+        return None
+    node_set = metadata.get("node_set")
+    return node_set if isinstance(node_set, list) else None

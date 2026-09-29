@@ -191,8 +191,9 @@ class GraphDBInterface(ABC):
         membership in one dataset without disturbing unrelated nodes that
         legitimately still carry the tag.
 
-        Default no-op; only Neo4j overrides this today. Other
-        list-property-storing adapters are free to implement it later.
+        Default no-op; Ladybug, postgres_demo, Neo4j, and Turso override this
+        today. Other list-property-storing adapters are free to implement it
+        later.
         """
         return
 
