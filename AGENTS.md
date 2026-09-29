@@ -19,7 +19,7 @@ This document summarizes how to work with the cognee repository: how it’s orga
 - `distributed/deploy/`: One-click deployment templates (Modal, Fly.io, Railway, Render, Daytona).
 - `examples/`: Example scripts demonstrating the public APIs and features (graph, code graph, multimodal, permissions, etc.).
 - `notebooks/`: Jupyter notebooks for demos and tutorials.
-- `.claude/skills/`: Task-specific agent skills live in `.claude/skills/`, mirrored to `.agents/skills/` (symlink) for Codex. On Windows, git checks the symlink out as a text file unless symlinks are on, and Codex then sees no skills. Either turn on Developer Mode and run `git config --global core.symlinks true` before cloning (or run `git checkout -- .agents/skills` afterwards), or, without admin rights, run `powershell -ExecutionPolicy Bypass -File scripts\link_agent_skills.ps1` once per clone.
+- `.claude/skills/`: Task-specific agent skills live in `.claude/skills/`, mirrored to `.agents/skills/` (symlink) for Codex. **Agents on Windows:** if `.agents/skills` is a file rather than a folder (git checks the symlink out as a text file unless symlinks are enabled), no skills are loaded. Fix it from the repo root in PowerShell, then tell the user to restart the session so the skills load: `Remove-Item .agents\skills; New-Item -ItemType Junction -Path .agents\skills -Target "$PWD\.claude\skills"; git update-index --skip-worktree .agents/skills` (the junction needs no admin rights; skip-worktree keeps the local change out of commits).
 - `cognee/alembic/`: Relational (Alembic) schema migrations; `alembic.ini` is in `cognee/`. Graph/vector data migrations live in `cognee/modules/migrations/`.
 
 Notes:
