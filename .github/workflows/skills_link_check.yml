@@ -1,0 +1,93 @@
+name: Skills link check
+
+# .agents/skills holds the repo's skills (Codex reads it natively) and
+# .claude/skills is a git symlink to it. On a default Windows clone git writes
+# that symlink as a text file; the SessionStart hook in .claude/settings.json
+# replaces it with a junction. This workflow proves both paths work.
+
+on:
+  pull_request:
+  push:
+    branches: [feature/share-skills-codex-claude]
+
+permissions:
+  contents: read
+
+jobs:
+  windows-junction:
+    name: Windows junction fallback
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Disable symlinks like a default Git for Windows install
+        run: git config --global core.symlinks false
+
+      - name: Check out (into a path with a space)
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          path: repo with space
+
+      - name: Placeholder is a text file before the hook runs
+        working-directory: repo with space
+        run: |
+          test -f .claude/skills && ! test -d .claude/skills
+          echo "placeholder contents: $(cat .claude/skills)"
+
+      - name: Hook creates the junction and requests a skill reload
+        working-directory: repo with space
+        run: |
+          out="$(CLAUDE_PROJECT_DIR="$PWD" bash .claude/hooks/link-skills.sh)"
+          echo "hook output: $out"
+          echo "$out" | grep -q '"reloadSkills":true'
+          test -f .claude/skills/cognee-cli/SKILL.md
+          cmd //c dir .claude | grep -i "<JUNCTION>"
+
+      - name: Git status stays clean
+        working-directory: repo with space
+        run: |
+          status="$(git status --porcelain)"
+          echo "$status"
+          test -z "$status"
+
+      - name: Second run is a no-op
+        working-directory: repo with space
+        run: test -z "$(CLAUDE_PROJECT_DIR="$PWD" bash .claude/hooks/link-skills.sh)"
+
+  claude-discovery:
+    name: Claude Code finds the skills (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Disable symlinks on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.symlinks false
+
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Ask a fresh session which repo skills it has
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          out="$(claude -p --model haiku \
+            "List, comma-separated, the names of every skill available to you. Output only the names.")"
+          echo "$out"
+          missing=0
+          for dir in .agents/skills/*/; do
+            name="$(basename "$dir")"
+            if ! echo "$out" | grep -q "$name"; then
+              echo "::error::skill $name not discovered"
+              missing=1
+            fi
+          done
+          exit $missing
