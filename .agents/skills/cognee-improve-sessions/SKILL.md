@@ -29,7 +29,7 @@ results = await cognee.recall("What does the user prefer?", session_id="chat_1")
 result = await cognee.improve(dataset="main_dataset", session_ids=["chat_1"])
 print(result.status, result.stage_summary())
 
-await cognee.wait_for_background_tasks()   # before a script exits
+await cognee.wait_for_background_tasks()  # before a script exits
 ```
 
 ## Use it

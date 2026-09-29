@@ -17,21 +17,24 @@ from cognee.modules.pipelines import Task
 from cognee.tasks.storage import add_data_points
 from cognee.low_level import DataPoint
 
+
 class Person(DataPoint):
     name: str
     metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
+
 async def extract_people(data_items: list) -> list[Person]:
     people = []
-    for item in data_items:                       # always a list, see below
+    for item in data_items:  # always a list, see below
         text = item if isinstance(item, str) else ""
         people += [Person(name=n.strip()) for n in text.split(",") if n.strip()]
     return people
 
+
 result = await cognee.run_custom_pipeline(
     tasks=[
         Task(extract_people, needs_llm=False),
-        Task(add_data_points, needs_llm=False),    # store in graph + vector DBs
+        Task(add_data_points, needs_llm=False),  # store in graph + vector DBs
     ],
     data=["Ada Lovelace, Alan Turing"],
     dataset="people",
@@ -65,11 +68,13 @@ from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.pipelines import Drop
 
+
 @task_summary("Tagged {n} chunk(s)")
 async def tag_chunks(chunks: list, ctx: PipelineContext = None, label: str = "x"):
     for chunk in chunks:
         chunk.metadata["label"] = label
-    return chunks            # or yield per item; return/yield Drop to discard
+    return chunks  # or yield per item; return/yield Drop to discard
+
 
 tag = Task(tag_chunks, label="reviewed", batch_size=10, needs_llm=False)
 ```
@@ -115,10 +120,10 @@ instead of duplicating (see the `cognee-custom-graph-models` skill).
 
 ```python
 await cognee.memify(
-    extraction_tasks=["extract_subgraph_chunks"],        # names or Task objects
+    extraction_tasks=["extract_subgraph_chunks"],  # names or Task objects
     enrichment_tasks=[Task(my_enrichment, needs_llm=False)],
     dataset="people",
-    node_name=["AI"],                                     # optional subgraph filter
+    node_name=["AI"],  # optional subgraph filter
 )
 ```
 

@@ -26,7 +26,7 @@ confirm, then delete**.
 ```python
 import cognee
 
-datasets = await cognee.datasets.list_datasets()   # datasets the user can read
+datasets = await cognee.datasets.list_datasets()  # datasets the user can read
 for ds in datasets:
     print(ds.id, ds.name)
 ```
@@ -36,7 +36,7 @@ HTTP: `GET /api/v1/datasets`. CLI: `cognee-cli datasets list`.
 ### 2. List its documents
 
 ```python
-items = await cognee.datasets.list_data(dataset_id)   # all Data rows, oldest first
+items = await cognee.datasets.list_data(dataset_id)  # all Data rows, oldest first
 for item in items:
     print(item.id, item.name, item.extension, item.created_at)
 ```

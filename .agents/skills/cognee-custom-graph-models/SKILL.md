@@ -14,21 +14,25 @@ from typing import Annotated, Literal
 import cognee
 from cognee.low_level import DataPoint, Edge, FromIdentity
 
+
 class Role(DataPoint):
     name: str
     metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
+
 class Person(DataPoint):
     name: str
-    is_a: Annotated[Role, FromIdentity()] | None = None     # reference by name
-    reports_to: list[Edge["Person", "Person"]] = []          # edge owned by Person
+    is_a: Annotated[Role, FromIdentity()] | None = None  # reference by name
+    reports_to: list[Edge["Person", "Person"]] = []  # edge owned by Person
     metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
-class PeopleGraph(DataPoint):                                # the root the LLM fills
+
+class PeopleGraph(DataPoint):  # the root the LLM fills
     people: list[Person]
     friends_with: list[Edge[Person, Person]] = []
     family: list[Edge[Person, Person, Literal["married_to", "sibling_of"]]] = []
     metadata: dict = {"index_fields": [], "transparent": True}
+
 
 await cognee.remember(text, graph_model=PeopleGraph, custom_prompt="Extract every person...")
 ```

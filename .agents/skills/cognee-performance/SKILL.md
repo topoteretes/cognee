@@ -16,7 +16,7 @@ model. Database and embedding work is small next to that.
 
 ```python
 estimate = await cognee.remember("./docs", dry_run=True)
-print(estimate)   # per-stage token counts and approximate cost; no LLM calls
+print(estimate)  # per-stage token counts and approximate cost; no LLM calls
 ```
 
 The estimate covers graph extraction and summarization only, not

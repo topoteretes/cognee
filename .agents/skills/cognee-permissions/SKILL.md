@@ -46,13 +46,13 @@ from cognee.modules.users.permissions.methods import (
 )
 
 await authorized_give_permission_on_datasets(
-    bob.id,                 # principal: a user, role, or tenant id
-    [UUID(res.dataset_id)], # dataset ids (RememberResult.dataset_id is a str)
-    "read",                 # "read" | "write" | "delete" | "share"
-    alice.id,               # the owner making the grant
+    bob.id,  # principal: a user, role, or tenant id
+    [UUID(res.dataset_id)],  # dataset ids (RememberResult.dataset_id is a str)
+    "read",  # "read" | "write" | "delete" | "share"
+    alice.id,  # the owner making the grant
 )
 
-await cognee.recall("...", user=bob, dataset_ids=[UUID(res.dataset_id)])   # by id (must be a UUID)
+await cognee.recall("...", user=bob, dataset_ids=[UUID(res.dataset_id)])  # by id (must be a UUID)
 ```
 
 Bob must address Alice's dataset by **id**: dataset *names* resolve only
@@ -64,14 +64,14 @@ among the caller's own datasets.
 from cognee.modules.users.tenants.methods import add_user_to_tenant, create_tenant, select_tenant
 from cognee.modules.users.roles.methods import add_user_to_role, create_role
 
-tenant_id = await create_tenant("Acme", alice.id)            # alice owns it
+tenant_id = await create_tenant("Acme", alice.id)  # alice owns it
 await select_tenant(user_id=alice.id, tenant_id=tenant_id)
 role_id = await create_role(role_name="Researcher", owner_id=alice.id)
 await add_user_to_tenant(user_id=bob.id, tenant_id=tenant_id, owner_id=alice.id)
 await add_user_to_role(user_id=bob.id, role_id=role_id, owner_id=alice.id)
 await select_tenant(user_id=bob.id, tenant_id=tenant_id)
 
-alice = await get_user(alice.id)   # reload after changing the active tenant
+alice = await get_user(alice.id)  # reload after changing the active tenant
 res = await cognee.remember(text, dataset_name="acme_docs", user=alice)
 await authorized_give_permission_on_datasets(role_id, [UUID(res.dataset_id)], "read", alice.id)
 ```

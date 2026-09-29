@@ -14,7 +14,7 @@ import cognee
 
 results = await cognee.recall("Where was Einstein born?")
 for r in results:
-    print(r.source, r.text)          # e.g. "graph", "Einstein was born in Ulm."
+    print(r.source, r.text)  # e.g. "graph", "Einstein was born in Ulm."
 ```
 
 Without `datasets` it searches every dataset the user can read. Pass
@@ -40,6 +40,7 @@ A routed type (never a pinned one) that the backend rejects, or a routed
 
 ```python
 from cognee import SearchType
+
 await cognee.recall("What changed in v2?", query_type=SearchType.GRAPH_COMPLETION)
 ```
 

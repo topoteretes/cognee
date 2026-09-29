@@ -12,10 +12,12 @@ this skill is a `remember()` argument unless it says otherwise.
 ```python
 import cognee
 
-result = await cognee.remember("Einstein was born in Ulm.")           # text
-result = await cognee.remember(["./notes.md", "./report.pdf"],        # files
-                               dataset_name="research")
-print(result.status, result.dataset_id)   # "completed", UUID
+result = await cognee.remember("Einstein was born in Ulm.")  # text
+result = await cognee.remember(
+    ["./notes.md", "./report.pdf"],  # files
+    dataset_name="research",
+)
+print(result.status, result.dataset_id)  # "completed", UUID
 ```
 
 All cognee functions are async. Without `dataset_name` data goes to
@@ -74,10 +76,12 @@ All cognee functions are async. Without `dataset_name` data goes to
 ```python
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 
-config = {"ontology_config": {
-    "ontology_resolver": RDFLibOntologyResolver(ontology_file="./my.owl"),
-    # "ontology_mode": "strict",   # drop entities with no ontology match
-}}
+config = {
+    "ontology_config": {
+        "ontology_resolver": RDFLibOntologyResolver(ontology_file="./my.owl"),
+        # "ontology_mode": "strict",   # drop entities with no ontology match
+    }
+}
 await cognee.remember(texts, config=config)
 ```
 
