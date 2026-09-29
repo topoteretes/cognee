@@ -27,7 +27,10 @@ def _adapter_configs():
 
 
 @pytest.mark.asyncio
-async def test_distinct_vector_database_owns_its_engine():
+@pytest.mark.parametrize("access_control", [True, False])
+async def test_distinct_vector_database_needs_access_control(access_control):
+    """A different VECTOR_DB_NAME gets its own engine only with access control on; with it
+    off, PGVector keeps sharing the relational engine, so prune() must refuse."""
     pytest.importorskip("asyncpg")
     pytest.importorskip("pgvector")
     from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
@@ -48,7 +51,7 @@ async def test_distinct_vector_database_owns_its_engine():
         ),
         patch(
             "cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter.backend_access_control_enabled",
-            return_value=False,
+            return_value=access_control,
         ),
     ):
         adapter = PGVectorAdapter(
@@ -57,7 +60,7 @@ async def test_distinct_vector_database_owns_its_engine():
             _Embedder(),
         )
 
-    assert adapter._owns_engine is True
+    assert adapter._owns_engine is access_control
     await adapter.close()
 
 
@@ -104,7 +107,7 @@ async def test_prune_refuses_to_drop_a_shared_relational_database():
     adapter._metadata = Mock()
     adapter.delete_database = AsyncMock()
 
-    with pytest.raises(SharedDatabasePruneError, match="shares the relational"):
+    with pytest.raises(SharedDatabasePruneError, match="not supported for PGVector"):
         await adapter.prune()
 
     adapter._metadata.clear.assert_not_called()

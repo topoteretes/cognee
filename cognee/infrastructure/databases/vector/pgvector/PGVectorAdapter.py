@@ -151,9 +151,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 pool_args=effective_pool_args,
             )
             self._owns_engine = True
-        elif db_name1 != db_name2:
-            # A different database name is sufficient isolation regardless of access-control
-            # mode, so honor VECTOR_DB_NAME instead of borrowing the relational engine.
+        elif backend_access_control_enabled() and (db_name1 != db_name2):
+            # If backend access control create new instances of engine and sessionmaker
             super().__init__(
                 connection_string=self.db_uri,
                 connect_args=effective_connect_args,
@@ -161,7 +160,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             )
             self._owns_engine = True
         elif relational_db.engine.dialect.name == "postgresql":
-            # Same PostgreSQL database as the relational engine: reuse its engine and sessionmaker
+            # If postgreSQL is used and not backend access control we must use the same engine and sessionmaker
             self.engine = relational_db.engine
             self.sessionmaker = relational_db.sessionmaker
         else:
@@ -924,10 +923,11 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         """Drop all vector collection tables and reset cached reflection metadata."""
         if not self._owns_engine:
             raise SharedDatabasePruneError(
-                "PGVector cannot be pruned independently while it shares the relational "
-                "PostgreSQL database. Use prune_system(metadata=True) to delete the shared "
-                "database (this also deletes users, datasets and permissions), or set "
-                "VECTOR_DB_NAME to a different, dedicated database."
+                "Pruning vectors on their own is not supported for PGVector with "
+                "ENABLE_BACKEND_ACCESS_CONTROL=false, because the vectors live in the "
+                "relational PostgreSQL database. Use prune_system(metadata=True) to delete "
+                "everything (this also deletes users, datasets and permissions), or enable "
+                "backend access control for per-dataset vector databases."
             )
 
         self._metadata.clear()
