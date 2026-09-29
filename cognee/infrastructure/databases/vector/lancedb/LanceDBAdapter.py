@@ -1107,11 +1107,12 @@ class LanceDBAdapter(VectorDBInterface):
                 otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
                 return []
 
-            # Note: Exclude payload if not needed to optimize performance
+            # Read only what a ScoredResult carries. The stored vector is not
+            # part of it, and reading it costs the full embedding per result:
+            # with limit=None that is every vector in the collection, decoded
+            # into Python floats and sent back from the worker process.
             select_columns = (
-                ["id", "vector", "payload", "_distance"]
-                if include_payload
-                else ["id", "vector", "_distance"]
+                ["id", "payload", "_distance"] if include_payload else ["id", "_distance"]
             )
 
             if node_name:
