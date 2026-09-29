@@ -166,6 +166,16 @@ jobs:
       - name: Run keyless e2e
         run: uv run python ./cognee/tests/e2e/keyless/keyless_ingest_check.py
 
+      # Every stored chunk must fit the embedding model's window and be embedded
+      # whole: with the default model, with a model whose tokenizer.json stores a
+      # truncation length, and with one that stores a fixed padding length (SDK-810).
+      - name: Run chunk token budget check (default model)
+        run: uv run python ./cognee/tests/e2e/keyless/chunk_token_budget_check.py
+      - name: Run chunk token budget check (snowflake-arctic-embed-xs)
+        run: uv run python ./cognee/tests/e2e/keyless/chunk_token_budget_check.py snowflake/snowflake-arctic-embed-xs
+      - name: Run chunk token budget check (all-MiniLM-L6-v2)
+        run: uv run python ./cognee/tests/e2e/keyless/chunk_token_budget_check.py sentence-transformers/all-MiniLM-L6-v2
+
       # A cognify run SIGKILLed after two documents, a second run, then startup
       # recovery: the two completed documents must survive and the run must be
       # closed as abandoned. Same keyless GLiNER stack, so it lives here.
