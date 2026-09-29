@@ -53,7 +53,7 @@ type-to-retriever table is `cognee/modules/retrieval/README.md`.
 | `HYBRID_COMPLETION` (default) | yes | General questions: document passages plus entity neighbourhoods, then an answer |
 | `GRAPH_COMPLETION` | yes | Answers from graph relationships |
 | `GRAPH_COMPLETION_COT`, `_CONTEXT_EXTENSION`, `_DECOMPOSITION` | yes | Harder multi-hop questions (more LLM calls) |
-| `GRAPH_SUMMARY_COMPLETION` | yes | Answers over pre-computed summaries |
+| `GRAPH_SUMMARY_COMPLETION` | yes | Summarizes the retrieved graph edges at query time (extra LLM call), then answers |
 | `RAG_COMPLETION` | yes | Classic chunk RAG |
 | `TRIPLET_COMPLETION` | yes | Subject-predicate-object facts (needs triplet embedding) |
 | `TEMPORAL` | yes | Time questions; needs data remembered with `temporal_cognify=True` |
@@ -88,9 +88,13 @@ Session and trace search is keyword overlap, not embeddings.
 
 ### Filters and knobs
 
-- `top_k=15`: results per dataset, not in total.
-- `node_name=["AI"]` (+ `node_name_filter_operator="OR"|"AND"`): restrict to
-  data remembered with that `node_set`.
+- `top_k=15`: per dataset, not in total. The default HYBRID caps each lane
+  at `min(top_k, 10)`; set `chunks_top_k` / `entities_top_k` /
+  `facts_top_k` in `retriever_specific_config` to go higher.
+- `node_name=["AI"]` (+ `node_name_filter_operator="OR"|"AND"`): restricts
+  graph/chunk/completion types to data remembered with that `node_set`.
+  SUMMARIES, CHUNKS_LEXICAL, GRAPH_REPORT, CYPHER, NATURAL_LANGUAGE, CODE and
+  SKILLS ignore it; CODING_RULES treats it as the rules node-set name.
 - `system_prompt` / `system_prompt_path`: change the answering prompt.
 - `response_model=MyPydanticModel`: structured answer, on `r.structured`.
 - `include_references=True`: attach the document chunks that support each
@@ -120,28 +124,44 @@ and appends hits with `source="skills"`. Disable with
 
 - **Permissions change what you get back.** With no `datasets`, recall
   searches only datasets the user can read, so a user without grants gets
-  `[]`. Asking for a dataset **id** the user cannot read raises
+  one `source="system"` `memory_warming_up` marker from a graph-only recall
+  (with `only_context=True` or `RECALL_WARMUP_SHORTCIRCUIT=false` it gets
+  `[]`; with session sources included only the graph lane is empty, and
+  session and trace hits still come back). Asking for a dataset **id** the user cannot read raises
   `PermissionDeniedError` (HTTP 403). Dataset **names** resolve only among
   the user's own datasets, so a name that is not theirs (even one shared
   with them) raises `DatasetNotFoundError`; use `dataset_ids` for shared
   datasets. See the `cognee-permissions` skill.
-- **"Memory warming up".** On an empty graph recall returns one
-  `source="system"` item with `status="memory_warming_up"` (or
-  `"build_failed"` plus `error_message`) instead of results. Wait for the
+- **"Memory warming up".** On an empty graph, a graph-only recall (no
+  session sources, not `only_context`) returns one `source="system"` item
+  with `status="memory_warming_up"` (or `"build_failed"` plus
+  `error_message`) instead of results; a multi-source recall just returns
+  no graph results. Wait for the
   remember to finish, or check why it failed.
-- **Hybrid silently becomes graph completion** when you pass a custom
-  `node_type`, `neighborhood_depth`, `feedback_influence > 0`, or the chunk
-  collection is missing. `wide_search_top_k` and `triplet_distance_penalty`
+- **Hybrid silently becomes graph completion** when you pass
+  `neighborhood_depth` or `feedback_influence > 0` (including a nonzero
+  `DEFAULT_FEEDBACK_INFLUENCE`), or the chunk collection is missing.
+  `node_name` stays on hybrid, which filters to that node set. `search()`
+  also defers for a custom `node_type` or `node_name` with `node_type=None`;
+  `recall()` has no `node_type`. `wide_search_top_k` and `triplet_distance_penalty`
   with hybrid raise `InvalidHybridSearchConfig`; pin
   `GRAPH_COMPLETION` to use them.
-- **`SKILLS` and `AGENTIC_COMPLETION` need exactly one dataset.** `SKILLS`
-  raises otherwise, from both `recall()` and `search()`. For
+- **`SKILLS` and `AGENTIC_COMPLETION` need exactly one dataset.** For
+  `SKILLS`, `search()` raises unless exactly one dataset is given.
+  `recall()` runs SKILLS per dataset with access control on (zero datasets
+  gives `[]`, not an error) and raises only with access control off and not
+  exactly one dataset. For
   `AGENTIC_COMPLETION` only `search()` checks it up front, so call it through
   `search()` with one dataset.
 - **`code_query` without `scope="code"` raises**, and `scope="tools"` also
   needs `TOOL_CALLS_ENABLED=true`.
-- **Latency.** Completion types make one LLM call; with a session and
-  `AUTO_FEEDBACK=true` (default) each answered turn adds one more. Set
+- **Latency.** Most completion types make one LLM call; COT,
+  DECOMPOSITION, CONTEXT_EXTENSION, GRAPH_SUMMARY_COMPLETION, TEMPORAL,
+  FEELING_LUCKY (one call to pick the type, then the chosen type's) and
+  AGENTIC_COMPLETION (a loop of up to `max_iter`, default 6) make more. NATURAL_LANGUAGE makes one (no answer call) and retries only on
+  an empty or failed query, up to 3 attempts. With `CACHING` and
+  `AUTO_FEEDBACK` on (defaults), each answered turn adds one analysis call,
+  even without a `session_id`. Set
   `AUTO_FEEDBACK=false` for low-latency reads (see the `cognee-performance`
   skill).
 

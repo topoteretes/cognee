@@ -24,8 +24,10 @@ It runs:
   `improve`, `memify`, memory imports), once per process;
 - when you call `await cognee.run_migrations()`.
 
-A fresh database is built by running the whole chain (no stamping). Steady
-state costs one in-memory revision check. `ENABLE_AUTO_MIGRATIONS=false`
+A fresh database is built by running the whole chain (no stamping). At
+head, the first run in each process still does a no-op Alembic upgrade plus
+a scan of the per-database revision rows; later calls in the same process
+are skipped by an in-memory flag. `ENABLE_AUTO_MIGRATIONS=false`
 turns off all automatic runs; then run `cognee-cli upgrade` yourself.
 
 Concurrent processes are serialized by a migration lock: a Postgres advisory
@@ -141,8 +143,9 @@ settings apply. Follow the recent revisions (for example
 
 Read `cognee/modules/migrations/README.md` first. In short:
 
-1. Write a module in `cognee/modules/migrations/versions/` with an `up`
-   (and optionally `down`) function.
+1. Write a module in `cognee/modules/migrations/versions/` with
+   `async def migrate(context)` (and optionally `async def downgrade(context)`);
+   step 2 registers them as `up=` / `down=`.
 2. Append `Migration(slug=..., cognee_version=..., up=..., down_revision=<previous slug>, down=...)`
    to `MIGRATIONS` in `registry.py`. The chain is validated at import
    (linear, unique slugs).

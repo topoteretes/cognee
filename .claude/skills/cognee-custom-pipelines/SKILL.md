@@ -1,6 +1,6 @@
 ---
 name: cognee-custom-pipelines
-description: Use when building your own cognee processing — writing custom tasks, chaining them into a pipeline with run_custom_pipeline or cognee.pipelines.run_pipeline, storing custom DataPoints with add_data_points, running custom extraction/enrichment over the existing graph with memify, checking pipeline run status, or debugging how data flows between tasks (batch_size, data_per_batch, ctx, Drop, enriches).
+description: Use when building your own cognee processing — writing custom tasks, chaining them into a pipeline with run_custom_pipeline or the lightweight run_pipeline (from cognee.pipelines import run_pipeline), storing custom DataPoints with add_data_points, running custom extraction/enrichment over the existing graph with memify, checking pipeline run status, or debugging how data flows between tasks (batch_size, data_per_batch, ctx, Drop, enriches).
 ---
 
 # Custom tasks and pipelines
@@ -48,7 +48,7 @@ There are three, and two share the name `run_pipeline`:
 |---|---|---|
 | `cognee.run_custom_pipeline(...)` | `cognee` | The normal choice: runs your tasks against a dataset with permissions, a per-dataset lock, run records, and status |
 | Full orchestrator `run_pipeline(tasks=..., data=..., datasets=...)` | `cognee.modules.pipelines` | What `run_custom_pipeline` and `cognify` call; yields `PipelineRunInfo` |
-| Lightweight `run_pipeline([...], data=...)` | `cognee.pipelines` | Quick chains of `task()` specs with no permissions, locks, run rows, or migrations; returns the last step's outputs |
+| Lightweight `run_pipeline([...], data=...)` | `from cognee.pipelines import run_pipeline` (after `import cognee`, the attribute `cognee.pipelines.run_pipeline` is the orchestrator) | Quick chains of `task()` specs with no permissions, locks, run rows, or migrations; returns the last step's outputs |
 
 `cognee.run_custom_pipeline(tasks, data=None, dataset="main_dataset",
 user=None, incremental_loading=False, data_per_batch=20,
@@ -85,8 +85,10 @@ tag = Task(tag_chunks, label="reviewed", batch_size=10, needs_llm=False)
 
 ### How data flows
 
-- **Each document runs the whole chain on its own**, and the first task
-  receives it as a **one-element list** (`[data_item]`), not the bare item.
+- **Each document runs the whole chain on its own** with `run_custom_pipeline`
+  or the orchestrator, and the first task receives it as a **one-element
+  list** (`[data_item]`), not the bare item. The lightweight `run_pipeline`
+  passes `data` to the first task unchanged.
 - **`data_per_batch`** (default 20) is how many documents run at the same
   time. It is a concurrency limit, not a batch size.
 - **`batch_size` belongs to the consumer.** A task's `batch_size` decides how
@@ -127,8 +129,10 @@ subgraph) to the first task. Registered task names:
 `cognify_agent_trace_feedback`, `apply_feedback_weights`,
 `detect_entity_duplicates`, `merge_entity_duplicates`, `index_data_points`.
 `improve()` also forwards `extraction_tasks` / `enrichment_tasks` to memify,
-but only inside its enrichment stage, which can be skipped when nothing
-changed. Call `memify` directly when you want your tasks to run every time.
+but only inside its enrichment stage. With custom tasks that stage skips
+the `TRIPLET_EMBEDDING` gate and the has-the-graph-changed check, so they
+run on every improve (unless the stage is disabled, the lock is held, or
+the fatal `persist_session_qa` stage errors and stops the run first).
 
 ### Check status
 
@@ -137,24 +141,26 @@ status = await cognee.datasets.get_status([dataset_id], pipeline_names=["custom_
 ```
 
 Without `pipeline_names` it reports only `cognify_pipeline`. It returns
-`{dataset_id: PipelineRunStatus}`: `DATASET_PROCESSING_INITIATED`,
-`_STARTED`, `_COMPLETED`, or `_ERRORED`. The value `run_custom_pipeline`
+`{str(dataset_id): PipelineRunStatus}` (`{str(dataset_id): {pipeline_name:
+status}}` for several `pipeline_names`): `DATASET_PROCESSING_STARTED`,
+`_COMPLETED`, or `_ERRORED` (`_INITIATED` exists only on legacy rows). The value `run_custom_pipeline`
 returns per dataset is a `PipelineRunInfo` instead, whose class names the
 outcome: `PipelineRunCompleted`, `PipelineRunAlreadyCompleted`,
 `PipelineRunErrored`, and so on.
 
 ## Pitfalls
 
-- **Wrong `run_pipeline`.** The one in `cognee.pipelines` wants `task()`
+- **Wrong `run_pipeline`.** The one imported via
+  `from cognee.pipelines import run_pipeline` wants `task()`
   specs *called* (`extract()`, not `extract`) and raises `TypeError`
   otherwise; the orchestrator in `cognee.modules.pipelines` wants `Task`
   objects and raises `WrongTaskTypeError` otherwise.
 - **String task names only work in `memify`.** `run_custom_pipeline` accepts
   only `Task` objects despite its type hint.
 - **Some callables are rejected** by `Task` (`ValueError: Unsupported task
-  type`): *sync* bound methods, `functools.partial` of a sync function, and
-  callable objects (instances with `__call__`). Async methods, partials of
-  async functions, plain functions, and lambdas work. When in doubt, wrap it
+  type`): bound methods and `functools.partial`s of a plain (non-generator)
+  sync function, and callable objects (instances with `__call__`). Generator
+  and async variants, plain functions, and lambdas work. When in doubt, wrap it
   in a plain `def` / `async def`.
 - **`run_custom_pipeline` does not run database migrations.** On an existing
   database, run `await cognee.run_migrations()` (or any `remember()` first).
@@ -163,10 +169,13 @@ outcome: `PipelineRunCompleted`, `PipelineRunAlreadyCompleted`,
   Otherwise `improve()` does not notice your graph writes and may skip
   enrichment as "already completed".
 - **memify defaults.** An omitted or empty task list is replaced by the
-  defaults (`get_triplet_datapoints` extraction, `index_data_points`
-  enrichment), and memify uses only the first dataset it resolves.
+  defaults: `index_data_points` enrichment, plus `get_triplet_datapoints`
+  extraction only when `TRIPLET_EMBEDDING=true` (off by default). memify
+  uses only the first dataset it resolves.
 - **Nodes duplicate on every run** when a DataPoint has no
-  `identity_fields`. Several shipped examples have this bug; don't copy it.
+  `identity_fields` (or `Dedup()` fields). `examples/guides/custom_data_models.py`
+  and `examples/guides/custom_tasks_and_pipelines.py` have this bug; don't
+  copy it.
 
 ## How it works
 
@@ -193,7 +202,8 @@ Examples:
 
 - `examples/demos/custom_pipelines/custom_pipeline_single_object_example.py`:
   the best reference. It runs over added documents, does LLM extraction into
-  typed DataPoints, then recalls. Add `identity_fields` to its models.
+  typed DataPoints, then recalls. Its models declare identity with `Dedup()`
+  (the `Annotated` alternative to `metadata["identity_fields"]`).
 - `examples/demos/custom_pipelines/organizational_hierarchy/`: low-level
   `run_tasks`, no LLM, dedup via `identity_fields`, status polling.
 - `examples/demos/custom_pipelines/custom_cognify_pipeline_example.py`:

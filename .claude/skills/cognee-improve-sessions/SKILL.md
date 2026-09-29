@@ -136,12 +136,14 @@ There is no debounce timer: held-back entries wait for the next
 - **`lock_held` does not wait.** Improves for the same dataset or session
   run one at a time: a second call returns at once with every stage
   `skipped: lock_held`. If it shares a session with the running one, it sets
-  `rerun_requested=True` and the holder runs up to 3 extra passes
-  (`rerun_passes`). The lock is per process only; multiple API workers do not
+  `rerun_requested=True` and the holder runs up to 2 extra passes (3 passes
+  in total; see `rerun_passes`). The bound is `IMPROVE_MAX_RERUN_PASSES`, a
+  constant in `cognee/api/v1/improve/improve.py`, not an env var. The lock is per process only; multiple API workers do not
   share it.
-- **Sessions bridge once.** Progress is tracked per user and session, not
-  per dataset. Bridging a session into dataset A and then into dataset B
-  adds nothing new to B.
+- **Sessions bridge once.** Q&A and trace persistence are tracked per user
+  and session, not per dataset, so bridging a session into dataset A and
+  then into dataset B persists no new Q&A/traces into B. Distillation is
+  tracked per (session, dataset) and still runs into B.
 - **`IMPROVE_STAGES_DISABLED` is validated.** An unknown stage name, or
   `persist_session_qa` (fatal, cannot be disabled), raises `ValueError`, and
   the API server refuses to start.

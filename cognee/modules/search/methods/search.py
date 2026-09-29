@@ -147,7 +147,9 @@ async def search(
 
     Notes:
         Scoping to specific datasets requires ``ENABLE_BACKEND_ACCESS_CONTROL``
-        (the default). Permission failures yield an empty list, not an error.
+        (the default). With ``dataset_ids=None``, datasets the user cannot read
+        are skipped (no grants -> ``[]``); an explicit id the user cannot read
+        raises ``PermissionDeniedError``.
     """
     send_telemetry(
         "cognee.search EXECUTION STARTED",

@@ -39,12 +39,13 @@ All cognee functions are async. Without `dataset_name` data goes to
   `SearchType.CODE`. To index a whole repository explicitly, pass
   `content_type="code"`.
 - **Databases and dlt sources**: a SQL connection string, a dlt
-  `DltResource` / `DltSource`, or a CSV. Needs the `dlt` extra
-  (`pip install "cognee[dlt]"`). Options: `primary_key` (default `"id"`),
+  `DltResource` / `DltSource`, or a CSV. dlt is a core dependency, so no
+  extra is needed (`cognee[dlt]` is an empty compatibility extra). Options: `primary_key` (default `"id"`),
   `write_disposition` (`"replace"` default, or `"append"`), `query`,
   `max_rows_per_table`.
-- **Skill playbooks** (`SKILL.md` files): `content_type="skills"` with an
-  explicit `dataset_name`.
+- **Skill playbooks** (`SKILL.md` files): `content_type="skills"`; ingests
+  into the target dataset (default `main_dataset`), so pass `dataset_name`
+  to keep skills in their own dataset.
 
 ### Where the data goes
 
@@ -120,7 +121,7 @@ it with `await cognee.remember(report)`, or pass `auto_apply=True`.
 
 `extractor="gliner"` builds the graph and summaries with a local GLiNER2
 model, with no LLM call (embeddings still run). Install
-`pip install "cognee[gliner]"`; the model (~800 MB) downloads on first use.
+`pip install "cognee[gliner]"`; the model (about 750 MB) downloads on first use.
 It cannot be combined with a custom `graph_model`, `temporal_cognify`,
 `dry_run`, `session_id`, or a remote instance.
 
@@ -139,11 +140,12 @@ It cannot be combined with a custom `graph_model`, `temporal_cognify`,
   |---|---|
   | `ontology_file_path` | `config={"ontology_config": ...}` or `ONTOLOGY_FILE_PATH` (above) |
   | `functional_relationships`, `chunk_attachment` | None yet. Only `cognee.cognify()` accepts them. |
-  | `extraction_rules`, `tavily_config`, `soup_crawler_config` (web scraping) | None yet. Only `cognee.add()` accepts them. |
+  | `extraction_rules` | Pass it through the loader: `preferred_loaders={"beautiful_soup_loader": {"extraction_rules": {...}}}` (works in `remember()` and `add()`). Needs the `scraping` extra: without it the loader is not registered and the rules are silently ignored |
+  | `tavily_config`, `soup_crawler_config` | Not honoured by `add()` or `remember()`; only the `cognee/tasks/web_scraper` tasks use them |
   | `column_value_columns` (dlt) | None yet. Only `cognee.add()` accepts it. |
 
-  If a user needs one of these, say so plainly: the option exists on the
-  lower-level `add()` / `cognify()` but not on `remember()` yet.
+  If a user needs one with no workaround, say so plainly: the option exists
+  on the lower-level `add()` / `cognify()` but not on `remember()` yet.
 - **Changed files raise `DocumentUpdateRequiredError`.** Re-remembering the
   same path (or the same filename for an upload) with different content is
   an update, not a new document. Use
@@ -152,7 +154,8 @@ It cannot be combined with a custom `graph_model`, `temporal_cognify`,
   a no-op.
 - **`content_type` is strict.** Only `None`, `"skills"`, or `"code"`.
   `"code"` rejects `session_id` and needs repository paths or git URLs;
-  `"skills"` needs an explicit dataset.
+  `"skills"` ingests into the target dataset like any other call (default
+  `main_dataset`); pass `dataset_name` to keep skills in their own dataset.
 - **Session mode needs `CACHING=true`**, and `extractor` cannot be combined
   with `session_id`.
 - **Remote mode.** After `cognee.serve(url)`, calls go to the server:

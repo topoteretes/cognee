@@ -74,14 +74,16 @@ candidates (name + a short preview) before deleting.
 | Goal | Call | What remains |
 |---|---|---|
 | One document | `forget(data_id=..., dataset_id=...)` (or `dataset="name"`) | Nothing of that document; shared entities stay while another document still references them |
-| A whole dataset | `forget(dataset="name")` or `forget(dataset_id=...)` | The dataset is emptied: data rows, graph, vectors |
+| A whole dataset | `forget(dataset="name")` or `forget(dataset_id=...)` | The dataset is deleted outright: the record, its data rows, graph and vector stores, and attributed sessions |
 | Rebuild a dataset's graph later | `forget(dataset="name", memory_only=True)` | Raw files and data rows; graph, vectors, sessions and pipeline status are reset, so the data can be re-processed |
 | One document's memory only | `forget(dataset="name", data_id=..., memory_only=True)` | That document's raw file and row |
-| Everything the user owns | `forget(everything=True)` | Nothing. Only on explicit request (see the hard limits) |
+| Every dataset the user can delete | `forget(everything=True)` | Nothing, in any dataset the user has `delete` on in the current tenant (shared ones included). Only on explicit request (see the hard limits) |
 
 Return values: `{"data_id", "dataset_id", "status"}` for a document,
 `{"dataset_id", "status"}` for a dataset (plus `data_records_reset` with
-`memory_only`), `{"datasets_removed", "status"}` for everything.
+`memory_only`), `{"datasets_removed", "status"}` for everything
+(`datasets_removed` counts the datasets the user can *read*, not the delete
+set).
 
 **HTTP:** `POST /api/v1/forget` with a JSON body; camelCase and snake_case
 keys both work: `{"datasetId": "...", "dataId": "..."}`,
@@ -105,7 +107,9 @@ combinations return 422.
 - **Not found and not allowed look the same.** An unknown dataset name and
   one the user cannot delete both raise `DatasetNotFoundError`. Deleting
   needs the `delete` permission on the dataset (see the `cognee-permissions`
-  skill). `everything=True` covers only datasets the user owns.
+  skill). `everything=True` deletes every dataset the user has `delete`
+  permission on in the current tenant, including datasets shared to them
+  with delete rights, not only the ones they own.
 - **Sessions that cited deleted data are invalidated** so recall stops
   returning answers built on it. Agent-trace entries are not invalidated.
 - **Changing a document is not a delete.** To replace a document's content,
@@ -126,8 +130,11 @@ combinations return 422.
 - **A dataset** → `datasets.empty_dataset()`.
 - **`memory_only`** → drops the dataset's graph/vector memory and resets its
   pipeline status, leaving raw data for a rebuild.
-- **`everything`** → `datasets.delete_all()` for the user's datasets plus
-  their session cache.
+- **`everything`** → `datasets.delete_all()` over every dataset the user has
+  `delete` on in the current tenant, plus a full prune of the session cache
+  (when caching or usage logging is on). This wipes **every user's**
+  sessions (Redis FLUSHDB / the whole fs cache / all SQL cache tables), not
+  just this user's.
 
 Key files:
 

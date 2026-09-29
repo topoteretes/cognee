@@ -70,27 +70,34 @@ a local model does not get the local default of 10 requests; set
 | `EMBEDDING_MAX_CONCURRENT_DATA_POINTS` | 150 (so 150 / 36 = 4 concurrent requests) |
 | `EMBEDDING_RATE_LIMIT_ENABLED` / `_REQUESTS` / `_INTERVAL` | off / 60 / 60 s |
 
-There is no automatic overload back-off for embeddings. Without any
+Embedding calls retry transient errors, rate-limit 429s included, with
+exponential jitter for up to 128 s (budget-exhaustion errors are terminal,
+not retried), but `AUTO_RATE_LIMIT` does not apply to them; enable
+`EMBEDDING_RATE_LIMIT_ENABLED` yourself for sustained load. Without any
 credentials cognee embeds locally with fastembed (`BAAI/bge-small-en-v1.5`),
 which runs on the CPU and blocks while it works.
 
 ### 5. Skip the LLM for extraction
 
 `remember(data, extractor="gliner")` builds the graph and summaries with a
-local GLiNER model: no LLM calls, embeddings still run (`pip install
+local GLiNER model: no LLM calls, embeddings still run. The runtime installs
+on first use (`GLINER_AUTO_INSTALL=false` to disable; then `pip install
 "cognee[gliner]"`). See the `cognee-ingestion` skill for its limits.
 
 ### 6. Read latency
 
 - **`AUTO_FEEDBACK=false`** is the biggest win for chat-style use: by default
-  every answered turn with a session makes one extra LLM call to analyze
-  feedback. Keep `CACHING=true` so session memory still works.
+  every answered turn (the default session is used when no `session_id` is
+  passed) makes one extra LLM call to analyze feedback. Keep `CACHING=true` so session memory still works.
 - **Pick a type without an LLM** when you need passages, not an answer:
   `CHUNKS`, `CHUNKS_LEXICAL`, `SUMMARIES`, `CODE`, `SKILLS`. Completion types
-  make one LLM call; `GRAPH_COMPLETION_COT` and `_DECOMPOSITION` make several;
-  `FEELING_LUCKY` adds one to pick the type.
+  make one LLM call; `GRAPH_COMPLETION_COT`, `_DECOMPOSITION`,
+  `_CONTEXT_EXTENSION`, `GRAPH_SUMMARY_COMPLETION` and `TEMPORAL` make
+  several; `NATURAL_LANGUAGE` makes one and retries (up to 3 attempts) only
+  on an empty or failed query; `FEELING_LUCKY` adds one to pick the type.
 - **Narrow the search**: pass `datasets=[...]` (one search runs per dataset)
-  and a smaller `top_k` (per dataset, default 15).
+  and a smaller `top_k` (per dataset, default 15; HYBRID caps each lane at
+  10, so only values below 10 shrink its context).
 - `SESSION_SEARCH_MODE=concurrent` (default) overlaps the feedback analysis
   with the answer; `sequential` runs them back to back.
 
@@ -99,8 +106,14 @@ local GLiNER model: no LLM calls, embeddings still run (`pip install
 With access control on (the default), each dataset has its own databases.
 `DATASET_QUEUE_MAX_CONCURRENT` (default 6, from `DATABASE_MAX_LRU_CACHE_SIZE`)
 caps how many datasets are processed at once in one process, and
-`SUBPROCESS_IDLE_TTL_SECONDS` (600) keeps idle database workers warm. Keep
-`DATASET_QUEUE_ENABLED=true` for parallel multi-dataset load.
+`SUBPROCESS_IDLE_TTL_SECONDS` (600) keeps idle database workers warm.
+`DATASET_QUEUE_ENABLED` (default true) enforces that cap, releases
+subprocess engines when a dataset's last scope exits (they stay warm for
+`SUBPROCESS_IDLE_TTL_SECONDS` and close at once only when it is 0) and pins
+in-use engines against eviction.
+Setting it false removes the cap rather than disabling parallelism, and
+risks file-lock leaks and engine eviction under parallel load, so keep it
+on.
 
 ### 8. Scaling a deployment
 
