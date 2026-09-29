@@ -12,6 +12,8 @@ Hard rules enforced here:
   a Python class name, allowlisted to identifier characters.
 - Identity columns (user_id, api_key_hash, anonymous_id, persistent_id)
   are used ONLY inside COUNT(DISTINCT ...); their values are never emitted.
+- Pipeline run ids are used ONLY to group a run's events and inside
+  COUNT(DISTINCT ...); their values are never emitted.
 - Identifier-bearing provider/model settings are bucketed as 'redacted'
   before grouping, so custom deployment names cannot stop the daily export.
 - A post-write guard fails the job if any output header matches the
@@ -94,6 +96,8 @@ _ORIGIN = "coalesce(json_extract_string(properties, '$.telemetry_origin'), 'unkn
 _VERSION = "coalesce(regexp_replace(cognee_version, '-local$', ''), 'unknown')"
 # Pipeline error class (``exception_type``): a Python class name. Anything that
 # is not one identifier is bucketed, so an unexpected value cannot stop the export.
+# A run's random id (``pipeline_run_id``): joins the per-item events of one run.
+_RUN_ID = "json_extract_string(properties, '$.pipeline_run_id')"
 _EXCEPTION_TYPE = (
     "CASE WHEN regexp_matches(json_extract_string(properties, '$.exception_type'), "
     "'^[A-Za-z_][A-Za-z0-9_]*$') THEN json_extract_string(properties, '$.exception_type') "
@@ -125,10 +129,38 @@ QUERIES: dict[str, str] = {
         SELECT ingestion_date AS day, {_VERSION} AS version,
                {_EXCEPTION_TYPE} AS exception_type,
                count(*) AS errors,
+               count(DISTINCT {_RUN_ID}) AS runs,
                count(DISTINCT {_IDENT}) AS distinct_identities
         FROM analytics.main.pipeline_events
         WHERE {_BASE_FILTER} AND tracking_event = 'Pipeline Run Errored'
         GROUP BY ALL ORDER BY day, errors DESC
+    """,
+    # Pipeline runs by outcome (SDK-775). Pipeline events fire once per data item,
+    # while startup recovery closes a whole run with one event, so event counts
+    # cannot balance. Each run is classified once from all its events: errored if
+    # any item errored, silent if no event of the run is Completed or Errored.
+    # Counted on the day and version of the run's Started event.
+    "pipeline_runs_daily": f"""
+        WITH runs AS (
+            SELECT {_RUN_ID} AS run_id,
+                   min(ingestion_date) FILTER (tracking_event = 'Pipeline Run Started') AS day,
+                   min({_VERSION}) FILTER (tracking_event = 'Pipeline Run Started') AS version,
+                   bool_or(tracking_event = 'Pipeline Run Errored') AS errored,
+                   bool_or(tracking_event IN ('Pipeline Run Completed', 'Pipeline Run Errored'))
+                       AS ended
+            FROM analytics.main.pipeline_events
+            WHERE {_BASE_FILTER} AND tracking_event LIKE 'Pipeline Run%'
+                  AND {_RUN_ID} IS NOT NULL
+            GROUP BY {_RUN_ID}
+        )
+        SELECT day, version,
+               count(*) AS runs_started,
+               count(*) FILTER (ended AND NOT errored) AS runs_completed,
+               count(*) FILTER (errored) AS runs_errored,
+               count(*) FILTER (NOT ended) AS runs_silent
+        FROM runs
+        WHERE day IS NOT NULL
+        GROUP BY ALL ORDER BY day, version
     """,
     # Graph-build pipeline health by day and version.
     "pipeline_outcomes_daily": f"""
