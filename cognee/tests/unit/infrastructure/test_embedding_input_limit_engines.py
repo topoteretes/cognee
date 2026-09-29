@@ -244,14 +244,19 @@ def test_openai_compatible_unknown_model_keeps_the_cap():
 # ---------------------------------------------------------------------------
 
 
-def _ollama_engine(monkeypatch, configured, model_limit):
+def _ollama_engine(
+    monkeypatch, configured, model_limit, endpoint="http://localhost:11434/api/embed"
+):
     monkeypatch.setenv("MOCK_EMBEDDING", "false")
     with (
         patch.object(ollama_module, "ollama_input_limit", return_value=model_limit) as lookup,
         patch.object(OllamaEmbeddingEngine, "get_tokenizer", return_value=MagicMock()),
     ):
         engine = OllamaEmbeddingEngine(
-            model="nomic-embed-text", dimensions=4, max_completion_tokens=configured
+            model="nomic-embed-text",
+            dimensions=4,
+            max_completion_tokens=configured,
+            endpoint=endpoint,
         )
     return engine, lookup
 
@@ -305,6 +310,23 @@ async def test_ollama_asks_the_server_to_reject_over_length_input(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_ollama_does_not_send_truncate_to_an_openai_shaped_endpoint(monkeypatch):
+    """A LiteLLM proxy or /v1 endpoint rejects unknown fields, so truncate stays Ollama-only."""
+    engine, _ = _ollama_engine(monkeypatch, None, None, endpoint="http://proxy:4000/v1/embeddings")
+    payloads = []
+
+    def _fake_post(self, url, *, json, **kwargs):
+        payloads.append(json)
+        return _FakeAiohttpResponse({"data": [{"embedding": [0.1, 0.2, 0.3, 0.4]}]})
+
+    monkeypatch.setattr(aiohttp.ClientSession, "post", _fake_post)
+
+    await engine.embed_text(["hello"])
+
+    assert "truncate" not in payloads[0]
+
+
+@pytest.mark.asyncio
 async def test_ollama_over_length_rejection_is_embedded_in_parts_without_an_error_log(
     monkeypatch, caplog
 ):
@@ -329,6 +351,11 @@ async def test_ollama_over_length_rejection_is_embedded_in_parts_without_an_erro
 # ---------------------------------------------------------------------------
 # the chunk size a pipeline runs with
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _fresh_chunk_size_warnings(monkeypatch):
+    monkeypatch.setattr(llm_utils, "_chunk_size_warnings_issued", set())
 
 
 def _vector_engine_with(limit: int, model_limit: int | None, model: str = BGE):

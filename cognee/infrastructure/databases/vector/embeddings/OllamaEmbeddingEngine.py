@@ -209,11 +209,14 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             "model": self.model,
             "input": prompt,
             "dimensions": self.dimensions,
-            # Reject over-length input ("the input length exceeds the context
-            # length") instead of Ollama's default of embedding only the head.
-            # The rejection is classified below and embed_text splits the text.
-            "truncate": False,
         }
+        if "/api/" in self.endpoint:
+            # Ollama's native API: reject over-length input ("the input length
+            # exceeds the context length") instead of embedding only the head.
+            # The rejection is classified below and embed_text splits the text.
+            # Not sent to an OpenAI-shaped endpoint (a LiteLLM proxy, /v1/...),
+            # which rejects unknown fields.
+            payload["truncate"] = False
 
         headers = {}
         api_key = os.getenv("LLM_API_KEY")
