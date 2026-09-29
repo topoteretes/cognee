@@ -65,8 +65,6 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
     mock: bool
     huggingface_tokenizer_name: str
 
-    MAX_RETRIES = 5
-
     def __init__(
         self,
         model: str | None = "avr/sfr-embedding-mistral:latest",

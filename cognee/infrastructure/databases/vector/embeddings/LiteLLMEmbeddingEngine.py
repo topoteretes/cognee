@@ -107,8 +107,6 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
     dimensions: int
     mock: bool
 
-    MAX_RETRIES = 5
-
     def __init__(
         self,
         model: str | None = "openai/text-embedding-3-large",
@@ -164,16 +162,23 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
         # Skip the retry chain for terminal error classes. Authentication /
-        # authorization / not-found errors will never succeed on a retry, so
-        # the previous behaviour of running the full backoff ladder wasted
-        # ~2 minutes of user wall clock on a mis-typed API key. Superset of
-        # the LLM adapter exclusion set (adds PermissionDeniedError); see
+        # authorization / not-found / bad-request / unprocessable errors will
+        # never succeed on a retry, so the previous
+        # behaviour of running the full backoff ladder wasted ~2 minutes of
+        # user wall clock on a mis-typed API key or EMBEDDING_MODEL. The
+        # handlers below re-raise these unwrapped, which is what lets this list
+        # match them. BadRequestError is safe to list: the recoverable
+        # over-length 400s are recovered in place (split + pool) and never
+        # reach tenacity. Superset of the LLM adapter exclusion set; see
         # cognee/infrastructure/llm/structured_output_framework/litellm_instructor/llm/openai/adapter.py.
-        # Budget exhaustion is terminal as well, but it is classified by
-        # predicate rather than by class: see embeddings/retry_config.py.
+        # Budget exhaustion and a missing provider SDK are terminal as well, but
+        # they are classified by predicate rather than by class, because the
+        # wrapping hides the class: see embeddings/retry_config.py.
         retry=embedding_retry_condition(
             EmbeddingContextWindowTooSmallError,
+            litellm.exceptions.BadRequestError,
             litellm.exceptions.NotFoundError,
+            litellm.exceptions.UnprocessableEntityError,
             litellm.exceptions.AuthenticationError,
             litellm.exceptions.PermissionDeniedError,
             asyncio.CancelledError,
@@ -356,9 +361,21 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             # already bypasses the handlers below and propagates unwrapped.)
             raise
 
-        except litellm.exceptions.NotFoundError as e:
-            logger.error(f"Embedding error with model {self.model}: {e!s}")
-            raise EmbeddingException(f"Failed to index data points using model {self.model}") from e
+        except (
+            litellm.exceptions.NotFoundError,
+            litellm.exceptions.UnprocessableEntityError,
+        ) as error:
+            # Terminal like the auth branch above: a model or route the
+            # provider does not serve (404), or input it rejects (422). Wrapping
+            # these in EmbeddingException hid the class from the exclusion list,
+            # so a mis-typed EMBEDDING_MODEL ran the full backoff ladder.
+            logger.error(
+                "Embedding request rejected (model='%s'): %s. "
+                "Check EMBEDDING_MODEL and EMBEDDING_ENDPOINT.",
+                str(self.model),
+                str(error),
+            )
+            raise
 
         except Exception as error:
             # A proxy spend cap lands here, either as litellm's own
@@ -368,14 +385,17 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             # message below, which points at the wrong problem entirely.
             raise_if_budget_exhausted(error)
 
-            # Fall back to a clear, actionable message for connectivity/misconfiguration issues
+            # Fall back to a clear, actionable message for connectivity/misconfiguration
+            # issues. The provider's error is part of the message: the generic text
+            # alone, next to the 422 status, read like a provider response.
             logger.error(
                 "Error embedding text: %s. EMBEDDING_ENDPOINT='%s'.",
                 str(error),
                 str(self.endpoint),
             )
             raise EmbeddingException(
-                "Embedding failed due to an unexpected error. Verify EMBEDDING_ENDPOINT and provider settings."
+                f"Embedding failed ({type(error).__name__}: {error}). "
+                "Verify EMBEDDING_ENDPOINT and provider settings."
             ) from error
 
     def get_vector_size(self) -> int:
