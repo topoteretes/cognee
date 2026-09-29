@@ -19,7 +19,7 @@ This document summarizes how to work with the cognee repository: how it’s orga
 - `distributed/deploy/`: One-click deployment templates (Modal, Fly.io, Railway, Render, Daytona).
 - `examples/`: Example scripts demonstrating the public APIs and features (graph, code graph, multimodal, permissions, etc.).
 - `notebooks/`: Jupyter notebooks for demos and tutorials.
-- `.claude/skills/`: Task-specific agent skills live in `.claude/skills/`, copied to `.agents/skills/` for Codex. Edit only `.claude/skills/`: the `sync-agent-skills` pre-commit hook (`scripts/sync_agent_skills.py`) regenerates the copy, and CI fails if the copy differs from the source.
+- `.claude/skills/`: Task-specific agent skills live in `.claude/skills/`, mirrored to `.agents/skills/` (symlink) for Codex.
 - `cognee/alembic/`: Relational (Alembic) schema migrations; `alembic.ini` is in `cognee/`. Graph/vector data migrations live in `cognee/modules/migrations/`.
 
 Notes:
