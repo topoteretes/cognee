@@ -109,11 +109,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         # so it has no effect on servers that ignore unknown fields.
         self.input_type = input_type
         self.tokenizer = self.get_tokenizer()
-        # A self-hosted server names no limit; the served model id is usually a
-        # HuggingFace repo (its tokenizer knows) or a hosted model litellm knows.
-        self.model_input_limit = litellm_input_limit(self.model) or sane_limit(
-            self.tokenizer.model_input_limit
-        )
+        self.model_input_limit = self.input_limit()
         self.max_completion_tokens = effective_input_limit(
             configured=max_completion_tokens,
             model_limit=self.model_input_limit,
@@ -305,6 +301,11 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             - int: The batch size.
         """
         return self.batch_size
+
+    def input_limit(self) -> int | None:
+        """A self-hosted server names no limit; the served model id is usually a
+        HuggingFace repo (its tokenizer knows) or a hosted model litellm knows."""
+        return litellm_input_limit(self.model) or sane_limit(self.tokenizer.model_input_limit)
 
     def get_tokenizer(self):
         """Load a tokenizer for chunk sizing against OpenAI-compatible embedding servers.

@@ -43,3 +43,16 @@ class EmbeddingEngine(Protocol):
 
         """
         raise NotImplementedError("Subclasses must implement get_batch_size()")
+
+    def input_limit(self) -> int | None:
+        """
+        How many tokens of text the configured model accepts in one input, when the
+        provider can tell (its model table, the loaded model, the server); None when
+        it cannot. The engine embeds by min(EMBEDDING_MAX_COMPLETION_TOKENS, this).
+
+        Returns:
+        --------
+
+            - int | None: The model's input limit in tokens, or None when unknown.
+        """
+        raise NotImplementedError("Subclasses must implement input_limit()")

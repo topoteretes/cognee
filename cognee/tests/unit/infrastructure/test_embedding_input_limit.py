@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine import (
-    fastembed_input_limit,
+    FastembedEmbeddingEngine,
 )
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     DEFAULT_EMBEDDING_INPUT_CAP,
@@ -23,7 +23,7 @@ from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     sane_limit,
 )
 from cognee.infrastructure.databases.vector.embeddings.OllamaEmbeddingEngine import (
-    ollama_input_limit,
+    OllamaEmbeddingEngine,
 )
 from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
@@ -73,25 +73,40 @@ def test_huggingface_tokenizer_knows_its_models_limit_less_special_tokens():
     assert TikTokenTokenizer(model=None).model_input_limit is None
 
 
+def _fastembed_engine_with(embedding_model) -> FastembedEmbeddingEngine:
+    engine = FastembedEmbeddingEngine.__new__(FastembedEmbeddingEngine)
+    engine.embedding_model = embedding_model
+    return engine
+
+
 def test_fastembed_input_limit_reads_the_loaded_tokenizer_truncation_less_special_tokens():
     model = MagicMock()
     model.model.tokenizer.truncation = {"max_length": 512, "direction": "right"}
     model.model.tokenizer.num_special_tokens_to_add.return_value = 2
-    assert fastembed_input_limit(model) == 510
+    assert _fastembed_engine_with(model).input_limit() == 510
 
     model.model.tokenizer.truncation = None
-    assert fastembed_input_limit(model) is None
+    assert _fastembed_engine_with(model).input_limit() is None
 
-    assert fastembed_input_limit(object()) is None
+    assert _fastembed_engine_with(object()).input_limit() is None
 
 
-def test_ollama_input_limit_reads_context_length_from_api_show():
+def _ollama_engine_with(endpoint, model) -> OllamaEmbeddingEngine:
+    engine = OllamaEmbeddingEngine.__new__(OllamaEmbeddingEngine)
+    engine.endpoint, engine.model = endpoint, model
+    return engine
+
+
+def test_ollama_input_limit_reads_context_length_from_api_show(monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "key")
     response = MagicMock()
     response.json.return_value = {
         "model_info": {"general.architecture": "qwen3", "qwen3.context_length": 40960}
     }
     with patch.object(httpx, "post", return_value=response) as post:
-        limit = ollama_input_limit("http://localhost:11434/api/embed", "qwen3-embedding", "key")
+        limit = _ollama_engine_with(
+            "http://localhost:11434/api/embed", "qwen3-embedding"
+        ).input_limit()
 
     assert limit == 40960
     assert post.call_args.args[0] == "http://localhost:11434/api/show"
@@ -99,21 +114,23 @@ def test_ollama_input_limit_reads_context_length_from_api_show():
     assert post.call_args.kwargs["headers"] == {"Authorization": "Bearer key"}
 
 
-def test_ollama_input_limit_is_none_when_the_server_cannot_answer():
+def test_ollama_input_limit_is_none_when_the_server_cannot_answer(monkeypatch):
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    native = "http://localhost:11434/api/embed"
     with patch.object(httpx, "post", side_effect=httpx.ConnectError("refused")):
-        assert ollama_input_limit("http://localhost:11434/api/embed", "m", None) is None
+        assert _ollama_engine_with(native, "m").input_limit() is None
 
     response = MagicMock()
     response.raise_for_status.side_effect = httpx.HTTPStatusError(
         "404", request=None, response=None
     )
     with patch.object(httpx, "post", return_value=response):
-        assert ollama_input_limit("http://localhost:11434/api/embed", "not-pulled", None) is None
+        assert _ollama_engine_with(native, "not-pulled").input_limit() is None
 
     # Not an Ollama-shaped endpoint: nothing to ask.
     with patch.object(httpx, "post") as post:
-        assert ollama_input_limit("http://proxy/v1/embeddings", "m", None) is None
-        assert ollama_input_limit(None, "m", None) is None
+        assert _ollama_engine_with("http://proxy/v1/embeddings", "m").input_limit() is None
+        assert _ollama_engine_with(None, "m").input_limit() is None
     post.assert_not_called()
 
 

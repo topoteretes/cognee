@@ -39,35 +39,6 @@ logger = get_logger("OllamaEmbeddingEngine")
 observe = get_observe()
 
 
-def ollama_input_limit(endpoint: str | None, model: str | None, api_key: str | None) -> int | None:
-    """The model's context length from Ollama's ``/api/show``, or None.
-
-    Ollama embeds up to the model's ``context_length``. Anything that stops the
-    lookup, from a server that is down to an endpoint that is not Ollama-shaped,
-    gives None: the cap then stands, and ``truncate: false`` on every embed request
-    still turns an over-length input into an error instead of a silent cut.
-    """
-    if not endpoint or not model or "/api/" not in endpoint:
-        return None
-    import httpx
-
-    show_url = f"{endpoint.split('/api/', 1)[0]}/api/show"
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    try:
-        response = httpx.post(show_url, json={"model": model}, headers=headers)
-        response.raise_for_status()
-        model_info = response.json().get("model_info") or {}
-    except Exception:
-        logger.debug(
-            "Could not read the context length of %r from %s", model, show_url, exc_info=True
-        )
-        return None
-    for key, value in model_info.items():
-        if key.endswith(".context_length"):
-            return sane_limit(value)
-    return None
-
-
 class OllamaEmbeddingEngine(EmbeddingEngine):
     """
     Implements an embedding engine using the Ollama embedding model.
@@ -115,7 +86,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         # the rest without an error. The limit comes from /api/show, and every
         # embed request below sends truncate=false so an over-length input is
         # rejected (and then embedded in parts) instead of silently shortened.
-        self.model_input_limit = ollama_input_limit(endpoint, model, os.getenv("LLM_API_KEY"))
+        self.model_input_limit = self.input_limit()
         self.max_completion_tokens = effective_input_limit(
             configured=max_completion_tokens,
             model_limit=self.model_input_limit,
@@ -309,6 +280,38 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
 
         """
         return self.batch_size
+
+    def input_limit(self) -> int | None:
+        """The model's context length from Ollama's ``/api/show``, or None.
+
+        Ollama embeds up to the model's ``context_length``. Anything that stops the
+        lookup, from a server that is down to an endpoint that is not Ollama-shaped,
+        gives None: the cap then stands, and ``truncate: false`` on every embed
+        request still turns an over-length input into an error instead of a silent cut.
+        """
+        if not self.endpoint or not self.model or "/api/" not in self.endpoint:
+            return None
+        import httpx
+
+        show_url = f"{self.endpoint.split('/api/', 1)[0]}/api/show"
+        api_key = os.getenv("LLM_API_KEY")
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        try:
+            response = httpx.post(show_url, json={"model": self.model}, headers=headers)
+            response.raise_for_status()
+            model_info = response.json().get("model_info") or {}
+        except Exception:
+            logger.debug(
+                "Could not read the context length of %r from %s",
+                self.model,
+                show_url,
+                exc_info=True,
+            )
+            return None
+        for key, value in model_info.items():
+            if key.endswith(".context_length"):
+                return sane_limit(value)
+        return None
 
     def get_tokenizer(self):
         """

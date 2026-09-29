@@ -74,22 +74,6 @@ def fastembed_model_cached(model: str) -> tuple[bool, str, str | None]:
     return any(path.exists() for path in candidates), str(cache_dir), size_hint
 
 
-def fastembed_input_limit(embedding_model) -> int | None:
-    """How many tokens of text the loaded fastembed model embeds, or None.
-
-    Read from the model's own tokenizer: the length it truncates at, less the
-    special tokens it adds itself, since text is counted without them.
-    """
-    tokenizer = getattr(getattr(embedding_model, "model", None), "tokenizer", None)
-    truncation = getattr(tokenizer, "truncation", None)
-    if not isinstance(truncation, dict):
-        return None
-    limit = sane_limit(truncation.get("max_length"))
-    if limit is None:
-        return None
-    return sane_limit(limit - tokenizer.num_special_tokens_to_add(False))
-
-
 class FastembedEmbeddingEngine(EmbeddingEngine):
     """
     Manages the embedding process using a specified model to generate text embeddings.
@@ -136,7 +120,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         self.embedding_model = TextEmbedding(model_name=model)
         # fastembed truncates input at the model's own limit without an error, so
         # chunks must never be sized past it.
-        self.model_input_limit = fastembed_input_limit(self.embedding_model)
+        self.model_input_limit = self.input_limit()
         self.max_completion_tokens = effective_input_limit(
             configured=max_completion_tokens,
             model_limit=self.model_input_limit,
@@ -225,6 +209,19 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             ) from error
 
         return handle_embedding_response(original_texts, embeddings, self.dimensions)
+
+    def input_limit(self) -> int | None:
+        """How many tokens of text the loaded model embeds, from its own tokenizer:
+        the length it truncates at, less the special tokens it adds itself, since
+        text is counted without them. None if fastembed does not expose it."""
+        tokenizer = getattr(getattr(self.embedding_model, "model", None), "tokenizer", None)
+        truncation = getattr(tokenizer, "truncation", None)
+        if not isinstance(truncation, dict):
+            return None
+        limit = sane_limit(truncation.get("max_length"))
+        if limit is None:
+            return None
+        return sane_limit(limit - tokenizer.num_special_tokens_to_add(False))
 
     def _exceeds_model_limit(self, texts: list[str]) -> bool:
         """Whether the model's tokenizer would truncate any of ``texts``.

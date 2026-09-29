@@ -128,11 +128,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         self.model = model
         self.dimensions = dimensions
         self.tokenizer = self.get_tokenizer()
-        # litellm's table knows the hosted models; a HuggingFace-repo model served
-        # elsewhere (vLLM, TEI, ...) at least carries its limit on its tokenizer.
-        self.model_input_limit = litellm_input_limit(model, provider) or sane_limit(
-            self.tokenizer.model_input_limit
-        )
+        self.model_input_limit = self.input_limit()
         self.max_completion_tokens = effective_input_limit(
             configured=max_completion_tokens,
             model_limit=self.model_input_limit,
@@ -407,6 +403,13 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
         """
         return self.batch_size
+
+    def input_limit(self) -> int | None:
+        """litellm's model table knows the hosted models; a HuggingFace-repo model
+        served elsewhere (vLLM, TEI, ...) at least carries its limit on its tokenizer."""
+        return litellm_input_limit(self.model, self.provider) or sane_limit(
+            self.tokenizer.model_input_limit
+        )
 
     def get_tokenizer(self):
         """

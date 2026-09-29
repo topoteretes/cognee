@@ -20,7 +20,6 @@ import pytest
 from typing_extensions import Self
 
 import cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine as fastembed_module
-import cognee.infrastructure.databases.vector.embeddings.OllamaEmbeddingEngine as ollama_module
 from cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine import (
     FastembedEmbeddingEngine,
 )
@@ -253,7 +252,7 @@ def _ollama_engine(
 ):
     monkeypatch.setenv("MOCK_EMBEDDING", "false")
     with (
-        patch.object(ollama_module, "ollama_input_limit", return_value=model_limit) as lookup,
+        patch.object(OllamaEmbeddingEngine, "input_limit", return_value=model_limit) as lookup,
         patch.object(OllamaEmbeddingEngine, "get_tokenizer", return_value=MagicMock()),
     ):
         engine = OllamaEmbeddingEngine(
@@ -280,7 +279,7 @@ def test_ollama_limit_comes_from_api_show(monkeypatch, configured, model_limit, 
 
     assert engine.model_input_limit == model_limit
     assert engine.max_completion_tokens == expected
-    assert lookup.call_args.args[:2] == ("http://localhost:11434/api/embed", "nomic-embed-text")
+    lookup.assert_called_once()
 
 
 class _FakeAiohttpResponse:
