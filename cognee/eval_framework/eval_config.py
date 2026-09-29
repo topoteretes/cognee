@@ -55,7 +55,7 @@ class EvalConfig(BaseSettings):
     direct_llm_eval_prompt: str = "direct_llm_eval_prompt.txt"
     instance_filter: list[str] | None = None
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     def to_dict(self) -> dict:
         return {
