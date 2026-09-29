@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "1.6.1"
+version = "1.6.2"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -111,7 +111,7 @@ dependencies = [
     "datamodel-code-generator>=0.54.0",
     # Enola powers the built-in deterministic code-graph route. Keep this pinned:
     # its snapshot contract and known answers are validated by test_code_graph_e2e.py.
-    "enola-cli==0.4.21",
+    "enola-cli==0.4.26",
     # dlt powers database, CSV and Google Drive/Gmail ingestion.
     "dlt[sqlalchemy]>=1.9.0,<2",
     # dlt's filesystem read_csv reader requires pandas but does not declare it

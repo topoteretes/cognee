@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.engine import DataPoint
-from cognee.infrastructure.llm import get_max_chunk_tokens
+from cognee.infrastructure.llm import resolve_chunk_size
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.config import (
@@ -186,7 +186,8 @@ async def cognify(
         ontology_file_path: Optional path, or comma-separated paths, to the ontology
                     used for both extraction schema planning and graph integration.
         chunk_size: Maximum tokens per chunk. Auto-calculated based on LLM if None.
-                   Formula: min(embedding_max_completion_tokens, llm_max_completion_tokens // 2)
+                   Formula: min(embedding token limit, llm_max_completion_tokens // 2). A value
+                   above what the embedding model accepts is lowered to that limit with a warning.
                    Default limits: ~512-8192 tokens depending on models.
                    Smaller chunks = more granular but potentially fragmented knowledge.
         chunks_per_batch: Number of chunks to be processed in a single batch in Cognify tasks.
@@ -419,7 +420,7 @@ async def cognify(
                 user=user,
                 graph_model=graph_model,
                 chunker=chunker,
-                chunk_size=chunk_size or await get_max_chunk_tokens(),
+                chunk_size=await resolve_chunk_size(chunk_size),
                 custom_prompt=custom_prompt,
             )
 
@@ -583,7 +584,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             cognify_config.chunks_per_batch if cognify_config.chunks_per_batch is not None else 2000
         )
 
-    max_chunk_size = chunk_size or await get_max_chunk_tokens()
+    max_chunk_size = await resolve_chunk_size(chunk_size)
     tasks = [
         # needs_llm=False marks the tasks that never call the LLM; the run's
         # need is the union over the tasks, so the LLM connection probe runs
@@ -673,7 +674,7 @@ async def get_dlt_tasks(
         # EXTRACT: one DocumentChunk per manifest row (no text chunking)
         Task(
             extract_chunks_from_documents,
-            max_chunk_size=chunk_size or await get_max_chunk_tokens(),
+            max_chunk_size=await resolve_chunk_size(chunk_size),
             chunker=TextChunker,
             needs_llm=False,
         ),
@@ -726,7 +727,7 @@ async def get_temporal_tasks(
         # EXTRACT: split Documents into semantic text chunks
         Task(
             extract_chunks_from_documents,
-            max_chunk_size=chunk_size or await get_max_chunk_tokens(),
+            max_chunk_size=await resolve_chunk_size(chunk_size),
             chunker=chunker,
         ),
         # COGNIFY: extract temporal events and timestamps from chunks

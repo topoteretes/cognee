@@ -917,7 +917,28 @@ def build_operation_layer(
 
 def _stage_for_node(node_info):
     node_type = node_info.get("type")
-    return _STAGE_BY_TYPE.get(node_type, "other")
+    if node_type in _STAGE_BY_TYPE:
+        return _STAGE_BY_TYPE[node_type]
+    # Nodes from a custom graph_model (Person, Project, ...) carry their own class
+    # name. The ones with an identity are entities, the same as Entity nodes.
+    if node_type not in _BUILTIN_IDENTITY_TYPES and _declares_identity(node_info):
+        return "entity"
+    return "other"
+
+
+# Built-in node types outside _STAGE_BY_TYPE that also declare identity_fields.
+_BUILTIN_IDENTITY_TYPES = frozenset({"EdgeType", "Skill", "SkillRun", "SkillImprovementProposal"})
+
+
+def _declares_identity(node_info) -> bool:
+    metadata = node_info.get("metadata")
+    if isinstance(metadata, str):
+        # Some adapters (Neo4j) store nested dicts as JSON strings.
+        try:
+            metadata = json.loads(metadata)
+        except ValueError:
+            return False
+    return isinstance(metadata, dict) and bool(metadata.get("identity_fields"))
 
 
 def _visual_rank(node_info, stage):

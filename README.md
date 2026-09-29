@@ -239,7 +239,8 @@ The UI launcher requires Node.js/npm; Docker is needed for its MCP service. See 
 
 ## Explore examples
 
-- [Build a small Company Brain from text, code, and session lessons](examples/demos/company_brain/company_brain_demo.py).
+- [Build a small Company Brain from text, code, and session lessons](examples/demos/company_brain/docs_code_conversations/company_brain_demo.py).
+- [Build a Company Brain from a database, a ticket export, and meeting notes](examples/demos/company_brain/multi_source/), then browse it in the UI and query it from Claude Code or Codex.
 - [Import memory from Mem0, Letta, Zep, or Graphiti](https://docs.cognee.ai/examples/migrate-memory-systems) using the COGX exchange format.
 - [Run with local Ollama models](https://docs.cognee.ai/guides/local-ollama), including a local embedding model.
 - [Visualize your knowledge graph](https://docs.cognee.ai/guides/graph-visualization) and inspect its connections.
@@ -251,7 +252,17 @@ The UI launcher requires Node.js/npm; Docker is needed for its MCP service. See 
 
 ## Deploy Cognee
 
-For a local API demo using a prebuilt image, follow the [minimal Docker Compose guide](docs/minimal-docker-compose.md). It includes a persistent-volume configuration and explains the single-user demo settings.
+For a local API demo using a prebuilt image, follow the [minimal Docker Compose guide](docs/minimal-docker-compose.md). It includes a persistent-volume configuration and explains the single-user demo settings. Or run the image directly:
+
+```bash
+docker run --rm -it -p 8000:8000 \
+  -e LLM_API_KEY="sk-..." \
+  -e ENABLE_BACKEND_ACCESS_CONTROL=false \
+  -v cognee_storage:/cognee-storage \
+  cognee/cognee:main
+```
+
+`ENABLE_BACKEND_ACCESS_CONTROL=false` is the single-user/local posture — without it the API defaults to multi-tenant mode and every `/api/v1` call requires an authenticated user. To keep authentication on instead, set `DEFAULT_USER_PASSWORD` to make the default account loginable (see the [compose guide](docs/minimal-docker-compose.md)). Note that `--rm` discards container-local data on exit; the `-v cognee_storage:/cognee-storage` named volume keeps your memory across runs.
 
 To run the API, UI, and MCP server from a source checkout, clone this repository, enter its directory, copy [`.env.template`](.env.template) to `.env`, and configure your providers. Then run:
 

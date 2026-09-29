@@ -19,7 +19,9 @@ This document summarizes how to work with the cognee repository: how it’s orga
 - `distributed/deploy/`: One-click deployment templates (Modal, Fly.io, Railway, Render, Daytona).
 - `examples/`: Example scripts demonstrating the public APIs and features (graph, code graph, multimodal, permissions, etc.).
 - `notebooks/`: Jupyter notebooks for demos and tutorials.
-- `alembic/`: Database migrations for relational backends.
+- `.agents/skills/`: Task-specific agent skills. This is the only copy; add and edit skills here (Codex reads this folder directly).
+- `.claude/skills/`: Symlink to `../.agents/skills` so Claude Code finds the same skills. On Windows clones without symlink support, the SessionStart hook in `.claude/settings.json` (`.claude/hooks/link-skills.sh`) replaces it with a directory junction automatically; no manual step is needed. That hook marks the path skip-worktree, so on those clones only, a later change to the `.claude/skills` entry itself makes git refuse to update it — run `git update-index --no-skip-worktree .claude/skills && git checkout -- .claude/skills`, then start a new session.
+- `cognee/alembic/`: Relational (Alembic) schema migrations; `alembic.ini` is in `cognee/`. Graph/vector data migrations live in `cognee/modules/migrations/`.
 
 Notes:
 - Co-locate feature-specific helpers under their respective package (`modules/`, `infrastructure/`, or `tasks/`).
@@ -127,6 +129,15 @@ graph and vector databases. Backend support (source of truth:
   Analytics and community adapters (unless they register a handler via
   `use_dataset_database_handler()`).
 - Relational (SQLite/Postgres) is always a single shared DB (users, ACLs, registry).
+
+Each provider has a default handler derived from it, so no handler setting is needed
+normally. Setting `GRAPH_DATASET_DATABASE_HANDLER` / `VECTOR_DATASET_DATABASE_HANDLER`
+explicitly is never overwritten by that derivation, and is how you select the alternates:
+`neo4j_community` (one Docker container per dataset, for Community edition, which serves
+one database per server), `neo4j_aura_dev` (one Aura instance per dataset; dev/PoC only),
+`postgres_graph_shared` and `pgvector_shared` (a schema per dataset in cognee's main
+Postgres database, so no `CREATE DATABASE` privilege is needed). Each requires its
+matching provider. See CLAUDE.md for the full matrix.
 
 Both graph and vector must be supported, or cognee raises `EnvironmentError` — an
 unsupported backend with the flag on is a hard error, not a fallback to shared DBs;

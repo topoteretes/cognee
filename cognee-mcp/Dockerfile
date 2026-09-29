@@ -100,5 +100,8 @@ ENTRYPOINT ["/app/entrypoint.sh"]
 
 # Only the HTTP/SSE transports serve an HTTP server; in the default stdio mode
 # there is nothing to probe, so report healthy without hitting the network.
+# TRANSPORT_MODE and HTTP_PORT are read at container runtime (os.environ), so
+# `docker run -e HTTP_PORT=9000 -e TRANSPORT_MODE=http` is honoured by the
+# probe instead of the build-time literal (#5145).
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-  CMD [ "${TRANSPORT_MODE:-stdio}" = "stdio" ] || python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"
+  CMD ["python", "-c", "import os, sys, urllib.request; sys.exit(0) if os.environ.get('TRANSPORT_MODE', 'stdio') == 'stdio' else urllib.request.urlopen('http://localhost:' + os.environ.get('HTTP_PORT', '8000') + '/health', timeout=5)"]
