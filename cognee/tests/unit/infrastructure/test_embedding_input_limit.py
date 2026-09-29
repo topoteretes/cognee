@@ -29,6 +29,7 @@ from cognee.infrastructure.databases.vector.embeddings.OllamaEmbeddingEngine imp
     OllamaEmbeddingEngine,
 )
 from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
+from cognee.infrastructure.llm.tokenizer.HuggingFace import adapter as hf_adapter
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
 
 
@@ -63,14 +64,19 @@ def test_litellm_input_limit_is_none_for_unknown_models():
 
 
 def test_huggingface_tokenizer_knows_its_models_limit_less_special_tokens():
-    tokenizer = HuggingFaceTokenizer.__new__(HuggingFaceTokenizer)
-    tokenizer.tokenizer = MagicMock(init_kwargs={"model_max_length": 512})
-    tokenizer.tokenizer.num_special_tokens_to_add.return_value = 2  # [CLS] and [SEP]
-    assert tokenizer.model_input_limit == 510
+    # The repo declares 512 and the model adds [CLS] and [SEP] itself.
+    with (
+        patch.object(hf_adapter, "_load", return_value=(lambda text: text.split(), 2)),
+        patch.object(hf_adapter, "_declared_input_limit", return_value=512),
+    ):
+        assert HuggingFaceTokenizer(model="org/model").model_input_limit == 510
 
-    # A repo that declares no limit (transformers substitutes a placeholder).
-    tokenizer.tokenizer = MagicMock(init_kwargs={})
-    assert tokenizer.model_input_limit is None
+    # A repo that declares no limit.
+    with (
+        patch.object(hf_adapter, "_load", return_value=(lambda text: text.split(), 2)),
+        patch.object(hf_adapter, "_declared_input_limit", return_value=None),
+    ):
+        assert HuggingFaceTokenizer(model="org/model").model_input_limit is None
 
     # A TikToken fallback says nothing about the embedding model.
     assert TikTokenTokenizer(model=None).model_input_limit is None
