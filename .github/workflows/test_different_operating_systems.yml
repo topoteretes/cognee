@@ -6,6 +6,13 @@ permissions:
 on:
   workflow_call:
     inputs:
+      has-secrets:
+        # False on fork PRs, where GitHub withholds repository secrets. Jobs
+        # that need a real LLM/embedding key skip instead of failing on an
+        # empty key. Other callers leave the default and run everything.
+        required: false
+        type: boolean
+        default: true
       python-versions:
         required: false
         type: string
@@ -20,25 +27,29 @@ on:
         required: false
         type: string
         default: ''
+    # Optional, not required: on a fork PR `secrets: inherit` passes none, and a
+    # required secret makes GitHub refuse to start ANY job in this workflow,
+    # including the ones that need no key. Jobs that do need one gate on
+    # inputs.has-secrets instead.
     secrets:
       LLM_PROVIDER:
-        required: true
+        required: false
       LLM_MODEL:
-        required: true
+        required: false
       LLM_ENDPOINT:
-        required: true
+        required: false
       LLM_API_KEY:
-        required: true
+        required: false
       LLM_ARGS:
         required: false
       LLM_API_VERSION:
-        required: true
+        required: false
       EMBEDDING_PROVIDER:
-        required: true
+        required: false
       EMBEDDING_MODEL:
-        required: true
+        required: false
       EMBEDDING_API_KEY:
-        required: true
+        required: false
 
 env:
   RUNTIME__LOG_LEVEL: ERROR
@@ -111,16 +122,13 @@ jobs:
           GRAPH_DATABASE_SUBPROCESS_ENABLED: "false"
           VECTOR_DB_SUBPROCESS_ENABLED: "false"
           LLM_PROVIDER: openai
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_ARGS: ${{ secrets.LLM_ARGS }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          LLM_MODEL: "openai/gpt-4o-mini"
+          LLM_API_KEY: "mock-not-used"
 
           EMBEDDING_PROVIDER: openai
           EMBEDDING_DIMENSIONS: 300
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_MODEL: "openai/text-embedding-3-large"
+          EMBEDDING_API_KEY: "mock-not-used"
         run: |
           set +e
           rm -f junit-unit.xml
@@ -236,16 +244,13 @@ jobs:
           GRAPH_DATABASE_SUBPROCESS_ENABLED: "false"
           VECTOR_DB_SUBPROCESS_ENABLED: "false"
           LLM_PROVIDER: openai
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_ARGS: ${{ secrets.LLM_ARGS }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          LLM_MODEL: "openai/gpt-4o-mini"
+          LLM_API_KEY: "mock-not-used"
 
           EMBEDDING_PROVIDER: openai
           EMBEDDING_DIMENSIONS: 300
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_MODEL: "openai/text-embedding-3-large"
+          EMBEDDING_API_KEY: "mock-not-used"
         run: |
           set +e
           rm -f junit-unit.xml
@@ -356,6 +361,7 @@ jobs:
 
   run-library-test:
     name: Library test ${{ matrix.python-version }} on ${{ matrix.os }}
+    if: ${{ inputs.has-secrets }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -642,6 +648,7 @@ jobs:
 
   run-soft-deletion-test:
     name: Soft Delete test ${{ matrix.python-version }} on ${{ matrix.os }}
+    if: ${{ inputs.has-secrets }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -690,6 +697,7 @@ jobs:
 
   run-hard-deletion-test:
     name: Custom Graph Delete test ${{ matrix.python-version }} on ${{ matrix.os }}
+    if: ${{ inputs.has-secrets }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
