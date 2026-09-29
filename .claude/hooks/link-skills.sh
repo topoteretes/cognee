@@ -24,7 +24,16 @@ case "$(uname -s)" in
 esac
 
 rm -f "$link" 2>/dev/null # the text placeholder, or a junction left dangling by a moved checkout
-cmd //c mklink /J "$(cygpath -w "$PWD/$link")" "$(cygpath -w "$PWD/$target")" >/dev/null 2>&1 || exit 0
+
+# PowerShell rather than `cmd //c mklink /J`: Git Bash rewrites the `/J` flag
+# into a drive path. Paths travel as env vars so spaces and quotes are safe.
+if ! SKILLS_LINK="$(cygpath -w "$PWD/$link")" SKILLS_TARGET="$(cygpath -w "$PWD/$target")" \
+  powershell.exe -NoProfile -NonInteractive -Command \
+  'New-Item -ItemType Junction -Path $env:SKILLS_LINK -Target $env:SKILLS_TARGET | Out-Null' >&2; then
+  echo "link-skills: could not create the $link junction" >&2
+  git checkout -- "$link" 2>/dev/null # put the placeholder back
+  exit 0
+fi
 
 # The tracked symlink entry now differs from the worktree; keep git status clean.
 git update-index --skip-worktree "$link" 2>/dev/null
