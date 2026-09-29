@@ -19,3 +19,12 @@ repos:
       # Run the formatter.
       - id: ruff-format
         types_or: [python, pyi]
+  - repo: local
+    hooks:
+      # .agents/skills/ is Codex's copy of .claude/skills/; never edit it by hand.
+      - id: sync-agent-skills
+        name: Sync .agents/skills from .claude/skills
+        entry: python scripts/sync_agent_skills.py
+        language: python
+        pass_filenames: false
+        files: ^\.(claude|agents)/skills/
