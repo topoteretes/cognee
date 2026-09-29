@@ -1,0 +1,61 @@
+{
+  "export": "Acorn Analytics support desk",
+  "exported_at": "2026-09-22",
+  "tickets": [
+    {
+      "ticket_id": "T-1041",
+      "title": "Search results are missing newly added products",
+      "customer": "Brightline Retail",
+      "project": "Atlas",
+      "assignee": "Dana Kim",
+      "status": "open",
+      "priority": "high",
+      "opened": "2026-09-17",
+      "description": "Products added to the Brightline Retail catalog after 15 September do not appear in storefront search."
+    },
+    {
+      "ticket_id": "T-1042",
+      "title": "Search autocomplete is slower than 800 ms",
+      "customer": "Brightline Retail",
+      "project": "Atlas",
+      "assignee": "Sam Okafor",
+      "status": "in progress",
+      "priority": "medium",
+      "opened": "2026-09-18",
+      "description": "Autocomplete latency on the Brightline Retail storefront rose from 200 ms to over 800 ms during peak hours."
+    },
+    {
+      "ticket_id": "T-1043",
+      "title": "Customers receive duplicate invoice emails",
+      "customer": "Kestrel Bank",
+      "project": "Ledger",
+      "assignee": "Lena Fischer",
+      "status": "resolved",
+      "priority": "high",
+      "opened": "2026-09-09",
+      "description": "Kestrel Bank customers received every invoice email two or three times on 9 September."
+    },
+    {
+      "ticket_id": "T-1044",
+      "title": "Invoice CSV export is missing the tax column",
+      "customer": "Kestrel Bank",
+      "project": "Ledger",
+      "assignee": "Lena Fischer",
+      "status": "open",
+      "priority": "low",
+      "opened": "2026-09-20",
+      "description": "The monthly CSV export no longer includes the VAT amount per invoice."
+    },
+    {
+      "ticket_id": "T-1045",
+      "title": "Single sign-on loops back to the login page on staging",
+      "customer": "Oakridge Health",
+      "project": "Harbor",
+      "assignee": "Tomas Novak",
+      "status": "open",
+      "priority": "medium",
+      "opened": "2026-09-21",
+      "description": "Oakridge Health testers are sent back to the login page after signing in to the Harbor staging portal."
+    }
+  ]
+}

@@ -21,7 +21,6 @@ exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for 
 exclude-newer-span = "P2D"
 
 [options.exclude-newer-package]
-enola-cli = { timestamp = "0001-01-01T00:00:00Z", span = "PT0S" }
 cognee = { timestamp = "0001-01-01T00:00:00Z", span = "PT0S" }
 
 [manifest]
