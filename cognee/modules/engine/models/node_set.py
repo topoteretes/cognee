@@ -1,5 +1,5 @@
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.engine.utils.generate_node_id import generate_node_id
+from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
 
 
 class NodeSet(DataPoint):
