@@ -10,7 +10,9 @@ from cognee.modules.users.permissions.permission_types import (
 )
 
 
-async def has_user_management_permission(requester_id: UUID, tenant_id: UUID) -> bool:
+async def has_user_management_permission(
+    requester_id: UUID, tenant_id: UUID, log_level: str = "ERROR"
+) -> bool:
     """
     Check if requester is allowed to manage users for a tenant.
 
@@ -24,6 +26,14 @@ async def has_user_management_permission(requester_id: UUID, tenant_id: UUID) ->
     Args:
         requester_id: Id of the user making the request.
         tenant_id: Id of the tenant.
+        log_level: level for the denial's ``PermissionDeniedError`` log line.
+            Defaults to "ERROR" (a denial here is normally the caller
+            attempting something they should not). Pass "DEBUG" for a caller
+            that uses this as a routine membership check rather than a gate
+            on a mutation — e.g. deciding which read-only view to render —
+            where "not an administrator" is an expected outcome, not an
+            error. Same precedent as
+            ``get_specific_user_permission_datasets``.
 
     Returns:
         True if the requester has permission to manage users for the tenant.
@@ -42,4 +52,6 @@ async def has_user_management_permission(requester_id: UUID, tenant_id: UUID) ->
     if USER_MANAGEMENT_ALLOWED_ROLE_NAMES & set(role_names):
         return True
 
-    raise PermissionDeniedError(message="User is not authorized to manage users for this tenant")
+    raise PermissionDeniedError(
+        message="User is not authorized to manage users for this tenant", log_level=log_level
+    )

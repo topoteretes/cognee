@@ -425,6 +425,26 @@ class TursoAdapter(GraphDBInterface):
                 connections.append((src, edge, tgt))
             return connections
 
+    async def get_entity_type_names(self, entity_ids: list[str]) -> dict[str, str]:
+        """One-hop ``is_a`` lookup: entity id to its EntityType name."""
+        if not entity_ids:
+            return {}
+        ids_subquery, params = _id_subquery("ids", entity_ids)
+        await self.initialize()
+        async with self.sessionmaker() as session:
+            result = await session.execute(
+                text(f"""
+                    SELECT e.source_id, t.name
+                      FROM graph_edge e
+                      JOIN graph_node t ON t.id = e.target_id
+                     WHERE e.source_id IN {ids_subquery}
+                       AND e.relationship_name = 'is_a'
+                       AND t.type = 'EntityType'
+                """),
+                params,
+            )
+            return {str(row[0]): row[1] for row in result.all() if row[1]}
+
     async def get_top_degree_node_ids(self, top_k: int) -> list[str]:
         """Rank a bounded physical edge prefix, with the same recency bias as Postgres."""
         if top_k < 1:
