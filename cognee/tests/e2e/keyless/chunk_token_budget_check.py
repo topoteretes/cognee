@@ -67,6 +67,12 @@ async def main() -> None:
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
     await cognee.add(text, dataset_name="chunk_budget")
+    # The embedding tokenizer must not import transformers: it caches "no torch" at
+    # import, and cognify's GLiNER auto-installer adds torch only after add() (#5258).
+    assert "transformers" not in sys.modules, (
+        "transformers was imported before cognify; the GLiNER runtime install would then "
+        "fail with 'PyTorch not found' in this process"
+    )
     await cognee.cognify(datasets=["chunk_budget"])
 
     engine = get_embedding_engine()
