@@ -29,11 +29,14 @@ from cognee.infrastructure.databases.vector.embeddings.utils import (
 )
 from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
 from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
+from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 
 litellm.set_verbose = False
 logger = get_logger("LiteLLMEmbeddingEngine")
+
+observe = get_observe()
 
 # Over-length embedding input: litellm maps chat "context length" 400s to
 # ContextWindowExceededError, but the embeddings API returns a plain
@@ -151,6 +154,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                     "via environment variable EMBEDDING_ENDPOINT."
                 )
 
+    @observe(as_type="embeddings")
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),

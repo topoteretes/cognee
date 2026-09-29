@@ -39,13 +39,49 @@ For each flagged pattern, form a hypothesis about the cause. Use the repository 
 
 ## Output
 
-1. Write `telemetry-insights-report.md`: a dated report with (a) a 5-line executive summary, (b) each finding with the computed numbers, hypothesis, proposed fix, and duplicate-check result, (c) a "watching" section for near-threshold trends, (d) explicit data-window and privacy note.
-2. If there is **at least one new, non-duplicate finding**: create one issue —
-   `gh issue create --title "Telemetry insights: <date> — <top finding>" --label telemetry-insights --body-file telemetry-insights-report.md`
-   If everything is quiet or duplicate: do NOT create an issue; end the report with "No new findings."
+You write two files. The workflow uploads both and files the issue itself; you do **not** call `gh issue create`.
+
+1. `telemetry-insights-report.md` — your full working notes, for the run artifact only. Put the method, every table you summed, the duplicate-check commands and results, the verification of prior findings, the "watching" list, and the data-window/privacy note here. There is no length limit on this file.
+2. `telemetry-insights-issue.md` — **only if there is at least one new, non-duplicate finding.** This is what people read, so it is short. If everything is quiet or duplicate, do not write this file and end the report with "No new findings."
+
+### Issue file format (exact)
+
+The issue is two tables with the same rows: first the findings in plain words, then the technical detail. Nothing else.
+
+```markdown
+# Telemetry insights: <YYYY-MM-DD> — <top finding, under 70 chars>
+
+## Simply put
+
+| # | Problem | Fix |
+|---|---|---|
+| 1 | <one sentence a non-engineer understands: what is going wrong for whom, and how much> | <one sentence: what we would do about it and how we would know it worked> |
+
+## Details
+
+| # | Observation | Analysis | Suggested fix |
+|---|---|---|---|
+| 1 | <one sentence: what changed, where, when, how big — a rate against its baseline> | <one sentence: the likely cause, with `file.py:line` or the prior issue number> | <one sentence: the change, or the observable that would confirm the cause> |
+```
+
+Example rows for one finding:
+
+`| 1 | About one in five of the newest installs failed at building memory yesterday, up from one in thirty, and we can't see which setup they run. | Record the setup on failed runs too, then check whether the new group of ~100 installs is the one failing. |`
+
+`| 1 | 1.6.0 non-local error rate 22.6% on 09-26 vs 3.5% on 09-24 (fleet 11.7%); a new 104-deployment stack arrived that day. | Errors cannot be tied to a stack: provider_stack_daily counts Completed runs only (run_tasks_with_telemetry.py:48). New; #5223 had it as watching. | Count started/errored runs in provider_stack_daily; confirm the new stack carries most 1.6.0 errors. |`
+
+Rules for the tables:
+
+- **At most 3 findings**; further findings go to the report's watching section. Both tables have the same rows in the same order, numbered 1, 2, 3.
+- **One sentence, ≤ 20 words, per cell.** Percentages first; raw counts only when they carry the point.
+- **"Simply put" is for someone who has never seen the code**: no file paths, function names, CSV names, version strings or issue numbers; say "installs", "memory building", "the newest release" instead. Ratios ("one in five") beat percentages there.
+- No `<br>`, no lists, no nested tables, no code fences, no `|` characters (write "or" instead). Everything beyond one sentence goes in the report.
+- Nothing outside the title, the two headings and the two tables: no summary, "method", "prior findings", "watching" or "privacy" sections — those belong in the report.
+
+The workflow fails the run if a table header is not exactly as above, a cell is empty, or the two tables have different rows; it cuts any cell longer than 140 characters and drops findings past the third.
 
 ## Constraints
 
 - Never fabricate a number; every figure in the report must be computable from the CSVs.
-- Prefer few, well-evidenced findings (max 5 per run) over exhaustive noise.
-- No network access beyond `gh`. No attempts to read secrets, env vars, or non-aggregate data.
+- Prefer few, well-evidenced findings over exhaustive noise: max 3 in the issue, max 5 in the report.
+- No network access beyond read-only `gh` (`issue list/view`, `pr list/view/diff`). No attempts to read secrets, env vars, or non-aggregate data.

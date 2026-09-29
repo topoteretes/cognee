@@ -4,9 +4,9 @@ Thin orchestration over the existing ``remember(content_type="code")`` path:
 mint a fresh installation token, resolve which repositories to index, and
 hand authenticated clone URLs to the code-graph pipeline. All the heavy
 lifting — clone reuse, snapshot-identity skip on unchanged repos, per-repo
-failure isolation — already lives in ``resolve_repo_source`` and the
-pipeline, which is what makes re-running this on every webhook cheap and
-idempotent.
+failure isolation (``raise_on_error=False``) — already lives in
+``resolve_repo_source`` and ``remember``, which is what makes re-running this
+on every webhook cheap and idempotent.
 
 The indexed graph is searchable via ``SearchType.CODE`` (the code route
 produces no chunks or embeddings by design); ``index_vectors`` stays off.
@@ -122,6 +122,9 @@ async def sync_repositories(
         user=owner,
         content_type="code",
         repo_credentials=token,
+        # Report a repo that fails (clone, auth, pipeline) as an errored item
+        # and keep syncing the rest, instead of aborting the whole batch.
+        raise_on_error=False,
     )
     if getattr(result, "status", None) == "errored":
         logger.warning(

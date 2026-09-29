@@ -201,6 +201,9 @@ class LinearIntegration(OAuthIntegration):
         """
         await sync_recent_issues(credential)
 
+    async def sync_now(self, credential: IntegrationCredential) -> None:
+        await sync_recent_issues(credential)
+
     async def revoke_remote(self, credential: IntegrationCredential) -> None:
         """Best-effort remote revoke of the workspace's agent token.
 

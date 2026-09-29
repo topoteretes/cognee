@@ -6,8 +6,10 @@ import TrashIcon from "@/ui/elements/TrashIcon";
 import { formatDate, formatFileSize } from "@/utils/fileFormat";
 import isMemoryBlobName from "@/modules/datasets/isMemoryBlobName";
 import { capRows, MAX_RENDERED_ROWS } from "@/modules/datasets/maxRenderedRows";
+import ProcessingBadge from "../../partials/ProcessingBadge";
 
 export interface FileRow {
+  completed?: boolean;
   id: string;
   name: string;
   extension?: string;
@@ -66,6 +68,7 @@ export default function FilesTable({
     <div style={{ background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "center", background: "rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.1)", padding: "12px 20px" }}>
         <span style={{ flex: 1, fontSize: 12, fontWeight: 700, color: "rgba(237,236,234,0.55)" }}>Name</span>
+        <span style={{ width: 85, fontSize: 12, color: "rgba(237,236,234,0.55)" }}>Processing</span>
         <span style={{ width: 100, fontSize: 12, fontWeight: 700, color: "rgba(237,236,234,0.55)", flexShrink: 0 }}>Type</span>
         <span style={{ width: 80, fontSize: 12, fontWeight: 700, color: "rgba(237,236,234,0.55)", flexShrink: 0 }}>Size</span>
         <span style={{ width: 170, fontSize: 12, fontWeight: 700, color: "rgba(237,236,234,0.55)", flexShrink: 0 }}>Added</span>
@@ -91,6 +94,7 @@ export default function FilesTable({
               <FileIcon fill={meta.fill} stroke={meta.stroke} text={meta.text} label={meta.label} />
               <span style={{ fontSize: 13, fontWeight: 500, color: "#EDECEA" }}>{displayName}</span>
             </div>
+            <span style={{ width: 85, flexShrink: 0 }}><ProcessingBadge completed={file.completed} /></span>
             <span style={{ width: 100, fontSize: 13, color: "rgba(237,236,234,0.55)", flexShrink: 0 }}>{typeName}</span>
             <span style={{ width: 80, fontSize: 13, color: "rgba(237,236,234,0.55)", flexShrink: 0 }}>{formatFileSize(file.size)}</span>
             <span style={{ width: 170, fontSize: 13, color: "rgba(237,236,234,0.35)", flexShrink: 0 }}>{formatDate(file.createdAt, true)}</span>

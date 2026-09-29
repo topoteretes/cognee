@@ -3,13 +3,17 @@ registered provider, dispatched generically on ``{provider}``.
 
 Route roles differ sharply in their auth model, which is the point:
 
-* ``POST /{provider}/authorize`` — authenticated. Minting the signed OAuth
-  state is the permission gate for the whole install; the callback trusts
-  the state alone.
+* ``POST /{provider}/authorize`` — authenticated. It mints the signed OAuth
+  state and sets the install-nonce cookie the callback checks against.
 * ``GET /{provider}/callback`` — necessarily unauthenticated (the browser
-  arrives from the provider's site without a session header). A valid,
-  unexpired state is the only credential, and it was only ever issued to the
-  connecting user.
+  arrives from the provider's site without a session header). Two things
+  authenticate it, and both are needed: a valid, unexpired state, and the
+  nonce cookie from the browser that started the install. The state alone is
+  not enough, because it travels in a URL that can be handed to somebody
+  else: it says an install was started by some user, not that this browser
+  belongs to that user. Completing a relayed authorize URL would otherwise
+  attach the consenting person's provider account to whoever started the
+  flow. See ``_set_install_nonce``.
 * ``GET/DELETE /{provider}/connection`` — authenticated; a user only ever
   sees or disconnects their own connection (credentials are user-scoped, not
   shared across a tenant/org).
@@ -34,17 +38,20 @@ provider name.
 """
 
 import asyncio
+import hmac
 import logging
+import secrets
 from datetime import datetime, timezone
 from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from fastapi_users.exceptions import UserAlreadyExists
+from pydantic import Field
 from sqlalchemy.exc import IntegrityError
 
-from cognee.api.DTO import OutDTO
+from cognee.api.DTO import InDTO, OutDTO
 from cognee.modules.agents.create_agent import create_agent
 from cognee.modules.agents.list_agents import list_agents
 from cognee.modules.agents.registry import (
@@ -60,8 +67,13 @@ from cognee.modules.integrations.credentials import (
     get_active_credential_for_user,
     list_active_credentials_for_user,
     revoke_credential_by_account,
+    update_provider_metadata,
 )
-from cognee.modules.integrations.oauth_flow import make_state, validate_state
+from cognee.modules.integrations.oauth_flow import (
+    DEFAULT_STATE_TTL_SECONDS,
+    make_state,
+    validate_state,
+)
 from cognee.modules.integrations.plugin_status import (
     PluginStatusRow,
     as_utc,
@@ -125,13 +137,47 @@ class AuthorizeUrlDTO(OutDTO):
 
 class ConnectionStatusDTO(OutDTO):
     connected: bool
+    dataset_id: str | None = None
+    stored_items: int | None = None
     account_label: str | None = None
     provider_account_id: str | None = None
     connected_at: datetime | None = None
+    # "ok" | "degraded" | None (never synced, or the provider doesn't stamp
+    # this yet). Written by connectors that have no webhook to self-heal on —
+    # see record_sync_result — so a connection can read as connected while
+    # its last sync failed or came back partial.
+    sync_status: str | None = None
+    last_synced_at: datetime | None = None
+    sync_counts: dict[str, int] | None = None
 
 
 class DisconnectResultDTO(OutDTO):
     disconnected: bool
+
+
+class IntegrationResourceDTO(OutDTO):
+    id: str
+    name: str
+    description: str | None = None
+    attributes: dict = Field(default_factory=dict)
+    selected: bool = False
+
+
+class IntegrationResourceListDTO(OutDTO):
+    resources: list[IntegrationResourceDTO]
+    selected: list[str] | None = None
+
+
+class IntegrationResourceSelectionPayload(InDTO):
+    resource_ids: list[str] | None = None
+
+
+class IntegrationResourceSelectionResultDTO(OutDTO):
+    selected: list[str] | None = None
+
+
+class IntegrationSyncResultDTO(OutDTO):
+    accepted: bool
 
 
 class PluginProvisionDTO(OutDTO):
@@ -147,6 +193,9 @@ class IntegrationStatusItemDTO(OutDTO):
     account_label: str | None = None
     provider_account_id: str | None = None
     connected_at: datetime | None = None
+    sync_status: str | None = None
+    last_synced_at: datetime | None = None
+    sync_counts: dict[str, int] | None = None
 
 
 class PluginStatusItemDTO(OutDTO):
@@ -243,6 +292,98 @@ async def _rotate_agent_api_key(agent_user: User, plugin_key: str) -> str:
     return new_key.api_key
 
 
+# The state proves an install was started by some cognee user; it does not
+# prove the browser completing it belongs to that user, because the state
+# travels in a URL anyone can be handed. This cookie is what binds the two:
+# it is set on the authenticated authorize call and compared at the callback,
+# so a relayed authorize link completed by somebody else is refused instead of
+# attaching their provider account to the account that started the flow.
+#
+# One cookie per *install*, not one shared cookie per provider: two tabs on
+# the same provider (a double-click, a second tab) each call authorize once
+# and each gets their own cookie in a single Set-Cookie, so there is no
+# shared value for a second write to race and no read-modify-write for two
+# concurrent authorize calls to lose one nonce to the other. The nonce itself
+# is part of the cookie name, so setting one is one atomic operation with
+# nothing to merge.
+#
+# SameSite=Lax is what a top-level GET navigation from the provider needs,
+# and requires the API and the app to share a registrable domain; on a
+# deployment where they do not, this needs SameSite=None and Secure instead.
+#
+# Each cookie expires on its own after DEFAULT_STATE_TTL_SECONDS, the same
+# window the state itself is valid for, so an abandoned install's cookie
+# cleans itself up without anything having to track or cap how many are
+# outstanding — the previous single-cookie design needed a cap because one
+# cookie's value could grow without bound; this design has no shared value
+# to grow.
+_INSTALL_NONCE_COOKIE_PREFIX = "cognee_oauth_nonce_"
+_INSTALL_NONCE_PATH = "/api/v1/integrations"
+
+
+def _install_nonce_cookie_name(provider: str, nonce: str) -> str:
+    safe_provider = quote(provider, safe="")
+    return f"{_INSTALL_NONCE_COOKIE_PREFIX}{safe_provider}_{nonce}"
+
+
+def _install_nonce_cookie_prefix(provider: str) -> str:
+    safe_provider = quote(provider, safe="")
+    return f"{_INSTALL_NONCE_COOKIE_PREFIX}{safe_provider}_"
+
+
+def _pending_install_nonces(request: Request, provider: str) -> list[str]:
+    """Every nonce this browser currently holds a pending install for."""
+    prefix = _install_nonce_cookie_prefix(provider)
+    return [
+        name[len(prefix) :]
+        for name in request.cookies
+        if name.startswith(prefix)
+        # isascii() before any of these ever reaches hmac.compare_digest,
+        # which raises TypeError on a non-ASCII str rather than returning
+        # False. A cookie name is attacker-influenceable (a sibling
+        # subdomain, a network position on plain http), and filtering here
+        # means every caller inherits the guard instead of each needing
+        # its own.
+        and name[len(prefix) :].isascii()
+    ]
+
+
+def _set_install_nonce(response: Response, request: Request, provider: str, nonce: str) -> None:
+    response.set_cookie(
+        _install_nonce_cookie_name(provider, nonce),
+        "1",
+        max_age=DEFAULT_STATE_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+        # Not hardcoded: a local http deployment would silently never receive
+        # the cookie back, turning every connect into an invalid-state error.
+        secure=request.url.scheme == "https",
+        path=_INSTALL_NONCE_PATH,
+    )
+
+
+def _install_nonce_matches(request: Request, provider: str, nonce: str) -> bool:
+    if not nonce:
+        return False
+    return any(
+        hmac.compare_digest(presented, nonce)
+        for presented in _pending_install_nonces(request, provider)
+    )
+
+
+def _retire_install_nonce(
+    response: Response, request: Request, provider: str, nonce: str
+) -> Response:
+    """Drop one finished install, leaving the tabs still waiting untouched.
+
+    Only ever called for a nonce that matched. A callback that did not match
+    leaves every cookie alone: clearing one there would let one forged or
+    stale redirect cancel an install the user still has open.
+    """
+    response.delete_cookie(_install_nonce_cookie_name(provider, nonce), path=_INSTALL_NONCE_PATH)
+    return response
+
+
 def _frontend_redirect(integration: OAuthIntegration, outcome: str) -> RedirectResponse:
     try:
         base = integration.frontend_base_url().rstrip("/")
@@ -303,6 +444,13 @@ def get_integrations_router():
                         account_label=credential.account_label if credential else None,
                         provider_account_id=credential.provider_account_id if credential else None,
                         connected_at=as_utc(credential.created_at) if credential else None,
+                        sync_status=credential.sync_status if credential else None,
+                        last_synced_at=as_utc(credential.last_synced_at) if credential else None,
+                        sync_counts=(getattr(credential, "provider_metadata", None) or {}).get(
+                            "last_sync_counts"
+                        )
+                        if credential
+                        else None,
                     )
                 )
 
@@ -465,9 +613,16 @@ def get_integrations_router():
 
     @integrations_router.post("/{provider}/authorize")
     async def authorize(
-        provider: str, user: User = Depends(get_authenticated_user)
+        provider: str,
+        request: Request,
+        response: Response,
+        user: User = Depends(get_authenticated_user),
     ) -> AuthorizeUrlDTO:
         """Mint the provider's authorize URL for the requesting user.
+
+        Also sets the nonce cookie the callback checks. The state alone says
+        which user *started* an install; the cookie is what says the browser
+        finishing it is the same one. See :func:`_set_install_nonce`.
 
         ## Path Parameters
         - **provider** (str): Key of a registered OAuth provider (see GET
@@ -477,8 +632,13 @@ def get_integrations_router():
             span.set_attribute("cognee.integrations.provider", provider)
             integration = _integration_or_404(provider)
             try:
-                state = make_state(user.id, signing_secret=integration.state_signing_secret())
-                return AuthorizeUrlDTO(authorize_url=integration.authorize_url(state))
+                nonce = secrets.token_urlsafe(32)
+                state = make_state(
+                    user.id, nonce, signing_secret=integration.state_signing_secret()
+                )
+                authorize_url = integration.authorize_url(state)
+                _set_install_nonce(response, request, provider, nonce)
+                return AuthorizeUrlDTO(authorize_url=authorize_url)
             except RuntimeError:
                 # A provider's require()-style settings guard raises when its
                 # client id/secret/signing key aren't configured — a
@@ -505,12 +665,42 @@ def get_integrations_router():
                 # (or the provider rejected the request) — not a fault, just
                 # an aborted install.
                 span.set_attribute("cognee.integrations.outcome", "cancelled")
+                # The cookie is left as it is: this path never learned which
+                # nonce the aborted install held, and the user's other tabs
+                # are still waiting on theirs. Unused nonces expire with the
+                # cookie's own max-age.
                 return _frontend_redirect(integration, "cancelled")
 
-            user_id = validate_state(state, signing_secret=integration.state_signing_secret())
-            if user_id is None:
+            fields = validate_state(
+                state, signing_secret=integration.state_signing_secret(), field_count=2
+            )
+            if not isinstance(fields, tuple):
                 span.set_attribute("cognee.integrations.outcome", "error_invalid_state")
                 return _frontend_redirect(integration, "error_invalid_state")
+
+            user_id_field, nonce = fields
+            if not _install_nonce_matches(request, provider, nonce):
+                # The state is authentic but this is not the browser that
+                # asked for it. Without this check anyone with a cognee
+                # account could mint an authorize URL, hand it to someone
+                # else, and have that person's provider account land on the
+                # attacker's cognee user. See _set_install_nonce.
+                logger.warning(
+                    "%s callback arrived without a matching install nonce; refusing", provider
+                )
+                span.set_attribute("cognee.integrations.outcome", "error_invalid_state")
+                # Nothing is retired here. This callback never proved it owns
+                # any pending install, so letting it empty the cookie would
+                # hand anyone a way to cancel every install the user has open.
+                return _frontend_redirect(integration, "error_invalid_state")
+
+            try:
+                user_id = UUID(user_id_field)
+            except ValueError:
+                span.set_attribute("cognee.integrations.outcome", "error_invalid_state")
+                return _retire_install_nonce(
+                    _frontend_redirect(integration, "error_invalid_state"), request, provider, nonce
+                )
 
             try:
                 credential = await complete_installation(
@@ -527,12 +717,22 @@ def get_integrations_router():
                 # rather than silently reassign it (see upsert_credential).
                 logger.warning("%s account already connected elsewhere; user %s", provider, user_id)
                 span.set_attribute("cognee.integrations.outcome", "error_already_connected")
-                return _frontend_redirect(integration, "error_already_connected")
+                return _retire_install_nonce(
+                    _frontend_redirect(integration, "error_already_connected"),
+                    request,
+                    provider,
+                    nonce,
+                )
             except Exception:  # any exchange/parse failure must redirect, not 500
                 # Full trace server-side; the browser only learns that it failed.
                 logger.exception("%s OAuth exchange failed for user %s", provider, user_id)
                 span.set_attribute("cognee.integrations.outcome", "error_exchange_failed")
-                return _frontend_redirect(integration, "error_exchange_failed")
+                return _retire_install_nonce(
+                    _frontend_redirect(integration, "error_exchange_failed"),
+                    request,
+                    provider,
+                    nonce,
+                )
 
             logger.info(
                 "%s account %s connected to user %s",
@@ -547,7 +747,9 @@ def get_integrations_router():
                 description=f"{provider} on_installed hook",
             )
             span.set_attribute("cognee.integrations.outcome", "connected")
-            return _frontend_redirect(integration, "connected")
+            return _retire_install_nonce(
+                _frontend_redirect(integration, "connected"), request, provider, nonce
+            )
 
     @integrations_router.post("/{provider}/events", include_in_schema=False)
     async def provider_events(provider: str, request: Request):
@@ -597,17 +799,131 @@ def get_integrations_router():
         if credential is None:
             return ConnectionStatusDTO(connected=False)
 
+        from cognee.modules.integrations.google.ingestion import dataset_summary, sync_is_running
+
+        dataset_id, stored_items = None, None
+        if provider in {"google_drive", "gmail"}:
+            dataset_id, stored_items = await dataset_summary(
+                credential, integration.dataset_name(credential)
+            )
+
         # Token material stays server-side; the frontend only needs display state.
         return ConnectionStatusDTO(
             connected=True,
+            dataset_id=dataset_id,
+            stored_items=stored_items,
             account_label=credential.account_label,
             provider_account_id=credential.provider_account_id,
             connected_at=as_utc(credential.created_at),
+            sync_status=(
+                "syncing"
+                if sync_is_running(provider, credential.provider_account_id)
+                else credential.sync_status
+            ),
+            last_synced_at=as_utc(credential.last_synced_at),
+            sync_counts=(getattr(credential, "provider_metadata", None) or {}).get(
+                "last_sync_counts"
+            ),
         )
+
+    @integrations_router.get("/{provider}/resources")
+    @integrations_router.get("/{provider}/folders")
+    @integrations_router.get("/{provider}/labels")
+    async def integration_resources(
+        provider: str, user: User = Depends(get_authenticated_user)
+    ) -> IntegrationResourceListDTO:
+        """List selectable resources for a connected integration.
+
+        ``/folders`` and ``/labels`` are readable aliases for SDK callers that
+        want provider vocabulary; ``/resources`` is the stable generic path.
+        The returned selection is three-state: ``null`` means all resources,
+        an empty list means none, and a non-empty list is an allowlist.
+        """
+        integration = _integration_or_404(provider)
+        if integration.resource_selection_key is None:
+            raise HTTPException(status_code=404, detail=f"{provider} has no selectable resources")
+        credential = await get_active_credential_for_user(user.id, integration.provider)
+        if credential is None:
+            raise HTTPException(status_code=404, detail=f"{provider} is not connected")
+        try:
+            resources = await integration.list_resources(credential)
+        except Exception:
+            logger.exception("Could not list %s resources for user %s", provider, user.id)
+            raise HTTPException(status_code=502, detail=f"Could not list {provider} resources")
+        if resources is None:
+            raise HTTPException(status_code=404, detail=f"{provider} has no selectable resources")
+
+        metadata = credential.provider_metadata or {}
+        raw_selected = metadata.get(integration.resource_selection_key)
+        selected = (
+            None
+            if raw_selected is None
+            else [str(resource_id) for resource_id in raw_selected]
+            if isinstance(raw_selected, list)
+            else None
+        )
+        selected_set = set(selected or []) if selected is not None else None
+        return IntegrationResourceListDTO(
+            resources=[
+                IntegrationResourceDTO(
+                    id=str(resource["id"]),
+                    name=str(resource.get("name") or resource["id"]),
+                    description=resource.get("description"),
+                    attributes=resource.get("attributes") or {},
+                    selected=selected_set is None or str(resource["id"]) in selected_set,
+                )
+                for resource in resources
+            ],
+            selected=selected,
+        )
+
+    @integrations_router.put("/{provider}/resources")
+    @integrations_router.put("/{provider}/folders")
+    @integrations_router.put("/{provider}/labels")
+    async def set_integration_resources(
+        provider: str,
+        payload: IntegrationResourceSelectionPayload,
+        user: User = Depends(get_authenticated_user),
+    ) -> IntegrationResourceSelectionResultDTO:
+        """Persist a full resource selection for a connected integration."""
+        integration = _integration_or_404(provider)
+        selection_key = integration.resource_selection_key
+        if selection_key is None:
+            raise HTTPException(status_code=404, detail=f"{provider} has no selectable resources")
+        credential = await get_active_credential_for_user(user.id, integration.provider)
+        if credential is None:
+            raise HTTPException(status_code=404, detail=f"{provider} is not connected")
+        resource_ids = None
+        if payload.resource_ids is not None:
+            resource_ids = list(
+                dict.fromkeys(str(resource_id) for resource_id in payload.resource_ids)
+            )
+        updated = await update_provider_metadata(
+            provider,
+            credential.provider_account_id,
+            {selection_key: resource_ids},
+        )
+        return IntegrationResourceSelectionResultDTO(
+            selected=(updated.provider_metadata or {}).get(selection_key)
+        )
+
+    @integrations_router.post("/{provider}/sync")
+    async def sync_integration(
+        provider: str, user: User = Depends(get_authenticated_user)
+    ) -> IntegrationSyncResultDTO:
+        """Start a provider sync without changing its stored selection."""
+        integration = _integration_or_404(provider)
+        credential = await get_active_credential_for_user(user.id, integration.provider)
+        if credential is None:
+            raise HTTPException(status_code=404, detail=f"{provider} is not connected")
+        _spawn_background(integration.sync_now(credential), description=f"{provider} manual sync")
+        return IntegrationSyncResultDTO(accepted=True)
 
     @integrations_router.delete("/{provider}/connection")
     async def disconnect(
-        provider: str, user: User = Depends(get_authenticated_user)
+        provider: str,
+        delete_data: bool = False,
+        user: User = Depends(get_authenticated_user),
     ) -> DisconnectResultDTO:
         """Disconnect the account connected by the requesting user.
 
@@ -629,6 +945,15 @@ def get_integrations_router():
             if credential is None or credential.provider_account_id is None:
                 return DisconnectResultDTO(disconnected=False)
 
+            dataset_name = None
+            if delete_data:
+                dataset_name = integration.dataset_name(credential)
+                if not dataset_name:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"{provider} does not expose a deletable dataset",
+                    )
+
             try:
                 await integration.revoke_remote(credential)
             except Exception:  # a remote-revoke failure must never block disconnect
@@ -639,6 +964,23 @@ def get_integrations_router():
                 )
 
             await revoke_credential_by_account(integration.provider, credential.provider_account_id)
+            if delete_data:
+                try:
+                    from cognee.api.v1.forget.forget import forget
+
+                    await forget(dataset=dataset_name, user=user)
+                except HTTPException:
+                    raise
+                except Exception:
+                    logger.exception(
+                        "Could not delete %s dataset %s during disconnect",
+                        provider,
+                        dataset_name,
+                    )
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"{provider} disconnected, but its data could not be deleted",
+                    )
             return DisconnectResultDTO(disconnected=True)
 
     return integrations_router

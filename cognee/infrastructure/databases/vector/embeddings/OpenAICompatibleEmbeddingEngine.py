@@ -45,10 +45,13 @@ from cognee.infrastructure.databases.vector.embeddings.utils import (
 )
 from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
 from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
+from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 
 logger = get_logger("OpenAICompatibleEmbeddingEngine")
+
+observe = get_observe()
 
 
 class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
@@ -115,6 +118,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             base = base + "/v1"
         self._client = AsyncOpenAI(api_key=self.api_key, base_url=base, timeout=120)
 
+    @observe(as_type="embeddings")
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),

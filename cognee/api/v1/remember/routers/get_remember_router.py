@@ -346,6 +346,7 @@ def get_remember_router() -> APIRouter:
           Skill nodes, or "code" to index whole repositories — each raw_data entry is
           then a git URL or server-local repo path and one code graph is built per
           entry (poll progress via GET /v1/datasets/status?pipeline=code_graph_pipeline);
+          each repository is one data item, its id on the result item;
           omit for normal ingestion.
         - **index_vectors** (Optional[bool]): content_type="code" only — also embed the
           extracted code facts for semantic retrievers (default false, no LLM/embedding

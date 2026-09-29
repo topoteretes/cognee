@@ -26,6 +26,8 @@ import PromptEditorModal from "./partials/PromptEditorModal";
 import UploadOntologyModal from "./partials/UploadOntologyModal";
 import MemoryCustomizationBar from "./partials/MemoryCustomizationBar";
 import FilesTable from "./partials/FilesTable";
+import ProcessingSummary from "../partials/ProcessingSummary";
+import { useDatasetProcessing } from "@/modules/datasets/useDatasetProcessing";
 import { decodeFilename } from "@/utils/fileFormat";
 import mapInferredSchema from "@/modules/graphModels/mapInferredSchema";
 import isMemoryBlobName from "@/modules/datasets/isMemoryBlobName";
@@ -459,6 +461,8 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
   }, [cogniInstance, isInitializing, loadFiles]);
 
   const { statusDetails, refetch: refetchStatuses } = useDatasetStatuses(!isInitializing);
+  const processingCounts = useDatasetProcessing(datasetId);
+  const completionById = new Map(processingCounts.data?.items.map(item => [item.id, item.completed]));
 
   useEffect(() => {
     const detail = statusDetails[datasetId];
@@ -934,6 +938,11 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
       )}
 
       {/* Outdated graph banner */}
+      <ProcessingSummary data={processingCounts.data} error={processingCounts.isError}
+        running={processing || datasetStatus === "processing" || datasetStatus === "pending"}
+        failed={datasetStatus === "failed" || datasetStatus === "failed_insufficient_credits"}
+        onRefresh={() => { void processingCounts.refetch(); void refetchStatuses(); }} />
+
       {graphOutdated && !processing && datasetStatus !== "processing" && (
         <div style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 8, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}><path d="M8 1L1 14h14L8 1z" fill="rgba(245,158,11,0.25)" stroke="#F59E0B" strokeWidth="1" /><text x="8" y="12" textAnchor="middle" fontSize="9" fontWeight="700" fill="#FBBF24">!</text></svg>
@@ -998,7 +1007,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
 
       {/* Files table */}
       <FilesTable
-        files={filtered}
+        files={filtered.map(file => ({ ...file, completed: completionById.get(file.id) }))}
         memorySessionIds={memorySessionIds}
         search={search}
         loadError={filesError}

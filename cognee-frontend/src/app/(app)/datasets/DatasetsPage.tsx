@@ -16,6 +16,7 @@ import { useBrainsData } from "./useBrainsData";
 
 export default function DatasetsPage() {
   const {
+    processingCounts, processingCountsError, refreshProcessingCounts,
     isLoading,
     datasets,
     datasetsError,
@@ -166,6 +167,10 @@ export default function DatasetsPage() {
 
           {/* Column 2 — Documents */}
           <DocumentsPanel
+            processingCounts={processingCounts}
+            processingCountsError={processingCountsError}
+            onRefreshProcessing={refreshProcessingCounts}
+            processingFailed={selectedDataset?.status === "failed" || selectedDataset?.status === "failed_insufficient_credits"}
             selectedId={selectedId}
             selectedName={selectedDataset?.name ?? null}
             docsLoading={docsLoading}
