@@ -28,7 +28,7 @@ class IngestionConfig(BaseSettings):
     # one embedding per unique value.
     dlt_max_column_value_length: int = 0
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     def to_dict(self) -> dict:
         return {

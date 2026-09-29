@@ -27,7 +27,7 @@ class CognifyConfig(BaseSettings):
     # "llm" / "gliner_demo" pin one regardless of credentials. The GLiNER demo
     # requires the `gliner` extra and makes no LLM call.
     graph_extractor: str = "auto"
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     def to_dict(self) -> dict:
         return {
