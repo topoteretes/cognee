@@ -486,3 +486,18 @@ async def test_graph_completion_decomposition_defaults_to_answer_per_subquery():
 
     assert isinstance(retriever_instance, GraphCompletionDecompositionRetriever)
     assert retriever_instance.decomposition_mode is DecompositionMode.ANSWER_PER_SUBQUERY
+
+
+@pytest.mark.asyncio
+async def test_temporal_forwards_include_references_like_hybrid():
+    """SDK-828: TEMPORAL is a HybridRetriever; evidence must reach it the same way."""
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.TEMPORAL, query_text="q", top_k=3, include_references=True
+    )
+
+    assert isinstance(retriever_instance, TemporalHybridRetriever)
+    assert retriever_instance.include_references is True
+    assert retriever_instance.top_k == 3
+    assert retriever_instance.chunks_top_k == 12  # candidate budget: 4x top_k unless configured

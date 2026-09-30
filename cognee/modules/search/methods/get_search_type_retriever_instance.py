@@ -339,6 +339,11 @@ async def get_search_type_retriever_instance(
                 "use_importance_weight": retriever_specific_config.get(
                     "use_importance_weight", True
                 ),
+                "use_truth_weight": retriever_specific_config.get("use_truth_weight", False),
+                "include_references": include_references,
+                "include_external_metadata": retriever_specific_config.get(
+                    "include_external_metadata", False
+                ),
             },
         ),
         SearchType.CHUNKS_LEXICAL: (BM25ChunksRetriever, {"top_k": top_k}),
