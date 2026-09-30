@@ -128,3 +128,38 @@ def test_a_timestamp_built_without_a_name_is_labelled_by_its_string():
 
     assert timestamp.name == "2021-01-01T00:00:00"
     assert timestamp.id == Timestamp.id_for("2021-01-01T00:00:00")
+
+
+@pytest.mark.parametrize(
+    "text, normalized, lower, upper",
+    [
+        ("1950", "1950", (1950, 1, 1), (1951, 1, 1)),
+        ("1950-12", "1950-12", (1950, 12, 1), (1951, 1, 1)),
+        ("2024-02-29", "2024-02-29", (2024, 2, 29), (2024, 3, 1)),
+        (
+            "1969-07-20 20:17:40",
+            "1969-07-20 20:17:40",
+            (1969, 7, 20, 20, 17, 40),
+            (1969, 7, 20, 20, 17, 41),
+        ),
+        ("March 1947", "1947-03", (1947, 3, 1), (1947, 4, 1)),
+    ],
+)
+def test_timestamp_bounds_is_the_half_open_period_at_the_stated_precision(
+    text, normalized, lower, upper
+):
+    from cognee.modules.engine.utils.timestamp_from_text import timestamp_bounds
+
+    got_normalized, got_lower, got_upper = timestamp_bounds(text)
+
+    assert got_normalized == normalized
+    assert got_lower == datetime(*lower, tzinfo=timezone.utc)
+    assert got_upper == datetime(*upper, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize("text", ["1940s", "that spring", "9999", "1950-02-30"])
+def test_timestamp_bounds_rejects_what_the_parser_rejects_and_year_9999(text):
+    from cognee.modules.engine.utils.timestamp_from_text import timestamp_bounds
+
+    with pytest.raises(ValueError):
+        timestamp_bounds(text)

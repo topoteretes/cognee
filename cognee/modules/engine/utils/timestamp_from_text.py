@@ -1,5 +1,5 @@
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from cognee.modules.engine.models import Timestamp
 from cognee.modules.engine.models.Timestamp import TimestampPrecision
@@ -68,3 +68,40 @@ def timestamp_from_text(text: str) -> Timestamp | None:
         minute=minute,
         second=second,
     )
+
+
+def timestamp_bounds(text: str) -> tuple[str, datetime, datetime]:
+    """``(normalized, lower, upper)`` for a time string: the half-open period it names.
+
+    ``1950`` is [1950-01-01, 1951-01-01), ``1950-03`` is [1950-03-01, 1950-04-01),
+    a day is one day, a full timestamp is one second. Accepts what
+    ``timestamp_from_text`` accepts; raises ``ValueError`` for anything else, and
+    for year 9999 (the exclusive upper bound would need year 10000).
+    """
+    timestamp = timestamp_from_text(text)
+    if timestamp is None:
+        raise ValueError(f"Unsupported timestamp: {text!r}")
+    if timestamp.year > 9998:
+        raise ValueError(f"Unsupported timestamp: {text!r}")
+    lower = datetime(
+        timestamp.year,
+        timestamp.month,
+        timestamp.day,
+        timestamp.hour,
+        timestamp.minute,
+        timestamp.second,
+        tzinfo=timezone.utc,
+    )
+    if timestamp.precision == "year":
+        upper = lower.replace(year=lower.year + 1)
+    elif timestamp.precision == "month":
+        upper = (
+            lower.replace(year=lower.year + 1, month=1)
+            if lower.month == 12
+            else lower.replace(month=lower.month + 1)
+        )
+    elif timestamp.precision == "day":
+        upper = lower + timedelta(days=1)
+    else:
+        upper = lower + timedelta(seconds=1)
+    return timestamp.timestamp_str, lower, upper
