@@ -126,7 +126,7 @@ answers "what do we know", across all sources.
 Run it:
 
 ```bash
-uv run python examples/demos/company_brain/multi_source/company_brain.py
+uv run python examples/cookbooks/company_brain/multi_source/company_brain.py
 ```
 
 The script empties cognee's store with `cognee.prune`, ingests the three sources (about

@@ -1,6 +1,6 @@
 # Cognee Examples
 
-Runnable example scripts demonstrating cognee end-to-end — 75 scripts across four folders.
+Runnable example scripts demonstrating cognee end-to-end — 78 scripts across five folders.
 They double as the smoke-test corpus the team uses to verify behaviour across the SDK.
 
 > **New here?** Start with [`guides/simple_cognee_example.py`](guides/simple_cognee_example.py)
@@ -22,11 +22,12 @@ They double as the smoke-test corpus the team uses to verify behaviour across th
 |---|---|---|
 | [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 38 |
 | [`advanced_guides/`](advanced_guides/) | Deeper takes on topics a guide already covers | 8 |
-| [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 28 |
+| [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 26 |
+| [`cookbooks/`](cookbooks/) | Applications you build and keep running: ingest, graph model, UI, live sync, an agent | 5 |
 | [`integrations/`](integrations/) | Connector packages and deployment kits that pair cognee with other systems | 1 |
 
 One line each: **guides teach a feature, advanced guides deepen a feature, demos combine
-features.** See [Contributing](#-contributing-a-new-example) for the precise category rules.
+features, cookbooks build an application.** See [Contributing](#-contributing-a-new-example) for the precise category rules.
 
 ## 📘 `guides/` — one feature per script
 
@@ -115,15 +116,29 @@ Each script names the simpler guide it builds on and states what it adds.
 | [`simple_document_qa/`](advanced_guides/simple_document_qa/) | `guides/simple_cognee_example.py` | Q&A over a real 150 KB document |
 | [`truth_centroid_slots_demo.py`](advanced_guides/truth_centroid_slots_demo.py) | `guides/truth_subspace_reranking.py` | Centroid slots, epochs, and rebuilds behind truth-subspace reranking |
 
+## 🍳 `cookbooks/` — applications you build and keep running
+
+A cookbook is named after the application it builds, not the feature it uses. The newer
+cookbooks share one shape: ingest real sources, a graph model shaped for the agent on top,
+the API server and UI, a `sync` that keeps memory live, and one agentic workflow. Each runs
+on bundled sample data with `--sample` before you connect your own accounts.
+
+| Cookbook | What you get |
+|---|---|
+| [`personalized_email/`](cookbooks/personalized_email/) | Granola + Gmail memory and a draft agent that answers an email with what you discussed, what you promised, and in your own tone |
+| [`company_brain/follow_up_agent/`](cookbooks/company_brain/follow_up_agent/) | Granola + Gmail + Linear memory and an agent that, after each call, asks in Slack whether it got the next steps right, then files the Linear issues |
+| [`self_hosted_companion/`](cookbooks/self_hosted_companion/) | A fully local chat companion (Ollama, embedded databases) that remembers your journal and every earlier chat |
+
+### [`company_brain/`](cookbooks/company_brain/) — one memory for a whole company
+| Script | Demonstrates |
+|---|---|
+| [`follow_up_agent/follow_up_agent.py`](cookbooks/company_brain/follow_up_agent/follow_up_agent.py) | The follow-up agent above ([guide](cookbooks/company_brain/follow_up_agent/README.md)) |
+| [`docs_code_conversations/company_brain_demo.py`](cookbooks/company_brain/docs_code_conversations/company_brain_demo.py) | The README onboarding tour: a text fact, a code graph, and a rule stated in a session — distilled, then answered from a fresh session |
+| [`multi_source/company_brain.py`](cookbooks/company_brain/multi_source/company_brain.py) | A relational database, a ticket export and meeting notes linked by a custom graph model, served in the UI, queried from Claude Code or Codex over MCP ([guide](cookbooks/company_brain/multi_source/README.md)) |
+
 ## 🎯 `demos/` — features combined into use cases
 
 Every demo lives in a topic folder.
-
-### [`company_brain/`](demos/company_brain/) — one memory for a whole company
-| Script | Demonstrates |
-|---|---|
-| [`docs_code_conversations/company_brain_demo.py`](demos/company_brain/docs_code_conversations/company_brain_demo.py) | The README onboarding tour: a text fact, a code graph, and a rule stated in a session — distilled, then answered from a fresh session |
-| [`multi_source/company_brain.py`](demos/company_brain/multi_source/company_brain.py) | A relational database, a ticket export and meeting notes linked by a custom graph model, served in the UI, queried from Claude Code or Codex over MCP ([guide](demos/company_brain/multi_source/README.md)) |
 
 ### [`comprehensive_example/`](demos/comprehensive_example/) — everything at once
 | Script | Demonstrates |
@@ -229,6 +244,13 @@ Lives in a topic subfolder (`agentic/`, `sessions/`, `feedback/`, `ingestion_and
 `custom_pipelines/`, `permissions/`) — never loose at the `demos/` root. Scenario folders keep
 their own `data/`. If your demo really demonstrates one feature and its length is padding,
 it's a guide that grew — trim it.
+
+**`cookbooks/`** — an application someone would keep running, named after what it builds
+("Personalized email", not "Sessions with preferences"). Each cookbook folder is
+self-contained, so it can be copied out as a starting point: a `README.md`, a `models.py` with
+the graph model, the entry script, and `sample_data/` so every command runs with `--sample`
+and no third-party account. If it presents a feature rather than leaving the reader with a
+tool, it's a demo.
 
 Research-grade proofs of concept don't belong in `examples/` — keep experiment drivers on a
 branch or in the issue that tracks the research.

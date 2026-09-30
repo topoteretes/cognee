@@ -193,8 +193,14 @@ cognee/cache/
 .data_storage/
 .cognee_cache/
 
-# Storage for the company-brain demo (examples/demos/company_brain/docs_code_conversations/)
+# Storage for the company-brain demo (examples/cookbooks/company_brain/docs_code_conversations/)
 .cognee-readme-demo/
+
+# Cookbook state, output and account credentials (examples/cookbooks/)
+examples/cookbooks/**/.state.json
+examples/cookbooks/**/drafts/
+examples/cookbooks/**/credentials.json
+examples/cookbooks/**/token.json
 .artifacts/
 .anon_id
 

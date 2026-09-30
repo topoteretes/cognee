@@ -1,0 +1,29 @@
+[
+  {
+    "id": "msg_sent_brightline_recap",
+    "labels": ["SENT"],
+    "from": "Alex Rivera <alex@lumenlabs.io>",
+    "to": "Priya Shah <priya@brightline-retail.com>",
+    "date": "2026-09-23T09:12:00Z",
+    "subject": "Recap: Brightline pilot",
+    "body": "Hi Priya,\n\nThanks for the time yesterday. Quick recap:\n- Pilot: three stores, six weeks\n- Sam is setting up the sandbox\n- Security questionnaire coming your way this week\n\nShout if I missed anything.\n\nBest,\nAlex"
+  },
+  {
+    "id": "msg_sent_harborview_followup",
+    "labels": ["SENT"],
+    "from": "Alex Rivera <alex@lumenlabs.io>",
+    "to": "Marco Deluca <marco@harborview.io>",
+    "date": "2026-09-25T16:40:00Z",
+    "subject": "Harborview renewal",
+    "body": "Hi Marco,\n\nGood talking on Wednesday. I'm working on the two-year option with finance and will come back to you by October 3.\n\nBest,\nAlex"
+  },
+  {
+    "id": "msg_inbox_brightline_questions",
+    "labels": ["INBOX"],
+    "from": "Priya Shah <priya@brightline-retail.com>",
+    "to": "Alex Rivera <alex@lumenlabs.io>",
+    "date": "2026-09-29T08:05:00Z",
+    "subject": "Re: Recap: Brightline pilot",
+    "body": "Hi Alex,\n\nDana asked me two things before she signs off on the budget: when exactly does the pilot start, and is Okta SSO included or is it an add-on?\n\nAlso, did the security questionnaire go out? I can't find it.\n\nThanks,\nPriya"
+  }
+]

@@ -1,0 +1,34 @@
+[
+  {
+    "id": "not_brightline_pilot_scoping",
+    "title": "Brightline Retail pilot scoping",
+    "created_at": "2026-09-22T15:00:00Z",
+    "owner": {"name": "Alex Rivera", "email": "alex@lumenlabs.io"},
+    "attendees": [
+      {"name": "Alex Rivera", "email": "alex@lumenlabs.io"},
+      {"name": "Priya Shah", "email": "priya@brightline-retail.com"},
+      {"name": "Sam Okafor", "email": "sam@lumenlabs.io"}
+    ],
+    "summary_markdown": "## Decisions\n- The Lumen pilot for Brightline Retail starts on October 14 and runs for six weeks.\n- The pilot covers point-of-sale data from three stores: Denver, Austin and Portland.\n- Okta SSO is included in the Enterprise tier at no extra cost; it is not an add-on.\n\n## Next steps\n- Alex Rivera sends Priya the security questionnaire by September 26.\n- Sam Okafor sets up the pilot sandbox by October 7.\n- Priya Shah gets budget sign-off from Dana Whitfield, VP of Operations at Brightline Retail.\n\n## Notes\n- Priya prefers short emails with bullet points.",
+    "transcript": [
+      {"speaker": {"name": "Priya Shah"}, "text": "Dana will ask me when the pilot starts and whether SSO costs extra, so I need both in writing."},
+      {"speaker": {"name": "Alex Rivera"}, "text": "October 14 for six weeks, and Okta SSO is part of Enterprise, so there is no add-on. I'll send the security questionnaire by Friday the 26th."},
+      {"speaker": {"name": "Sam Okafor"}, "text": "I'll have the sandbox with the three stores loaded by October 7."}
+    ]
+  },
+  {
+    "id": "not_harborview_renewal",
+    "title": "Harborview Logistics renewal check-in",
+    "created_at": "2026-09-24T10:00:00Z",
+    "owner": {"name": "Alex Rivera", "email": "alex@lumenlabs.io"},
+    "attendees": [
+      {"name": "Alex Rivera", "email": "alex@lumenlabs.io"},
+      {"name": "Marco Deluca", "email": "marco@harborview.io"}
+    ],
+    "summary_markdown": "## Decisions\n- Harborview Logistics renews on November 1.\n\n## Next steps\n- Alex Rivera checks with Lumen finance whether a 10% discount is possible for a two-year renewal, and answers Marco by October 3.\n\n## Notes\n- Marco Deluca is CTO of Harborview Logistics and signs the renewal himself.",
+    "transcript": [
+      {"speaker": {"name": "Marco Deluca"}, "text": "If we commit to two years, I'd expect around ten percent off."},
+      {"speaker": {"name": "Alex Rivera"}, "text": "Let me check with finance and get back to you by October 3."}
+    ]
+  }
+]
