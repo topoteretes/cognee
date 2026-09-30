@@ -19,7 +19,7 @@ from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Literal
 
-from cognee.infrastructure.llm.utils import get_max_chunk_tokens
+from cognee.infrastructure.llm.utils import resolve_chunk_size
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.config import get_cognify_config
@@ -330,7 +330,7 @@ async def get_gliner_demo_tasks(
         ontology_config["ontology_resolver"] = ontology_resolver
         config = {**(config or {}), "ontology_config": ontology_config}
 
-    max_chunk_size = chunk_size or await get_max_chunk_tokens()
+    max_chunk_size = await resolve_chunk_size(chunk_size)
     schema_task = build_gliner_schema_task(
         entity_types,
         relation_types,

@@ -85,14 +85,14 @@ async def test_every_tool_declares_a_tier():
 
 def test_pinned_sets_are_derived_from_tags():
     assert set(server.registry.names_with_tag(MEMORY_TAG)) == MEMORY_TOOLS
-    assert set(server.registry.names_with_tag(DEFAULT_TAG)) == MEMORY_TOOLS
+    assert set(server.registry.names_with_tag(DEFAULT_TAG)) == MEMORY_TOOLS | {"code_search"}
 
 
 # --- what each mode advertises ------------------------------------------------
 
 
 async def test_default_mode_advertises_pinned_plus_synthetic():
-    assert await advertised("default") == MEMORY_TOOLS | SYNTHETIC_TOOLS
+    assert await advertised("default") == MEMORY_TOOLS | {"code_search"} | SYNTHETIC_TOOLS
 
 
 async def test_minimal_mode_advertises_only_the_memory_api():
@@ -107,7 +107,9 @@ async def test_all_mode_restores_the_flat_surface():
 
 async def test_unknown_mode_falls_back_to_default():
     assert server.apply_tool_mode("banana") == "default"
-    assert {tool.name for tool in await server.mcp.list_tools()} == (MEMORY_TOOLS | SYNTHETIC_TOOLS)
+    assert {tool.name for tool in await server.mcp.list_tools()} == (
+        MEMORY_TOOLS | {"code_search"} | SYNTHETIC_TOOLS
+    )
 
 
 async def test_apply_tool_mode_is_idempotent():

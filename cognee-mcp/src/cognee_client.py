@@ -857,6 +857,8 @@ class CogneeClient:
         session_id: str | None = None,
         system_prompt: str | None = None,
         top_k: int = 15,
+        scope: list[str] | str | None = None,
+        code_query: dict | None = None,
     ) -> Any:
         """Search memory via recall() with auto-routing and session awareness."""
         if not system_prompt:
@@ -881,6 +883,10 @@ class CogneeClient:
                 payload["session_id"] = session_id
             if system_prompt:
                 payload["system_prompt"] = system_prompt
+            if scope:
+                payload["scope"] = scope
+            if code_query is not None:
+                payload["code_query"] = code_query
             response = await self.client.post(endpoint, json=payload, headers=self._get_headers())
             response.raise_for_status()
             return response.json()
@@ -897,6 +903,10 @@ class CogneeClient:
                     kwargs["session_id"] = session_id
                 if system_prompt:
                     kwargs["system_prompt"] = system_prompt
+                if scope:
+                    kwargs["scope"] = scope
+                if code_query is not None:
+                    kwargs["code_query"] = code_query
                 return await self.cognee.recall(query_text=query_text, **kwargs)
 
     async def forget(

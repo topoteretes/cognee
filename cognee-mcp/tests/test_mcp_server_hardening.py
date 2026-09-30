@@ -99,21 +99,21 @@ def test_cognee_client_auth_schemes():
 
 
 # Tools that the MCP server is expected to expose. Kept as named groups so the
-# contract documents intent rather than just enumerating names. The hardening
-# rule is that the LLM-direct memory API stays minimal (V2: remember/recall/
-# forget).
+# contract documents intent rather than just enumerating names. Keep the memory
+# API minimal while exposing code-graph search as a separate tool.
 MEMORY_API_TOOLS = {"remember", "recall", "forget", "search_sources"}
+CODE_SEARCH_TOOLS = {"code_search"}
 STATUS_TOOLS = {
     # Ingestion is queued (remember(background=True)) because it outruns the
     # host's request deadline, so progress and failures are only observable
     # through a status call.
     "cognify_status",
 }
-EXPECTED_TOOLS = MEMORY_API_TOOLS | STATUS_TOOLS
+EXPECTED_TOOLS = MEMORY_API_TOOLS | CODE_SEARCH_TOOLS | STATUS_TOOLS
 
 
 @pytest.mark.asyncio
-async def test_mcp_exposes_only_memory_tools():
+async def test_mcp_exposes_memory_and_code_search_tools():
     from src import server
 
     tools = await server.mcp.list_tools()
@@ -748,6 +748,8 @@ async def test_mcp_recall_forwards_system_prompt(monkeypatch):
         "session_id": "session-1",
         "system_prompt": "Answer with provenance.",
         "top_k": 5,
+        "scope": None,
+        "code_query": None,
     }
 
 

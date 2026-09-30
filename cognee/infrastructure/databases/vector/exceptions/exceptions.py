@@ -3,6 +3,10 @@ from fastapi import status
 from cognee.exceptions import CogneeValidationError
 
 
+class SharedDatabasePruneError(RuntimeError):
+    """Raised when vector-only pruning cannot be isolated from relational data."""
+
+
 class EmbeddingDimensionMismatchError(CogneeValidationError):
     """The configured embedding model produces a different vector width than the one that built a dataset."""
 

@@ -112,7 +112,11 @@ class EmbeddingConfig(BaseSettings):
     )
     embedding_api_key: str | None = None
     embedding_api_version: str | None = None
-    embedding_max_completion_tokens: int | None = 8191
+    # Cap on the tokens a chunk (or anything else) is embedded with. Unset means
+    # DEFAULT_EMBEDDING_INPUT_CAP (4096); the engine lowers the effective limit to
+    # the model's own input limit when that is known and smaller (see
+    # embeddings/input_limit.py).
+    embedding_max_completion_tokens: int | None = Field(default=None, gt=0)
     embedding_batch_size: int | None = None
     # Total data points allowed in flight to the embedding engine during indexing.
     # Concurrent embedding requests = max(1, this // embedding_batch_size).
@@ -130,7 +134,7 @@ class EmbeddingConfig(BaseSettings):
     embedding_rate_limit_requests: int = 60
     embedding_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
     embedding_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
-    model_config = SettingsConfigDict(env_file=".env", extra="allow", populate_by_name=True)
+    model_config = SettingsConfigDict(extra="allow", populate_by_name=True)
 
     def model_post_init(self, context, /) -> None:
         if self.embedding_dimensions is None:

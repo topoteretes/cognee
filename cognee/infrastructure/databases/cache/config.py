@@ -74,7 +74,7 @@ class CacheConfig(BaseSettings):
     tapes_model: str = "cognee-session"
     tapes_request_timeout: float = 5.0
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     @pydantic.model_validator(mode="after")
     def sync_legacy_ladybug_lock(self):
