@@ -86,7 +86,9 @@ def get_improve_router() -> APIRouter:
         (`completed` / `already_completed` / `skipped` / `errored`), a `reason` when
         skipped, `counts`, `duration_ms` and the pipeline `run` when the stage is a
         pipeline. A non-fatal stage error is reported inside the body with a 200;
-        inspect `status`.
+        inspect `status`. A stage that fails because the LLM budget is exhausted
+        ends the run: the stages after it are `skipped` with reason
+        `budget_exhausted`.
 
         ## Error Codes
         - **400 Bad Request**: Neither dataset_id nor dataset_name provided
