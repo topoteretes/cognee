@@ -119,15 +119,14 @@ Each script names the simpler guide it builds on and states what it adds.
 ## 🍳 `cookbooks/` — applications you build and keep running
 
 A cookbook is named after the application it builds, not the feature it uses. The newer
-cookbooks share one shape: ingest real sources, a graph model shaped for the agent on top,
-the API server and UI, a `sync` that keeps memory live, and one agentic workflow. Each runs
-on bundled sample data with `--sample` before you connect your own accounts.
+cookbooks share one shape: one short script that remembers your real accounts or folders
+with `remember()`, then runs one agent over that memory with `recall()`.
 
 | Cookbook | What you get |
 |---|---|
 | [`personalized_email/`](cookbooks/personalized_email/) | Granola + Gmail memory and a draft agent that answers an email with what you discussed, what you promised, and in your own tone |
-| [`company_brain/follow_up_agent/`](cookbooks/company_brain/follow_up_agent/) | Granola + Gmail + Linear memory and an agent that, after each call, asks in Slack whether it got the next steps right, then files the Linear issues |
-| [`self_hosted_companion/`](cookbooks/self_hosted_companion/) | A fully local chat companion (Ollama, embedded databases) that remembers your journal and every earlier chat |
+| [`company_brain/follow_up_agent/`](cookbooks/company_brain/follow_up_agent/) | Granola + Gmail + Linear memory and an agent that turns your latest call into next steps (owner, team, deadline, tracked issue) and posts them to Slack |
+| [`self_hosted_companion/`](cookbooks/self_hosted_companion/) | A chat companion that remembers your notes folder and every earlier chat |
 
 ### [`company_brain/`](cookbooks/company_brain/) — one memory for a whole company
 | Script | Demonstrates |
@@ -247,9 +246,8 @@ it's a guide that grew — trim it.
 
 **`cookbooks/`** — an application someone would keep running, named after what it builds
 ("Personalized email", not "Sessions with preferences"). Each cookbook folder is
-self-contained, so it can be copied out as a starting point: a `README.md`, a `models.py` with
-the graph model, the entry script, and `sample_data/` so every command runs with `--sample`
-and no third-party account. If it presents a feature rather than leaving the reader with a
+self-contained, so it can be copied out as a starting point: a `README.md` and one script
+that runs on the reader's own data, using cognee's connectors where they exist. If it presents a feature rather than leaving the reader with a
 tool, it's a demo.
 
 Research-grade proofs of concept don't belong in `examples/` — keep experiment drivers on a

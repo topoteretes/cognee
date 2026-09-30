@@ -196,9 +196,7 @@ cognee/cache/
 # Storage for the company-brain demo (examples/cookbooks/company_brain/docs_code_conversations/)
 .cognee-readme-demo/
 
-# Cookbook state, output and account credentials (examples/cookbooks/)
-examples/cookbooks/**/.state.json
-examples/cookbooks/**/drafts/
+# Account credentials for the cookbooks (examples/cookbooks/)
 examples/cookbooks/**/credentials.json
 examples/cookbooks/**/token.json
 .artifacts/
