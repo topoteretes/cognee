@@ -300,6 +300,6 @@ async def test_node_set_filter_skips_edge_type_collection():
     }
     assert filters == {
         "Entity_name": (["A"], "AND"),
-        "EdgeType_relationship_name": (None, "OR"),
+        "EdgeType_relationship_name": (None, "AND"),
     }
     assert vector_search.edge_distances

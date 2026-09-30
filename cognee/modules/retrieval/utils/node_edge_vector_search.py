@@ -213,7 +213,7 @@ class NodeEdgeVectorSearch:
             # Edge types are shared vocabulary, not node-set members: they only score
             # edges the graph projection already scoped, so the node filter never
             # applies to them (the hybrid retriever does the same).
-            node_name, node_name_filter_operator = None, "OR"
+            node_name = None
         try:
             return await vector_engine.search(
                 collection_name=collection_name,
