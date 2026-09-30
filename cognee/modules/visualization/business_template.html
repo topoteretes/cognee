@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>cognee · __DATASET_NAME__</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #141d33; color: #E9EEF6;
+      font: 12px/1.4 -apple-system, BlinkMacSystemFont, Inter, "Segoe UI", sans-serif; }
+    #root, .bv-root { position: fixed; inset: 0; overflow: hidden; }
+    /* The canvas component uses these Tailwind utilities; the UI's stylesheet is not shipped here. */
+    .absolute { position: absolute; } .inset-0 { inset: 0; }
+    .cursor-grab { cursor: grab; } .overscroll-none { overscroll-behavior: none; }
+    .bv-hud { position: absolute; left: 12px; top: 12px; padding: 6px 10px;
+      background: rgba(0, 0, 0, .45); border-radius: 8px; }
+    .bv-hud button { margin-left: 10px; background: #2b3a5e; color: inherit; border: 0;
+      border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+    .bv-tip { position: absolute; pointer-events: none; padding: 6px 8px; max-width: 320px;
+      background: rgba(0, 0, 0, .75); border-radius: 6px; }
+    .bv-panel { position: absolute; right: 12px; top: 12px; width: 280px; padding: 10px 12px;
+      background: rgba(0, 0, 0, .55); border-radius: 8px; }
+    .bv-panel p { margin: 8px 0; white-space: pre-wrap; }
+    .bv-muted { opacity: .7; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script>window.__COGNEE_PAYLOAD__ = __PAYLOAD__;</script>
+  <script>__BUSINESS_JS__</script>
+</body>
+</html>

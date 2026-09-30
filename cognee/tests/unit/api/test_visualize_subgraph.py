@@ -48,13 +48,12 @@ def _chain_graph(node_count: int = 20):
 
 
 def _rendered_ids_and_edges(html: str):
-    nodes_match = re.search(r"var nodes\s*=\s*(\[.*?\]);", html, re.DOTALL)
-    links_match = re.search(r"var links\s*=\s*(\[.*?\]);", html, re.DOTALL)
-    assert nodes_match and links_match, "nodes/links payload missing from HTML"
-    node_ids = {str(n["id"]) for n in json.loads(nodes_match.group(1))}
-    edge_pairs = {
-        (str(link["source"]), str(link["target"])) for link in json.loads(links_match.group(1))
-    }
+    # The default (Business) page embeds the whole payload as one JSON literal.
+    payload_match = re.search(r"window\.__COGNEE_PAYLOAD__ = (\{.*?\});</script>", html, re.DOTALL)
+    assert payload_match, "nodes/links payload missing from HTML"
+    payload = json.loads(payload_match.group(1))
+    node_ids = {str(n["id"]) for n in payload["nodes"]}
+    edge_pairs = {(str(link["source"]), str(link["target"])) for link in payload["links"]}
     return node_ids, edge_pairs
 
 

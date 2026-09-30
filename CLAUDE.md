@@ -897,6 +897,8 @@ from cognee.api.v1.visualize import visualization_server
 shutdown = visualization_server(port=8080)  # synchronous; returns a shutdown callable
 ```
 
+Render one dataset to a self-contained HTML file with `await cognee.visualize_graph(dataset="my_dataset")` (HTTP: `GET /api/v1/visualize?dataset_id=...`). The backend never executes JS: it embeds the graph payload and a JS chunk into an HTML template, and the browser that opens the page draws it. `renderer="business"` (default) is the UI's Business canvas, bundled with React and d3 so the page needs no network; `renderer="story"` is the legacy story view with schema/memory/semantic tabs. The Business bundle (`cognee/modules/visualization/views/business_standalone.js`) is generated — after changing `cognee-frontend/src/modules/business/**`, run `npm run build:standalone` in `cognee-frontend` and commit the output.
+
 ## Debugging & Troubleshooting
 
 ### Debug Configuration

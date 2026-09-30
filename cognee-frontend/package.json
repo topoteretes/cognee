@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "NEXT_TELEMETRY_DISABLED=1 next dev --turbopack",
     "build": "NEXT_TELEMETRY_DISABLED=1 next build",
+    "build:standalone": "node scripts/build-standalone.mjs",
     "start": "NEXT_TELEMETRY_DISABLED=1 next start",
     "test": "jest",
     "lint": "eslint .",
@@ -49,6 +50,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.23",
+    "esbuild": "^0.25.12",
     "eslint": "^9",
     "eslint-config-next": "15.3.5",
     "jest": "^30.2.0",

@@ -4,7 +4,7 @@ from collections import defaultdict
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from sqlalchemy import select
@@ -19,6 +19,7 @@ from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models.User import User
 from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
+from cognee.modules.visualization.business_visualization import cognee_business_visualization
 from cognee.modules.visualization.cognee_network_visualization import (
     aggregate_multi_user_graphs,
     build_brain_summary_payload,
@@ -204,6 +205,7 @@ async def visualize_graph(
     neighborhood_depth: int = DEFAULT_NEIGHBORHOOD_DEPTH,
     neighborhood_seed_top_k: int = DEFAULT_SEED_TOP_K,
     max_nodes: int = DEFAULT_MAX_NODES,
+    renderer: Literal["business", "story"] = "business",
 ) -> str:
     """Render the knowledge graph to a self-contained HTML file.
 
@@ -213,6 +215,10 @@ async def visualize_graph(
     Pass ``full=True`` for the legacy whole-graph render.
 
     Args:
+        renderer: Which page to build. ``"business"`` (default) is the UI's
+            Business canvas, bundled so the page needs no network access;
+            ``"story"`` is the legacy story view with its schema, memory and
+            semantic tabs.
         destination_file_path: Where to write the HTML (default: home dir).
         include_session_events: When True (default), best-effort collect the
             backend's search and feedback history from the session layer and
@@ -254,9 +260,19 @@ async def visualize_graph(
         session_ids=session_ids,
     )
 
-    graph = await cognee_network_visualization(
-        graph_data, destination_file_path, search_events=search_events
-    )
+    if renderer == "business":
+        graph = await cognee_business_visualization(
+            graph_data,
+            destination_file_path,
+            dataset_name=str(dataset) if dataset else "",
+            search_events=search_events,
+        )
+    elif renderer == "story":
+        graph = await cognee_network_visualization(
+            graph_data, destination_file_path, search_events=search_events
+        )
+    else:
+        raise ValueError(f"Unknown visualization renderer: {renderer!r}")
 
     if destination_file_path:
         logger.info(f"The HTML file has been stored at path: {destination_file_path}")

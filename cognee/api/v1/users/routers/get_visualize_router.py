@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisconnect
@@ -96,6 +97,13 @@ def get_visualize_router() -> APIRouter:
             le=5000,
             description="Hard cap on rendered nodes after expansion.",
         ),
+        renderer: Literal["business", "story"] = Query(
+            "business",
+            description=(
+                "Page to render: 'business' (the UI's Business canvas, default) "
+                "or 'story' (the legacy story view)."
+            ),
+        ),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -114,6 +122,7 @@ def get_visualize_router() -> APIRouter:
         - **neighborhood_depth** (int): k-hop expansion depth (default 2)
         - **neighborhood_seed_top_k** (int): Max seeds (default 10)
         - **max_nodes** (int): Node cap after expansion (default 500)
+        - **renderer** (str): `business` (default) or `story` (legacy view)
 
         ## Response
         Returns an HTML page containing the interactive graph visualization.
@@ -152,6 +161,7 @@ def get_visualize_router() -> APIRouter:
                 neighborhood_depth=neighborhood_depth,
                 neighborhood_seed_top_k=neighborhood_seed_top_k,
                 max_nodes=max_nodes,
+                renderer=renderer,
             )
             return HTMLResponse(html_visualization)
 
