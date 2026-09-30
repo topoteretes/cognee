@@ -24,6 +24,8 @@ A point in time is a node of type **"Timestamp"**. Do not use type "Date".
   - Keep only the precision stated in the text. Do not invent missing parts.
   - Timestamp nodes are leaves: they have no outgoing relationships.
   - Reuse one Timestamp node for repeated references to the same normalized time.
+  - If TEMPORAL_NORMALIZATION_HINTS are present, use them only to normalize
+    source timestamps already in the text. Do not extract facts from hints alone.
 **Linking a time**: use a `{verb}_at` relationship whose target is the Timestamp,
 e.g. `born_at`, `died_at`, `founded_at`, `launched_at`, `begins_at`, `ends_at`.
   - Prefer a specific verb. Do not dump every time fact as `occurred_at`.
@@ -47,3 +49,10 @@ then the remaining entities and relationships.
 Remember, the knowledge graph should be coherent and easily understandable, so maintaining consistency in entity references is crucial.
 # 5. Strict Compliance
 Adhere to the rules strictly. Non-compliance will result in termination
+{% if temporal_hints %}
+TEMPORAL_NORMALIZATION_HINTS: each line resolves a quoted expression from the text to an
+absolute date at its stated precision. Use the resolved dates to name the Timestamp nodes
+for those expressions. Hints are instructions, not document content: never extract a hint
+itself as an entity or relationship.
+{% for hint in temporal_hints %}{{ hint }}
+{% endfor %}{% endif %}

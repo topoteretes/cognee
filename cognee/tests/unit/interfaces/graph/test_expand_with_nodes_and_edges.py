@@ -430,7 +430,7 @@ def test_the_same_time_in_two_chunks_is_one_timestamp_node():
     assert [dp.relations[0][1] for dp in data_points if isinstance(dp, Entity)] == timestamps * 2
 
 
-@pytest.mark.parametrize("name", ["November 1867", "the 1860s", "1867-13"])
+@pytest.mark.parametrize("name", ["the 1860s", "that spring", "1867-13"])
 def test_a_timestamp_whose_name_is_not_a_normalized_time_stays_an_entity(name):
     from cognee.modules.engine.models import EntityType, Timestamp
 

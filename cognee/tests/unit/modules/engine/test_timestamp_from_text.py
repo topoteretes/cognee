@@ -53,12 +53,7 @@ def test_surrounding_whitespace_is_ignored():
 @pytest.mark.parametrize(
     "text",
     [
-        "July 1969",
-        "1969-07-20 (Sunday)",
         "1940s",
-        "20/07/1969",
-        "1969-7-20",
-        "1969-07-20 20:17",
         "",
         "Apollo 11",
     ],
@@ -88,3 +83,29 @@ def test_temporal_pipeline_timestamps_keep_their_explicit_id_and_gain_a_name():
     assert timestamp.name == timestamp.timestamp_str
     assert timestamp.precision == "second"
     assert timestamp.id != Timestamp.id_for(timestamp.timestamp_str)
+
+
+@pytest.mark.parametrize(
+    "text, normalized, precision",
+    [
+        ("23 March 1947", "1947-03-23", "day"),
+        ("March 1947", "1947-03", "month"),
+        ("April 27, 1791", "1791-04-27", "day"),
+        ("1969-07-20 (Sunday)", "1969-07-20", "day"),
+        ("20/07/1969", "1969-07-20", "day"),
+        ("1969-7-20", "1969-07-20", "day"),
+        ("1969-07-20 20:17", "1969-07-20 20:17:00", "second"),
+    ],
+)
+def test_an_absolute_date_in_prose_is_normalized_first(text, normalized, precision):
+    timestamp = timestamp_from_text(text)
+
+    assert timestamp.timestamp_str == normalized
+    assert timestamp.name == normalized
+    assert timestamp.precision == precision
+    assert timestamp.id == Timestamp.id_for(normalized)
+
+
+@pytest.mark.parametrize("text", ["the 1950s", "that spring", "four weeks later", "spring of 1943"])
+def test_relative_or_year_less_prose_is_rejected(text):
+    assert timestamp_from_text(text) is None
