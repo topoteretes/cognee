@@ -35,6 +35,22 @@ def get_slack_history_router():
 
         This is a long-running request. For interactive use, the Slack import
         dialog acknowledges immediately and reports its background result.
+
+        ## Path Parameters
+        - **team_id** (str): No description provided in code yet.
+
+        ## Request Parameters
+        - **channel_ids** (List[str]): No description provided in code yet.
+        - **dataset_id** (UUID): UUID of the dataset (from GET /api/v1/datasets).
+        - **days** (Optional[int]): No description provided in code yet.
+        - **latest** (Optional[datetime]): No description provided in code yet.
+        - **max_messages** (int): No description provided in code yet. Defaults to 50000.
+        - **max_requests** (int): No description provided in code yet. Defaults to 1000.
+        - **oldest** (Optional[datetime]): No description provided in code yet.
+        - **thread_links** (List[str]): No description provided in code yet.
+        - **thread_mode** (Literal['started', 'active']): One of: 'started', 'active'. Defaults to
+          'started'.
+        - **threads** (List[SlackThread]): No description provided in code yet.
         """
         try:
             return await run_history_import(team_id, selection, user=user)
@@ -51,6 +67,16 @@ def get_slack_history_router():
         settings: SlackSyncSettings,
         user: Annotated[User, Depends(get_authenticated_user)],
     ):
+        """Set sync — PUT /api/v1/slack/history/{team_id}/sync.
+
+        ## Path Parameters
+        - **team_id** (str): No description provided in code yet.
+
+        ## Request Parameters
+        - **enabled** (bool): No description provided in code yet. Defaults to False.
+        - **interval_seconds** (int): No description provided in code yet. Defaults to 21600.
+        - **selection** (Optional[SlackHistoryRequest]): No description provided in code yet.
+        """
         try:
             return await configure_slack_sync(team_id, settings, user=user)
         except (SlackHistoryError, ValueError) as error:
@@ -62,6 +88,11 @@ def get_slack_history_router():
 
     @router.get("/history/{team_id}")
     async def history_status(team_id: str, user: Annotated[User, Depends(get_authenticated_user)]):
+        """History status — GET /api/v1/slack/history/{team_id}.
+
+        ## Path Parameters
+        - **team_id** (str): No description provided in code yet.
+        """
         credential = await get_by_team(team_id)
         if not is_active(credential) or credential.user_id != user.id:
             raise HTTPException(404, "Slack connection not found.")
