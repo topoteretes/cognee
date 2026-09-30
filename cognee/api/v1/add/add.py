@@ -1,51 +1,58 @@
+from typing import Any, BinaryIO
 from uuid import UUID
-from typing import Union, BinaryIO, List, Optional, Any
 
-from cognee.modules.users.models import User
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+from cognee.modules.engine.operations.setup import setup
+from cognee.modules.observability import (
+    COGNEE_DATASET_NAME,
+    MEMORY_COLLECTION,
+    MEMORY_OPERATION,
+    MEMORY_SYSTEM,
+    increment_items_stored,
+    new_span,
+    record_operation_duration,
+)
 from cognee.modules.pipelines import Task, run_pipeline
+from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
     resolve_authorized_user_dataset,
 )
-from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
-    reset_dataset_pipeline_run_status,
+from cognee.modules.pipelines.models.PipelineRunInfo import (
+    PipelineRunAlreadyCompleted,
+    PipelineRunCompleted,
 )
-from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
-from cognee.modules.engine.operations.setup import setup
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
 from cognee.tasks.ingestion.data_item import DataItem
+from cognee.tasks.ingestion.refuse_changed_existing_documents import (
+    refuse_changed_existing_documents,
+)
 from cognee.tasks.ingestion.resolve_dlt_sources import resolve_dlt_sources
 from cognee.tasks.ingestion.utils import materialize_stream_for_background
-from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
 
 async def add(
-    data: Union[
-        BinaryIO,
-        list[BinaryIO],
-        str,
-        list[str],
-        DataItem,
-        list[DataItem],
-        Any,  # DltResource, SourceFactory, or other dlt types
-    ],
-    dataset_name: str = "main_dataset",
+    data: BinaryIO | list[BinaryIO] | str | list[str] | DataItem | list[DataItem] | Any,
+    dataset_name: str = DEFAULT_DATASET_NAME,
     user: User = None,
-    node_set: Optional[List[str]] = None,
-    vector_db_config: dict = None,
-    graph_db_config: dict = None,
-    dataset_id: Optional[UUID] = None,
-    preferred_loaders: Optional[List[Union[str, dict[str, dict[str, Any]]]]] = None,
+    node_set: list[str] | None = None,
+    vector_db_config: dict | None = None,
+    graph_db_config: dict | None = None,
+    dataset_id: UUID | None = None,
+    preferred_loaders: list[str | dict[str, dict[str, Any]]] | None = None,
     incremental_loading: bool = True,
-    data_per_batch: Optional[int] = 20,
-    importance_weight: Optional[float] = 0.5,
+    data_per_batch: int | None = 20,
+    importance_weight: float | None = 0.5,
     run_in_background: bool = False,
-    llm_config: Optional[LLMConfig] = None,
-    embedding_config: Optional[EmbeddingConfig] = None,
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = True,
+    skip_connection_test: bool = False,
     **kwargs,
 ):
     """
@@ -60,6 +67,12 @@ async def add(
         - **Database Setup**: Relational and vector databases must be configured
         - **User Authentication**: Uses default user if none provided (created automatically)
 
+    add() creates documents; it never updates one. A file that already exists in
+    the dataset (the same path, or the same filename for an upload) with different
+    content raises ``DocumentUpdateRequiredError``: replace the stored version with
+    ``update(data_id=..., data=..., dataset_id=...)`` so the document keeps its id
+    and its graph is replaced in place. Re-adding identical content is a no-op.
+
     Supported Input Types:
         - **Text strings**: Direct text content (str) - any string not starting with "/" or "file://"
         - **File paths**: Local file paths as strings in these formats:
@@ -67,6 +80,12 @@ async def add(
             * File URLs: "file:///path/to/document.pdf" or "file://relative/path.txt"
             * S3 paths: "s3://bucket-name/path/to/file.pdf"
         - **Binary file objects**: File handles/streams (BinaryIO)
+        - **Web URLs**: "https://example.com/page" is fetched and ingested as a page
+        - **Code repository URLs**: "https://github.com/<owner>/<repo>" (or a gitlab.com
+          project, or any URL ending in .git) is shallow-cloned and ingested as ONE
+          code-repo item that cognify runs through the enola code graph pipeline
+          (cross-file edges), plus the repo's documents; same as adding a local code
+          project directory. Requires ALLOW_HTTP_REQUESTS and git on PATH.
         - **Lists**: Multiple files or text strings in a single call
 
     Supported File Formats:
@@ -92,7 +111,8 @@ async def add(
             - S3 path: "s3://my-bucket/documents/file.pdf"
             - List of mixed types: ["text content", "/path/file.pdf", "file://doc.txt", file_handle]
             - Binary file object: open("file.txt", "rb")
-            - url: A web link url (https or http)
+            - url: A web link url (https or http); a GitHub/GitLab repository URL is
+              cloned and indexed as a code graph instead of fetched as a page
         dataset_name: Name of the dataset to store data in. Defaults to "main_dataset".
                     Create separate datasets to organize different knowledge domains.
         user: User object for authentication and permissions. Uses default user if None.
@@ -104,7 +124,9 @@ async def add(
         graph_db_config: Optional configuration for graph database (for custom setups).
         dataset_id: Optional specific dataset UUID to use instead of dataset_name.
         run_in_background: If True, starts ingestion asynchronously and returns immediately.
-                          If False (default), waits for completion before returning.
+                           DLT orphan cleanup is skipped; propagating upstream deletions
+                           requires a successful foreground sync.
+                           If False (default), waits for completion before returning.
         extraction_rules: Optional dictionary of rules (e.g., CSS selectors, XPath) for extracting specific content from web pages using BeautifulSoup
         tavily_config: Optional configuration for Tavily API, including API key and extraction settings
         soup_crawler_config: Optional configuration for BeautifulSoup crawler, specifying concurrency, crawl delay, and extraction rules.
@@ -169,22 +191,28 @@ async def add(
         Make sure to set TAVILY_API_KEY = YOUR_TAVILY_API_KEY as a environment variable
         await cognee.add("https://example.com")
 
+        # Add a single url and keenable extract ingestion method
+        Make sure to set KEENABLE_API_KEY = YOUR_KEENABLE_API_KEY as a environment variable
+        (Tavily takes precedence if both keys are set.)
+        await cognee.add("https://example.com")
+
         # Add multiple urls
         await cognee.add(["https://example.com","https://books.toscrape.com"])
         ```
 
     Environment Variables:
-        Required:
-        - LLM_API_KEY: API key for your LLM provider (OpenAI, Anthropic, etc.)
+        - LLM_API_KEY: API key for your LLM provider (OpenAI, Anthropic, etc.). When
+          unset, ingestion runs on local models (GLiNER extraction, fastembed embeddings).
 
         Optional:
         - LLM_PROVIDER: "openai" (default), "anthropic", "gemini", "ollama", "mistral", "bedrock"
-        - LLM_MODEL: Model name (default: "gpt-5-mini")
+        - LLM_MODEL: Model name (default: "openai/gpt-5.6-luna")
         - DEFAULT_USER_EMAIL: Custom default user email
         - DEFAULT_USER_PASSWORD: Custom default user password
         - VECTOR_DB_PROVIDER: "lancedb" (default), "pgvector"
         - GRAPH_DATABASE_PROVIDER: "ladybug" (default), "neo4j"
         - TAVILY_API_KEY: YOUR_TAVILY_API_KEY
+        - KEENABLE_API_KEY: YOUR_KEENABLE_API_KEY
 
     """
     # Route to remote instance if connected via serve()
@@ -207,51 +235,93 @@ async def add(
                 transformed[item] = {}
         preferred_loaders = transformed
 
+    # add() stages data and makes no LLM call of its own, so it validates the
+    # embedding side of the provider config only. Whether the run needs an LLM
+    # is decided where the LLM is used: remember() and cognify() from their
+    # task lists, and the media loaders -- the one ingestion step that calls
+    # the LLM -- at the moment they would (``require_llm_for_media``). Keyless
+    # ingestion (local GLiNER extractor, local embedder) is a supported mode,
+    # and a guess made here about a file whose loader is not resolved yet was
+    # blocking it.
+    from cognee.modules.preflight import validate_provider_config
+
+    validate_provider_config(needs_llm=False)
+
+    await setup()
+
+    # The pipeline-run log writers INSERT the operation-record columns
+    # (user_id, outcome, tokens, ...), so an existing database must be at the
+    # current Alembic head before the first write — same gate as cognify().
+    from cognee.modules.migrations.startup import run_migrations_and_block
+
+    await run_migrations_and_block(dataset_id or dataset_name, user)
+
+    import time as _time
+
+    _add_start_ns = _time.monotonic_ns()
+
+    with new_span("memory.store") as _span:
+        _span.set_attribute(MEMORY_SYSTEM, "cognee")
+        _span.set_attribute(MEMORY_OPERATION, "store")
+        _span.set_attribute(MEMORY_COLLECTION, dataset_name or "main_dataset")
+        _span.set_attribute(COGNEE_DATASET_NAME, dataset_name or "main_dataset")
+
+    user, authorized_dataset = await resolve_authorized_user_dataset(
+        dataset_name=dataset_name, dataset_id=dataset_id, user=user
+    )
+
+    # The dataset is resolved (created if needed) and write-checked above; hand
+    # its id to the ingestion task so it does not resolve the name again on
+    # every item (the pipeline also passes the dataset via ctx — this keeps the
+    # non-pipeline fallback on the cheap branch too).
     tasks = [
-        Task(resolve_data_directories, include_subdirectories=True),
+        Task(resolve_data_directories, include_subdirectories=True, needs_llm=False),
         Task(
             ingest_data,
             dataset_name,
             user,
             node_set,
-            dataset_id,
+            authorized_dataset.id,
             preferred_loaders,
             importance_weight,
+            needs_llm=False,
         ),
     ]
-
-    await setup()
-
-    user, authorized_dataset = await resolve_authorized_user_dataset(
-        dataset_name=dataset_name, dataset_id=dataset_id, user=user
-    )
 
     # Expand DLT resources (and auto-detected CSV/connection strings) into
     # standard DataItems before the pipeline sees them. orphan_cleanup (when
     # not None) deletes dlt rows no longer present in the source; it is
     # deferred until after the fresh rows are committed to avoid a data-loss
     # window on a mid-ingest failure.
+    # The dataset's stored name, not the caller's argument: a DLT manifest's
+    # identity is seeded from (dataset name, source name), and update()'s
+    # rebuild re-adds by dataset_id alone. Passing None there would mint a
+    # second manifest for the same source.
     data, orphan_cleanup = await resolve_dlt_sources(
         data,
-        dataset_name=dataset_name,
+        dataset_name=authorized_dataset.name,
         user=user,
+        dataset_id=authorized_dataset.id,
         **kwargs,
     )
+
+    # A file the dataset already holds with other content is an update in
+    # disguise: refuse the whole request now, before the pipeline writes the
+    # items ahead of it one by one, and point at update().
+    await refuse_changed_existing_documents(data, user, authorized_dataset)
 
     # Background runs must not depend on caller/request-scoped stream lifetimes.
     # Materialize stream-like inputs into owned in-memory buffers up front.
     if run_in_background:
-        # Detached pipelines run one-at-a-time (to avoid DB write conflicts)
-        # and commit later, so we cannot safely defer cleanup past their commit
-        # from here without racing them. Run it up front instead.
+        # The detached pipeline has not committed when this call returns.
+        # Never delete the previous data without proof its replacement succeeded.
         if orphan_cleanup is not None:
-            await orphan_cleanup()
+            logger.warning(
+                "Skipping DLT orphan cleanup for background ingestion; "
+                "reload the affected source in the foreground to propagate upstream deletions."
+            )
             orphan_cleanup = None
         data = await materialize_stream_for_background(data)
-
-    await reset_dataset_pipeline_run_status(
-        authorized_dataset.id, user, pipeline_names=["add_pipeline", "cognify_pipeline"]
-    )
 
     pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
 
@@ -264,23 +334,34 @@ async def add(
         pipeline_name="add_pipeline",
         vector_db_config=vector_db_config,
         graph_db_config=graph_db_config,
-        use_pipeline_cache=False,
         incremental_loading=incremental_loading,
         data_per_batch=data_per_batch,
         llm_config=llm_config,
         embedding_config=embedding_config,
         data_cache=data_cache,
+        skip_connection_test=skip_connection_test,
     )
-
-    # Foreground runs: the fresh rows are committed by pipeline_executor_func
-    # above, so it's now safe to clean up orphans. (Background runs already ran
-    # this up front and set orphan_cleanup to None.)
-    if orphan_cleanup is not None:
-        await orphan_cleanup()
 
     # run_pipeline_blocking returns {dataset_id: PipelineRunInfo} but callers
     # expect a single PipelineRunInfo (add always processes one dataset).
     if isinstance(result, dict) and len(result) == 1:
-        return next(iter(result.values()))
+        result = next(iter(result.values()))
+
+    # Executors may return an error result rather than raise. Only a successful
+    # foreground completion proves it is safe to remove the previous records.
+    if orphan_cleanup is not None and isinstance(
+        result, (PipelineRunCompleted, PipelineRunAlreadyCompleted)
+    ):
+        await orphan_cleanup()
+
+    _duration_ms = (_time.monotonic_ns() - _add_start_ns) / 1_000_000
+    _attrs = {
+        "memory.system": "cognee",
+        "memory.operation": "store",
+        "memory.collection": dataset_name or "main_dataset",
+    }
+    record_operation_duration(_duration_ms, _attrs)
+    item_count = len(data) if hasattr(data, "__len__") else 1
+    increment_items_stored(item_count, _attrs)
 
     return result

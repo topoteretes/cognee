@@ -2,10 +2,11 @@ import argparse
 import asyncio
 from uuid import UUID
 
-from cognee.cli.reference import SupportsCliCommand
-from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
+from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.hints import hint_remember
+from cognee.cli.reference import SupportsCliCommand
 
 
 class ForgetCommand(SupportsCliCommand):
@@ -16,7 +17,9 @@ class ForgetCommand(SupportsCliCommand):
 Remove data from the knowledge graph.
 
 Use --everything (alias --all) to delete all user data, --dataset/--dataset-id
-to delete a dataset, or dataset + --data-id to delete a single item.
+to delete a dataset, or dataset + --data-id to delete a single item. Add
+--memory-only to clear graph/vector memory while keeping raw files and data
+records, so the dataset (or item) can be re-cognified later.
     """
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
@@ -35,6 +38,16 @@ to delete a dataset, or dataset + --data-id to delete a single item.
             action="store_true",
             default=False,
             help="Delete all datasets and data",
+        )
+        parser.add_argument(
+            "--memory-only",
+            action="store_true",
+            default=False,
+            help=(
+                "Delete only graph/vector memory (requires --dataset or --dataset-id); "
+                "raw files and data records are preserved so the dataset can be "
+                "re-cognified with different settings"
+            ),
         )
 
     def execute(self, args: argparse.Namespace) -> None:
@@ -55,6 +68,18 @@ to delete a dataset, or dataset + --data-id to delete a single item.
                 )
                 return
 
+            if data_id and not dataset and not dataset_id:
+                fmt.error("Specify --dataset or --dataset-id when using --data-id.")
+                return
+
+            if args.everything and args.memory_only:
+                fmt.error(
+                    "--memory-only has no effect with --everything: everything deletes all "
+                    "datasets and data outright. Specify --dataset or --dataset-id with "
+                    "--memory-only instead."
+                )
+                return
+
             async def run_forget():
                 try:
                     return await cognee.forget(
@@ -62,14 +87,21 @@ to delete a dataset, or dataset + --data-id to delete a single item.
                         dataset=dataset,
                         dataset_id=dataset_id,
                         everything=args.everything,
+                        memory_only=args.memory_only,
                     )
                 except Exception as e:
-                    raise CliCommandInnerException(f"Failed to forget: {str(e)}") from e
+                    raise CliCommandInnerException(f"Failed to forget: {e!s}") from e
 
             result = asyncio.run(run_forget())
             fmt.success(f"Done: {result}")
 
+            # After a successful forget the natural next step is to seed the
+            # graph again with remember; a placeholder is used when the user
+            # wiped everything so no specific dataset name is meaningful.
+            hint_dataset = dataset or "<dataset-name>"
+            hint_remember(hint_dataset)
+
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(f"Error during forget: {str(e)}", error_code=1) from e
+            raise CliCommandException(f"Error during forget: {e!s}", error_code=1) from e

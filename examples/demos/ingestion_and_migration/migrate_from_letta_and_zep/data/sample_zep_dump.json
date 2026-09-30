@@ -1,0 +1,83 @@
+{
+  "episodes": [
+    {
+      "uuid": "ep-001",
+      "name": "Project kickoff",
+      "content": "We decided to use PostgreSQL as the primary database and Redis for caching. Alice will set up the staging environment.",
+      "created_at": "2025-03-10T09:00:00Z",
+      "valid_at": "2025-03-10T09:00:00Z"
+    },
+    {
+      "uuid": "ep-002",
+      "name": "Architecture review",
+      "content": "The team agreed on an event-driven architecture using Kafka. Bob will handle the infrastructure provisioning.",
+      "created_at": "2025-03-12T14:00:00Z",
+      "valid_at": "2025-03-12T14:00:00Z"
+    }
+  ],
+  "entities": [
+    {
+      "uuid": "node-alice",
+      "name": "Alice",
+      "labels": ["Person", "Engineer"],
+      "summary": "Backend engineer on the platform team."
+    },
+    {
+      "uuid": "node-bob",
+      "name": "Bob",
+      "labels": ["Person", "Manager"],
+      "summary": "Leads the platform engineering team."
+    },
+    {
+      "uuid": "node-postgres",
+      "name": "PostgreSQL",
+      "labels": ["Technology", "Database"],
+      "summary": "Primary OLTP database for the new service."
+    },
+    {
+      "uuid": "node-redis",
+      "name": "Redis",
+      "labels": ["Technology", "Cache"],
+      "summary": "Caching layer for the new service."
+    }
+  ],
+  "facts": [
+    {
+      "uuid": "fact-1",
+      "source_node_uuid": "node-alice",
+      "target_node_uuid": "node-bob",
+      "name": "reports_to",
+      "fact": "Alice reports to Bob",
+      "valid_at": "2025-02-01T11:00:00Z",
+      "created_at": "2025-02-01T11:00:00Z"
+    },
+    {
+      "uuid": "fact-2",
+      "source_node_uuid": "node-alice",
+      "target_node_uuid": "node-postgres",
+      "name": "uses",
+      "fact": "Alice uses PostgreSQL as the primary database",
+      "valid_at": "2025-03-10T09:00:00Z",
+      "created_at": "2025-03-10T09:00:00Z"
+    },
+    {
+      "uuid": "fact-3",
+      "source_node_uuid": "node-alice",
+      "target_node_uuid": "node-redis",
+      "name": "uses",
+      "fact": "Alice uses Redis for caching",
+      "valid_at": "2025-03-10T09:05:00Z",
+      "created_at": "2025-03-10T09:05:00Z"
+    },
+    {
+      "uuid": "fact-4",
+      "source_node_uuid": "node-bob",
+      "target_node_uuid": "node-alice",
+      "name": "manages",
+      "fact": "Bob manages Alice",
+      "valid_at": "2025-02-01T11:00:00Z",
+      "invalid_at": null,
+      "created_at": "2025-02-01T11:00:00Z"
+    }
+  ]
+}

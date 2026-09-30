@@ -1,10 +1,11 @@
 """Tests for explicit dataset/dataset_id handling in cognee.forget()."""
 
 import importlib
-import pytest
 from types import SimpleNamespace
-from uuid import uuid4
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
+
+import pytest
 
 forget_module = importlib.import_module("cognee.api.v1.forget.forget")
 serve_state_module = importlib.import_module("cognee.api.v1.serve.state")
@@ -45,6 +46,7 @@ async def test_forget_routes_dataset_id_without_name_inference():
     with (
         patch.object(low_level_module, "setup", AsyncMock()),
         patch.object(serve_state_module, "get_remote_client", return_value=None),
+        patch.object(forget_module, "_resolve_dataset_id", AsyncMock(return_value=dataset_id)),
         patch.object(
             forget_module,
             "set_database_global_context_variables",
@@ -54,18 +56,23 @@ async def test_forget_routes_dataset_id_without_name_inference():
     ):
         await forget_module.forget(dataset_id=dataset_id, user=USER)
 
-    assert _CapturingContextManager.captured == [dataset_id]
+    # forget() must NOT enter the database context itself: the context (queue
+    # slot) is entered after the per-dataset lock, inside the helpers /
+    # datasets operations — canonical order (dataset lock -> queue slot), SDK-483.
+    assert _CapturingContextManager.captured == []
     forget_dataset.assert_awaited_once()
     assert forget_dataset.call_args.args[0] == dataset_id
 
 
 @pytest.mark.asyncio
 async def test_forget_routes_dataset_as_name():
-    forget_dataset = AsyncMock(return_value={"status": "success", "dataset_id": str(uuid4())})
+    resolved_id = uuid4()
+    forget_dataset = AsyncMock(return_value={"status": "success", "dataset_id": str(resolved_id)})
 
     with (
         patch.object(low_level_module, "setup", AsyncMock()),
         patch.object(serve_state_module, "get_remote_client", return_value=None),
+        patch.object(forget_module, "_resolve_dataset_id", AsyncMock(return_value=resolved_id)),
         patch.object(
             forget_module,
             "set_database_global_context_variables",
@@ -75,7 +82,9 @@ async def test_forget_routes_dataset_as_name():
     ):
         await forget_module.forget(dataset="scientists", user=USER)
 
-    assert _CapturingContextManager.captured == ["scientists"]
+    # forget() must NOT enter the database context itself (see the dataset_id
+    # variant above); authorization still resolved the name before dispatch.
+    assert _CapturingContextManager.captured == []
     forget_dataset.assert_awaited_once()
     assert forget_dataset.call_args.args[0] == "scientists"
 

@@ -39,6 +39,16 @@
   --color-cognee-placeholder: #A1A1AA;
   --color-cognee-text-disabled: #D4D4D8;
 
+  /* ── Dark app shell ──
+     The in-app surfaces run on the black grid base, not the light Zinc scale
+     above: `fg` is the canonical foreground there (use /55 for secondary text,
+     which is the lowest alpha that still clears WCAG AA on that background). */
+  --color-cognee-fg: #EDECEA;
+  --color-cognee-success: #22C55E;
+  --color-cognee-warning: #F59E0B;
+  --color-cognee-danger: #EF4444;
+  --color-cognee-danger-fg: #FF8A8A;
+
   /* ── Typography ── */
   --font-sans: "TWKLausanne", sans-serif;
   --font-mono: ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace;

@@ -4,6 +4,9 @@
  * environment variables set in step 1.
  */
 
+import { writeSkillFile } from "@/utils/osCommands";
+import type { PreferredOs } from "@/ui/layout/OsPreferenceContext";
+
 export const CLAUDE_PROMPT = `You are connected to Cognee Cloud, a persistent knowledge graph memory system. Use it to store and retrieve knowledge across conversations.
 
 ## First — is memory already automatic here?
@@ -57,10 +60,10 @@ Before answering questions, check if relevant knowledge exists:
 POST $COGNEE_BASE_URL/api/v1/recall
 Headers: X-Api-Key: $COGNEE_API_KEY
 Content-Type: application/json
-Body: {"query": "<user question>", "session_id": "<session-id>"}
+Body: {"query": "<user question>", "datasets": ["<dataset>"], "session_id": "<session-id>"}
 \`\`\`
 
-For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION (default), GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
+The query is auto-routed to a search strategy by default. For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION, GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
 
 ### List datasets
 \`\`\`
@@ -129,10 +132,10 @@ Before answering questions, check if relevant knowledge exists:
 curl -X POST $COGNEE_BASE_URL/api/v1/recall \\
   -H "X-Api-Key: $COGNEE_API_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"query": "<user question>", "session_id": "<session-id>"}'
+  -d '{"query": "<user question>", "datasets": ["<dataset>"], "session_id": "<session-id>"}'
 \`\`\`
 
-For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION (default), GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
+The query is auto-routed to a search strategy by default. For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION, GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
 
 ### List datasets
 \`\`\`bash
@@ -200,10 +203,10 @@ rm -f "$TMP"
 curl -X POST $COGNEE_BASE_URL/api/v1/recall \\
   -H "X-Api-Key: $COGNEE_API_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"query": "<user question>", "session_id": "<session-id>"}'
+  -d '{"query": "<user question>", "datasets": ["<dataset>"], "session_id": "<session-id>"}'
 \`\`\`
 
-For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION (default), GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
+The query is auto-routed to a search strategy by default. For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION, GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
 
 ## Behavior Guidelines
 1. If a Cognee plugin or MCP server is active, memory is automatic — do NOT call the API manually, and do NOT narrate routine recalls/saves. The rest applies only to the HTTP-API fallback.
@@ -276,10 +279,10 @@ Before answering questions, check if relevant knowledge exists:
 curl -X POST $COGNEE_BASE_URL/api/v1/recall \\
   -H "X-Api-Key: $COGNEE_API_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"query": "<user question>", "session_id": "<session-id>"}'
+  -d '{"query": "<user question>", "datasets": ["<dataset>"], "session_id": "<session-id>"}'
 \`\`\`
 
-For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION (default), GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
+The query is auto-routed to a search strategy by default. For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION, GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
 
 ### List datasets
 \`\`\`bash
@@ -354,10 +357,10 @@ Before answering questions, check if relevant knowledge exists:
 curl -X POST $COGNEE_BASE_URL/api/v1/recall \\
   -H "X-Api-Key: $COGNEE_API_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"query": "<user question>", "session_id": "<session-id>"}'
+  -d '{"query": "<user question>", "datasets": ["<dataset>"], "session_id": "<session-id>"}'
 \`\`\`
 
-For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION (default), GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
+The query is auto-routed to a search strategy by default. For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION, GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
 
 ### List datasets
 \`\`\`bash
@@ -425,10 +428,10 @@ Before answering questions, check if relevant knowledge exists:
 curl -X POST $COGNEE_BASE_URL/api/v1/recall \\
   -H "X-Api-Key: $COGNEE_API_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"query": "<user question>", "session_id": "<session-id>"}'
+  -d '{"query": "<user question>", "datasets": ["<dataset>"], "session_id": "<session-id>"}'
 \`\`\`
 
-For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION (default), GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
+The query is auto-routed to a search strategy by default. For targeted retrieval, add "search_type" to the recall body — one of: HYBRID_COMPLETION, GRAPH_COMPLETION, CHUNKS, GRAPH_SUMMARY_COMPLETION.
 
 ### List datasets
 \`\`\`bash
@@ -477,14 +480,17 @@ export const UPLOAD_SAMPLE_PROMPT =
 export const RECALL_SAMPLE_PROMPT = "Where is Cognee's founder and CEO Vasilije from, and what is special about that town?";
 
 // Ready-to-paste shell commands — copied to clipboard and run by the user locally
-export const CLAUDE_CODE_SKILL_INSTALL =
-  `mkdir -p ~/.claude/skills/cognee && cat > ~/.claude/skills/cognee/SKILL.md << 'COGNEE_EOF'\n${SKILLS_CONTENT}\nCOGNEE_EOF`;
+export function claudeCodeSkillInstall(os: PreferredOs): string {
+  return writeSkillFile(os, "/.claude/skills/cognee", "SKILL.md", SKILLS_CONTENT);
+}
 
-export const CODEX_SKILL_INSTALL =
-  `mkdir -p ~/.codex/skills/cognee && cat > ~/.codex/skills/cognee/SKILL.md << 'COGNEE_EOF'\n${CODEX_SKILLS_CONTENT}\nCOGNEE_EOF`;
+export function codexSkillInstall(os: PreferredOs): string {
+  return writeSkillFile(os, "/.codex/skills/cognee", "SKILL.md", CODEX_SKILLS_CONTENT);
+}
 
-export const OPENCLAW_SKILL_INSTALL =
-  `mkdir -p ~/.openclaw/skills/cognee && cat > ~/.openclaw/skills/cognee/SKILL.md << 'COGNEE_EOF'\n${OPENCLAW_SKILLS_CONTENT}\nCOGNEE_EOF`;
+export function openclawSkillInstall(os: PreferredOs): string {
+  return writeSkillFile(os, "/.openclaw/skills/cognee", "SKILL.md", OPENCLAW_SKILLS_CONTENT);
+}
 
 // Agent-agnostic variant of the Claude Code skill, used by the API / MCP
 // card: same operations and behavior rules, but without Claude-specific
@@ -511,8 +517,12 @@ export const GENERIC_SKILL_CONTENT = SKILLS_CONTENT
     'a unix-timestamp-based id unique to this conversation, e.g. "1719320000"',
   );
 
-export const GENERIC_SKILL_INSTALL =
-  `mkdir -p skills/cognee && cat > skills/cognee/SKILL.md << 'COGNEE_EOF'\n${GENERIC_SKILL_CONTENT}\nCOGNEE_EOF`;
+export function genericSkillInstall(os: PreferredOs): string {
+  if (os === "windows") {
+    return `New-Item -ItemType Directory -Force -Path "skills\\cognee" | Out-Null\nSet-Content -Path "skills\\cognee\\SKILL.md" -Value @'\n${GENERIC_SKILL_CONTENT}\n'@`;
+  }
+  return `mkdir -p skills/cognee && cat > skills/cognee/SKILL.md << 'COGNEE_EOF'\n${GENERIC_SKILL_CONTENT}\nCOGNEE_EOF`;
+}
 
 // Standard stdio MCP config. Launched via `uvx cognee-mcp`, which fetches and
 // runs the package on demand — no separate `pip install` step, and it avoids
@@ -540,6 +550,23 @@ export const HERMES_MCP_CONFIG = `mcp_servers:
     env:
       COGNEE_BASE_URL: "{{BASE_URL}}"
       COGNEE_API_KEY: "{{API_KEY}}"`;
+
+// Claude Desktop's config file already exists (it holds "preferences" and other
+// keys), so users MERGE this "mcpServers" key into it — hence no outer file
+// braces here, unlike MCP_STDIO_CONFIG's whole-file shape. Pasting a full
+// { "mcpServers": … } object would nest braces inside the existing root and
+// break the JSON. Uses --api-url/--api-token flags (not env vars) to match
+// the args Claude Desktop's own docs show for third-party servers.
+export const CLAUDE_DESKTOP_MCP_ENTRY = `"mcpServers": {
+  "cognee": {
+    "command": "uvx",
+    "args": [
+      "cognee-mcp@latest",
+      "--api-url", "{{BASE_URL}}",
+      "--api-token", "{{API_KEY}}"
+    ]
+  }
+}`;
 
 export function fillTemplate(template: string, baseUrl: string, apiKey: string): string {
   return template

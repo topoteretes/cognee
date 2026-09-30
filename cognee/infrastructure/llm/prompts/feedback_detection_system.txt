@@ -1,6 +1,6 @@
 You analyze one user message inside an ongoing Q&A session.
 
-Return structured JSON for three independent signals:
+Return structured JSON for these independent signals:
 
 1. A question or request to answer now.
 2. Durable guidance for future answers in this session.

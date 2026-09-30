@@ -1,4 +1,5 @@
 SOURCE_REF_PREFIX = "source_ref:v1"
+CHUNK_SOURCE_REF_PREFIX = "source_ref:v2"
 SOURCE_RUN_REF_PREFIX = "source_run_ref:v1"
 
 GRAPH_PROVENANCE_VERSION_KEY = "provenance_version"

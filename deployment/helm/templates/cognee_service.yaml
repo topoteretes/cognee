@@ -1,13 +1,13 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Release.Name }}-cognee
+  name: {{ include "cognee.fullname" . }}
   labels:
-    app: {{ .Release.Name }}-cognee
+    {{- include "cognee.labels" . | nindent 4 }}
 spec:
-  type: ClusterIP
+  type: {{ .Values.service.type }}
   ports:
-    - port: {{ .Values.cognee.port }}
-      targetPort: {{ .Values.cognee.port }}
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.port }}
   selector:
-    app: {{ .Release.Name }}-cognee
+    {{- include "cognee.selectorLabels" . | nindent 4 }}

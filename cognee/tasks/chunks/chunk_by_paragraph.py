@@ -1,4 +1,5 @@
-from typing import Any, Dict, Iterator
+from collections.abc import Iterator
+from typing import Any
 from uuid import NAMESPACE_OID, uuid5
 
 from .chunk_by_sentence import chunk_by_sentence
@@ -8,7 +9,7 @@ def chunk_by_paragraph(
     data: str,
     max_chunk_size,
     batch_paragraphs: bool = True,
-) -> Iterator[Dict[str, Any]]:
+) -> Iterator[dict[str, Any]]:
     """
     Chunk the input text by paragraph while enabling exact text reconstruction.
 

@@ -7,13 +7,19 @@ Requires a running Postgres instance. Connection defaults:
 Override via environment variables if needed.
 """
 
+import asyncio
 import os
-import json
+from copy import deepcopy
+from uuid import uuid4
+
 import pytest
 import pytest_asyncio
 
-from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
-
+from cognee.infrastructure.databases.graph.postgres_demo.adapter import PostgresDemoAdapter
+from cognee.infrastructure.databases.provenance import EdgeIdentity, make_source_ref_key
+from cognee.tests.utils.assert_bounded_neighborhood_contract import (
+    assert_bounded_neighborhood_contract,
+)
 
 # -- Session-scoped event loop so the async engine's connection pool
 #    stays on a single loop across all tests.
@@ -44,7 +50,7 @@ async def adapter():
     port = os.environ.get("DB_PORT", "5432")
     database = os.environ.get("DB_NAME", "cognee_db")
     connection_string = f"postgresql+asyncpg://{username}:{password}@{host}:{port}/{database}"
-    a = PostgresAdapter(connection_string=connection_string)
+    a = PostgresDemoAdapter(connection_string=connection_string)
 
     # Create tables and indexes
     await a.initialize()
@@ -93,10 +99,14 @@ async def test_add_and_get_node(adapter):
 
 @pytest.mark.asyncio
 async def test_add_node_string_form(adapter):
-    await adapter.add_node("n2", properties={"name": "Bob", "type": "Person"})
+    properties = {"id": "wrong", "name": "Bob", "type": "Person"}
+    await adapter.add_node("n2", properties=properties)
+
+    assert properties == {"id": "wrong", "name": "Bob", "type": "Person"}
     result = await adapter.get_node("n2")
     assert result is not None
     assert result["name"] == "Bob"
+    assert await adapter.get_node("wrong") is None
 
 
 @pytest.mark.asyncio
@@ -122,6 +132,64 @@ async def test_add_nodes_upsert(adapter):
 
     result = await adapter.get_node("u1")
     assert result["name"] == "V2"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_nodes_and_edges_use_the_last_value(adapter):
+    await adapter.add_nodes(
+        [
+            ("duplicate", {"name": "first", "type": "T"}),
+            ("other", {"name": "Other", "type": "T"}),
+            ("duplicate", {"name": "last", "type": "T"}),
+        ]
+    )
+    await adapter.add_edges(
+        [
+            ("duplicate", "other", "R", {"value": "first"}),
+            ("duplicate", "other", "R", {"value": "last"}),
+        ]
+    )
+
+    assert (await adapter.get_node("duplicate"))["name"] == "last"
+    connection = (await adapter.get_connections("duplicate"))[0]
+    assert connection[1]["value"] == "last"
+
+
+@pytest.mark.asyncio
+async def test_add_nodes_does_not_mutate_caller_properties(adapter):
+    """Preparing a write must copy: sanitization rewrites values the caller still owns."""
+    properties = {"name": "Ca\0ller", "type": "T", "nested": {"value": "a\0b"}}
+    original = deepcopy(properties)
+
+    await adapter.add_nodes([("caller-node", properties)])
+
+    assert properties == original
+
+
+@pytest.mark.asyncio
+async def test_tuple_id_wins_over_conflicting_properties_id(adapter):
+    await adapter.add_nodes([("authoritative", {"id": "ignored", "name": "N", "type": "T"})])
+
+    assert (await adapter.get_node("authoritative"))["id"] == "authoritative"
+    assert await adapter.get_node("ignored") is None
+
+
+@pytest.mark.asyncio
+async def test_node_and_edge_payloads_are_sanitized(adapter):
+    await adapter.add_nodes(
+        [
+            ("left\0", {"name": "Le\0ft", "type": "T", "nested": {"value": "a\0b"}}),
+            ("right", {"name": "Right", "type": "T"}),
+        ]
+    )
+    await adapter.add_edge("left\0", "right", "RE\0L", {"value": "c\0d"})
+
+    node = await adapter.get_node("left")
+    connection = (await adapter.get_connections("left"))[0]
+    assert node["name"] == "Left"
+    assert node["nested"] == {"value": "ab"}
+    assert connection[1]["relationship_name"] == "REL"
+    assert connection[1]["value"] == "cd"
 
 
 @pytest.mark.asyncio
@@ -167,6 +235,20 @@ async def test_add_and_has_edge(adapter):
     assert await adapter.has_edge("e1", "e2", "KNOWS") is True
     assert await adapter.has_edge("e1", "e2", "LIKES") is False
     assert await adapter.has_edge("e2", "e1", "KNOWS") is False
+
+
+@pytest.mark.asyncio
+async def test_has_edges_returns_only_present_edges(adapter):
+    await adapter.add_nodes([_FakeDataPoint(id=f"he{i}", name=f"N{i}", type="T") for i in range(3)])
+    present = [("he0", "he1", "R1"), ("he1", "he2", "R2")]
+    await adapter.add_edges([(*edge, {}) for edge in present])
+
+    found = await adapter.has_edges(
+        [present[0], ("he0", "he1", "NOPE"), present[1], ("he1", "he0", "R1")]
+    )
+
+    assert set(found) == set(present)
+    assert await adapter.has_edges([]) == []
 
 
 @pytest.mark.asyncio
@@ -237,6 +319,122 @@ async def test_cascade_delete(adapter):
     assert await adapter.has_edge("cd1", "cd2", "R") is False
 
 
+@pytest.mark.asyncio
+async def test_node_write_rolls_back_when_provenance_fails(adapter, monkeypatch):
+    async def fail_transition(*args, **kwargs):
+        raise RuntimeError("provenance failed")
+
+    monkeypatch.setattr(adapter, "_update_node_provenance", fail_transition)
+    source_ref = make_source_ref_key(uuid4(), uuid4())
+
+    with pytest.raises(RuntimeError, match="provenance failed"):
+        await adapter.add_nodes(
+            [("rollback-node", {"name": "Rollback", "type": "T"})],
+            source_ref_key=source_ref,
+        )
+
+    assert await adapter.has_node("rollback-node") is False
+
+
+@pytest.mark.asyncio
+async def test_edge_write_rolls_back_when_provenance_fails(adapter, monkeypatch):
+    await adapter.add_nodes(
+        [
+            ("rollback-source", {"name": "Source", "type": "T"}),
+            ("rollback-target", {"name": "Target", "type": "T"}),
+        ]
+    )
+
+    async def fail_transition(*args, **kwargs):
+        raise RuntimeError("provenance failed")
+
+    monkeypatch.setattr(adapter, "_update_edge_provenance", fail_transition)
+    source_ref = make_source_ref_key(uuid4(), uuid4())
+
+    with pytest.raises(RuntimeError, match="provenance failed"):
+        await adapter.add_edges(
+            [("rollback-source", "rollback-target", "R", {})],
+            source_ref_key=source_ref,
+        )
+
+    assert await adapter.has_edge("rollback-source", "rollback-target", "R") is False
+
+
+@pytest.mark.asyncio
+async def test_concurrent_provenance_updates_across_adapter_instances(adapter):
+    second_adapter = PostgresDemoAdapter(adapter.db_uri)
+    node_id = "concurrent-node"
+    edge = EdgeIdentity(node_id, node_id, "LOOP")
+    node_keys = [make_source_ref_key(uuid4(), uuid4()) for _ in range(2)]
+    edge_keys = [make_source_ref_key(uuid4(), uuid4()) for _ in range(2)]
+
+    try:
+        await adapter.add_node(node_id, {"name": "Node", "type": "T"})
+        await adapter.add_edge(node_id, node_id, edge.relationship_name)
+
+        await asyncio.wait_for(
+            asyncio.gather(
+                adapter.attach_node_source_refs([node_id], [node_keys[0]]),
+                second_adapter.attach_node_source_refs([node_id], [node_keys[1]]),
+                adapter.attach_edge_source_refs([edge], [edge_keys[0]]),
+                second_adapter.attach_edge_source_refs([edge], [edge_keys[1]]),
+            ),
+            timeout=30,
+        )
+        node_snapshot = (await adapter.get_node_delete_data([node_id]))[node_id]
+        edge_snapshot = (await adapter.get_edge_delete_data([edge]))[edge]
+        assert set(node_snapshot.source_ref_keys) == set(node_keys)
+        assert set(edge_snapshot.source_ref_keys) == set(edge_keys)
+
+        await asyncio.wait_for(
+            asyncio.gather(
+                adapter.remove_node_source_refs([node_id], [node_keys[0]]),
+                second_adapter.remove_node_source_refs([node_id], [node_keys[1]]),
+                adapter.remove_edge_source_refs([edge], [edge_keys[0]]),
+                second_adapter.remove_edge_source_refs([edge], [edge_keys[1]]),
+            ),
+            timeout=30,
+        )
+        node_snapshot = (await adapter.get_node_delete_data([node_id]))[node_id]
+        edge_snapshot = (await adapter.get_edge_delete_data([edge]))[edge]
+        assert node_snapshot.source_ref_keys == []
+        assert edge_snapshot.source_ref_keys == []
+    finally:
+        await second_adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_tag_removal_across_adapter_instances(adapter):
+    """Two adapters stripping different tags from one node must both take effect.
+
+    Row locks are the only thing keeping the read-modify-write over the JSONB
+    property blob from losing one of the two updates.
+    """
+    second_adapter = PostgresDemoAdapter(adapter.db_uri)
+    node_id = "concurrent-tag-node"
+
+    try:
+        await adapter.add_node(
+            node_id, {"name": "Node", "type": "T", "belongs_to_set": ["keep", "drop_a", "drop_b"]}
+        )
+        # Open both connections up front: a cold connect costs more than a whole
+        # transaction, which would serialize the two removals and test nothing.
+        await second_adapter.get_node(node_id)
+
+        await asyncio.wait_for(
+            asyncio.gather(
+                adapter.remove_belongs_to_set_tags(["drop_a"], node_ids=[node_id]),
+                second_adapter.remove_belongs_to_set_tags(["drop_b"]),
+            ),
+            timeout=30,
+        )
+
+        node = await adapter.get_node(node_id)
+        assert node["belongs_to_set"] == ["keep"]
+    finally:
+        await second_adapter.close()
+
+
 # -- Tests: neighbor and connection queries --
 
 
@@ -262,6 +460,27 @@ async def test_get_neighbors(adapter):
 
 
 @pytest.mark.asyncio
+async def test_get_neighbors_deduplicates_pairs_and_keeps_self_loops(adapter):
+    await adapter.add_nodes(
+        [
+            _FakeDataPoint(id="neighbor-a", name="A", type="T"),
+            _FakeDataPoint(id="neighbor-b", name="B", type="T"),
+        ]
+    )
+    await adapter.add_edges(
+        [
+            ("neighbor-a", "neighbor-b", "R1", {}),
+            ("neighbor-a", "neighbor-b", "R2", {}),
+            ("neighbor-a", "neighbor-a", "LOOP", {}),
+        ]
+    )
+
+    neighbors = await adapter.get_neighbors("neighbor-a")
+
+    assert {node["id"] for node in neighbors} == {"neighbor-a", "neighbor-b"}
+
+
+@pytest.mark.asyncio
 async def test_get_connections(adapter):
     await adapter.add_nodes(
         [
@@ -273,7 +492,7 @@ async def test_get_connections(adapter):
 
     connections = await adapter.get_connections("cn1")
     assert len(connections) == 1
-    src, edge, tgt = connections[0]
+    _src, edge, _tgt = connections[0]
     assert edge["relationship_name"] == "LINKED"
 
 
@@ -291,6 +510,39 @@ async def test_get_neighborhood_with_asyncpg_seed_array(adapter):
 
     assert {node_id for node_id, _ in nodes} == {"nh1", "nh2"}
     assert ("nh1", "nh2", "next", {}) in edges
+
+
+@pytest.mark.asyncio
+async def test_neighborhood_depth_filter_and_boundary_rules(adapter):
+    await adapter.add_nodes(
+        [_FakeDataPoint(id=f"walk-{index}", name=str(index), type="T") for index in range(4)]
+    )
+    await adapter.add_edges(
+        [
+            ("walk-0", "walk-1", "walk", {}),
+            ("walk-1", "walk-2", "walk", {}),
+            ("walk-0", "walk-1", "other", {}),
+            ("walk-1", "walk-3", "other", {}),
+        ]
+    )
+
+    nodes, edges = await adapter.get_neighborhood(["walk-0"], depth=2, edge_types=["walk"])
+    assert {node_id for node_id, _ in nodes} == {"walk-0", "walk-1", "walk-2"}
+    assert {(source, target, name) for source, target, name, _ in edges} == {
+        ("walk-0", "walk-1", "walk"),
+        ("walk-0", "walk-1", "other"),
+        ("walk-1", "walk-2", "walk"),
+    }
+
+    nodes, edges = await adapter.get_neighborhood(["walk-0", "walk-1", "missing"], depth=0)
+    assert {node_id for node_id, _ in nodes} == {"walk-0", "walk-1"}
+    assert {(source, target, name) for source, target, name, _ in edges} == {
+        ("walk-0", "walk-1", "walk"),
+        ("walk-0", "walk-1", "other"),
+    }
+
+    with pytest.raises(ValueError, match="non-negative"):
+        await adapter.get_neighborhood(["walk-0"], depth=-1)
 
 
 # -- Tests: graph-wide reads --
@@ -320,6 +572,45 @@ async def test_get_graph_data_empty(adapter):
 
 
 @pytest.mark.asyncio
+async def test_filtered_graph_projection_rules(adapter):
+    await adapter.add_nodes(
+        [
+            ("projection-1", {"name": "1", "type": "Selected"}),
+            ("projection-2", {"name": "2", "type": "Selected"}),
+            ("projection-3", {"name": "3", "type": "Other"}),
+            ("projection-isolated", {"name": "4", "type": "Selected"}),
+        ]
+    )
+    await adapter.add_edges(
+        [
+            ("projection-1", "projection-2", "inside", {}),
+            ("projection-2", "projection-3", "outside", {}),
+        ]
+    )
+
+    nodes, edges = await adapter.get_id_filtered_graph_data(["projection-2"])
+    assert {node_id for node_id, _ in nodes} == {
+        "projection-1",
+        "projection-2",
+        "projection-3",
+    }
+    assert {relationship for _, _, relationship, _ in edges} == {"inside", "outside"}
+
+    nodes, edges = await adapter.get_filtered_graph_data([{"type": ["Selected"]}])
+    assert {node_id for node_id, _ in nodes} == {
+        "projection-1",
+        "projection-2",
+        "projection-isolated",
+    }
+    assert [(source, target, name) for source, target, name, _ in edges] == [
+        ("projection-1", "projection-2", "inside")
+    ]
+
+    with pytest.raises(ValueError, match="Invalid filter attribute"):
+        await adapter.get_filtered_graph_data([{"properties": ["hidden"]}])
+
+
+@pytest.mark.asyncio
 async def test_get_nodeset_subgraph(adapter):
     await adapter.add_nodes(
         [
@@ -342,9 +633,47 @@ async def test_get_nodeset_subgraph(adapter):
     nodes, edges = await adapter.get_nodeset_subgraph(Entity, ["Alpha"])
     node_ids = {n[0] for n in nodes}
 
-    # Should include ns1 (primary) plus neighbors ns2 and ns3
-    assert "ns1" in node_ids
-    assert len(node_ids) >= 2
+    assert node_ids == {"ns1", "ns2", "ns3"}
+    assert {(source, target, name) for source, target, name, _ in edges} == {
+        ("ns1", "ns2", "R"),
+        ("ns1", "ns3", "R"),
+    }
+
+
+@pytest.mark.asyncio
+async def test_nodeset_and_operator_uses_only_existing_primaries(adapter):
+    await adapter.add_nodes(
+        [
+            ("primary-a", {"name": "Alpha", "type": "Entity"}),
+            ("primary-b", {"name": "Beta", "type": "Entity"}),
+            ("shared", {"name": "Shared", "type": "Other"}),
+            ("one-side", {"name": "One", "type": "Other"}),
+        ]
+    )
+    await adapter.add_edges(
+        [
+            ("primary-a", "shared", "R", {}),
+            ("primary-b", "shared", "R", {}),
+            ("primary-a", "one-side", "R", {}),
+        ]
+    )
+
+    class Entity:
+        pass
+
+    nodes, _ = await adapter.get_nodeset_subgraph(
+        Entity, ["Alpha", "Beta"], node_name_filter_operator="AND"
+    )
+    assert {node_id for node_id, _ in nodes} == {"primary-a", "primary-b", "shared"}
+
+    nodes, _ = await adapter.get_nodeset_subgraph(
+        Entity, ["Alpha", "Missing"], node_name_filter_operator="AND"
+    )
+    assert {node_id for node_id, _ in nodes} == {"primary-a", "shared", "one-side"}
+    assert await adapter.get_nodeset_subgraph(Entity, ["Missing"], "AND") == ([], [])
+
+    with pytest.raises(ValueError, match="must be 'OR' or 'AND'"):
+        await adapter.get_nodeset_subgraph(Entity, ["Alpha"], "XOR")
 
 
 @pytest.mark.asyncio
@@ -380,6 +709,27 @@ async def test_get_graph_metrics_basic(adapter):
     metrics = await adapter.get_graph_metrics()
     assert metrics["num_nodes"] == 2
     assert metrics["num_edges"] == 1
+
+
+@pytest.mark.asyncio
+async def test_graph_metrics_components_and_optional_self_loops(adapter):
+    await adapter.add_nodes(
+        [_FakeDataPoint(id=f"metric-{index}", name=str(index), type="T") for index in range(6)]
+    )
+    await adapter.add_edges(
+        [
+            ("metric-0", "metric-1", "R", {}),
+            ("metric-1", "metric-2", "R", {}),
+            ("metric-3", "metric-4", "R", {}),
+            ("metric-0", "metric-0", "LOOP", {}),
+        ]
+    )
+
+    assert (await adapter.get_graph_metrics())["num_selfloops"] == -1
+    metrics = await adapter.get_graph_metrics(include_optional=True)
+    assert metrics["num_connected_components"] == 3
+    assert metrics["sizes_of_connected_components"] == [3, 2, 1]
+    assert metrics["num_selfloops"] == 1
 
 
 # -- Tests: delete_graph --
@@ -434,8 +784,14 @@ async def test_get_triplets_batch_offset(adapter):
     all_triplets = await adapter.get_triplets_batch(offset=0, limit=10)
     assert len(all_triplets) == 2
 
-    one_triplet = await adapter.get_triplets_batch(offset=1, limit=1)
-    assert len(one_triplet) == 1
+    # Paginating must walk the same stable order, so each page continues the
+    # previous one instead of repeating or skipping a triplet.
+    pages = []
+    for offset in range(2):
+        page = await adapter.get_triplets_batch(offset=offset, limit=1)
+        assert len(page) == 1
+        pages.extend(page)
+    assert pages == all_triplets
 
 
 @pytest.mark.asyncio
@@ -453,3 +809,273 @@ async def test_get_triplets_batch_validation(adapter):
 async def test_query_raises_not_implemented(adapter):
     with pytest.raises(NotImplementedError):
         await adapter.query("MATCH (n) RETURN n")
+
+
+@pytest.mark.asyncio
+async def test_degree_seeds_cover_empty_isolated_and_bidirectional_graphs(adapter):
+    from unittest.mock import AsyncMock
+
+    adapter.get_graph_data = AsyncMock(side_effect=AssertionError("unexpected full graph read"))
+    assert await adapter.get_top_degree_node_ids(5) == []
+    await adapter.add_nodes(
+        [_FakeDataPoint(id=n) for n in ["hub", "incoming", "outgoing", "isolated"]]
+    )
+    # Exercises the intentionally empty ANY(:seed_ids) binding with asyncpg.
+    assert set(await adapter.get_top_degree_node_ids(5)) == {
+        "hub",
+        "incoming",
+        "outgoing",
+        "isolated",
+    }
+    await adapter.add_edge("incoming", "hub", "rel")
+    await adapter.add_edge("hub", "outgoing", "rel")
+    assert await adapter.get_top_degree_node_ids(1) == ["hub"]
+    seeds = await adapter.get_top_degree_node_ids(5)
+    assert seeds[0] == "hub"
+    assert set(seeds) == {"hub", "incoming", "outgoing", "isolated"}
+    adapter.get_graph_data.assert_not_awaited()
+
+
+# -- Tests: bounded neighbourhood (SDK-786) --
+
+
+async def _two_hub_graph(adapter, spokes=30):
+    """Two hubs with their own spokes, one spoke of each linked to a shared tail."""
+    nodes = [("hub-a", {"name": "a", "type": "Hub"}), ("hub-b", {"name": "b", "type": "Hub"})]
+    edges = []
+    for hub in ("a", "b"):
+        for index in range(spokes):
+            spoke = f"{hub}-{index}"
+            nodes.append((spoke, {"name": spoke, "type": "Spoke", "text": "x" * 200}))
+            edges.append((f"hub-{hub}", spoke, "has", {}))
+    nodes.append(("tail", {"name": "tail", "type": "Tail"}))
+    edges += [("a-0", "tail", "next", {}), ("tail", "b-0", "next", {})]
+    await adapter.add_nodes(nodes)
+    await adapter.add_edges(edges)
+    return nodes, edges
+
+
+async def _bounded_chunks(adapter, *args, **kwargs):
+    return [chunk async for chunk in adapter.iter_bounded_neighborhood(*args, **kwargs)]
+
+
+@pytest.mark.asyncio
+async def test_bounded_neighborhood_shares_the_budget_between_hubs(adapter):
+    from unittest.mock import AsyncMock
+
+    _, edges = await _two_hub_graph(adapter)
+    adapter.get_neighborhood = AsyncMock(side_effect=AssertionError("unbounded read"))
+
+    chunks = await _bounded_chunks(adapter, ["hub-a", "hub-b"], 2, 22, chunk_size=5)
+
+    members, _ = assert_bounded_neighborhood_contract(
+        chunks, max_nodes=22, chunk_size=5, seed_ids=["hub-a", "hub-b"], graph_edges=edges
+    )
+    assert len(members) == 22
+    per_hub = {hub: sum(member.startswith(f"{hub}-") for member in members) for hub in "ab"}
+    assert per_hub == {"a": 10, "b": 10}  # round robin, not whichever hub the scan hit first
+    assert "tail" not in members
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("depth", [1, 2])
+async def test_bounded_neighborhood_matches_get_neighborhood_when_the_budget_is_larger(
+    adapter, depth
+):
+    _, edges = await _two_hub_graph(adapter, spokes=5)
+    reference_nodes, reference_edges = await adapter.get_neighborhood(["hub-a"], depth=depth)
+
+    chunks = await _bounded_chunks(adapter, ["hub-a"], depth, 10_000, chunk_size=3)
+
+    members, identities = assert_bounded_neighborhood_contract(
+        chunks, max_nodes=10_000, chunk_size=3, seed_ids=["hub-a"], graph_edges=edges
+    )
+    assert set(members) == {node_id for node_id, _ in reference_nodes}
+    assert identities == {(s, t, r) for s, t, r, _ in reference_edges}
+    full = {node_id: data for nodes, _ in chunks for node_id, data in nodes}
+    assert full == {node_id: data for node_id, data in reference_nodes}
+
+
+@pytest.mark.asyncio
+async def test_bounded_neighborhood_seed_handling(adapter):
+    """Isolated seeds come back alone; missing and repeated seeds take no slot."""
+    await adapter.add_nodes(
+        [
+            ("alone", {"name": "alone", "type": "T"}),
+            ("b", {"name": "b", "type": "T"}),
+            *[(f"n{index}", {"name": str(index), "type": "T"}) for index in range(5)],
+        ]
+    )
+    await adapter.add_edges([("b", f"n{index}", "rel", {}) for index in range(5)])
+
+    assert await _bounded_chunks(adapter, ["alone"], 2, 10) == [
+        ([("alone", {"name": "alone", "type": "T"})], [])
+    ]
+
+    chunks = await _bounded_chunks(adapter, ["b", "missing", "alone", "b"], 1, 4)
+    members, _ = assert_bounded_neighborhood_contract(
+        chunks, max_nodes=4, chunk_size=2000, seed_ids=["b", "alone"]
+    )
+    assert len(members) == 4
+
+
+@pytest.mark.asyncio
+async def test_bounded_neighborhood_accepts_uuid_seeds(adapter):
+    seed = uuid4()
+    await adapter.add_nodes([(str(seed), {"name": "u", "type": "T"}), ("n", {"name": "n"})])
+    await adapter.add_edges([(str(seed), "n", "rel", {})])
+
+    chunks = await _bounded_chunks(adapter, [seed], 1, 10)
+
+    members, identities = assert_bounded_neighborhood_contract(
+        chunks, max_nodes=10, chunk_size=2000, seed_ids=[str(seed)]
+    )
+    assert members == [str(seed), "n"]
+    assert identities == {(str(seed), "n", "rel")}
+
+
+@pytest.mark.asyncio
+async def test_bounded_neighborhood_projects_properties_in_sql(adapter):
+    await adapter.add_nodes(
+        [("p", {"name": "p", "type": "T", "text": "long " * 500, "belongs_to_set": ["s"]})]
+    )
+
+    ((nodes, _),) = await _bounded_chunks(adapter, ["p"], 1, 10, property_keys=["belongs_to_set"])
+
+    assert nodes == [("p", {"name": "p", "type": "T", "belongs_to_set": ["s"]})]
+
+
+@pytest.mark.asyncio
+async def test_bounded_neighborhood_skips_a_node_deleted_between_chunks(adapter):
+    await _two_hub_graph(adapter, spokes=6)
+    stream = adapter.iter_bounded_neighborhood(["hub-a"], 1, 100, chunk_size=3)
+
+    first = await stream.__anext__()
+    await adapter.delete_node("a-5")  # sits in a later chunk
+    rest = [chunk async for chunk in stream]
+
+    members, identities = assert_bounded_neighborhood_contract(
+        [first, *rest], max_nodes=100, chunk_size=3, seed_ids=["hub-a"]
+    )
+    assert "a-5" not in members
+    assert all("a-5" not in identity for identity in identities)
+    assert len(members) == 6
+
+
+@pytest.mark.asyncio
+async def test_bounded_neighborhood_is_stable_across_generic_plan_switches(adapter):
+    """Prepared statements switch to a generic plan after five executions.
+
+    The result must not depend on which plan runs, so read it more often than
+    that on one pool and compare. Each hub has more spokes than the budget, so
+    the per-node LIMIT cuts and the same spokes have to survive every read.
+    """
+    await _two_hub_graph(adapter, spokes=30)
+
+    results = [
+        await _bounded_chunks(adapter, ["hub-a", "hub-b"], 2, 12, chunk_size=4) for _ in range(8)
+    ]
+
+    assert all(result == results[0] for result in results)
+
+
+# -- Tests: streamed visualization (SDK-787) --
+
+
+@pytest.mark.asyncio
+async def test_streamed_graph_matches_preprocess_and_never_sends_text(adapter):
+    import json
+
+    from cognee.modules.visualization.graph_stream import begin_graph_stream, stream_graph_events
+    from cognee.modules.visualization.preprocessor import COMPACT_PROPERTY_KEYS, preprocess
+
+    await adapter.add_nodes(
+        [("hub", {"name": "hub", "type": "Entity", "source_node_set": "docs"})]
+        + [
+            (f"chunk-{index}", {"type": "DocumentChunk", "text": f"chunk {index} " * 400})
+            for index in range(30)
+        ]
+    )
+    await adapter.add_edges([("hub", f"chunk-{index}", "contains", {}) for index in range(30)])
+    await adapter.add_edges([("chunk-0", "chunk-1", "next", {})])
+
+    requested = []
+    native = adapter.iter_bounded_neighborhood
+
+    def spy(*args, **kwargs):
+        requested.append(kwargs.get("property_keys"))
+        return native(*args, **kwargs)
+
+    adapter.iter_bounded_neighborhood = spy
+
+    stream = await begin_graph_stream(
+        stream_graph_events(
+            adapter,
+            query=None,
+            seed_node_ids=["hub"],
+            neighborhood_depth=1,
+            seed_top_k=10,
+            max_nodes=100,
+            chunk_size=8,
+        )
+    )
+    frames = [frame async for frame in stream.frames()]
+    events = [
+        (lines[0][7:], json.loads(lines[1][6:]))
+        for lines in (frame.strip().splitlines() for frame in frames if frame.startswith("event"))
+    ]
+
+    assert [name for name, _ in events][:2] == ["meta", "chunk"]
+    assert [name for name, _ in events][-2:] == ["summary", "done"]
+    assert requested == [list(COMPACT_PROPERTY_KEYS)]  # projected in SQL, not in Python
+
+    sent, links = {}, []
+    for name, data in events:
+        if name == "chunk":
+            for node in data["nodes"]:
+                sent[node["id"]] = node
+            for link in data["links"]:
+                assert link["source"] in sent and link["target"] in sent
+                links.append(link)
+    assert all("text" not in node for node in sent.values())
+    assert len(json.dumps([data for name, data in events if name == "chunk"])) < 20_000
+
+    reference = preprocess(await adapter.get_neighborhood(["hub"], depth=1))
+    by_id = {node["id"]: node for node in reference.nodes}
+    assert {node_id: node["name"] for node_id, node in sent.items()} == {
+        node_id: node["name"] for node_id, node in by_id.items()
+    }
+    summaries = [data for name, data in events if name == "summary"]
+    summary = {
+        "nodes": {k: v for part in summaries for k, v in part["nodes"].items()},
+        "color_maps": summaries[0]["color_maps"],
+    }
+    assert all(len(part["nodes"]) <= 8 for part in summaries)
+    assert summary["nodes"] == {
+        node_id: {"importance": node["importance"], "label_priority": node["label_priority"]}
+        for node_id, node in by_id.items()
+    }
+    assert summary["color_maps"]["node_set"] == reference.color_maps["node_set"]
+    assert len(links) == len(reference.links)
+
+
+@pytest.mark.asyncio
+async def test_entity_type_names_reads_one_is_a_hop(adapter):
+    """SDK-794: the native lookup maps entities to their EntityType, never outward."""
+    for node_id, name, node_type in [
+        ("alice", "Alice", "Entity"),
+        ("bob", "Bob", "Entity"),
+        ("carol", "Carol", "Entity"),
+        ("person", "Person", "EntityType"),
+    ]:
+        await adapter.add_node(_FakeDataPoint(id=node_id, name=name, type=node_type))
+    await adapter.add_edge("alice", "person", "is_a")
+    await adapter.add_edge("bob", "person", "is_a")
+    await adapter.add_edge("alice", "bob", "knows")
+
+    assert await adapter.get_entity_type_names(["alice", "bob", "carol"]) == {
+        "alice": "Person",
+        "bob": "Person",
+    }
+    assert await adapter.get_entity_type_names(["person"]) == {}
+    assert await adapter.get_entity_type_names([]) == {}

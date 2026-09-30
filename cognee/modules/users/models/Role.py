@@ -1,5 +1,6 @@
-from sqlalchemy.orm import relationship, Mapped
-from sqlalchemy import Column, String, ForeignKey, UUID, UniqueConstraint
+from sqlalchemy import UUID, Column, ForeignKey, String, UniqueConstraint
+from sqlalchemy.orm import Mapped, relationship
+
 from .Principal import Principal
 from .UserRole import UserRole
 

@@ -1,8 +1,21 @@
 name: test | mcp
 
+# Least-privilege GITHUB_TOKEN (OSSF Scorecard: Token-Permissions). A caller can
+# only narrow this further. packages: read is required: the jobs run inside the
+# private ghcr.io CI image (and pull ghcr.io service images), which the runner
+# fetches with this token before the first step. Nothing here writes.
+permissions:
+  contents: read
+  packages: read
+
 on:
   workflow_call:
     inputs:
+      python-version:
+        required: false
+        type: string
+        default: "3.11.x"
+        description: "Python version to run the MCP tests with"
       cognee_version:
         required: false
         type: string
@@ -18,10 +31,10 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: ${{ inputs.python-version }}
 

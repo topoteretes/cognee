@@ -1,0 +1,51 @@
+{
+  "agents": [
+    {
+      "id": "agent-001",
+      "name": "assistant_one",
+      "core_memory": [
+        {
+          "id": "block-human",
+          "label": "human",
+          "value": "Alice is a backend engineer who prefers dark mode, uses VS Code, and owns a cat named Pixel.",
+          "limit": 2000
+        },
+        {
+          "id": "block-persona",
+          "label": "persona",
+          "value": "You are a helpful coding assistant. Answer concisely and suggest best practices.",
+          "limit": 2000
+        }
+      ],
+      "messages": [
+        {
+          "role": "user",
+          "content": "What database should we use for the new service?",
+          "created_at": "2025-03-10T09:00:00Z"
+        },
+        {
+          "role": "assistant",
+          "content": "Given your requirements for ACID compliance and managed-service support, I recommend PostgreSQL with the pgvector extension for embeddings.",
+          "created_at": "2025-03-10T09:01:30Z"
+        },
+        {
+          "role": "user",
+          "content": "Great. Set up the caching layer with Redis.",
+          "created_at": "2025-03-10T09:05:00Z"
+        }
+      ],
+      "archival_memory": [
+        {
+          "id": "passage-1",
+          "text": "Alice's manager is Bob, who leads the platform engineering team. Bob reports to the VP of Engineering.",
+          "created_at": "2025-02-01T11:00:00Z"
+        },
+        {
+          "id": "passage-2",
+          "text": "The Q2 OKRs include reducing p95 latency by 30% and launching the new API gateway.",
+          "created_at": "2025-03-15T16:00:00Z"
+        }
+      ]
+    }
+  ]
+}

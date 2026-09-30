@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import { useUser } from "@/modules/users/UserContext";
+import { OsToggle } from "@/ui/elements/OsToggle";
+import { useOsPreference } from "@/ui/layout/OsPreferenceContext";
+import { exportEnvVar } from "@/utils/osCommands";
 import { completeOnboardingAndNavigate } from "../completeOnboardingAndNavigate";
 import { useAgentConnectionDetection } from "../hooks/useAgentConnectionDetection";
 import { useOnboardingTrackEvent } from "../useOnboardingTrackEvent";
@@ -27,12 +30,13 @@ export function AgentOnboarding({ agent, serviceUrl, apiKey, cogniInstance, onRe
   const router = useRouter();
   const { markOnboardingComplete } = useUser();
   const track = useOnboardingTrackEvent();
+  const { os } = useOsPreference();
   const name = agent === "claude-code" ? "Claude Code" : "Codex";
   const credsReady = Boolean(serviceUrl && apiKey);
   const baseUrl = serviceUrl || "https://your-tenant.aws.cognee.ai";
   const resolvedKey = apiKey || "your-api-key";
   // API key + base url are all the plugin/skill needs.
-  const credsCode = `export COGNEE_BASE_URL="${baseUrl}"\nexport COGNEE_API_KEY="${resolvedKey}"`;
+  const credsCode = `${exportEnvVar(os, "COGNEE_BASE_URL", baseUrl)}\n${exportEnvVar(os, "COGNEE_API_KEY", resolvedKey)}`;
 
   // Accordion: exactly one step expanded at a time. Clicking a later step
   // collapses the current one (which turns green/"Done") and expands the next.
@@ -46,7 +50,7 @@ export function AgentOnboarding({ agent, serviceUrl, apiKey, cogniInstance, onRe
     completeOnboardingAndNavigate(markOnboardingComplete, () => router.push("/dashboard"));
   }
 
-  const cards = buildAgentOnboardingCards({ agent, name, baseUrl, credsCode, credsReady, connectVerified, goToDashboard });
+  const cards = buildAgentOnboardingCards({ agent, name, baseUrl, credsCode, credsReady, connectVerified, goToDashboard, os });
 
   useEffect(() => {
     track({ pageName: "Onboarding", eventName: "agent_step_viewed", additionalProperties: { agent, step: String(currentStep), title: cards[currentStep]?.title ?? "" } });
@@ -88,6 +92,10 @@ export function AgentOnboarding({ agent, serviceUrl, apiKey, cogniInstance, onRe
         <p style={{ fontSize: 14, color: "rgba(237,236,234,0.6)", margin: "0 0 12px", textAlign: "center" }}>
           A few quick steps to give {name} persistent memory.
         </p>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", width: "100%", marginBottom: 4 }}>
+          <OsToggle />
+        </div>
 
         <style>{`
           @keyframes ob-check { 0% { transform: scale(0.4); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }

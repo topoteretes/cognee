@@ -25,7 +25,6 @@
 # -----------------------------------------------------------------------------
 /cognee/modules/retrieval/                         @hajdul88 @lxobr
 /cognee/tasks/memify/                              @lxobr @hajdul88
-/cognee/tasks/temporal_awareness/                  @lxobr @hajdul88
 /cognee/tasks/temporal_graph/                      @lxobr @hajdul88
 
 # -----------------------------------------------------------------------------

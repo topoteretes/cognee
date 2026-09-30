@@ -1,10 +1,12 @@
-from typing import Any, Optional
+from typing import Any
 
+from cognee.modules.retrieval.hybrid.chunks import search_collection
 from cognee.modules.retrieval.hybrid.facts import connection_edge_type_id
 from cognee.modules.retrieval.hybrid.results import (
     display_value,
     first_display_value,
     payload,
+    payload_matches_node_filter,
     result_id,
 )
 from cognee.shared.logging_utils import get_logger
@@ -12,36 +14,71 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("HybridRetriever")
 
 
+async def search_entities(
+    vector_engine: Any,
+    query: str,
+    top_k: int,
+    node_name: list[str] | None,
+    node_name_filter_operator: str,
+    query_vector: list[float],
+) -> list[Any]:
+    """Entity_name hits, or empty if the collection is missing or search fails."""
+    try:
+        return await search_collection(
+            vector_engine,
+            "Entity_name",
+            query,
+            top_k,
+            node_name,
+            node_name_filter_operator,
+            query_vector=query_vector,
+        )
+    except Exception as error:
+        logger.warning(
+            "Entity_name search failed; continuing without entities: %s", error, exc_info=True
+        )
+        return []
+
+
 async def build_entities(
     graph_engine: Any,
     entity_hits: list[Any],
     max_edges_per_entity: int,
-    edge_ranks: Optional[dict[str, int]] = None,
-):
+    edge_ranks: dict[str, int] | None = None,
+    node_name: list[str] | None = None,
+    node_name_filter_operator: str = "OR",
+) -> tuple[list[dict], set[str]]:
     if not entity_hits:
-        return []
+        return [], set()
 
     entities = [_entity_from_result(result) for result in entity_hits]
     entity_ids = [entity["id"] for entity in entities if entity["id"]]
     if not entity_ids:
-        return entities
+        return entities, set()
 
     try:
         nodes, edges = await graph_engine.get_neighborhood(entity_ids, depth=1)
     except Exception as error:
         logger.warning(
-            "Graph neighborhood retrieval failed; returning entities without edges: %s", error
+            "Graph neighborhood retrieval failed; returning entities without edges: %s",
+            error,
+            exc_info=True,
         )
-        return entities
+        return entities, set()
 
-    connections_by_entity_id = _partition_neighborhood(entity_ids, nodes, edges)
+    connections_by_entity_id = _keep_scoped_connections(
+        _partition_neighborhood(entity_ids, nodes, edges),
+        node_name,
+        node_name_filter_operator,
+    )
+    reachable_edge_type_ids = _reachable_edge_type_ids(connections_by_entity_id)
     for entity in entities:
         entity["edges"] = _edge_bullets_from_connections(
             connections_by_entity_id.get(entity["id"], []),
             max_edges_per_entity,
             edge_ranks or {},
         )
-    return entities
+    return entities, reachable_edge_type_ids
 
 
 def _partition_neighborhood(
@@ -70,6 +107,52 @@ def _partition_neighborhood(
         if target_id in connections and target_id != source_id:
             connections[target_id].append(triple)
     return connections
+
+
+def _keep_scoped_connections(
+    connections_by_entity_id: dict[str, list[tuple[dict, dict, dict]]],
+    node_name: list[str] | None,
+    node_name_filter_operator: str,
+) -> dict[str, list[tuple[dict, dict, dict]]]:
+    """Drop 1-hop neighbours that are not in the requested node set.
+
+    ``is_a`` type edges stay: EntityType nodes usually have no ``belongs_to_set``.
+    Unscoped searches are unchanged.
+    """
+    if not node_name:
+        return connections_by_entity_id
+    return {
+        entity_id: [
+            triple
+            for triple in triples
+            if _connection_in_scope(entity_id, triple, node_name, node_name_filter_operator)
+        ]
+        for entity_id, triples in connections_by_entity_id.items()
+    }
+
+
+def _connection_in_scope(
+    entity_id: str,
+    triple: tuple[dict, dict, dict],
+    node_name: list[str],
+    node_name_filter_operator: str,
+) -> bool:
+    source, edge, target = triple
+    if _is_type_relationship(display_value(edge.get("relationship_name"))):
+        return True
+    neighbor = target if display_value(source.get("id")) == entity_id else source
+    return payload_matches_node_filter(neighbor, node_name, node_name_filter_operator)
+
+
+def _reachable_edge_type_ids(
+    connections_by_entity_id: dict[str, list[tuple[dict, dict, dict]]],
+) -> set[str]:
+    return {
+        edge_type_id
+        for triples in connections_by_entity_id.values()
+        for _source, edge, _target in triples
+        if (edge_type_id := connection_edge_type_id(edge))
+    }
 
 
 def format_entities(entities: list[dict]) -> str:
@@ -119,7 +202,7 @@ def _format_entity(entity: dict) -> str:
     return "\n".join(lines)
 
 
-def _entity_type(result_payload: dict) -> Optional[str]:
+def _entity_type(result_payload: dict) -> str | None:
     for value in (result_payload.get("is_a"), result_payload.get("type")):
         entity_type = display_value(value)
         if entity_type and entity_type not in {"IndexSchema"}:
@@ -171,7 +254,7 @@ def _edge_sort_key(edge: dict, edge_ranks: dict[str, int]) -> tuple[int, int]:
     return (1, rank)
 
 
-def _unpack_connection(connection: Any) -> Optional[tuple[dict, dict, dict]]:
+def _unpack_connection(connection: Any) -> tuple[dict, dict, dict] | None:
     if not isinstance(connection, (list, tuple)) or len(connection) != 3:
         return None
     source, edge, target = connection
@@ -180,7 +263,7 @@ def _unpack_connection(connection: Any) -> Optional[tuple[dict, dict, dict]]:
     return source, edge, target
 
 
-def _edge_bullet(source: dict, edge: dict, target: dict) -> Optional[dict]:
+def _edge_bullet(source: dict, edge: dict, target: dict) -> dict | None:
     source_label = _node_label(source)
     target_label = _node_label(target)
     relationship = display_value(edge.get("relationship_name"))
@@ -198,10 +281,11 @@ def _edge_bullet(source: dict, edge: dict, target: dict) -> Optional[dict]:
         "relationship": relationship,
         "target_id": display_value(target.get("id")),
         "edge_type_id": connection_edge_type_id(edge),
+        "edge_object_id": display_value((edge.get("properties") or {}).get("edge_object_id")),
     }
 
 
-def _edge_dedupe_key(edge: dict) -> Optional[tuple[str, str, str]]:
+def _edge_dedupe_key(edge: dict) -> tuple[str, str, str] | None:
     source_id = display_value(edge.get("source_id"))
     relationship = display_value(edge.get("relationship"))
     target_id = display_value(edge.get("target_id"))
@@ -210,23 +294,26 @@ def _edge_dedupe_key(edge: dict) -> Optional[tuple[str, str, str]]:
     return None
 
 
-def _is_type_edge(edge: dict) -> bool:
-    relationship = display_value(edge.get("relationship"))
-    if relationship:
-        normalized = relationship.lower().replace("_", " ").replace("-", " ").strip()
-        if normalized == "is a":
-            return True
+def _is_type_relationship(relationship: str | None) -> bool:
+    if not relationship:
+        return False
+    normalized = relationship.lower().replace("_", " ").replace("-", " ").strip()
+    return normalized == "is a"
 
+
+def _is_type_edge(edge: dict) -> bool:
+    if _is_type_relationship(display_value(edge.get("relationship"))):
+        return True
     text = display_value(edge.get("text"))
     return bool(text and " is a " in f" {text.lower()} ")
 
 
-def _nested_edge_text(edge: dict) -> Optional[str]:
+def _nested_edge_text(edge: dict) -> str | None:
     properties = edge.get("properties")
     if not isinstance(properties, dict):
         return None
     return display_value(properties.get("edge_text"))
 
 
-def _node_label(node: dict) -> Optional[str]:
+def _node_label(node: dict) -> str | None:
     return first_display_value(node.get("name"), node.get("id"))

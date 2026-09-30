@@ -6,10 +6,22 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
-from typing import List, Optional
 
 from pydantic import ValidationError
-from sqlalchemy import create_engine, delete, event, func, insert, or_, select, text, update
+from sqlalchemy import (
+    NullPool,
+    create_engine,
+    delete,
+    event,
+    func,
+    insert,
+    or_,
+    select,
+    text,
+    update,
+)
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -41,6 +53,16 @@ _DEADLOCK_ATTEMPTS = 3
 
 # Advisory-lock id guarding the throttled global TTL sweep on Postgres.
 _PURGE_LOCK_ID = int.from_bytes(sha256(b"cognee_cache_ttl_sweep").digest()[:8], "big", signed=True)
+
+# Fraction of the TTL window a row's expiry may lag behind the freshest write
+# before a sliding-TTL UPDATE re-stamps it. The slide is Redis EXPIRE parity,
+# but Redis EXPIRE is O(1) metadata on one key while the naive SQL translation
+# rewrites every session row per write — quadratic total write cost, and on the
+# SQLite WAL ~15,400x write amplification in a long agent session (issue #4393).
+# Skipping rows that are less than (fraction * ttl) stale bounds each row to at
+# most one re-stamp per slack window; rows then expire between (1 - fraction)
+# and 1.0 of the TTL after the session's last write.
+_TTL_REFRESH_FRACTION = 0.05
 
 
 def _is_deadlock_error(error: Exception) -> bool:
@@ -77,12 +99,12 @@ class _SqlAdvisoryLockHandle:
                 text("SELECT pg_advisory_unlock(:lock_id)"), {"lock_id": self.lock_id}
             )
         except Exception as error:
-            logger.debug("Error releasing Postgres advisory lock: %s", error)
+            logger.debug("Error releasing Postgres advisory lock: %s", error, exc_info=True)
         finally:
             try:
                 self.connection.close()
             except Exception as error:
-                logger.debug("Error closing advisory lock connection: %s", error)
+                logger.debug("Error closing advisory lock connection: %s", error, exc_info=True)
 
 
 class SqlCacheAdapter(CacheDBInterface):
@@ -101,7 +123,7 @@ class SqlCacheAdapter(CacheDBInterface):
         connection_string: str,
         lock_key: str = "default_lock",
         log_key: str = "usage_logs",
-        session_ttl_seconds: Optional[int] = 604800,
+        session_ttl_seconds: int | None = 604800,
         agentic_lock_expire: int = 240,
         agentic_lock_timeout: int = 300,
         purge_interval_seconds: int = 900,
@@ -125,6 +147,11 @@ class SqlCacheAdapter(CacheDBInterface):
             pool_args: dict = (
                 dict(relational_config.pool_args) if relational_config.pool_args else {}
             )
+            # POOL_ARGS is shared configuration: the relational adapter accepts
+            # "nullpool" as a string and normalizes it to the pool class, so the
+            # same value must work here — SQLAlchemy itself needs the class.
+            if pool_args.get("poolclass", "").lower() == "nullpool":
+                pool_args["poolclass"] = NullPool
             if is_sqlite:
                 # Concurrency tuning: wait out writer locks instead of failing
                 # with SQLITE_BUSY when several processes share one cache.db.
@@ -191,7 +218,7 @@ class SqlCacheAdapter(CacheDBInterface):
         """Whether session-scoped sliding TTL is active."""
         return bool(self.session_ttl_seconds and self.session_ttl_seconds > 0)
 
-    def _session_expiry(self) -> Optional[datetime]:
+    def _session_expiry(self) -> datetime | None:
         """Expiry timestamp for session-scoped rows, or None when TTL is disabled."""
         if not self._ttl_enabled():
             return None
@@ -202,17 +229,49 @@ class SqlCacheAdapter(CacheDBInterface):
         return or_(table.c.expires_at.is_(None), table.c.expires_at > self._now())
 
     def _session_filter(self, table, user_id: str, session_id: str):
-        """WHERE clause for one session's rows."""
+        """WHERE clause for one session's rows (StringKey columns stringify the binds)."""
         return (table.c.user_id == user_id) & (table.c.session_id == session_id)
 
+    async def _lock_session_writes(self, session, table, user_id: str, session_id: str) -> None:
+        """Serialize same-session write transactions on Postgres.
+
+        Session writes end with the sliding-TTL UPDATE over all of the session's
+        rows while already holding row locks taken earlier in the transaction
+        (a FOR UPDATE read or a fresh insert), so two concurrent writers acquire
+        row locks in opposite orders and deadlock. One transaction-scoped
+        advisory lock per (table, user, session) makes them queue instead; it
+        auto-releases at COMMIT/ROLLBACK. No-op on SQLite (single-writer lock).
+        """
+        if not self._is_postgres:
+            return
+        lock_id = int.from_bytes(
+            sha256(f"{table.name}:{user_id}:{session_id}".encode()).digest()[:8],
+            "big",
+            signed=True,
+        )
+        await session.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
+
     async def _refresh_session_ttl(self, session, table, user_id: str, session_id: str) -> None:
-        """Slide the whole session's expiry forward (Redis EXPIRE-on-write parity)."""
+        """Slide the session's expiry forward (Redis EXPIRE-on-write parity), lazily.
+
+        Only rows whose expiry lags the new target by more than the slack
+        window (_TTL_REFRESH_FRACTION of the TTL) are re-stamped, so a write
+        costs roughly its own bytes instead of rewriting the whole session
+        (see _TTL_REFRESH_FRACTION for the amplification math). NULL-expiry
+        rows (written while TTL was disabled) are stamped too, matching the
+        eager slide's behavior.
+        """
         if not self._ttl_enabled():
             return
+        new_expiry = self._session_expiry()
+        cutoff = new_expiry - timedelta(seconds=self.session_ttl_seconds * _TTL_REFRESH_FRACTION)
         await session.execute(
             update(table)
-            .where(self._session_filter(table, user_id, session_id))
-            .values(expires_at=self._session_expiry())
+            .where(
+                self._session_filter(table, user_id, session_id),
+                or_(table.c.expires_at.is_(None), table.c.expires_at < cutoff),
+            )
+            .values(expires_at=new_expiry)
         )
 
     async def _purge_session_expired(self, session, table, user_id: str, session_id: str) -> None:
@@ -267,23 +326,25 @@ class SqlCacheAdapter(CacheDBInterface):
                         )
                     )
         except Exception as error:
-            logger.debug("SQL cache TTL sweep failed (will retry next interval): %s", error)
+            logger.debug(
+                "SQL cache TTL sweep failed (will retry next interval): %s", error, exc_info=True
+            )
 
     @staticmethod
     def _build_qa_entry_dump(
         question: str,
         context: str,
         answer: str,
-        qa_id: Optional[str] = None,
-        feedback_text: Optional[str] = None,
-        feedback_score: Optional[int] = None,
-        used_graph_element_ids: Optional[dict] = None,
-        memify_metadata: Optional[dict] = None,
-        used_session_context_ids: Optional[list] = None,
+        qa_id: str | None = None,
+        feedback_text: str | None = None,
+        feedback_score: int | None = None,
+        used_graph_element_ids: dict | None = None,
+        memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
     ) -> dict:
         """Serialize one QA entry into the normalized cache payload shape."""
         entry = SessionQAEntry(
-            time=datetime.utcnow().isoformat(),
+            time=datetime.now(timezone.utc).isoformat(),
             question=question,
             context=context,
             answer=answer,
@@ -303,7 +364,7 @@ class SqlCacheAdapter(CacheDBInterface):
         status: str,
         memory_query: str = "",
         memory_context: str = "",
-        method_params: Optional[dict] = None,
+        method_params: dict | None = None,
         method_return_value=None,
         error_message: str = "",
         session_feedback: str = "",
@@ -325,14 +386,14 @@ class SqlCacheAdapter(CacheDBInterface):
     @staticmethod
     def _merge_entry_update(
         entry: dict,
-        question: Optional[str] = None,
-        context: Optional[str] = None,
-        answer: Optional[str] = None,
-        feedback_text: Optional[str] = None,
-        feedback_score: Optional[int] = None,
-        used_graph_element_ids: Optional[dict] = None,
-        memify_metadata: Optional[dict] = None,
-        used_session_context_ids: Optional[list] = None,
+        question: str | None = None,
+        context: str | None = None,
+        answer: str | None = None,
+        feedback_text: str | None = None,
+        feedback_score: int | None = None,
+        used_graph_element_ids: dict | None = None,
+        memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
     ) -> dict:
         """Merge partial QA updates into an existing payload; None preserves values."""
         merged = {**entry}
@@ -418,7 +479,7 @@ class SqlCacheAdapter(CacheDBInterface):
             try:
                 connection.close()
             except Exception as error:
-                logger.debug("Error closing advisory lock connection: %s", error)
+                logger.debug("Error closing advisory lock connection: %s", error, exc_info=True)
             raise
 
     def release_lock(self, lock=None):
@@ -433,7 +494,7 @@ class SqlCacheAdapter(CacheDBInterface):
         try:
             handle.release()
         except Exception as error:
-            logger.debug("Error releasing Postgres advisory lock: %s", error)
+            logger.debug("Error releasing Postgres advisory lock: %s", error, exc_info=True)
         finally:
             if handle is self.lock:
                 self.lock = None
@@ -449,12 +510,12 @@ class SqlCacheAdapter(CacheDBInterface):
         question: str,
         context: str,
         answer: str,
-        qa_id: Optional[str] = None,
-        feedback_text: Optional[str] = None,
-        feedback_score: Optional[int] = None,
-        used_graph_element_ids: Optional[dict] = None,
-        memify_metadata: Optional[dict] = None,
-        used_session_context_ids: Optional[list] = None,
+        qa_id: str | None = None,
+        feedback_text: str | None = None,
+        feedback_score: int | None = None,
+        used_graph_element_ids: dict | None = None,
+        memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
     ) -> None:
         """Append one QA entry to the session. Creates the session if it doesn't exist."""
         await self._ensure_initialized()
@@ -471,6 +532,7 @@ class SqlCacheAdapter(CacheDBInterface):
                 used_session_context_ids=used_session_context_ids,
             )
             async with self.sessionmaker() as session, session.begin():
+                await self._lock_session_writes(session, cache_qa_entries, user_id, session_id)
                 await self._purge_session_expired(session, cache_qa_entries, user_id, session_id)
                 await session.execute(
                     insert(cache_qa_entries).values(
@@ -490,7 +552,7 @@ class SqlCacheAdapter(CacheDBInterface):
 
     async def get_latest_qa_entries(
         self, user_id: str, session_id: str, last_n: int = 5
-    ) -> List[SessionQAEntry]:
+    ) -> list[SessionQAEntry]:
         """Return the most recent QA entries (chronological); [] when none, for all last_n."""
         if last_n <= 0:
             return []
@@ -514,7 +576,7 @@ class SqlCacheAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from error
 
-    async def get_all_qa_entries(self, user_id: str, session_id: str) -> List[SessionQAEntry]:
+    async def get_all_qa_entries(self, user_id: str, session_id: str) -> list[SessionQAEntry]:
         """Return all QA entries stored for the given session, oldest first."""
         await self._ensure_initialized()
         try:
@@ -538,8 +600,8 @@ class SqlCacheAdapter(CacheDBInterface):
         self,
         user_id: str,
         session_id: str,
-        qa_ids: List[str],
-    ) -> List[SessionQAEntry]:
+        qa_ids: list[str],
+    ) -> list[SessionQAEntry]:
         """Return matching QA entries for the given session, oldest first."""
         if not qa_ids:
             return []
@@ -569,6 +631,7 @@ class SqlCacheAdapter(CacheDBInterface):
         while True:
             try:
                 async with self.sessionmaker() as session, session.begin():
+                    await self._lock_session_writes(session, cache_qa_entries, user_id, session_id)
                     result = await session.execute(
                         select(cache_qa_entries.c.payload)
                         .where(
@@ -604,14 +667,14 @@ class SqlCacheAdapter(CacheDBInterface):
         user_id: str,
         session_id: str,
         qa_id: str,
-        question: Optional[str] = None,
-        context: Optional[str] = None,
-        answer: Optional[str] = None,
-        feedback_text: Optional[str] = None,
-        feedback_score: Optional[int] = None,
-        used_graph_element_ids: Optional[dict] = None,
-        memify_metadata: Optional[dict] = None,
-        used_session_context_ids: Optional[list] = None,
+        question: str | None = None,
+        context: str | None = None,
+        answer: str | None = None,
+        feedback_text: str | None = None,
+        feedback_score: int | None = None,
+        used_graph_element_ids: dict | None = None,
+        memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
     ) -> bool:
         """
         Update a QA entry by qa_id. Same QA fields as create_qa_entry.
@@ -665,6 +728,7 @@ class SqlCacheAdapter(CacheDBInterface):
         await self._ensure_initialized()
         try:
             async with self.sessionmaker() as session, session.begin():
+                await self._lock_session_writes(session, cache_qa_entries, user_id, session_id)
                 result = await session.execute(
                     delete(cache_qa_entries).where(
                         self._session_filter(cache_qa_entries, user_id, session_id),
@@ -690,6 +754,10 @@ class SqlCacheAdapter(CacheDBInterface):
         try:
             async with self.sessionmaker() as session, session.begin():
                 deleted_rows = 0
+                # Fixed acquisition order (matching the tuple below) so this
+                # multi-table writer can never cycle with single-table writers.
+                for table in (cache_qa_entries, cache_trace_entries, cache_session_context):
+                    await self._lock_session_writes(session, table, user_id, session_id)
                 for table in (cache_qa_entries, cache_trace_entries, cache_session_context):
                     # Expired rows are invisible — drop them first so they don't
                     # count toward "session existed".
@@ -717,7 +785,7 @@ class SqlCacheAdapter(CacheDBInterface):
         status: str,
         memory_query: str = "",
         memory_context: str = "",
-        method_params: Optional[dict] = None,
+        method_params: dict | None = None,
         method_return_value=None,
         error_message: str = "",
         session_feedback: str = "",
@@ -737,6 +805,7 @@ class SqlCacheAdapter(CacheDBInterface):
                 session_feedback=session_feedback,
             )
             async with self.sessionmaker() as session, session.begin():
+                await self._lock_session_writes(session, cache_trace_entries, user_id, session_id)
                 await self._purge_session_expired(session, cache_trace_entries, user_id, session_id)
                 await session.execute(
                     insert(cache_trace_entries).values(
@@ -754,8 +823,8 @@ class SqlCacheAdapter(CacheDBInterface):
         await self._maybe_purge_expired()
 
     async def get_agent_trace_session(
-        self, user_id: str, session_id: str, last_n: Optional[int] = None
-    ) -> List[SessionAgentTraceEntry]:
+        self, user_id: str, session_id: str, last_n: int | None = None
+    ) -> list[SessionAgentTraceEntry]:
         """Retrieve stored trace steps for the given session (reads don't refresh TTL)."""
         if last_n is not None and last_n <= 0:
             return []
@@ -782,8 +851,8 @@ class SqlCacheAdapter(CacheDBInterface):
             raise CacheConnectionError(error_msg) from error
 
     async def get_agent_trace_feedback(
-        self, user_id: str, session_id: str, last_n: Optional[int] = None
-    ) -> List[str]:
+        self, user_id: str, session_id: str, last_n: int | None = None
+    ) -> list[str]:
         """Retrieve ordered per-step feedback for the given trace session."""
         entries = await self.get_agent_trace_session(user_id, session_id, last_n=last_n)
         return [entry.session_feedback for entry in entries]
@@ -814,28 +883,40 @@ class SqlCacheAdapter(CacheDBInterface):
     async def create_session_context_entry(
         self, user_id: str, session_id: str, entry_dump: dict
     ) -> None:
-        """Append one session-context entry (kind-discriminated dict) to the session.
+        """Create or replace one session-context entry (kind-discriminated dict).
 
         The caller validates the payload; we only promote its ``id`` to the
-        ``entry_id`` column so updates can target a single row directly.
+        ``entry_id`` column so updates can target a single row directly. Writes
+        upsert on (user_id, session_id, entry_id) — last writer wins — so racing
+        update-then-create flows (e.g. the session persist watermark) converge
+        on a single row instead of accumulating duplicates.
         """
         await self._ensure_initialized()
         # Redis/FS append regardless of "id" (an id-less entry is simply never
         # targetable by update). Mirror that: fall back to a synthetic entry_id
         # only to satisfy the NOT NULL column; the stored payload is untouched.
         entry_id = entry_dump.get("id") or str(uuid.uuid4())
+        insert_into = pg_insert if self._is_postgres else sqlite_insert
+        statement = insert_into(cache_session_context).values(
+            user_id=user_id,
+            session_id=session_id,
+            entry_id=entry_id,
+            payload=entry_dump,
+            expires_at=self._session_expiry(),
+        )
         try:
             async with self.sessionmaker() as session, session.begin():
+                await self._lock_session_writes(session, cache_session_context, user_id, session_id)
                 await self._purge_session_expired(
                     session, cache_session_context, user_id, session_id
                 )
                 await session.execute(
-                    insert(cache_session_context).values(
-                        user_id=user_id,
-                        session_id=session_id,
-                        entry_id=entry_id,
-                        payload=entry_dump,
-                        expires_at=self._session_expiry(),
+                    statement.on_conflict_do_update(
+                        index_elements=["user_id", "session_id", "entry_id"],
+                        set_={
+                            "payload": statement.excluded.payload,
+                            "expires_at": statement.excluded.expires_at,
+                        },
                     )
                 )
                 await self._refresh_session_ttl(session, cache_session_context, user_id, session_id)
@@ -876,6 +957,14 @@ class SqlCacheAdapter(CacheDBInterface):
         while True:
             try:
                 async with self.sessionmaker() as session, session.begin():
+                    await self._lock_session_writes(
+                        session, cache_session_context, user_id, session_id
+                    )
+                    # The unique index keeps this to one row; if duplicates predate the
+                    # backfill, resolve to the newest instead of raising
+                    # MultipleResultsFound — the permanent per-session 503 of issue
+                    # #4226. The UPDATE below still targets every duplicate, so
+                    # stragglers converge on the merged payload.
                     result = await session.execute(
                         select(cache_session_context.c.payload)
                         .where(
@@ -883,9 +972,11 @@ class SqlCacheAdapter(CacheDBInterface):
                             cache_session_context.c.entry_id == entry_id,
                             self._not_expired(cache_session_context),
                         )
+                        .order_by(cache_session_context.c.seq.desc())
+                        .limit(1)
                         .with_for_update()
                     )
-                    payload = result.scalar_one_or_none()
+                    payload = result.scalars().first()
                     if payload is None:
                         return False
                     merged = {**dict(payload), **merge}
@@ -914,11 +1005,35 @@ class SqlCacheAdapter(CacheDBInterface):
                 logger.error(error_msg)
                 raise CacheConnectionError(error_msg) from error
 
+    async def delete_session_context_entry(
+        self, user_id: str, session_id: str, entry_id: str
+    ) -> bool:
+        """Delete a single session-context entry by entry_id (single atomic DELETE)."""
+        await self._ensure_initialized()
+        try:
+            async with self.sessionmaker() as session, session.begin():
+                await self._lock_session_writes(session, cache_session_context, user_id, session_id)
+                result = await session.execute(
+                    delete(cache_session_context).where(
+                        self._session_filter(cache_session_context, user_id, session_id),
+                        cache_session_context.c.entry_id == entry_id,
+                        self._not_expired(cache_session_context),
+                    )
+                )
+                return result.rowcount > 0
+        except Exception as error:
+            error_msg = (
+                f"Unexpected error while deleting session context entry from SQL cache: {error}"
+            )
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from error
+
     async def delete_session_context(self, user_id: str, session_id: str) -> bool:
         """Delete all session-context entries for the session. True if any existed."""
         await self._ensure_initialized()
         try:
             async with self.sessionmaker() as session, session.begin():
+                await self._lock_session_writes(session, cache_session_context, user_id, session_id)
                 await self._purge_session_expired(
                     session, cache_session_context, user_id, session_id
                 )
@@ -941,7 +1056,7 @@ class SqlCacheAdapter(CacheDBInterface):
         self,
         user_id: str,
         log_entry: dict,
-        ttl: Optional[int] = 604800,
+        ttl: int | None = 604800,
     ):
         """
         Log usage information (API endpoint calls, MCP tool invocations) to SQL cache.
@@ -969,11 +1084,21 @@ class SqlCacheAdapter(CacheDBInterface):
                     )
                 )
                 if expires_at is not None:
+                    # Same lazy slide as _refresh_session_ttl: Redis EXPIREs the
+                    # whole per-user list per logged call, but re-stamping every
+                    # row here turns each decorated API call into an
+                    # O(user's-log-history) write (issue #4393). Skip rows less
+                    # than the slack window stale.
+                    cutoff = expires_at - timedelta(seconds=ttl * _TTL_REFRESH_FRACTION)
                     await session.execute(
                         update(cache_usage_logs)
                         .where(
                             cache_usage_logs.c.log_key == self.log_key,
                             cache_usage_logs.c.user_id == user_id,
+                            or_(
+                                cache_usage_logs.c.expires_at.is_(None),
+                                cache_usage_logs.c.expires_at < cutoff,
+                            ),
                         )
                         .values(expires_at=expires_at)
                     )
@@ -1017,7 +1142,7 @@ class SqlCacheAdapter(CacheDBInterface):
     # Key/value storage (small exact-key cache values)
     # --------------------------------------------------------------------- #
 
-    async def get_value(self, key: str) -> Optional[str]:
+    async def get_value(self, key: str) -> str | None:
         """Return the string value stored under key, or None if absent/expired."""
         await self._ensure_initialized()
         try:
@@ -1033,7 +1158,7 @@ class SqlCacheAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from error
 
-    async def set_value(self, key: str, value: str, ttl: Optional[int] = None) -> None:
+    async def set_value(self, key: str, value: str, ttl: int | None = None) -> None:
         """Upsert a string value under key; ttl=None stores it without expiry."""
         await self._ensure_initialized()
         try:
@@ -1100,11 +1225,11 @@ class SqlCacheAdapter(CacheDBInterface):
         try:
             await self.engine.dispose(close=True)
         except Exception as error:
-            logger.debug("Error closing SQL cache async engine: %s", error)
+            logger.debug("Error closing SQL cache async engine: %s", error, exc_info=True)
         if self._sync_lock_engine is not None:
             try:
                 self._sync_lock_engine.dispose(close=True)
             except Exception as error:
-                logger.debug("Error closing SQL cache sync lock engine: %s", error)
+                logger.debug("Error closing SQL cache sync lock engine: %s", error, exc_info=True)
             self._sync_lock_engine = None
         self._initialized = False

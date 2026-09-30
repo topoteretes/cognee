@@ -1,6 +1,10 @@
 from typing import Any
 from uuid import UUID
 
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
 
 def parse_id(id: Any) -> Any:
     """
@@ -27,5 +31,5 @@ def parse_id(id: Any) -> Any:
         try:
             return UUID(id)
         except Exception:
-            pass
+            logger.debug("Ignoring exception in parse_id", exc_info=True)
     return id

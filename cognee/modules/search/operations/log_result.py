@@ -1,12 +1,19 @@
 import os
 from uuid import UUID
+
 from cognee.infrastructure.databases.relational import get_relational_engine
+
 from ..models.Result import Result
 
 _LOG_ENABLED = os.getenv("COGNEE_LOG_SEARCH_HISTORY", "true").lower() in ("true", "1", "yes")
 
 
-async def log_result(query_id: UUID, result: str, user_id: UUID):
+async def log_result(
+    query_id: UUID,
+    result: str,
+    user_id: UUID,
+    dataset_id: UUID | None = None,
+):
     if not _LOG_ENABLED:
         return
 
@@ -18,6 +25,7 @@ async def log_result(query_id: UUID, result: str, user_id: UUID):
                 value=result,
                 query_id=query_id,
                 user_id=user_id,
+                dataset_id=dataset_id,
             )
         )
 

@@ -8,6 +8,10 @@ import { getPipelineSettingsFromStorage } from "../configuration/pipelineSetting
 //   edges: { source: string; target: string; label: string }[];
 // }
 
+// runInBackground=true means the server returns immediately — this only
+// needs to cover a cold pod's startup, not the actual cognify run. See CLO-333.
+const COGNIFY_TIMEOUT_MS = 60_000;
+
 interface CognifyOptions {
   graphModel?: object;
   customPrompt?: string;
@@ -30,7 +34,12 @@ export default async function cognifyDataset(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      datasets: [dataset.name],
+      // datasetIds resolves the dataset unambiguously; only send `datasets`
+      // (names) when a name is actually present. Sending an empty or unmatched
+      // name makes cognify create a new empty dataset named after that string
+      // (a UUID-in-`datasets` does the same) — so a name-less caller must send
+      // ids alone.
+      ...(dataset.name ? { datasets: [dataset.name] } : {}),
       datasetIds: [dataset.id],
       runInBackground: true,
       ...(options?.graphModel ? { graphModel: options.graphModel } : {}),
@@ -40,6 +49,7 @@ export default async function cognifyDataset(
       chunkSize: options?.chunkSize ?? pipelineSettings.chunkSize,
       ...(options?.llmModel && { llmModel: options.llmModel }),
     }),
+    timeoutMs: COGNIFY_TIMEOUT_MS,
   })
   .then((response) => response.json());
   // .then(() => {

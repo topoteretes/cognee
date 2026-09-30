@@ -1,12 +1,15 @@
 import inspect
 from tempfile import SpooledTemporaryFile
 from types import SimpleNamespace
-from typing import Any, Optional
+from typing import Any
 
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
 
+logger = get_logger()
 
-def _normalize_filename(filename: Optional[str], index: int) -> str:
+
+def _normalize_filename(filename: str | None, index: int) -> str:
     if not filename:
         return f"upload_{index}.bin"
     normalized = str(filename).replace("\\", "/").split("/")[-1]
@@ -22,7 +25,7 @@ async def _read_stream_bytes(stream: Any) -> bytes:
         try:
             stream.seek(0)
         except Exception:
-            pass
+            logger.debug("Ignoring exception in _read_stream_bytes", exc_info=True)
 
     data = stream.read()
     if inspect.isawaitable(data):
@@ -38,10 +41,13 @@ async def _read_stream_bytes(stream: Any) -> bytes:
 
 async def materialize_stream_for_background(data_item: Any, index: int = 0) -> Any:
     if isinstance(data_item, DataItem):
+        # Copy EVERY DataItem field: dropping one here silently breaks the
+        # background path only (system_metadata carries the DLT routing stamp).
         return DataItem(
             data=await materialize_stream_for_background(data_item.data, index=index),
             label=data_item.label,
             external_metadata=data_item.external_metadata,
+            system_metadata=data_item.system_metadata,
             data_id=data_item.data_id,
         )
 
@@ -60,7 +66,7 @@ async def materialize_stream_for_background(data_item: Any, index: int = 0) -> A
         return data_item
 
     payload = await _read_stream_bytes(stream)
-    buffer = SpooledTemporaryFile(mode="w+b")
+    buffer = SpooledTemporaryFile(mode="w+b")  # noqa: SIM115 - returned to the caller, who owns it
     buffer.write(payload)
     buffer.seek(0)
 

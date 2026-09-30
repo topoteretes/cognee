@@ -7,26 +7,28 @@ efficiency and storage optimization through whole-document removal.
 """
 
 import json
-from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any
-from uuid import UUID
 import os
-from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine_async
-from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.data.models import Data, DatasetData
-from cognee.shared.logging_utils import get_logger
-from sqlalchemy import select, or_
-import cognee
+from datetime import datetime, timedelta, timezone
+from typing import Any
+from uuid import UUID
+
 import sqlalchemy as sa
+from sqlalchemy import or_, select
+
+import cognee
+from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.modules.data.models import Data
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
 
 async def cleanup_unused_data(
-    minutes_threshold: Optional[int], dry_run: bool = True, user_id: Optional[UUID] = None
-) -> Dict[str, Any]:
+    minutes_threshold: int | None, dry_run: bool = True, user_id: UUID | None = None
+) -> dict[str, Any]:
     """
     Identify and remove unused data from the memify pipeline.
 
@@ -93,8 +95,8 @@ async def cleanup_unused_data(
 
 
 async def _cleanup_via_sql(
-    cutoff_date: datetime, dry_run: bool, user_id: Optional[UUID] = None
-) -> Dict[str, Any]:
+    cutoff_date: datetime, dry_run: bool, user_id: UUID | None = None
+) -> dict[str, Any]:
     """
     SQL-based cleanup: Query Data table for unused documents and use cognee.delete().
 
@@ -116,21 +118,19 @@ async def _cleanup_via_sql(
 
     async with db_engine.get_async_session() as session:
         # Query for Data records with old last_accessed timestamps
-        query = (
-            select(Data, DatasetData)
-            .join(DatasetData, Data.id == DatasetData.data_id)
-            .where(or_(Data.last_accessed < cutoff_date, Data.last_accessed.is_(None)))
+        query = select(Data).where(
+            or_(Data.last_accessed < cutoff_date, Data.last_accessed.is_(None))
         )
 
         if user_id:
             from cognee.modules.data.models import Dataset
 
-            query = query.join(Dataset, DatasetData.dataset_id == Dataset.id).where(
+            query = query.join(Dataset, Data.dataset_id == Dataset.id).where(
                 Dataset.owner_id == user_id
             )
 
         result = await session.execute(query)
-        unused_data = result.all()
+        unused_data = list(result.scalars().all())
 
     logger.info(f"Found {len(unused_data)} unused documents in SQL")
 
@@ -149,18 +149,18 @@ async def _cleanup_via_sql(
 
     user = await get_default_user() if user_id is None else None
 
-    for data, dataset_data in unused_data:
+    for data in unused_data:
         try:
             await cognee.delete(
                 data_id=data.id,
-                dataset_id=dataset_data.dataset_id,
+                dataset_id=data.dataset_id,
                 mode="hard",  # Use hard mode to also remove orphaned entities
                 user=user,
             )
             deleted_count += 1
-            logger.info(f"Deleted document {data.id} from dataset {dataset_data.dataset_id}")
-        except Exception as e:
-            logger.error(f"Failed to delete document {data.id}: {e}")
+            logger.info(f"Deleted document {data.id} from dataset {data.dataset_id}")
+        except Exception:
+            logger.exception(f"Failed to delete document {data.id}")
 
     logger.info("Cleanup completed", deleted_count=deleted_count)
 

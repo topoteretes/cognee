@@ -1,21 +1,22 @@
-from fastapi import APIRouter
-from fastapi import Form, Depends, Path
 from uuid import UUID
 
+from fastapi import APIRouter, Depends, Form, Path
 from pydantic import Field
 
 from cognee.api.DTO import InDTO
-from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
-from cognee.shared.logging_utils import get_logger
-from cognee.shared.usage_logger import log_usage
 from cognee.modules.users.methods import (
-    store_principal_configuration as method_store_principal_configuration,
+    get_principal_all_configuration as method_get_principal_all_configuration,
 )
 from cognee.modules.users.methods import (
     get_principal_configuration as method_get_principal_configuration,
-    get_principal_all_configuration as method_get_principal_all_configuration,
 )
+from cognee.modules.users.methods import (
+    store_principal_configuration as method_store_principal_configuration,
+)
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
+from cognee.shared.usage_logger import log_usage
 
 logger = get_logger()
 
