@@ -1,6 +1,6 @@
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from cognee.infrastructure.engine import DataPoint
 
@@ -17,10 +17,11 @@ class Timestamp(DataPoint):
     fields and ``time_at`` (milliseconds since the epoch, UTC) hold the lower
     bound of that period, with unstated parts filled by the earliest value.
     ``name`` repeats ``timestamp_str``: it is what graph renderers and the
-    hybrid retrieval context label a node by.
+    hybrid retrieval context label a node by. It is filled from
+    ``timestamp_str`` when a caller does not pass it.
     """
 
-    name: str
+    name: str = ""
     timestamp_str: str = Field(...)
     precision: TimestampPrecision = "second"
     time_at: int = Field(...)
@@ -34,3 +35,10 @@ class Timestamp(DataPoint):
     # Deterministic id from the normalized string, so every mention of the same
     # time across chunks and documents resolves to one node.
     metadata: dict = {"index_fields": [], "identity_fields": ["timestamp_str"]}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _name_defaults_to_timestamp_str(cls, data: Any) -> Any:
+        if isinstance(data, dict) and not data.get("name") and data.get("timestamp_str"):
+            return {**data, "name": data["timestamp_str"]}
+        return data

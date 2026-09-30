@@ -111,3 +111,20 @@ def test_an_absolute_date_in_prose_is_normalized_first(text, normalized, precisi
 )
 def test_relative_or_year_less_prose_is_rejected(text):
     assert timestamp_from_text(text) is None
+
+
+def test_a_timestamp_built_without_a_name_is_labelled_by_its_string():
+    """Existing callers (temporal pipeline, retriever tests) construct Timestamps without ``name``."""
+    timestamp = Timestamp(
+        time_at=1609459200000,
+        year=2021,
+        month=1,
+        day=1,
+        hour=0,
+        minute=0,
+        second=0,
+        timestamp_str="2021-01-01T00:00:00",
+    )
+
+    assert timestamp.name == "2021-01-01T00:00:00"
+    assert timestamp.id == Timestamp.id_for("2021-01-01T00:00:00")
