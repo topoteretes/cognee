@@ -27,7 +27,6 @@ from cognee.tasks.storage.exceptions import (
     InvalidDataPointsInAddDataPointsError,
 )
 
-from ...modules.engine.utils import generate_node_id
 from .chunk_ownership import collect_chunk_ownership
 from .index_data_points import index_data_points
 from .index_graph_edges import index_graph_edges
@@ -520,7 +519,7 @@ def _create_triplets_from_graph(nodes: list[DataPoint], edges: list[tuple]) -> l
 
         embeddable_text = f"{source_node_text} -› {relationship_text}-›{target_node_text}".strip()
 
-        triplet_id = generate_node_id(str(source_node_id) + relationship_name + str(target_node_id))
+        triplet_id = Triplet.id_for_edge(source_node_id, relationship_name, target_node_id)
 
         if triplet_id in seen_ids:
             continue

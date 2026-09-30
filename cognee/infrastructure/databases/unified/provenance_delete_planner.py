@@ -18,7 +18,7 @@ Vector ids mirror ``delete_from_graph_and_vector``:
   - node -> collection ``f"{node_type}_{field}"`` for each indexed field,
     id = node_id;
   - edge -> ``EdgeType.id_for(edge_text)`` in ``EdgeType_relationship_name``;
-    ``generate_node_id(source_id + relationship_name + target_id)`` in
+    ``Triplet.id_for_edge(source_id, relationship_name, target_id)`` in
     ``Triplet_text`` (best-effort; the collection may not exist).
 """
 
@@ -30,7 +30,7 @@ from cognee.infrastructure.databases.provenance import (
     EdgeIdentity,
     NodeDeleteData,
 )
-from cognee.modules.engine.utils import generate_node_id
+from cognee.modules.engine.models import Triplet
 from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 from cognee.shared.logging_utils import get_logger
@@ -112,7 +112,7 @@ async def execute_source_ref_removal(
         # are handled in _cleanup_orphaned_edge_types (after the graph delete,
         # against the truly-orphaned text set) — never blindly here.
         triplet_ids: list[str] = [
-            str(generate_node_id(edge.source_id + edge.relationship_name + edge.target_id))
+            str(Triplet.id_for_edge(edge.source_id, edge.relationship_name, edge.target_id))
             for edge in unowned_edges
         ]
         if triplet_ids:

@@ -4,7 +4,6 @@ from typing import Any
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.infrastructure.engine import DataPoint, is_internal_node
 from cognee.modules.engine.models import Triplet
-from cognee.modules.engine.utils import generate_node_id
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage import index_data_points
@@ -165,7 +164,7 @@ def _process_single_triplet(
     embeddable_text = f"{start_node_text}-›{relationship_text}-›{end_node_text}".strip()
 
     relationship_name = relationship.get("relationship_name", "")
-    triplet_id = generate_node_id(str(start_node_id) + str(relationship_name) + str(end_node_id))
+    triplet_id = Triplet.id_for_edge(start_node_id, relationship_name, end_node_id)
 
     triplet_obj = Triplet(
         id=triplet_id, from_node_id=start_node_id, to_node_id=end_node_id, text=embeddable_text

@@ -1,6 +1,6 @@
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_engine_async
-from cognee.modules.engine.utils import generate_node_id
+from cognee.modules.engine.models import Triplet
 from cognee.modules.graph.legacy.mark_ledger_as_deleted import (
     mark_ledger_edges_as_deleted,
     mark_ledger_nodes_as_deleted,
@@ -98,10 +98,8 @@ async def delete_from_graph_and_vector(
 
         triplet_ids = [
             str(
-                generate_node_id(
-                    str(edge.source_node_id)
-                    + edge.relationship_name
-                    + str(edge.destination_node_id)
+                Triplet.id_for_edge(
+                    edge.source_node_id, edge.relationship_name, edge.destination_node_id
                 )
             )
             for edge in unique_edges
