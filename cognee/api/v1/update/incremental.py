@@ -67,7 +67,12 @@ from cognee.modules.chunking.chunk_policy import (
 from cognee.modules.chunking.external_metadata import normalize_external_metadata
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.chunking.TextChunker import TextChunker
-from cognee.modules.cognify.config import get_cognify_config
+from cognee.modules.cognify.config import (
+    GLINER_DEMO_EXTRACTOR,
+    LLM_EXTRACTOR,
+    ensure_extractor_runtime,
+    get_cognify_config,
+)
 from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.methods import (
@@ -108,6 +113,13 @@ from cognee.shared.utils import send_telemetry
 from cognee.tasks.documents.classify_documents import document_class_for, update_node_set
 from cognee.tasks.graph.detect_contradictions import detect_contradictions
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
+from cognee.tasks.graph.gliner_demo.schema import resolve_schema
+from cognee.tasks.graph.gliner_demo.tasks import (
+    GlinerOptions,
+    GlinerRunStats,
+    extract_graph_and_summarize_with_gliner,
+    prepare_gliner_schema,
+)
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.data_item_to_text_file import data_item_to_text_file
 from cognee.tasks.ingestion.save_data_item_to_storage import save_data_item_to_storage
@@ -325,6 +337,24 @@ def _resolve_extraction_config() -> Config:
     return {"ontology_config": {"ontology_resolver": get_default_ontology_resolver()}}
 
 
+async def _prepare_gliner(
+    document: Document, chunker: type, fresh: list[DocumentChunk], config: Config | None
+) -> tuple[GlinerOptions, GlinerRunStats]:
+    """Attach the document's GLiNER schema and return the options the extraction task takes.
+
+    Same resolution chain as ``get_gliner_demo_tasks`` for a cognify run: the
+    configured ontology when there is one, else the label bank probed on the
+    document's sketch. The sketch is read from the staged new content with the
+    document's own chunker and the token budget its chunks were cut against.
+    """
+    await ensure_extractor_runtime(GLINER_DEMO_EXTRACTOR, get_cognify_config())
+    ontology_resolver = ((config or {}).get("ontology_config") or {}).get("ontology_resolver")
+    schema = resolve_schema(ontology_resolver=ontology_resolver)
+    max_chunk_size = fresh[0].max_chunk_tokens or await get_max_chunk_tokens()
+    await prepare_gliner_schema([document], schema, max_chunk_size, chunker=chunker)
+    return GlinerOptions(), GlinerRunStats()
+
+
 def _rehydrate_chunk(document: Document, node: dict, chunk_index: int) -> DocumentChunk:
     """Rebuild a stored chunk at a new position, preserving every model field.
 
@@ -533,8 +563,12 @@ async def incremental_update(
     custom_prompt: str | None = None,
     chunker: type = TextChunker,
     policy: ChunkPolicy = DEFAULT_CHUNK_POLICY,
+    extractor: str = LLM_EXTRACTOR,
 ) -> dict:
     """Perform a chunk-level incremental update of one document.
+
+    ``extractor`` is the value ``update()`` resolved the way ``cognify()`` does
+    (``llm`` or ``gliner_demo``); the edited chunks are re-extracted with it.
 
     ``policy`` decides which chunks exist afterwards and what happens to the
     old ones; it is replaceable without touching storage or this orchestration.
@@ -638,6 +672,7 @@ async def incremental_update(
             custom_prompt,
             chunker,
             policy,
+            extractor=extractor,
         )
 
 
@@ -653,6 +688,7 @@ async def _run_incremental_update(
     custom_prompt: str | None,
     chunker: type,
     policy: ChunkPolicy,
+    extractor: str = LLM_EXTRACTOR,
 ) -> dict:
     """Stage → validate → (record) → write → publish.
 
@@ -694,6 +730,8 @@ async def _run_incremental_update(
                 graph_model,
                 custom_prompt,
                 pipeline_run.pipeline_run_id,
+                chunker=chunker,
+                extractor=extractor,
             )
     except Exception as error:
         await log_pipeline_run_error(
@@ -876,6 +914,8 @@ async def _write_and_publish(
     graph_model: type[BaseModel],
     custom_prompt: str | None,
     pipeline_run_id: UUID,
+    chunker: type = TextChunker,
+    extractor: str = LLM_EXTRACTOR,
 ) -> dict:
     """The write phase, ending in the one-transaction publish.
 
@@ -923,6 +963,10 @@ async def _write_and_publish(
     # document becomes one oversized extraction step with no intermediate
     # progress and a single all-or-nothing failure.
     batch_size = cognify_config.chunks_per_batch or DEFAULT_CHUNKS_PER_BATCH
+    extraction_config = _resolve_extraction_config()
+    gliner = None
+    if extractor == GLINER_DEMO_EXTRACTOR and plan.fresh:
+        gliner = await _prepare_gliner(document, chunker, plan.fresh, extraction_config)
     for start in range(0, len(plan.fresh), batch_size):
         batch = plan.fresh[start : start + batch_size]
         # Match extract_chunks_from_documents: policies plan content, while
@@ -930,13 +974,19 @@ async def _write_and_publish(
         for chunk in batch:
             chunk.belongs_to_set = document.belongs_to_set
             chunk.source_node_set = document.source_node_set
-        summaries = await extract_graph_and_summarize(
-            batch,
-            graph_model=graph_model,
-            config=_resolve_extraction_config(),
-            custom_prompt=custom_prompt,
-            ctx=context,
-        )
+        if gliner is not None:
+            options, stats = gliner
+            summaries = await extract_graph_and_summarize_with_gliner(
+                batch, stats, options, config=extraction_config, ctx=context
+            )
+        else:
+            summaries = await extract_graph_and_summarize(
+                batch,
+                graph_model=graph_model,
+                config=extraction_config,
+                custom_prompt=custom_prompt,
+                ctx=context,
+            )
         await add_data_points(
             summaries, ctx=context, embed_triplets=cognify_config.triplet_embedding
         )
