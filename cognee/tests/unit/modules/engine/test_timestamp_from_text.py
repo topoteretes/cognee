@@ -106,6 +106,8 @@ def test_an_absolute_date_in_prose_is_normalized_first(text, normalized, precisi
     assert timestamp.id == Timestamp.id_for(normalized)
 
 
-@pytest.mark.parametrize("text", ["the 1950s", "that spring", "four weeks later", "spring of 1943"])
+@pytest.mark.parametrize(
+    "text", ["the 1950s", "that spring", "four weeks later", "spring of 1943", "July 24", "24 July"]
+)
 def test_relative_or_year_less_prose_is_rejected(text):
     assert timestamp_from_text(text) is None

@@ -24,8 +24,13 @@ _STATED_YEAR = re.compile(r"\b\d{4}\b")
 # ordinals, durations, and decades; a dropped hint costs nothing (the raw text
 # is still in the prompt) while a bogus hint is misinformation, so the gate
 # trades recall for precision.
+# Month names are matched case-sensitively and as whole words: lower-case
+# "may" is usually the verb, and a prefix match on "dec" would fire on
+# "decade" (both seen in the Apollo 11 article, where they produced hints
+# for years that are not in the text).
 _DATE_ANCHOR = re.compile(
-    r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b"
+    r"(?-i:\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?"
+    r"|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\b)"
     r"|\b\d{1,2}:\d{2}\b"
     r"|\b(?:ago|later|earlier|next|last|following|previous)\b"
     r"|\bthat (?:spring|summer|autumn|fall|winter|year|month|week|day|night|morning|evening)\b",
@@ -62,7 +67,12 @@ def normalize_absolute_date(text: str) -> str | None:
     "23 March 1947" becomes "1947-03-23" and "March 1947" becomes "1947-03":
     the output precision follows dateparser's own period detection, so a month
     name never fabricates a day. Relative or year-less expressions return None.
+    The year must be written as four digits: dateparser would otherwise read
+    the day in "July 24" as the year 2024, and ``REQUIRE_PARTS`` does not
+    catch that.
     """
+    if not _STATED_YEAR.search(text):
+        return None
     date_data = DateDataParser(languages=["en"], settings=_ABSOLUTE_SETTINGS).get_date_data(text)
     if date_data.date_obj is None:
         return None
