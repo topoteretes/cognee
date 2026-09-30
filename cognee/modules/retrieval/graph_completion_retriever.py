@@ -465,7 +465,7 @@ class GraphCompletionRetriever(BaseRetriever):
             if not turn_preparation.should_answer:
                 from cognee.infrastructure.session.session_turn import acknowledgement_for_turn
 
-                return [acknowledgement_for_turn(turn_preparation.response_to_user)]
+                return [acknowledgement_for_turn()]
             effective_query = turn_preparation.effective_query or query
 
         retrieved_objects = await self.get_retrieved_objects(

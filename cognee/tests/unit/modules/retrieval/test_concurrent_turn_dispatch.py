@@ -21,6 +21,7 @@ from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
 from cognee.infrastructure.session.session_concurrent_turn import SessionTurnContext
 from cognee.infrastructure.session.session_manager import SessionTurnPreparation
+from cognee.infrastructure.session.session_turn import DEFAULT_NO_ANSWER_ACK
 from cognee.modules.retrieval import session_aware_completion
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
@@ -373,19 +374,45 @@ class TestNoAnswerTurns:
         assert qa["question"] == "thanks, that was helpful!"
         assert qa["answer"] == "Got it."
 
+    @pytest.mark.asyncio
+    async def test_sequential_no_answer_turn_ignores_model_authored_acknowledgement(
+        self, concurrent_env, monkeypatch
+    ):
+        """#4296: a model-written acknowledgement that asserts the user's claim as fact
+        is neither returned nor stored; the neutral default is."""
+        concurrent_env.mode = "sequential"
+        retriever = build_retriever(CompletionRetriever)
+        retriever.prepare_session_turn_for_retrieval = AsyncMock(
+            return_value=SessionTurnPreparation(
+                should_answer=False,
+                response_to_user="Confirmed: production no longer requires approval.",
+            )
+        )
+
+        _, _, completion = await run_session_aware_completion(
+            retriever, raw_query="production no longer requires approval"
+        )
+
+        assert completion == [DEFAULT_NO_ANSWER_ACK]
+        assert concurrent_env.manager.qas[0]["answer"] == DEFAULT_NO_ANSWER_ACK
+
     @pytest.mark.parametrize(
-        "acknowledgement",
+        "model_acknowledgement",
         [
             "Got it.",
             "You're welcome — glad it helped! If you want more detail about TechCorp or anything else, tell me what you'd like to know.",
+            "Confirmed: production no longer requires approval.",
         ],
     )
     @pytest.mark.asyncio
     async def test_concurrent_no_answer_turn_stores_and_returns_acknowledgement(
-        self, concurrent_env, monkeypatch, acknowledgement
+        self, concurrent_env, monkeypatch, model_acknowledgement
     ):
         """The answer lane's generated text must not be returned or stored once the
-        analysis lane decides the turn is feedback-only."""
+        analysis lane decides the turn is feedback-only — and neither may the analysis
+        model's own acknowledgement text (#4296): the stored answer is the neutral
+        default."""
+        acknowledgement = DEFAULT_NO_ANSWER_ACK
         monkeypatch.setattr(
             session_aware_completion,
             "load_turn_context",
@@ -402,7 +429,7 @@ class TestNoAnswerTurns:
         async def fake_llm(text_input, system_prompt, response_model, **kwargs):
             concurrent_env.llm_calls.append(response_model)
             if response_model is SessionTurnAnalysis:
-                return SessionTurnAnalysis(response_to_user=acknowledgement)
+                return SessionTurnAnalysis(response_to_user=model_acknowledgement)
             if response_model is str:
                 return "a generated answer that must be discarded"
             return response_model(text="a generated answer that must be discarded")

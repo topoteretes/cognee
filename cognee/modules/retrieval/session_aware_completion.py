@@ -343,11 +343,7 @@ async def run_concurrent_session_turn(
             answer_lane_result = await answer_lane
         retrieved_objects, context, generated_answer = answer_lane_result
         should_answer = should_answer_turn(analysis, has_previous_qa=bool(snapshot.previous_qa_id))
-        stored_answer = (
-            generated_answer
-            if should_answer
-            else acknowledgement_for_turn(analysis.response_to_user)
-        )
+        stored_answer = generated_answer if should_answer else acknowledgement_for_turn()
 
         if generated_answer is None:
             # Empty-context skip in the answer lane: no answer was generated,
@@ -419,7 +415,7 @@ async def run_sequential_session_turn(
     if not only_context and getattr(retriever, "supports_session_turn_preparation", True):
         turn_preparation = await retriever.prepare_session_turn_for_retrieval(raw_query)
         if not turn_preparation.should_answer:
-            acknowledgement = acknowledgement_for_turn(turn_preparation.response_to_user)
+            acknowledgement = acknowledgement_for_turn()
             await _record_no_answer_turn(retriever, raw_query=raw_query, answer=acknowledgement)
             return None, None, [acknowledgement]
         effective_query = turn_preparation.effective_query or raw_query
