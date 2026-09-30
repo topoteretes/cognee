@@ -3,9 +3,17 @@ from uuid import UUID
 from cognee.infrastructure.databases.provenance import EdgeIdentity
 from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.modules.chunking.models import DocumentChunk
-from cognee.modules.engine.models import Entity, EntityType
+from cognee.modules.engine.models import Entity, EntityType, Timestamp
 from cognee.modules.engine.utils import generate_edge_name, generate_node_name
+from cognee.modules.engine.utils.timestamp_from_text import timestamp_from_text
 from cognee.shared.data_models import KnowledgeGraph, Node
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("expand_with_nodes_and_edges")
+
+# What construction yields, keyed by str(id): the extracted entities, their
+# types, and the timestamps facts anchor to.
+GraphDataPoint = Entity | EntityType | Timestamp
 
 
 def _strip_nonblank_text(value: str | None) -> str | None:
@@ -16,10 +24,47 @@ def _strip_nonblank_text(value: str | None) -> str | None:
     return stripped_value or None
 
 
+def _get_or_create_timestamp(
+    extracted_node: Node,
+    edge_source_ids: set[str],
+    data_chunk: DocumentChunk,
+    data_points_by_id: dict[str, GraphDataPoint],
+) -> Timestamp | None:
+    """The ``Timestamp`` for a node the LLM typed "Timestamp", or None to keep it an Entity.
+
+    The prompt asks for timestamps as leaves named by their normalized time
+    string. A node that breaks either rule stays an ordinary entity: one with
+    outgoing edges has no ``relations`` list to hold them as a Timestamp, and
+    a name that does not parse would be a Timestamp with no time. The id
+    derives from the normalized string, so a time mentioned in several chunks
+    is one node.
+    """
+    if generate_node_name(extracted_node.type) != "timestamp":
+        return None
+    if extracted_node.id in edge_source_ids:
+        logger.warning("Timestamp %r has outgoing edges; kept as an entity", extracted_node.name)
+        return None
+    timestamp = timestamp_from_text(extracted_node.name)
+    if timestamp is None:
+        logger.warning(
+            "Timestamp %r is not a normalized time string; kept as an entity",
+            extracted_node.name,
+        )
+        return None
+
+    existing_data_point = data_points_by_id.get(str(timestamp.id))
+    if isinstance(existing_data_point, Timestamp):
+        return existing_data_point
+
+    timestamp.importance_weight = data_chunk.importance_weight
+    data_points_by_id[str(timestamp.id)] = timestamp
+    return timestamp
+
+
 def _get_or_create_entity_type(
     extracted_type: str,
     data_chunk: DocumentChunk,
-    data_points_by_id: dict[str, Entity | EntityType],
+    data_points_by_id: dict[str, GraphDataPoint],
 ) -> EntityType | None:
     """The chunk's EntityType for ``extracted_type``, or None when it has no name.
 
@@ -50,7 +95,7 @@ def _get_or_create_entity(
     entity_id: UUID,
     entity_type: EntityType | None,
     data_chunk: DocumentChunk,
-    data_points_by_id: dict[str, Entity | EntityType],
+    data_points_by_id: dict[str, GraphDataPoint],
 ) -> Entity:
     entity_key = str(entity_id)
     existing_data_point = data_points_by_id.get(entity_key)
@@ -115,7 +160,7 @@ def _calculate_entity_ids_by_extracted_node_id(
 def _link_chunk_to_entity(
     data_chunk: DocumentChunk,
     extracted_node: Node,
-    entity: Entity,
+    entity: Entity | Timestamp,
 ) -> None:
     if data_chunk.contains is None:
         data_chunk.contains = []
@@ -137,16 +182,25 @@ def _link_chunk_to_entity(
 def _convert_extracted_nodes_to_data_points(
     data_chunk: DocumentChunk,
     extracted_graph: KnowledgeGraph,
-    data_points_by_id: dict[str, Entity | EntityType],
-) -> dict[str, Entity]:
+    data_points_by_id: dict[str, GraphDataPoint],
+) -> dict[str, Entity | Timestamp]:
     """Construct final DataPoints and index entities by their graph-local LLM IDs."""
     entity_ids_by_extracted_node_id = _calculate_entity_ids_by_extracted_node_id(
         extracted_graph,
         data_chunk,
     )
-    entities_by_extracted_node_id: dict[str, Entity] = {}
+    edge_source_ids = {edge.source_node_id for edge in extracted_graph.edges}
+    entities_by_extracted_node_id: dict[str, Entity | Timestamp] = {}
 
     for extracted_node in extracted_graph.nodes:
+        timestamp = _get_or_create_timestamp(
+            extracted_node, edge_source_ids, data_chunk, data_points_by_id
+        )
+        if timestamp is not None:
+            entities_by_extracted_node_id[extracted_node.id] = timestamp
+            _link_chunk_to_entity(data_chunk, extracted_node, timestamp)
+            continue
+
         entity_type = _get_or_create_entity_type(
             extracted_node.type,
             data_chunk,
@@ -169,7 +223,7 @@ def _convert_extracted_nodes_to_data_points(
 def _add_extracted_edges(
     data_chunk: DocumentChunk,
     extracted_graph: KnowledgeGraph,
-    entities_by_extracted_node_id: dict[str, Entity],
+    entities_by_extracted_node_id: dict[str, Entity | Timestamp],
     edges_by_identity: dict[EdgeIdentity, Edge],
 ) -> None:
     produced = data_chunk._produced_edge_identities
@@ -218,9 +272,15 @@ def _add_extracted_edges(
 def construct_data_points_and_edges(
     data_chunks: list[DocumentChunk],
     extracted_graphs: list[KnowledgeGraph],
-) -> tuple[dict[str, Entity | EntityType], dict[EdgeIdentity, Edge]]:
-    """Convert extracted knowledge graphs into DataPoints and edges."""
-    data_points_by_id: dict[str, Entity | EntityType] = {}
+) -> tuple[dict[str, GraphDataPoint], dict[EdgeIdentity, Edge]]:
+    """Convert extracted knowledge graphs into DataPoints and edges.
+
+    Nodes the LLM typed "Timestamp" become ``Timestamp`` datapoints (see
+    ``_get_or_create_timestamp``), so the ``*_at`` edges pointing at them anchor
+    facts to real times; every other node becomes an ``Entity`` with its
+    ``EntityType``.
+    """
+    data_points_by_id: dict[str, GraphDataPoint] = {}
     edges_by_identity: dict[EdgeIdentity, Edge] = {}
 
     for data_chunk, extracted_graph in zip(data_chunks, extracted_graphs):
@@ -243,7 +303,7 @@ def construct_data_points_and_edges(
 
 
 def attach_new_edges_to_data_points(
-    data_points_by_id: dict[str, Entity | EntityType],
+    data_points_by_id: dict[str, GraphDataPoint],
     edges_by_identity: dict[EdgeIdentity, Edge],
     existing_edge_identities: set[EdgeIdentity],
 ) -> None:

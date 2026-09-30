@@ -242,6 +242,8 @@ Key files: `cognee/api/v1/add/add.py`, `cognee/tasks/ingestion/ingest_data.py`
 #### COGNIFY: Knowledge Graph Construction
 `cognify()` → `classify_documents` → `extract_chunks_from_documents` → `extract_graph_from_data` (LLM extracts entities/relationships using Instructor) → `summarize_text` → `add_data_points` (store in graph + vector DBs)
 
+Times are first-class in the default path: the graph prompt asks for points in time as nodes of type `Timestamp` named by their normalized string (`YYYY`, `YYYY-MM`, `YYYY-MM-DD`, `YYYY-MM-DD HH:MM:SS`) and linked by `{verb}_at` edges (`born_at`, `founded_at`, `begins_at`, …). Graph construction (`construct_data_points_and_edges`) turns such a node into a real `Timestamp` datapoint (`precision` records how much was stated; the id derives from the string, so one time is one node) in the same LLM call — no extra pass. A "Timestamp" node whose name does not parse, or that has outgoing edges, stays an ordinary `Entity`. `update()` shares this extraction, so edits get the same handling.
+
 Key files:
 - `cognee/api/v1/cognify/cognify.py`
 - `cognee/tasks/graph/extract_graph_from_data.py`
