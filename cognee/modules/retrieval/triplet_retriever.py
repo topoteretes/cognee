@@ -7,8 +7,8 @@ from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 from cognee.infrastructure.session.get_session_manager import get_session_manager
-from cognee.modules.engine.models import Triplet
 from cognee.modules.engine.models.node_set import NodeSet
+from cognee.modules.engine.utils import generate_node_id
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.utils.completion import generate_completion
@@ -116,7 +116,8 @@ class TripletRetriever(BaseRetriever):
         )
         triplet_ids = list(
             dict.fromkeys(
-                str(Triplet.id_for_edge(source_id, relationship_name, target_id))
+                # Same id _create_triplets_from_graph and get_triplet_datapoints write.
+                str(generate_node_id(str(source_id) + relationship_name + str(target_id)))
                 for source_id, target_id, relationship_name, _ in edges
             )
         )
