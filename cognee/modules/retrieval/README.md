@@ -15,7 +15,7 @@ together.
 | `GRAPH_COMPLETION_CONTEXT_EXTENSION` | `GraphCompletionContextExtensionRetriever` | `graph_completion_context_extension_retriever.py` | yes | Iteratively widens context |
 | `GRAPH_COMPLETION_DECOMPOSITION` | `GraphCompletionDecompositionRetriever` | `graph_completion_decomposition_retriever.py` | yes | Splits the query into sub-queries first |
 | `GRAPH_SUMMARY_COMPLETION` | `GraphSummaryCompletionRetriever` | `graph_summary_completion_retriever.py` | yes | Graph context built from summaries |
-| `TEMPORAL` | `TemporalRetriever` | `temporal_retriever.py` | yes | Time-bounded traversal over the temporal graph |
+| `TEMPORAL` | `TemporalHybridRetriever` | `temporal_hybrid_retriever.py` | yes | Hybrid retrieval filtered to the chunks whose `Timestamp` nodes overlap the time window the LLM extracts from the question; falls back to plain hybrid when the question carries no time or nothing overlaps (`temporal_hybrid/matching.py`) |
 | `RAG_COMPLETION` | `CompletionRetriever` | `completion_retriever.py` | yes | Chunk vector search + completion |
 | `TRIPLET_COMPLETION` | `TripletRetriever` | `triplet_retriever.py` | yes | Triplet-embedding search + completion |
 | `AGENTIC_COMPLETION` | `AgenticRetriever` | `agentic_retriever.py` | yes | Special-cased in the factory (not in the dict): tool loop with `skills`, `tools`, `max_iter` |

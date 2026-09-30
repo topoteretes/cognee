@@ -275,7 +275,7 @@ Available search types (from `cognee/modules/search/types/SearchType.py`), passe
 - **SUMMARIES** - Search pre-computed document summaries
 - **CYPHER** - Direct Cypher query execution (enabled by default; `ALLOW_CYPHER_QUERY=false` disables it)
 - **NATURAL_LANGUAGE** - Natural language to structured query
-- **TEMPORAL** - Time-aware graph search
+- **TEMPORAL** - Hybrid retrieval filtered to the chunks whose `Timestamp` nodes overlap the time window the LLM extracts from the question ("what happened in 1969?"); falls back to plain hybrid when the question carries no time or nothing overlaps
 - **FEELING_LUCKY** - Automatic search type selection
 - **CODING_RULES** - Code-specific search rules
 - **SKILLS** - Semantic discovery of skill playbooks (metadata-only, no LLM; requires exactly one dataset)

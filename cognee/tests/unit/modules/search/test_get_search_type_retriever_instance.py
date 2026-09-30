@@ -17,7 +17,7 @@ from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
-from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
+from cognee.modules.retrieval.temporal_hybrid_retriever import TemporalHybridRetriever
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.search.types import SearchType
 
@@ -429,7 +429,6 @@ async def test_coding_rules_uses_node_name_as_rules_nodeset_name():
             GraphCompletionContextExtensionRetriever,
         ),
         (SearchType.GRAPH_SUMMARY_COMPLETION, GraphSummaryCompletionRetriever),
-        (SearchType.TEMPORAL, TemporalRetriever),
     ],
 )
 async def test_graph_search_retrievers_receive_feedback_influence(search_type, expected_class):
@@ -455,7 +454,6 @@ async def test_graph_search_retrievers_default_triplet_penalty_is_updated():
         SearchType.GRAPH_COMPLETION_COT,
         SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION,
         SearchType.GRAPH_SUMMARY_COMPLETION,
-        SearchType.TEMPORAL,
     ]:
         retriever_instance = await mod.get_search_type_retriever_instance(
             search_type, query_text="q"
