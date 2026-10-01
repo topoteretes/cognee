@@ -17,8 +17,8 @@ follow **For agents** and run the commands as written.
 | What | Why | Where |
 |---|---|---|
 | `LLM_API_KEY` | cognee extracts the graph and writes the answer with an LLM (OpenAI by default) | `.env` at the repo root |
-| `credentials.json` | Gmail OAuth client, type *Desktop app*, with the Gmail API enabled in Google Cloud | this folder |
-| `token.json` | Written on the first run, after you consent in the browser. Scope: `gmail.readonly` | this folder, created for you |
+| `credentials.json` | Gmail OAuth client, type *Desktop app*, with the Gmail API enabled in Google Cloud | `1_ingest_email/` |
+| `token.json` | Written on the first run, after you consent in the browser. Scope: `gmail.readonly` | `1_ingest_email/`, created for you |
 | `cognee[gmail]` | The Google client libraries | `uv sync --extra gmail` |
 
 No Gmail? Run with `--no-email`; then only `LLM_API_KEY` is needed.
@@ -26,14 +26,26 @@ No Gmail? Run with `--no-email`; then only `LLM_API_KEY` is needed.
 
 ## Steps
 
-Each step is its own script and also runs on its own. `run.py` runs them in order.
+```
+inbox_qa_skill/
+├── SKILL.md              this file
+├── run.py                orchestrator: --check, then each step in order
+├── 1_ingest_email/       main.py, plus credentials.json and token.json (yours, git-ignored)
+├── 2_ingest_file/        main.py, plus notes.txt (the sample file)
+└── 3_answer/             main.py
+```
 
-| # | Script | Does | Writes |
+Each step folder holds its `main.py` and the files that step needs. `run.py` runs each
+`main.py` as its own process, the same command you would type, so any step also runs alone.
+
+| # | Command (`uv run python examples/cookbooks/inbox_qa_skill/...`) | Does | Writes |
 |---|---|---|---|
 | 0 | `run.py --check` | Reports what is missing. Does no work | nothing |
-| 1 | `ingest_email.py` | Remembers the newest inbox email (node set `email`) | cognee dataset |
-| 2 | `ingest_file.py [path]` | Remembers a text file, `data/notes.txt` by default (node set `notes`) | cognee dataset |
-| 3 | `answer.py "question"` | Answers from what steps 1 and 2 remembered | nothing |
+| 1 | `1_ingest_email/main.py` | Remembers the newest inbox email (node set `email`) | cognee dataset |
+| 2 | `2_ingest_file/main.py [path]` | Remembers a text file, `notes.txt` by default (node set `notes`) | cognee dataset |
+| 3 | `3_answer/main.py "question"` | Answers from what steps 1 and 2 remembered | nothing |
+
+All steps write to the cognee dataset `inbox_qa_skill`, named once in each `main.py`.
 
 ## Run it (people)
 
@@ -60,7 +72,8 @@ content; cognee skips content it already holds.
 3. The answer is the line starting `[answer] A:`. Give it to the user in your own words,
    and say which sources went in: the email subject from `[ingest_email]` and the file from
    `[ingest_file]`.
-4. If one step fails, run that step's script on its own to see its error.
+4. If a step fails, `run.py` prints `[run] FAILED: <folder>` and exits with that step's
+   code. Run that folder's `main.py` on its own to see the error.
 
 Rules: Gmail access is read-only and nothing is sent. Don't print the contents of
 `credentials.json`, `token.json` or `.env`. Step 1 reads the user's real mailbox and every

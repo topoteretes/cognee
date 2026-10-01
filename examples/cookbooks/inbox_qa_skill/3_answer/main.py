@@ -1,24 +1,24 @@
 """Step 3: answer a question from everything the earlier steps remembered.
 
-Run alone: uv run python examples/cookbooks/inbox_qa_skill/answer.py "Your question"
+Run alone: uv run python examples/cookbooks/inbox_qa_skill/3_answer/main.py "Your question"
 """
 
 import asyncio
 import sys
 
-from common import DATASET
-
 import cognee
+from cognee.shared.logging_utils import ERROR, setup_logging
 
+DATASET = "inbox_qa_skill"  # the same in every step
 DEFAULT_QUESTION = "What does the newest email ask of me, and what do my notes say about it?"
 
 
-async def run(question: str = DEFAULT_QUESTION) -> str:
+async def main(question: str) -> None:
     results = await cognee.recall(question, datasets=[DATASET])
     answer = str(results[0].text) if results else "Nothing found. Run the ingest steps first."
     print(f"[answer] Q: {question}\n[answer] A: {answer}")
-    return answer
 
 
 if __name__ == "__main__":
-    asyncio.run(run(" ".join(sys.argv[1:]) or DEFAULT_QUESTION))
+    setup_logging(log_level=ERROR)
+    asyncio.run(main(" ".join(sys.argv[1:]) or DEFAULT_QUESTION))
