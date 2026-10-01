@@ -783,3 +783,44 @@ async def test_a_normal_refresh_logs_no_missing_refresh_token_warning(linear, ca
         await adapter.access_token_for(original)
 
     assert "returned no refresh token" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_retry_waiting_is_not_registered_for_the_shutdown_drain(linear, monkeypatch):
+    from cognee.infrastructure import background_tasks
+
+    original = await install()
+    monkeypatch.setattr(adapter, "_RETRY_DELAY", 3600)
+    monkeypatch.setattr(
+        adapter, "refresh_access_token", AsyncMock(side_effect=asyncio.TimeoutError())
+    )
+    before = set(background_tasks._BACKGROUND_TASKS)
+
+    with pytest.raises(asyncio.TimeoutError):
+        await adapter.access_token_for(original)
+
+    assert len(adapter._retry_tasks) == 1
+    assert set(background_tasks._BACKGROUND_TASKS) == before
+
+
+@pytest.mark.asyncio
+async def test_a_retry_refreshing_is_registered_and_survives_being_cancelled(linear):
+    from cognee.infrastructure import background_tasks
+
+    original = await install()
+    linear.replay = True
+    linear.lose_answer = asyncio.TimeoutError()
+    with pytest.raises(asyncio.TimeoutError):
+        await adapter.access_token_for(original)
+    linear.started.clear()
+    linear.gate = asyncio.Event()  # holds the retry's request in flight
+    before = set(background_tasks._BACKGROUND_TASKS)
+    await asyncio.wait_for(linear.started.wait(), 5)
+
+    assert len(set(background_tasks._BACKGROUND_TASKS) - before) == 1
+    for task in list(adapter._retry_tasks):
+        task.cancel()  # what a shutdown does to the retry task
+    linear.gate.set()
+    assert await background_tasks.wait_for_background_tasks(timeout=5)
+
+    assert_recovered(linear, await persisted())

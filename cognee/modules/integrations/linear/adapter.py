@@ -41,6 +41,7 @@ from uuid import UUID
 import aiohttp
 from sqlalchemy.exc import SQLAlchemyError
 
+from cognee.infrastructure.background_tasks import register_background_task
 from cognee.modules.integrations.base import (
     OAuthInstallation,
     OAuthIntegration,
@@ -272,9 +273,8 @@ def _retry_refresh_later(credential: IntegrationCredential) -> None:
         return
     _pending_retries.add(credential.id)
 
-    async def _retry() -> None:
+    async def _attempt() -> None:
         try:
-            await asyncio.sleep(_RETRY_DELAY)
             await _refresh_expiring(credential, retry=False)
         except CredentialInactiveError:
             logger.info(
@@ -286,6 +286,16 @@ def _retry_refresh_later(credential: IntegrationCredential) -> None:
                 "Linear token refresh retry for organization %s failed",
                 credential.provider_account_id,
             )
+
+    async def _retry() -> None:
+        try:
+            await asyncio.sleep(_RETRY_DELAY)
+            # Only the refresh itself is registered for the shutdown drain, not
+            # the minute of waiting: the drain gives up after a few seconds, so
+            # waiting on the sleep would only delay shutdown. Once the request is
+            # out, Linear may rotate the token, and the drain should let the save
+            # finish. The shield keeps it running if this task is cancelled.
+            await asyncio.shield(register_background_task(asyncio.create_task(_attempt())))
         finally:
             _pending_retries.discard(credential.id)
 
