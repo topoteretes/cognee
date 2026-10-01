@@ -16,7 +16,11 @@ from cognee.api.v1.update.incremental import (
 from cognee.api.v1.update.result import Fallback, UpdateError, UpdateResult
 from cognee.modules.chunking.chunk_policy import DEFAULT_CHUNK_POLICY, ChunkPolicy
 from cognee.modules.chunking.TextChunker import TextChunker
-from cognee.modules.cognify.config import get_cognify_config, resolve_extractor
+from cognee.modules.cognify.config import (
+    ensure_extractor_runtime,
+    get_cognify_config,
+    resolve_extractor,
+)
 from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -177,8 +181,12 @@ async def update(
     # The incremental path re-extracts the edited chunks with it. A custom
     # graph_model or custom_prompt never reaches that path (they route to the
     # full rebuild below), so cognify() applies its own extractor argument
-    # rules to them there.
-    extractor = resolve_extractor(None, get_cognify_config())
+    # rules to them there. Resolve, then install the runtime, in the same two
+    # steps as cognify(), so the incremental path never starts before the GLiNER
+    # runtime is importable (a no-op for the LLM extractor).
+    cognify_config = get_cognify_config()
+    extractor = resolve_extractor(None, cognify_config)
+    await ensure_extractor_runtime(extractor, cognify_config)
 
     from cognee.modules.data.methods import reset_data_pipeline_status, resolve_data_id
     from cognee.modules.ingestion.exceptions import IngestionError

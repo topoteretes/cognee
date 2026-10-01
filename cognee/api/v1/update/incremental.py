@@ -70,7 +70,6 @@ from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.config import (
     GLINER_DEMO_EXTRACTOR,
     LLM_EXTRACTOR,
-    ensure_extractor_runtime,
     get_cognify_config,
 )
 from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
@@ -113,12 +112,11 @@ from cognee.shared.utils import send_telemetry
 from cognee.tasks.documents.classify_documents import document_class_for, update_node_set
 from cognee.tasks.graph.detect_contradictions import detect_contradictions
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
-from cognee.tasks.graph.gliner_demo.schema import resolve_schema
 from cognee.tasks.graph.gliner_demo.tasks import (
     GlinerOptions,
     GlinerRunStats,
+    build_gliner_schema_task,
     extract_graph_and_summarize_with_gliner,
-    prepare_gliner_schema,
 )
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.data_item_to_text_file import data_item_to_text_file
@@ -337,22 +335,22 @@ def _resolve_extraction_config() -> Config:
     return {"ontology_config": {"ontology_resolver": get_default_ontology_resolver()}}
 
 
-async def _prepare_gliner(
+async def _prepare_gliner_schema(
     document: Document, chunker: type, fresh: list[DocumentChunk], config: Config | None
-) -> tuple[GlinerOptions, GlinerRunStats]:
-    """Attach the document's GLiNER schema and return the options the extraction task takes.
+) -> None:
+    """Attach the document's GLiNER schema with cognify's own schema task, run directly.
 
-    Same resolution chain as ``get_gliner_demo_tasks`` for a cognify run: the
-    configured ontology when there is one, else the label bank probed on the
-    document's sketch. The sketch is read from the staged new content with the
-    document's own chunker and the token budget its chunks were cut against.
+    The one difference from a cognify run is the token budget: the sketch is
+    read from the staged new content against the budget the edited chunks were
+    cut with, not the current config.
     """
-    await ensure_extractor_runtime(GLINER_DEMO_EXTRACTOR, get_cognify_config())
     ontology_resolver = ((config or {}).get("ontology_config") or {}).get("ontology_resolver")
-    schema = resolve_schema(ontology_resolver=ontology_resolver)
-    max_chunk_size = fresh[0].max_chunk_tokens or await get_max_chunk_tokens()
-    await prepare_gliner_schema([document], schema, max_chunk_size, chunker=chunker)
-    return GlinerOptions(), GlinerRunStats()
+    schema_task = build_gliner_schema_task(
+        ontology_resolver=ontology_resolver,
+        max_chunk_size=fresh[0].max_chunk_tokens or await get_max_chunk_tokens(),
+        chunker=chunker,
+    )
+    await schema_task.run([document])
 
 
 def _rehydrate_chunk(document: Document, node: dict, chunk_index: int) -> DocumentChunk:
@@ -966,7 +964,8 @@ async def _write_and_publish(
     extraction_config = _resolve_extraction_config()
     gliner = None
     if extractor == GLINER_DEMO_EXTRACTOR and plan.fresh:
-        gliner = await _prepare_gliner(document, chunker, plan.fresh, extraction_config)
+        await _prepare_gliner_schema(document, chunker, plan.fresh, extraction_config)
+        gliner = (GlinerOptions(), GlinerRunStats())
     for start in range(0, len(plan.fresh), batch_size):
         batch = plan.fresh[start : start + batch_size]
         # Match extract_chunks_from_documents: policies plan content, while
