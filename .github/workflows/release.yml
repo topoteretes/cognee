@@ -310,18 +310,28 @@ jobs:
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
 
       - name: Wait for cognee ${{ needs.release-github.outputs.version }} on PyPI
+        # Poll the simple index, not the JSON API. uv resolves through
+        # /simple/cognee/, which PyPI serves through Fastly with max-age=600 and
+        # which is hot enough to be cached almost always. The per-version JSON
+        # URL is brand new at release time, so it misses the cache and reports
+        # the release ~26s after upload while /simple/ can trail it by up to 10
+        # minutes. Gating on the JSON API let this job race the CDN and fail on
+        # 1.6.0, 1.6.1 and 1.6.2 with a resolver error that looked like a
+        # dependency conflict (SDK-898).
         env:
           VERSION: ${{ needs.release-github.outputs.version }}
         run: |
           for attempt in $(seq 1 60); do
-            if curl -sf "https://pypi.org/pypi/cognee/${VERSION}/json" > /dev/null; then
-              echo "cognee ${VERSION} is live on PyPI."
+            if curl -sf -H "Accept: application/vnd.pypi.simple.v1+json" \
+                "https://pypi.org/simple/cognee/" \
+                | python3 -c 'import json, os, sys; sys.exit(os.environ["VERSION"] not in json.load(sys.stdin)["versions"])'; then
+              echo "cognee ${VERSION} is in PyPI's simple index."
               exit 0
             fi
-            echo "Attempt ${attempt}/60: cognee ${VERSION} not on PyPI yet; retrying in 15s..."
+            echo "Attempt ${attempt}/60: cognee ${VERSION} not in the simple index yet; retrying in 15s..."
             sleep 15
           done
-          echo "::error::cognee ${VERSION} did not appear on PyPI within 15 minutes."
+          echo "::error::cognee ${VERSION} did not appear in PyPI's simple index within 15 minutes."
           exit 1
 
       - name: Re-lock cognee-mcp to the released version
@@ -329,7 +339,20 @@ jobs:
           VERSION: ${{ needs.release-github.outputs.version }}
         working-directory: cognee-mcp
         run: |
-          uv lock --upgrade-package "cognee==${VERSION}"
+          # --refresh-package bypasses any uv cache setup-uv restored, and the
+          # retry covers the CDN edge uv lands on still trailing the one the
+          # wait step's curl saw. Bounded, so a genuine conflict still fails.
+          for attempt in $(seq 1 10); do
+            if uv lock --upgrade-package "cognee==${VERSION}" --refresh-package cognee; then
+              break
+            fi
+            if [ "${attempt}" -eq 10 ]; then
+              echo "::error::uv lock could not resolve cognee ${VERSION} after 10 attempts."
+              exit 1
+            fi
+            echo "Attempt ${attempt}/10: uv lock could not resolve cognee ${VERSION} yet; retrying in 30s..."
+            sleep 30
+          done
           LOCKED_VERSION="$(python3 - <<'PY'
           import tomllib
 
