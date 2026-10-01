@@ -26,23 +26,18 @@ def _strip_nonblank_text(value: str | None) -> str | None:
 
 def _get_or_create_timestamp(
     extracted_node: Node,
-    edge_source_ids: set[str],
     data_chunk: DocumentChunk,
     data_points_by_id: dict[str, GraphDataPoint],
 ) -> Timestamp | None:
     """The ``Timestamp`` for a node the LLM typed "Timestamp", or None to keep it an Entity.
 
-    The prompt asks for timestamps as leaves named by their normalized time
-    string. A node that breaks either rule stays an ordinary entity: one with
-    outgoing edges has no ``relations`` list to hold them as a Timestamp, and
-    a name that does not parse would be a Timestamp with no time. The id
-    derives from the normalized string, so a time mentioned in several chunks
-    is one node.
+    A name that does not parse as a normalized time string stays an ordinary
+    entity: it would be a Timestamp with no time. Edges are not a reason to
+    demote — ``_with_timestamps_as_leaves`` has already turned every edge
+    drawn from a parseable timestamp around. The id derives from the
+    normalized string, so a time mentioned in several chunks is one node.
     """
     if generate_node_name(extracted_node.type) != "timestamp":
-        return None
-    if extracted_node.id in edge_source_ids:
-        logger.warning("Timestamp %r has outgoing edges; kept as an entity", extracted_node.name)
         return None
     timestamp = timestamp_from_text(extracted_node.name)
     if timestamp is None:
@@ -179,6 +174,54 @@ def _link_chunk_to_entity(
     )
 
 
+def _with_timestamps_as_leaves(extracted_graph: KnowledgeGraph) -> KnowledgeGraph:
+    """The extracted graph with every parseable timestamp on the target side of its edges.
+
+    The prompt asks for timestamps as leaves (``marie_curie -born_at-> 1867``).
+    When the LLM draws the edge the other way (``1898 -discovery_of-> radium``)
+    the fact is still that radium is tied to 1898, so the edge is reversed and
+    keeps its name instead of costing the chunk its timestamp: a Timestamp has
+    no ``relations`` list to own an edge. An edge between two timestamps has
+    no entity to live on and is dropped.
+    """
+    timestamp_ids = {
+        node.id
+        for node in extracted_graph.nodes
+        if generate_node_name(node.type) == "timestamp"
+        and timestamp_from_text(node.name) is not None
+    }
+    if not timestamp_ids:
+        return extracted_graph
+
+    edges = []
+    for edge in extracted_graph.edges:
+        if edge.source_node_id not in timestamp_ids:
+            edges.append(edge)
+        elif edge.target_node_id in timestamp_ids:
+            logger.warning(
+                "Dropping edge %r between timestamps %r and %r",
+                edge.relationship_name,
+                edge.source_node_id,
+                edge.target_node_id,
+            )
+        else:
+            logger.debug(
+                "Reversing edge %r drawn from timestamp %r to %r",
+                edge.relationship_name,
+                edge.source_node_id,
+                edge.target_node_id,
+            )
+            edges.append(
+                edge.model_copy(
+                    update={
+                        "source_node_id": edge.target_node_id,
+                        "target_node_id": edge.source_node_id,
+                    }
+                )
+            )
+    return extracted_graph.model_copy(update={"edges": edges})
+
+
 def _convert_extracted_nodes_to_data_points(
     data_chunk: DocumentChunk,
     extracted_graph: KnowledgeGraph,
@@ -189,13 +232,10 @@ def _convert_extracted_nodes_to_data_points(
         extracted_graph,
         data_chunk,
     )
-    edge_source_ids = {edge.source_node_id for edge in extracted_graph.edges}
     entities_by_extracted_node_id: dict[str, Entity | Timestamp] = {}
 
     for extracted_node in extracted_graph.nodes:
-        timestamp = _get_or_create_timestamp(
-            extracted_node, edge_source_ids, data_chunk, data_points_by_id
-        )
+        timestamp = _get_or_create_timestamp(extracted_node, data_chunk, data_points_by_id)
         if timestamp is not None:
             entities_by_extracted_node_id[extracted_node.id] = timestamp
             _link_chunk_to_entity(data_chunk, extracted_node, timestamp)
@@ -287,6 +327,7 @@ def construct_data_points_and_edges(
         if not extracted_graph:
             continue
 
+        extracted_graph = _with_timestamps_as_leaves(extracted_graph)
         entities_by_extracted_node_id = _convert_extracted_nodes_to_data_points(
             data_chunk,
             extracted_graph,
@@ -316,5 +357,10 @@ def attach_new_edges_to_data_points(
         target_data_point = data_points_by_id.get(edge_identity.target_id)
         if source_data_point is None or target_data_point is None:
             continue
+        if isinstance(source_data_point, Timestamp):
+            raise ValueError(
+                f"Timestamp {source_data_point.timestamp_str!r} cannot own edge "
+                f"{edge_identity.relationship_name!r}; construction must reverse it"
+            )
 
         source_data_point.relations.append((edge, target_data_point))
