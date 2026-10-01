@@ -149,7 +149,6 @@ _ERROR_CODES = frozenset(
         "access_denied",
         "server_error",
         "temporarily_unavailable",
-        "Error",
     }
 )
 
