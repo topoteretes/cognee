@@ -1,8 +1,8 @@
 """Orchestrator: check setup, then run each step folder's main.py in order.
 
-    uv run python examples/cookbooks/inbox_qa_skill/run.py --check      # setup only, no work
-    uv run python examples/cookbooks/inbox_qa_skill/run.py              # all steps
-    uv run python examples/cookbooks/inbox_qa_skill/run.py --no-email --file my.txt \
+    uv run python .agents/skills/inbox-qa/run.py --check      # setup only, no work
+    uv run python .agents/skills/inbox-qa/run.py              # all steps
+    uv run python .agents/skills/inbox-qa/run.py --no-email --file my.txt \
         --question "What did we decide?"
 
 Each step runs as its own process, the same command a person or an agent would type, so

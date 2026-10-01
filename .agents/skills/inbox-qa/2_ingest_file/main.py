@@ -1,6 +1,6 @@
 """Step 2: remember a text file (notes.txt in this folder by default).
 
-Run alone: uv run python examples/cookbooks/inbox_qa_skill/2_ingest_file/main.py [file.txt]
+Run alone: uv run python .agents/skills/inbox-qa/2_ingest_file/main.py [file.txt]
 """
 
 import asyncio

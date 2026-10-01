@@ -1,6 +1,6 @@
 """Step 3: answer a question from everything the earlier steps remembered.
 
-Run alone: uv run python examples/cookbooks/inbox_qa_skill/3_answer/main.py "Your question"
+Run alone: uv run python .agents/skills/inbox-qa/3_answer/main.py "Your question"
 """
 
 import asyncio

@@ -27,7 +27,7 @@ No Gmail? Run with `--no-email`; then only `LLM_API_KEY` is needed.
 ## Steps
 
 ```
-inbox_qa_skill/
+inbox-qa/
 ├── SKILL.md              this file
 ├── run.py                orchestrator: --check, then each step in order
 ├── 1_ingest_email/       main.py, plus credentials.json and token.json (yours, git-ignored)
@@ -38,7 +38,7 @@ inbox_qa_skill/
 Each step folder holds its `main.py` and the files that step needs. `run.py` runs each
 `main.py` as its own process, the same command you would type, so any step also runs alone.
 
-| # | Command (`uv run python examples/cookbooks/inbox_qa_skill/...`) | Does | Writes |
+| # | Command (`uv run python .agents/skills/inbox-qa/...`) | Does | Writes |
 |---|---|---|---|
 | 0 | `run.py --check` | Reports what is missing. Does no work | nothing |
 | 1 | `1_ingest_email/main.py` | Remembers the newest inbox email (node set `email`) | cognee dataset |
@@ -52,9 +52,9 @@ All steps write to the cognee dataset `inbox_qa_skill`, named once in each `main
 From the repo root:
 
 ```bash
-uv run python examples/cookbooks/inbox_qa_skill/run.py --check
-uv run python examples/cookbooks/inbox_qa_skill/run.py
-uv run python examples/cookbooks/inbox_qa_skill/run.py --file my_notes.txt --question "What do I owe Priya?"
+uv run python .agents/skills/inbox-qa/run.py --check
+uv run python .agents/skills/inbox-qa/run.py
+uv run python .agents/skills/inbox-qa/run.py --file my_notes.txt --question "What do I owe Priya?"
 ```
 
 The first Gmail run opens a browser to consent. Running it again re-remembers the same
@@ -62,7 +62,7 @@ content; cognee skips content it already holds.
 
 ## For agents
 
-1. Run `uv run python examples/cookbooks/inbox_qa_skill/run.py --check` from the repo root.
+1. Run `uv run python .agents/skills/inbox-qa/run.py --check` from the repo root.
    - Exit 0: go to step 2.
    - Exit 2: each `[setup] MISSING:` line names one fix. Don't create credentials yourself.
      Tell the user exactly which line to fix, using the table above, and stop. If only

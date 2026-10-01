@@ -3,7 +3,7 @@
 Needs credentials.json (a Gmail OAuth Desktop client) in this folder; token.json is
 written here on the first run.
 
-Run alone: uv run python examples/cookbooks/inbox_qa_skill/1_ingest_email/main.py
+Run alone: uv run python .agents/skills/inbox-qa/1_ingest_email/main.py
 """
 
 import asyncio
