@@ -33,6 +33,21 @@ _warned_degree_fallbacks: set[type] = set()
 _warned_neighborhood_fallbacks: set[type] = set()
 
 
+def timestamp_overlaps(node: dict, start: int | None, end: int | None) -> bool:
+    """Whether a Timestamp node's period ``[time_at, time_until)`` meets ``[start, end)``.
+
+    ``time_until`` defaults to one second after ``time_at`` for nodes written
+    before the field existed.
+    """
+    try:
+        time_at = int(node["time_at"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    time_until = node.get("time_until")
+    time_until = int(time_until) if time_until not in (None, "") else time_at + 1000
+    return (end is None or time_at < end) and (start is None or time_until > start)
+
+
 class GraphDBInterface(ABC):
     """
     Interface every graph backend implements (Ladybug/Kuzu, Neo4j, Neptune, Turso, Postgres demo).
@@ -821,6 +836,34 @@ class GraphDBInterface(ABC):
             - node_id (Union[str, UUID]): Unique identifier of the node for which to retrieve connections.
         """
         raise NotImplementedError
+
+    async def get_timestamps_in_range(self, start: int | None, end: int | None) -> list[NodeData]:
+        """
+        Return the ``Timestamp`` nodes whose period overlaps the half-open window
+        ``[start, end)``, both in milliseconds since the epoch (UTC); ``None``
+        leaves that side open. A timestamp's period is ``[time_at, time_until)``
+        (see ``cognee.modules.engine.models.Timestamp``), so the test is
+        ``time_at < end`` and ``time_until > start``. Each result carries at
+        least ``id``, ``timestamp_str``, ``time_at`` and ``time_until``.
+
+        This default scans ``get_graph_data``; adapters with a native query
+        override it (Ladybug, Neo4j, Postgres demo).
+
+        Parameters:
+        -----------
+
+            - start (Optional[int]): Inclusive window start in ms, or None.
+            - end (Optional[int]): Exclusive window end in ms, or None.
+        """
+        nodes, _edges = await self.get_graph_data()
+        matches: list[NodeData] = []
+        for node_id, properties in nodes:
+            if (properties or {}).get("type") != "Timestamp":
+                continue
+            node = {**properties, "id": str(node_id)}
+            if timestamp_overlaps(node, start, end):
+                matches.append(node)
+        return matches
 
     @abstractmethod
     async def get_neighborhood(

@@ -27,6 +27,22 @@ def _match_normalized(text: str) -> tuple[re.Match | None, TimestampPrecision | 
     return None, None
 
 
+def _period_end(lower: datetime, precision: TimestampPrecision) -> datetime:
+    """The exclusive end of the period ``lower`` starts at the given precision.
+
+    Raises ``ValueError`` for year 9999, whose end would need year 10000.
+    """
+    if precision == "year":
+        return lower.replace(year=lower.year + 1)
+    if precision == "month":
+        if lower.month == 12:
+            return lower.replace(year=lower.year + 1, month=1)
+        return lower.replace(month=lower.month + 1)
+    if precision == "day":
+        return lower + timedelta(days=1)
+    return lower + timedelta(seconds=1)
+
+
 def timestamp_from_text(text: str) -> Timestamp | None:
     """The ``Timestamp`` datapoint for a normalized time string, or None.
 
@@ -53,6 +69,7 @@ def timestamp_from_text(text: str) -> Timestamp | None:
     year, month, day, hour, minute, second = stated + list(_LOWER_BOUND_DEFAULTS[len(stated) - 1 :])
     try:
         lower_bound = datetime(year, month, day, hour, minute, second, tzinfo=timezone.utc)
+        upper_bound = _period_end(lower_bound, precision)
     except ValueError:
         return None
 
@@ -61,6 +78,7 @@ def timestamp_from_text(text: str) -> Timestamp | None:
         timestamp_str=normalized,
         precision=precision,
         time_at=int(lower_bound.timestamp() * 1000),
+        time_until=int(upper_bound.timestamp() * 1000),
         year=year,
         month=month,
         day=day,
@@ -75,33 +93,14 @@ def timestamp_bounds(text: str) -> tuple[str, datetime, datetime]:
 
     ``1950`` is [1950-01-01, 1951-01-01), ``1950-03`` is [1950-03-01, 1950-04-01),
     a day is one day, a full timestamp is one second. Accepts what
-    ``timestamp_from_text`` accepts; raises ``ValueError`` for anything else, and
-    for year 9999 (the exclusive upper bound would need year 10000).
+    ``timestamp_from_text`` accepts; raises ``ValueError`` for anything else
+    (including year 9999, whose exclusive upper bound would need year 10000).
     """
     timestamp = timestamp_from_text(text)
     if timestamp is None:
         raise ValueError(f"Unsupported timestamp: {text!r}")
-    if timestamp.year > 9998:
-        raise ValueError(f"Unsupported timestamp: {text!r}")
-    lower = datetime(
-        timestamp.year,
-        timestamp.month,
-        timestamp.day,
-        timestamp.hour,
-        timestamp.minute,
-        timestamp.second,
-        tzinfo=timezone.utc,
+    return (
+        timestamp.timestamp_str,
+        datetime.fromtimestamp(timestamp.time_at / 1000, tz=timezone.utc),
+        datetime.fromtimestamp(timestamp.time_until / 1000, tz=timezone.utc),
     )
-    if timestamp.precision == "year":
-        upper = lower.replace(year=lower.year + 1)
-    elif timestamp.precision == "month":
-        upper = (
-            lower.replace(year=lower.year + 1, month=1)
-            if lower.month == 12
-            else lower.replace(month=lower.month + 1)
-        )
-    elif timestamp.precision == "day":
-        upper = lower + timedelta(days=1)
-    else:
-        upper = lower + timedelta(seconds=1)
-    return timestamp.timestamp_str, lower, upper

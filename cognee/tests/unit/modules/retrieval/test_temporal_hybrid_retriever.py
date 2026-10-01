@@ -1,8 +1,4 @@
-"""TemporalHybridRetriever and its matching helpers (SDK-828).
-
-Ported from cognee/tests/unit/examples/test_temporal_hybrid_demo.py, where they
-exercised the POC copies in examples/advanced_guides/temporal_awareness_example.
-"""
+"""TemporalHybridRetriever: interval extraction, anchors, rerank, fallbacks (SDK-828)."""
 
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock
@@ -10,10 +6,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from cognee.modules.retrieval.temporal_hybrid.matching import (
-    build_temporal_index,
+    anchors_from_neighborhood,
+    chunks_containing,
     extract_query_interval,
-    filter_hybrid,
-    match_temporal_neighborhood,
+    rerank_hybrid,
+    slice_hybrid,
+    to_epoch_ms,
 )
 from cognee.modules.retrieval.temporal_hybrid_retriever import TemporalHybridRetriever
 
@@ -33,14 +31,10 @@ def _query_interval(start: dict | None = None, end: dict | None = None):
 
 
 def _utc_fields(year: int, month: int = 1, day: int = 1) -> dict:
-    return {
-        "year": year,
-        "month": month,
-        "day": day,
-        "hour": 0,
-        "minute": 0,
-        "second": 0,
-    }
+    return {"year": year, "month": month, "day": day, "hour": 0, "minute": 0, "second": 0}
+
+
+# --- interval extraction ---------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -59,7 +53,6 @@ def _utc_fields(year: int, month: int = 1, day: int = 1) -> dict:
 async def test_extract_query_interval(
     start, end, expected_start, expected_end, reason, monkeypatch
 ):
-
     monkeypatch.setattr(
         "cognee.modules.retrieval.temporal_hybrid.matching.LLMGateway.acreate_structured_output",
         AsyncMock(return_value=_query_interval(start, end)),
@@ -70,7 +63,6 @@ async def test_extract_query_interval(
 
 @pytest.mark.asyncio
 async def test_extract_query_interval_propagates_llm_errors(monkeypatch):
-
     monkeypatch.setattr(
         "cognee.modules.retrieval.temporal_hybrid.matching.LLMGateway.acreate_structured_output",
         AsyncMock(side_effect=RuntimeError("provider")),
@@ -79,149 +71,126 @@ async def test_extract_query_interval_propagates_llm_errors(monkeypatch):
         await extract_query_interval("in 1950")
 
 
-def _graph_node(node_id: str, type_name: str, **properties):
+def test_to_epoch_ms():
+    assert to_epoch_ms(None) is None
+    assert to_epoch_ms(_utc(1970, 1, 1, 0, 0, 1)) == 1000
+
+
+# --- anchors -----------------------------------------------------------------
+
+
+def _node(node_id: str, type_name: str, **properties):
     return (node_id, {"type": type_name, **properties})
 
 
-def _graph_edge(source: str, target: str, relationship: str):
+def _edge(source: str, target: str, relationship: str):
     return (source, target, relationship, {})
 
 
-def test_match_temporal_neighborhood_overlap_table():
-
+def test_anchors_come_from_edges_into_the_matched_timestamps():
     nodes = [
-        _graph_node("chunk_period", "DocumentChunk"),
-        _graph_node("chunk_year", "DocumentChunk"),
-        _graph_node("chunk_contact", "DocumentChunk"),
-        _graph_node("chunk_invalid", "DocumentChunk"),
-        _graph_node("chunk_other", "DocumentChunk"),
-        _graph_node("ts_1947", "Timestamp", timestamp_str="1947"),
-        _graph_node("ts_1956", "Timestamp", timestamp_str="1956"),
-        _graph_node("ts_1950", "Timestamp", timestamp_str="1950"),
-        _graph_node("ts_1951", "Timestamp", timestamp_str="1951"),
-        _graph_node("ts_1949", "Timestamp", timestamp_str="1949"),
-        _graph_node("ts_1960", "Timestamp", timestamp_str="1960"),
-        _graph_node("ts_bad", "Timestamp", timestamp_str="1940s"),
-        _graph_node("presidency", "Entity"),
-        _graph_node("missing_end", "Entity"),
-        _graph_node("two_begins", "Entity"),
-        _graph_node("reversed", "Entity"),
-        _graph_node("person", "Entity"),
+        _node("c1", "DocumentChunk"),
+        _node("c2", "DocumentChunk"),
+        _node("ts_1950", "Timestamp", timestamp_str="1950"),
+        _node("ts_1960", "Timestamp", timestamp_str="1960"),
+        _node("ada", "Entity"),
+        _node("acme", "Entity"),
+        _node("person", "EntityType"),
     ]
     edges = [
-        _graph_edge("chunk_period", "presidency", "contains"),
-        _graph_edge("chunk_period", "ts_1947", "contains"),
-        _graph_edge("chunk_period", "ts_1956", "contains"),
-        _graph_edge("chunk_period", "person", "contains"),
-        _graph_edge("presidency", "ts_1947", "begins_at"),
-        _graph_edge("presidency", "ts_1956", "ends_at"),
-        _graph_edge("chunk_year", "ts_1950", "contains"),
-        _graph_edge("chunk_contact", "ts_1951", "contains"),
-        _graph_edge("chunk_contact", "ts_1949", "contains"),
-        _graph_edge("chunk_invalid", "missing_end", "contains"),
-        _graph_edge("chunk_invalid", "ts_1960", "contains"),
-        _graph_edge("missing_end", "ts_1960", "begins_at"),
-        _graph_edge("chunk_invalid", "two_begins", "contains"),
-        _graph_edge("two_begins", "ts_1947", "begins_at"),
-        _graph_edge("two_begins", "ts_1950", "begins_at"),
-        _graph_edge("two_begins", "ts_1956", "ends_at"),
-        _graph_edge("chunk_invalid", "reversed", "contains"),
-        _graph_edge("reversed", "ts_1960", "begins_at"),
-        _graph_edge("reversed", "ts_1947", "ends_at"),
-        _graph_edge("chunk_invalid", "ts_bad", "contains"),
-        _graph_edge("chunk_other", "person", "contains"),
-        _graph_edge("person", "ts_1950", "born_at"),
+        _edge("c1", "ts_1950", "contains"),
+        _edge("c2", "ts_1960", "contains"),
+        _edge("ada", "ts_1950", "born_at"),
+        _edge("acme", "ts_1960", "founded_at"),
+        _edge("ada", "person", "is_a"),
+        _edge("c1", "ada", "contains"),
     ]
-    start, end = _utc(1950, 1, 1), _utc(1951, 1, 1)
-    matched = match_temporal_neighborhood(build_temporal_index(nodes, edges), start, end)
+    anchors = anchors_from_neighborhood({"ts_1950"}, nodes, edges)
 
-    assert matched["timestamp_ids"] == {"ts_1950"}
-    assert matched["period_ids"] == {"presidency"}
-    assert matched["eligible_chunk_ids"] == {"chunk_period", "chunk_year"}
-    assert "chunk_contact" not in matched["eligible_chunk_ids"]
-    assert "chunk_invalid" not in matched["eligible_chunk_ids"]
-    assert "chunk_other" not in matched["eligible_chunk_ids"]
-    assert matched["chunk_entities"]["chunk_period"] == {"presidency", "person"}
-    assert ("presidency", "ts_1947", "begins_at") in matched["temporal_edges"]
-    assert ("presidency", "ts_1956", "ends_at") in matched["temporal_edges"]
-    assert ("person", "ts_1950", "born_at") in matched["temporal_edges"]
+    assert anchors["chunk_ids"] == {"c1"}
+    assert anchors["entity_ids"] == {"ada"}  # any edge into the timestamp, not only *_at
 
 
-def test_filter_hybrid_relabels_timestamp_bullets():
+def test_chunks_containing_follows_contains_edges_only_from_chunks():
+    nodes = [
+        _node("c1", "DocumentChunk"),
+        _node("c2", "DocumentChunk"),
+        _node("ada", "Entity"),
+        _node("x", "Entity"),
+    ]
+    edges = [
+        _edge("c1", "ada", "contains"),
+        _edge("x", "ada", "knows"),
+        _edge("c2", "x", "contains"),
+    ]
 
-    nodes, edges = _temporal_graph()
-    matches = match_temporal_neighborhood(
-        build_temporal_index(nodes, edges), _utc(1950, 1, 1), _utc(1951, 1, 1)
-    )
-    candidates = {
-        "chunks": [{"id": "c2", "text": "in 1950"}],
-        "chunk_summaries": {},
-        "entities": [
-            {
-                "id": "e2",
-                "description": "Ada",
-                "edges": [
-                    {
-                        "source": "Ada",
-                        "source_id": "e2",
-                        "target": "ts_1950",
-                        "target_id": "ts_1950",
-                        "relationship": "born_at",
-                        "text": "Ada -- born_at -- ts_1950",
-                    }
-                ],
-            }
-        ],
-        "facts": [],
-    }
+    assert chunks_containing({"ada"}, nodes, edges) == {"c1"}
 
-    result = filter_hybrid(candidates, matches, top_k=5)
 
-    [bullet] = result["entities"][0]["edges"]
-    assert bullet["target"] == "1950"
-    assert bullet["text"] == "Ada -- born_at -- 1950"
+# --- rerank ----------------------------------------------------------------------
 
 
 def _candidates():
-    entity_temporal = {
-        "id": "e2",
-        "description": "keep me",
-        "edges": [
-            {"source_id": "e2", "target_id": "ts_1950", "relationship": "born_at"},
-            {"source_id": "e2", "target_id": "x", "relationship": "works_at"},
-        ],
-    }
     return {
-        "chunks": [{"id": "c1", "text": "unrelated"}, {"id": "c2", "text": "in 1950"}],
-        "chunk_summaries": {"c1": "s1", "c2": "s2"},
-        "entities": [{"id": "e1", "description": "other", "edges": []}, entity_temporal],
+        "chunks": [
+            {"id": "c1", "text": "unrelated"},
+            {"id": "c2", "text": "in 1950"},
+            {"id": "c3", "text": "also 1950"},
+        ],
+        "chunk_summaries": {"c1": "s1", "c2": "s2", "c3": "s3"},
+        "entities": [
+            {"id": "e1", "description": "other", "edges": []},
+            {
+                "id": "e2",
+                "description": "keep me",
+                "edges": [{"relationship": "born_at"}, {"relationship": "works_at"}],
+            },
+        ],
         "facts": ["f1", "f2"],
     }
 
 
-def _temporal_graph():
-    nodes = [
-        _graph_node("c1", "DocumentChunk"),
-        _graph_node("c2", "DocumentChunk"),
-        _graph_node("ts_1950", "Timestamp", timestamp_str="1950"),
-        _graph_node("e2", "Entity"),
-    ]
-    edges = [
-        _graph_edge("c2", "ts_1950", "contains"),
-        _graph_edge("c2", "e2", "contains"),
-        _graph_edge("e2", "ts_1950", "born_at"),
-    ]
-    return nodes, edges
+def test_rerank_puts_anchored_candidates_first_and_keeps_the_rest():
+    anchors = {"timestamp_ids": {"ts"}, "chunk_ids": {"c3", "c2"}, "entity_ids": {"e2"}}
+    result = rerank_hybrid(_candidates(), anchors, top_k=2)
+
+    assert [chunk["id"] for chunk in result["chunks"]] == [
+        "c2",
+        "c3",
+    ]  # hybrid order among anchored
+    assert result["chunk_summaries"] == {"c2": "s2", "c3": "s3"}
+    assert [entity["id"] for entity in result["entities"]] == ["e2", "e1"]
+    assert result["entities"][0]["description"] == "keep me"  # nothing stripped
+    assert len(result["entities"][0]["edges"]) == 2
+    assert result["facts"] == ["f1", "f2"]
 
 
-def _retriever(monkeypatch, *, nodes, edges, interval, candidates, empty=False):
+def test_rerank_with_no_anchored_candidate_is_the_plain_slice():
+    anchors = {"timestamp_ids": {"ts"}, "chunk_ids": {"elsewhere"}, "entity_ids": set()}
+    assert rerank_hybrid(_candidates(), anchors, top_k=2) == slice_hybrid(_candidates(), 2)
 
+
+def test_rerank_fills_up_with_unanchored_candidates():
+    anchors = {"timestamp_ids": {"ts"}, "chunk_ids": {"c3"}, "entity_ids": set()}
+    result = rerank_hybrid(_candidates(), anchors, top_k=2)
+    assert [chunk["id"] for chunk in result["chunks"]] == ["c3", "c1"]
+
+
+# --- retriever flow ------------------------------------------------------------
+
+
+def _retriever(monkeypatch, *, timestamps, neighborhoods, interval, candidates, empty=False):
     class FakeGraphEngine:
-        calls = 0
+        range_calls: list = []
+        neighborhood_calls: list = []
 
-        async def get_graph_data(self):
-            FakeGraphEngine.calls += 1
-            return nodes, edges
+        async def get_timestamps_in_range(self, start, end):
+            FakeGraphEngine.range_calls.append((start, end))
+            return timestamps
+
+        async def get_neighborhood(self, node_ids, depth=1, edge_types=None):
+            FakeGraphEngine.neighborhood_calls.append((list(node_ids), depth, edge_types))
+            return neighborhoods.get(tuple(node_ids), ([], []))
 
     class FakeGraph:
         async def is_empty(self):
@@ -236,37 +205,31 @@ def _retriever(monkeypatch, *, nodes, edges, interval, candidates, empty=False):
     async def fake_unified_engine():
         return FakeUnified()
 
+    FakeGraphEngine.range_calls = []
+    FakeGraphEngine.neighborhood_calls = []
     hybrid_fetch = AsyncMock(return_value=candidates)
     extract = AsyncMock(return_value=interval)
-    monkeypatch.setattr(
-        "cognee.modules.retrieval.temporal_hybrid_retriever.get_graph_engine", fake_graph_engine
-    )
-    monkeypatch.setattr(
-        "cognee.modules.retrieval.temporal_hybrid_retriever.get_unified_engine", fake_unified_engine
-    )
-    monkeypatch.setattr(
-        "cognee.modules.retrieval.temporal_hybrid_retriever.extract_query_interval", extract
-    )
-    monkeypatch.setattr(
-        "cognee.modules.retrieval.temporal_hybrid_retriever.HybridRetriever.get_retrieved_objects",
-        hybrid_fetch,
-    )
-    retriever = TemporalHybridRetriever(candidate_top_k=20, top_k=1)
+    module = "cognee.modules.retrieval.temporal_hybrid_retriever."
+    monkeypatch.setattr(module + "get_graph_engine", fake_graph_engine)
+    monkeypatch.setattr(module + "get_unified_engine", fake_unified_engine)
+    monkeypatch.setattr(module + "extract_query_interval", extract)
+    monkeypatch.setattr(module + "HybridRetriever.get_retrieved_objects", hybrid_fetch)
+    retriever = TemporalHybridRetriever(candidate_top_k=20, top_k=2)
     return retriever, FakeGraphEngine, hybrid_fetch, extract
 
 
 def test_temporal_retriever_rejects_bad_limits():
-
     with pytest.raises(ValueError):
         TemporalHybridRetriever(candidate_top_k=1, top_k=2)
     with pytest.raises(ValueError):
         TemporalHybridRetriever(candidate_top_k=5, top_k=0)
+    assert TemporalHybridRetriever(top_k=3).chunks_top_k == 12
 
 
 @pytest.mark.asyncio
 async def test_temporal_retriever_empty_graph_makes_no_external_calls(monkeypatch):
-    retriever, _engine, hybrid_fetch, extract = _retriever(
-        monkeypatch, nodes=[], edges=[], interval=None, candidates=None, empty=True
+    retriever, engine, hybrid_fetch, extract = _retriever(
+        monkeypatch, timestamps=[], neighborhoods={}, interval=None, candidates=None, empty=True
     )
     with pytest.raises(ValueError, match="blank"):
         await retriever.get_retrieved_objects(query="   ")
@@ -276,89 +239,80 @@ async def test_temporal_retriever_empty_graph_makes_no_external_calls(monkeypatc
     assert result["chunks"] == []
     hybrid_fetch.assert_not_called()
     extract.assert_not_called()
+    assert engine.range_calls == []
 
 
 @pytest.mark.asyncio
-async def test_temporal_retriever_filters_before_limit_and_restricts_entities(monkeypatch):
-    nodes, edges = _temporal_graph()
-    candidates = _candidates()
+async def test_temporal_retriever_reranks_by_timestamp_and_entity_anchors(monkeypatch):
+    ts_neighborhood = (
+        [_node("c2", "DocumentChunk"), _node("ts_1950", "Timestamp"), _node("e2", "Entity")],
+        [_edge("c2", "ts_1950", "contains"), _edge("e2", "ts_1950", "born_at")],
+    )
+    entity_neighborhood = (
+        [_node("c3", "DocumentChunk"), _node("c2", "DocumentChunk"), _node("e2", "Entity")],
+        [_edge("c3", "e2", "contains"), _edge("c2", "e2", "contains")],
+    )
     retriever, engine, _fetch, _extract = _retriever(
         monkeypatch,
-        nodes=nodes,
-        edges=edges,
+        timestamps=[{"id": "ts_1950", "timestamp_str": "1950", "time_at": 0, "time_until": 1}],
+        neighborhoods={("ts_1950",): ts_neighborhood, ("e2",): entity_neighborhood},
         interval=(_utc(1950, 1, 1), _utc(1951, 1, 1), None),
-        candidates=candidates,
+        candidates=_candidates(),
     )
     result = await retriever.get_retrieved_objects(query="in 1950")
 
     assert retriever.last_reason is None
-    assert [chunk["id"] for chunk in result["chunks"]] == ["c2"]
-    assert result["chunk_summaries"] == {"c2": "s2"}
-    assert result["facts"] == []
-    filtered_entity = result["entities"][0]
-    assert filtered_entity["description"] is None
-    assert filtered_entity["edges"] == [
-        {
-            "source_id": "e2",
-            "target_id": "ts_1950",
-            "relationship": "born_at",
-            "target": "1950",
-            "text": "e2 -- born_at -- 1950",
-        }
-    ]
-
-    baseline = retriever.last_baseline
-    assert [chunk["id"] for chunk in baseline["chunks"]] == ["c1"]
-    assert baseline["facts"] == ["f1"]
-    assert baseline["entities"][0]["description"] == "other"
-    assert candidates["entities"][1]["description"] == "keep me"
-    assert len(candidates["entities"][1]["edges"]) == 2
-
-    await retriever.get_retrieved_objects(query="in 1950")
-    assert engine.calls == 1  # the temporal index is built once per instance
+    assert engine.range_calls == [(to_epoch_ms(_utc(1950, 1, 1)), to_epoch_ms(_utc(1951, 1, 1)))]
+    assert engine.neighborhood_calls == [(["ts_1950"], 1, None), (["e2"], 1, ["contains"])]
+    assert retriever.last_anchors["chunk_ids"] == {"c2", "c3"}  # c3 via the entity anchor
+    assert retriever.last_anchors["entity_ids"] == {"e2"}
+    assert [chunk["id"] for chunk in result["chunks"]] == ["c2", "c3"]
+    assert [entity["id"] for entity in result["entities"]] == ["e2", "e1"]
+    assert result["entities"][0]["description"] == "keep me"
+    assert [chunk["id"] for chunk in retriever.last_baseline["chunks"]] == ["c1", "c2"]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("interval", "graph", "reason"),
+    ("interval", "timestamps", "reason"),
     [
-        ((None, None, "no_time_constraint"), _temporal_graph(), "no_time_constraint"),
-        ((None, None, "invalid_interval"), _temporal_graph(), "invalid_interval"),
-        ((_utc(1800, 1, 1), _utc(1801, 1, 1), None), _temporal_graph(), "no_temporal_match"),
+        ((None, None, "no_time_constraint"), [], "no_time_constraint"),
+        ((None, None, "invalid_interval"), [], "invalid_interval"),
+        ((_utc(1800, 1, 1), _utc(1801, 1, 1), None), [], "no_temporal_match"),
         (
             (_utc(1950, 1, 1), _utc(1951, 1, 1), None),
-            (
-                [
-                    _graph_node("elsewhere", "DocumentChunk"),
-                    _graph_node("ts_1950", "Timestamp", timestamp_str="1950"),
-                ],
-                [_graph_edge("elsewhere", "ts_1950", "contains")],
-            ),
+            [{"id": "ts_elsewhere", "timestamp_str": "1950", "time_at": 0, "time_until": 1}],
             "no_candidate_overlap",
         ),
     ],
 )
-async def test_temporal_retriever_fallback_reasons(interval, graph, reason, monkeypatch):
-    nodes, edges = graph
+async def test_temporal_retriever_fallbacks_return_the_baseline(
+    monkeypatch, interval, timestamps, reason
+):
     retriever, _engine, _fetch, _extract = _retriever(
-        monkeypatch, nodes=nodes, edges=edges, interval=interval, candidates=_candidates()
+        monkeypatch,
+        timestamps=timestamps,
+        neighborhoods={
+            ("ts_elsewhere",): (
+                [_node("far", "DocumentChunk")],
+                [_edge("far", "ts_elsewhere", "contains")],
+            )
+        },
+        interval=interval,
+        candidates=_candidates(),
     )
-    result = await retriever.get_retrieved_objects(query="query")
+    result = await retriever.get_retrieved_objects(query="in 1950")
+
     assert retriever.last_reason == reason
-    assert result is retriever.last_baseline
-    assert [chunk["id"] for chunk in result["chunks"]] == ["c1"]
+    assert result == retriever.last_baseline
+    assert [chunk["id"] for chunk in result["chunks"]] == ["c1", "c2"]
 
 
 @pytest.mark.asyncio
 async def test_temporal_retriever_propagates_hybrid_errors(monkeypatch):
-    nodes, edges = _temporal_graph()
     retriever, _engine, hybrid_fetch, _extract = _retriever(
-        monkeypatch,
-        nodes=nodes,
-        edges=edges,
-        interval=(None, None, "no_time_constraint"),
-        candidates=None,
+        monkeypatch, timestamps=[], neighborhoods={}, interval=(None, None, None), candidates=None
     )
-    hybrid_fetch.side_effect = RuntimeError("hybrid")
-    with pytest.raises(RuntimeError, match="hybrid"):
+    hybrid_fetch.side_effect = RuntimeError("hybrid down")
+    with pytest.raises(RuntimeError, match="hybrid down"):
         await retriever.get_retrieved_objects(query="in 1950")
