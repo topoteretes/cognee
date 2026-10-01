@@ -122,13 +122,32 @@ async def test_codegraph_config_is_rejected_with_session_id(permanent_pipeline):
 
 
 @pytest.mark.asyncio
-async def test_code_content_type_is_rejected(permanent_pipeline):
-    with pytest.raises(ValueError, match="need no content_type"):
+async def test_removed_code_content_type_is_ignored(permanent_pipeline):
+    # Existing callers keep working: the value is dropped and the repository
+    # runs through add() + cognify() like any other input, credentials included.
+    result = await remember_module.remember(
+        "https://github.com/acme/private",
+        dataset_id=uuid4(),
+        user=SimpleNamespace(id=uuid4()),
+        self_improvement=False,
+        content_type="code",
+        repo_credentials="tok123",
+    )
+
+    assert result.status == "completed"
+    assert permanent_pipeline["add"]["codegraph_config"] == {"repo_credentials": "tok123"}
+    assert "content_type" not in permanent_pipeline["add"]
+    assert "content_type" not in permanent_pipeline["cognify"]
+
+
+@pytest.mark.asyncio
+async def test_other_unsupported_content_types_are_still_rejected(permanent_pipeline):
+    with pytest.raises(ValueError, match="Unsupported remember content_type"):
         await remember_module.remember(
             "/some/repo",
             dataset_id=uuid4(),
             user=SimpleNamespace(id=uuid4()),
-            content_type="code",
+            content_type="pdf",
         )
 
     assert permanent_pipeline == {}

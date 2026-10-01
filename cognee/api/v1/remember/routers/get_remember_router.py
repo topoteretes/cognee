@@ -257,10 +257,9 @@ def get_remember_router() -> APIRouter:
             examples=[""],
             description=(
                 "Set to 'skills' to ingest SKILL.md files as dataset-scoped Skill nodes, "
-                "or 'code' to index whole code repositories (pass git URLs or server-local "
-                "repo paths via 'raw_data') as an architectural code graph through the "
-                "enola-backed pipeline. "
-                "Leave empty for normal ingestion."
+                "or 'cogx-archive' to import an uploaded archive. Leave empty for normal "
+                "ingestion, including code repositories (pass git URLs or server-local "
+                "repo paths via 'raw_data'). The removed 'code' value is accepted and ignored."
             ),
         ),
         import_mode: str | None = Form(
@@ -379,6 +378,15 @@ def get_remember_router() -> APIRouter:
             raise HTTPException(
                 status_code=400,
                 detail="Either datasetId or datasetName must be provided.",
+            )
+
+        # content_type='code' was removed (SDK-793): a repository in raw_data is
+        # ordinary data. Clients still sending it keep working; it is dropped.
+        if content_type == "code":
+            content_type = None
+            logger.warning(
+                "POST /remember content_type='code' is deprecated and ignored: pass the "
+                "repository path or URL in raw_data."
             )
 
         # String inputs join the uploads as one item list, uploads first. Drop

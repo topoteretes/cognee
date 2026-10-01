@@ -107,11 +107,11 @@ async def resolve_data_directories(
             if code_repo_clone_url(item) is not None:
                 from cognee.tasks.code_graph.code_repo import resolve_code_repository_url
 
-                manifest_item, document_paths, _skipped = await resolve_code_repository_url(
+                manifest_item, documents, _skipped = await resolve_code_repository_url(
                     item, user=user, dataset_id=dataset_id
                 )
                 resolved_data.append(manifest_item)
-                resolved_data.extend(str(path) for path in document_paths)
+                resolved_data.extend(documents)
                 continue
 
             local_path = _resolve_existing_local_path(item)

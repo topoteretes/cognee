@@ -1041,6 +1041,16 @@ async def remember(
     from cognee import __version__ as cognee_version
     from cognee.shared.utils import send_telemetry
 
+    # content_type="code" was removed (SDK-793): a repository is ordinary data
+    # and builds through add() + cognify(). Callers still passing it keep
+    # working; the value is dropped here, before any path reads it.
+    if kwargs.get("content_type") == "code":
+        kwargs.pop("content_type")
+        logger.warning(
+            "remember(content_type='code') is deprecated and ignored: pass the repository "
+            "path or URL as data; use codegraph_config for index_vectors / repo_credentials."
+        )
+
     # Migration dispatch: a MemorySource streams COGX records from an external
     # memory system (Mem0, Zep/Graphiti, Letta, a COGX archive, ...). The
     # migration loader routes them through add/cognify or direct graph storage

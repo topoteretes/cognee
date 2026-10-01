@@ -326,10 +326,15 @@ async def resolve_code_repository_url(
     shallow-cloned into the shared clones directory and then partitioned
     exactly like a local code project -- one ``code_repo`` manifest for the
     CODE_REPO cognify route plus the repository's documents as individual
-    items. Returns ``(manifest_item, document_paths, skip_count)``; the
-    manifest carries the credential-free URL as ``repo_url``. ``credentials``
-    authenticates the clone of a private repository (see ``resolve_repo_source``).
+    items. Returns ``(manifest_item, documents, skip_count)``; the manifest
+    carries the credential-free URL as ``repo_url``, and each document is a
+    ``RepoCloneFile``: the clone is cognee's, so its files are stored even when
+    ``ACCEPT_LOCAL_FILE_PATH=false`` refuses caller-supplied paths.
+    ``credentials`` authenticates the clone of a private repository (see
+    ``resolve_repo_source``).
     """
+    from cognee.tasks.ingestion.repo_clone_file import RepoCloneFile
+
     clone_url = code_repo_clone_url(spec)
     if clone_url is None:
         raise ValueError(
@@ -337,9 +342,10 @@ async def resolve_code_repository_url(
             "expected https://github.com/<owner>/<repo>, a gitlab.com project, or a .git URL."
         )
     repo_path = await resolve_repo_source(clone_url, credentials=credentials)
-    return await resolve_code_repository(
+    manifest_item, document_paths, skip_count = await resolve_code_repository(
         repo_path, user=user, dataset_id=dataset_id, source_url=redact_repo_spec(clone_url)
     )
+    return manifest_item, [RepoCloneFile(Path(path)) for path in document_paths], skip_count
 
 
 async def resolve_code_repository_urls(data, credentials: str, user=None, dataset_id=None):
@@ -357,11 +363,11 @@ async def resolve_code_repository_urls(data, credentials: str, user=None, datase
     resolved = []
     for item in items:
         if isinstance(item, str) and code_repo_clone_url(item) is not None:
-            manifest_item, document_paths, _skipped = await resolve_code_repository_url(
+            manifest_item, documents, _skipped = await resolve_code_repository_url(
                 item, user=user, dataset_id=dataset_id, credentials=credentials
             )
             resolved.append(manifest_item)
-            resolved.extend(str(path) for path in document_paths)
+            resolved.extend(documents)
         else:
             resolved.append(item)
     return resolved

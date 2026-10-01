@@ -30,6 +30,7 @@ from cognee.shared.logging_utils import get_logger
 from .carried_source import find_carried_source
 from .data_item import DataItem
 from .data_item_to_text_file import data_item_to_text_file
+from .repo_clone_file import RepoCloneFile
 from .save_data_item_to_storage import save_data_item_to_storage_detailed
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle: pipelines imports this package
@@ -91,6 +92,9 @@ def _source_uri_from_input(data_item: Any) -> str | None:
             if isinstance(explicit, str) and explicit.strip():
                 return explicit.strip()
         data_item = data_item.data
+
+    if isinstance(data_item, RepoCloneFile):
+        return data_item.path.as_uri()
 
     if isinstance(data_item, str):
         parsed = urlparse(data_item)
