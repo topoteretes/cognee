@@ -20,6 +20,17 @@ _FORMATS: tuple[tuple[re.Pattern, TimestampPrecision], ...] = (
 # Earliest value for each unstated part, in field order after the year.
 _LOWER_BOUND_DEFAULTS = (1, 1, 0, 0, 0)
 
+# A period with both bounds stated. The normalized form is ``<start>/<end>``
+# (ISO 8601 interval notation); prose spans — "from 1803 to 1815",
+# "between March 2024 and June 2024", "1803–1815" — are split on the connector
+# and each half normalized on its own. A hyphen counts only between two
+# four-digit years, so ``1803-05`` stays a month.
+_SPAN_SEPARATOR = re.compile(
+    r"\s*/\s*|\s+(?:to|and|until|till|through)\s+|\s*[\u2013\u2014]\s*|(?<=\d{4})-(?=\d{4})",
+    re.IGNORECASE,
+)
+_SPAN_PREFIX = re.compile(r"^(?:from|between)\s+", re.IGNORECASE)
+
 
 def _match_normalized(text: str) -> tuple[re.Match | None, TimestampPrecision | None]:
     for pattern, precision in _FORMATS:
@@ -45,18 +56,52 @@ def _period_end(lower: datetime, precision: TimestampPrecision) -> datetime:
     return lower + timedelta(seconds=1)
 
 
+def _span_from_text(text: str) -> Timestamp | None:
+    """The span ``Timestamp`` for ``<start>/<end>`` or a prose period, or None.
+
+    Both halves must parse as points and the start must come first; the span
+    runs from the start's lower bound to the end's exclusive upper bound, so
+    ``1803/1815`` is [1803-01-01, 1816-01-01). The calendar fields are the
+    start's.
+    """
+    parts = _SPAN_SEPARATOR.split(_SPAN_PREFIX.sub("", text.strip()), maxsplit=1)
+    if len(parts) != 2:
+        return None
+    start, end = (_point_from_text(part) for part in parts)
+    if start is None or end is None or start.time_at >= end.time_at:
+        return None
+    fields = {
+        name: getattr(start, name) for name in ("year", "month", "day", "hour", "minute", "second")
+    }
+    return Timestamp(
+        timestamp_str=f"{start.timestamp_str}/{end.timestamp_str}",
+        precision="span",
+        time_at=start.time_at,
+        time_until=end.time_until,
+        **fields,
+    )
+
+
 def timestamp_from_text(text: str) -> Timestamp | None:
     """The ``Timestamp`` datapoint for a normalized time string, or None.
 
     Accepts ``YYYY``, ``YYYY-MM``, ``YYYY-MM-DD`` and ``YYYY-MM-DD HH:MM:SS``,
-    and absolute dates in prose ("23 March 1947", "March 1947"), which
+    absolute dates in prose ("23 March 1947", "March 1947"), which
     ``normalize_absolute_date`` brings to one of those shapes at the precision
-    they state. Relative or year-less expressions ("that spring", "the 1950s")
-    return None. The precision is the form that matched; unstated parts take
-    the earliest value (January, the 1st, midnight), so the calendar fields and
-    ``time_at`` are the lower bound of the stated period. A string in the right
-    shape that is not a real date (``1950-02-30``, ``0000``) returns None too.
+    they state, and periods with both bounds stated (``1803/1815``,
+    "from 1803 to 1815", "between March 2024 and June 2024"), which become one
+    span (see ``_span_from_text``). Relative or year-less expressions ("that
+    spring", "the 1950s") return None. The precision is the form that matched;
+    unstated parts take the earliest value (January, the 1st, midnight), so the
+    calendar fields and ``time_at`` are the lower bound of the stated period.
+    A string in the right shape that is not a real date (``1950-02-30``,
+    ``0000``) returns None too.
     """
+    return _point_from_text(text) or _span_from_text(text)
+
+
+def _point_from_text(text: str) -> Timestamp | None:
+    """A single-point ``Timestamp`` (no spans); see ``timestamp_from_text``."""
     match, precision = _match_normalized(text.strip())
     if match is None:
         normalized = normalize_absolute_date(text)

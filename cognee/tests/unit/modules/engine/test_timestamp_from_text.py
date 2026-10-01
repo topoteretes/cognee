@@ -163,3 +163,62 @@ def test_timestamp_bounds_rejects_what_the_parser_rejects_and_year_9999(text):
 
     with pytest.raises(ValueError):
         timestamp_bounds(text)
+
+
+# --- spans: a period with both bounds stated (SDK-899) -------------------------
+
+
+@pytest.mark.parametrize(
+    "text, normalized, lower, upper",
+    [
+        ("1803/1815", "1803/1815", (1803, 1, 1), (1816, 1, 1)),
+        ("from 1803 to 1815", "1803/1815", (1803, 1, 1), (1816, 1, 1)),
+        ("between 1803 and 1815", "1803/1815", (1803, 1, 1), (1816, 1, 1)),
+        ("1803–1815", "1803/1815", (1803, 1, 1), (1816, 1, 1)),
+        ("1803-1815", "1803/1815", (1803, 1, 1), (1816, 1, 1)),
+        ("2024-03/2024-06", "2024-03/2024-06", (2024, 3, 1), (2024, 7, 1)),
+        ("between March 2024 and June 2024", "2024-03/2024-06", (2024, 3, 1), (2024, 7, 1)),
+        ("from 12 May 2023 to 14 May 2023", "2023-05-12/2023-05-14", (2023, 5, 12), (2023, 5, 15)),
+        ("1969-07-16 / 1969-07-24", "1969-07-16/1969-07-24", (1969, 7, 16), (1969, 7, 25)),
+    ],
+)
+def test_a_period_with_both_bounds_is_one_span_timestamp(text, normalized, lower, upper):
+    timestamp = timestamp_from_text(text)
+
+    assert timestamp is not None
+    assert timestamp.precision == "span"
+    assert timestamp.timestamp_str == normalized
+    assert timestamp.name == normalized
+    assert timestamp.time_at == _epoch_ms(*lower)
+    assert timestamp.time_until == _epoch_ms(*upper)
+    assert (timestamp.year, timestamp.month, timestamp.day) == lower
+    assert timestamp.id == Timestamp.id_for(normalized)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "1815/1803",  # backwards
+        "1803/1803",  # not a period
+        "from 1803 to that spring",  # one half does not parse
+        "between March and June 2024",  # first half has no year
+        "1803/1815/1820",  # three bounds
+    ],
+)
+def test_malformed_periods_are_rejected(text):
+    assert timestamp_from_text(text) is None
+
+
+def test_a_hyphen_splits_only_two_four_digit_years():
+    assert timestamp_from_text("1803-05").precision == "month"
+    assert timestamp_from_text("1803-1815").precision == "span"
+
+
+def test_a_window_inside_a_span_overlaps_it():
+    from cognee.infrastructure.databases.graph.graph_db_interface import timestamp_overlaps
+
+    span = timestamp_from_text("from 1803 to 1815")
+    node = {"id": "ts", "time_at": span.time_at, "time_until": span.time_until}
+    assert timestamp_overlaps(node, _epoch_ms(1805, 1, 1), _epoch_ms(1806, 1, 1)) is True
+    assert timestamp_overlaps(node, _epoch_ms(1816, 1, 1), _epoch_ms(1817, 1, 1)) is False
+    assert timestamp_overlaps(node, _epoch_ms(1802, 1, 1), _epoch_ms(1803, 1, 1)) is False
