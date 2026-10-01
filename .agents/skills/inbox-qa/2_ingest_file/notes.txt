@@ -1,7 +1,0 @@
-Notes, week of September 28
-
-- Promised Priya at Northwind the pilot pricing by Friday: 3 seats at 400 EUR a month,
-  first month free. Not sent yet.
-- SSO for the pilot: SAML only for now; OIDC lands in November.
-- The Atlas migration is paused until the duplicate-invoice fix ships. Owner: Jonas.
-- Prefer short replies, first names, sign off with "Best, M."
