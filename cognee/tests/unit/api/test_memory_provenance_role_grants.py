@@ -793,37 +793,15 @@ async def _tenantless_caller_graph(seed):
 
 
 @pytest.mark.asyncio
-async def test_tenantless_caller_sees_datasets_shared_with_them_by_acl():
+async def test_tenantless_caller_sees_exactly_the_datasets_shared_with_them():
     """Issue #5110: with no tenant, the scope used to be ownership, so a caller
     who owns nothing but holds read grants got no Dataset nodes while
-    `/datasets` and `/visualize/brains` listed every shared dataset."""
+    `/datasets` and `/visualize/brains` listed every shared dataset.
+
+    The scope is exactly what `/datasets` lists: Z, which the caller owns but
+    holds no read grant on, stays out, and nothing from the unrelated tenant
+    seeded alongside leaks in."""
     await _seed()  # an unrelated tenant in the same database
-    seed = await _seed_tenantless_share()
-
-    by_type = await _tenantless_caller_graph(seed)
-
-    shared = {f"dataset:{dataset_id}" for dataset_id in seed["shared_ids"]}
-    assert shared <= by_type.get("Dataset", set())
-    owners = {f"user:{user_id}" for user_id in seed["owner_ids"]}
-    assert owners <= by_type.get("User", set())
-
-
-@pytest.mark.asyncio
-async def test_tenantless_caller_does_not_see_an_owned_dataset_without_a_read_grant():
-    """Ownership is not access: an owned dataset with no ACL row is hidden by
-    `/datasets`, so the provenance graph must hide it too."""
-    seed = await _seed_tenantless_share()
-
-    by_type = await _tenantless_caller_graph(seed)
-
-    assert f"dataset:{seed['owned_id']}" not in by_type.get("Dataset", set())
-
-
-@pytest.mark.asyncio
-async def test_tenantless_caller_scope_lists_no_unrelated_tenants_users_or_datasets():
-    """The dataset-only scope must narrow the tenant query too: without that
-    filter the graph named every tenant in the system."""
-    await _seed()
     seed = await _seed_tenantless_share()
 
     by_type = await _tenantless_caller_graph(seed)
@@ -833,6 +811,22 @@ async def test_tenantless_caller_scope_lists_no_unrelated_tenants_users_or_datas
     assert by_type.get("Dataset", set()) == expected_datasets
     expected_users = {f"user:{user_id}" for user_id in (*seed["owner_ids"], seed["caller_id"])}
     assert by_type.get("User", set()) == expected_users
+
+
+@pytest.mark.asyncio
+async def test_dataset_only_scope_lists_only_the_tenants_of_its_datasets():
+    """Without a tenant scope, the Tenant query is narrowed to the tenants the
+    in-scope datasets belong to; unfiltered it named every tenant in the
+    database."""
+    from cognee.api.v1.visualize.memory_provenance import get_memory_provenance_graph
+
+    in_scope = await _seed()
+    await _seed()  # a second tenant, out of scope
+
+    nodes, _edges = await get_memory_provenance_graph(scope_dataset_ids=[in_scope["dataset_id"]])
+
+    tenants = {node_id for node_id, props in nodes if props.get("type") == "Tenant"}
+    assert tenants == {f"tenant:{in_scope['tenant_id']}"}
 
 
 @pytest.mark.asyncio
