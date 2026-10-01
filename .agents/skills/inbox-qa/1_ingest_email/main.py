@@ -1,6 +1,7 @@
-"""Step 1: remember the newest email in your Gmail inbox, plus your last 20 sent emails.
+"""Step 1: remember your 20 newest inbox emails, plus your last 20 sent emails.
 
-The sent emails (node set `sent`) are a sample of how you write, so step 3 can draft a
+The inbox emails (node set `email`) are what step 3 answers; it picks one by sender name,
+or the newest. The sent emails (node set `sent`) are a sample of how you write, so step 3 can draft a
 reply in your style. Needs credentials.json (a Gmail OAuth Desktop client) in this folder;
 token.json is written here on the first run.
 
@@ -15,7 +16,7 @@ from cognee.shared.logging_utils import ERROR, setup_logging
 from cognee.tasks.ingestion.connectors.gmail import build_gmail_service, parse_message
 
 DATASET = "inbox_qa_skill"  # the same in every step
-SENT_COUNT = 20
+INBOX_COUNT = SENT_COUNT = 20
 HERE = Path(__file__).parent
 CREDENTIALS, TOKEN = HERE / "credentials.json", HERE / "token.json"
 
@@ -34,11 +35,13 @@ def fetch_emails(label: str, count: int) -> list[str]:
 
 
 async def main() -> None:
-    inbox = fetch_emails("INBOX", 1)
+    inbox = fetch_emails("INBOX", INBOX_COUNT)
     if not inbox:
         raise SystemExit("[ingest_email] Your Gmail inbox is empty.")
     await cognee.remember(inbox, dataset_name=DATASET, node_set=["email"], self_improvement=False)
-    print(f"[ingest_email] Remembered: {inbox[0].splitlines()[0]}")
+    print(
+        f"[ingest_email] Remembered {len(inbox)} inbox emails, newest: {inbox[0].splitlines()[0]}"
+    )
 
     sent = fetch_emails("SENT", SENT_COUNT)
     if sent:

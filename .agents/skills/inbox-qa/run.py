@@ -48,6 +48,7 @@ if __name__ == "__main__":
     parser.add_argument("--no-granola", action="store_true", help="skip the Granola step")
     parser.add_argument("--days", type=int, default=30, help="Granola meetings to remember")
     parser.add_argument("--question", help="what to ask (default: draft a reply)")
+    parser.add_argument("--sender", help="answer the newest email from this name or address")
     args = parser.parse_args()
 
     missing = missing_setup(need_gmail=not args.no_email, need_granola=not args.no_granola)
@@ -63,4 +64,5 @@ if __name__ == "__main__":
         run_step("1_ingest_email")
     if not args.no_granola:
         run_step("2_ingest_granola", str(args.days))
-    run_step("3_answer", *([args.question] if args.question else []))
+    sender = ["--sender", args.sender] if args.sender else []
+    run_step("3_answer", *sender, *([args.question] if args.question else []))

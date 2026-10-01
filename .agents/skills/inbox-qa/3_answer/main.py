@@ -1,36 +1,57 @@
 """Step 3: answer a question from everything the earlier steps remembered.
 
-Facts come from the newest email and your Granola meetings; when the question asks for a
-reply, a few of your own sent emails are passed in so the draft sounds like you.
+Facts come from one inbox email and your Granola meetings: the newest email from
+--sender when given, else the newest email. When the question asks for a reply, a few of
+your own sent emails are passed in so the draft sounds like you.
 
-Run alone: uv run python .agents/skills/inbox-qa/3_answer/main.py "Your question"
+Run alone: uv run python .agents/skills/inbox-qa/3_answer/main.py [--sender NAME] ["question"]
 """
 
+import argparse
 import asyncio
-import sys
+import re
 
 import cognee
 from cognee.modules.search.types import SearchType
 from cognee.shared.logging_utils import ERROR, setup_logging
 
 DATASET = "inbox_qa_skill"  # the same in every step
-DEFAULT_QUESTION = "Draft my reply to the newest email, using what my meetings say about it."
+DEFAULT_QUESTION = "Draft my reply to this email, using what my meetings say about it."
 STYLE_PROMPT = """Answer from the context. Never invent a date, price or promise.
 When asked to write or draft a reply, write it as the user would: match the greeting,
 length, tone and sign-off of the user's own emails given below. Write in the language of
 the email being answered, not the language of the examples."""
 
 
-async def main(question: str) -> None:
-    # Name the inbox email explicitly: with sent mail in the graph too, "the newest email"
-    # alone can match one of your own threads instead.
-    inbox = await cognee.recall(
-        "The newest email in my inbox",
+def header(text: str, field: str) -> str:
+    """One header line of a remembered email (From, Received, ...), or ""."""
+    match = re.search(rf"^{field}: (.*)$", text, re.MULTILINE)
+    return match.group(1).strip() if match else ""
+
+
+async def pick_email(sender: str | None) -> str:
+    """The newest inbox email, or the newest one whose From line contains ``sender``."""
+    # Similarity search can't tell which email is newest, so take every inbox chunk and
+    # choose by the headers step 1 stored. Only an email's first chunk carries them.
+    chunks = await cognee.recall(
+        sender or "email",
         query_type=SearchType.CHUNKS,
         datasets=[DATASET],
         node_name=["email"],
-        top_k=1,
+        top_k=100,
     )
+    emails = [str(chunk.text) for chunk in chunks if header(str(chunk.text), "From")]
+    if sender:
+        emails = [text for text in emails if sender.lower() in header(text, "From").lower()]
+    if not emails:
+        who = f" from {sender}" if sender else ""
+        raise SystemExit(f"[answer] No inbox email{who}. Run the ingest steps first.")
+    return max(emails, key=lambda text: header(text, "Received"))
+
+
+async def main(question: str, sender: str | None) -> None:
+    email = await pick_email(sender)
+    print(f"[answer] Email: {email.splitlines()[0]} (from {header(email, 'From')})")
     own_emails = await cognee.recall(
         "Emails I wrote to a person",
         query_type=SearchType.CHUNKS,
@@ -39,8 +60,7 @@ async def main(question: str) -> None:
         top_k=3,
     )
     prompt = question
-    if inbox:
-        prompt += f"\n\nThe newest email in my inbox:\n{inbox[0].text}"
+    prompt += f"\n\nThe email to answer:\n{email}"
     if own_emails:
         examples = "\n---\n".join(str(chunk.text) for chunk in own_emails)
         prompt += f"\n\nExamples of my own emails, for style only:\n{examples}"
@@ -56,4 +76,8 @@ async def main(question: str) -> None:
 
 if __name__ == "__main__":
     setup_logging(log_level=ERROR)
-    asyncio.run(main(" ".join(sys.argv[1:]) or DEFAULT_QUESTION))
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("question", nargs="*", help="what to ask (default: draft a reply)")
+    parser.add_argument("--sender", help="answer the newest email from this name or address")
+    args = parser.parse_args()
+    asyncio.run(main(" ".join(args.question) or DEFAULT_QUESTION, args.sender))
