@@ -17,6 +17,38 @@
       }
     },
     {
+      "name": "hybrid_completion_5_20",
+      "base": "hybrid_completion",
+      "kwargs": {
+        "chunks_top_k": 5,
+        "entities_top_k": 20
+      },
+      "qa_prompt_paths": {
+        "DEFAULT": "cognee/eval_framework/locomo/qa_prompts/default.txt",
+        "single_hop": "cognee/eval_framework/locomo/qa_prompts/single_hop.txt",
+        "multi_hop": "cognee/eval_framework/locomo/qa_prompts/multi_hop.txt",
+        "temporal": "cognee/eval_framework/locomo/qa_prompts/temporal.txt",
+        "open_domain": "cognee/eval_framework/locomo/qa_prompts/open_domain.txt",
+        "adversarial": "cognee/eval_framework/locomo/qa_prompts/adversarial.txt"
+      }
+    },
+    {
+      "name": "hybrid_completion_10_20",
+      "base": "hybrid_completion",
+      "kwargs": {
+        "chunks_top_k": 10,
+        "entities_top_k": 20
+      },
+      "qa_prompt_paths": {
+        "DEFAULT": "cognee/eval_framework/locomo/qa_prompts/default.txt",
+        "single_hop": "cognee/eval_framework/locomo/qa_prompts/single_hop.txt",
+        "multi_hop": "cognee/eval_framework/locomo/qa_prompts/multi_hop.txt",
+        "temporal": "cognee/eval_framework/locomo/qa_prompts/temporal.txt",
+        "open_domain": "cognee/eval_framework/locomo/qa_prompts/open_domain.txt",
+        "adversarial": "cognee/eval_framework/locomo/qa_prompts/adversarial.txt"
+      }
+    },
+    {
       "name": "hybrid_completion_20_20_gci",
       "base": "hybrid_completion",
       "kwargs": {
