@@ -1826,8 +1826,12 @@ jobs:
           uv pip install -e ./cognee-mcp
 
           # 2. Force-install the local root to overwrite the PyPI version
-          # This replaces the PyPI 'cognee' with your current branch code
-          uv pip install --force-reinstall -e .
+          # This replaces the PyPI 'cognee' with your current branch code.
+          # --no-deps: the environment was already synced from uv.lock, and a
+          # fresh resolution here ignores the lock and upgrades dependencies
+          # one package at a time (opentelemetry-api past the locked
+          # opentelemetry-sdk, which pins the API to its exact version).
+          uv pip install --no-deps --force-reinstall -e .
 
       - name: Run api/tool usage logger
         env:
