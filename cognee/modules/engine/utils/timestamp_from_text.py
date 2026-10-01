@@ -5,6 +5,8 @@ from cognee.modules.engine.models import Timestamp
 from cognee.modules.engine.models.Timestamp import TimestampPrecision
 from cognee.modules.engine.utils.temporal_hints import normalize_absolute_date
 
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
 # The normalized forms the graph prompt asks for, most to least precise. Anchored
 # with fullmatch, so "1969-07-20 (Sunday)" never parses; a date left in prose
 # ("July 1969") gets one normalization pass first, and anything still unparsed
@@ -99,8 +101,10 @@ def timestamp_bounds(text: str) -> tuple[str, datetime, datetime]:
     timestamp = timestamp_from_text(text)
     if timestamp is None:
         raise ValueError(f"Unsupported timestamp: {text!r}")
+    # Epoch arithmetic rather than fromtimestamp(): on Windows the latter
+    # rejects negative values, i.e. every date before 1970.
     return (
         timestamp.timestamp_str,
-        datetime.fromtimestamp(timestamp.time_at / 1000, tz=timezone.utc),
-        datetime.fromtimestamp(timestamp.time_until / 1000, tz=timezone.utc),
+        _EPOCH + timedelta(milliseconds=timestamp.time_at),
+        _EPOCH + timedelta(milliseconds=timestamp.time_until),
     )
