@@ -127,6 +127,7 @@ with `remember()`, then runs one agent over that memory with `recall()`.
 | [`personalized_email/`](cookbooks/personalized_email/) | Granola + Gmail memory and a draft agent that answers an email with what you discussed, what you promised, and in your own tone |
 | [`company_brain/follow_up_agent/`](cookbooks/company_brain/follow_up_agent/) | Granola + Gmail + Linear memory and an agent that turns your latest call into next steps (owner, team, deadline, tracked issue) and posts them to Slack |
 | [`self_hosted_companion/`](cookbooks/self_hosted_companion/) | A chat companion that remembers your notes folder and every earlier chat |
+| [`inbox_qa_skill/`](cookbooks/inbox_qa_skill/) | A multi-step skill (newest email + a notes file, then a question) with one `SKILL.md` that a person or an agent can follow |
 
 ### [`company_brain/`](cookbooks/company_brain/) — one memory for a whole company
 | Script | Demonstrates |
