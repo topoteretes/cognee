@@ -4,6 +4,7 @@ import inspect
 import threading
 import types
 from collections import OrderedDict
+from contextlib import asynccontextmanager
 from enum import Enum
 from os import path
 from typing import (  # noqa: UP035 - typing.List is a distinct origin key, not an annotation
@@ -16,6 +17,7 @@ from typing import (  # noqa: UP035 - typing.List is a distinct origin key, not 
 )
 from uuid import UUID
 
+from filelock import AsyncFileLock
 import lancedb
 from lancedb.pydantic import LanceModel, Vector
 from pydantic import BaseModel
@@ -211,6 +213,19 @@ class LanceDBAdapter(VectorDBInterface):
         #   (*,     True)  — closed, not reusable in either mode
         self._subprocess_mode = session is not None
         self._permanently_closed = False
+
+    @asynccontextmanager
+    async def _write_lock(self):
+        async with self.VECTOR_DB_LOCK:
+            url = self.url or getattr(self.connection, "_url", None)
+            if not url:
+                raise RuntimeError("LanceDB URL required for interprocess writer lock")
+            if url.startswith(("db://", "http://", "https://", "s3://", "gs://", "az://")):
+                yield
+            else:
+                # ponytail: one local-store writer; partition by table if throughput requires it.
+                async with AsyncFileLock(path.realpath(url) + ".writer.lock"):
+                    yield
 
     async def get_connection(self):
         """
@@ -423,7 +438,7 @@ class LanceDBAdapter(VectorDBInterface):
         LanceDataPoint = self._make_lance_datapoint_cls(payload_schema, vector_size)
 
         if not await self.has_collection(collection_name):
-            async with self.VECTOR_DB_LOCK:
+            async with self._write_lock():
                 if not await self.has_collection(collection_name):
                     connection = await self.get_connection()
                     return await connection.create_table(
@@ -445,14 +460,7 @@ class LanceDBAdapter(VectorDBInterface):
         payload_schema = type(data_points[0])
 
         if not await self.has_collection(collection_name):
-            async with self.VECTOR_DB_LOCK:
-                if not await self.has_collection(collection_name):
-                    await self.create_collection(
-                        collection_name,
-                        payload_schema,
-                    )
-
-        collection = await self.get_collection(collection_name)
+            await self.create_collection(collection_name, payload_schema)
 
         data_vectors = await self.embed_data(
             [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
@@ -475,7 +483,8 @@ class LanceDBAdapter(VectorDBInterface):
         # serializes upserts but is the only way to keep tag unions honest.
         lance_data_points: list = []
         try:
-            async with self.VECTOR_DB_LOCK:
+            async with self._write_lock():
+                collection = await self.get_collection(collection_name)
                 existing_belongs_to_set: dict[str, list] = {}
                 incoming_ids = [str(dp.id) for dp in data_points]
                 if incoming_ids:
@@ -598,7 +607,7 @@ class LanceDBAdapter(VectorDBInterface):
         LanceDataPoint = self._make_lance_datapoint_cls(payload_schema, vector_size)
 
         if not await self.has_collection(collection_name):
-            async with self.VECTOR_DB_LOCK:
+            async with self._write_lock():
                 if not await self.has_collection(collection_name):
                     connection = await self.get_connection()
                     await connection.create_table(
@@ -606,8 +615,6 @@ class LanceDBAdapter(VectorDBInterface):
                         schema=self._schema_for_create_table(LanceDataPoint),
                         exist_ok=True,
                     )
-
-        collection = await self.get_collection(collection_name)
 
         raw_points = []
         for point in points:
@@ -630,7 +637,8 @@ class LanceDBAdapter(VectorDBInterface):
                 )
             )
 
-        async with self.VECTOR_DB_LOCK:
+        async with self._write_lock():
+            collection = await self.get_collection(collection_name)
             await (
                 collection.merge_insert("id")
                 .when_matched_update_all()
@@ -718,7 +726,7 @@ class LanceDBAdapter(VectorDBInterface):
                 "(or make them optional) and re-run migration."
             )
 
-        async with self.VECTOR_DB_LOCK:
+        async with self._write_lock():
             connection = await self.get_connection()
             await connection.drop_table(collection_name)
             await connection.create_table(
@@ -1205,8 +1213,6 @@ class LanceDBAdapter(VectorDBInterface):
             return
         if not await self.has_collection(collection_name):
             return
-        collection = await self.get_collection(collection_name)
-
         escaped_ids = [str(id_).replace("'", "''") for id_ in payload_updates]
         if len(escaped_ids) == 1:
             where_clause = f"id = '{escaped_ids[0]}'"
@@ -1214,7 +1220,8 @@ class LanceDBAdapter(VectorDBInterface):
             id_list = ", ".join(f"'{id_}'" for id_ in escaped_ids)
             where_clause = f"id IN ({id_list})"
 
-        async with self.VECTOR_DB_LOCK:
+        async with self._write_lock():
+            collection = await self.get_collection(collection_name)
             schema = await collection.schema()
             # The caller contract: every updated field already exists in the
             # payload struct. pyarrow silently DROPS unknown struct keys when
@@ -1256,12 +1263,8 @@ class LanceDBAdapter(VectorDBInterface):
 
     async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
         # Idempotent: a missing collection (or empty id list) is a no-op.
-        if not await self.has_collection(collection_name):
-            return
         if not data_point_ids:
             return
-
-        collection = await self.get_collection(collection_name)
 
         # ids may be UUIDs or graph-computed deterministic strings; the stored
         # `id` column is a str, so match by string and escape single quotes to
@@ -1272,7 +1275,11 @@ class LanceDBAdapter(VectorDBInterface):
             batch = data_point_ids[start : start + self.DELETE_PREDICATE_BATCH_SIZE]
             escaped_ids = [str(data_point_id).replace("'", "''") for data_point_id in batch]
             id_list = ", ".join(f"'{escaped_id}'" for escaped_id in escaped_ids)
-            await collection.delete(f"id IN ({id_list})")
+            async with self._write_lock():
+                if not await self.has_collection(collection_name):
+                    return
+                collection = await self.get_collection(collection_name)
+                await collection.delete(f"id IN ({id_list})")
 
     async def remove_belongs_to_set_tags(
         self,
@@ -1359,7 +1366,8 @@ class LanceDBAdapter(VectorDBInterface):
                 literal_ids = "(" + ", ".join(f"'{nid}'" for nid in escaped_ids) + ")"
                 where_clause = f"({where_clause}) AND id IN {literal_ids}"
 
-            async with self.VECTOR_DB_LOCK:
+            async with self._write_lock():
+                collection = await self.get_collection(collection_name)
                 try:
                     rows = await collection.query().where(where_clause).to_list()
                 except Exception as e:
@@ -1457,20 +1465,21 @@ class LanceDBAdapter(VectorDBInterface):
         )
 
     async def prune(self):
-        connection = await self.get_connection()
-        collection_names = await connection.table_names()
+        async with self._write_lock():
+            connection = await self.get_connection()
+            collection_names = await connection.table_names()
 
-        for collection_name in collection_names:
-            collection = await self.get_collection(collection_name)
-            await collection.delete("id IS NOT NULL")
-            await connection.drop_table(collection_name)
+            for collection_name in collection_names:
+                collection = await self.get_collection(collection_name)
+                await collection.delete("id IS NOT NULL")
+                await connection.drop_table(collection_name)
 
-        if self.url and not self.url.startswith(
-            ("db://", "http://", "https://", "s3://", "gs://", "az://")
-        ):
-            db_dir_path = path.dirname(self.url)
-            db_file_name = path.basename(self.url)
-            await get_file_storage(db_dir_path).remove_all(db_file_name)
+            if self.url and not self.url.startswith(
+                ("db://", "http://", "https://", "s3://", "gs://", "az://")
+            ):
+                db_dir_path = path.dirname(self.url)
+                db_file_name = path.basename(self.url)
+                await get_file_storage(db_dir_path).remove_all(db_file_name)
 
     def get_data_point_schema(self, model_type: BaseModel):
         """Return the storable payload schema for ``model_type``. Memoized on
