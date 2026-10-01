@@ -68,6 +68,14 @@ def _has_budget_message(text: str) -> bool:
     return _BUDGET_SENTENCE_RE.search(text) is not None
 
 
+def _budget_detail_from_text(text: str) -> str | None:
+    """The provider's budget sentence inside ``text``, identifiers masked, or None."""
+    match = _BUDGET_SENTENCE_RE.search(text)
+    if match is None:
+        return None
+    return _redact_budget_identifiers(match.group(0).strip())
+
+
 def _is_budget_exhausted_link(e: BaseException) -> bool:
     """Classify a single exception in a ``__cause__`` chain."""
     # Case 1: provider-level payment required
@@ -151,9 +159,9 @@ def budget_exhaustion_detail(e: BaseException) -> str | None:
         except Exception:
             logger.debug("Ignoring exception in budget_exhaustion_detail", exc_info=True)
             text = ""
-        match = _BUDGET_SENTENCE_RE.search(text)
-        if match:
-            return _redact_budget_identifiers(match.group(0).strip())
+        detail = _budget_detail_from_text(text)
+        if detail:
+            return detail
         current = current.__cause__
     return None
 
@@ -172,6 +180,46 @@ def raise_if_budget_exhausted(error: BaseException) -> None:
     if detail:
         raise LLMPaymentRequiredError(f"LLM budget exhausted: {detail}") from error
     raise LLMPaymentRequiredError() from error
+
+
+def is_budget_exhausted_record(error_class: str | None, error_message: str | None) -> bool:
+    """Return True if a *recorded* failure signals LLM budget or payment exhaustion.
+
+    The counterpart of ``is_budget_exhausted_error`` for a failure that no
+    longer exists as an exception. A pipeline that ends ``PipelineRunErrored``
+    without raising hands back only the root error's class name and its
+    scrubbed message (``error_class`` / ``error_message``), so there is no
+    ``__cause__`` chain, status code or response body left to inspect.
+
+    Two signals, in order: the class name ``LLMPaymentRequiredError``, which is
+    what the LLM and embedding paths raise once they have classified a budget
+    rejection, and then the same whole-sentence message match
+    ``is_budget_exhausted_error`` falls back to (see ``_BUDGET_SENTENCE_RE``),
+    for a run that recorded the provider's own error instead.
+    """
+    if error_class == LLMPaymentRequiredError.__name__:
+        return True
+    if not error_message:
+        return False
+    return _has_budget_message(error_message)
+
+
+def raise_if_budget_exhausted_record(error_class: str | None, error_message: str | None) -> None:
+    """Raise ``LLMPaymentRequiredError`` (HTTP 402) for a recorded budget failure.
+
+    ``raise_if_budget_exhausted`` for the recorded shape (see
+    ``is_budget_exhausted_record``): a caller that ran a pipeline with
+    ``raise_on_error=False`` turns the errored run back into the typed error,
+    so everything above it classifies the failure the same way as a raised one.
+    The provider's budget sentence is carried over when the recorded message
+    still contains it.
+    """
+    if not is_budget_exhausted_record(error_class, error_message):
+        return
+    detail = _budget_detail_from_text(error_message or "")
+    if detail:
+        raise LLMPaymentRequiredError(f"LLM budget exhausted: {detail}")
+    raise LLMPaymentRequiredError()
 
 
 class LLMAPIKeyNotSetError(CogneeValidationError):
