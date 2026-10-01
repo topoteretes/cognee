@@ -1,9 +1,7 @@
 import asyncio
-from typing import Any, Optional
+from typing import Any
 
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
-from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
-from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.hybrid.pairs import (
     attach_source_chunks,
     chunk_summary_pairs,
@@ -17,7 +15,6 @@ from cognee.modules.retrieval.hybrid.results import (
     payload,
     payload_matches_node_filter,
     result_id,
-    scored_payload,
 )
 from cognee.shared.logging_utils import get_logger
 
@@ -28,20 +25,21 @@ async def retrieve_hybrid_chunks(
     vector_engine: Any,
     query: str,
     chunks_top_k: int,
-    text_summaries_top_k: Optional[int],
-    node_name: Optional[list[str]],
+    text_summaries_top_k: int | None,
+    node_name: list[str] | None,
     node_name_filter_operator: str,
     use_importance_weight: bool,
-    query_vector: Optional[list[float]] = None,
+    query_vector: list[float] | None = None,
     use_truth_weight: bool = False,
-    q_coords: Optional[list[float]] = None,
-    truth_state_by_id: Optional[dict] = None,
-    current_truth_epoch: Optional[int] = None,
+    q_coords: list[float] | None = None,
+    truth_state_by_id: dict | None = None,
+    current_truth_epoch: int | None = None,
+    personal_weights: dict | None = None,
+    personal_influence: float = 0.0,
 ) -> dict[str, Any]:
-    candidate_limit = max(0, chunks_top_k * 2)
+    candidate_limit = chunk_candidate_limit(chunks_top_k)
     summary_limit = summary_candidate_limit(chunks_top_k, text_summaries_top_k)
-    bm25_chunks, vector_chunks, summary_hits = await asyncio.gather(
-        search_bm25_chunks(query, candidate_limit, node_name, node_name_filter_operator),
+    vector_chunks, summary_hits = await asyncio.gather(
         search_collection(
             vector_engine,
             "DocumentChunk_text",
@@ -49,7 +47,6 @@ async def retrieve_hybrid_chunks(
             candidate_limit,
             node_name,
             node_name_filter_operator,
-            required=True,
             query_vector=query_vector,
         ),
         search_collection(
@@ -64,7 +61,6 @@ async def retrieve_hybrid_chunks(
     )
 
     pairs = chunk_summary_pairs(
-        bm25_chunks,
         vector_chunks,
         summary_hits,
         node_name,
@@ -88,6 +84,8 @@ async def retrieve_hybrid_chunks(
         q_coords=q_coords,
         truth_state_by_id=truth_state_by_id,
         current_truth_epoch=current_truth_epoch,
+        personal_weights=personal_weights,
+        personal_influence=personal_influence,
     )
     if summary_limit > 0:
         await load_summary_text_for_ranked_pairs(
@@ -103,41 +101,14 @@ async def retrieve_hybrid_chunks(
     }
 
 
-def summary_candidate_limit(chunks_top_k: int, text_summaries_top_k: Optional[int]) -> int:
+def chunk_candidate_limit(chunks_top_k: int) -> int:
+    return max(0, chunks_top_k * 2)
+
+
+def summary_candidate_limit(chunks_top_k: int, text_summaries_top_k: int | None) -> int:
     if text_summaries_top_k is None:
         return max(0, chunks_top_k)
     return text_summaries_top_k
-
-
-async def search_bm25_chunks(
-    query: str,
-    limit: int,
-    node_name: Optional[list[str]],
-    node_name_filter_operator: str,
-) -> list[dict]:
-    if limit <= 0:
-        return []
-
-    try:
-        retriever = BM25ChunksRetriever(top_k=limit, with_scores=True)
-        scored_chunks = await retriever.get_retrieved_objects(query)
-    except NoDataError:
-        return []
-    except Exception as error:
-        logger.warning("BM25 chunk retrieval failed; using vector chunks only: %s", error)
-        return []
-
-    chunks = []
-    for item in scored_chunks:
-        chunk, score = scored_payload(item)
-        if score <= 0:
-            continue
-        if not isinstance(chunk, dict):
-            continue
-        if not payload_matches_node_filter(chunk, node_name, node_name_filter_operator):
-            continue
-        chunks.append(chunk)
-    return chunks
 
 
 async def search_collection(
@@ -145,12 +116,11 @@ async def search_collection(
     collection_name: str,
     query: str,
     limit: int,
-    node_name: Optional[list[str]],
+    node_name: list[str] | None,
     node_name_filter_operator: str,
     *,
-    required: bool = False,
     apply_node_filter: bool = True,
-    query_vector: Optional[list[float]] = None,
+    query_vector: list[float] | None = None,
 ) -> list[Any]:
     if limit <= 0:
         return []
@@ -167,10 +137,7 @@ async def search_collection(
             node_name=search_node_name,
             node_name_filter_operator=search_operator,
         )
-    except CollectionNotFoundError as error:
-        if required:
-            logger.error("%s collection not found", collection_name)
-            raise NoDataError("No data found in the system, please add data first.") from error
+    except CollectionNotFoundError:
         logger.debug("%s collection not found; using empty channel", collection_name)
         return []
 
@@ -178,7 +145,7 @@ async def search_collection(
 async def load_source_chunks_for_summaries(
     vector_engine: Any,
     chunk_ids: list[str],
-    node_name: Optional[list[str]],
+    node_name: list[str] | None,
     node_name_filter_operator: str,
 ) -> list[Any]:
     chunks = await vector_engine.retrieve("DocumentChunk_text", chunk_ids)
@@ -212,7 +179,7 @@ async def load_source_chunks_for_summaries(
 async def load_summary_text_for_ranked_pairs(
     vector_engine: Any,
     ranked_pairs: list[dict],
-    node_name: Optional[list[str]],
+    node_name: list[str] | None,
     node_name_filter_operator: str,
 ) -> None:
     summary_ids_by_chunk_id = {}

@@ -1,20 +1,18 @@
 from uuid import UUID
-from typing import Optional
 
 from sqlalchemy import text
 
-from cognee.modules.users.models import User
-from cognee.modules.users.models import DatasetDatabase
-from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
-from cognee.infrastructure.databases.vector.create_vector_engine import (
-    create_vector_engine,
-    evict_vector_engines_for_database,
-)
 from cognee.infrastructure.databases.postgres import (
     create_pg_database_if_not_exists,
     drop_pg_database_if_exists,
 )
+from cognee.infrastructure.databases.vector import get_vectordb_config
+from cognee.infrastructure.databases.vector.create_vector_engine import (
+    create_vector_engine,
+    vector_engine_cache,
+)
+from cognee.modules.users.models import DatasetDatabase, User
 
 
 class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
@@ -23,7 +21,7 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     """
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: UUID | None, user: User | None) -> dict:
         vector_config = get_vectordb_config()
 
         if vector_config.vector_db_provider != "pgvector":
@@ -100,4 +98,4 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         # the drop's awaits would be re-cached and survive a pre-drop eviction.
         # Post-drop nothing stale can persist — engines connect lazily and a fresh
         # adapter starts with empty collection metadata.
-        evict_vector_engines_for_database(dataset_database.vector_database_name)
+        vector_engine_cache.evict_for_database(dataset_database.vector_database_name)

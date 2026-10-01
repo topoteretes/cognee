@@ -1,4 +1,5 @@
-from typing import Any, Dict, Iterator
+from collections.abc import Iterator
+from typing import Any
 from uuid import NAMESPACE_OID, uuid5
 
 from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
@@ -32,7 +33,7 @@ def _get_pair_size(pair_text: str) -> int:
 def chunk_by_row(
     data: str,
     max_chunk_size,
-) -> Iterator[Dict[str, Any]]:
+) -> Iterator[dict[str, Any]]:
     """
     Chunk the input text by row while enabling exact text reconstruction.
 
@@ -93,9 +94,12 @@ def chunk_by_row(
 
             yield chunk_dict
 
-            # Start a fresh chunk for the next row so its pairs are not
-            # accumulated onto this row's chunk and chunk indices stay
-            # monotonically increasing.
-            current_chunk_list = []
-            current_chunk_size = 0
             chunk_index += 1
+
+        # Start a fresh chunk for the next row so its pairs are not
+        # accumulated onto this row's chunk and chunk indices stay
+        # monotonically increasing. The reset must also run for a blank row
+        # (consecutive separators produce ""), otherwise its empty pair leaks
+        # into the next row's text, size, and chunk_id.
+        current_chunk_list = []
+        current_chunk_size = 0

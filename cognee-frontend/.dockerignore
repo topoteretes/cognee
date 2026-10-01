@@ -1,2 +1,18 @@
-.next
+# Build artefacts and installed dependencies: the image installs its own.
 node_modules
+.next
+*.tsbuildinfo
+
+# Never bake a developer's environment into a published image.
+.env
+.env.*
+!.env.template
+
+# Not needed to produce a production build. Note the leading **: a bare
+# name only matches a top-level path segment, and every __tests__ here is
+# nested.
+**/__tests__
+Dockerfile
+.dockerignore
+.git
+.gitignore

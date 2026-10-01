@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from cognee.modules.chunking.models import DocumentChunk
-from cognee.modules.data.processing.document_types import DltRowDocument, TextDocument
+from cognee.modules.data.processing.document_types import TextDocument
 
 summarize_text_module = importlib.import_module("cognee.tasks.summarization.summarize_text")
 
@@ -46,18 +46,3 @@ async def test_summarize_text_sets_source_chunk_reference_fields():
     assert summaries[0].source_chunk_id == str(chunk.id)
     assert summaries[0].belongs_to_set == ["KEEP"]
     assert summaries[0].made_from == chunk
-
-
-@pytest.mark.asyncio
-async def test_summarize_text_leaves_dlt_row_chunks_unchanged():
-    document = DltRowDocument(
-        name="row",
-        raw_data_location="/tmp/row.txt",
-        external_metadata="",
-        mime_type="application/x-dlt-row",
-    )
-    chunk = _chunk("Structured row", document=document)
-
-    result = await summarize_text_module.summarize_text([chunk], summarization_model=object)
-
-    assert result == [chunk]

@@ -3,6 +3,7 @@
 import { useState, useRef } from "react";
 import { StepDots, SkipLink } from "./Shared";
 import { useOnboardingTrackEvent } from "../useOnboardingTrackEvent";
+import { MAX_FILES_PER_UPLOAD } from "@/modules/ingestion/uploadLimits";
 
 export function Step1({ onNext, files, setFiles }: {
   onNext: () => void;
@@ -12,6 +13,7 @@ export function Step1({ onNext, files, setFiles }: {
   const [isDragging, setIsDragging] = useState(false);
   const [showPaste, setShowPaste] = useState(false);
   const [pasteText, setPasteText] = useState("");
+  const [limitError, setLimitError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const track = useOnboardingTrackEvent();
 
@@ -19,7 +21,15 @@ export function Step1({ onNext, files, setFiles }: {
   // in Step2 as a single remember call.
   const handleFiles = (newFiles: FileList | File[]) => {
     const fileArray = Array.from(newFiles);
-    setFiles((prev) => [...prev, ...fileArray]);
+    setFiles((prev) => {
+      const combined = [...prev, ...fileArray];
+      if (combined.length > MAX_FILES_PER_UPLOAD) {
+        setLimitError(`You can add up to ${MAX_FILES_PER_UPLOAD} files at once. Only the first ${MAX_FILES_PER_UPLOAD} were kept.`);
+        return combined.slice(0, MAX_FILES_PER_UPLOAD);
+      }
+      setLimitError(null);
+      return combined;
+    });
     track({ pageName: "Onboarding", eventName: "onboarding_files_added", additionalProperties: { file_count: String(fileArray.length), step: "1" } });
   };
 
@@ -97,6 +107,10 @@ export function Step1({ onNext, files, setFiles }: {
 
           {files.length > 0 && (
             <div style={{ fontSize: 13, color: "#22C55E" }}>{files.length} file{files.length !== 1 ? "s" : ""} ready to process</div>
+          )}
+
+          {limitError && (
+            <div style={{ fontSize: 13, color: "#EF4444" }}>{limitError}</div>
           )}
 
           {/* Paste text button / area */}

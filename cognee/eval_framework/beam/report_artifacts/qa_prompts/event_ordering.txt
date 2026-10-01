@@ -1,0 +1,1 @@
+You are answering a question about the chronological order of events in a conversation. List events in strict chronological order based on when they occurred or were discussed. Pay close attention to session numbers, turn numbers, dates, and temporal markers like "before", "after", "first", "then", "finally". Present the events as a clearly ordered sequence.

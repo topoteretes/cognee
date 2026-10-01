@@ -41,3 +41,10 @@ try:
     __all__.append("DoclingLoader")
 except ImportError:
     pass
+
+try:
+    from .dlt_csv_loader import DltCsvLoader
+
+    __all__.append("DltCsvLoader")
+except ImportError:
+    pass

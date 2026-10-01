@@ -1,9 +1,10 @@
 """Get the LLM client."""
 
+from collections.abc import Hashable
 from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
-from typing import Any, Hashable, TypeGuard
+from typing import Any, TypeGuard
 
 from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.infrastructure.llm.exceptions import (
@@ -55,6 +56,7 @@ class _LLMClientCacheKey:
     streaming: bool
     max_completion_tokens: int
     transcription_model: str
+    image_transcribe_model: str
     fallback_api_key_cache_key: _SecretCacheKey
     fallback_endpoint: str
     fallback_model: str
@@ -64,6 +66,7 @@ class _LLMClientCacheKey:
     llama_cpp_n_ctx: int
     llama_cpp_n_gpu_layers: int
     llama_cpp_chat_format: str
+    ollama_num_ctx: int
 
 
 # Define an Enum for LLM Providers
@@ -171,6 +174,7 @@ def _build_llm_client_cache_key(llm_config, max_completion_tokens: int) -> _LLMC
         streaming=llm_config.llm_streaming,
         max_completion_tokens=max_completion_tokens,
         transcription_model=llm_config.transcription_model,
+        image_transcribe_model=llm_config.image_transcribe_model,
         fallback_api_key_cache_key=_secret_cache_key(llm_config.fallback_api_key),
         fallback_endpoint=llm_config.fallback_endpoint,
         fallback_model=llm_config.fallback_model,
@@ -180,6 +184,7 @@ def _build_llm_client_cache_key(llm_config, max_completion_tokens: int) -> _LLMC
         llama_cpp_n_ctx=llm_config.llama_cpp_n_ctx,
         llama_cpp_n_gpu_layers=llm_config.llama_cpp_n_gpu_layers,
         llama_cpp_chat_format=llm_config.llama_cpp_chat_format,
+        ollama_num_ctx=llm_config.ollama_num_ctx,
     )
 
 
@@ -221,6 +226,7 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             api_version=cache_key.api_version,
             model=cache_key.model,
             transcription_model=cache_key.transcription_model,
+            image_transcribe_model=cache_key.image_transcribe_model or None,
             max_completion_tokens=max_completion_tokens,
             instructor_mode=cache_key.instructor_mode,
             streaming=cache_key.streaming,
@@ -242,6 +248,7 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             api_version=cache_key.api_version,
             model=cache_key.model,
             transcription_model=cache_key.transcription_model,
+            image_transcribe_model=cache_key.image_transcribe_model or None,
             max_completion_tokens=max_completion_tokens,
             instructor_mode=cache_key.instructor_mode,
             streaming=cache_key.streaming,
@@ -253,13 +260,16 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
 
     elif provider == LLMProvider.OLLAMA:
         return OllamaAPIAdapter(
-            cache_key.endpoint,
-            llm_api_key,
-            cache_key.model,
-            "Ollama",
-            max_completion_tokens,
+            endpoint=cache_key.endpoint,
+            api_key=llm_api_key,
+            model=cache_key.model,
+            name="Ollama",
+            max_completion_tokens=max_completion_tokens,
             instructor_mode=cache_key.instructor_mode,
             llm_args=llm_args,
+            ollama_num_ctx=cache_key.ollama_num_ctx,
+            transcription_model=cache_key.transcription_model,
+            image_transcribe_model=cache_key.image_transcribe_model or None,
         )
 
     elif provider == LLMProvider.ANTHROPIC:
@@ -272,6 +282,8 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             cache_key.model,
             max_completion_tokens,
             instructor_mode=cache_key.instructor_mode,
+            transcription_model=cache_key.transcription_model,
+            image_transcribe_model=cache_key.image_transcribe_model or None,
             llm_args=llm_args,
         )
 
@@ -287,6 +299,8 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             name="Custom",
             endpoint=cache_key.endpoint,
             instructor_mode=cache_key.instructor_mode,
+            transcription_model=cache_key.transcription_model,
+            image_transcribe_model=cache_key.image_transcribe_model or None,
             fallback_api_key=llm_config.fallback_api_key,
             fallback_endpoint=cache_key.fallback_endpoint,
             fallback_model=cache_key.fallback_model,
@@ -305,6 +319,8 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             endpoint=cache_key.endpoint,
             api_version=cache_key.api_version,
             instructor_mode=cache_key.instructor_mode,
+            transcription_model=cache_key.transcription_model,
+            image_transcribe_model=cache_key.image_transcribe_model or None,
             llm_args=llm_args,
         )
 
@@ -319,6 +335,8 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             max_completion_tokens=max_completion_tokens,
             endpoint=cache_key.endpoint,
             instructor_mode=cache_key.instructor_mode,
+            transcription_model=cache_key.transcription_model,
+            image_transcribe_model=cache_key.image_transcribe_model or None,
             llm_args=llm_args,
         )
 
@@ -408,6 +426,8 @@ def get_llm_client(raise_api_key_error: bool = True) -> LLMInterface:
     if model_max_completion_tokens is not None:
         # Use the lower of the model's hard limit and the user's configured ceiling
         max_completion_tokens = min(model_max_completion_tokens, user_max)
+    elif provider == LLMProvider.OLLAMA:
+        max_completion_tokens = llm_config.ollama_num_ctx
     else:
         max_completion_tokens = user_max
 

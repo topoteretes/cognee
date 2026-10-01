@@ -4,6 +4,7 @@ from cognee.infrastructure.session.session_context_models import (
     CandidateContextUpdate,
     CandidateContextUpdateVariant,
     ServedContextRating,
+    coerce_rating_or_none,
 )
 
 
@@ -31,6 +32,20 @@ class SessionTurnAnalysis(BaseModel):
             "section-specific candidate update types."
         ),
     )
+    previous_answer_rating: int | None = Field(
+        default=None,
+        description=(
+            "1-5 rating of the previous answer, only when this message gives clear "
+            "evidence about its quality; otherwise null."
+        ),
+    )
+
+    @field_validator("previous_answer_rating", mode="before")
+    @classmethod
+    def rating_in_range_or_none(cls, value):
+        """Coerce anything outside 1-5 to None, so a malformed value degrades to
+        "no signal" rather than raising (non-blocking contract)."""
+        return coerce_rating_or_none(value)
 
     @field_validator("response_to_user", "query_to_answer")
     @classmethod

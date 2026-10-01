@@ -1,17 +1,17 @@
 from uuid import UUID
+
 from sqlalchemy import insert
 from sqlalchemy.exc import IntegrityError
-from typing import Optional
 
-from cognee.modules.users.models.UserTenant import UserTenant
 from cognee.infrastructure.databases.exceptions import EntityAlreadyExistsError
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.users.models import Tenant
 from cognee.modules.users.methods import get_user
+from cognee.modules.users.models import Tenant
+from cognee.modules.users.models.UserTenant import UserTenant
 
 
 async def create_tenant(
-    tenant_name: str, user_id: UUID, set_as_active_tenant: Optional[bool] = True
+    tenant_name: str, user_id: UUID, set_as_active_tenant: bool | None = True
 ) -> UUID:
     """
         Create a new tenant with the given name, for the user with the given id.
@@ -25,10 +25,14 @@ async def create_tenant(
         None
     """
     db_engine = get_relational_engine()
+
+    # Resolve the user (opens its own session) BEFORE opening ours, so this
+    # request never holds two pooled connections at once — that overlap
+    # deadlocks the pool under concurrency (issue #4197 class).
+    user = await get_user(user_id)
+
     async with db_engine.get_async_session() as session:
         try:
-            user = await get_user(user_id)
-
             tenant = Tenant(name=tenant_name, owner_id=user_id)
             session.add(tenant)
             await session.flush()

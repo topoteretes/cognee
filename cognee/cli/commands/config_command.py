@@ -1,11 +1,14 @@
 import argparse
 import json
-from typing import Optional, Any
 
-from cognee.cli.reference import SupportsCliCommand
-from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
+from cognee.api.v1.exceptions.exceptions import InvalidConfigAttributeError
+from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.reference import SupportsCliCommand
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 
 class ConfigCommand(SupportsCliCommand):
@@ -32,6 +35,11 @@ Configuration changes will affect how cognee processes and stores data.
         get_parser = subparsers.add_parser("get", help="Get configuration value(s)")
         get_parser.add_argument(
             "key", nargs="?", help="Configuration key to retrieve (shows all if not specified)"
+        )
+        get_parser.add_argument(
+            "--show-secrets",
+            action="store_true",
+            help="Show secret values (API keys) in plaintext instead of masked",
         )
 
         # Set command
@@ -80,51 +88,37 @@ Configuration changes will affect how cognee processes and stores data.
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(
-                f"Error managing configuration: {str(e)}", error_code=1
-            ) from e
+            raise CliCommandException(f"Error managing configuration: {e!s}", error_code=1) from e
 
     def _handle_get(self, args: argparse.Namespace) -> None:
         try:
             import cognee
 
+            reveal_secrets = getattr(args, "show_secrets", False)
+
             if args.key:
                 # Get specific key
                 try:
-                    if hasattr(cognee.config, "get"):
-                        value = cognee.config.get(args.key)
-                        fmt.echo(f"{args.key}: {value}")
-                    else:
-                        fmt.error("Configuration retrieval not implemented yet")
-                        fmt.note(
-                            "The config system currently only supports setting values, not retrieving them"
-                        )
-                        fmt.note(f"To set this value: 'cognee config set {args.key} <value>'")
+                    value = cognee.config.get(args.key, reveal_secrets=reveal_secrets)
+                    fmt.echo(f"{args.key}: {value}")
+                except InvalidConfigAttributeError:
+                    fmt.error(f"Configuration key '{args.key}' not found")
+                    fmt.note("Use 'cognee config get' to see all available keys")
                 except Exception:
+                    logger.debug("Ignoring exception in ConfigCommand._handle_get", exc_info=True)
                     fmt.error(f"Configuration key '{args.key}' not found or retrieval failed")
             else:
                 # Get all configuration
-                try:
-                    if hasattr(cognee.config, "get_all"):
-                        config_dict = cognee.config.get_all()
-                        if config_dict:
-                            fmt.echo("Current configuration:")
-                            for key, value in config_dict.items():
-                                fmt.echo(f"  {key}: {value}")
-                        else:
-                            fmt.echo("No configuration settings found")
-                    else:
-                        fmt.error("Configuration viewing not implemented yet")
-                        fmt.note(
-                            "The config system currently only supports setting values, not retrieving them"
-                        )
-                        fmt.note("Available commands: 'cognee config set <key> <value>'")
-                except Exception:
-                    fmt.error("Failed to retrieve configuration")
-                    fmt.note("Configuration viewing not fully implemented yet")
+                config_dict = cognee.config.get_all(reveal_secrets=reveal_secrets)
+                if config_dict:
+                    fmt.echo("Current configuration:")
+                    for key, value in config_dict.items():
+                        fmt.echo(f"  {key}: {value}")
+                else:
+                    fmt.echo("No configuration settings found")
 
         except Exception as e:
-            raise CliCommandInnerException(f"Failed to get configuration: {str(e)}") from e
+            raise CliCommandInnerException(f"Failed to get configuration: {e!s}") from e
 
     def _handle_set(self, args: argparse.Namespace) -> None:
         try:
@@ -137,67 +131,68 @@ Configuration changes will affect how cognee processes and stores data.
                 value = args.value
 
             try:
-                cognee.config.set(args.key, value)
+                persist_info = cognee.config.set(args.key, value, persist=True)
                 fmt.success(f"Set {args.key} = {value}")
+                if persist_info:
+                    if persist_info["created"]:
+                        fmt.note(f"Created new .env file at {persist_info['path']}")
+                    fmt.note(f"Persisted {persist_info['env_var']} to {persist_info['path']}")
             except Exception:
+                logger.debug("Ignoring exception in ConfigCommand._handle_set", exc_info=True)
                 fmt.error(f"Failed to set configuration key '{args.key}'")
 
         except Exception as e:
-            raise CliCommandInnerException(f"Failed to set configuration: {str(e)}") from e
+            raise CliCommandInnerException(f"Failed to set configuration: {e!s}") from e
 
     def _handle_unset(self, args: argparse.Namespace) -> None:
         try:
             import cognee
 
             # Confirm unset unless forced
-            if not args.force:
-                if not fmt.confirm(f"Unset configuration key '{args.key}'?"):
-                    fmt.echo("Unset cancelled.")
-                    return
+            if not args.force and not fmt.confirm(f"Unset configuration key '{args.key}'?"):
+                fmt.echo("Unset cancelled.")
+                return
 
-            # Since the config system doesn't have explicit unset methods,
-            # we need to map config keys to their reset/default behaviors
-            config_key_mappings = {
+            # Since the config system doesn't have explicit unset methods, we
+            # map config keys to their default values and reuse the generic
+            # setter (persisted, so the reset survives past this process).
+            config_key_defaults = {
                 # LLM configuration
-                "llm_provider": ("set_llm_provider", "openai"),
-                "llm_model": ("set_llm_model", "gpt-5-mini"),
-                "llm_api_key": ("set_llm_api_key", ""),
-                "llm_endpoint": ("set_llm_endpoint", ""),
+                "llm_provider": "openai",
+                "llm_model": "gpt-5.6-luna",
+                "llm_api_key": "",
+                "llm_endpoint": "",
                 # Database configuration
-                "graph_database_provider": ("set_graph_database_provider", "ladybug"),
-                "vector_db_provider": ("set_vector_db_provider", "lancedb"),
-                "vector_db_url": ("set_vector_db_url", ""),
-                "vector_db_key": ("set_vector_db_key", ""),
+                "graph_database_provider": "ladybug",
+                "vector_db_provider": "lancedb",
+                "vector_db_url": "",
+                "vector_db_key": "",
                 # Chunking configuration
-                "chunk_size": ("set_chunk_size", 1500),
-                "chunk_overlap": ("set_chunk_overlap", 10),
+                "chunk_size": 1500,
+                "chunk_overlap": 10,
             }
 
-            if args.key in config_key_mappings:
-                method_name, default_value = config_key_mappings[args.key]
+            if args.key in config_key_defaults:
+                default_value = config_key_defaults[args.key]
 
                 try:
-                    # Get the method and call it with the default value
-                    method = getattr(cognee.config, method_name)
-                    method(default_value)
+                    cognee.config.set(args.key, default_value, persist=True)
                     fmt.success(f"Unset {args.key} (reset to default: {default_value})")
-                except AttributeError:
-                    fmt.error(f"Configuration method '{method_name}' not found")
                 except Exception as e:
-                    fmt.error(f"Failed to unset '{args.key}': {str(e)}")
+                    logger.debug("Ignoring exception in ConfigCommand._handle_unset", exc_info=True)
+                    fmt.error(f"Failed to unset '{args.key}': {e!s}")
             else:
                 fmt.error(f"Unknown configuration key '{args.key}'")
-                fmt.note("Available keys: " + ", ".join(config_key_mappings.keys()))
+                fmt.note("Available keys: " + ", ".join(config_key_defaults.keys()))
                 fmt.note("Use 'cognee config list' to see all available configuration options")
 
         except Exception as e:
-            raise CliCommandInnerException(f"Failed to unset configuration: {str(e)}") from e
+            raise CliCommandInnerException(f"Failed to unset configuration: {e!s}") from e
 
     def _handle_list(self, args: argparse.Namespace) -> None:
         try:
             import cognee
 
-            # This would need to be implemented in cognee.config
             fmt.note("Available configuration keys:")
             fmt.echo("  llm_provider, llm_model, llm_api_key, llm_endpoint")
             fmt.echo("  graph_database_provider, vector_db_provider")
@@ -211,17 +206,16 @@ Configuration changes will affect how cognee processes and stores data.
             fmt.echo("  cognee config reset         - Reset all to defaults")
 
         except Exception as e:
-            raise CliCommandInnerException(f"Failed to list configuration: {str(e)}") from e
+            raise CliCommandInnerException(f"Failed to list configuration: {e!s}") from e
 
     def _handle_reset(self, args: argparse.Namespace) -> None:
         try:
-            if not args.force:
-                if not fmt.confirm("Reset all configuration to defaults?"):
-                    fmt.echo("Reset cancelled.")
-                    return
+            if not args.force and not fmt.confirm("Reset all configuration to defaults?"):
+                fmt.echo("Reset cancelled.")
+                return
 
             fmt.note("Configuration reset not fully implemented yet")
             fmt.echo("This would reset all settings to their default values")
 
         except Exception as e:
-            raise CliCommandInnerException(f"Failed to reset configuration: {str(e)}") from e
+            raise CliCommandInnerException(f"Failed to reset configuration: {e!s}") from e

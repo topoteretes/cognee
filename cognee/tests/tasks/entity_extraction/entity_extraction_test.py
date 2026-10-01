@@ -1,18 +1,18 @@
+import asyncio
 import os
 import pathlib
-import asyncio
 
 import cognee
-import cognee.modules.ingestion as ingestion
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm import get_max_chunk_tokens
 from cognee.infrastructure.llm.extraction import extract_content_graph
+from cognee.modules import ingestion
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.tasks.documents import extract_chunks_from_documents
 from cognee.tasks.ingestion import save_data_item_to_storage
-from cognee.infrastructure.files.utils.open_data_file import open_data_file
 
 
 async def extract_graphs(document_chunks):
@@ -51,13 +51,18 @@ async def main():
 
     original_file_path = await save_data_item_to_storage(file_path)
 
+    await cognee.add(file_path)
+
+    # Dedup is a dataset-scoped lookup now: resolve the ingested row's id
+    # AFTER the add, through the dataset that received it.
+    from cognee.modules.data.methods import get_datasets
+
+    user = await get_default_user()
+    dataset = next(d for d in await get_datasets(user.id) if d.name == "main_dataset")
     async with open_data_file(original_file_path) as file:
         classified_data = ingestion.classify(file)
-
-        # data_id is the hash of original file contents + owner id to avoid duplicate data
-        data_id = await ingestion.identify(classified_data, await get_default_user())
-
-    await cognee.add(file_path)
+        data_id = await ingestion.identify(classified_data, user, dataset.id)
+    assert data_id is not None, "ingested content must resolve to its Data row"
 
     text_document = TextDocument(
         id=data_id,

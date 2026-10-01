@@ -1,22 +1,20 @@
 import json
-from typing import Optional
 
+from cognee import __version__ as cognee_version
+from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.settings import get_current_settings
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
-from cognee import __version__ as cognee_version
-from cognee.modules.pipelines.models import PipelineContext
 
-from .run_tasks_base import run_tasks_base
 from ..tasks.task import Task
-
+from .run_tasks_base import run_tasks_base
 
 logger = get_logger("run_tasks_with_telemetry()")
 
 
 async def run_tasks_with_telemetry(
-    tasks: list[Task], data, user: User, pipeline_name: str, ctx: Optional[PipelineContext] = None
+    tasks: list[Task], data, user: User, pipeline_name: str, ctx: PipelineContext | None = None
 ):
     config = get_current_settings()
 
@@ -26,7 +24,7 @@ async def run_tasks_with_telemetry(
         logger.info("Pipeline run started: `%s`", pipeline_name)
         send_telemetry(
             "Pipeline Run Started",
-            user.id,
+            user,
             additional_properties={
                 "pipeline_name": str(pipeline_name),
                 "cognee_version": cognee_version,
@@ -41,7 +39,7 @@ async def run_tasks_with_telemetry(
         logger.info("Pipeline run completed: `%s`", pipeline_name)
         send_telemetry(
             "Pipeline Run Completed",
-            user.id,
+            user,
             additional_properties={
                 "pipeline_name": str(pipeline_name),
                 "cognee_version": cognee_version,
@@ -49,16 +47,14 @@ async def run_tasks_with_telemetry(
             }
             | config,
         )
-    except Exception as error:
-        logger.error(
-            "Pipeline run errored: `%s`\n%s\n",
+    except Exception:
+        logger.exception(
+            "Pipeline run errored: `%s`\n",
             pipeline_name,
-            str(error),
-            exc_info=True,
         )
         send_telemetry(
             "Pipeline Run Errored",
-            user.id,
+            user,
             additional_properties={
                 "pipeline_name": str(pipeline_name),
                 "cognee_version": cognee_version,
@@ -67,4 +63,4 @@ async def run_tasks_with_telemetry(
             | config,
         )
 
-        raise error
+        raise

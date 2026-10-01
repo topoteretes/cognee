@@ -1,4 +1,3 @@
-from typing import List
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.utils.ids import triplet_key
 
@@ -6,13 +5,13 @@ from cognee.modules.retrieval.utils.ids import triplet_key
 class QueryState:
     """Tracks per-query state across retrieval rounds."""
 
-    def __init__(self, triplets: List[Edge] = None, context_text: str = ""):
+    def __init__(self, triplets: list[Edge] | None = None, context_text: str = ""):
         self.triplets = triplets or []
         self.context_text = context_text
         self.completion = None
         self.done = False
 
-    def merge_triplets(self, new_triplets: List[Edge]):
+    def merge_triplets(self, new_triplets: list[Edge]):
         """Merge new triplets with existing ones, deduplicating by triplet value."""
         seen_ids = {triplet_key(t) for t in self.triplets}
         for t in new_triplets:

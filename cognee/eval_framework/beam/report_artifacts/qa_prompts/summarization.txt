@@ -1,0 +1,1 @@
+You are summarizing a multi-session conversation. Provide a comprehensive, detailed summary that covers all key features, decisions, milestones, challenges, solutions, and outcomes discussed across every session. Be thorough and specific - include names, dates, technologies, and concrete details. Do not omit any significant topic or decision.

@@ -46,7 +46,15 @@ export function useDashboardTelemetry(range: Range): DashboardTelemetry {
         listSessions(cogniInstance, { range, limit: 50 }, { signal, timeoutMs: BACKGROUND_POLL_TIMEOUT_MS }),
       ]);
       return {
-        runs: (Array.isArray(runData) ? runData : []) as PipelineRun[],
+        // Operation rows (kind: "operation") legitimately carry pipeline_name:
+        // null (recall/search/remember/... aren't named pipelines) — only
+        // reject rows missing the kind discriminator itself, which is the
+        // actual signal of a malformed row (see AgentActivityTerminal.tsx).
+        runs: (Array.isArray(runData) ? runData : []).filter(
+          (r): r is PipelineRun =>
+            (r as { kind?: unknown } | null)?.kind === "pipeline" ||
+            (r as { kind?: unknown } | null)?.kind === "operation",
+        ),
         sessions: sessionsPage?.sessions ?? [],
       };
     },

@@ -14,13 +14,14 @@ Test Coverage:
 
 import os
 import pathlib
+from datetime import datetime, timedelta, timezone
+
 import pytest
-from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, update
 
 import cognee
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.data.models import Data, DatasetData
+from cognee.modules.data.models import Data
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
@@ -72,20 +73,16 @@ async def test_last_accessed_updates_on_search():
     await cognee.add([doc_text], dataset_name=dataset_name, user=user)
     cognify_result = await cognee.cognify([dataset_name], user=user)
 
-    dataset_id = list(cognify_result.keys())[0]
+    dataset_id = next(iter(cognify_result.keys()))
 
     # Get the data_id
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
-        result = await session.execute(
-            select(Data, DatasetData)
-            .join(DatasetData, Data.id == DatasetData.data_id)
-            .where(DatasetData.dataset_id == dataset_id)
-        )
-        data_records = result.all()
+        result = await session.execute(select(Data).where(Data.dataset_id == dataset_id))
+        data_records = list(result.scalars().all())
         assert len(data_records) > 0, "Should have at least one data record"
 
-        data_before = data_records[0][0]
+        data_before = data_records[0]
         data_id = data_before.id
 
         # Record timestamp before search
@@ -191,7 +188,7 @@ async def test_cleanup_unused_data_dry_run():
         data_ids.append(add_result.data_ingestion_info[0]["data_id"])
 
     cognify_result = await cognee.cognify([dataset_name], user=user)
-    list(cognify_result.keys())[0]
+    next(iter(cognify_result.keys()))
 
     # Age the first 3 documents to be "old"
     db_engine = get_relational_engine()
@@ -297,7 +294,7 @@ async def test_cleanup_actual_deletion():
         data_ids.append(add_result.data_ingestion_info[0]["data_id"])
 
     cognify_result = await cognee.cognify([dataset_name], user=user)
-    list(cognify_result.keys())[0]
+    next(iter(cognify_result.keys()))
 
     # Age the first 3 documents to be "old"
     db_engine = get_relational_engine()

@@ -26,6 +26,7 @@ function makeRun(overrides: Partial<RawRun> & Pick<RawRun, "id" | "status" | "cr
 function instanceReturning(rows: RawRun[]): CogneeInstance {
   return {
     name: "test",
+    instanceId: "test",
     fetch: jest.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve(rows),

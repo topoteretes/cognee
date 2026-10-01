@@ -15,12 +15,13 @@ import sys
 import tempfile
 import warnings
 
-
 # Maps the on-disk storage version code (read from catalog.kz) to a ladybug
 # release that can open that format. The code is shared across patch/minor
 # releases that keep the same on-disk format, so there is one entry per format,
-# not per release: 0.16.0 and 0.16.1 both write code 40; 0.17.0 and 0.17.1 both
-# write code 41. Used by needs_migration() to detect legacy (<0.15.0) databases.
+# not per release: 0.16.0 and 0.16.1 both write code 40
+# Codes are read from the header of a store each release actually wrote, not
+# from release notes: create a database with the wheel installed, then unpack
+# bytes 4..12 of catalog.kz as a little-endian uint64.
 ladybug_version_mapping: dict[int, str] = {
     34: "0.7.0",
     35: "0.7.1",
@@ -30,6 +31,8 @@ ladybug_version_mapping: dict[int, str] = {
     39: "0.11.3",
     40: "0.16.0",
     41: "0.17.1",
+    42: "0.18.2",
+    43: "0.19.0",
 }
 
 
@@ -52,7 +55,8 @@ def read_ladybug_storage_version(ladybug_db_path: str) -> str:
         version_file_path = ladybug_db_path
 
     with open(version_file_path, "rb") as f:
-        # Skip the 3-byte magic "KUZ" and one byte of padding
+        # Skip the 4-byte magic ("KUZ" + padding on kuzu-era files, "LBUG" on
+        # ladybug >= 0.18)
         f.seek(4)
         # Read the next 8 bytes as a little-endian unsigned 64-bit integer
         data = f.read(8)
@@ -123,6 +127,7 @@ def _try_create_env(python_exe: str, base: str, package_name: str, version: str)
         [py_bin, "-m", "pip", "install", f"{package_name}=={version}"],
         capture_output=True,
         text=True,
+        check=False,
     )
     if result.returncode == 0:
         return py_bin
@@ -192,6 +197,7 @@ conn.execute({cypher!r})
         text=True,
         cwd=tempfile.gettempdir(),
         env=env,
+        check=False,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"{cypher} failed:\n{proc.stderr}")
@@ -205,7 +211,7 @@ def ladybug_migration(
     """
     print(f"Migrating graph database from {old_version} to {new_version}", file=sys.stderr)
     print(f"Source: {old_db}", file=sys.stderr)
-    print("", file=sys.stderr)
+    print(file=sys.stderr)
 
     # If version of old database is not provided try to determine it based on file info
     if not old_version:

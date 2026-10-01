@@ -3,19 +3,21 @@ import pathlib
 
 import cognee
 from cognee import visualize_graph
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.files.storage import get_storage_config
 from cognee.modules.data.models import Data
-from cognee.modules.users.methods import get_default_user
-from cognee.modules.search.types import SearchType
 from cognee.modules.search.operations import get_history
+from cognee.modules.search.types import SearchType
+from cognee.modules.users.methods import get_default_user
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
 
 async def test_local_file_deletion(data_text, file_location):
-    from sqlalchemy import select
     import hashlib
+
+    from sqlalchemy import select
+
     from cognee.infrastructure.databases.relational import get_relational_engine
 
     engine = get_relational_engine()
@@ -297,8 +299,11 @@ async def main():
         print(f"{result}\n")
 
     user = await get_default_user()
-    history = await get_history(user.id)
-    assert len(history) == 8, "Search history is not correct."
+    # Two datasets, so an unscoped search records a query and a result per
+    # dataset while a scoped one records a single pair: 2 + 1 + 1 + 2 = 6 queries, each with its result.
+    # limit=0 lifts get_history's default cap of 10.
+    history = await get_history(user.id, limit=0)
+    assert len(history) == 12, "Search history is not correct."
 
     await test_vector_engine_search_none_limit()
 

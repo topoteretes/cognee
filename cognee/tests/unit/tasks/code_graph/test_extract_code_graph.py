@@ -4,9 +4,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
-import cognee
 import pytest
 
+import cognee
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
 from cognee.tasks.code_graph.enola import parse_enola_snapshot
@@ -21,12 +21,12 @@ from cognee.tasks.code_graph.extract_code_graph import (
 )
 from cognee.tasks.code_graph.models import (
     ApiEndpoint,
+    CodeFileReference,
     CodeModule,
     CodeRepository,
     CodeService,
     CodeSymbol,
     CodeTestReference,
-    CodeFileReference,
     ExternalDependency,
     StorageResource,
 )
@@ -416,6 +416,120 @@ def test_build_code_graph_edges_normalizes_cross_repo_go_call_targets():
     assert calls[0][1] == fact_node_id("go-auth", "symbol", "adapters.AuthHandler.Login")
 
 
+def _client_route(repo, name, **props):
+    return {"kind": "route", "name": name, "repo": repo, "props": {"role": "client", **props}}
+
+
+def test_build_code_graph_edges_links_a_call_to_its_caller_and_the_route_it_reaches():
+    caller_id = "a" * 32
+    server_id = "b" * 32
+    facts = [
+        {"kind": "symbol", "name": "api.fetchRounds", "repo": "ui", "id": caller_id},
+        {"kind": "route", "name": "/api/rounds", "repo": "golf", "id": server_id},
+        _client_route(
+            "ui",
+            "/api/rounds",
+            caller="api.fetchRounds",
+            caller_id=caller_id,
+            matched_routes=[
+                {
+                    "repo": "golf",
+                    "name": "/api/rounds",
+                    "file": "golf/handlers/rounds.go",
+                    "method": "GET",
+                    "confidence": "verified",
+                    "id": server_id,
+                }
+            ],
+        ),
+    ]
+
+    edges, skipped = build_code_graph_edges(facts)
+    by_type = {edge[2]: edge for edge in edges}
+    client = fact_node_id("ui", "route", "/api/rounds")
+
+    assert skipped == 0
+    assert (by_type["makes_request"][0], by_type["makes_request"][1]) == (
+        fact_node_id("ui", "symbol", "api.fetchRounds"),
+        client,
+    )
+    reaches = by_type["reaches_route"]
+    assert (reaches[0], reaches[1]) == (client, fact_node_id("golf", "route", "/api/rounds"))
+    assert reaches[3]["confidence"] == "verified"
+
+
+def test_build_code_graph_edges_resolves_caller_and_match_by_name_without_ids():
+    facts = [
+        {"kind": "symbol", "name": "fetchRounds", "repo": "ui"},
+        {"kind": "symbol", "name": "fetchRounds", "repo": "other"},
+        {"kind": "route", "name": "/api/rounds/:id", "repo": "golf"},
+        _client_route(
+            "ui",
+            "/api/rounds/7",
+            caller="fetchRounds",
+            matched_routes=[{"repo": "golf", "name": "/api/rounds/:id", "confidence": "probable"}],
+        ),
+    ]
+
+    edges, skipped = build_code_graph_edges(facts)
+    pairs = {(edge[0], edge[1], edge[2]) for edge in edges}
+    client = fact_node_id("ui", "route", "/api/rounds/7")
+
+    assert skipped == 0
+    assert (fact_node_id("ui", "symbol", "fetchRounds"), client, "makes_request") in pairs
+    assert (client, fact_node_id("golf", "route", "/api/rounds/:id"), "reaches_route") in pairs
+
+
+def test_build_code_graph_edges_skips_self_served_match_and_counts_unresolved_refs():
+    facts = [
+        # A call its own repo serves: client and server route share one node.
+        {"kind": "route", "name": "/health", "repo": "golf"},
+        _client_route(
+            "golf",
+            "/health",
+            matched_routes=[{"repo": "golf", "name": "/health", "confidence": "verified"}],
+        ),
+        # Neither the caller nor the matched route is in the snapshot.
+        _client_route(
+            "ui",
+            "/api/gone",
+            caller="missing",
+            matched_routes=[{"repo": "golf", "name": "/api/gone"}, "not-a-match"],
+        ),
+    ]
+
+    edges, skipped = build_code_graph_edges(facts)
+
+    assert edges == []
+    assert skipped == 3
+
+
+def test_build_code_graph_edges_keeps_handled_by_from_route_to_handler():
+    handler_id = "c" * 32
+    facts = [
+        {"kind": "symbol", "name": "handlers.ListRounds", "repo": "golf", "id": handler_id},
+        {
+            "kind": "route",
+            "name": "/api/rounds",
+            "repo": "golf",
+            "relations": [
+                {"kind": "handled_by", "target": "handlers.ListRounds", "target_id": handler_id}
+            ],
+        },
+    ]
+
+    edges, skipped = build_code_graph_edges(facts)
+
+    assert skipped == 0
+    assert [(edge[0], edge[1], edge[2]) for edge in edges] == [
+        (
+            fact_node_id("golf", "route", "/api/rounds"),
+            fact_node_id("golf", "symbol", "handlers.ListRounds"),
+            "handled_by",
+        )
+    ]
+
+
 def test_multi_repo_snapshot_creates_one_repository_per_repo():
     facts = [
         {"kind": "module", "name": "checkout", "repo": "acme/shop"},
@@ -458,16 +572,28 @@ async def test_extract_code_graph_without_repo_path_or_snapshot_dir_raises():
 async def test_add_code_graph_data_points_invalidates_cached_indexes(monkeypatch):
     add_data_points_module = importlib.import_module("cognee.tasks.storage.add_data_points")
     code_retriever_module = importlib.import_module("cognee.modules.retrieval.code_retriever")
+    graph_engine_module = importlib.import_module(
+        "cognee.infrastructure.databases.graph.get_graph_engine"
+    )
     add_data_points_mock = AsyncMock(return_value=["stored"])
     invalidate_mock = MagicMock()
+    graph_engine = AsyncMock()
+    graph_engine.get_graph_data.return_value = ([], [])
     monkeypatch.setattr(add_data_points_module, "add_data_points", add_data_points_mock)
     monkeypatch.setattr(
         code_retriever_module, "invalidate_code_graph_snapshot_cache", invalidate_mock
     )
+    monkeypatch.setattr(
+        graph_engine_module, "get_graph_engine", AsyncMock(return_value=graph_engine)
+    )
 
     result = await add_code_graph_data_points(["node"])
 
-    assert result == ["stored"]
+    # Passthrough of the full fact set (not add_data_points' return), so the
+    # edges task sees every fact and the carried pre-read state.
+    assert list(result) == ["node"]
+    assert result.node_delta["nodes_added"] == 1
+    assert result.existing_edge_keys == set()
     add_data_points_mock.assert_awaited_once_with(["node"], ctx=None, graph_only=True)
     invalidate_mock.assert_called_once_with()
 
@@ -480,6 +606,7 @@ async def test_add_code_graph_edges_writes_edges_and_passes_data_points_through(
     code_retriever_module = importlib.import_module("cognee.modules.retrieval.code_retriever")
 
     graph_engine = AsyncMock()
+    graph_engine.get_graph_data.return_value = ([], [])
     invalidate_mock = MagicMock()
     monkeypatch.setattr(
         graph_engine_module, "get_graph_engine", AsyncMock(return_value=graph_engine)
@@ -508,6 +635,7 @@ async def test_add_code_graph_edges_registers_edges_in_rollback_ledger(monkeypat
     graph_methods_module = importlib.import_module("cognee.modules.graph.methods")
 
     graph_engine = AsyncMock()
+    graph_engine.get_graph_data.return_value = ([], [])
     monkeypatch.setattr(
         graph_engine_module, "get_graph_engine", AsyncMock(return_value=graph_engine)
     )
@@ -521,7 +649,9 @@ async def test_add_code_graph_edges_registers_edges_in_rollback_ledger(monkeypat
         pipeline_run_id=uuid4(),
     )
 
-    await add_code_graph_edges([], snapshot_dir=FIXTURES_DIR, ctx=ctx)
+    # Empty data_points now signals "extract skipped an unchanged snapshot",
+    # so pass a sentinel to exercise the ledger path.
+    await add_code_graph_edges(["sentinel"], snapshot_dir=FIXTURES_DIR, ctx=ctx)
 
     upsert_edges_mock.assert_awaited_once()
     call = upsert_edges_mock.await_args
@@ -551,6 +681,7 @@ async def test_public_code_graph_pipeline_accepts_repo_path_payload_with_access_
     monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "true")
 
     graph_engine = AsyncMock()
+    graph_engine.get_graph_data.return_value = ([], [])
     vector_engine = MagicMock()
     unified_engine = SimpleNamespace(
         graph=graph_engine,
@@ -619,8 +750,14 @@ async def test_public_code_graph_pipeline_accepts_repo_path_payload_with_access_
 
     assert len(result) == 1
     assert len(result[0]) == 17
-    graph_engine.add_nodes.assert_awaited_once()
-    assert graph_engine.add_edges.await_count == 2
+    # One bulk node load, then the incremental-skip stamp on the repository node.
+    assert graph_engine.add_nodes.await_count == 2
+    stamped = graph_engine.add_nodes.await_args_list[-1].args[0]
+    assert [type(node).__name__ for node in stamped] == ["CodeRepository"]
+    assert stamped[0].last_snapshot_id is not None
+    # The bulk edge load only: the stamp pass has no edges and empty edge
+    # batches are no longer written.
+    assert graph_engine.add_edges.await_count == 1
     add_data_points_module.get_unified_engine.assert_not_awaited()
     add_data_points_module.index_data_points.assert_not_awaited()
     add_data_points_module.index_graph_edges.assert_not_awaited()

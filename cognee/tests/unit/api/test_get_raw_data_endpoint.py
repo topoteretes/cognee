@@ -67,19 +67,21 @@ def _patch_raw_download_dependencies(
 
     monkeypatch.setattr(
         data_methods_module,
-        "get_dataset_data",
-        AsyncMock(return_value=[SimpleNamespace(id=data_id)]),
+        "resolve_data_id",
+        AsyncMock(return_value=data_id),
     )
     monkeypatch.setattr(
         data_methods_module,
-        "get_data",
+        "get_dataset_data",
         AsyncMock(
-            return_value=SimpleNamespace(
-                id=data_id,
-                raw_data_location=raw_data_location,
-                name=name,
-                mime_type=mime_type,
-            )
+            return_value=[
+                SimpleNamespace(
+                    id=data_id,
+                    raw_data_location=raw_data_location,
+                    name=name,
+                    mime_type=mime_type,
+                )
+            ]
         ),
     )
 

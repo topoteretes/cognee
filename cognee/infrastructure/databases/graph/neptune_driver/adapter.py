@@ -1,27 +1,29 @@
 """Neptune Analytics Adapter for Graph Database"""
 
 import json
-from typing import Optional, Any, List, Dict, Type, Tuple
+from typing import Any
 from uuid import UUID
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.graph.graph_db_interface import (
-    GraphDBInterface,
-    NodeData,
-    EdgeData,
-    Node,
-)
-from cognee.modules.storage.utils import JSONEncoder
-from cognee.infrastructure.engine import DataPoint
+
 from botocore.config import Config
+
+from cognee.infrastructure.databases.graph.graph_db_interface import (
+    EdgeData,
+    GraphDBInterface,
+    Node,
+    NodeData,
+)
+from cognee.infrastructure.engine import DataPoint
+from cognee.modules.storage.utils import JSONEncoder
+from cognee.shared.logging_utils import get_logger
 
 from .exceptions import (
     NeptuneAnalyticsConfigurationError,
 )
 from .neptune_utils import (
-    validate_graph_id,
-    validate_aws_region,
     build_neptune_config,
     format_neptune_error,
+    validate_aws_region,
+    validate_graph_id,
 )
 
 logger = get_logger("NeptuneGraphDB")
@@ -59,10 +61,10 @@ class NeptuneGraphDB(GraphDBInterface):
     def __init__(
         self,
         graph_id: str,
-        region: Optional[str] = None,
-        aws_access_key_id: Optional[str] = None,
-        aws_secret_access_key: Optional[str] = None,
-        aws_session_token: Optional[str] = None,
+        region: str | None = None,
+        aws_access_key_id: str | None = None,
+        aws_secret_access_key: str | None = None,
+        aws_session_token: str | None = None,
     ):
         """
         Initialize the Neptune Analytics adapter.
@@ -109,11 +111,9 @@ class NeptuneGraphDB(GraphDBInterface):
 
         # Initialize Neptune Analytics client using langchain_aws
         self._client: Any = self._initialize_client()
-        logger.info(
-            f'Initialized Neptune Analytics adapter for graph: "{graph_id}" in region: "{self.region}"'
-        )
+        logger.info('Initialized Neptune Analytics adapter in region: "%s"', self.region)
 
-    def _initialize_client(self) -> Optional[Any]:
+    def _initialize_client(self) -> Any | None:
         """
         Initialize the Neptune Analytics client using langchain_aws.
 
@@ -146,8 +146,23 @@ class NeptuneGraphDB(GraphDBInterface):
                 message=f"Failed to initialize Neptune Analytics client: {format_neptune_error(e)}"
             ) from e
 
+    async def close(self) -> None:
+        """
+        Release resources held by the Neptune Analytics client.
+
+        Called automatically by ``closing_lru_cache`` when this adapter is
+        evicted from ``_create_graph_engine``'s cache. The underlying boto3
+        client is cleaned up if present.
+        """
+        if hasattr(self, "_client") and self._client is not None:
+            # NeptuneAnalyticsGraph wraps a boto3 client; close it if available
+            underlying = getattr(self._client, "client", None)
+            if underlying is not None and hasattr(underlying, "close"):
+                underlying.close()
+            self._client = None
+
     @staticmethod
-    def _serialize_properties(properties: Dict[str, Any]) -> Dict[str, Any]:
+    def _serialize_properties(properties: dict[str, Any]) -> dict[str, Any]:
         """
         Serialize properties for Neptune Analytics storage.
         Parameters:
@@ -164,7 +179,7 @@ class NeptuneGraphDB(GraphDBInterface):
                 serialized_properties[property_key] = str(property_value)
                 continue
 
-            if isinstance(property_value, dict) or isinstance(property_value, list):
+            if isinstance(property_value, (dict, list)):
                 serialized_properties[property_key] = json.dumps(property_value, cls=JSONEncoder)
                 continue
 
@@ -172,7 +187,7 @@ class NeptuneGraphDB(GraphDBInterface):
 
         return serialized_properties
 
-    async def query(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Any]:
+    async def query(self, query: str, params: dict[str, Any] | None = None) -> list[Any]:
         """
         Execute a query against the Neptune Analytics database and return the results.
 
@@ -204,7 +219,7 @@ class NeptuneGraphDB(GraphDBInterface):
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Neptune Analytics query failed: {error_msg}")
-            raise Exception(f"Query execution failed: {error_msg}") from e
+            raise RuntimeError(f"Query execution failed: {error_msg}") from e
 
     async def add_node(self, node: DataPoint) -> None:
         """
@@ -232,18 +247,18 @@ class NeptuneGraphDB(GraphDBInterface):
 
             result = await self.query(query, params)
             logger.debug(f"Successfully added/updated node: {node.id}")
-            logger.debug(f"Successfully added/updated node: {str(result)}")
+            logger.debug(f"Successfully added/updated node: {result!s}")
 
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to add node {node.id}: {error_msg}")
-            raise Exception(f"Failed to add node: {error_msg}") from e
+            raise RuntimeError(f"Failed to add node: {error_msg}") from e
 
     async def add_nodes(
         self,
-        nodes: List[DataPoint],
-        source_ref_key: Optional[str] = None,
-        pipeline_run_id: Optional[str] = None,
+        nodes: list[DataPoint],
+        source_ref_key: str | None = None,
+        pipeline_run_id: str | None = None,
     ) -> None:
         """
         Add multiple nodes to the graph in a single operation.
@@ -285,14 +300,12 @@ class NeptuneGraphDB(GraphDBInterface):
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to add nodes in bulk: {error_msg}")
             # Fallback to individual node creation
-            logger.info("Falling back to individual node creation")
+            logger.info("Falling back to individual node creation", exc_info=True)
             for node in nodes:
                 try:
                     await self.add_node(node)
-                except Exception as node_error:
-                    logger.error(
-                        f"Failed to add individual node {node.id}: {format_neptune_error(node_error)}"
-                    )
+                except Exception:
+                    logger.exception(f"Failed to add individual node {node.id}")
                     continue
 
     async def delete_node(self, node_id: str) -> None:
@@ -319,9 +332,9 @@ class NeptuneGraphDB(GraphDBInterface):
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to delete node {node_id}: {error_msg}")
-            raise Exception(f"Failed to delete node: {error_msg}") from e
+            raise RuntimeError(f"Failed to delete node: {error_msg}") from e
 
-    async def delete_nodes(self, node_ids: List[str]) -> None:
+    async def delete_nodes(self, node_ids: list[str]) -> None:
         """
         Delete multiple nodes from the graph by their identifiers.
 
@@ -350,17 +363,15 @@ class NeptuneGraphDB(GraphDBInterface):
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to delete nodes in bulk: {error_msg}")
             # Fallback to individual node deletion
-            logger.info("Falling back to individual node deletion")
+            logger.info("Falling back to individual node deletion", exc_info=True)
             for node_id in node_ids:
                 try:
                     await self.delete_node(node_id)
-                except Exception as node_error:
-                    logger.error(
-                        f"Failed to delete individual node {node_id}: {format_neptune_error(node_error)}"
-                    )
+                except Exception:
+                    logger.exception(f"Failed to delete individual node {node_id}")
                     continue
 
-    async def get_node(self, node_id: str) -> Optional[NodeData]:
+    async def get_node(self, node_id: str) -> NodeData | None:
         """
         Retrieve a single node from the graph using its ID.
 
@@ -397,9 +408,9 @@ class NeptuneGraphDB(GraphDBInterface):
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to get node {node_id}: {error_msg}")
-            raise Exception(f"Failed to get node: {error_msg}") from e
+            raise RuntimeError(f"Failed to get node: {error_msg}") from e
 
-    async def get_nodes(self, node_ids: List[str]) -> List[NodeData]:
+    async def get_nodes(self, node_ids: list[str]) -> list[NodeData]:
         """
         Retrieve multiple nodes from the graph using their IDs.
 
@@ -439,17 +450,15 @@ class NeptuneGraphDB(GraphDBInterface):
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to get nodes in bulk: {error_msg}")
             # Fallback to individual node retrieval
-            logger.info("Falling back to individual node retrieval")
+            logger.info("Falling back to individual node retrieval", exc_info=True)
             nodes = []
             for node_id in node_ids:
                 try:
                     node_data = await self.get_node(node_id)
                     if node_data:
                         nodes.append(node_data)
-                except Exception as node_error:
-                    logger.error(
-                        f"Failed to get individual node {node_id}: {format_neptune_error(node_error)}"
-                    )
+                except Exception:
+                    logger.exception(f"Failed to get individual node {node_id}")
                     continue
             return nodes
 
@@ -472,7 +481,7 @@ class NeptuneGraphDB(GraphDBInterface):
 
         return results[0] if len(results) > 0 else None
 
-    async def extract_nodes(self, node_ids: List[str]):
+    async def extract_nodes(self, node_ids: list[str]):
         """
         Retrieve multiple nodes from the database by their IDs.
 
@@ -502,7 +511,7 @@ class NeptuneGraphDB(GraphDBInterface):
         source_id: str,
         target_id: str,
         relationship_name: str,
-        properties: Optional[Dict[str, Any]] = None,
+        properties: dict[str, Any] | None = None,
     ) -> None:
         """
         Create a new edge between two nodes in the graph.
@@ -547,13 +556,13 @@ class NeptuneGraphDB(GraphDBInterface):
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to add edge {source_id} -> {target_id}: {error_msg}")
-            raise Exception(f"Failed to add edge: {error_msg}") from e
+            raise RuntimeError(f"Failed to add edge: {error_msg}") from e
 
     async def add_edges(
         self,
-        edges: List[Tuple[str, str, str, Optional[Dict[str, Any]]]],
-        source_ref_key: Optional[str] = None,
-        pipeline_run_id: Optional[str] = None,
+        edges: list[tuple[str, str, str, dict[str, Any] | None]],
+        source_ref_key: str | None = None,
+        pipeline_run_id: str | None = None,
     ) -> None:
         """
         Add multiple edges to the graph in a single operation.
@@ -610,16 +619,14 @@ class NeptuneGraphDB(GraphDBInterface):
                 logger.error(
                     f"Failed to add edges for relationship {relationship_name}: {format_neptune_error(e)}"
                 )
-                logger.info("Falling back to individual edge creation")
+                logger.info("Falling back to individual edge creation", exc_info=True)
                 for edge in edges_for_relationship:
                     try:
                         source_id, target_id, relationship_name = edge[0], edge[1], edge[2]
                         properties = edge[3] if len(edge) > 3 else {}
                         await self.add_edge(source_id, target_id, relationship_name, properties)
-                    except Exception as edge_error:
-                        logger.error(
-                            f"Failed to add individual edge {edge[0]} -> {edge[1]}: {format_neptune_error(edge_error)}"
-                        )
+                    except Exception:
+                        logger.exception(f"Failed to add individual edge {edge[0]} -> {edge[1]}")
                         continue
 
         processed_count = 0
@@ -643,21 +650,15 @@ class NeptuneGraphDB(GraphDBInterface):
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to delete graph: {error_msg}")
-            raise Exception(f"Failed to delete graph: {error_msg}") from e
+            raise RuntimeError(f"Failed to delete graph: {error_msg}") from e
 
-    async def is_empty(self) -> bool:
-        """
-        Check if the graph is empty.
-        """
-        query = """
-        MATCH (n)
-        RETURN true
-        LIMIT 1;
-        """
-        query_result = await self.query(query)
-        return len(query_result) == 0
+    async def get_top_degree_node_ids(self, top_k: int) -> list[str]:
+        """Rank a bounded edge sample in the store; include isolated nodes."""
+        from cognee.infrastructure.databases.graph.degree_seeds import cypher_degree_seeds
 
-    async def get_graph_data(self) -> Tuple[List[Node], List[EdgeData]]:
+        return await cypher_degree_seeds(self, top_k, typed=False)
+
+    async def get_graph_data(self) -> tuple[list[Node], list[EdgeData]]:
         """
         Retrieve all nodes and edges within the graph.
 
@@ -702,14 +703,14 @@ class NeptuneGraphDB(GraphDBInterface):
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to get graph data: {error_msg}")
-            raise Exception(f"Failed to get graph data: {error_msg}") from e
+            raise RuntimeError(f"Failed to get graph data: {error_msg}") from e
 
     async def get_neighborhood(
         self,
-        node_ids: List[str],
+        node_ids: list[str],
         depth: int = 1,
-        edge_types: Optional[List[str]] = None,
-    ) -> Tuple[List[Node], List[EdgeData]]:
+        edge_types: list[str] | None = None,
+    ) -> tuple[list[Node], list[EdgeData]]:
         """
         Get the k-hop neighborhood subgraph around a set of seed nodes.
 
@@ -771,9 +772,23 @@ class NeptuneGraphDB(GraphDBInterface):
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to get neighborhood: {error_msg}")
-            raise Exception(f"Failed to get neighborhood: {error_msg}") from e
+            raise RuntimeError(f"Failed to get neighborhood: {error_msg}") from e
 
-    async def get_graph_metrics(self, include_optional: bool = False) -> Dict[str, Any]:
+    async def is_empty(self) -> bool:
+        """Return True if the graph contains no nodes."""
+        query = f"""
+            MATCH (n:{self._GRAPH_NODE_LABEL})
+            RETURN count(n) AS node_count
+        """
+        try:
+            result = await self.query(query)
+            return not result or result[0]["node_count"] == 0
+        except Exception as e:
+            error_msg = format_neptune_error(e)
+            logger.error(f"Failed to check if graph is empty: {error_msg}")
+            raise RuntimeError(f"Failed to check if graph is empty: {error_msg}") from e
+
+    async def get_graph_metrics(self, include_optional: bool = False) -> dict[str, Any]:
         """
         Fetch metrics and statistics of the graph, possibly including optional details.
 
@@ -786,7 +801,7 @@ class NeptuneGraphDB(GraphDBInterface):
             - Dict[str, Any]: A dictionary containing graph metrics and statistics.
         """
         num_nodes, num_edges = await self._get_model_independent_graph_data()
-        num_cluster, list_clsuter_size = await self._get_connected_components_stat()
+        list_clsuter_size, num_cluster = await self._get_connected_components_stat()
 
         mandatory_metrics = {
             "num_nodes": num_nodes,
@@ -858,10 +873,12 @@ class NeptuneGraphDB(GraphDBInterface):
 
         except Exception as e:
             error_msg = format_neptune_error(e)
-            logger.error(f"Failed to check edge existence {source_id} -> {target_id}: {error_msg}")
+            logger.exception(
+                f"Failed to check edge existence {source_id} -> {target_id}: {error_msg}"
+            )
             return False
 
-    async def has_edges(self, edges: List[EdgeData]) -> List[EdgeData]:
+    async def has_edges(self, edges: list[EdgeData]) -> list[EdgeData]:
         """
         Determine the existence of multiple edges in the graph.
 
@@ -902,11 +919,17 @@ class NeptuneGraphDB(GraphDBInterface):
             return existing_edges
 
         except Exception as e:
+            # A failed existence check is NOT an empty existence check: returning
+            # [] tells the cognify dedup that none of these edges exist, so it
+            # writes them; if the store is failing those writes fail too and the
+            # run reports success while persisting nothing (issue #4348). Surface
+            # the failure like the other backends do (neo4j re-raises;
+            # postgres/turso let it propagate) instead of masking it.
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to check edges existence: {error_msg}")
-            return []
+            raise
 
-    async def get_edges(self, node_id: str) -> List[EdgeData]:
+    async def get_edges(self, node_id: str) -> list[EdgeData]:
         """
         Retrieve all edges that are connected to the specified node.
 
@@ -942,7 +965,7 @@ class NeptuneGraphDB(GraphDBInterface):
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to get edges for node {node_id}: {error_msg}")
-            raise Exception(f"Failed to get edges: {error_msg}") from e
+            raise RuntimeError(f"Failed to get edges: {error_msg}") from e
 
     async def get_disconnected_nodes(self) -> list[str]:
         """
@@ -962,7 +985,7 @@ class NeptuneGraphDB(GraphDBInterface):
         results = await self.query(query)
         return results[0]["ids"] if len(results) > 0 else []
 
-    async def get_predecessors(self, node_id: str, edge_label: str = "") -> list[str]:
+    async def get_predecessors(self, node_id: str, edge_label: str | None = None) -> list[str]:
         """
         Retrieve the predecessor nodes of a specified node based on an optional edge label.
 
@@ -989,7 +1012,7 @@ class NeptuneGraphDB(GraphDBInterface):
 
         return [result["predecessor"] for result in results]
 
-    async def get_successors(self, node_id: str, edge_label: str = "") -> list[str]:
+    async def get_successors(self, node_id: str, edge_label: str | None = None) -> list[str]:
         """
         Retrieve the successor nodes of a specified node based on an optional edge label.
 
@@ -1007,7 +1030,7 @@ class NeptuneGraphDB(GraphDBInterface):
 
         edge_label = f" :{edge_label}" if edge_label is not None else ""
         query = f"""
-        MATCH (node)-[r {edge_label}]->(successor)
+        MATCH (node)-[r{edge_label}]->(successor)
         WHERE node.id = $node_id
         RETURN successor
         """
@@ -1016,7 +1039,7 @@ class NeptuneGraphDB(GraphDBInterface):
 
         return [result["successor"] for result in results]
 
-    async def get_neighbors(self, node_id: str) -> List[NodeData]:
+    async def get_neighbors(self, node_id: str) -> list[NodeData]:
         """
         Get all neighboring nodes connected to the specified node.
 
@@ -1050,11 +1073,11 @@ class NeptuneGraphDB(GraphDBInterface):
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to get neighbors for node {node_id}: {error_msg}")
-            raise Exception(f"Failed to get neighbors: {error_msg}") from e
+            raise RuntimeError(f"Failed to get neighbors: {error_msg}") from e
 
     async def get_nodeset_subgraph(
-        self, node_type: Type[Any], node_name: List[str]
-    ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
+        self, node_type: type[Any], node_name: list[str]
+    ) -> tuple[list[tuple[int, dict]], list[tuple[int, int, str, dict]]]:
         """
         Fetch a subgraph consisting of a specific set of nodes and their relationships.
 
@@ -1121,7 +1144,7 @@ class NeptuneGraphDB(GraphDBInterface):
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to get nodeset subgraph for type {node_type}: {error_msg}")
-            raise Exception(f"Failed to get nodeset subgraph: {error_msg}") from e
+            raise RuntimeError(f"Failed to get nodeset subgraph: {error_msg}") from e
 
     async def get_connections(self, node_id: UUID) -> list:
         """
@@ -1172,7 +1195,7 @@ class NeptuneGraphDB(GraphDBInterface):
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to get connections for node {node_id}: {error_msg}")
-            raise Exception(f"Failed to get connections: {error_msg}") from e
+            raise RuntimeError(f"Failed to get connections: {error_msg}") from e
 
     async def remove_connection_to_predecessors_of(self, node_ids: list[str], edge_label: str):
         """
@@ -1278,7 +1301,6 @@ class NeptuneGraphDB(GraphDBInterface):
             - graph_name: The name of the graph to drop, defaults to 'myGraph'. (default
               'myGraph')
         """
-        pass
 
     async def graph_exists(self, graph_name="myGraph"):
         """
@@ -1298,7 +1320,6 @@ class NeptuneGraphDB(GraphDBInterface):
 
             True if the graph exists, otherwise False.
         """
-        pass
 
     async def project_entire_graph(self, graph_name="myGraph"):
         """
@@ -1307,7 +1328,6 @@ class NeptuneGraphDB(GraphDBInterface):
         Note: This method is currently a placeholder because GDS (Graph Data Science)
         projection is not supported in Neptune Anlaytics.
         """
-        pass
 
     async def get_filtered_graph_data(self, attribute_filters: list[dict[str, list]]):
         """

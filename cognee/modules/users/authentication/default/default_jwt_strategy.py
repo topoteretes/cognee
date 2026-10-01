@@ -1,10 +1,11 @@
-import jwt
 from uuid import UUID
-from fastapi_users.jwt import generate_jwt
-from fastapi_users.authentication import JWTStrategy
 
-from cognee.modules.users.models import User
+import jwt
+from fastapi_users.authentication import JWTStrategy
+from fastapi_users.jwt import generate_jwt
+
 from cognee.modules.users.get_user_manager import UserManager
+from cognee.modules.users.models import User
 
 
 class DefaultJWTStrategy(JWTStrategy):

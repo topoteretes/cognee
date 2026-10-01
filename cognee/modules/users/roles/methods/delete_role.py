@@ -1,17 +1,17 @@
 from uuid import UUID
 
-from sqlalchemy.future import select
 from sqlalchemy import delete
+from sqlalchemy.future import select
 
-from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
-from cognee.modules.users.permissions.methods import has_user_management_permission
+from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.models import (
     Role,
     UserRole,
 )
 from cognee.modules.users.models.ACL import ACL
 from cognee.modules.users.models.Principal import Principal
+from cognee.modules.users.permissions.methods import has_user_management_permission
 
 
 async def delete_role(role_id: UUID, owner_id: UUID):
@@ -29,8 +29,13 @@ async def delete_role(role_id: UUID, owner_id: UUID):
         if not role:
             raise EntityNotFoundError(message="Role not found.")
 
-        await has_user_management_permission(requester_id=owner_id, tenant_id=role.tenant_id)
+        tenant_id = role.tenant_id
 
+    # has_user_management_permission opens its own session(s); run it OUTSIDE the
+    # session above so we never hold two pooled connections at once (#4197 class).
+    await has_user_management_permission(requester_id=owner_id, tenant_id=tenant_id)
+
+    async with db_engine.get_async_session() as session:
         # Remove all user-role associations
         await session.execute(delete(UserRole).where(UserRole.role_id == role_id))
 

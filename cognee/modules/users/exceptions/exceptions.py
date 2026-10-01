@@ -1,5 +1,6 @@
-from cognee.exceptions import CogneeValidationError
 from fastapi import status
+
+from cognee.exceptions import CogneeValidationError
 
 
 class RoleNotFoundError(CogneeValidationError):
@@ -44,8 +45,10 @@ class PermissionDeniedError(CogneeValidationError):
         message: str = "User does not have permission on documents.",
         name: str = "PermissionDeniedError",
         status_code=status.HTTP_403_FORBIDDEN,
+        log: bool = True,
+        log_level: str = "ERROR",
     ):
-        super().__init__(message, name, status_code)
+        super().__init__(message, name, status_code, log, log_level)
 
 
 class PermissionNotFoundError(CogneeValidationError):

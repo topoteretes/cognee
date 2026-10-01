@@ -1,4 +1,5 @@
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Union
+
 from pydantic import BaseModel, Field
 
 
@@ -39,8 +40,8 @@ class NodeModel(BaseModel):
 
     node_id: str
     name: str
-    default_relationship: Optional[RelationshipModel] = None
-    children: List[Union[Dict[str, Any], "NodeModel"]] = Field(default_factory=list)
+    default_relationship: RelationshipModel | None = None
+    children: list[Union[dict[str, Any], "NodeModel"]] = Field(default_factory=list)
 
 
 NodeModel.model_rebuild()
@@ -87,3 +88,34 @@ class GraphOntology(BaseModel):
 
     nodes: list[OntologyNode]
     edges: list[OntologyEdge]
+
+
+class Contradiction(BaseModel):
+    """
+    One contradiction between two of the numbered facts sent to the LLM (issue #3699).
+
+    The model only reports which facts conflict; the caller already holds the rendered
+    fact lines and reconstructs their text locally, so it is guaranteed to match the graph.
+
+    Instance variables:
+
+    - first_fact_id: Identifier of the first conflicting fact, as given in the prompt.
+    - second_fact_id: Identifier of the second conflicting fact, as given in the prompt.
+    - reason: Short explanation of why the two facts are incompatible.
+    - confidence: The model's confidence that this is a genuine contradiction, in [0.0, 1.0].
+    """
+
+    first_fact_id: str = Field(description="Id of the first conflicting fact, e.g. 'F0'.")
+    second_fact_id: str = Field(description="Id of the second conflicting fact, e.g. 'F3'.")
+    reason: str = Field(description="Why the two facts are incompatible.")
+    confidence: float = Field(
+        ge=0.0, le=1.0, description="Confidence that this is a genuine contradiction."
+    )
+
+
+class ContradictionList(BaseModel):
+    """
+    Structured contradiction-detection response: the detected contradictions (possibly empty).
+    """
+
+    contradictions: list[Contradiction] = Field(default_factory=list)

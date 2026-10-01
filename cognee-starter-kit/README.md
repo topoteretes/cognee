@@ -1,13 +1,13 @@
-# ⚠️ DEPRECATED - Go to `new-examples/` Instead
+# ⚠️ DEPRECATED - Go to `examples/` Instead
 
-This starter kit is deprecated. Its examples have been integrated into the `/new-examples/` folder.
+This starter kit is deprecated. Its examples have been integrated into the `/examples/` folder.
 
 | Old Location | New Location |
 |--------------|--------------|
 | `src/pipelines/default.py` | none |
-| `src/pipelines/low_level.py` | `new-examples/custom_pipelines/organizational_hierarchy/` |
-| `src/pipelines/custom-model.py` | `new-examples/demos/custom_graph_model_entity_schema_definition.py` |
-| `src/data/` | Included in `new-examples/custom_pipelines/organizational_hierarchy/data/` |
+| `src/pipelines/low_level.py` | `examples/demos/custom_pipelines/organizational_hierarchy/` |
+| `src/pipelines/custom-model.py` | `examples/guides/custom_graph_model.py` |
+| `src/data/` | Included in `examples/demos/custom_pipelines/organizational_hierarchy/data/` |
 
 ----------
 

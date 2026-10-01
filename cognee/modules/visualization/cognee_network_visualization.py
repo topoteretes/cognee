@@ -20,11 +20,13 @@ caller of ``cognee_network_visualization`` or
 
 import json
 import os
-from typing import Optional
+from dataclasses import asdict
 
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
+from cognee.modules.visualization.embedding_join import fetch_node_embeddings, select_nodes
+from cognee.modules.visualization.layouts import pipeline_layout, semantic_layout
 from cognee.modules.visualization.preprocessor import preprocess
+from cognee.modules.visualization.semantic_clusters import compute_clusters
 from cognee.modules.visualization.views import (
     inspector,
     memory_map,
@@ -33,14 +35,12 @@ from cognee.modules.visualization.views import (
     story_view,
     ui_chrome,
 )
-from cognee.modules.visualization.layouts import pipeline_layout, semantic_layout
-from cognee.modules.visualization.embedding_join import fetch_node_embeddings, select_nodes
-from cognee.modules.visualization.semantic_clusters import compute_clusters
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
 
-async def _semantic_payload(pre) -> tuple[Optional[dict], Optional[dict]]:
+async def _semantic_payload(pre) -> tuple[dict | None, dict | None]:
     """Best-effort semantic positions + clusters. Never blocks the classic render.
 
     Returns ``(positions, clusters)`` or ``(None, None)`` when they can't be
@@ -61,8 +61,80 @@ async def _semantic_payload(pre) -> tuple[Optional[dict], Optional[dict]]:
         clusters = compute_clusters(nodes, embeddings)
         return positions, clusters
     except Exception as exc:
-        logger.warning("Semantic map: payload computation failed (%s); tab shows empty state.", exc)
+        logger.warning(
+            "Semantic map: payload computation failed (%s); tab shows empty state.",
+            exc,
+            exc_info=True,
+        )
         return None, None
+
+
+def build_visualization_payload(
+    graph_data,
+    schema_data: dict | None = None,
+    search_events: list | None = None,
+) -> dict:
+    """JSON-safe snapshot of the graph, for a client that renders it itself.
+
+    Runs the same ``preprocess()`` the HTML path renders from, so the two
+    cannot drift on the data — only on how each packages it (template tokens
+    here vs. a plain dict there). Everything in the result already passes
+    through ``json.dumps`` in the HTML path via ``_safe_json_embed``, which
+    is why this needs no custom encoder.
+
+    Returns ``asdict(pre)`` in full, not the eight fields the HTML template
+    turns into tokens. ``pipeline_stages``, ``edge_classes``, ``bundles``,
+    ``provenance_index`` and ``has_meaningful_topological_rank`` never become
+    tokens today — the view modules read them straight off ``pre`` through
+    ``emit_js(pre)`` — but a client that replaces those modules needs them.
+
+    Semantic positions/clusters are deliberately not included here; see
+    ``build_semantic_payload``. Folding them in would mean every caller pays
+    for the embedding fetch and PCA behind them even when the semantic tab is
+    never opened, which is exactly the cost this split removes.
+    """
+    pre = preprocess(graph_data, schema_data=schema_data)
+    return {**asdict(pre), "search_events": search_events or []}
+
+
+async def build_semantic_payload(graph_data, schema_data: dict | None = None) -> dict:
+    """Semantic layout for the graph, computed on demand.
+
+    Re-runs ``preprocess()`` rather than accepting an already-built ``pre``:
+    that step is cheap dict-shuffling, and keeping this function
+    self-contained means a caller reaching for semantic data alone (as the
+    JSON API does) never has to thread a ``pre`` through from somewhere else.
+    The expensive part this isolates is ``_semantic_payload`` — fetching
+    embeddings for up to 2000 nodes, then PCA (or UMAP) over them — which the
+    HTML path below runs unconditionally on every render.
+    """
+    pre = preprocess(graph_data, schema_data=schema_data)
+    positions, clusters = await _semantic_payload(pre)
+    return {"semantic_positions": positions, "semantic_clusters": clusters}
+
+
+def build_brain_summary_payload(dataset_name: str, graph_data) -> dict:
+    """One dataset's graph, in the shape a multi-dataset overview needs.
+
+    ``{"name", "nodes", "links", "node_set_colors"}`` — not the full
+    ``build_visualization_payload`` shape, because this is meant to be called
+    once per dataset a user can read (see ``visualize.build_brains_payload``)
+    and schema_graph/memory_map/pipeline_stages/etc. are one dataset's worth
+    of detail that an overview showing many datasets at once does not need
+    multiplied by each of them.
+
+    This is also, deliberately, the exact shape a static Business-view export
+    already embeds per dataset under a top-level ``brainsData`` object keyed
+    by dataset id — matching it means a client built against that export
+    reads this from a live endpoint with no adaptation.
+    """
+    pre = preprocess(graph_data)
+    return {
+        "name": dataset_name,
+        "nodes": pre.nodes,
+        "links": pre.links,
+        "node_set_colors": pre.color_maps.get("node_set", {}),
+    }
 
 
 _TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "template.html")
@@ -81,9 +153,9 @@ def _read_template() -> str:
 
 async def cognee_network_visualization(
     graph_data,
-    destination_file_path: Optional[str] = None,
-    schema_data: Optional[dict] = None,
-    search_events: Optional[list] = None,
+    destination_file_path: str | None = None,
+    schema_data: dict | None = None,
+    search_events: list | None = None,
 ) -> str:
     """Render the graph to a self-contained HTML file and return the HTML.
 
@@ -193,8 +265,8 @@ async def aggregate_multi_user_graphs(user_dataset_pairs):
         ``get_graph_data()``, with nodes tagged with ``source_user`` from
         the owning user's email.
     """
-    from cognee.infrastructure.databases.graph import get_graph_engine
     from cognee.context_global_variables import set_database_global_context_variables
+    from cognee.infrastructure.databases.graph import get_graph_engine
 
     all_nodes: dict = {}
     all_edges: list = []

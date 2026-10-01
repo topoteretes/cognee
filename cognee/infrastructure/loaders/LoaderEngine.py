@@ -5,7 +5,7 @@ import filetype
 from cognee.infrastructure.files.utils.guess_file_type import guess_file_type
 from cognee.shared.logging_utils import get_logger
 
-from .LoaderInterface import LoaderInterface
+from .LoaderInterface import LoaderInterface, LoaderResult
 
 logger = get_logger(__name__)
 
@@ -30,11 +30,19 @@ class LoaderEngine:
         self._mime_type_map: dict[str, list[LoaderInterface]] = {}
 
         self.default_loader_priority = [
+            # Before text_loader: code files content-sniff as plain text, so
+            # text_loader's content-detection fallback would claim them first.
+            "code_loader",
             "text_loader",
             "pypdf_loader",
             "image_loader",
             "audio_loader",
             "video_loader",
+            # dlt before csv on purpose: with the dlt extra installed, CSVs
+            # take the structured DLT route; csv_loader's text flattening is
+            # the fallback (no dlt) or an explicit per-call choice via
+            # preferred_loaders={"csv_loader": {}}.
+            "dlt_csv_loader",
             "csv_loader",
             "unstructured_loader",
             "advanced_pdf_loader",
@@ -127,7 +135,7 @@ class LoaderEngine:
         file_path: str,
         preferred_loaders: dict[str, dict[str, Any]] | None = None,
         **kwargs: Any,
-    ) -> str:
+    ) -> "str | LoaderResult":
         """
         Load file using appropriate loader.
 

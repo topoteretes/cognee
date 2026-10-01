@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
-from cognee.modules.engine.models import Interval, Timestamp, Event
+
+from cognee.modules.engine.models import Event, Interval, Timestamp
 from cognee.modules.engine.utils import generate_node_id
 
 
