@@ -8,10 +8,13 @@ HYBRID_COMPLETION.
 Auto-routing may only pick a strategy that is at least as good as the HYBRID
 default on a default-built graph and does not add LLM calls without an
 unambiguous signal. HYBRID already searches document chunks, summaries, and the
-entity neighbourhood in one LLM call, so every rule here fires on an input that
-is not a natural-language question and for which HYBRID is the wrong operation
-rather than a worse one. Question-shaped intent (summary, temporal, reasoning,
-context extension) stays reachable only through an explicit ``query_type``.
+entity neighbourhood in one LLM call, so a rule here fires either on an input
+that is not a natural-language question and for which HYBRID is the wrong
+operation rather than a worse one, or — TEMPORAL only — on a question scoped
+to an absolute date, where the target is HYBRID's own candidates reranked by
+that date and never a smaller context. Other question-shaped intent (summary,
+reasoning, context extension) stays reachable only through an explicit
+``query_type``.
 """
 
 import re
@@ -33,9 +36,33 @@ class RouteDecision:
     rule: str
 
 
+# The temporal signal: a time preposition followed directly by an absolute date
+# — `in 2019`, `before 1900`, `between 1910 and 1920`, `in July 1969`,
+# `on 7 November 1867`, `on 2024-03-01`, `in the 1990s`, `in early 2024`. A
+# year must be four digits and sit right after the preposition (modifier
+# allowed), so `the 2019 report`, `ticket 2048`, `Q4 2024` and a bare `when` or
+# `since monday` do not fire: the retriever's interval extraction would spend an
+# LLM call to find no window in those.
+_TIME_PREPOSITION = (
+    r"(?:in|during|before|after|since|until|till|between|from|by|on|around|circa"
+    r"|as of|prior to|through|throughout)"
+)
+_YEAR = r"(?:1[0-9]{3}|20[0-9]{2})"
+_DAY = r"\d{1,2}(?:st|nd|rd|th)?"
+_MONTH = (
+    r"(?:january|february|march|april|may|june|july|august|september|october|november"
+    r"|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\.?"
+)
+_ABSOLUTE_DATE = (
+    rf"(?:{_YEAR}-\d{{2}}-\d{{2}}"  # 2024-03-01
+    rf"|(?:{_DAY}\s+)?{_MONTH}\s+(?:{_DAY},?\s+)?{_YEAR}"  # 7 November 1867, July 1969, March 1, 2024
+    rf"|(?:(?:early|late|mid)[-\s]+)?{_YEAR}s?)"  # 1915, early 2024, 1990s
+)
+
 # (rule name, pattern, search type). Shape rules (what the input looks like) come
 # first and win: a quoted string is handled as what it is, even when its text
-# also reads as intent — `"coding rules"` is a lexical search.
+# also reads as intent — `"coding rules"` is a lexical search. The temporal rule
+# is last so an explicit coding-rules phrase keeps its route.
 # No query in the golden table depends on the order (test_no_query_matches_two_rules).
 #
 # CYPHER is deliberately NOT routable. A retriever runs the query text verbatim
@@ -58,6 +85,14 @@ _RULES: tuple[tuple[str, re.Pattern, SearchType], ...] = (
             re.IGNORECASE,
         ),
         SearchType.CODING_RULES,
+    ),
+    (
+        "time_scoped_question",
+        re.compile(
+            rf"\b{_TIME_PREPOSITION}\s+(?:{_ABSOLUTE_DATE}|the\s+{_YEAR}s)\b",
+            re.IGNORECASE,
+        ),
+        SearchType.TEMPORAL,
     ),
 )
 

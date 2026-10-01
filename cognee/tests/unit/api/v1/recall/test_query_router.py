@@ -11,12 +11,14 @@ from cognee.api.v1.recall.query_router import (
 from cognee.modules.search.types import SearchType
 
 # Every type the router is allowed to pick. Anything else must come from an
-# explicit query_type, never from auto-routing. Each entry is non-generative or
-# a different operation from HYBRID, never a narrower completion.
+# explicit query_type, never from auto-routing. Each entry is non-generative, a
+# different operation from HYBRID, or (TEMPORAL) HYBRID's own candidates
+# reranked — never a narrower completion.
 ROUTABLE_TYPES = {
     SearchType.HYBRID_COMPLETION,
     SearchType.CHUNKS_LEXICAL,
     SearchType.CODING_RULES,
+    SearchType.TEMPORAL,
 }
 
 GOLDEN = [
@@ -50,22 +52,44 @@ GOLDEN = [
     ("Give me the main points of the meeting", SearchType.HYBRID_COMPLETION),
     ("Summarize the timeline of Einstein's work", SearchType.HYBRID_COMPLETION),
     ("Summarize why the migration stalled", SearchType.HYBRID_COMPLETION),
-    # Dates and timelines stay on HYBRID: TEMPORAL needs Timestamp nodes that
-    # only temporal_cognify=True creates, so on a default graph it pays an
-    # interval-extraction LLM call and then degrades to triplet search.
-    ("What happened between 1910 and 1920?", SearchType.HYBRID_COMPLETION),
-    ("Show the timeline of discoveries", SearchType.HYBRID_COMPLETION),
-    ("What was discovered in 1915?", SearchType.HYBRID_COMPLETION),
-    ("What did we decide in 2024?", SearchType.HYBRID_COMPLETION),
+    # time_scoped_question: a time preposition right before an absolute date.
+    # The default pipeline extracts Timestamp nodes, and TEMPORAL reranks
+    # HYBRID's own candidates by the window, so the route costs one
+    # interval-extraction LLM call and never a smaller context.
+    ("what happened in 2019", SearchType.TEMPORAL),
+    ("What happened between 1910 and 1920?", SearchType.TEMPORAL),
+    ("What was discovered in 1915?", SearchType.TEMPORAL),
+    ("What did we decide in 2024?", SearchType.TEMPORAL),
+    ("Incidents from 2019 to 2021", SearchType.TEMPORAL),
+    ("What shipped on 2024-03-01?", SearchType.TEMPORAL),
+    ("What happened in July 1969?", SearchType.TEMPORAL),
+    ("Who was born on 7 November 1867?", SearchType.TEMPORAL),
+    ("What happened on March 1, 2024?", SearchType.TEMPORAL),
+    ("What did Marie Curie do before 1900?", SearchType.TEMPORAL),
+    ("What changed after 2010?", SearchType.TEMPORAL),
+    ("What happened in the 1990s?", SearchType.TEMPORAL),
+    ("What happened in early 2024?", SearchType.TEMPORAL),
+    ("What was the plan as of Jan 2025?", SearchType.TEMPORAL),
+    ("What did Pierre say about Napoleon in 1805?", SearchType.TEMPORAL),
+    # A year that names a thing rather than a time has no preposition in front
+    # of it, and bare temporal words carry no date for the interval extraction
+    # to find, so both stay on the default.
+    ("Summarise the 2019 report", SearchType.HYBRID_COMPLETION),
+    ("Who wrote the 2019 annual report?", SearchType.HYBRID_COMPLETION),
+    ("What's in the 2019 report?", SearchType.HYBRID_COMPLETION),
     ("What was the 1990s policy on remote work?", SearchType.HYBRID_COMPLETION),
-    ("Incidents from 2019 to 2021", SearchType.HYBRID_COMPLETION),
-    ("What shipped on 2024-03-01?", SearchType.HYBRID_COMPLETION),
-    # bare temporal prepositions likewise stay on the default
+    ("Open ticket 2048", SearchType.HYBRID_COMPLETION),
+    ("Error 1045 in the logs", SearchType.HYBRID_COMPLETION),
+    ("How many rows are in table 2024_sales?", SearchType.HYBRID_COMPLETION),
+    ("Which version shipped in Q4 2024?", SearchType.HYBRID_COMPLETION),
+    ("What did Alice say in 2 meetings?", SearchType.HYBRID_COMPLETION),
+    ("Show the timeline of discoveries", SearchType.HYBRID_COMPLETION),
     ("When was the company founded?", SearchType.HYBRID_COMPLETION),
     ("What happened after the merger?", SearchType.HYBRID_COMPLETION),
     ("Since when has Alice been on the team?", SearchType.HYBRID_COMPLETION),
     ("list the open tickets since monday", SearchType.HYBRID_COMPLETION),
     ("When did Einstein publish?", SearchType.HYBRID_COMPLETION),
+    ("What happened last year?", SearchType.HYBRID_COMPLETION),
     # reasoning / relationship intent stays on the default
     ("Why did Curie win two Nobel Prizes?", SearchType.HYBRID_COMPLETION),
     ("Explain how the auth module works", SearchType.HYBRID_COMPLETION),
@@ -172,3 +196,27 @@ class TestNegativeInvariants:
         let any request body that reaches the endpoint mutate the graph.
         """
         assert route_query(query).search_type != SearchType.CYPHER
+
+
+class TestTemporalRoute:
+    def test_no_false_positives_in_the_golden_table(self):
+        """The false-positive rate the SDK-829 ticket asks for, over every
+        non-temporal golden row: zero. The rule costs an LLM call when it
+        fires, so a year that names a thing must never trigger it."""
+        false_positives = [
+            query
+            for query, expected in GOLDEN
+            if expected is not SearchType.TEMPORAL
+            and route_query(query).search_type is SearchType.TEMPORAL
+        ]
+        assert false_positives == []
+
+    def test_known_limitation_four_digit_quantity_reads_as_a_year(self):
+        """A preposition followed by a four-digit count is indistinguishable
+        from a year without parsing the sentence. The cost is bounded: the
+        retriever's interval extraction finds no window and the result is the
+        plain HYBRID one, one LLM call later."""
+        assert route_query("What is in 2048 bytes?").search_type is SearchType.TEMPORAL
+
+    def test_rule_name(self):
+        assert route_query("What happened in 1898?").rule == "time_scoped_question"
