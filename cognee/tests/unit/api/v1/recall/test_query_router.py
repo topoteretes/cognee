@@ -71,6 +71,11 @@ GOLDEN = [
     ("What happened in early 2024?", SearchType.TEMPORAL),
     ("What was the plan as of Jan 2025?", SearchType.TEMPORAL),
     ("What did Pierre say about Napoleon in 1805?", SearchType.TEMPORAL),
+    # `for` only when the year is the object of the phrase, never a quantity
+    ("What is scheduled for 2031?", SearchType.TEMPORAL),
+    ("What is planned for March 2026?", SearchType.TEMPORAL),
+    ("What are the goals for 2027 and 2028?", SearchType.TEMPORAL),
+    ("What was the plan for the 1990s?", SearchType.TEMPORAL),
     # A year that names a thing rather than a time has no preposition in front
     # of it, and bare temporal words carry no date for the interval extraction
     # to find, so both stay on the default.
@@ -83,6 +88,10 @@ GOLDEN = [
     ("How many rows are in table 2024_sales?", SearchType.HYBRID_COMPLETION),
     ("Which version shipped in Q4 2024?", SearchType.HYBRID_COMPLETION),
     ("What did Alice say in 2 meetings?", SearchType.HYBRID_COMPLETION),
+    ("What is the budget for 2000 users?", SearchType.HYBRID_COMPLETION),
+    ("Order chairs for 1500 guests", SearchType.HYBRID_COMPLETION),
+    ("Reserve the hall for 2024_sales", SearchType.HYBRID_COMPLETION),
+    ("What is the plan for 2000 new hires?", SearchType.HYBRID_COMPLETION),
     ("Show the timeline of discoveries", SearchType.HYBRID_COMPLETION),
     ("When was the company founded?", SearchType.HYBRID_COMPLETION),
     ("What happened after the merger?", SearchType.HYBRID_COMPLETION),

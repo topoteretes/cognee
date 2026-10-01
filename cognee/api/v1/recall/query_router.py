@@ -38,11 +38,11 @@ class RouteDecision:
 
 # The temporal signal: a time preposition followed directly by an absolute date
 # — `in 2019`, `before 1900`, `between 1910 and 1920`, `in July 1969`,
-# `on 7 November 1867`, `on 2024-03-01`, `in the 1990s`, `in early 2024`. A
-# year must be four digits and sit right after the preposition (modifier
-# allowed), so `the 2019 report`, `ticket 2048`, `Q4 2024` and a bare `when` or
-# `since monday` do not fire: the retriever's interval extraction would spend an
-# LLM call to find no window in those.
+# `on 7 November 1867`, `on 2024-03-01`, `in the 1990s`, `in early 2024`,
+# `scheduled for 2031`. A year must be four digits and sit right after the
+# preposition (modifier allowed), so `the 2019 report`, `ticket 2048`, `Q4 2024`
+# and a bare `when` or `since monday` do not fire: the retriever's interval
+# extraction would spend an LLM call to find no window in those.
 _TIME_PREPOSITION = (
     r"(?:in|during|before|after|since|until|till|between|from|by|on|around|circa"
     r"|as of|prior to|through|throughout)"
@@ -57,6 +57,16 @@ _ABSOLUTE_DATE = (
     rf"(?:{_YEAR}-\d{{2}}-\d{{2}}"  # 2024-03-01
     rf"|(?:{_DAY}\s+)?{_MONTH}\s+(?:{_DAY},?\s+)?{_YEAR}"  # 7 November 1867, July 1969, March 1, 2024
     rf"|(?:(?:early|late|mid)[-\s]+)?{_YEAR}s?)"  # 1915, early 2024, 1990s
+)
+# `for` takes a quantity as readily as a date (`for 2000 users`, `for 1500
+# guests`), so after `for` a bare year must end the phrase: followed by nothing,
+# punctuation, or a conjunction joining another date — never by a noun.
+_YEAR_AS_OBJECT = rf"{_YEAR}s?(?!\s+(?!(?:and|or|to|through|until|till)\b)[a-z])"
+_FOR_DATE = (
+    rf"\bfor\s+(?:{_YEAR}-\d{{2}}-\d{{2}}"
+    rf"|(?:{_DAY}\s+)?{_MONTH}\s+(?:{_DAY},?\s+)?{_YEAR}"
+    rf"|(?:(?:early|late|mid)[-\s]+)?{_YEAR_AS_OBJECT}"
+    rf"|the\s+{_YEAR_AS_OBJECT})"
 )
 
 # (rule name, pattern, search type). Shape rules (what the input looks like) come
@@ -89,7 +99,7 @@ _RULES: tuple[tuple[str, re.Pattern, SearchType], ...] = (
     (
         "time_scoped_question",
         re.compile(
-            rf"\b{_TIME_PREPOSITION}\s+(?:{_ABSOLUTE_DATE}|the\s+{_YEAR}s)\b",
+            rf"(?:\b{_TIME_PREPOSITION}\s+(?:{_ABSOLUTE_DATE}|the\s+{_YEAR}s)\b|{_FOR_DATE}\b)",
             re.IGNORECASE,
         ),
         SearchType.TEMPORAL,
