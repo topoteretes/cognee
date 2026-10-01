@@ -109,3 +109,30 @@ async def test_rest_handler_adds_remediation_key_only_when_known():
 
     without = await exception_handler(None, CogneeApiError("plain", "Plain"))
     assert set(json.loads(without.body)) == {"detail"}
+
+
+@pytest.mark.parametrize(
+    "message,anchor",
+    [
+        (
+            "litellm.NotFoundError: The model `text-embeding-3-small` does not exist",
+            "EMBEDDING_MODEL",
+        ),
+        ("No module named 'transformers'", "cognee[huggingface]"),
+    ],
+)
+def test_embedding_misconfiguration_rows(message, anchor):
+    assert anchor in find_remediation(message)
+
+
+def test_cognee_not_found_errors_do_not_match_the_model_row():
+    hint = find_remediation("EntityNotFoundError: Entity not found. (Status code: 404)")
+    assert hint is None or "EMBEDDING_MODEL" not in hint
+
+
+def test_auto_log_line_includes_the_message(caplog):
+    import logging
+
+    with caplog.at_level(logging.ERROR):
+        CogneeApiError("the real cause", "Boom", status_code=422)
+    assert any("the real cause" in r.getMessage() for r in caplog.records)

@@ -21,7 +21,6 @@ exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for 
 exclude-newer-span = "P2D"
 
 [options.exclude-newer-package]
-enola-cli = { timestamp = "0001-01-01T00:00:00Z", span = "PT0S" }
 cognee = { timestamp = "0001-01-01T00:00:00Z", span = "PT0S" }
 
 [manifest]
@@ -978,7 +977,7 @@ postgres-binary = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cognee", extras = ["postgres-binary", "docs", "neo4j"], specifier = ">=1.5.0,<2.0.0" },
+    { name = "cognee", extras = ["postgres-binary", "docs", "neo4j"], specifier = ">=1.5.4,<2.0.0" },
     { name = "fastmcp", specifier = ">=3.4.0,<4.0.0" },
     { name = "httpx", specifier = ">=0.27.0,<1.0.0" },
     { name = "mcp", specifier = ">=1.24.0,<2.0.0" },

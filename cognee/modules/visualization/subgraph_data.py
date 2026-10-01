@@ -16,6 +16,7 @@ from typing import Any
 from cognee.infrastructure.databases.graph.bounded_neighborhood import hop_distances
 from cognee.infrastructure.databases.graph.graph_db_interface import EdgeData, Node
 from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
+from cognee.modules.visualization.preprocessor import SEMANTIC_TYPE_KEY
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("visualization.subgraph_data")
@@ -192,7 +193,69 @@ def truncate_subgraph(
     return (kept_nodes, kept_edges), True
 
 
-def iter_seed_neighborhood(
+ENTITY_NODE_TYPE = "Entity"
+
+
+async def resolve_entity_types(graph_engine: Any, nodes_data: list[Node]) -> dict[str, str] | None:
+    """The EntityType name of each Entity in ``nodes_data``, read from the store.
+
+    A bounded read returns only the edges between its members, so an entity
+    whose EntityType node was not admitted comes back with no way to tell its
+    type. This asks the store for each entity's ``is_a`` target.
+
+    Only Entity nodes are looked up: a type node as a seed would pull in every
+    entity of that type. A failed lookup is logged and yields ``None``, so the
+    read still returns, with those entities typed from the edges it has.
+    """
+    entity_ids = [
+        str(node_id)
+        for node_id, properties in nodes_data
+        if properties.get("type") == ENTITY_NODE_TYPE
+    ]
+    if not entity_ids:
+        return {}
+    method = getattr(graph_engine, "get_entity_type_names", None)
+    try:
+        if callable(method):
+            return await method(entity_ids)
+        # Community registration permits duck-typed adapters, not only subclasses.
+        from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+
+        return await GraphDBInterface.get_entity_type_names(graph_engine, entity_ids)
+    except Exception:
+        logger.warning(
+            "Entity type lookup failed for %d entities; they keep the types the read itself shows.",
+            len(entity_ids),
+            exc_info=True,
+        )
+        return None
+
+
+def with_entity_types(nodes_data: list[Node], entity_types: dict[str, str]) -> list[Node]:
+    """``nodes_data`` with each resolved Entity's ``SEMANTIC_TYPE_KEY`` set."""
+    return [
+        (node_id, {**properties, SEMANTIC_TYPE_KEY: entity_types[str(node_id)]})
+        if str(node_id) in entity_types
+        else (node_id, properties)
+        for node_id, properties in nodes_data
+    ]
+
+
+def _bounded_neighborhood(
+    graph_engine: Any, seeds: list[str], depth: int, max_nodes: int, options: dict[str, Any]
+) -> AsyncIterator[GraphData]:
+    method = getattr(graph_engine, "iter_bounded_neighborhood", None)
+    if callable(method):
+        return method(seeds, depth, max_nodes, **options)
+    # Community registration permits duck-typed adapters, not only subclasses.
+    from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+
+    return GraphDBInterface.iter_bounded_neighborhood(
+        graph_engine, seeds, depth, max_nodes, **options
+    )
+
+
+async def iter_seed_neighborhood(
     graph_engine: Any,
     seeds: list[str],
     depth: int,
@@ -204,22 +267,26 @@ def iter_seed_neighborhood(
     """The adapter's ``iter_bounded_neighborhood`` chunks for these seeds.
 
     A store with a native implementation stops at ``max_nodes`` instead of
-    returning the whole neighbourhood for Python to cut.
+    returning the whole neighbourhood for Python to cut. Every Entity in a
+    chunk carries its semantic type as ``entity_type``, whether or not its
+    EntityType node is in the read (see ``resolve_entity_types``).
     """
     # Only passed when asked for, so the unprojected read calls the adapter
     # exactly as it did before property projection had a caller.
     options: dict[str, Any] = {"chunk_size": chunk_size}
     if property_keys is not None:
         options["property_keys"] = list(property_keys)
-    method = getattr(graph_engine, "iter_bounded_neighborhood", None)
-    if callable(method):
-        return method(seeds, depth, max_nodes, **options)
-    # Community registration permits duck-typed adapters, not only subclasses.
-    from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
-
-    return GraphDBInterface.iter_bounded_neighborhood(
-        graph_engine, seeds, depth, max_nodes, **options
-    )
+    # A lookup that failed once is not retried for the rest of the read: a
+    # store that cannot answer it would fail, and log, once per chunk.
+    lookup_failed = False
+    async for nodes_data, edges_data in _bounded_neighborhood(
+        graph_engine, seeds, depth, max_nodes, options
+    ):
+        entity_types = None
+        if not lookup_failed:
+            entity_types = await resolve_entity_types(graph_engine, nodes_data)
+            lookup_failed = entity_types is None
+        yield with_entity_types(nodes_data, entity_types or {}), edges_data
 
 
 async def expand_seed_neighborhood(

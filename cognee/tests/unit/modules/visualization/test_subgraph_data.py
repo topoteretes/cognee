@@ -2,11 +2,12 @@
 
 from functools import partial
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.modules.visualization.preprocessor import SEMANTIC_TYPE_KEY
 from cognee.modules.visualization.subgraph_data import (
     DEFAULT_NEIGHBORHOOD_DEPTH,
     fetch_visualization_graph_data,
@@ -25,6 +26,7 @@ def _mock_engine():
     """
     engine = MagicMock()
     engine.iter_bounded_neighborhood = partial(GraphDBInterface.iter_bounded_neighborhood, engine)
+    engine.get_entity_type_names = AsyncMock(return_value={})
     return engine
 
 
@@ -282,3 +284,117 @@ async def test_fetch_validates_bounds(kwargs):
     engine = _mock_engine()
     with pytest.raises(ValueError):
         await fetch_visualization_graph_data(engine, **kwargs)
+
+
+# --- semantic types outside the read (SDK-794) -----------------------------
+
+
+class _TypedStore:
+    """alice -knows- bob, each ``is_a`` Person, and a Person type node.
+
+    ``get_neighborhood`` honours ``edge_types`` and is undirected, like the
+    real adapters, and records every call.
+    """
+
+    def __init__(self):
+        self.nodes = {
+            "alice": {"type": "Entity", "name": "Alice"},
+            "bob": {"type": "Entity", "name": "Bob"},
+            "person": {"type": "EntityType", "name": "Person"},
+            "chunk": {"type": "DocumentChunk", "text": "Alice knows Bob"},
+        }
+        self.edges = [
+            ("alice", "bob", "knows", {}),
+            ("alice", "person", "is_a", {}),
+            ("bob", "person", "is_a", {}),
+            ("chunk", "alice", "contains", {}),
+        ]
+        self.calls = []
+
+    async def get_neighborhood(self, node_ids, depth=1, edge_types=None):
+        self.calls.append((list(node_ids), depth, edge_types))
+        members = set(node_ids)
+        for _ in range(depth):
+            # One hop per round: expand from a snapshot of the frontier.
+            reached = set(members)
+            for source, target, relation, _props in self.edges:
+                if edge_types and relation not in edge_types:
+                    continue
+                if source in reached or target in reached:
+                    members |= {source, target}
+        nodes = [(node_id, dict(self.nodes[node_id])) for node_id in members]
+        edges = [e for e in self.edges if e[0] in members and e[1] in members]
+        return nodes, edges
+
+    def iter_bounded_neighborhood(self, seeds, depth, max_nodes, **options):
+        return GraphDBInterface.iter_bounded_neighborhood(self, seeds, depth, max_nodes, **options)
+
+
+@pytest.mark.asyncio
+async def test_neighbours_keep_their_type_when_the_type_node_is_outside_the_read():
+    store = _TypedStore()
+    # Seeded on the chunk, depth 1: alice is admitted, her Person node is not.
+    nodes, _ = await fetch_visualization_graph_data(
+        store, seed_node_ids=["chunk"], neighborhood_depth=1
+    )
+    by_id = dict(nodes)
+    assert "person" not in by_id
+    assert by_id["alice"][SEMANTIC_TYPE_KEY] == "Person"
+    assert SEMANTIC_TYPE_KEY not in by_id["chunk"]
+
+
+@pytest.mark.asyncio
+async def test_a_budget_cut_never_drops_an_entity_type():
+    store = _TypedStore()
+    # max_nodes=2 keeps chunk and alice and cuts the Person node.
+    nodes, _ = await fetch_visualization_graph_data(
+        store, seed_node_ids=["chunk"], neighborhood_depth=2, max_nodes=2
+    )
+    by_id = dict(nodes)
+    assert set(by_id) == {"chunk", "alice"}
+    assert by_id["alice"][SEMANTIC_TYPE_KEY] == "Person"
+
+
+@pytest.mark.asyncio
+async def test_the_type_lookup_never_starts_from_a_type_node():
+    store = _TypedStore()
+    await fetch_visualization_graph_data(store, seed_node_ids=["person"], neighborhood_depth=1)
+    lookups = [c for c in store.calls if c[2] == ["is_a"]]
+    assert lookups, "the read should look up the admitted entities' types"
+    for seeds, depth, _ in lookups:
+        assert "person" not in seeds
+        assert "chunk" not in seeds
+        assert depth == 1
+
+
+@pytest.mark.asyncio
+async def test_a_failed_type_lookup_still_returns_the_read(caplog):
+    store = _TypedStore()
+
+    async def broken(entity_ids):
+        raise RuntimeError("edge type filter unsupported by this store")
+
+    store.get_entity_type_names = broken
+    nodes, _ = await fetch_visualization_graph_data(
+        store, seed_node_ids=["chunk"], neighborhood_depth=1
+    )
+    assert {node_id for node_id, _ in nodes} == {"chunk", "alice"}
+    assert all(SEMANTIC_TYPE_KEY not in properties for _, properties in nodes)
+
+
+@pytest.mark.asyncio
+async def test_a_native_type_lookup_is_preferred_over_the_neighbourhood_default():
+    store = _TypedStore()
+    asked = []
+
+    async def native(entity_ids):
+        asked.append(list(entity_ids))
+        return {"alice": "Person"}
+
+    store.get_entity_type_names = native
+    nodes, _ = await fetch_visualization_graph_data(
+        store, seed_node_ids=["chunk"], neighborhood_depth=1
+    )
+    assert asked == [["alice"]]
+    assert not [c for c in store.calls if c[2] == ["is_a"]]
+    assert dict(nodes)["alice"][SEMANTIC_TYPE_KEY] == "Person"

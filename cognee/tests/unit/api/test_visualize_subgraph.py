@@ -11,7 +11,7 @@ import sys
 from contextlib import asynccontextmanager
 from functools import partial
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
@@ -37,6 +37,7 @@ def _mock_engine():
     """
     engine = MagicMock()
     engine.iter_bounded_neighborhood = partial(GraphDBInterface.iter_bounded_neighborhood, engine)
+    engine.get_entity_type_names = AsyncMock(return_value={})
     return engine
 
 
