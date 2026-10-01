@@ -169,6 +169,7 @@ evals = [
     "matplotlib>=3.8.3,<4",
     "scikit-learn>=1.6.1,<2",
     "locust>=2.0.0,<3",
+    "nltk>=3.9.3,<4", # Porter stemmer for the official LoCoMo F1 (locomo/metrics/f1_locomo.py)
 ]
 
 graphiti = ["graphiti-core>=0.28.0"]

@@ -23,6 +23,25 @@ Decisions taken vs. the plan above:
 - **Adversarial**: kept by default; the aggregate reports both "overall" and a mem0-comparable
   slice without it.
 
+## Status (2026-10-01) — single-conversation experiment
+
+Branch `federica/locomo-experiments`. Scope narrowed to **one conversation (conv-30, index 1),
+one retriever (`hybrid_completion_20_20`)**, to get a first number quickly. Changes on top of the
+harness above:
+
+- `--ingest-mode remember` (new default): one document per session + overview through a single
+  `remember()` (add + cognify + improve, no sessions). The original session → `improve()` path is
+  kept as `--ingest-mode sessions`.
+- `--prompt-style locomo` (new default): the official LoCoMo QA protocol (one prompt, date hint
+  on temporal questions, (a)/(b) choice on adversarial ones, option letter mapped back before
+  scoring). The per-category prompts stay available as `--prompt-style category`; their
+  abstention phrase is now the official *"Not mentioned in the conversation"*.
+- `f1_locomo`: a port of the official scorer (stemming, per-category rules) reported next to the
+  SQuAD-style `f1` and the LLM judge. Needs `nltk` (added to the `evals` extra).
+- Fixes: answer records now carry `category` / `evidence` / `adversarial_answer` /
+  `answer_options` to the evaluator (the judge never saw the distractor before); the judge's
+  completion cap is 2000 tokens and empty verdicts are retried.
+
 ## 0. What already exists and what is missing
 
 The BEAM work (`cognee/eval_framework/beam/`) is the template. Everything below is reusable as-is:

@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 from cognee.eval_framework.analysis.metrics_calculator import bootstrap_ci
 from cognee.eval_framework.reporting.io import read_json, write_json
 
-METRICS = ("f1", "llm_judge")
+METRICS = ("f1", "f1_locomo", "llm_judge")
 MEM0_COMPARABLE_TYPES = ("single_hop", "multi_hop", "temporal", "open_domain")
 CATEGORY_ORDER = ("single_hop", "multi_hop", "temporal", "open_domain", "adversarial")
 _FILE_RE = re.compile(r"locomo_metrics_conv(?P<conv>\d+)_(?P<retriever>.+)_run(?P<run>\d+)\.json$")

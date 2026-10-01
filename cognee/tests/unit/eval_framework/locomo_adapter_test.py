@@ -93,6 +93,56 @@ def test_build_question_records_adversarial_and_golden_context():
     adversarial = records[-1]
     assert adversarial["answer"] == ADVERSARIAL_GOLD_ANSWER
     assert adversarial["adversarial_answer"] == "distractor"
+    # LoCoMo-protocol question augmentations live next to the plain question.
+    temporal = records[2]
+    assert temporal["completion_question"].startswith("Q when?")
+    assert "Use DATE of CONVERSATION" in temporal["completion_question"]
+    assert "answer_options" not in temporal
+    assert "completion_question" not in records[0]
+    assert "Select the correct answer: (a)" in adversarial["completion_question"]
+    assert set(adversarial["answer_options"].values()) == {ADVERSARIAL_GOLD_ANSWER, "distractor"}
+    assert "distractor" in adversarial["completion_question"]
+    assert ADVERSARIAL_GOLD_ANSWER in adversarial["completion_question"]
+
+
+def test_locomo_completion_question_alternates_option_order():
+    from cognee.eval_framework.benchmark_adapters.locomo_adapter import (
+        locomo_completion_question,
+    )
+
+    _, even = locomo_completion_question("Q?", 5, distractor="d", position=0)
+    _, odd = locomo_completion_question("Q?", 5, distractor="d", position=1)
+    assert even == {"a": ADVERSARIAL_GOLD_ANSWER, "b": "d"}
+    assert odd == {"a": "d", "b": ADVERSARIAL_GOLD_ANSWER}
+    # no distractor -> no choice; non-temporal, non-adversarial -> untouched
+    assert locomo_completion_question("Q?", 5, distractor=None) == (None, None)
+    assert locomo_completion_question("Q?", 4, distractor="d") == (None, None)
+
+
+def test_session_documents_one_per_session_with_date(tmp_path):
+    from cognee.eval_framework.locomo.preprocess import (
+        build_session_documents,
+        write_session_documents,
+    )
+
+    conversation = parse_conversation(make_record(), 0)
+    documents = build_session_documents(conversation)
+    assert [d["session_index"] for d in documents] == [1, 2]
+    assert [d["turn_count"] for d in documents] == [4, 3]
+    assert documents[1]["text"].startswith(
+        "Session 2 of the conversation between Ana and Ben, which took place at "
+        "1:00 pm on 2 May, 2023."
+    )
+    assert "(part" not in documents[0]["text"]
+    assert "[shares a photo: a cat on a sofa]" in documents[0]["text"]
+
+    folder = write_session_documents(conversation, documents, tmp_path)
+    assert (folder / "overview.txt").exists()
+    assert (folder / "session_01.txt").read_text().startswith("Session 1 of the conversation")
+    manifest = json.loads((folder / "manifest.json").read_text())
+    assert manifest["dataset_name"] == "locomo_conv_1"
+    assert [d["session_index"] for d in manifest["documents"]] == [1, 2]
+    assert "text" not in manifest["documents"][0]
 
 
 def test_build_question_records_drops_beyond_truncation_and_adversarial():
@@ -157,3 +207,20 @@ def test_bundle_and_files(tmp_path):
     assert isinstance(items, list) and len(items) == 2
     manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["sessions"][0]["window_count"] == 2
+
+
+def test_abstention_distractor_disables_the_two_way_choice():
+    from cognee.eval_framework.benchmark_adapters.locomo_adapter import (
+        is_abstention,
+        locomo_completion_question,
+    )
+
+    assert is_abstention("Not mentioned")
+    assert is_abstention("No information available in the chat")
+    assert not is_abstention("a necklace")
+    assert not is_abstention(None)
+    # dataset rows whose "distractor" is itself "Not mentioned": plain question, no options
+    assert locomo_completion_question("Q?", 5, distractor="Not mentioned", position=0) == (
+        None,
+        None,
+    )

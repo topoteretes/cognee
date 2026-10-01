@@ -47,6 +47,9 @@ from cognee.eval_framework.sweeps.retriever_sweep_runner import (
 )
 
 ARTIFACT_PREFIX = "locomo"
+PROMPT_STYLES = ("locomo", "category")
+DEFAULT_PROMPT_STYLE = "locomo"
+QA_PROMPTS_DIR = Path(__file__).resolve().parent / "qa_prompts"
 
 
 def print_step(message: str) -> None:
@@ -63,7 +66,7 @@ def build_eval_params(output_dir: Path, conversation_index: int) -> dict[str, An
         evaluating_answers=True,
         evaluating_contexts=False,
         evaluation_engine="LocomoEval",
-        evaluation_metrics=["f1", "llm_judge"],
+        evaluation_metrics=["f1", "f1_locomo", "llm_judge"],
         calculate_metrics=True,
         dashboard=False,
         questions_path=str(
@@ -125,11 +128,6 @@ async def answer_conversation(args: argparse.Namespace) -> dict[str, Any]:
     if not questions:
         raise RuntimeError("No questions selected")
 
-    output_dir: Path = args.run_dir / "qa"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    eval_params = build_eval_params(output_dir, args.conversation_index)
-    write_json(eval_params["questions_path"], questions)
-
     payload = load_beam_sweep_payload_from_file(args.config_json_path)
     configs = resolve_beam_sweep_config(payload, build_registry_base_configs())
     if args.retrievers:
@@ -138,13 +136,19 @@ async def answer_conversation(args: argparse.Namespace) -> dict[str, Any]:
         missing = wanted - {config["name"] for config in configs}
         if missing:
             raise ValueError(f"Unknown retriever variant(s): {', '.join(sorted(missing))}")
+    configs, questions = apply_prompt_style(configs, questions, args.prompt_style)
+
+    output_dir: Path = args.run_dir / "qa"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    eval_params = build_eval_params(output_dir, args.conversation_index)
+    write_json(eval_params["questions_path"], questions)
 
     type_counts: dict[str, int] = {}
     for question in questions:
         type_counts[question["question_type"]] = type_counts.get(question["question_type"], 0) + 1
     print_step(
         f"{conversation.sample_id}: {len(questions)} questions {json.dumps(type_counts)} x "
-        f"{len(configs)} retriever(s) x {args.num_runs} run(s); "
+        f"{len(configs)} retriever(s) x {args.num_runs} run(s); prompt style={args.prompt_style}; "
         f"answer model={os.getenv('LLM_MODEL')} judge={os.getenv('LOCOMO_JUDGE_MODEL')}"
     )
 
@@ -154,7 +158,11 @@ async def answer_conversation(args: argparse.Namespace) -> dict[str, Any]:
         parallel_runs=False,
         max_concurrent_questions=args.max_concurrent_questions,
         artifact_prefix=ARTIFACT_PREFIX,
-        summary_tags={"benchmark": "LoCoMo", "conversation": conversation.sample_id},
+        summary_tags={
+            "benchmark": "LoCoMo",
+            "conversation": conversation.sample_id,
+            "prompt_style": args.prompt_style,
+        },
     )
     batch_results = await run_retriever_sweep_for_questions(
         conversation_index=args.conversation_index,
@@ -171,6 +179,7 @@ async def answer_conversation(args: argparse.Namespace) -> dict[str, Any]:
         "question_type_counts": type_counts,
         "answer_model": os.getenv("LLM_MODEL"),
         "judge_model": os.getenv("LOCOMO_JUDGE_MODEL"),
+        "prompt_style": args.prompt_style,
         "retrievers": [config["name"] for config in configs],
         "num_runs": args.num_runs,
         "batches": [
@@ -201,6 +210,36 @@ async def answer_conversation(args: argparse.Namespace) -> dict[str, Any]:
     return summary
 
 
+def apply_prompt_style(
+    configs: list[dict[str, Any]], questions: list[dict[str, Any]], style: str
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Make the retriever configs and questions follow one answer-prompt protocol.
+
+    ``locomo`` — the official LoCoMo protocol: one short-answer system prompt for every
+    question (``qa_prompts/locomo.txt``; adversarial questions get the official category-5
+    variant without the "exact words" instruction) plus the question augmentations the
+    adapter attached (``completion_question``: date hint on temporal questions, (a)/(b)
+    choice on adversarial ones). Overrides whatever ``qa_prompt_paths`` the sweep config has.
+
+    ``category`` — the per-category prompts from the sweep config, and plain questions:
+    the adapter's ``completion_question`` / ``answer_options`` are dropped.
+    """
+    if style == "locomo":
+        prompt_paths = {
+            "DEFAULT": str(QA_PROMPTS_DIR / "locomo.txt"),
+            "adversarial": str(QA_PROMPTS_DIR / "locomo_adversarial.txt"),
+        }
+        configs = [{**config, "qa_prompt_paths": dict(prompt_paths)} for config in configs]
+        return configs, questions
+    if style == "category":
+        questions = [
+            {k: v for k, v in q.items() if k not in ("completion_question", "answer_options")}
+            for q in questions
+        ]
+        return configs, questions
+    raise ValueError(f"Unknown prompt style: {style}. Available: {', '.join(PROMPT_STYLES)}")
+
+
 def _parse_csv(value: str) -> list[str] | None:
     items = [item.strip() for item in value.split(",") if item.strip()]
     return items or None
@@ -212,6 +251,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--config-json-path", type=Path, required=True)
     parser.add_argument("--data-path", default=None)
+    parser.add_argument("--prompt-style", choices=PROMPT_STYLES, default=DEFAULT_PROMPT_STYLE)
     parser.add_argument("--max-sessions", type=int, default=None)
     parser.add_argument("--max-questions", type=int, default=None)
     parser.add_argument("--question-types", type=_parse_csv, default=None)

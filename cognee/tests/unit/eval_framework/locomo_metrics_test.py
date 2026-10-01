@@ -167,3 +167,154 @@ def test_driver_helpers():
     assert [q["question_idx"] for q in picked] == sorted(q["question_idx"] for q in picked)
     only_temporal = select_questions(questions, question_types=["temporal"], max_questions=None)
     assert [q["question_type"] for q in only_temporal] == ["temporal", "temporal"]
+
+
+# --------------------------------------------------------------- official LoCoMo F1
+
+
+def test_normalize_answer_locomo_drops_commas_and_and():
+    from cognee.eval_framework.locomo.metrics.f1_locomo import normalize_answer_locomo
+
+    assert (
+        normalize_answer_locomo("Camping, pottery and the painting!") == "camping pottery painting"
+    )
+    assert normalize_answer_locomo(None) == ""
+
+
+@pytest.mark.parametrize(
+    "prediction,gold,category,expected",
+    [
+        # stemming: "painting" == "painted" (SQuAD-style f1 gives 0.5 here)
+        ("painting a sunset", "painted a sunset", 4, 1.0),
+        # multi-hop: comma-split sub-answers, best match per gold part, averaged
+        ("pottery, camping, swimming and painting", "camping, pottery, painting", 1, 8 / 9),
+        # open-domain: only the gold text before ';' counts
+        ("Psychology", "Psychology; counseling certification", 3, 1.0),
+        # adversarial: abstention markers only, no F1 against the gold
+        ("Not mentioned in the conversation", "Not mentioned in the conversation", 5, 1.0),
+        ("No information available", "Not mentioned in the conversation", 5, 1.0),
+        ("The conversation does not contain this information.", "Not mentioned", 5, 0.0),
+        ("a necklace", "Not mentioned in the conversation", 5, 0.0),
+        ("cats", "dogs", 2, 0.0),
+        ("", "", 4, 0.0),  # official f1_score returns 0 when nothing overlaps, even on empty
+    ],
+)
+def test_locomo_f1_per_category(prediction, gold, category, expected):
+    from cognee.eval_framework.locomo.metrics.f1_locomo import locomo_f1
+
+    score, _rule = locomo_f1(prediction, gold, category)
+    assert score == pytest.approx(expected)
+
+
+def test_locomo_f1_metric_resolves_category_from_type_name():
+    from cognee.eval_framework.locomo.metrics.f1_locomo import LocomoOfficialF1Metric
+
+    metric = LocomoOfficialF1Metric()
+    case = SimpleNamespace(
+        actual_output="I'm afraid that is not mentioned anywhere",
+        expected_output="Not mentioned in the conversation",
+        additional_metadata={"question_type": "adversarial"},
+    )
+    assert metric.measure(case) == 1.0
+    assert "abstention" in metric.reason
+
+    numbered = SimpleNamespace(
+        actual_output="camping",
+        expected_output="camping, pottery",
+        additional_metadata={"category": "1"},
+    )
+    assert metric.measure(numbered) == pytest.approx(0.5)
+    assert "multi_answer" in metric.reason
+
+
+def test_resolve_option_answer():
+    from cognee.eval_framework.locomo.eval_adapter import resolve_option_answer
+
+    options = {"a": "Not mentioned in the conversation", "b": "a necklace"}
+    assert resolve_option_answer("(a)", options) == "Not mentioned in the conversation"
+    assert resolve_option_answer("b", options) == "a necklace"
+    assert resolve_option_answer("B)", options) == "a necklace"
+    assert resolve_option_answer("(a) Not mentioned in the conversation", options) == (
+        "Not mentioned in the conversation"
+    )
+    # free text and non-option answers pass through; "a necklace" must not read as option a
+    assert resolve_option_answer("a necklace", options) == "a necklace"
+    assert resolve_option_answer("not mentioned", options) == "not mentioned"
+    assert resolve_option_answer("(a)", None) == "(a)"
+    assert resolve_option_answer(None, options) == ""
+
+
+def test_eval_adapter_f1_locomo_and_option_resolution(monkeypatch):
+    async def fake_call_judge(prompt, *, model=None):
+        return '{"label": "CORRECT", "reason": "ok"}'
+
+    monkeypatch.setattr(llm_judge, "call_judge", fake_call_judge)
+    adapter = LocomoEvalAdapter(max_concurrent_evaluations=2)
+    options = {"a": "a necklace", "b": "Not mentioned in the conversation"}
+    answers = [
+        {
+            "question": "q",
+            "answer": "(b)",
+            "golden_answer": "Not mentioned in the conversation",
+            "question_type": "adversarial",
+            "category": 5,
+            "answer_options": options,
+        },
+        {
+            "question": "q2",
+            "answer": "painting a sunset",
+            "golden_answer": "painted a sunset",
+            "question_type": "single_hop",
+            "category": 4,
+        },
+    ]
+    results = asyncio.run(adapter.evaluate_answers(answers, ["f1", "f1_locomo", "llm_judge"]))
+    assert results[0]["answer"] == "(b)"  # raw output kept
+    assert results[0]["answer_resolved"] == "Not mentioned in the conversation"
+    assert results[0]["metrics"]["f1_locomo"]["score"] == 1.0
+    assert results[0]["metrics"]["f1"]["score"] == 1.0
+    assert "answer_resolved" not in results[1]
+    assert results[1]["metrics"]["f1"]["score"] == pytest.approx(0.5)
+    assert results[1]["metrics"]["f1_locomo"]["score"] == 1.0
+
+
+def test_apply_prompt_style():
+    from cognee.eval_framework.locomo.answer import QA_PROMPTS_DIR, apply_prompt_style
+
+    configs = [{"name": "r", "qa_prompt_paths": {"DEFAULT": "x.txt", "temporal": "t.txt"}}]
+    questions = [
+        {"question": "Q?", "question_type": "temporal", "completion_question": "Q? Use DATE"},
+        {"question": "A?", "question_type": "adversarial", "answer_options": {"a": "1", "b": "2"}},
+    ]
+    locomo_configs, locomo_questions = apply_prompt_style(configs, questions, "locomo")
+    assert locomo_configs[0]["qa_prompt_paths"] == {
+        "DEFAULT": str(QA_PROMPTS_DIR / "locomo.txt"),
+        "adversarial": str(QA_PROMPTS_DIR / "locomo_adversarial.txt"),
+    }
+    assert all(
+        (QA_PROMPTS_DIR / name).exists() for name in ("locomo.txt", "locomo_adversarial.txt")
+    )
+    assert locomo_questions == questions
+    assert configs[0]["qa_prompt_paths"]["DEFAULT"] == "x.txt"  # input not mutated
+
+    category_configs, category_questions = apply_prompt_style(configs, questions, "category")
+    assert category_configs is configs
+    assert all(
+        "completion_question" not in q and "answer_options" not in q for q in category_questions
+    )
+    assert [q["question"] for q in category_questions] == ["Q?", "A?"]
+
+    with pytest.raises(ValueError):
+        apply_prompt_style(configs, questions, "nope")
+
+
+def test_render_judge_prompt_ignores_abstention_distractor():
+    prompt = llm_judge.render_judge_prompt(
+        question="Q?",
+        gold_answer="Not mentioned in the conversation",
+        model_answer="Not mentioned in the conversation.",
+        question_type="adversarial",
+        adversarial_answer="Not mentioned",
+    )
+    assert "UNANSWERABLE" in prompt
+    assert "distractor" not in prompt

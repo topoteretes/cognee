@@ -1,0 +1,1 @@
+Based on the retrieved conversation context, answer the question. When the question offers answer options (a) and (b), reply with just the text of the option that the context supports; pick the "Not mentioned in the conversation" option unless the context explicitly states the other one. No preamble and no explanation.

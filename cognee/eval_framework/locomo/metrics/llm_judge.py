@@ -19,6 +19,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from cognee.eval_framework.benchmark_adapters.locomo_adapter import is_abstention
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -26,6 +27,9 @@ logger = get_logger()
 DEFAULT_JUDGE_MODEL = "openai/gpt-5.1"
 JUDGE_MODEL_ENV = "LOCOMO_JUDGE_MODEL"
 JUDGE_RETRIES = 4
+# Reasoning models count their hidden reasoning against this cap; the visible verdict is a
+# one-line JSON, but a tight cap can leave it empty. Empty output is retried like an error.
+JUDGE_MAX_COMPLETION_TOKENS = 2000
 _PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / "locomo_judge_prompt.txt"
 _LABEL_RE = re.compile(r"\b(CORRECT|WRONG)\b", re.IGNORECASE)
 
@@ -65,7 +69,9 @@ def render_judge_prompt(
             "say the information is not available. A response that commits to a concrete answer "
             "is WRONG"
         )
-        if adversarial_answer:
+        # A distractor that is itself an abstention ("Not mentioned") must not be presented
+        # as the wrong answer, or the judge fails every correct abstention.
+        if adversarial_answer and not is_abstention(adversarial_answer):
             gold_block += f' — especially the plausible-sounding distractor "{adversarial_answer}"'
         gold_block += "."
     else:
@@ -126,9 +132,13 @@ async def call_judge(prompt: str, *, model: str | None = None) -> str:
                     {"role": "user", "content": prompt},
                 ],
                 api_key=_judge_api_key(),
-                max_completion_tokens=400,
+                max_completion_tokens=JUDGE_MAX_COMPLETION_TOKENS,
             )
-            return response.choices[0].message.content or ""
+            content = response.choices[0].message.content or ""
+            if not content.strip():
+                finish_reason = getattr(response.choices[0], "finish_reason", None)
+                raise RuntimeError(f"empty judge output (finish_reason={finish_reason})")
+            return content
         except Exception as error:  # network / rate-limit / transient provider errors
             last_error = error
             logger.warning("LoCoMo judge call failed (attempt %s): %s", attempt + 1, error)

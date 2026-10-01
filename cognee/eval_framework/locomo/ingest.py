@@ -1,40 +1,45 @@
-"""Ingest ONE LoCoMo conversation through cognee's memory API: sessions first, then improve().
+"""Ingest ONE LoCoMo conversation into cognee (meant to run in its own process/roots).
 
-Flow (per conversation, meant to run in its own process with its own DATA/SYSTEM roots):
+Two ingest modes (``--ingest-mode``):
 
-1. ``remember(overview)`` — a short permanent document with the speakers and the session
-   timeline. Creates the dataset.
+``remember`` (default) — permanent memory through the standard API. Every LoCoMo session
+becomes one document (dated header + turns), plus a short overview document with the
+speakers and the session timeline, and all of them go through a single
+``remember(documents, dataset_name=...)`` = ``add`` + ``cognify`` + ``improve()`` (triplet
+embeddings; no global context index). This measures cognee's graph built the way any user
+builds it.
+
+``sessions`` — the session-memory path:
+
+1. ``remember(overview)`` — the overview document. Creates the dataset.
 2. For every LoCoMo session ``n``: the dialogue is split into dated windows and each window is
    written to the session cache with ``remember(text, session_id=<conv>_s<n>)``. Optionally
    every window is also run through the session-context analyzer (the same
    ``analyze_turn_for_session_context`` that powers automatic feedback) so durable
    preferences / facts become gated session guidance.
-3. ``improve(dataset, session_ids=[all sessions], build_global_context_index=True)`` — the
+3. ``improve(dataset, session_ids=[all sessions], build_global_context_index=...)`` — the
    bridge into permanent memory: persists the session windows into the graph (add + cognify
    under the ``user_sessions_from_cache`` node set), distills the gated guidance into curated
-   lessons, updates preference weights, runs the default enrichment (triplet embeddings) and
-   builds the global context index.
+   lessons, updates preference weights and runs the default enrichment.
 
-Nothing in the dialogue reaches the graph except through ``improve()``, so the graph is an
-honest picture of what the session → improve path produces.
+In ``sessions`` mode nothing in the dialogue reaches the graph except through ``improve()``.
 
 Usage (normally driven by ``run_locomo_eval.py``)::
 
-    uv run python -m cognee.eval_framework.locomo.ingest --conversation-index 0 \
-        --run-dir temp/locomo_runs/<run>/conv_00
+    uv run python -m cognee.eval_framework.locomo.ingest --conversation-index 1 \
+        --run-dir temp/locomo_runs/<run>/conv_01 [--ingest-mode remember|sessions]
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import os
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 # Env that must be in place before cognee is imported (settings are read at import time).
 os.environ.setdefault("CACHING", "true")
@@ -43,14 +48,24 @@ os.environ.setdefault("ENABLE_BACKEND_ACCESS_CONTROL", "false")
 os.environ.setdefault("LOG_LEVEL", "ERROR")
 os.environ.setdefault("COGNEE_LOG_FILE", "false")
 
-from cognee.eval_framework.benchmark_adapters.locomo_adapter import LocomoAdapter
+from cognee.eval_framework.benchmark_adapters.locomo_adapter import (
+    LocomoAdapter,
+    LocomoConversation,
+)
 from cognee.eval_framework.locomo.model_registry import ensure_model_registered
 from cognee.eval_framework.locomo.preprocess import (
     DEFAULT_WINDOW_TURNS,
     build_conversation_bundle,
+    build_session_documents,
+    conversation_overview_text,
+    dataset_name_for,
     write_conversation_files,
+    write_session_documents,
 )
 from cognee.eval_framework.reporting.io import write_json
+
+INGEST_MODES = ("remember", "sessions")
+DEFAULT_INGEST_MODE = "remember"
 
 
 def print_step(message: str) -> None:
@@ -111,51 +126,52 @@ async def analyze_windows(
     return touched
 
 
-async def ingest_conversation(args: argparse.Namespace) -> dict[str, Any]:
-    started = time.monotonic()
-    report: dict[str, Any] = {
-        "started_at": utc_now(),
-        "conversation_index": args.conversation_index,
-        "answer_model": os.getenv("LLM_MODEL"),
-        "window_turns": args.window_turns,
-        "max_sessions": args.max_sessions,
-        "turn_analysis": not args.skip_turn_analysis,
-        "global_context_index": not args.skip_global_context_index,
-        "data_root_directory": os.getenv("DATA_ROOT_DIRECTORY"),
-        "system_root_directory": os.getenv("SYSTEM_ROOT_DIRECTORY"),
-        "sessions": [],
-    }
+async def ingest_via_remember(
+    args: argparse.Namespace,
+    conversation: LocomoConversation,
+    *,
+    cognee,
+    user,
+    dataset_name: str,
+    report: dict[str, Any],
+) -> None:
+    """One document per session + overview, one ``remember()`` call (add+cognify+improve)."""
+    documents = build_session_documents(conversation)
+    folder = write_session_documents(conversation, documents, args.run_dir / "preprocessed")
+    texts = [conversation_overview_text(conversation)] + [doc["text"] for doc in documents]
 
-    if os.getenv("LLM_MODEL"):
-        ensure_model_registered(os.environ["LLM_MODEL"])
+    report["document_count"] = len(texts)
+    report["documents"] = [
+        {key: value for key, value in doc.items() if key != "text"} for doc in documents
+    ]
+    report["preprocessed_dir"] = str(folder)
 
-    import cognee
-    from cognee.infrastructure.session.get_session_manager import get_session_manager
-    from cognee.modules.engine.operations.setup import setup
-    from cognee.modules.users.methods import get_default_user
-
-    adapter = LocomoAdapter(
-        conversation_index=args.conversation_index,
-        max_sessions=args.max_sessions,
-        data_path=args.data_path,
+    print_step(
+        f"{conversation.sample_id}: remember() {len(texts)} documents "
+        f"({len(documents)} sessions + overview) into dataset {dataset_name}"
     )
-    conversation = adapter.load_conversation(args.conversation_index)
+    remember_started = time.monotonic()
+    await cognee.remember(texts, dataset_name=dataset_name, user=user)
+    report["remember_seconds"] = time.monotonic() - remember_started
+    print_step(f"{conversation.sample_id}: remember done in {report['remember_seconds']:.1f}s")
+
+
+async def ingest_via_sessions(
+    args: argparse.Namespace,
+    conversation: LocomoConversation,
+    *,
+    cognee,
+    user,
+    dataset_name: str,
+    report: dict[str, Any],
+) -> None:
+    """Windows into the session cache per LoCoMo session, then ``improve(session_ids=...)``."""
+    from cognee.infrastructure.session.get_session_manager import get_session_manager
+
     bundle = build_conversation_bundle(conversation, args.window_turns)
-    dataset_name = bundle["dataset_name"]
-    report["dataset_name"] = dataset_name
-    report["sample_id"] = bundle["sample_id"]
+    write_conversation_files(bundle, args.run_dir / "preprocessed")
+    report["sessions"] = []
 
-    run_dir: Path = args.run_dir
-    run_dir.mkdir(parents=True, exist_ok=True)
-    write_conversation_files(bundle, run_dir / "preprocessed")
-
-    if args.prune_first:
-        print_step("Pruning existing cognee state")
-        await cognee.prune.prune_data()
-        await cognee.prune.prune_system(metadata=True)
-
-    await setup()
-    user = await get_default_user()
     user_id = str(user.id)
     session_manager = get_session_manager()
     if not session_manager.is_available:
@@ -239,6 +255,56 @@ async def ingest_conversation(args: argparse.Namespace) -> dict[str, Any]:
     report["improve_seconds"] = time.monotonic() - improve_started
     print_step(f"{bundle['sample_id']}: improve done in {report['improve_seconds']:.1f}s")
 
+
+async def ingest_conversation(args: argparse.Namespace) -> dict[str, Any]:
+    started = time.monotonic()
+    sessions_mode = args.ingest_mode == "sessions"
+    report: dict[str, Any] = {
+        "started_at": utc_now(),
+        "conversation_index": args.conversation_index,
+        "ingest_mode": args.ingest_mode,
+        "answer_model": os.getenv("LLM_MODEL"),
+        "window_turns": args.window_turns if sessions_mode else None,
+        "max_sessions": args.max_sessions,
+        "turn_analysis": sessions_mode and not args.skip_turn_analysis,
+        "global_context_index": sessions_mode and not args.skip_global_context_index,
+        "data_root_directory": os.getenv("DATA_ROOT_DIRECTORY"),
+        "system_root_directory": os.getenv("SYSTEM_ROOT_DIRECTORY"),
+    }
+
+    if os.getenv("LLM_MODEL"):
+        ensure_model_registered(os.environ["LLM_MODEL"])
+
+    import cognee
+    from cognee.modules.engine.operations.setup import setup
+    from cognee.modules.users.methods import get_default_user
+
+    adapter = LocomoAdapter(
+        conversation_index=args.conversation_index,
+        max_sessions=args.max_sessions,
+        data_path=args.data_path,
+    )
+    conversation = adapter.load_conversation(args.conversation_index)
+    dataset_name = dataset_name_for(conversation)
+    report["dataset_name"] = dataset_name
+    report["sample_id"] = conversation.sample_id
+
+    run_dir: Path = args.run_dir
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.prune_first:
+        print_step("Pruning existing cognee state")
+        await cognee.prune.prune_data()
+        await cognee.prune.prune_system(metadata=True)
+
+    await setup()
+    user = await get_default_user()
+
+    ingest = ingest_via_sessions if sessions_mode else ingest_via_remember
+    await ingest(
+        args, conversation, cognee=cognee, user=user, dataset_name=dataset_name, report=report
+    )
+
     # Graph size, for the report.
     try:
         from cognee.infrastructure.databases.graph import get_graph_engine
@@ -255,7 +321,7 @@ async def ingest_conversation(args: argparse.Namespace) -> dict[str, Any]:
     report["status"] = "completed"
     write_json(str(run_dir / "ingestion_report.json"), report)
     print_step(
-        f"{bundle['sample_id']}: ingestion complete in {report['total_seconds'] / 60:.1f} min "
+        f"{conversation.sample_id}: ingestion complete in {report['total_seconds'] / 60:.1f} min "
         f"(nodes={report.get('graph_nodes')}, edges={report.get('graph_edges')})"
     )
     return report
@@ -266,7 +332,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--conversation-index", type=int, required=True)
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--data-path", default=None)
+    parser.add_argument("--ingest-mode", choices=INGEST_MODES, default=DEFAULT_INGEST_MODE)
     parser.add_argument("--max-sessions", type=int, default=None)
+    # sessions-mode knobs (ignored in remember mode)
     parser.add_argument("--window-turns", type=int, default=DEFAULT_WINDOW_TURNS)
     parser.add_argument("--analysis-concurrency", type=int, default=8)
     parser.add_argument("--skip-turn-analysis", action="store_true")

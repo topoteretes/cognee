@@ -1,0 +1,1 @@
+Based on the retrieved conversation context, write an answer in the form of a short phrase for the question. Answer with exact words from the context whenever possible. Reply with just the short answer, no preamble and no explanation. If the context does not contain the answer, reply exactly: "Not mentioned in the conversation".

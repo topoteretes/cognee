@@ -108,6 +108,67 @@ def conversation_overview_text(conversation: LocomoConversation) -> str:
     return "\n".join(lines)
 
 
+def session_document_text(conversation: LocomoConversation, session: LocomoSession) -> str:
+    """One permanent-memory document per LoCoMo session: dated header plus every turn.
+
+    Used by the ``remember`` ingest mode (``add`` + ``cognify`` + ``improve`` with no session
+    cache). The header carries the session date so temporal questions stay answerable.
+    """
+    lines = [window_header(conversation, session, 1, 1)]
+    lines.extend(format_turn(turn) for turn in session.turns)
+    return "\n".join(lines)
+
+
+def build_session_documents(conversation: LocomoConversation) -> list[dict[str, Any]]:
+    documents = []
+    for session in conversation.sessions:
+        if not session.turns:
+            continue
+        text = session_document_text(conversation, session)
+        documents.append(
+            {
+                "session_index": session.index,
+                "date_time": session.date_time,
+                "turn_count": len(session.turns),
+                "text": text,
+                "word_count": len(text.split()),
+            }
+        )
+    return documents
+
+
+def write_session_documents(
+    conversation: LocomoConversation, documents: list[dict[str, Any]], output_dir: Path
+) -> Path:
+    """Write the per-session documents (plus overview and manifest); returns the folder."""
+    folder = (
+        output_dir
+        / f"conv_{conversation.conversation_index:02d}_{conversation.sample_id}"
+        / "documents"
+    )
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "overview.txt").write_text(
+        conversation_overview_text(conversation) + "\n", encoding="utf-8"
+    )
+    for document in documents:
+        (folder / f"session_{document['session_index']:02d}.txt").write_text(
+            document["text"] + "\n", encoding="utf-8"
+        )
+    manifest = {
+        "conversation_index": conversation.conversation_index,
+        "sample_id": conversation.sample_id,
+        "dataset_name": dataset_name_for(conversation),
+        "documents": [
+            {key: value for key, value in document.items() if key != "text"}
+            for document in documents
+        ],
+    }
+    (folder / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return folder
+
+
 def session_id_for(conversation: LocomoConversation, session: LocomoSession) -> str:
     return f"locomo_{conversation.sample_id.replace('-', '_')}_s{session.index:02d}"
 

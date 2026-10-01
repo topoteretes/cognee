@@ -49,10 +49,54 @@ CATEGORY_NAMES: dict[int, str] = {
     5: "adversarial",
 }
 ADVERSARIAL_CATEGORY = 5
+TEMPORAL_CATEGORY = 2
 # The answer the adapter records for adversarial (unanswerable) questions. The
 # dataset's ``adversarial_answer`` is the *distractor* the model should not give,
-# so it is kept under its own key and the gold answer becomes an abstention.
-ADVERSARIAL_GOLD_ANSWER = "The conversation does not contain this information."
+# so it is kept under its own key and the gold answer becomes an abstention. The
+# phrase is the one the official LoCoMo scorer (``task_eval/evaluation.py``) credits:
+# a category-5 answer counts only if it contains "not mentioned" or
+# "no information available".
+ADVERSARIAL_GOLD_ANSWER = "Not mentioned in the conversation"
+# What the official scorer accepts as an abstention (substring match, case-insensitive).
+ABSTENTION_MARKERS = ("not mentioned", "no information available")
+
+
+def is_abstention(text: str | None) -> bool:
+    lowered = (text or "").lower()
+    return any(marker in lowered for marker in ABSTENTION_MARKERS)
+
+
+# Question augmentations from the official LoCoMo QA script (``task_eval/gpt_utils.py``).
+# They are applied to the *completion* question only (``completion_question``), so the
+# plain question still drives retrieval. Temporal questions get the date hint; adversarial
+# questions become a two-way choice between abstaining and the dataset's distractor.
+TEMPORAL_QUESTION_SUFFIX = " Use DATE of CONVERSATION to answer with an approximate date."
+ADVERSARIAL_CHOICE_TEMPLATE = " Select the correct answer: (a) {} (b) {}."
+
+
+def locomo_completion_question(
+    question: str,
+    category: int,
+    *,
+    distractor: str | None = None,
+    position: int = 0,
+) -> tuple[str | None, dict[str, str] | None]:
+    """Return ``(completion_question, answer_options)`` for the LoCoMo prompt style.
+
+    ``None`` means "use the plain question". The official script randomises the option
+    order; here it alternates on ``position`` so runs are reproducible. A handful of dataset
+    distractors are themselves abstentions ("Not mentioned"); offering those as option (b)
+    would make the choice meaningless, so such questions keep the plain question.
+    """
+    if category == TEMPORAL_CATEGORY:
+        return question + TEMPORAL_QUESTION_SUFFIX, None
+    if category == ADVERSARIAL_CATEGORY and distractor and not is_abstention(distractor):
+        if position % 2 == 0:
+            options = {"a": ADVERSARIAL_GOLD_ANSWER, "b": distractor}
+        else:
+            options = {"a": distractor, "b": ADVERSARIAL_GOLD_ANSWER}
+        return question + ADVERSARIAL_CHOICE_TEMPLATE.format(options["a"], options["b"]), options
+    return None, None
 
 
 @dataclass
@@ -237,6 +281,17 @@ def build_question_records(
             record["adversarial_answer"] = str(qa["adversarial_answer"])
         if category == ADVERSARIAL_CATEGORY and qa.get("answer") is not None:
             record["dataset_answer"] = str(qa["answer"])
+
+        completion_question, answer_options = locomo_completion_question(
+            record["question"],
+            category,
+            distractor=record.get("adversarial_answer") or record.get("dataset_answer"),
+            position=position,
+        )
+        if completion_question is not None:
+            record["completion_question"] = completion_question
+        if answer_options is not None:
+            record["answer_options"] = answer_options
 
         if load_golden_context:
             golden_lines = []

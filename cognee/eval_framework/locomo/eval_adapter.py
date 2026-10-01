@@ -1,22 +1,51 @@
-"""Async LoCoMo evaluator: token-F1 plus a binary LLM judge, no deepeval dependency.
+"""Async LoCoMo evaluator: two token-F1 variants plus a binary LLM judge, no deepeval.
 
 Registered as the ``LocomoEval`` engine in ``evaluation/evaluator_adapters.py``. Mirrors
 ``BeamEvalAdapter``: fresh metric instance per (answer, metric), bounded concurrency.
+
+Metrics: ``f1`` (SQuAD-style), ``f1_locomo`` (the official LoCoMo scorer, stemmed and
+per-category) and ``llm_judge`` (binary, separate judge model).
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from cognee.eval_framework.evaluation.base_eval_adapter import BaseEvalAdapter
 from cognee.eval_framework.locomo.metrics.f1 import LocomoF1Metric
+from cognee.eval_framework.locomo.metrics.f1_locomo import LocomoOfficialF1Metric
 from cognee.eval_framework.locomo.metrics.llm_judge import LocomoLLMJudgeMetric
 
 DEFAULT_LOCOMO_EVAL_MAX_CONCURRENT = 8
-LOCOMO_METRICS = ("f1", "llm_judge")
+LOCOMO_METRICS = ("f1", "f1_locomo", "llm_judge")
+
+# The option a model picks from a LoCoMo two-way adversarial question: either the bare
+# letter ("a", "(b)", "a)", "b.") or a parenthesised letter followed by text ("(a) Not
+# mentioned ..."). A bare letter followed by text is NOT an option ("a necklace").
+_OPTION_RE = re.compile(
+    r"^(?:\(?([ab])\)?[.:]?|(?:\(([ab])\)|([ab])\))[.:]?\s+.*)$", re.IGNORECASE | re.DOTALL
+)
+
+
+def resolve_option_answer(answer: str | None, answer_options: dict[str, str] | None) -> str:
+    """Map a chosen option letter back to its text (``get_cat_5_answer`` in LoCoMo).
+
+    Anything that is not a bare option (or an option followed by text) is returned
+    unchanged, so free-text answers to adversarial questions are graded as written.
+    """
+    text = (answer or "").strip()
+    if not answer_options or not text:
+        return text
+    match = _OPTION_RE.match(text)
+    if not match:
+        return text
+    letter = next(group for group in match.groups() if group)
+    option_text = answer_options.get(letter.lower())
+    return option_text if option_text is not None else text
 
 
 @dataclass
@@ -42,18 +71,25 @@ class LocomoEvalAdapter(BaseEvalAdapter):
         )
         self._metric_factories = {
             "f1": LocomoF1Metric,
+            "f1_locomo": LocomoOfficialF1Metric,
             "llm_judge": LocomoLLMJudgeMetric,
         }
 
     @staticmethod
     def _build_test_case(answer: dict[str, Any]) -> LocomoTestCase:
         metadata: dict[str, Any] = {}
-        for key in ("question_type", "category", "adversarial_answer", "evidence"):
+        for key in (
+            "question_type",
+            "category",
+            "adversarial_answer",
+            "evidence",
+            "answer_options",
+        ):
             if key in answer:
                 metadata[key] = answer[key]
         return LocomoTestCase(
             input=answer["question"],
-            actual_output=answer.get("answer") or "",
+            actual_output=resolve_option_answer(answer.get("answer"), answer.get("answer_options")),
             expected_output=answer.get("golden_answer") or "",
             retrieval_context=[answer["retrieval_context"]]
             if answer.get("retrieval_context")
@@ -84,7 +120,11 @@ class LocomoEvalAdapter(BaseEvalAdapter):
         values = await asyncio.gather(
             *(self._evaluate_metric(name, test_case, semaphore) for name in metric_names)
         )
-        return {**answer, "metrics": dict(zip(metric_names, values))}
+        result = {**answer, "metrics": dict(zip(metric_names, values))}
+        if test_case.actual_output != (answer.get("answer") or "").strip():
+            # Keep the raw model output in ``answer``; record what was actually graded.
+            result["answer_resolved"] = test_case.actual_output
+        return result
 
     async def evaluate_answers(
         self, answers: list[dict[str, Any]], evaluator_metrics: list[str]

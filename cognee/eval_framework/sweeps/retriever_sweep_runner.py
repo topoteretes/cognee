@@ -116,7 +116,19 @@ def build_answer_record(
         "run_idx": run_idx,
     }
 
-    for optional_key in ("rubric", "difficulty", "golden_context"):
+    # Pass benchmark-specific fields through so evaluators can grade per category
+    # (LoCoMo: category / evidence / adversarial distractor / answer options).
+    for optional_key in (
+        "rubric",
+        "difficulty",
+        "golden_context",
+        "category",
+        "evidence",
+        "adversarial_answer",
+        "completion_question",
+        "answer_options",
+        "conversation_index",
+    ):
         if optional_key in question:
             answer[optional_key] = question[optional_key]
 
@@ -202,6 +214,10 @@ async def _answer_single_fixed_retriever(
 
         retriever = config["retriever_cls"](**retriever_kwargs)
 
+        # Retrieval always uses the plain question; a benchmark may supply an augmented
+        # ``completion_question`` (e.g. LoCoMo's date hint / answer options) for the LLM.
+        completion_query = question.get("completion_question") or question["question"]
+
         try:
             retrieved_objects = await retriever.get_retrieved_objects(query=question["question"])
             retrieval_context = await retriever.get_context_from_objects(
@@ -209,7 +225,7 @@ async def _answer_single_fixed_retriever(
                 retrieved_objects=retrieved_objects,
             )
             search_results = await retriever.get_completion_from_context(
-                query=question["question"],
+                query=completion_query,
                 retrieved_objects=retrieved_objects,
                 context=retrieval_context,
             )

@@ -6,8 +6,12 @@ Per conversation this launches two child processes with their own DATA/SYSTEM ro
 (``<run-dir>/conv_NN/{data,system}``), so the ten LoCoMo conversations never see each other
 and every memory stays on disk for later re-querying:
 
-1. ``ingest``  — sessions + improve (``cognee.eval_framework.locomo.ingest``)
-2. ``answer``  — retriever sweep + F1 + LLM judge (``cognee.eval_framework.locomo.answer``)
+1. ``ingest``  — ``--ingest-mode remember`` (default: one document per session through
+   ``remember()`` = add + cognify + improve) or ``sessions`` (session cache windows bridged by
+   ``improve(session_ids=...)``) — ``cognee.eval_framework.locomo.ingest``
+2. ``answer``  — retriever sweep + F1 (SQuAD and official LoCoMo) + LLM judge, with
+   ``--prompt-style locomo`` (default, official protocol) or ``category`` —
+   ``cognee.eval_framework.locomo.answer``
 
 then aggregates everything into ``<run-dir>/locomo_summary.{json,md}``.
 
@@ -133,6 +137,8 @@ def ingest_args(args: argparse.Namespace, index: int, conv_dir: Path) -> list[st
         str(conv_dir),
         "--data-path",
         str(args.data_path),
+        "--ingest-mode",
+        args.ingest_mode,
         "--window-turns",
         str(args.window_turns),
         "--analysis-concurrency",
@@ -161,6 +167,8 @@ def answer_args(args: argparse.Namespace, index: int, conv_dir: Path) -> list[st
         str(args.num_runs),
         "--max-concurrent-questions",
         str(args.max_concurrent_questions),
+        "--prompt-style",
+        args.prompt_style,
     ]
     if args.max_sessions:
         cli += ["--max-sessions", str(args.max_sessions)]
@@ -217,6 +225,8 @@ def write_run_manifest(args: argparse.Namespace, conversations: list[int]) -> No
         "answer_model": args.answer_model,
         "judge_model": args.judge_model,
         "config_json_path": str(args.config_json_path),
+        "ingest_mode": args.ingest_mode,
+        "prompt_style": args.prompt_style,
         "window_turns": args.window_turns,
         "max_sessions": args.max_sessions,
         "max_questions": args.max_questions,
@@ -307,7 +317,14 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--llm-api-key", default=None, help="defaults to LLM_API_KEY from env/.env")
     parser.add_argument("--skip-probe", action="store_true", help="do not probe the models first")
     # ingestion knobs
-    parser.add_argument("--window-turns", type=int, default=6)
+    parser.add_argument(
+        "--ingest-mode",
+        choices=("remember", "sessions"),
+        default="remember",
+        help="remember: one document per session through remember() (add+cognify+improve); "
+        "sessions: session cache windows bridged by improve(session_ids=...)",
+    )
+    parser.add_argument("--window-turns", type=int, default=6, help="sessions mode only")
     parser.add_argument("--max-sessions", type=int, default=None)
     parser.add_argument("--analysis-concurrency", type=int, default=8)
     parser.add_argument("--skip-turn-analysis", action="store_true")
@@ -316,6 +333,13 @@ def _parse_args() -> argparse.Namespace:
         "--force-ingest", action="store_true", help="re-ingest even if a report exists"
     )
     # QA knobs
+    parser.add_argument(
+        "--prompt-style",
+        choices=("locomo", "category"),
+        default="locomo",
+        help="locomo: official LoCoMo answer prompt + question augmentations; "
+        "category: the per-category prompts from the sweep config",
+    )
     parser.add_argument("--max-questions", type=int, default=None)
     parser.add_argument("--question-types", type=_parse_csv, default=None)
     parser.add_argument("--retrievers", type=_parse_csv, default=None)
