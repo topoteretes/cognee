@@ -461,6 +461,41 @@ class PostgresDemoAdapter(GraphDBInterface):
                 for row in result.mappings().all()
             ]
 
+    async def get_timestamps_in_range(
+        self, start: int | None, end: int | None
+    ) -> list[dict[str, Any]]:
+        """Timestamp nodes whose ``[time_at, time_until)`` overlaps ``[start, end)``."""
+        conditions = ["type = 'Timestamp'"]
+        params: dict[str, Any] = {}
+        if end is not None:
+            conditions.append("(properties->>'time_at')::bigint < :window_end")
+            params["window_end"] = int(end)
+        if start is not None:
+            conditions.append(
+                "COALESCE((properties->>'time_until')::bigint, (properties->>'time_at')::bigint + 1000) > :window_start"
+            )
+            params["window_start"] = int(start)
+        async with self.sessionmaker() as session:
+            result = await session.execute(
+                text(
+                    "SELECT id, properties->>'timestamp_str' AS timestamp_str, "
+                    "(properties->>'time_at')::bigint AS time_at, "
+                    "COALESCE((properties->>'time_until')::bigint, (properties->>'time_at')::bigint + 1000) AS time_until "
+                    f"FROM graph_node WHERE {' AND '.join(conditions)} ORDER BY time_at, id"
+                ),
+                params,
+            )
+            return [
+                {
+                    "id": row["id"],
+                    "type": "Timestamp",
+                    "timestamp_str": row["timestamp_str"],
+                    "time_at": row["time_at"],
+                    "time_until": row["time_until"],
+                }
+                for row in result.mappings().all()
+            ]
+
     async def add_edge(
         self,
         source_id: str,
