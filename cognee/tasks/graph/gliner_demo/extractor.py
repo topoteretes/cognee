@@ -13,10 +13,13 @@ concurrency across every pipeline in the process, which also bounds memory:
 each in-flight batch holds its own activations. With one thread, a call runs
 its batches one after another.
 
-Calls on the shared model need no lock. The runtime's per-call state changes
-are idempotent for inference (eval mode, ``is_training=False``), and this was
-checked directly: two pipelines cognified at once with the lock removed, calls
-overlapping on the model, produced a graph identical to the sequential one.
+Calls on the shared model need no lock. The runtime writes three things per
+call, all idempotent for inference: eval mode, ``is_training=False``, and, on
+the ``extract`` path with no ``max_len`` (the schema probe), a lazily cached
+default collator that two concurrent probes may each construct, with equivalent
+results. This was checked directly: two pipelines cognified at once with the
+lock removed, calls overlapping on the model, produced a graph identical to the
+sequential one.
 
 Extraction can also be spread over several processes (GLINER_INFERENCE_PROCESSES,
 or ``gliner_processes`` on cognify/remember; default 1). The calling process
@@ -119,7 +122,7 @@ CGROUP_V1_NO_LIMIT = 2**60
 _extractors: dict[str, Any] = {}
 _load_lock = threading.Lock()
 _pool_lock = threading.Lock()
-# (batch_size, requested processes, requested threads) -> (processes, threads per process)
+# (requested processes, requested threads) -> (processes, threads per process)
 _resolved_concurrency: dict[tuple, tuple[int, int]] = {}
 _thread_pool_instance: ThreadPoolExecutor | None = None
 _thread_pool_size = 0
@@ -271,7 +274,7 @@ def container_memory_free() -> int | None:
     return min(remaining) if remaining else None
 
 
-def auto_inference_threads(batch_size: int = DEFAULT_BATCH_SIZE, processes: int = 1) -> int:
+def auto_inference_threads(processes: int = 1) -> int:
     """How many model batches each process can run at once, at full speed.
 
     The machine's total is the tighter of two bounds. The CPU bound is half of
@@ -282,6 +285,14 @@ def auto_inference_threads(batch_size: int = DEFAULT_BATCH_SIZE, processes: int 
     the tighter of the machine's free memory and a container's remaining
     limit, so a busy machine or a small pod gets fewer threads instead of
     swapping or an OOM kill. The total is split evenly across the processes.
+
+    The memory bound assumes batches of ``DEFAULT_BATCH_SIZE`` windows, the
+    pipeline's default. Concurrency is resolved once per call shape and the
+    first caller is the per-document schema probe, which has no batch size of
+    its own, so sizing on a caller's batch size would size on the wrong one. A
+    pipeline built with a larger ``gliner_batch_size`` holds proportionally
+    more activations per batch and should set ``GLINER_INFERENCE_THREADS``
+    itself.
     """
     import psutil
     import torch
@@ -297,8 +308,7 @@ def auto_inference_threads(batch_size: int = DEFAULT_BATCH_SIZE, processes: int 
     if container_free is not None:
         available = min(available, container_free)
     available -= (processes - 1) * BYTES_PER_MODEL
-    per_batch = BYTES_PER_CONCURRENT_BATCH * batch_size / DEFAULT_BATCH_SIZE
-    memory_bound = 1 + int(max(0, available - MEMORY_RESERVE_BYTES) // per_batch)
+    memory_bound = 1 + int(max(0, available - MEMORY_RESERVE_BYTES) // BYTES_PER_CONCURRENT_BATCH)
     total = max(1, min(cpu_bound, memory_bound))
     if processes > total:
         logger.warning(
@@ -319,29 +329,25 @@ def inference_processes(requested: int | None = None) -> int:
     return processes
 
 
-def inference_threads(
-    batch_size: int = DEFAULT_BATCH_SIZE, processes: int = 1, requested: int | None = None
-) -> int:
+def inference_threads(processes: int = 1, requested: int | None = None) -> int:
     """Threads per process: ``requested``, else GLINER_INFERENCE_THREADS; 0 means auto."""
     configured = get_cognify_config().gliner_inference_threads if requested is None else requested
     if configured < 0:
         raise ValueError(f"GLINER_INFERENCE_THREADS must be >= 0, got {configured}")
-    return configured or auto_inference_threads(batch_size, processes)
+    return configured or auto_inference_threads(processes)
 
 
-def _concurrency(
-    batch_size: int, processes: int | None = None, threads: int | None = None
-) -> tuple[int, int]:
+def _concurrency(processes: int | None = None, threads: int | None = None) -> tuple[int, int]:
     """Resolve (processes, threads per process) once per call shape.
 
     Auto-sizing reads free memory, which drops once the pools fill it, so the
     first answer is kept for the life of the process.
     """
-    key = (batch_size, processes, threads)
+    key = (processes, threads)
     with _pool_lock:
         if key not in _resolved_concurrency:
             resolved_processes = inference_processes(processes)
-            resolved_threads = inference_threads(batch_size, resolved_processes, threads)
+            resolved_threads = inference_threads(resolved_processes, threads)
             _resolved_concurrency[key] = (resolved_processes, resolved_threads)
             logger.info(
                 "GLiNER inference: %d process(es) x %d concurrent model batch(es)",
@@ -369,10 +375,14 @@ def _thread_pool(threads: int) -> ThreadPoolExecutor:
 
 
 def _inference_pool(
-    batch_size: int, processes: int | None = None, threads: int | None = None
+    processes: int | None = None, threads: int | None = None
 ) -> ThreadPoolExecutor | None:
-    """This process's thread pool for the given call shape, or None for one thread."""
-    resolved_threads = _concurrency(batch_size, processes, threads)[1]
+    """This process's thread pool for the given call shape, or None for one thread.
+
+    The size assumes ``DEFAULT_BATCH_SIZE`` windows per batch (see
+    ``auto_inference_threads``); a call's own batch size does not resize it.
+    """
+    resolved_threads = _concurrency(processes, threads)[1]
     return _thread_pool(resolved_threads) if resolved_threads > 1 else None
 
 
@@ -647,7 +657,7 @@ def extract_batch(
         return [{} for _ in texts]
 
     built = build_gliner_schema(extractor, schema)
-    processes, threads = _concurrency(batch_size, processes, threads)
+    processes, threads = _concurrency(processes, threads)
     if processes == 1 and threads <= 1:
         return extractor.batch_extract_long(
             list(texts),
@@ -716,7 +726,7 @@ def extract_once(
 
     # Inside the same concurrency as the extraction, so a call's schema probes
     # count against the limit it asked for.
-    resolved_threads = _concurrency(DEFAULT_BATCH_SIZE, processes, threads)[1]
+    resolved_threads = _concurrency(processes, threads)[1]
     if resolved_threads <= 1:
         return run()
     return _thread_pool(resolved_threads).submit(run).result()

@@ -170,10 +170,14 @@ def test_auto_sizing_takes_the_tighter_of_cpu_and_memory(
     assert extractor_module.auto_inference_threads() == expected
 
 
-def test_larger_batches_count_for_more_memory(machine):
+def test_sizing_assumes_the_default_batch_size(machine):
+    """The pool is sized once, by its first user, which is the schema probe:
+    it has no batch size of its own, so sizing is pinned to DEFAULT_BATCH_SIZE
+    rather than taken from whichever call arrives first. A larger
+    gliner_batch_size needs GLINER_INFERENCE_THREADS set by hand."""
     machine(10, 12)
-    assert extractor_module.auto_inference_threads(batch_size=16) == 5
-    assert extractor_module.auto_inference_threads(batch_size=32) == 3
+    assert extractor_module.auto_inference_threads() == 5
+    assert extractor_module.DEFAULT_BATCH_SIZE == 16
 
 
 def test_configured_thread_count_wins_over_auto_sizing(monkeypatch):
@@ -203,17 +207,17 @@ def test_negative_thread_count_is_rejected(monkeypatch):
 
 
 def test_one_thread_keeps_the_runtimes_long_text_call():
-    """The single-threaded path is the unchanged public call, under the lock."""
+    """The single-threaded path is the unchanged public call, batches run in turn."""
     extractor_module.reset_inference_pool()
-    assert extractor_module._inference_pool(16) is None
+    assert extractor_module._inference_pool() is None
 
 
 def test_several_threads_share_one_pool(monkeypatch):
     monkeypatch.setattr(extractor_module, "inference_threads", lambda *_args, **_kwargs: 3)
     extractor_module.reset_inference_pool()
-    first = extractor_module._inference_pool(16)
+    first = extractor_module._inference_pool()
     assert first is not None and extractor_module._thread_pool_size == 3
-    assert extractor_module._inference_pool(32) is first, "one pool per process"
+    assert extractor_module._inference_pool() is first, "one pool per process"
 
 
 def test_no_cgroup_files_means_no_container_limits(cgroup):
@@ -506,8 +510,8 @@ def test_concurrency_is_resolved_once_per_call_shape(monkeypatch):
     """Auto-sizing reads free memory, which the pools then use: the first answer sticks."""
     calls = []
 
-    def counting_threads(batch_size, processes, requested):
-        calls.append((batch_size, processes, requested))
+    def counting_threads(processes, requested):
+        calls.append((processes, requested))
         return 2
 
     monkeypatch.setattr(extractor_module, "inference_threads", counting_threads)
@@ -515,10 +519,10 @@ def test_concurrency_is_resolved_once_per_call_shape(monkeypatch):
         extractor_module, "inference_processes", lambda requested=None: requested or 1
     )
     extractor_module.reset_inference_pool()
-    assert extractor_module._concurrency(16) == (1, 2)
-    assert extractor_module._concurrency(16) == (1, 2)
-    assert extractor_module._concurrency(16, 2, 3) == (2, 2)
-    assert calls == [(16, 1, None), (16, 2, 3)]
+    assert extractor_module._concurrency() == (1, 2)
+    assert extractor_module._concurrency() == (1, 2)
+    assert extractor_module._concurrency(2, 3) == (2, 2)
+    assert calls == [(1, None), (2, 3)]
     extractor_module.reset_inference_pool()
 
 
