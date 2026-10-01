@@ -4,14 +4,17 @@ from pydantic import Field, model_validator
 
 from cognee.infrastructure.engine import DataPoint
 
-TimestampPrecision = Literal["year", "month", "day", "second"]
+# "span" is a period with a stated start and end (``1803/1815``): its
+# calendar fields and ``time_at`` are the start, ``time_until`` the end.
+TimestampPrecision = Literal["year", "month", "day", "second", "span"]
 
 
 class Timestamp(DataPoint):
     """A point in time that facts anchor to through ``*_at`` edges.
 
     ``timestamp_str`` is the normalized form the source stated — ``YYYY``,
-    ``YYYY-MM``, ``YYYY-MM-DD`` or ``YYYY-MM-DD HH:MM:SS`` — and ``precision``
+    ``YYYY-MM``, ``YYYY-MM-DD``, ``YYYY-MM-DD HH:MM:SS``, or ``<start>/<end>``
+    for a period with both bounds stated — and ``precision``
     records how much of it was stated, so ``1950`` and ``1950-01-01`` stay
     distinguishable although their calendar fields are the same. The calendar
     fields and ``time_at`` (milliseconds since the epoch, UTC) hold the lower
