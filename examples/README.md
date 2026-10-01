@@ -131,7 +131,7 @@ with `remember()`, then runs one agent over that memory with `recall()`.
 ### [`company_brain/`](cookbooks/company_brain/) — one memory for a whole company
 | Script | Demonstrates |
 |---|---|
-| [`follow_up_agent/follow_up_agent.py`](cookbooks/company_brain/follow_up_agent/follow_up_agent.py) | The follow-up agent above ([guide](cookbooks/company_brain/follow_up_agent/README.md)) |
+| [`follow_up_agent/follow_up_agent.py`](cookbooks/company_brain/follow_up_agent/follow_up_agent.py) | The follow-up agent above ([guide](cookbooks/company_brain/follow_up_agent/SKILL.md)) |
 | [`docs_code_conversations/company_brain_demo.py`](cookbooks/company_brain/docs_code_conversations/company_brain_demo.py) | The README onboarding tour: a text fact, a code graph, and a rule stated in a session — distilled, then answered from a fresh session |
 | [`multi_source/company_brain.py`](cookbooks/company_brain/multi_source/company_brain.py) | A relational database, a ticket export and meeting notes linked by a custom graph model, served in the UI, queried from Claude Code or Codex over MCP ([guide](cookbooks/company_brain/multi_source/README.md)) |
 
