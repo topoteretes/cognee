@@ -104,6 +104,14 @@ _INVALID_GRANT_SETTLE = 3
 # use the still-valid token) at once instead of each running a refresh of their own.
 _FAILURE_MEMORY = 5
 
+# Codes that mean the app's own configuration is wrong, such as a rotated client
+# secret. Retrying cannot fix them, so they get no retry and a much longer
+# memory, to keep every caller from sending the same doomed request.
+_CONFIGURATION_ERROR_CODES = frozenset(
+    {"invalid_client", "unauthorized_client", "unsupported_grant_type", "invalid_request"}
+)
+_CONFIGURATION_FAILURE_MEMORY = 300
+
 # viewer is the freshly installed app user (the agent identity in that
 # workspace); organization.id is what every webhook envelope routes by.
 _INSTALL_CONTEXT_QUERY = """
@@ -125,7 +133,7 @@ _pending_retries: set[UUID] = set()
 _retry_tasks: set[asyncio.Task] = set()
 
 # When the last transient refresh failure of a credential happened, and what it was.
-_recent_failures: dict[UUID, tuple[float, Exception]] = {}
+_recent_failures: dict[UUID, tuple[float, Exception, float]] = {}
 
 
 # The OAuth error codes worth telling apart. Anything else, including text a
@@ -318,7 +326,11 @@ def _retry_refresh_later(credential: IntegrationCredential) -> None:
 
 
 def _transient_failure(
-    credential: IntegrationCredential, error: Exception, retry: bool, rejected: bool
+    credential: IntegrationCredential,
+    error: Exception,
+    retry: bool,
+    rejected: bool,
+    memory: float | None = None,
 ) -> IntegrationCredential:
     """Handle a refresh that failed in a way that may have followed a rotation.
 
@@ -327,7 +339,11 @@ def _transient_failure(
     replay window, so do not wait for the next caller: it may come hours later
     on a quiet workspace.
     """
-    _recent_failures[credential.id] = (time.monotonic(), error)
+    _recent_failures[credential.id] = (
+        time.monotonic(),
+        error,
+        _FAILURE_MEMORY if memory is None else memory,
+    )
     if retry:
         _retry_refresh_later(credential)
     return _keep_valid_token(credential, error, rejected=rejected)
@@ -376,7 +392,7 @@ async def _refresh_expiring(
 
         # The retry exists to try again, so it never answers from the memory.
         recent = _recent_failures.get(credential.id) if retry else None
-        if recent and time.monotonic() - recent[0] < _FAILURE_MEMORY:
+        if recent and time.monotonic() - recent[0] < recent[2]:
             return _keep_valid_token(credential, recent[1], rejected=stale)
 
         rejected: LinearAuthError | None = None
@@ -393,6 +409,16 @@ async def _refresh_expiring(
                 # the current one. If it was not, another process refreshed
                 # first and the read below returns that token.
                 rejected = error
+            elif error.code in _CONFIGURATION_ERROR_CODES:
+                logger.error(
+                    "Linear rejected the app's own credentials refreshing the token for "
+                    "organization %s (%s); check LINEAR_CLIENT_ID and LINEAR_CLIENT_SECRET",
+                    credential.provider_account_id,
+                    error.code,
+                )
+                return _transient_failure(
+                    credential, error, False, stale, _CONFIGURATION_FAILURE_MEMORY
+                )
             else:
                 # A 5xx from a gateway, or a body that never finished, can come
                 # after Linear rotated the token. See the next branch.

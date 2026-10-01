@@ -700,6 +700,7 @@ async def test_a_successful_refresh_clears_the_failure_memory(linear):
     adapter._recent_failures[original.id] = (
         adapter.time.monotonic() - 3600,
         asyncio.TimeoutError(),
+        5,
     )
 
     assert await adapter.access_token_for(original) == "access-1"
@@ -717,7 +718,11 @@ async def test_the_retry_ignores_a_failure_remembered_just_before_it_fires(linea
     with pytest.raises(asyncio.TimeoutError):
         await adapter.access_token_for(original)
     # Another caller failed moments before the retry fires.
-    adapter._recent_failures[original.id] = (adapter.time.monotonic(), asyncio.TimeoutError())
+    adapter._recent_failures[original.id] = (
+        adapter.time.monotonic(),
+        asyncio.TimeoutError(),
+        60,
+    )
     await drain_retries()
 
     assert_recovered(linear, await persisted())
@@ -902,3 +907,38 @@ async def test_concurrent_401s_trigger_one_refresh(linear):
 
     assert results == ["access-1"] * 4
     assert linear.calls == ["refresh-0"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "code", ["invalid_client", "unauthorized_client", "unsupported_grant_type", "invalid_request"]
+)
+async def test_a_configuration_error_is_logged_loudly_and_not_retried(
+    linear, monkeypatch, caplog, code
+):
+    original = await install(expires_in=3 / 60)  # inside the margin, the old token still works
+    endpoint = AsyncMock(side_effect=LinearAuthError("token refresh", code))
+    monkeypatch.setattr(adapter, "refresh_access_token", endpoint)
+
+    with caplog.at_level("ERROR"):
+        assert await adapter.access_token_for(original) == "access-0"
+
+    assert code in caplog.text and "LINEAR_CLIENT_SECRET" in caplog.text
+    assert not adapter._retry_tasks
+    assert (await persisted()).status == "active"
+
+
+@pytest.mark.asyncio
+async def test_a_configuration_error_is_not_sent_again_for_minutes(linear, monkeypatch):
+    original = await install()  # expired, so every caller needs a refresh
+    endpoint = AsyncMock(side_effect=LinearAuthError("token refresh", "invalid_client"))
+    monkeypatch.setattr(adapter, "refresh_access_token", endpoint)
+    # The short failure memory has long passed; the configuration one has not.
+    for _ in range(3):
+        with pytest.raises(LinearAuthError):
+            await adapter.access_token_for(original)
+        stamp, error, memory = adapter._recent_failures[original.id]
+        adapter._recent_failures[original.id] = (stamp - 60, error, memory)
+
+    assert endpoint.await_count == 1
+    assert adapter._CONFIGURATION_FAILURE_MEMORY > adapter._FAILURE_MEMORY
