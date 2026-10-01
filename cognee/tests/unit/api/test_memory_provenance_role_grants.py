@@ -709,3 +709,127 @@ async def test_administers_tenant_denial_logs_at_debug_not_error(caplog):
 
     assert result is False
     assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+
+async def _seed_tenantless_share():
+    """Three users with no tenant: A owns X, B owns Y, and C holds a read grant
+    on both but owns only Z, which has no ACL row at all. The same DB also holds
+    the tenant from ``_seed`` that none of them belongs to."""
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.models import Dataset
+    from cognee.modules.users.models import ACL, User
+
+    owner_a, owner_b, caller = uuid4(), uuid4(), uuid4()
+    shared_x, shared_y, owned_z = uuid4(), uuid4(), uuid4()
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        for user_id in (owner_a, owner_b, caller):
+            session.add(
+                User(
+                    id=user_id,
+                    email=f"{user_id}@example.com",
+                    hashed_password="x",
+                    is_active=True,
+                    is_superuser=False,
+                    is_verified=True,
+                    tenant_id=None,
+                )
+            )
+        await session.flush()
+
+        session.add_all(
+            [
+                Dataset(id=shared_x, name="x", owner_id=owner_a),
+                Dataset(id=shared_y, name="y", owner_id=owner_b),
+                Dataset(id=owned_z, name="z", owner_id=caller),
+            ]
+        )
+        await session.flush()
+
+        read_id = await _permission_id(session, "read")
+        session.add_all(
+            [
+                ACL(principal_id=caller, permission_id=read_id, dataset_id=shared_x),
+                ACL(principal_id=caller, permission_id=read_id, dataset_id=shared_y),
+            ]
+        )
+        await session.commit()
+
+    return {
+        "owner_ids": (owner_a, owner_b),
+        "caller_id": caller,
+        "shared_ids": (shared_x, shared_y),
+        "owned_id": owned_z,
+    }
+
+
+async def _tenantless_caller_graph(seed):
+    from sqlalchemy import select
+
+    from cognee.api.v1.visualize.memory_provenance import get_memory_provenance_graph
+    from cognee.api.v1.visualize.routers.get_schema_router import _provenance_scope
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.users.models import User
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        caller = (
+            (await session.execute(select(User).where(User.id == seed["caller_id"])))
+            .scalars()
+            .one()
+        )
+        tenant_ids, user_ids, dataset_ids = await _provenance_scope(caller)
+
+    nodes, _edges = await get_memory_provenance_graph(
+        scope_tenant_ids=tenant_ids,
+        scope_user_ids=user_ids,
+        scope_dataset_ids=dataset_ids,
+    )
+    by_type: dict[str, set[str]] = {}
+    for node_id, props in nodes:
+        by_type.setdefault(props.get("type"), set()).add(node_id)
+    return by_type
+
+
+@pytest.mark.asyncio
+async def test_tenantless_caller_sees_datasets_shared_with_them_by_acl():
+    """Issue #5110: with no tenant, the scope used to be ownership, so a caller
+    who owns nothing but holds read grants got no Dataset nodes while
+    `/datasets` and `/visualize/brains` listed every shared dataset."""
+    await _seed()  # an unrelated tenant in the same database
+    seed = await _seed_tenantless_share()
+
+    by_type = await _tenantless_caller_graph(seed)
+
+    shared = {f"dataset:{dataset_id}" for dataset_id in seed["shared_ids"]}
+    assert shared <= by_type.get("Dataset", set())
+    owners = {f"user:{user_id}" for user_id in seed["owner_ids"]}
+    assert owners <= by_type.get("User", set())
+
+
+@pytest.mark.asyncio
+async def test_tenantless_caller_keeps_an_owned_dataset_with_no_acl_row():
+    seed = await _seed_tenantless_share()
+
+    by_type = await _tenantless_caller_graph(seed)
+
+    assert f"dataset:{seed['owned_id']}" in by_type.get("Dataset", set())
+
+
+@pytest.mark.asyncio
+async def test_tenantless_caller_scope_lists_no_unrelated_tenants_users_or_datasets():
+    """The dataset-only scope must narrow the tenant query too: without that
+    filter the graph named every tenant in the system."""
+    await _seed()
+    seed = await _seed_tenantless_share()
+
+    by_type = await _tenantless_caller_graph(seed)
+
+    assert "Tenant" not in by_type
+    expected_datasets = {
+        f"dataset:{dataset_id}" for dataset_id in (*seed["shared_ids"], seed["owned_id"])
+    }
+    assert by_type.get("Dataset", set()) == expected_datasets
+    expected_users = {f"user:{user_id}" for user_id in (*seed["owner_ids"], seed["caller_id"])}
+    assert by_type.get("User", set()) == expected_users

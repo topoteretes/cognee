@@ -72,13 +72,20 @@ async def _provenance_scope(user: User) -> tuple[list | None, list | None, list 
     readable datasets and everything ``get_memory_provenance_graph`` derives
     from them.
     """
+    from cognee.modules.data.methods import get_datasets
     from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
 
     tenant_id = getattr(user, "tenant_id", None)
     if tenant_id is None:
-        # No tenant: the OSS/single-user path, where "the caller" is the whole
-        # scope and ownership is already the filter.
-        return None, [user.id], None
+        # No tenant is not the same as single-user: with access control on,
+        # tenantless users share datasets through ACL grants, and an
+        # ownership filter would hide every dataset shared with the caller
+        # while `/datasets` and `/visualize/brains` list it. Scope to what the
+        # caller can read, plus what they own so a dataset with no ACL row
+        # (created before owner grants were written) stays visible.
+        readable = await get_all_user_permission_datasets(user, "read")
+        owned = await get_datasets(user.id)
+        return None, None, list({dataset.id for dataset in [*readable, *owned]})
 
     if await _administers_tenant(user, tenant_id):
         return [tenant_id], None, None
@@ -267,8 +274,8 @@ def get_schema_router() -> APIRouter:
         """Return a caller-scoped memory-provenance graph as a JSON-safe dict.
 
         Same scoping as `GET /schema/provenance` (the whole tenant for its
-        administrators, the caller's readable datasets for any other member,
-        just the caller when there is no tenant) and the same underlying graph —
+        administrators, the caller's readable and owned datasets for anyone
+        else, tenant or not) and the same underlying graph —
         packaged as a dict instead of an HTML page.
 
         Query parameters:
