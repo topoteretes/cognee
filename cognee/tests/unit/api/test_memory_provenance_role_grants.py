@@ -809,12 +809,14 @@ async def test_tenantless_caller_sees_datasets_shared_with_them_by_acl():
 
 
 @pytest.mark.asyncio
-async def test_tenantless_caller_keeps_an_owned_dataset_with_no_acl_row():
+async def test_tenantless_caller_does_not_see_an_owned_dataset_without_a_read_grant():
+    """Ownership is not access: an owned dataset with no ACL row is hidden by
+    `/datasets`, so the provenance graph must hide it too."""
     seed = await _seed_tenantless_share()
 
     by_type = await _tenantless_caller_graph(seed)
 
-    assert f"dataset:{seed['owned_id']}" in by_type.get("Dataset", set())
+    assert f"dataset:{seed['owned_id']}" not in by_type.get("Dataset", set())
 
 
 @pytest.mark.asyncio
@@ -827,9 +829,73 @@ async def test_tenantless_caller_scope_lists_no_unrelated_tenants_users_or_datas
     by_type = await _tenantless_caller_graph(seed)
 
     assert "Tenant" not in by_type
-    expected_datasets = {
-        f"dataset:{dataset_id}" for dataset_id in (*seed["shared_ids"], seed["owned_id"])
-    }
+    expected_datasets = {f"dataset:{dataset_id}" for dataset_id in seed["shared_ids"]}
     assert by_type.get("Dataset", set()) == expected_datasets
     expected_users = {f"user:{user_id}" for user_id in (*seed["owner_ids"], seed["caller_id"])}
     assert by_type.get("User", set()) == expected_users
+
+
+@pytest.mark.asyncio
+async def test_member_removed_from_tenant_cannot_see_it_through_an_owned_dataset():
+    """remove_user_from_tenant revokes the user's grants on the tenant's
+    datasets but leaves owner_id on the ones they created there. After
+    select_tenant(None), that ownership must not bring the dataset back into
+    scope, and with it the tenant's name, roles, members and grants."""
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.models import Dataset
+    from cognee.modules.users.models import ACL, Role, Tenant, User, UserRole, UserTenant
+
+    tenant_id, tenant_owner, removed, colleague = uuid4(), uuid4(), uuid4(), uuid4()
+    role_id, dataset_id = uuid4(), uuid4()
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        session.add(Tenant(id=tenant_id, name="Acme", owner_id=tenant_owner))
+        for user_id, user_tenant_id in (
+            (tenant_owner, tenant_id),
+            (colleague, tenant_id),
+            # Already removed from the tenant and switched to no tenant.
+            (removed, None),
+        ):
+            session.add(
+                User(
+                    id=user_id,
+                    email=f"{user_id}@example.com",
+                    hashed_password="x",
+                    is_active=True,
+                    is_superuser=False,
+                    is_verified=True,
+                    tenant_id=user_tenant_id,
+                )
+            )
+        await session.flush()
+
+        session.add_all(
+            [
+                UserTenant(user_id=user_id, tenant_id=tenant_id)
+                for user_id in (tenant_owner, colleague)
+            ]
+        )
+        session.add(Role(id=role_id, name="payroll", tenant_id=tenant_id))
+        await session.flush()
+        session.add(UserRole(user_id=colleague, role_id=role_id))
+
+        # Created by `removed` while a member; it stays in the tenant.
+        session.add(Dataset(id=dataset_id, name="plans", owner_id=removed, tenant_id=tenant_id))
+        await session.flush()
+
+        read_id = await _permission_id(session, "read")
+        session.add_all(
+            [
+                ACL(principal_id=role_id, permission_id=read_id, dataset_id=dataset_id),
+                ACL(principal_id=colleague, permission_id=read_id, dataset_id=dataset_id),
+            ]
+        )
+        await session.commit()
+
+    by_type = await _tenantless_caller_graph({"caller_id": removed})
+
+    assert f"dataset:{dataset_id}" not in by_type.get("Dataset", set())
+    assert "Tenant" not in by_type
+    assert "Role" not in by_type
+    assert f"user:{colleague}" not in by_type.get("User", set())
