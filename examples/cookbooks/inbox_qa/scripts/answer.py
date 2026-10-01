@@ -4,7 +4,7 @@ Facts come from that email and your Granola meetings: the newest email from --se
 given, else the newest email. When the question asks for a reply, a few of your own sent
 emails are passed in so the draft sounds like you.
 
-Run alone: uv run python .agents/skills/inbox-qa/scripts/answer.py [--sender NAME] ["question"]
+Run alone: uv run python examples/cookbooks/inbox_qa/scripts/answer.py [--sender NAME] ["question"]
 """
 
 import argparse

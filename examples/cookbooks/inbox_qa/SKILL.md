@@ -31,9 +31,9 @@ No Gmail or no Granola? Run with `--no-email` or `--no-granola` to skip that ste
 ## Steps
 
 ```
-inbox-qa/
+inbox_qa/
 ├── SKILL.md              this file
-├── run.py                checks setup, then calls the three scripts in order
+├── inbox_qa.py           checks setup, then calls the three scripts in order
 ├── credentials.json      yours, git-ignored
 ├── token.json            yours, git-ignored, written on the first Gmail run
 └── scripts/
@@ -42,12 +42,12 @@ inbox-qa/
     └── answer.py
 ```
 
-`run.py` imports each script and calls its function in one process. Each script also runs
+`inbox_qa.py` imports each script and calls its function in one process. Each script also runs
 alone with the same options.
 
-| # | Command (`uv run python .agents/skills/inbox-qa/...`) | Does | Writes |
+| # | Command (`uv run python examples/cookbooks/inbox_qa/...`) | Does | Writes |
 |---|---|---|---|
-| 0 | `run.py --check` | Reports what is missing. Does no work | nothing |
+| 0 | `inbox_qa.py --check` | Reports what is missing. Does no work | nothing |
 | 1 | `scripts/ingest_email.py [--emails N]` | Remembers the `N` newest inbox emails, 20 by default (node set `email`), and your last 20 sent emails (node set `sent`) | cognee dataset |
 | 2 | `scripts/ingest_granola.py [--days N]` | Remembers Granola meeting notes from the last 30 days by default (node set `meetings`) | cognee dataset |
 | 3 | `scripts/answer.py [--sender NAME] "question"` | Picks the newest email (from `NAME` if given) and answers about it; a drafted reply copies the style of your sent emails | nothing |
@@ -59,11 +59,11 @@ All scripts write to the cognee dataset `inbox_qa_skill`, named once in each scr
 From the repo root:
 
 ```bash
-uv run python .agents/skills/inbox-qa/run.py --check
-uv run python .agents/skills/inbox-qa/run.py
-uv run python .agents/skills/inbox-qa/run.py --days 7 --question "What do I owe Priya?"
-uv run python .agents/skills/inbox-qa/run.py --sender Priya   # draft a reply to Priya's email
-uv run python .agents/skills/inbox-qa/run.py --emails 50 --sender Priya   # look further back
+uv run python examples/cookbooks/inbox_qa/inbox_qa.py --check
+uv run python examples/cookbooks/inbox_qa/inbox_qa.py
+uv run python examples/cookbooks/inbox_qa/inbox_qa.py --days 7 --question "What do I owe Priya?"
+uv run python examples/cookbooks/inbox_qa/inbox_qa.py --sender Priya   # draft a reply to Priya's email
+uv run python examples/cookbooks/inbox_qa/inbox_qa.py --emails 50 --sender Priya   # look further back
 ```
 
 The first Gmail run opens a browser to consent. Running it again re-remembers the same
@@ -71,12 +71,12 @@ content; cognee skips content it already holds.
 
 ## For agents
 
-1. Run `uv run python .agents/skills/inbox-qa/run.py --check` from the repo root.
+1. Run `uv run python examples/cookbooks/inbox_qa/inbox_qa.py --check` from the repo root.
    - Exit 0: go to step 2.
    - Exit 2: each `[setup] MISSING:` line names one fix. Don't create credentials yourself.
      Tell the user exactly which line to fix, using the table above, and stop. If only
      the Gmail lines are missing, ask whether to run with `--no-email` instead.
-2. Run `run.py` with the user's question: `--question "..."`. For "answer my latest
+2. Run `inbox_qa.py` with the user's question: `--question "..."`. For "answer my latest
    email", omit `--question`: the default drafts a reply. For "answer NAME" or "reply to
    NAME's email", add `--sender NAME` (matched against the From line, name or address;
    only the newest `--emails N` inbox emails are searched, 20 by default; raise it if the
@@ -86,7 +86,7 @@ content; cognee skips content it already holds.
    the user in your own words, and say which sources went in: the email answered from
    `[answer] Email:`, the sent-mail count from `[ingest_email]` and the meeting count from
    `[ingest_granola]`. A drafted reply is never sent: hand it to the user to send.
-4. If a script fails, `run.py` exits 1 with a line naming what went wrong. Run that script
+4. If a script fails, `inbox_qa.py` exits 1 with a line naming what went wrong. Run that script
    on its own to look closer.
 
 Rules: Gmail access is read-only and nothing is sent. Don't print the contents of

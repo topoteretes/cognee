@@ -5,7 +5,7 @@ The inbox emails (node set `email`) are what answer.py answers. The sent emails 
 credentials.json (a Gmail OAuth Desktop client) in the skill folder; token.json is written
 there on the first run.
 
-Run alone: uv run python .agents/skills/inbox-qa/scripts/ingest_email.py [--emails N]
+Run alone: uv run python examples/cookbooks/inbox_qa/scripts/ingest_email.py [--emails N]
 """
 
 import argparse

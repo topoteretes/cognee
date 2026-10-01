@@ -23,7 +23,7 @@ They double as the smoke-test corpus the team uses to verify behaviour across th
 | [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 38 |
 | [`advanced_guides/`](advanced_guides/) | Deeper takes on topics a guide already covers | 8 |
 | [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 26 |
-| [`cookbooks/`](cookbooks/) | Applications you build and keep running: ingest, graph model, UI, live sync, an agent | 5 |
+| [`cookbooks/`](cookbooks/) | Applications you build and keep running: ingest, graph model, UI, live sync, an agent | 6 |
 | [`integrations/`](integrations/) | Connector packages and deployment kits that pair cognee with other systems | 1 |
 
 One line each: **guides teach a feature, advanced guides deepen a feature, demos combine
@@ -127,6 +127,7 @@ with `remember()`, then runs one agent over that memory with `recall()`.
 | [`personalized_email/`](cookbooks/personalized_email/) | Granola + Gmail memory and a draft agent that answers an email with what you discussed, what you promised, and in your own tone |
 | [`company_brain/follow_up_agent/`](cookbooks/company_brain/follow_up_agent/) | Granola + Gmail + Linear memory and an agent that turns your latest call into next steps (owner, team, deadline, tracked issue) and posts them to Slack |
 | [`self_hosted_companion/`](cookbooks/self_hosted_companion/) | A chat companion that remembers your notes folder and every earlier chat |
+| [`inbox_qa/`](cookbooks/inbox_qa/) | Gmail + Granola memory in a multi-step agent skill: answers your newest email, or one from a named sender, and drafts the reply in the style of your sent mail ([`SKILL.md`](cookbooks/inbox_qa/SKILL.md)) |
 
 ### [`company_brain/`](cookbooks/company_brain/) — one memory for a whole company
 | Script | Demonstrates |

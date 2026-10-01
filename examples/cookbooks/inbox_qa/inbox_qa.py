@@ -1,8 +1,8 @@
 """Check setup, then run the scripts in order: ingest email, ingest Granola, answer.
 
-    uv run python .agents/skills/inbox-qa/run.py --check      # setup only, no work
-    uv run python .agents/skills/inbox-qa/run.py              # everything
-    uv run python .agents/skills/inbox-qa/run.py --no-email --days 7 \
+    uv run python examples/cookbooks/inbox_qa/inbox_qa.py --check      # setup only, no work
+    uv run python examples/cookbooks/inbox_qa/inbox_qa.py              # everything
+    uv run python examples/cookbooks/inbox_qa/inbox_qa.py --no-email --days 7 \
         --question "What did we decide?"
 
 Each script in scripts/ also runs alone. Exit codes: 0 done, 2 setup missing, 1 a script

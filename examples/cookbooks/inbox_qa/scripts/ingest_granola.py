@@ -2,7 +2,7 @@
 
 Needs GRANOLA_API_KEY (create one in Granola's settings) in .env at the repo root.
 
-Run alone: uv run python .agents/skills/inbox-qa/scripts/ingest_granola.py [--days N]
+Run alone: uv run python examples/cookbooks/inbox_qa/scripts/ingest_granola.py [--days N]
 """
 
 import argparse
