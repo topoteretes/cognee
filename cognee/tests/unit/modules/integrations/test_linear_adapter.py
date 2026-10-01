@@ -8,6 +8,7 @@ mapping, and revoke_remote's never-raise contract. Refresh against a real
 credential row lives in test_linear_credential_lifecycle.py.
 """
 
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from urllib.parse import parse_qs, urlsplit
@@ -454,3 +455,13 @@ async def test_revoke_remote_opens_its_sessions_with_the_revoke_timeout(monkeypa
     await LinearIntegration().revoke_remote(_CREDENTIAL)
 
     assert opened == [{"timeout": adapter_module._REVOKE_TIMEOUT}] * 2
+
+
+@pytest.mark.parametrize("expires_in", [None, 0, "abc", 10**30, True])
+def test_parse_installation_gives_an_unusable_expires_in_a_day(expires_in):
+    installation = LinearIntegration().parse_installation(
+        {**_TOKEN_RESPONSE, **_INSTALL_CONTEXT, "expires_in": expires_in}
+    )
+
+    remaining = installation.token_expires_at - datetime.now(timezone.utc)
+    assert timedelta(hours=23, minutes=59) < remaining <= timedelta(hours=24)

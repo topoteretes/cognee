@@ -33,8 +33,9 @@ refreshes an expiring token, one refresh at a time per credential.
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, TypeVar
 from urllib.parse import urlencode
 from uuid import UUID
 
@@ -54,7 +55,7 @@ from cognee.modules.integrations.credentials import (
     revoke_credential_if_current,
     update_refreshed_credential,
 )
-from cognee.modules.integrations.linear.client import graphql
+from cognee.modules.integrations.linear.client import LinearUnauthorizedError, graphql
 from cognee.modules.integrations.linear.handle_linear_event import handle_linear_event
 from cognee.modules.integrations.linear.linear_settings import LinearSettings, require
 from cognee.modules.integrations.linear.sync import sync_recent_issues
@@ -62,6 +63,8 @@ from cognee.modules.integrations.linear.verify_linear_signature import LinearWeb
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 _AUTHORIZE_URL = "https://linear.app/oauth/authorize"
 _TOKEN_URL = "https://api.linear.app/oauth/token"
@@ -227,15 +230,18 @@ def _is_expiring(credential: IntegrationCredential) -> bool:
     return _expires_within(credential, _REFRESH_MARGIN)
 
 
-def _keep_valid_token(credential: IntegrationCredential, error: Exception) -> IntegrationCredential:
+def _keep_valid_token(
+    credential: IntegrationCredential, error: Exception, *, rejected: bool = False
+) -> IntegrationCredential:
     """Fall back to the stored token when a refresh failed but it still works.
 
     The margin refreshes early, so for a few minutes the old token is valid
     while the token endpoint may not be. Failing there would fail sessions the
     old token could have answered. Past its real expiry there is nothing to
-    fall back to and the error is raised.
+    fall back to and the error is raised. So it is when Linear has already
+    rejected the stored token (``rejected``), whatever its expiry says.
     """
-    if _expires_within(credential, timedelta(0)):
+    if rejected or _expires_within(credential, timedelta(0)):
         raise error
     logger.warning(
         "Linear token refresh for organization %s failed (%s); using the token that is still valid",
@@ -245,7 +251,9 @@ def _keep_valid_token(credential: IntegrationCredential, error: Exception) -> In
     return credential
 
 
-async def access_token_for(credential: IntegrationCredential) -> str:
+async def access_token_for(
+    credential: IntegrationCredential, *, rejected: str | None = None
+) -> str:
     """A usable access token for this credential, refreshed if it is about to die.
 
     The only sanctioned path from a stored credential to a usable bearer
@@ -253,10 +261,15 @@ async def access_token_for(credential: IntegrationCredential) -> str:
     rather than holding the result, since the token lasts 24 hours. It raises
     rather than returning an empty string so a malformed payload fails loudly
     at the call site instead of as a Linear 401.
+
+    ``rejected`` is a token Linear just answered 401 to. The stored expiry can
+    be wrong, or Linear can end a token early, and a refresh keyed on the
+    expiry alone would then never happen. Passing it forces one refresh,
+    unless another caller has replaced that token already.
     """
     credential = await require_active_credential(credential)
-    if _is_expiring(credential):
-        credential = await _refresh_expiring(credential)
+    if rejected is not None or _is_expiring(credential):
+        credential = await _refresh_expiring(credential, rejected_token=rejected)
 
     token = decrypt_token_payload(credential).get("access_token")
     if not token:
@@ -305,7 +318,7 @@ def _retry_refresh_later(credential: IntegrationCredential) -> None:
 
 
 def _transient_failure(
-    credential: IntegrationCredential, error: Exception, retry: bool
+    credential: IntegrationCredential, error: Exception, retry: bool, rejected: bool
 ) -> IntegrationCredential:
     """Handle a refresh that failed in a way that may have followed a rotation.
 
@@ -317,15 +330,34 @@ def _transient_failure(
     _recent_failures[credential.id] = (time.monotonic(), error)
     if retry:
         _retry_refresh_later(credential)
-    return _keep_valid_token(credential, error)
+    return _keep_valid_token(credential, error, rejected=rejected)
+
+
+async def call_with_token(
+    credential: IntegrationCredential, call: Callable[[str], Awaitable[T]]
+) -> T:
+    """Run ``call(token)``, refreshing once and trying again if Linear answers 401."""
+    token = await access_token_for(credential)
+    try:
+        return await call(token)
+    except LinearUnauthorizedError:
+        return await call(await access_token_for(credential, rejected=token))
 
 
 async def _refresh_expiring(
-    credential: IntegrationCredential, *, retry: bool = True
+    credential: IntegrationCredential,
+    *,
+    retry: bool = True,
+    rejected_token: str | None = None,
 ) -> IntegrationCredential:
-    """Refresh under the credential's lock and return the row as it is afterwards."""
+    """Refresh under the credential's lock and return the row as it is afterwards.
+
+    ``rejected_token`` is an access token Linear answered 401 to. It forces a
+    refresh even though the stored expiry says the token is fine, unless
+    another caller already replaced it.
+    """
     lock = _refresh_locks.setdefault(credential.id, asyncio.Lock())
-    if lock.locked() and not _expires_within(credential, timedelta(0)):
+    if rejected_token is None and lock.locked() and not _expires_within(credential, timedelta(0)):
         # Someone else is refreshing and this token still works. Waiting would
         # only queue behind a refresh that can take its full timeout.
         return credential
@@ -335,13 +367,17 @@ async def _refresh_expiring(
         # row we were handed would spend a refresh token that rotation has
         # since killed.
         credential = await require_active_credential(credential)
-        if not _is_expiring(credential):
+        stale = (
+            rejected_token is not None
+            and decrypt_token_payload(credential).get("access_token") == rejected_token
+        )
+        if not stale and not _is_expiring(credential):
             return credential
 
         # The retry exists to try again, so it never answers from the memory.
         recent = _recent_failures.get(credential.id) if retry else None
         if recent and time.monotonic() - recent[0] < _FAILURE_MEMORY:
-            return _keep_valid_token(credential, recent[1])
+            return _keep_valid_token(credential, recent[1], rejected=stale)
 
         rejected: LinearAuthError | None = None
         try:
@@ -360,9 +396,9 @@ async def _refresh_expiring(
             else:
                 # A 5xx from a gateway, or a body that never finished, can come
                 # after Linear rotated the token. See the next branch.
-                return _transient_failure(credential, error, retry)
+                return _transient_failure(credential, error, retry, stale)
         except (aiohttp.ClientError, asyncio.TimeoutError, SQLAlchemyError) as error:
-            return _transient_failure(credential, error, retry)
+            return _transient_failure(credential, error, retry, stale)
         except asyncio.CancelledError:
             if retry:
                 _retry_refresh_later(credential)
@@ -463,7 +499,7 @@ class LinearIntegration(OAuthIntegration):
             },
             account_label=organization.get("name"),
             scopes=token_response.get("scope"),
-            token_expires_at=_expires_at(token_response.get("expires_in")),
+            token_expires_at=_expires_at(_lifetime(token_response.get("expires_in"))),
             auth_type="oauth2",
         )
 

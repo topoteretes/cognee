@@ -23,6 +23,7 @@ from sqlalchemy.exc import OperationalError
 from cognee.modules.integrations import credentials as store
 from cognee.modules.integrations.linear import adapter
 from cognee.modules.integrations.linear.adapter import LinearAuthError, LinearIntegration
+from cognee.modules.integrations.linear.client import LinearUnauthorizedError
 
 ACCOUNT_ID = "org-1"
 
@@ -824,3 +825,80 @@ async def test_a_retry_refreshing_is_registered_and_survives_being_cancelled(lin
     assert await background_tasks.wait_for_background_tasks(timeout=5)
 
     assert_recovered(linear, await persisted())
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_token_forces_a_refresh_although_its_expiry_is_fine(linear):
+    original = await install(expires_in=12)
+
+    assert await adapter.access_token_for(original, rejected="access-0") == "access-1"
+
+    assert linear.calls == ["refresh-0"]
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_token_someone_else_already_replaced_is_not_refreshed_again(linear):
+    original = await install(expires_in=12)
+    await adapter.access_token_for(original, rejected="access-0")
+
+    # A second caller whose request was rejected with the same old token.
+    assert await adapter.access_token_for(original, rejected="access-0") == "access-1"
+
+    assert linear.calls == ["refresh-0"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_forced_refresh_never_hands_back_the_rejected_token(linear, monkeypatch):
+    original = await install(expires_in=12)
+    monkeypatch.setattr(
+        adapter,
+        "refresh_access_token",
+        AsyncMock(side_effect=LinearAuthError("token refresh", "http_500")),
+    )
+
+    with pytest.raises(LinearAuthError):
+        await adapter.access_token_for(original, rejected="access-0")
+
+
+@pytest.mark.asyncio
+async def test_call_with_token_refreshes_once_and_tries_again_on_a_401(linear):
+    original = await install(expires_in=12)
+    tokens = []
+
+    async def call(token):
+        tokens.append(token)
+        if token == "access-0":
+            raise LinearUnauthorizedError("Linear Query failed: HTTP 401")
+        return "ok"
+
+    assert await adapter.call_with_token(original, call) == "ok"
+
+    assert tokens == ["access-0", "access-1"]
+    assert linear.calls == ["refresh-0"]
+
+
+@pytest.mark.asyncio
+async def test_call_with_token_gives_up_after_one_refresh(linear):
+    original = await install(expires_in=12)
+    call = AsyncMock(side_effect=LinearUnauthorizedError("Linear Query failed: HTTP 401"))
+
+    with pytest.raises(LinearUnauthorizedError):
+        await adapter.call_with_token(original, call)
+
+    assert call.await_count == 2
+    assert linear.calls == ["refresh-0"]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_401s_trigger_one_refresh(linear):
+    original = await install(expires_in=12)
+
+    async def call(token):
+        if token == "access-0":
+            raise LinearUnauthorizedError("Linear Query failed: HTTP 401")
+        return token
+
+    results = await asyncio.gather(*(adapter.call_with_token(original, call) for _ in range(4)))
+
+    assert results == ["access-1"] * 4
+    assert linear.calls == ["refresh-0"]

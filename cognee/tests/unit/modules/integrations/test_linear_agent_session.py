@@ -154,3 +154,28 @@ async def test_a_failed_refresh_ends_the_turn_without_raising_or_posting(mocks, 
     await handle_agent_session(_credential(), _created_payload())
 
     assert mocks.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_401_on_an_activity_refreshes_the_token_and_posts_it_again(mocks, monkeypatch):
+    from cognee.modules.integrations.linear.client import LinearUnauthorizedError
+
+    posted = []
+
+    async def activity(access_token, agent_session_id, content):
+        posted.append((access_token, content["type"]))
+        if access_token == "lin_tok" and content["type"] == "thought":
+            raise LinearUnauthorizedError("Linear AgentActivityCreate failed: HTTP 401")
+
+    refresh = AsyncMock(side_effect=["lin_tok", "lin_tok_2"])
+    monkeypatch.setattr(adapter_module, "access_token_for", refresh)
+    monkeypatch.setattr(session_module, "create_agent_activity", activity)
+
+    await handle_agent_session(_credential(), _created_payload())
+
+    assert posted == [
+        ("lin_tok", "thought"),
+        ("lin_tok_2", "thought"),
+        ("lin_tok_2", "response"),
+    ]
+    assert refresh.await_args_list[1].kwargs == {"rejected": "lin_tok"}
