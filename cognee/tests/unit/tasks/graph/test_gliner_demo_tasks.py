@@ -714,7 +714,7 @@ async def test_get_gliner_demo_tasks_shape():
     stats = GlinerRunStats()
     with (
         patch.object(tasks_module, "require_gliner2"),
-        patch.object(tasks_module, "get_max_chunk_tokens", AsyncMock(return_value=512)),
+        patch.object(tasks_module, "resolve_chunk_size", AsyncMock(return_value=512)),
     ):
         tasks = await get_gliner_demo_tasks(
             ["person"], ["works_for"], chunks_per_batch=7, stats=stats

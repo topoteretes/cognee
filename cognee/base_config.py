@@ -154,7 +154,7 @@ class BaseConfig(BaseSettings):
     langfuse_secret_key: str | None = None
     langfuse_host: str | None = None
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     def to_dict(self) -> dict:
         return {
