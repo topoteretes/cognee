@@ -84,8 +84,14 @@ BYTES_PER_CONCURRENT_BATCH = 2 * 1024**3  # at DEFAULT_BATCH_SIZE, rounded up
 MEMORY_RESERVE_BYTES = 4 * 1024**3  # left free for the rest of the system
 # Linux containers (Docker --cpus/--memory, Kubernetes limits) enforce CPU and
 # memory through cgroups, which neither torch's thread count nor /proc/meminfo
-# reflects: a pod limited to 4 GB still sees the node's free memory.
+# reflects: a pod limited to 4 GB still sees the node's free memory. The limit
+# files live in the process's own cgroup directory, named by /proc/self/cgroup:
+# the root of the mount only inside a private cgroup namespace (Docker's
+# default), elsewhere a path such as /kubepods.slice/.../cri-containerd-x.scope.
 CGROUP_ROOT = Path("/sys/fs/cgroup")
+PROC_SELF_CGROUP = Path("/proc/self/cgroup")
+# cgroup v1 reports "no limit" as a number near 2**63.
+CGROUP_V1_NO_LIMIT = 2**60
 
 _extractors: dict[str, Any] = {}
 _load_lock = threading.Lock()
@@ -146,41 +152,87 @@ async def get_extractor(model_name: str = DEFAULT_MODEL) -> Any:
     return await asyncio.to_thread(load_extractor, model_name)
 
 
-def _read_cgroup(*names: str) -> str | None:
-    """The first readable cgroup file among ``names`` (v2 name first, then v1)."""
-    for name in names:
-        try:
-            return (CGROUP_ROOT / name).read_text().strip()
-        except OSError:
+def _read_cgroup(path: Path) -> str | None:
+    """The stripped text of one cgroup file, or None when it cannot be read."""
+    try:
+        return path.read_text().strip()
+    except OSError:
+        return None
+
+
+def _cgroup_dirs(controller: str) -> list[Path]:
+    """The directories whose ``controller`` limits apply to this process, nearest first.
+
+    Resolved from ``/proc/self/cgroup``. A line ``0::/a/b`` is the cgroup v2
+    hierarchy, mounted at the root; ``3:cpu,cpuacct:/a/b`` is a cgroup v1
+    hierarchy, mounted under its controller names. The process's own directory
+    is listed first, then every ancestor up to the mount root, since a limit
+    on any ancestor (a Kubernetes pod's slice, a Docker container's scope)
+    binds the process as much as its own. Inside a private cgroup namespace the
+    process is at ``/`` and only the root is listed. No file (macOS, Windows)
+    means no cgroups, so nothing is listed.
+    """
+    lines = _read_cgroup(PROC_SELF_CGROUP)
+    if not lines:
+        return []
+    dirs: list[Path] = []
+    for line in lines.splitlines():
+        _, controllers, path = line.split(":", 2)
+        if controllers == "":
+            mount = CGROUP_ROOT
+        elif controller in controllers.split(","):
+            mount = CGROUP_ROOT / controllers
+        else:
             continue
-    return None
+        cgroup = mount / path.lstrip("/")
+        dirs.append(cgroup)
+        while cgroup != mount:
+            cgroup = cgroup.parent
+            dirs.append(cgroup)
+    return dirs
 
 
 def container_cpu_limit() -> float | None:
-    """CPUs a cgroup quota grants this process, or None when there is no quota.
+    """CPUs the tightest cgroup quota grants this process, or None when there is none.
 
     Docker ``--cpus`` and Kubernetes CPU limits are a CFS quota: the process
-    still sees every host CPU, it just gets throttled past the quota.
+    still sees every host CPU, it just gets throttled past the quota. Every
+    level from the process's cgroup up to the root is read and the smallest
+    quota wins.
     """
-    v2 = _read_cgroup("cpu.max")  # "max 100000" or "200000 100000"
-    if v2:
-        quota, period = v2.split()[:2]
-        return None if quota == "max" else int(quota) / int(period)
-    quota = _read_cgroup("cpu/cpu.cfs_quota_us")
-    period = _read_cgroup("cpu/cpu.cfs_period_us")
-    if quota and period and int(quota) > 0:
-        return int(quota) / int(period)
-    return None
+    quotas: list[float] = []
+    for cgroup in _cgroup_dirs("cpu"):
+        v2 = _read_cgroup(cgroup / "cpu.max")  # "max 100000" or "200000 100000"
+        if v2 is not None:
+            quota, period = v2.split()[:2]
+            if quota != "max":
+                quotas.append(int(quota) / int(period))
+            continue
+        quota = _read_cgroup(cgroup / "cpu.cfs_quota_us")
+        period = _read_cgroup(cgroup / "cpu.cfs_period_us")
+        if quota and period and int(quota) > 0:
+            quotas.append(int(quota) / int(period))
+    return min(quotas) if quotas else None
 
 
 def container_memory_free() -> int | None:
-    """Bytes left under a cgroup memory limit, or None when there is no limit."""
-    limit = _read_cgroup("memory.max", "memory/memory.limit_in_bytes")
-    usage = _read_cgroup("memory.current", "memory/memory.usage_in_bytes")
-    # cgroup v1 reports "no limit" as a number near 2**63.
-    if not limit or not usage or limit == "max" or int(limit) >= 2**60:
-        return None
-    return max(0, int(limit) - int(usage))
+    """Bytes left under the tightest cgroup memory limit, or None when there is none.
+
+    Each level from the process's cgroup up to the root is read; what is left
+    under a limit is that level's limit minus that level's usage (an ancestor's
+    usage includes its other children), and the smallest remainder wins.
+    """
+    remaining: list[int] = []
+    for cgroup in _cgroup_dirs("memory"):
+        limit = _read_cgroup(cgroup / "memory.max")
+        usage = _read_cgroup(cgroup / "memory.current")
+        if limit is None:
+            limit = _read_cgroup(cgroup / "memory.limit_in_bytes")
+            usage = _read_cgroup(cgroup / "memory.usage_in_bytes")
+        if not limit or not usage or limit == "max" or int(limit) >= CGROUP_V1_NO_LIMIT:
+            continue
+        remaining.append(max(0, int(limit) - int(usage)))
+    return min(remaining) if remaining else None
 
 
 def auto_inference_threads(batch_size: int = DEFAULT_BATCH_SIZE) -> int:

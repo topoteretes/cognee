@@ -114,14 +114,25 @@ def test_every_batch_keeps_its_single_threaded_members():
 
 @pytest.fixture
 def cgroup(tmp_path, monkeypatch):
-    """A fake /sys/fs/cgroup: write the files a container would have."""
-    monkeypatch.setattr(extractor_module, "CGROUP_ROOT", tmp_path)
+    """A fake /sys/fs/cgroup and /proc/self/cgroup.
+
+    ``cgroup(name, value)`` writes one file under the cgroup mount;
+    ``cgroup.process(*lines)`` sets the process's /proc/self/cgroup lines. The
+    default is Docker's private namespace: the process at the root of a v2
+    hierarchy, ``0::/``.
+    """
+    root = tmp_path / "sys_fs_cgroup"
+    proc = tmp_path / "proc_self_cgroup"
+    monkeypatch.setattr(extractor_module, "CGROUP_ROOT", root)
+    monkeypatch.setattr(extractor_module, "PROC_SELF_CGROUP", proc)
+    proc.write_text("0::/\n")
 
     def write(name: str, value: str):
-        path = tmp_path / name
+        path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(value + "\n")
 
+    write.process = lambda *lines: proc.write_text("\n".join(lines) + "\n")
     return write
 
 
@@ -204,7 +215,16 @@ def test_several_threads_share_one_pool(monkeypatch):
 
 
 def test_no_cgroup_files_means_no_container_limits(cgroup):
-    """macOS, Windows, and Linux outside a container: nothing is read as a limit."""
+    """Linux outside a container: the files exist but hold no limit, or are absent."""
+    assert extractor_module.container_cpu_limit() is None
+    assert extractor_module.container_memory_free() is None
+
+
+def test_no_proc_self_cgroup_means_no_container_limits(cgroup):
+    """macOS and Windows have no /proc/self/cgroup, so there is nothing to read."""
+    extractor_module.PROC_SELF_CGROUP.unlink()
+    cgroup("cpu.max", "200000 100000")  # never consulted without a cgroup path
+    assert extractor_module._cgroup_dirs("cpu") == []
     assert extractor_module.container_cpu_limit() is None
     assert extractor_module.container_memory_free() is None
 
@@ -220,6 +240,8 @@ def test_no_cgroup_files_means_no_container_limits(cgroup):
     ],
 )
 def test_container_cpu_quota(cgroup, files, expected):
+    if any(name.startswith("cpu/") for name in files):
+        cgroup.process("3:cpu:/")
     for name, value in files.items():
         cgroup(name, value)
     assert extractor_module.container_cpu_limit() == expected
@@ -248,10 +270,66 @@ def test_container_cpu_quota(cgroup, files, expected):
     ],
 )
 def test_container_memory_left(cgroup, files, expected_gib):
+    if any(name.startswith("memory/") for name in files):
+        cgroup.process("5:memory:/")
     for name, value in files.items():
         cgroup(name, value)
     free = extractor_module.container_memory_free()
     assert free == (None if expected_gib is None else expected_gib * GIB)
+
+
+def test_process_cgroup_path_is_resolved_from_proc_self_cgroup(cgroup):
+    """Docker --cgroupns=host, measured: the process is at /docker/<id>, not at
+    the root, and the limit files are in that directory. The root has none."""
+    cgroup.process("0::/docker/80e6330e3f72")
+    cgroup("docker/80e6330e3f72/cpu.max", "200000 100000")
+    cgroup("docker/80e6330e3f72/memory.max", str(4 * GIB))
+    cgroup("docker/80e6330e3f72/memory.current", str(1 * GIB))
+    assert extractor_module._cgroup_dirs("cpu") == [
+        extractor_module.CGROUP_ROOT / "docker/80e6330e3f72",
+        extractor_module.CGROUP_ROOT / "docker",
+        extractor_module.CGROUP_ROOT,
+    ]
+    assert extractor_module.container_cpu_limit() == 2.0
+    assert extractor_module.container_memory_free() == 3 * GIB
+
+
+def test_a_limit_on_an_ancestor_cgroup_binds_the_process(cgroup):
+    """A Kubernetes pod on a cgroup v2 node: the container's own cgroup has no
+    memory limit, the pod slice above it does, and a looser CPU quota sits on
+    the container than on the pod. The tightest level wins for each resource."""
+    pod = "kubepods.slice/kubepods-pod1.slice"
+    container = f"{pod}/cri-containerd-abc.scope"
+    cgroup.process(f"0::/{container}")
+    cgroup(f"{container}/cpu.max", "400000 100000")
+    cgroup(f"{container}/memory.max", "max")
+    cgroup(f"{container}/memory.current", str(1 * GIB))
+    cgroup(f"{pod}/cpu.max", "200000 100000")
+    cgroup(f"{pod}/memory.max", str(4 * GIB))
+    cgroup(f"{pod}/memory.current", str(2 * GIB))  # includes a sibling container
+    assert extractor_module.container_cpu_limit() == 2.0
+    assert extractor_module.container_memory_free() == 2 * GIB
+
+
+def test_cgroup_v1_files_are_read_under_the_controller_mount(cgroup):
+    """A cgroup v1 node with a host namespace: each controller is its own
+    hierarchy, mounted under its /proc/self/cgroup name, and the process path
+    is relative to that mount."""
+    cgroup.process(
+        "11:memory:/kubepods/pod1/ctr",
+        "7:cpu,cpuacct:/kubepods/pod1/ctr",
+        "1:name=systemd:/kubepods/pod1/ctr",
+    )
+    cgroup("cpu,cpuacct/kubepods/pod1/ctr/cpu.cfs_quota_us", "150000")
+    cgroup("cpu,cpuacct/kubepods/pod1/ctr/cpu.cfs_period_us", "100000")
+    cgroup("cpu,cpuacct/cpu.cfs_quota_us", "-1")  # the mount root: no quota
+    cgroup("cpu,cpuacct/cpu.cfs_period_us", "100000")
+    cgroup("memory/kubepods/pod1/ctr/memory.limit_in_bytes", str(6 * GIB))
+    cgroup("memory/kubepods/pod1/ctr/memory.usage_in_bytes", str(2 * GIB))
+    cgroup("memory/memory.limit_in_bytes", "9223372036854771712")  # root: no limit
+    cgroup("memory/memory.usage_in_bytes", str(40 * GIB))
+    assert extractor_module.container_cpu_limit() == 1.5
+    assert extractor_module.container_memory_free() == 4 * GIB
 
 
 def test_a_small_container_on_a_big_host_is_sized_to_the_container(machine, cgroup):
