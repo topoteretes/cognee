@@ -1,13 +1,14 @@
-"""Step 1: remember your 20 newest inbox emails, plus your last 20 sent emails.
+"""Remember your newest inbox emails (20 by default) and your last 20 sent emails.
 
-The inbox emails (node set `email`) are what step 3 answers; it picks one by sender name,
-or the newest. The sent emails (node set `sent`) are a sample of how you write, so step 3 can draft a
-reply in your style. Needs credentials.json (a Gmail OAuth Desktop client) in this folder;
-token.json is written here on the first run.
+The inbox emails (node set `email`) are what answer.py answers. The sent emails (node set
+`sent`) are a sample of how you write, so a drafted reply sounds like you. Needs
+credentials.json (a Gmail OAuth Desktop client) in the skill folder; token.json is written
+there on the first run.
 
-Run alone: uv run python .agents/skills/inbox-qa/1_ingest_email/main.py
+Run alone: uv run python .agents/skills/inbox-qa/scripts/ingest_email.py [--emails N]
 """
 
+import argparse
 import asyncio
 from pathlib import Path
 
@@ -15,10 +16,10 @@ import cognee
 from cognee.shared.logging_utils import ERROR, setup_logging
 from cognee.tasks.ingestion.connectors.gmail import build_gmail_service, parse_message
 
-DATASET = "inbox_qa_skill"  # the same in every step
-INBOX_COUNT = SENT_COUNT = 20
-HERE = Path(__file__).parent
-CREDENTIALS, TOKEN = HERE / "credentials.json", HERE / "token.json"
+DATASET = "inbox_qa_skill"  # the same in every script
+SENT_COUNT = 20
+SKILL_DIR = Path(__file__).parent.parent
+CREDENTIALS, TOKEN = SKILL_DIR / "credentials.json", SKILL_DIR / "token.json"
 
 
 def fetch_emails(label: str, count: int) -> list[str]:
@@ -34,8 +35,8 @@ def fetch_emails(label: str, count: int) -> list[str]:
     return emails
 
 
-async def main() -> None:
-    inbox = fetch_emails("INBOX", INBOX_COUNT)
+async def ingest_email(count: int = 20) -> None:
+    inbox = fetch_emails("INBOX", count)
     if not inbox:
         raise SystemExit("[ingest_email] Your Gmail inbox is empty.")
     await cognee.remember(inbox, dataset_name=DATASET, node_set=["email"], self_improvement=False)
@@ -51,4 +52,6 @@ async def main() -> None:
 
 if __name__ == "__main__":
     setup_logging(log_level=ERROR)
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--emails", type=int, default=20, help="inbox emails to remember")
+    asyncio.run(ingest_email(parser.parse_args().emails))

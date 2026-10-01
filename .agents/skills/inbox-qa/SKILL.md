@@ -1,15 +1,16 @@
 ---
 name: inbox-qa
-description: Answer a question from one of your 20 newest Gmail emails (the newest, or the newest from a named sender) plus your Granola meeting notes, and draft replies in your own style learned from your sent mail, using cognee memory. Use when someone asks what their latest email wants, asks to answer or reply to it or to an email from a named person, or asks a question that needs both that email and their meetings. Runs locally; reads Gmail read-only; never sends mail.
+description: Answer a question about one of your newest Gmail emails (the newest, or the newest from a named sender; 20 are loaded by default) plus your Granola meeting notes, and draft replies in your own style learned from your sent mail, using cognee memory. Use when someone asks what their latest email wants, asks to answer or reply to it or to an email from a named person, or asks a question that needs both that email and their meetings. Runs locally; reads Gmail read-only; never sends mail.
 ---
 
 # Inbox Q&A
 
-Remembers the 20 newest emails in your Gmail inbox, your last 20 sent emails and your Granola
-meeting notes in one cognee dataset (`inbox_qa_skill`), then answers a question about one of
-those emails: the newest, or the newest from a sender you name. Facts come from the email and the meetings; the sent emails are a sample of how you write,
-so a drafted reply sounds like you. Use it to check how
-cognee combines two sources, or as a template for a skill with several steps.
+Remembers the newest emails in your Gmail inbox (20 by default), your last 20 sent emails
+and your Granola meeting notes in one cognee dataset (`inbox_qa_skill`), then answers a
+question about one of those emails: the newest, or the newest from a sender you name. Facts
+come from the email and the meetings; the sent emails are a sample of how you write, so a
+drafted reply sounds like you. Use it to check how cognee combines two sources, or as a
+template for a skill with several steps.
 
 This file is for both readers. A person can follow it top to bottom. An agent should
 follow **For agents** and run the commands as written.
@@ -19,8 +20,8 @@ follow **For agents** and run the commands as written.
 | What | Why | Where |
 |---|---|---|
 | `LLM_API_KEY` | cognee extracts the graph and writes the answer with an LLM (OpenAI by default) | `.env` at the repo root |
-| `credentials.json` | Gmail OAuth client, type *Desktop app*, with the Gmail API enabled in Google Cloud | `1_ingest_email/` |
-| `token.json` | Written on the first run, after you consent in the browser. Scope: `gmail.readonly` | `1_ingest_email/`, created for you |
+| `credentials.json` | Gmail OAuth client, type *Desktop app*, with the Gmail API enabled in Google Cloud | the skill folder, next to `SKILL.md` |
+| `token.json` | Written on the first run, after you consent in the browser. Scope: `gmail.readonly` | the skill folder, created for you |
 | `GRANOLA_API_KEY` | Reads your meeting notes through Granola's public API. Create one in Granola's settings | `.env` at the repo root |
 | `cognee[gmail]` | The Google client libraries | `uv sync --extra gmail` |
 
@@ -32,23 +33,26 @@ No Gmail or no Granola? Run with `--no-email` or `--no-granola` to skip that ste
 ```
 inbox-qa/
 ├── SKILL.md              this file
-├── run.py                orchestrator: --check, then each step in order
-├── 1_ingest_email/       main.py, plus credentials.json and token.json (yours, git-ignored)
-├── 2_ingest_granola/     main.py
-└── 3_answer/             main.py
+├── run.py                checks setup, then calls the three scripts in order
+├── credentials.json      yours, git-ignored
+├── token.json            yours, git-ignored, written on the first Gmail run
+└── scripts/
+    ├── ingest_email.py
+    ├── ingest_granola.py
+    └── answer.py
 ```
 
-Each step folder holds its `main.py` and the files that step needs. `run.py` runs each
-`main.py` as its own process, the same command you would type, so any step also runs alone.
+`run.py` imports each script and calls its function in one process. Each script also runs
+alone with the same options.
 
 | # | Command (`uv run python .agents/skills/inbox-qa/...`) | Does | Writes |
 |---|---|---|---|
 | 0 | `run.py --check` | Reports what is missing. Does no work | nothing |
-| 1 | `1_ingest_email/main.py` | Remembers the 20 newest inbox emails (node set `email`) and your last 20 sent emails (node set `sent`) | cognee dataset |
-| 2 | `2_ingest_granola/main.py [days]` | Remembers Granola meeting notes from the last 30 days by default (node set `meetings`) | cognee dataset |
-| 3 | `3_answer/main.py [--sender NAME] "question"` | Picks the newest email (from `NAME` if given) and answers about it; a drafted reply copies the style of your sent emails | nothing |
+| 1 | `scripts/ingest_email.py [--emails N]` | Remembers the `N` newest inbox emails, 20 by default (node set `email`), and your last 20 sent emails (node set `sent`) | cognee dataset |
+| 2 | `scripts/ingest_granola.py [--days N]` | Remembers Granola meeting notes from the last 30 days by default (node set `meetings`) | cognee dataset |
+| 3 | `scripts/answer.py [--sender NAME] "question"` | Picks the newest email (from `NAME` if given) and answers about it; a drafted reply copies the style of your sent emails | nothing |
 
-All steps write to the cognee dataset `inbox_qa_skill`, named once in each `main.py`.
+All scripts write to the cognee dataset `inbox_qa_skill`, named once in each script.
 
 ## Run it (people)
 
@@ -59,6 +63,7 @@ uv run python .agents/skills/inbox-qa/run.py --check
 uv run python .agents/skills/inbox-qa/run.py
 uv run python .agents/skills/inbox-qa/run.py --days 7 --question "What do I owe Priya?"
 uv run python .agents/skills/inbox-qa/run.py --sender Priya   # draft a reply to Priya's email
+uv run python .agents/skills/inbox-qa/run.py --emails 50 --sender Priya   # look further back
 ```
 
 The first Gmail run opens a browser to consent. Running it again re-remembers the same
@@ -74,14 +79,15 @@ content; cognee skips content it already holds.
 2. Run `run.py` with the user's question: `--question "..."`. For "answer my latest
    email", omit `--question`: the default drafts a reply. For "answer NAME" or "reply to
    NAME's email", add `--sender NAME` (matched against the From line, name or address;
-   only the 20 newest inbox emails are searched). Add `--days N` if the user named a time
-   range for meetings, and `--no-email` / `--no-granola` if they don't want a source used.
+   only the newest `--emails N` inbox emails are searched, 20 by default; raise it if the
+   sender isn't found). Add `--days N` if the user named a time range for meetings, and
+   `--no-email` / `--no-granola` if they don't want a source used.
 3. The answer is everything from the line starting `[answer] A:` to the end. Give it to
    the user in your own words, and say which sources went in: the email answered from
    `[answer] Email:`, the sent-mail count from `[ingest_email]` and the meeting count from
    `[ingest_granola]`. A drafted reply is never sent: hand it to the user to send.
-4. If a step fails, `run.py` prints `[run] FAILED: <folder>` and exits with that step's
-   code. Run that folder's `main.py` on its own to see the error.
+4. If a script fails, `run.py` exits 1 with a line naming what went wrong. Run that script
+   on its own to look closer.
 
 Rules: Gmail access is read-only and nothing is sent. Don't print the contents of
 `credentials.json`, `token.json` or `.env`. Steps 1 and 2 read the user's real mailbox and

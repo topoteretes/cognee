@@ -1,13 +1,13 @@
-"""Step 2: remember your Granola meeting notes from the last 30 days.
+"""Remember your Granola meeting notes from the last 30 days.
 
 Needs GRANOLA_API_KEY (create one in Granola's settings) in .env at the repo root.
 
-Run alone: uv run python .agents/skills/inbox-qa/2_ingest_granola/main.py [days]
+Run alone: uv run python .agents/skills/inbox-qa/scripts/ingest_granola.py [--days N]
 """
 
+import argparse
 import asyncio
 import os
-import sys
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -15,7 +15,7 @@ import httpx
 import cognee  # also loads .env, so a GRANOLA_API_KEY set there is seen
 from cognee.shared.logging_utils import ERROR, setup_logging
 
-DATASET = "inbox_qa_skill"  # the same in every step
+DATASET = "inbox_qa_skill"  # the same in every script
 
 
 def granola_notes(days: int) -> list[str]:
@@ -45,7 +45,7 @@ def granola_notes(days: int) -> list[str]:
         params["cursor"] = page["cursor"]
 
 
-async def main(days: int) -> None:
+async def ingest_granola(days: int = 30) -> None:
     notes = granola_notes(days)
     if not notes:
         print(f"[ingest_granola] No Granola meetings in the last {days} days.")
@@ -58,4 +58,6 @@ async def main(days: int) -> None:
 
 if __name__ == "__main__":
     setup_logging(log_level=ERROR)
-    asyncio.run(main(int(sys.argv[1]) if len(sys.argv) > 1 else 30))
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--days", type=int, default=30, help="how far back to read meetings")
+    asyncio.run(ingest_granola(parser.parse_args().days))
