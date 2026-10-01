@@ -42,6 +42,7 @@ from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.code_graph.config import CodeGraphConfig, validate_codegraph_config
 from cognee.tasks.ingestion.data_item import DataItem
 
 logger = get_logger("remember")
@@ -103,7 +104,12 @@ class RememberKwargs(TypedDict, total=False):
     graph_db_config: dict
     content_type: Literal["skills"]
     skill_improvement: dict[str, Any]
+    codegraph_config: CodeGraphConfig
+    # Top-level spellings of the codegraph_config keys, kept for existing
+    # callers; folded into codegraph_config. index_vectors also keeps its
+    # cogx-archive meaning (False imports the graph without vectors).
     index_vectors: bool
+    repo_credentials: str
     skills_text: str
     skill_name: str
     primary_key: str
@@ -144,7 +150,7 @@ _ADD_ONLY = frozenset(
     }
 )
 _COGNIFY_ONLY = frozenset(
-    {"graph_model", "extractor", "chunks_per_batch", "config", "temporal_cognify", "index_vectors"}
+    {"graph_model", "extractor", "chunks_per_batch", "config", "temporal_cognify"}
 )
 _SHARED = frozenset(
     {
@@ -157,8 +163,23 @@ _SHARED = frozenset(
         "run_in_background",
         "llm_config",
         "embedding_config",
+        # add() reads repo_credentials, cognify() reads index_vectors.
+        "codegraph_config",
     }
 )
+
+
+def _fold_codegraph_kwargs(kwargs: dict) -> None:
+    """Move top-level ``index_vectors`` / ``repo_credentials`` into ``codegraph_config``.
+
+    An explicit ``codegraph_config`` key wins over its top-level spelling.
+    """
+    legacy = {
+        key: kwargs.pop(key) for key in ("index_vectors", "repo_credentials") if key in kwargs
+    }
+    legacy = {key: value for key, value in legacy.items() if value is not None}
+    if legacy:
+        kwargs["codegraph_config"] = {**legacy, **(kwargs.get("codegraph_config") or {})}
 
 
 PRESORT_FOLDERS_ENV = "PRESORT_FOLDERS_ENABLED"
@@ -986,8 +1007,11 @@ async def remember(
             auto-detect skill paths. Code repositories need no content type:
             a local code-project directory or a GitHub/GitLab URL passed as
             ``data`` is stored as one ``code_repo`` row by ``add()`` and built
-            by cognify's CODE_REPO route; pass ``index_vectors=True`` to also
-            embed the code facts of the repositories this call builds.
+            by cognify's CODE_REPO route. ``codegraph_config`` (see
+            ``CodeGraphConfig``) sets ``index_vectors`` to also embed the code
+            facts this call builds, and ``repo_credentials`` to clone private
+            repository URLs; the top-level ``index_vectors=`` /
+            ``repo_credentials=`` spellings are still accepted.
         skill_improvement: Internal skill-improvement control dict used with
             ``SkillRunEntry`` or ``content_type="skills"``. ``apply=True``
             requires an existing ``proposal_id``.
@@ -1016,6 +1040,16 @@ async def remember(
     """
     from cognee import __version__ as cognee_version
     from cognee.shared.utils import send_telemetry
+
+    # content_type="code" was removed (SDK-793): a repository is ordinary data
+    # and builds through add() + cognify(). Callers still passing it keep
+    # working; the value is dropped here, before any path reads it.
+    if kwargs.get("content_type") == "code":
+        kwargs.pop("content_type")
+        logger.warning(
+            "remember(content_type='code') is deprecated and ignored: pass the repository "
+            "path or URL as data; use codegraph_config for index_vectors / repo_credentials."
+        )
 
     # Migration dispatch: a MemorySource streams COGX records from an external
     # memory system (Mem0, Zep/Graphiti, Letta, a COGX archive, ...). The
@@ -1062,9 +1096,9 @@ async def remember(
                 },
             )
             # index_vectors=False imports the archive's graph without touching
-            # the vector/embedding stack (same kwarg cognify uses for code), so a
-            # bundled archive restores with no API key. Vector-independent
-            # search (CHUNKS_LEXICAL) still works over such an import.
+            # the vector/embedding stack, so a bundled archive restores with no
+            # API key. Vector-independent search (CHUNKS_LEXICAL) still works
+            # over such an import.
             graph_only = not kwargs.pop("index_vectors", True)
             return await import_memory_source(
                 data,
@@ -1077,6 +1111,10 @@ async def remember(
                 graph_only=graph_only,
                 **kwargs,
             )
+
+    # Past the archive branch, the top-level code graph kwargs mean what their
+    # codegraph_config keys mean; fold them before any path forwards kwargs.
+    _fold_codegraph_kwargs(kwargs)
 
     # Typed MemoryEntry dispatch: trace steps, rich QA, feedback, and
     # explicit skill-run scores. These short-circuit the add+cognify path.
@@ -1375,8 +1413,25 @@ async def _remember_inner(
 ) -> "RememberResult":
     from cognee.api.v1.serve.state import get_remote_client
 
+    _fold_codegraph_kwargs(kwargs)
+    codegraph_config = validate_codegraph_config(kwargs.get("codegraph_config"))
+    if codegraph_config and (session_id or kwargs.get("content_type")):
+        # Only the add + cognify path reads it; the session-cache and skills
+        # paths would ignore it silently (the HTTP route rejects it the same way).
+        raise ValueError(
+            "codegraph_config (index_vectors, repo_credentials) is only supported for "
+            "normal ingestion, not with session_id or content_type."
+        )
+
     client = get_remote_client()
     if client is not None:
+        if codegraph_config.get("repo_credentials"):
+            # POST /remember has no credentials field; the remote would try an
+            # unauthenticated clone, so an explicit token has to raise.
+            raise ValueError(
+                "repo_credentials is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to clone the repository locally."
+            )
         if kwargs.get("extractor") is not None:
             # client.remember() whitelists its form fields and would silently
             # drop the extractor choice, so an explicit one has to raise.

@@ -42,6 +42,7 @@ from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.code_files import get_code_file_tasks
 from cognee.tasks.code_graph.code_repo import get_code_repo_tasks
+from cognee.tasks.code_graph.config import CodeGraphConfig, validate_codegraph_config
 from cognee.tasks.documents import (
     classify_documents,
     extract_chunks_from_documents,
@@ -131,7 +132,7 @@ async def cognify(
     chunk_attachment: Literal["direct", "all"] | None = None,
     extractor: Literal["llm", "gliner_demo", "gliner"] | None = None,
     ontology_file_path: str | None = None,
-    index_vectors: bool = False,
+    codegraph_config: CodeGraphConfig | None = None,
     **kwargs,
 ):
     """
@@ -238,13 +239,15 @@ async def cognify(
                  generic KnowledgeGraph, so a custom graph_model raises. Raises with
                  temporal_cognify=True, with dry_run=True, or while connected to a
                  remote instance — none of those paths can honour it yet.
-        index_vectors: Also embed the code facts of the code files and code
-                 repositories this run builds (CODE and CODE_REPO routes). Off by
-                 default: SearchType.CODE reads the graph only, and embedding lets
-                 completion search types reach the code. Applies only to items the
+        codegraph_config: Options for the code files and code repositories this
+                 run builds (CODE and CODE_REPO routes), as a ``CodeGraphConfig``.
+                 cognify() reads ``index_vectors``: also embed the code facts, so
+                 completion search types can reach the code. Off by default:
+                 SearchType.CODE reads the graph only. It applies only to items the
                  run actually builds — an unchanged, already-built item is skipped
                  by incremental loading and keeps its previous vectors (or none).
-                 Not supported while connected to a remote instance.
+                 ``repo_credentials`` is read by add() and ignored here. Not
+                 supported while connected to a remote instance.
 
     Returns:
         Union[dict, list[PipelineRunInfo], DryRunEstimate]:
@@ -322,6 +325,7 @@ async def cognify(
         - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
     """
+    index_vectors = bool(validate_codegraph_config(codegraph_config).get("index_vectors"))
     cognify_config = get_cognify_config()
     # The extractor decision is made once, here, before any branch. Branches
     # that cannot honour it raise below instead of silently running something
@@ -383,9 +387,10 @@ async def cognify(
             # client.cognify() has no index_vectors field; the remote would
             # silently build graph-only, so an explicit choice has to raise.
             raise ValueError(
-                "index_vectors is not supported by cognify() while connected to a remote "
-                "Cognee instance. Use remember(..., index_vectors=True) or call "
-                "cognee.disconnect() to cognify locally."
+                "codegraph_config index_vectors is not supported by cognify() while "
+                "connected to a remote Cognee instance. Use remember(..., "
+                'codegraph_config={"index_vectors": True}) or call cognee.disconnect() '
+                "to cognify locally."
             )
         return await client.cognify(
             datasets,

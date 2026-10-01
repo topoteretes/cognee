@@ -221,13 +221,13 @@ async def test_repository_url_is_cloned_and_resolved_like_a_project(
     assert manifest.system_metadata["repo_path"] == str(clone)
     assert manifest.system_metadata["repo_url"] == "https://github.com/org/repo"
     assert manifest.system_metadata["file_count"] == 3
-    # The repo's documents ride along individually; unrelated items pass through.
-    string_items = [item for item in resolved if isinstance(item, str)]
-    assert {Path(item).name for item in string_items if item != "plain text note"} == {
-        "README.md",
-        "notes.txt",
-    }
-    assert "plain text note" in string_items
+    # The repo's documents ride along individually, marked as files of a clone
+    # cognee made; unrelated items pass through.
+    from cognee.tasks.ingestion.repo_clone_file import RepoCloneFile
+
+    documents = [item for item in resolved if isinstance(item, RepoCloneFile)]
+    assert {document.path.name for document in documents} == {"README.md", "notes.txt"}
+    assert [item for item in resolved if isinstance(item, str)] == ["plain text note"]
 
 
 @pytest.mark.asyncio
@@ -281,6 +281,135 @@ async def test_resolve_code_repository_url_rejects_non_repository_specs():
 
     with pytest.raises(ValueError, match="not a repository URL"):
         await resolve_code_repository_url("https://github.com/org/repo/blob/main/README.md")
+
+
+@pytest.mark.asyncio
+async def test_repository_urls_are_cloned_with_credentials_ahead_of_the_pipeline(
+    tmp_path, monkeypatch, llm_key_set
+):
+    """add(codegraph_config={"repo_credentials": ...}) clones private repos up front."""
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+    from cognee.tasks.ingestion.data_item import DataItem
+
+    clone = _make_repo(tmp_path)
+    clones = []
+
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None):
+        clones.append((spec, credentials))
+        return clone
+
+    monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
+
+    resolved = await code_repo_module.resolve_code_repository_urls(
+        ["plain text note", "https://github.com/org/private"], credentials="tok123"
+    )
+
+    assert clones == [("https://github.com/org/private", "tok123")]
+    assert resolved[0] == "plain text note"
+    manifest = resolved[1]
+    assert isinstance(manifest, DataItem)
+    assert manifest.system_metadata["repo_url"] == "https://github.com/org/private"
+    assert "tok123" not in json.dumps(manifest.system_metadata)
+    assert {document.path.name for document in resolved[2:]} == {"README.md", "notes.txt"}
+
+
+@pytest.mark.asyncio
+async def test_data_without_repository_urls_is_returned_unchanged(monkeypatch):
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+
+    async def refuse(*_args, **_kwargs):
+        raise AssertionError("nothing here is a repository URL")
+
+    monkeypatch.setattr(code_repo_module, "resolve_repo_source", refuse)
+    data = "https://example.com/article"
+
+    assert await code_repo_module.resolve_code_repository_urls(data, credentials="tok") is data
+
+
+@pytest.fixture
+def local_paths_disabled(monkeypatch, tmp_path):
+    import importlib
+
+    # The directory must resolve as a local path for the check to be reached.
+    monkeypatch.setenv("COGNEE_ALLOWED_LOCAL_FILE_ROOTS", str(tmp_path))
+
+    # The package re-exports a function of the same name, so import the module.
+    storage_module = importlib.import_module("cognee.tasks.ingestion.save_data_item_to_storage")
+
+    monkeypatch.setattr(storage_module.settings, "accept_local_file_path", False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_code_project", [True, False])
+async def test_local_directories_are_refused_when_local_paths_are_disabled(
+    tmp_path, local_paths_disabled, is_code_project
+):
+    """A code project would otherwise become a manifest that skips the per-file check."""
+    from cognee.modules.ingestion.exceptions import IngestionError
+    from cognee.tasks.ingestion.resolve_data_directories import resolve_data_directories
+
+    if is_code_project:
+        _make_repo(tmp_path)
+    else:
+        (tmp_path / "a.md").write_text("# a")
+
+    with pytest.raises(IngestionError, match="ACCEPT_LOCAL_FILE_PATH=false"):
+        await resolve_data_directories([str(tmp_path)])
+
+
+@pytest.mark.asyncio
+async def test_repository_urls_still_resolve_when_local_paths_are_disabled(
+    tmp_path, monkeypatch, local_paths_disabled
+):
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+    from cognee.tasks.ingestion.data_item import DataItem
+    from cognee.tasks.ingestion.resolve_data_directories import resolve_data_directories
+
+    clone = _make_repo(tmp_path)
+
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None):
+        return clone
+
+    monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
+
+    resolved = await resolve_data_directories(["https://github.com/org/repo"])
+
+    assert any(isinstance(item, DataItem) for item in resolved)
+
+
+@pytest.mark.asyncio
+async def test_clone_documents_are_stored_when_local_paths_are_disabled(
+    tmp_path, monkeypatch, llm_key_set, local_paths_disabled
+):
+    """A cloned repository's documents are cognee's files, not caller-supplied paths."""
+    import importlib
+
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+    from cognee.modules.ingestion.exceptions import IngestionError
+    from cognee.tasks.ingestion.repo_clone_file import RepoCloneFile
+
+    storage = importlib.import_module("cognee.tasks.ingestion.save_data_item_to_storage")
+    clone = _make_repo(tmp_path)
+
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None):
+        return clone
+
+    monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
+
+    _manifest, documents, _skipped = await code_repo_module.resolve_code_repository_url(
+        "https://github.com/org/repo"
+    )
+    readme = next(document for document in documents if document.path.name == "README.md")
+
+    stored = await storage.save_data_item_to_storage(readme)
+    assert stored == (clone / "README.md").as_uri()
+
+    # The same file named as a plain path is still refused.
+    with pytest.raises(IngestionError, match="Local files are not accepted"):
+        await storage.save_data_item_to_storage(str(clone / "README.md"))
+
+    with pytest.raises(IngestionError, match="does not exist"):
+        await storage.save_data_item_to_storage(RepoCloneFile(clone / "missing.md"))
 
 
 @pytest.mark.parametrize("index_vectors", [False, True])

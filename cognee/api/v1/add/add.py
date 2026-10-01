@@ -25,6 +25,7 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
 )
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.code_graph.config import CodeGraphConfig, validate_codegraph_config
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.refuse_changed_existing_documents import (
@@ -53,6 +54,7 @@ async def add(
     embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = True,
     skip_connection_test: bool = False,
+    codegraph_config: CodeGraphConfig | None = None,
     **kwargs,
 ):
     """
@@ -127,6 +129,12 @@ async def add(
                            DLT orphan cleanup is skipped; propagating upstream deletions
                            requires a successful foreground sync.
                            If False (default), waits for completion before returning.
+        codegraph_config: Options for code repositories (``CodeGraphConfig``). add()
+                 reads ``repo_credentials``: a token used to clone private
+                 GitHub/GitLab repository URLs in ``data``. It reaches git only
+                 through environment config, never the URL or the stored rows.
+                 ``index_vectors`` is read by cognify() and ignored here. Not
+                 supported while connected to a remote instance.
         extraction_rules: Optional dictionary of rules (e.g., CSS selectors, XPath) for extracting specific content from web pages using BeautifulSoup
         tavily_config: Optional configuration for Tavily API, including API key and extraction settings
         soup_crawler_config: Optional configuration for BeautifulSoup crawler, specifying concurrency, crawl delay, and extraction rules.
@@ -218,8 +226,17 @@ async def add(
     # Route to remote instance if connected via serve()
     from cognee.api.v1.serve.state import get_remote_client
 
+    codegraph_config = validate_codegraph_config(codegraph_config)
+
     client = get_remote_client()
     if client is not None:
+        if codegraph_config.get("repo_credentials"):
+            # client.add() has no credentials field; the remote would try an
+            # unauthenticated clone, so an explicit token has to raise.
+            raise ValueError(
+                "repo_credentials is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to clone the repository locally."
+            )
         result = await client.add(data, dataset_name)
         # Wrap in a simple namespace so callers expecting .model_dump() still work
         from types import SimpleNamespace
@@ -287,6 +304,18 @@ async def add(
             needs_llm=False,
         ),
     ]
+
+    # The pipeline clones repository URLs itself, but without credentials: a
+    # private repository has to be cloned here, with the token, before it runs.
+    if codegraph_config.get("repo_credentials"):
+        from cognee.tasks.code_graph.code_repo import resolve_code_repository_urls
+
+        data = await resolve_code_repository_urls(
+            data,
+            credentials=codegraph_config["repo_credentials"],
+            user=user,
+            dataset_id=authorized_dataset.id,
+        )
 
     # Expand DLT resources (and auto-detected CSV/connection strings) into
     # standard DataItems before the pipeline sees them. orphan_cleanup (when

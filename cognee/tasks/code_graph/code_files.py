@@ -103,7 +103,7 @@ async def extract_code_files_graph(
     accepts directories), then the standard code graph tasks run on it:
     extract_code_graph -> add_code_graph_data_points -> add_code_graph_edges.
     Graph-only unless ``index_vectors``: SearchType.CODE uses graph indexes,
-    so embeddings are opt-in (``cognify(index_vectors=True)``).
+    so embeddings are opt-in (``cognify(codegraph_config={"index_vectors": True})``).
     """
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
     from cognee.tasks.code_graph.extract_code_graph import (

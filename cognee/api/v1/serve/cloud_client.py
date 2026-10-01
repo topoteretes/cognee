@@ -149,7 +149,8 @@ class CloudClient:
         if kwargs.get("import_mode") is not None:
             form.add_field("import_mode", str(kwargs["import_mode"]))
 
-        if kwargs.get("index_vectors"):
+        codegraph_config = kwargs.get("codegraph_config") or {}
+        if codegraph_config.get("index_vectors") or kwargs.get("index_vectors"):
             form.add_field("index_vectors", "true")
 
         from cognee.tasks.code_graph.resolve_repo import code_repo_clone_url

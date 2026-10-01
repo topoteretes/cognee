@@ -1,17 +1,20 @@
 """Sync a GitHub installation's repositories into the code graph.
 
 Thin orchestration: mint a fresh installation token, resolve which
-repositories to index, clone each one with the token, and ``remember`` the
-local clone. ``remember`` stores the clone as one ``code_repo`` row through
-``add()`` and cognify builds it on the CODE_REPO route. Clone reuse lives in
-``resolve_repo_source`` and incremental loading skips an unchanged repo, which
-is what makes re-running this on every webhook cheap and idempotent.
+repositories to index, and ``remember`` each repository's clone URL with the
+token as ``codegraph_config["repo_credentials"]``. ``add()`` clones it and
+stores it as one ``code_repo`` row (with its ``repo_url``), and cognify builds
+it on the CODE_REPO route. Clone reuse lives in ``resolve_repo_source`` and
+incremental loading skips an unchanged repo, which is what makes re-running
+this on every webhook cheap and idempotent.
 
-The token reaches git only through ``resolve_repo_source(credentials=...)``;
-``remember`` sees a local path, so no secret rides the data it stores.
+The token reaches git only through environment config; the URL and
+everything stored from it stay credential-free.
 
-The indexed graph is searchable via ``SearchType.CODE``; code facts are not
-embedded (``index_vectors`` stays off).
+The code graph is searchable via ``SearchType.CODE``; code facts are not
+embedded (``index_vectors`` stays off). The repository's documents (README,
+docs) are ingested as ordinary documents when an LLM key is configured, so
+they run LLM extraction and are embedded.
 
 One dataset per installation (``github_<org>``), not per repository —
 per-repo datasets would mean one isolated database per repo under backend
@@ -48,7 +51,7 @@ def clone_url(full_name: str) -> str:
     """The credential-free https clone URL for a repository.
 
     Deliberately carries no token: auth travels out-of-band as
-    ``resolve_repo_source(credentials=...)`` (injected into git via
+    ``codegraph_config["repo_credentials"]`` (injected into git via
     environment config), so no URL-derived string — clone slugs, stored rows,
     logs, git error output — can ever leak a secret.
     """
@@ -96,7 +99,6 @@ async def sync_repositories(
     # heavyweight.
     from cognee.api.v1.remember.remember import remember as cognee_remember
     from cognee.modules.users.methods import get_user
-    from cognee.tasks.code_graph.resolve_repo import resolve_repo_source
 
     token, _expires_at = await mint_installation_token(int(credential.provider_account_id))
 
@@ -123,11 +125,11 @@ async def sync_repositories(
     failed: list[str] = []
     for full_name in repo_full_names:
         try:
-            repo_path = await resolve_repo_source(clone_url(full_name), credentials=token)
             result = await cognee_remember(
-                str(repo_path),
+                clone_url(full_name),
                 dataset_name=dataset_name,
                 user=owner,
+                codegraph_config={"repo_credentials": token},
                 # The code graph is the point of the sync; no session to bridge.
                 self_improvement=False,
                 raise_on_error=False,
