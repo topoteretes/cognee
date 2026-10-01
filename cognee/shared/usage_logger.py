@@ -25,20 +25,21 @@ def _sanitize_value(value: Any) -> Any:
             return f"<cannot be serialized: {type(value).__name__}>"
         return str_repr
     except Exception:
+        logger.debug("Falling back after error in _sanitize_value", exc_info=True)
         return f"<cannot be serialized: {type(value).__name__}>"
 
 
 @_sanitize_value.register(type(None))
 def _(value: None) -> None:
     """Handle None values - returns None as-is."""
-    return None
+    return
 
 
 @_sanitize_value.register(str)
 @_sanitize_value.register(int)
 @_sanitize_value.register(float)
 @_sanitize_value.register(bool)
-def _(value: str | int | float | bool) -> str | int | float | bool:
+def _(value: str | float | bool) -> str | int | float | bool:
     """Handle primitive types - returns value as-is since they're JSON-serializable."""
     return value
 
@@ -87,6 +88,7 @@ def _get_param_names(func: Callable) -> list[str]:
     try:
         return list(inspect.signature(func).parameters.keys())
     except Exception:
+        logger.debug("Falling back to [] after error in _get_param_names", exc_info=True)
         return []
 
 
@@ -100,6 +102,7 @@ def _get_param_defaults(func: Callable) -> dict[str, Any]:
                 defaults[param_name] = param.default
         return defaults
     except Exception:
+        logger.debug("Falling back to {} after error in _get_param_defaults", exc_info=True)
         return {}
 
 
@@ -126,6 +129,7 @@ def _extract_user_id(args: tuple, kwargs: dict, param_names: list[str]) -> str |
                     return str(user.id)
         return None
     except Exception:
+        logger.debug("Falling back to None after error in _extract_user_id", exc_info=True)
         return None
 
 
@@ -230,8 +234,66 @@ async def _log_usage_async(
             ttl=config.usage_logging_ttl,
         )
         logger.info(f"Successfully logged usage for {function_name} (user_id={user_id})")
-    except Exception as e:
-        logger.error(f"Failed to log usage for {function_name}: {str(e)}", exc_info=True)
+    except Exception:
+        logger.exception(f"Failed to log usage for {function_name}")
+
+
+def _is_streaming_response(result: Any) -> bool:
+    """A response whose body is produced after the handler returns.
+
+    Duck-typed rather than importing starlette here: this module is shared and
+    has no other web-framework dependency.
+    """
+    return hasattr(result, "body_iterator")
+
+
+def _wrap_streaming_result(result: Any, emit, function_name: str):
+    """Defer usage logging to the end of a streaming body.
+
+    Returns the response with a wrapped iterator, or ``None`` if it is not a
+    streaming response. The stream's own duration and outcome are what get
+    logged — a client disconnect included, since that cancels the iterator.
+    """
+    if not _is_streaming_response(result):
+        return None
+
+    inner = result.body_iterator
+
+    async def _logged():
+        success = True
+        error = None
+        try:
+            async for chunk in inner:
+                yield chunk
+        except BaseException as streaming_error:  # logged, then re-raised
+            success = False
+            error = str(streaming_error) or type(streaming_error).__name__
+            raise
+        finally:
+            # Closing the wrapped iterator explicitly. A disconnect that lands
+            # while the consumer is suspended in send() never reaches `inner`,
+            # so its own cleanup — which is where a streaming endpoint releases
+            # per-request resources — would never run.
+            aclose = getattr(inner, "aclose", None)
+            if aclose is not None:
+                try:
+                    await aclose()
+                except BaseException:  # cleanup must not mask the outcome
+                    logger.debug("Failed to close streaming body", exc_info=True)
+            # Shielded because the common ending is a client disconnect, which
+            # cancels this scope: an unshielded await would be cancelled at its
+            # first suspension point and the record would be lost precisely for
+            # the requests most worth recording. BaseException, not Exception,
+            # for the same reason — CancelledError is not an Exception.
+            try:
+                await asyncio.shield(asyncio.ensure_future(emit(None, success, error)))
+            except BaseException:
+                logger.exception(
+                    f"Failed to log usage for {function_name}",
+                )
+
+    result.body_iterator = _logged()
+    return result
 
 
 def log_usage(function_name: str | None = None, log_type: str = "function"):
@@ -309,35 +371,49 @@ def log_usage(function_name: str | None = None, log_type: str = "function"):
             success = True
             error = None
 
+            def _emit(logged_result, logged_success, logged_error):
+                end_time = datetime.now(timezone.utc)
+                return _log_usage_async(
+                    function_name=resolved_function_name,
+                    log_type=log_type,
+                    user_id=user_id,
+                    parameters=parameters,
+                    result=logged_result,
+                    success=logged_success,
+                    error=logged_error,
+                    duration_ms=(end_time - start_time).total_seconds() * 1000,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
+
+            deferred_to_stream = False
+
             try:
                 result = await func(*args, **kwargs)
+                streamed = _wrap_streaming_result(result, _emit, resolved_function_name)
+                if streamed is not None:
+                    # A streaming response returns before the work happens, so
+                    # logging here would record every stream as an instant
+                    # success returning an unserializable object — and a failure
+                    # mid-stream as success. Logging is deferred to the end of
+                    # the body instead, where the real duration and outcome are.
+                    deferred_to_stream = True
+                    return streamed
                 return result
             except Exception as e:
                 success = False
                 error = str(e)
                 raise
             finally:
-                end_time = datetime.now(timezone.utc)
-                duration_ms = (end_time - start_time).total_seconds() * 1000
-
-                try:
-                    await _log_usage_async(
-                        function_name=resolved_function_name,
-                        log_type=log_type,
-                        user_id=user_id,
-                        parameters=parameters,
-                        result=result,
-                        success=success,
-                        error=error,
-                        duration_ms=duration_ms,
-                        start_time=start_time,
-                        end_time=end_time,
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"Failed to log usage for {resolved_function_name}: {str(e)}",
-                        exc_info=True,
-                    )
+                # Skipped when the body iterator took over the logging; a bare
+                # return here would discard an in-flight exception.
+                if not deferred_to_stream:
+                    try:
+                        await _emit(result, success, error)
+                    except Exception:
+                        logger.exception(
+                            f"Failed to log usage for {resolved_function_name}",
+                        )
 
         return async_wrapper
 

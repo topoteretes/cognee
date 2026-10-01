@@ -35,23 +35,24 @@ async def main():
 
     await cognee.remember(TEXT, dataset_name=DATASET, self_improvement=False)
 
-    def out(name: str) -> str:
-        return os.path.join(ARTIFACTS, f"{name}.html")
-
     # 1. Bare call: highest-degree nodes seed a representative bounded subgraph.
-    await visualize_graph(out("default_degree_seeded"), dataset=DATASET)
+    await visualize_graph(os.path.join(ARTIFACTS, "default_degree_seeded.html"), dataset=DATASET)
 
     # 2. Query-seeded: the query's nearest vector hits become the seeds.
-    await visualize_graph(out("query_seeded"), dataset=DATASET, query="What is Python used for?")
+    await visualize_graph(
+        os.path.join(ARTIFACTS, "query_seeded.html"),
+        dataset=DATASET,
+        query="What is Python used for?",
+    )
 
     # 3. Whole graph, unbounded.
-    await visualize_graph(out("full_graph"), dataset=DATASET, full=True)
+    await visualize_graph(os.path.join(ARTIFACTS, "full_graph.html"), dataset=DATASET, full=True)
 
     # Two more seeding options, if you already have node ids or a recall result:
-    #   await visualize_graph(out("explicit_seeds"), dataset=DATASET, seed_node_ids=[...])
+    #   await visualize_graph("explicit_seeds.html", dataset=DATASET, seed_node_ids=[...])
     #
     #   result = await cognee.recall("What is Python?", datasets=[DATASET])
-    #   await visualize_graph(out("recall_seeded"), dataset=DATASET, recall_result=result)
+    #   await visualize_graph("recall_seeded.html", dataset=DATASET, recall_result=result)
     # The second seeds the view from the answer's provenance (used_graph_element_ids),
     # so you see the subgraph behind a specific answer.
 

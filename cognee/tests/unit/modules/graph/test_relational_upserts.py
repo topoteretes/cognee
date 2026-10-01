@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from importlib import import_module
-from uuid import UUID, uuid4
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, select, text

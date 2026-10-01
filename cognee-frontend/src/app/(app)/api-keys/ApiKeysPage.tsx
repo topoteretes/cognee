@@ -47,15 +47,16 @@ function CheckIcon() {
   );
 }
 
-const localApiUrl = process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:8000";
-
 export default function ApiKeysPage() {
   const { cogniInstance, serviceUrl, isInitializing } = useCogniInstance();
   const { tenant, hasAccess, tenantReady } = useTenant();
   const isCloud = isCloudEnvironment();
-  // In cloud, never fall back to localhost — show the real tenant URL when known,
-  // otherwise treat as provisioning. Only local/OSS mode uses localApiUrl.
-  const baseUrl = isCloud ? serviceUrl : (serviceUrl || localApiUrl);
+  // In cloud, never fall back to localhost — show the real tenant URL when
+  // known, otherwise treat as provisioning. In local mode LocalProvider always
+  // sets serviceUrl (from getLocalApiUrl), so there is nothing to fall back to:
+  // a build-time NEXT_PUBLIC_LOCAL_API_URL default here would only ever show a
+  // stale URL that ignores the container's COGNEE_BACKEND_URL.
+  const baseUrl = serviceUrl;
   const urlProvisioning = isCloud && !serviceUrl;
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(true);
@@ -101,19 +102,33 @@ export default function ApiKeysPage() {
   }
 
   async function handleCreate() {
-    if (!newName.trim()) return;
+    const name = newName.trim();
+    if (!name) return;
     setCreating(true);
     try {
-      const created = await createApiKey({ name: newName.trim(), noRedirectOnAuth: true });
-      trackEvent({ pageName: "API Keys", eventName: "api_key_created", additionalProperties: { key_name: newName.trim() } });
+      const result = await createApiKey({ name, noRedirectOnAuth: true });
+      if (!result.ok) {
+        notifications.show({ title: "Could not create API key", message: result.error, color: "red" });
+        return;
+      }
+      trackEvent({ pageName: "API Keys", eventName: "api_key_created", additionalProperties: { key_name: name } });
       setNewName("");
       setShowCreateModal(false);
-      // Reload the list, then surface the full key once — this is the only
-      // time the server returns it in clear text.
       await loadKeys();
-      setKeys((prev) => prev.map((k) => (k.id === created.id ? { ...k, key: created.key, isNew: true } : k)));
+      const created = result.key;
+      if (created) {
+        // Surface the full key once — this is the only time the server returns
+        // it in clear text.
+        setKeys((prev) => prev.map((k) => (k.id === created.id ? { ...k, key: created.key, isNew: true } : k)));
+      } else {
+        // The key was created but the response carried no clear-text key, so
+        // there is nothing to reveal. Say so rather than silently listing a
+        // masked key the user can never read.
+        notifications.show({ title: "API key created", message: `"${name}" was created, but the key could not be shown. Revoke it and create a new one if you need the value.`, color: "yellow" });
+      }
     } catch (err) {
       console.error("Failed to create key:", err);
+      notifications.show({ title: "Could not create API key", message: "Something went wrong while creating the key. Please try again.", color: "red" });
     } finally {
       setCreating(false);
     }
@@ -351,14 +366,14 @@ export default function ApiKeysPage() {
               {k.isNew ? (
                 /* Show full key once for newly created keys */
                 <div style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.4)", borderRadius: 6, padding: "6px 12px" }}>
-                  <span style={{ fontSize: 12, color: "#22C55E", fontFamily: 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace', wordBreak: "break-all" }}>{k.key}</span>
+                  <span className="cs-mask" data-cs-mask="true" style={{ fontSize: 12, color: "#22C55E", fontFamily: 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace', wordBreak: "break-all" }}>{k.key}</span>
                   <button onClick={() => handleCopy(k.id, k.key)} className="cursor-pointer" style={{ background: "none", border: "none", padding: 2, display: "flex", flexShrink: 0 }} title="Copy key">
                     {copiedId === k.id ? <CheckIcon /> : <CopyIcon />}
                   </button>
                 </div>
               ) : (
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ fontSize: 13, color: "rgba(237,236,234,0.7)", fontFamily: 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace' }}>{k.label || k.key}</span>
+                  <span className="cs-mask" data-cs-mask="true" style={{ fontSize: 13, color: "rgba(237,236,234,0.7)", fontFamily: 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace' }}>{k.label || k.key}</span>
                   <button onClick={() => handleCopy(k.id, k.key)} className="cursor-pointer" style={{ background: "none", border: "none", padding: 2, display: "flex" }} title="Copy key">
                     {copiedId === k.id ? <CheckIcon /> : <CopyIcon />}
                   </button>

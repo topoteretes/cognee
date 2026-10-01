@@ -15,6 +15,7 @@ from uuid import uuid4
 import pytest
 
 from cognee.infrastructure.locks import get_dataset_lock
+from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElements
 
 datasets_module = importlib.import_module("cognee.api.v1.datasets.datasets")
 data_methods_module = importlib.import_module("cognee.modules.data.methods")
@@ -56,7 +57,7 @@ async def _assert_waits_for_pipeline_lock(dataset_id, run_delete, mutation_mock)
 @pytest.mark.asyncio
 async def test_empty_dataset_waits_for_pipeline_lock():
     dataset_id = uuid4()
-    delete_nodes_and_edges = AsyncMock()
+    delete_nodes_and_edges = AsyncMock(return_value=DeletedGraphElements())
 
     with (
         patch.object(

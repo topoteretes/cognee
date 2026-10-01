@@ -5,14 +5,16 @@ on:
     types: [opened]
 
 permissions:
-  issues: write
+  contents: read
 
 jobs:
   greeting:
+    permissions:
+      issues: write
     if: github.actor != 'github-actions[bot]' && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/first-interaction@v3
+    - uses: actions/first-interaction@1c4688942c71f71d4f5502a26ea67c331730fa4d  # v3.1.0
       with:
         repo_token: ${{ secrets.GITHUB_TOKEN }}
         issue_message: |

@@ -1,7 +1,8 @@
 import sys
 import uuid
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types.AudioDocument import AudioDocument

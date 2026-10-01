@@ -1,6 +1,6 @@
 """Schema definitions for the Turso graph adapter (graph_node, graph_edge)."""
 
-from sqlalchemy import Table, Column, MetaData, String, DateTime, Index, ForeignKey, func
+from sqlalchemy import Column, DateTime, ForeignKey, Index, MetaData, String, Table, func
 
 _meta = MetaData()
 

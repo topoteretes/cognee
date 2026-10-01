@@ -1,11 +1,10 @@
 from datetime import datetime, timezone
-from uuid import UUID
 
 from sqlalchemy import (
+    JSON,
+    UUID,
     # event,
     DateTime,
-    JSON,
-    Uuid,
     Text,
 )
 

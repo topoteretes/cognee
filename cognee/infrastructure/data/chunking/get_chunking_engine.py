@@ -1,5 +1,3 @@
-from typing import Any
-
 from cognee.infrastructure.data.chunking.DefaultChunkEngine import DefaultChunkEngine
 from cognee.infrastructure.data.chunking.HaystackChunkEngine import HaystackChunkEngine
 from cognee.infrastructure.data.chunking.LangchainChunkingEngine import LangchainChunkEngine

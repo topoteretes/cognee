@@ -147,13 +147,15 @@ async def test_auth_error_raises_immediately():
         )
     )
 
-    with patch("litellm.acompletion", mock_acompletion):
-        with pytest.raises(litellm.exceptions.AuthenticationError):
-            await adapter.acreate_structured_output(
-                text_input="Test input",
-                system_prompt="Test prompt",
-                response_model=PersonModel,
-            )
+    with (
+        patch("litellm.acompletion", mock_acompletion),
+        pytest.raises(litellm.exceptions.AuthenticationError),
+    ):
+        await adapter.acreate_structured_output(
+            text_input="Test input",
+            system_prompt="Test prompt",
+            response_model=PersonModel,
+        )
 
     assert mock_acompletion.call_count == 1
 
@@ -236,13 +238,14 @@ def test_no_instructor_import_in_litellm_native():
                         instructor_imports.append(
                             f"{py_file.name}:{node.lineno} import {alias.name}"
                         )
-            elif isinstance(node, ast.ImportFrom):
-                if node.module and (
-                    node.module == "instructor" or node.module.startswith("instructor.")
-                ):
-                    instructor_imports.append(
-                        f"{py_file.name}:{node.lineno} from {node.module} import ..."
-                    )
+            elif (
+                isinstance(node, ast.ImportFrom)
+                and node.module
+                and (node.module == "instructor" or node.module.startswith("instructor."))
+            ):
+                instructor_imports.append(
+                    f"{py_file.name}:{node.lineno} from {node.module} import ..."
+                )
 
     assert instructor_imports == [], (
         f"Found instructor imports in litellm_native: {instructor_imports}"
@@ -314,13 +317,12 @@ async def test_budget_exhausted_error_raises_payment_required_without_retry():
 
     mock_acompletion = AsyncMock(side_effect=_PaymentRequiredError("Payment required"))
 
-    with patch("litellm.acompletion", mock_acompletion):
-        with pytest.raises(LLMPaymentRequiredError):
-            await adapter.acreate_structured_output(
-                text_input="Test input",
-                system_prompt="Test prompt",
-                response_model=PersonModel,
-            )
+    with patch("litellm.acompletion", mock_acompletion), pytest.raises(LLMPaymentRequiredError):
+        await adapter.acreate_structured_output(
+            text_input="Test input",
+            system_prompt="Test prompt",
+            response_model=PersonModel,
+        )
 
     # Mapped to an actionable, non-retryable error — called exactly once.
     assert mock_acompletion.call_count == 1
@@ -470,10 +472,233 @@ async def test_cancellation_is_not_retried():
     )
 
     mock_acompletion = AsyncMock(side_effect=asyncio.CancelledError())
-    with patch("litellm.acompletion", mock_acompletion):
-        with pytest.raises(asyncio.CancelledError):
-            await adapter.acreate_structured_output(
-                text_input="t", system_prompt="s", response_model=PersonModel
-            )
+    with patch("litellm.acompletion", mock_acompletion), pytest.raises(asyncio.CancelledError):
+        await adapter.acreate_structured_output(
+            text_input="t", system_prompt="s", response_model=PersonModel
+        )
 
     assert mock_acompletion.call_count == 1
+
+
+# ── provider-qualified model names (CLO-594) ─────────────────────────────────
+# cognee stores provider and model separately; litellm routes on a qualified
+# model name. The instructor path dispatched per provider, so LLM_PROVIDER=ollama
+# with LLM_MODEL=phi4 worked there and 400s on litellm_native with
+# "LLM Provider NOT provided". This broke the Ollama nightly the first time it
+# ran on dev after litellm_native became the default framework.
+
+
+class TestQualifyModel:
+    """_qualify_model must rescue unroutable names and touch nothing else."""
+
+    @staticmethod
+    def _qualify(model, provider):
+        from cognee.infrastructure.llm.structured_output_framework.litellm_native.get_native_client import (
+            _qualify_model,
+        )
+
+        return _qualify_model(model, provider)
+
+    def test_bare_ollama_model_gets_prefixed(self):
+        """The exact CI failure: LLM_PROVIDER=ollama, LLM_MODEL=phi4."""
+        assert self._qualify("phi4", "ollama") == "ollama/phi4"
+
+    def test_tagged_ollama_model_gets_prefixed(self):
+        assert self._qualify("qwen3:latest", "ollama") == "ollama/qwen3:latest"
+
+    def test_already_qualified_is_untouched(self):
+        assert self._qualify("ollama/phi4", "ollama") == "ollama/phi4"
+        assert self._qualify("openai/gpt-5-mini", "openai") == "openai/gpt-5-mini"
+
+    def test_name_litellm_already_resolves_is_untouched(self):
+        """Must not re-route a configuration that works today."""
+        assert self._qualify("gpt-4o", "openai") == "gpt-4o"
+
+    def test_unknown_provider_is_untouched(self):
+        """generic/llama_cpp have no unambiguous litellm prefix — leave them be."""
+        assert self._qualify("some-custom-model", "generic") == "some-custom-model"
+
+    def test_empty_model_is_untouched(self):
+        assert self._qualify("", "ollama") == ""
+
+    def test_qualified_name_is_routable_by_litellm(self):
+        """End of the chain: the rescued name must actually resolve."""
+        import litellm
+
+        qualified = self._qualify("phi4", "ollama")
+        assert litellm.get_llm_provider(model=qualified)[1] == "ollama"
+
+    def test_namespaced_ollama_model_gets_prefixed(self):
+        """A slash is not a provider: Ollama accepts namespaced names."""
+        assert self._qualify("library/phi4", "ollama") == "ollama/library/phi4"
+
+    def test_hugging_face_gguf_path_gets_prefixed(self):
+        """The documented way to run a GGUF under Ollama keeps its full path."""
+        model = "hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF"
+        assert self._qualify(model, "ollama") == f"ollama/{model}"
+
+    def test_namespaced_name_is_routable_by_litellm(self):
+        """Same end of the chain, for a name that contains a slash."""
+        import litellm
+
+        qualified = self._qualify("library/phi4", "ollama")
+        assert litellm.get_llm_provider(model=qualified)[1] == "ollama"
+
+
+# ── markdown-fenced JSON on the fallback path (CLO-596) ──────────────────────
+# The prompted-JSON path hands the model's reply straight to
+# model_validate_json. Models on that path routinely wrap the answer in a
+# ```json fence: the JSON inside is valid, but pydantic sees a backtick at
+# column 1 and rejects it, and the self-correction retry cannot help because a
+# model that fences once fences again. Hit while capturing the datasheets cassette.
+
+
+class TestStripJsonFence:
+    @staticmethod
+    def _strip(text):
+        from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+            _strip_json_fence,
+        )
+
+        return _strip_json_fence(text)
+
+    def test_fenced_with_language_tag(self):
+        """The exact shape that broke the datasheets capture."""
+        assert self._strip('```json\n{"summary": "s"}\n```') == '{"summary": "s"}'
+
+    def test_fenced_without_language_tag(self):
+        assert self._strip('```\n{"summary": "s"}\n```') == '{"summary": "s"}'
+
+    def test_surrounding_whitespace(self):
+        assert self._strip('  ```json\n{"summary": "s"}\n```  \n') == '{"summary": "s"}'
+
+    def test_plain_json_untouched(self):
+        payload = '{"summary": "s"}'
+        assert self._strip(payload) == payload
+
+    def test_backticks_inside_a_value_untouched(self):
+        """Anchored to the whole payload, so a value containing ``` survives."""
+        payload = '{"summary": "use ```json to fence"}'
+        assert self._strip(payload) == payload
+
+    def test_fenced_payload_parses_after_stripping(self):
+        """End of the chain: the rescued payload must validate."""
+        from cognee.shared.data_models import SummarizedContent
+
+        raw = '```json\n{"summary": "a summary", "description": ""}\n```'
+        assert SummarizedContent.model_validate_json(self._strip(raw)).summary == "a summary"
+
+
+# ---- Non-strict demotion + native validation fallback (COG-6271) ----
+
+
+def _schema_400() -> Exception:
+    from litellm.exceptions import BadRequestError
+
+    return BadRequestError(
+        message="Invalid schema for response_format 'PersonModel': 'oneOf' is not permitted.",
+        model="gpt-5-mini",
+        llm_provider="openai",
+    )
+
+
+@pytest.fixture
+def _clean_demotions():
+    from cognee.infrastructure.llm.structured_output_framework.litellm_native import (
+        native_adapter,
+    )
+
+    native_adapter.clear_nonstrict_demotions()
+    yield
+    native_adapter.clear_nonstrict_demotions()
+
+
+def _schema_adapter():
+    from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+        NativeLiteLLMAdapter,
+    )
+
+    return NativeLiteLLMAdapter(
+        api_key="test-key",
+        model="openai/gpt-5-mini",  # supports_response_schema is True
+        max_completion_tokens=4096,
+    )
+
+
+@pytest.mark.asyncio
+async def test_schema_400_demotes_to_nonstrict_and_is_remembered(_clean_demotions):
+    """A strict rejection retries once non-strict; later calls skip the strict attempt."""
+    adapter = _schema_adapter()
+    valid = json.dumps({"name": "Eve", "age": 22})
+
+    mock_acompletion = AsyncMock(
+        side_effect=[_schema_400(), _make_mock_response(valid), _make_mock_response(valid)]
+    )
+    with patch("litellm.acompletion", mock_acompletion):
+        first = await adapter.acreate_structured_output(
+            text_input="Tell me about Eve",
+            system_prompt="Extract person info.",
+            response_model=PersonModel,
+        )
+        second = await adapter.acreate_structured_output(
+            text_input="Tell me about Eve again",
+            system_prompt="Extract person info.",
+            response_model=PersonModel,
+        )
+
+    assert first.name == "Eve" and second.name == "Eve"
+    # Call 1: strict (Pydantic class). Call 2: non-strict retry of the same
+    # request. Call 3: the next request goes straight to non-strict — the
+    # failed strict request is paid once per process, not per call.
+    assert mock_acompletion.call_count == 3
+    calls = mock_acompletion.call_args_list
+    assert calls[0].kwargs["response_format"] is PersonModel
+    for call in calls[1:]:
+        response_format = call.kwargs["response_format"]
+        assert response_format["type"] == "json_schema"
+        assert response_format["json_schema"]["strict"] is False
+        assert response_format["json_schema"]["name"] == "PersonModel"
+
+
+@pytest.mark.asyncio
+async def test_nonstrict_rejection_falls_back_to_prompted_json(_clean_demotions):
+    """If the non-strict retry is also rejected, the prompted-JSON path still answers."""
+    adapter = _schema_adapter()
+    valid = json.dumps({"name": "Eve", "age": 22})
+
+    mock_acompletion = AsyncMock(
+        side_effect=[_schema_400(), _schema_400(), _make_mock_response(valid)]
+    )
+    with patch("litellm.acompletion", mock_acompletion):
+        result = await adapter.acreate_structured_output(
+            text_input="Tell me about Eve",
+            system_prompt="Extract person info.",
+            response_model=PersonModel,
+        )
+
+    assert result.name == "Eve"
+    assert mock_acompletion.call_count == 3
+    assert mock_acompletion.call_args_list[2].kwargs["response_format"] == {"type": "json_object"}
+
+
+@pytest.mark.asyncio
+async def test_native_validation_error_routes_to_json_fallback(_clean_demotions):
+    """Invalid native output goes to the self-correcting fallback, not blind tenacity retries."""
+    adapter = _schema_adapter()
+    valid = json.dumps({"name": "Eve", "age": 22})
+
+    mock_acompletion = AsyncMock(
+        side_effect=[_make_mock_response("not json at all"), _make_mock_response(valid)]
+    )
+    with patch("litellm.acompletion", mock_acompletion):
+        result = await adapter.acreate_structured_output(
+            text_input="Tell me about Eve",
+            system_prompt="Extract person info.",
+            response_model=PersonModel,
+        )
+
+    assert result.name == "Eve"
+    # Exactly two calls: the failed native attempt, then the prompted-JSON
+    # fallback — NOT a tenacity re-send of the native request.
+    assert mock_acompletion.call_count == 2
+    assert mock_acompletion.call_args_list[1].kwargs["response_format"] == {"type": "json_object"}

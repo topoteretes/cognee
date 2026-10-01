@@ -7,8 +7,8 @@ silently aborting the sync. The fix anchors it in the module-level
 ``_BACKGROUND_SYNC_TASKS`` set and discards it on completion.
 """
 
-import gc
 import asyncio
+import gc
 import importlib
 from types import SimpleNamespace
 from uuid import uuid4

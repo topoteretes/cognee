@@ -15,15 +15,20 @@ from pydantic import BaseModel, ConfigDict
 
 from cognee.infrastructure.session.feedback_detection import analyze_turn_for_session_context
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
+from cognee.infrastructure.session.session_context_builder import render_preference_block
 from cognee.infrastructure.session.session_turn import (
     apply_session_turn_analysis,
     build_active_context_block_safe,
     coerce_qa_entry,
-    compose_session_prompt,
+    load_preference_lines_safe,
     load_served_context_payload,
     select_session_history,
 )
-from cognee.modules.retrieval.utils.completion import generate_completion
+from cognee.modules.retrieval.utils.completion import (
+    SessionPrompt,
+    generate_answer,
+    summarize_text,
+)
 from cognee.modules.session_lifecycle import track_session_usage
 from cognee.shared.logging_utils import get_logger
 
@@ -86,6 +91,7 @@ async def load_turn_context(
     """
     try:
         auto_feedback = session_manager.is_auto_feedback_enabled()
+        preference_lines = await load_preference_lines_safe()
         loads = [
             session_manager.get_session(
                 user_id=user_id,
@@ -107,11 +113,18 @@ async def load_turn_context(
                     user_id=user_id,
                     session_id=session_id,
                     query=raw_message,
+                    preference_lines=preference_lines,
                 )
             )
         # The guidance block is the only optional load, so it is the only trailing result.
         recent_entries, completion_history, *optional = await asyncio.gather(*loads)
-        active_context, active_context_ids = optional[0] if optional else ("", [])
+        if optional:
+            active_context, active_context_ids = optional[0]
+        else:
+            # No stored-entry guidance layer; durable preferences still render
+            # through the same owner, budgets, and block shape.
+            active_context = render_preference_block(preference_lines) if preference_lines else ""
+            active_context_ids = []
 
         # get_session already caps at last_n=2 above; recent_qas inherits that bound.
         recent_rows = [coerce_qa_entry(entry) for entry in recent_entries or []]
@@ -153,15 +166,17 @@ async def load_turn_context(
             ),
         )
     except Exception as error:
-        logger.warning("Concurrent turn context load failed open: %s", error)
+        logger.warning("Concurrent turn context load failed open: %s", error, exc_info=True)
         return SessionTurnContext(raw_message=raw_message)
 
 
 async def analyze_turn(snapshot: SessionTurnContext) -> SessionTurnAnalysis:
     """Analyze one turn under a timeout. Fail open to no context updates.
 
-    Concurrent mode uses only the two context-maintenance outputs; the routing fields are
-    ignored because retrieval and the answer are already in flight by the time this lands.
+    Retrieval and the answer are already in flight by the time this lands, so the
+    routing fields (``query_to_answer`` / ``response_to_user``) cannot steer them — but
+    the caller still uses them, via ``should_answer_turn``, to decide whether
+    to keep the generated answer or store an acknowledgement instead.
     """
     try:
         return await asyncio.wait_for(
@@ -177,7 +192,7 @@ async def analyze_turn(snapshot: SessionTurnContext) -> SessionTurnAnalysis:
             timeout=ANALYSIS_TIMEOUT_SECONDS,
         )
     except Exception as error:
-        logger.warning("Concurrent turn analysis failed open: %s", error)
+        logger.warning("Concurrent turn analysis failed open: %s", error, exc_info=True)
         return SessionTurnAnalysis()
 
 
@@ -190,23 +205,50 @@ async def complete_turn(
     prompts: TurnPrompts,
 ) -> Any:
     """Generate the turn's answer from retrieval context and session prompt history."""
-    completion_call = generate_completion(
+    completion_call = generate_answer(
         query=snapshot.raw_message,
         context=context,
         user_prompt_path=prompts.user_prompt_path,
         system_prompt_path=prompts.system_prompt_path,
         system_prompt=prompts.system_prompt,
-        conversation_history=compose_session_prompt(
-            snapshot.active_context,
-            snapshot.completion_history,
+        session=SessionPrompt(
+            history=snapshot.completion_history, guidance=snapshot.active_context
         ),
         response_model=prompts.response_model,
     )
 
+    # generate_answer rather than generate_completion: this call *is* the turn's
+    # answer, so it is the one a listening client may watch. That is the entire
+    # distinction, and it lives in the name — this module neither imports nor
+    # needs to know about streaming. Turn analysis runs concurrently via
+    # asyncio.gather, which snapshots the context per task, so the analysis lane
+    # cannot inherit the answer lane's stream.
     if isinstance(user_id, UUID):
         async with track_session_usage(session_id, user_id):
             return await completion_call
     return await completion_call
+
+
+async def context_to_store_for_turn(context: Any, *, summarize_context: bool) -> str:
+    """The ``context`` value a turn's QA row carries — the same rule as the sequential path.
+
+    ``generate_session_completion_with_optional_summary`` stores the LLM summary of the
+    retrieval context when ``summarize_context`` is on and an empty string otherwise.
+    Both search modes must write the same row, because the session-persist stage copies
+    that row into the graph and is fail-closed on the argument that losing it is data
+    loss. Fail-open: a failed summary stores "" rather than blocking the commit.
+    """
+    if not summarize_context:
+        return ""
+    context_text = context if isinstance(context, str) else str(context or "")
+    if not context_text.strip():
+        return ""
+    try:
+        summary = await summarize_text(context_text)
+    except Exception as error:
+        logger.warning("Concurrent turn context summary failed open: %s", error, exc_info=True)
+        return ""
+    return summary if isinstance(summary, str) else str(summary or "")
 
 
 async def commit_turn(
@@ -218,12 +260,27 @@ async def commit_turn(
     user_id: str,
     session_id: str,
     used_graph_element_ids: dict | None,
+    context: Any = "",
+    summarize_context: bool = False,
+    answered: bool = True,
 ) -> None:
     """Apply the turn's context updates, then store the QA pair.
 
     Both fail open. The answer is already generated by the time this runs, so a failing
     cache write costs the recording, never the answer. ``apply_session_turn_analysis``
     swallows its own errors; ``add_qa`` does not, so it is guarded here.
+
+    ``context`` is the retrieval context the answer was generated from. It is stored on
+    the QA row under exactly the rule the sequential path applies (see
+    ``context_to_store_for_turn``), so the row is identical regardless of
+    ``SESSION_SEARCH_MODE``.
+
+    ``answered`` is False when the analysis decided the generated answer should be
+    discarded for an acknowledgement. That acknowledgement came from neither retrieval nor
+    session guidance, so the row must not claim either: a QA row's ``used_*`` fields are
+    exactly what the *next* turn's analysis is handed to rate, and rating guidance the user
+    never saw is how the session teaches itself from nothing. The context updates above
+    still apply — they rate the previous, genuinely answered turn.
     """
     await apply_session_turn_analysis(
         session_manager,
@@ -234,15 +291,18 @@ async def commit_turn(
         previous_qa_id=snapshot.previous_qa_id,
         served_ids=[entry_id for entry_id, _content in snapshot.previous_served_context],
     )
+    context_to_store = await context_to_store_for_turn(context, summarize_context=summarize_context)
     try:
         await session_manager.add_qa(
             user_id=user_id,
             question=snapshot.raw_message,
-            context="",
+            context=context_to_store,
             answer=answer.model_dump_json() if isinstance(answer, BaseModel) else str(answer),
             session_id=session_id,
-            used_graph_element_ids=used_graph_element_ids,
-            used_session_context_ids=list(snapshot.active_context_ids) or None,
+            used_graph_element_ids=used_graph_element_ids if answered else None,
+            used_session_context_ids=(
+                (list(snapshot.active_context_ids) or None) if answered else None
+            ),
         )
     except Exception as error:
-        logger.warning("Concurrent turn QA write failed open: %s", error)
+        logger.warning("Concurrent turn QA write failed open: %s", error, exc_info=True)

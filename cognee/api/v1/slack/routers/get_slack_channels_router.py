@@ -8,10 +8,12 @@ integration — it does not belong on the generic integrations router either.
 """
 
 import logging
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from cognee.api.DTO import InDTO, OutDTO
+from cognee.api.v1.slack.routers.get_slack_history_router import get_slack_history_router
 from cognee.modules.integrations.credentials import (
     decrypt_token_payload,
     get_active_credential_for_user,
@@ -62,9 +64,12 @@ def _connected_credential_or_404(credential) -> IntegrationCredential:
 
 def get_slack_channels_router():
     router = APIRouter()
+    router.include_router(get_slack_history_router())
 
     @router.get("/channels")
-    async def get_channels(user: User = Depends(get_authenticated_user)) -> ChannelListDTO:
+    async def get_channels(
+        user: Annotated[User, Depends(get_authenticated_user)],
+    ) -> ChannelListDTO:
         """List the connected workspace's public channels, flagging the current allowlist."""
         credential = _connected_credential_or_404(
             await get_active_credential_for_user(user.id, PROVIDER)
@@ -100,13 +105,17 @@ def get_slack_channels_router():
 
     @router.put("/channels")
     async def set_allowed_channels(
-        payload: SetAllowedChannelsPayload, user: User = Depends(get_authenticated_user)
+        payload: SetAllowedChannelsPayload, user: Annotated[User, Depends(get_authenticated_user)]
     ) -> SetAllowedChannelsResultDTO:
         """Restrict slash commands to exactly these channel ids.
 
         An empty list means unrestricted (the default) — channel scoping is
         opt-in, so a workspace that never visits this settings screen keeps
         working everywhere, exactly as before this feature existed.
+
+        ## Request Parameters
+        - **channelIds** (List[str]): Slack channel IDs allowed to run slash commands; an
+          empty list removes all channel restrictions.
         """
         credential = _connected_credential_or_404(
             await get_active_credential_for_user(user.id, PROVIDER)
@@ -122,13 +131,17 @@ def get_slack_channels_router():
 
     @router.post("/link")
     async def link(
-        payload: ConfirmLinkPayload, user: User = Depends(get_authenticated_user)
+        payload: ConfirmLinkPayload, user: Annotated[User, Depends(get_authenticated_user)]
     ) -> ConfirmLinkResultDTO:
         """Confirm a ``/cognee-link`` magic-link code for the authenticated caller.
 
         Backs the ``/link-slack`` frontend page — the browser session here
         (not anything typed into Slack) is what proves which cognee account
         the invoking Slack member should be linked to.
+
+        ## Request Parameters
+        - **code** (str): Magic-link code issued by /cognee-link, confirmed to bind the
+          Slack member to this account.
         """
         linked = await confirm_link(payload.code, user.id)
         if not linked:
