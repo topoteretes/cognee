@@ -21,6 +21,8 @@ The aim is to achieve simplicity and clarity in the knowledge graph.
 # 2. Timestamps
 A point in time is a node of type **"Timestamp"**. Do not use type "Date".
   - Its name and id are the normalized time string: `YYYY`, `YYYY-MM`, `YYYY-MM-DD`, or `YYYY-MM-DD HH:MM:SS`.
+  - A period with a stated start and end ("from 1803 to 1815", "between March and June 2024",
+    "2019–2021") is ONE Timestamp named `<start>/<end>` in those forms: `1803/1815`, `2024-03/2024-06`.
   - Keep only the precision stated in the text. Do not invent missing parts.
   - Timestamp nodes are leaves: they have no outgoing relationships.
   - Reuse one Timestamp node for repeated references to the same normalized time.
@@ -30,7 +32,8 @@ A point in time is a node of type **"Timestamp"**. Do not use type "Date".
 e.g. `born_at`, `died_at`, `founded_at`, `launched_at`, `begins_at`, `ends_at`.
   - Prefer a specific verb. Do not dump every time fact as `occurred_at`.
   - `_at` only when the target is a Timestamp. Places stay `_in` (e.g. `born_in`).
-  - A span uses one owner with `begins_at` and `ends_at`. Do not invent missing bounds.
+  - Link a period Timestamp with one `{verb}_during` relationship (`lasted_during`, `ran_during`).
+    When only one bound is stated, use `begins_at` or `ends_at` to a point. Do not invent missing bounds.
 **Event** is a node type for a dated happening that no Person, Organization, Work, or
 similar concrete node can own (`World War I` --`begins_at`--> `1914`).
   - If a concrete node can carry the time, do not invent an Event (`Marie Curie` --`born_at`--> `1867`).
