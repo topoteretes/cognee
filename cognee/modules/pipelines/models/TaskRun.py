@@ -1,9 +1,9 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import JSON, Column, DateTime, String
+from sqlalchemy import JSON, Column, DateTime, String, Uuid
 
-from cognee.infrastructure.databases.relational import UUID, Base
+from cognee.infrastructure.databases.relational import Base
 
 
 class TaskRun(Base):

@@ -2,7 +2,7 @@ from uuid import UUID as uuid_UUID
 
 from fastapi_users import schemas
 from fastapi_users.db import SQLAlchemyBaseUserTableUUID
-from sqlalchemy import UUID, Column, ForeignKey
+from sqlalchemy import Column, ForeignKey, Uuid
 from sqlalchemy.orm import Mapped, relationship
 
 from .Principal import Principal

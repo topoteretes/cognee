@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import NAMESPACE_OID, uuid5
 
-from sqlalchemy import UUID, Column, DateTime, Index, String
+from sqlalchemy import Column, DateTime, Index, String, Uuid
 
 from cognee.infrastructure.databases.relational import Base
 

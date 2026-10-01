@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import UUID, Column, DateTime, ForeignKey, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Text, Uuid
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import JSON as GenericJSON
 

@@ -8,9 +8,7 @@ from sqlalchemy import (
     DateTime,
     Integer,
     Text,
-)
-from sqlalchemy import (
-    UUID as SQLAlchemy_UUID,
+    Uuid,
 )
 from sqlalchemy import (
     Enum as SQLEnum,

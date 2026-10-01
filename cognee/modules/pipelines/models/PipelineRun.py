@@ -2,7 +2,7 @@ import enum
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import JSON, UUID, Boolean, Column, DateTime, Enum, Index, Integer, String
+from sqlalchemy import JSON, Boolean, Column, DateTime, Enum, Index, Integer, String, Uuid
 
 from cognee.infrastructure.databases.relational import Base
 
@@ -71,8 +71,8 @@ class PipelineRun(Base):
     # recall, forget, remember, delete, prune) write exactly one row with
     # status/pipeline_name/pipeline_id NULL, which keeps them invisible to
     # the legacy latest-row status readers.
-    user_id = Column(UUID, index=True)
-    tenant_id = Column(UUID)
+    user_id = Column(Uuid, index=True)
+    tenant_id = Column(Uuid)
     operation_name = Column(String, index=True)
     started_at = Column(DateTime(timezone=True))
     ended_at = Column(DateTime(timezone=True))
@@ -84,7 +84,7 @@ class PipelineRun(Base):
     session_id = Column(String, index=True)  # session-cache id; joins SessionModelUsage
     # Parent operation's pipeline_run_id — makes remember → add/cognify/improve
     # nesting a queryable tree (token totals chain to parents; never SUM across levels).
-    parent_operation_id = Column(UUID, index=True)
+    parent_operation_id = Column(Uuid, index=True)
     # True = launched background work, so outcome="succeeded" means "accepted
     # and started", not "background work finished". NULL = not applicable.
     background = Column(Boolean)

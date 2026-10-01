@@ -1,4 +1,4 @@
-from sqlalchemy import UUID, Column, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Column, ForeignKey, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, relationship
 
 from .Principal import Principal

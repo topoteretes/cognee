@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import JSON, UUID, Column, DateTime, ForeignKey, String
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, String, Uuid
 from sqlalchemy.ext.mutable import MutableDict
 
 from cognee.infrastructure.databases.relational import Base

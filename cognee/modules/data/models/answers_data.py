@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import JSON, UUID, Column, DateTime
+from sqlalchemy import JSON, Column, DateTime, Uuid
 
 from cognee.modules.data.models.answers_base import AnswersBase
 
