@@ -362,7 +362,7 @@ Retrieval-only types (no LLM call):
 
 Other:
 
-- `CYPHER`: raw Cypher when `ALLOW_CYPHER_QUERY=true` (not on the Postgres demo graph)
+- `CYPHER`: raw Cypher, on by default (`ALLOW_CYPHER_QUERY=false` disables it; not on the Postgres demo graph)
 - `NATURAL_LANGUAGE`: natural language to graph query
 - `CODING_RULES`: retrieve stored coding rules
 - `GRAPH_REPORT`: graph insight report (hubs, cross-source links, suggested questions)

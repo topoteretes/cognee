@@ -38,7 +38,7 @@ class CognifyConfig(BaseSettings):
     # half of torch's thread count, capped by free memory. 1 keeps the
     # single-threaded behaviour. Output is identical at every setting.
     gliner_inference_threads: int = 0
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     def to_dict(self) -> dict:
         return {

@@ -36,6 +36,11 @@ from cognee.infrastructure.databases.exceptions import (
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
 )
+from cognee.infrastructure.databases.vector.embeddings.input_limit import (
+    init_input_limit,
+    litellm_input_limit,
+    sane_limit,
+)
 from cognee.infrastructure.databases.vector.embeddings.retry_config import (
     embedding_retry_condition,
 )
@@ -87,7 +92,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         self,
         model: str | None = "default",
         dimensions: int = 3072,
-        max_completion_tokens: int = 8191,
+        max_completion_tokens: int | None = None,
         endpoint: str | None = "http://localhost:8080",
         api_key: str | None = "no-key-required",
         batch_size: int = 36,
@@ -95,7 +100,6 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
     ):
         self.model = model or "default"
         self.dimensions = dimensions
-        self.max_completion_tokens = max_completion_tokens
         self.endpoint = endpoint or "http://localhost:8080"
         self.api_key = api_key or "no-key-required"
         self.batch_size = batch_size
@@ -105,6 +109,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         # so it has no effect on servers that ignore unknown fields.
         self.input_type = input_type
         self.tokenizer = self.get_tokenizer()
+        init_input_limit(self, max_completion_tokens)
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false").lower()
         self.mock = enable_mocking in ("true", "1", "yes")
@@ -291,6 +296,13 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         """
         return self.batch_size
 
+    input_limit_source = "litellm model table or the model's tokenizer"
+
+    async def input_limit(self) -> int | None:
+        """A self-hosted server names no limit; the served model id is usually a
+        HuggingFace repo (its tokenizer knows) or a hosted model litellm knows."""
+        return litellm_input_limit(self.model) or sane_limit(self.tokenizer.model_input_limit)
+
     def get_tokenizer(self):
         """Load a tokenizer for chunk sizing against OpenAI-compatible embedding servers.
 
@@ -298,8 +310,4 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         model's own tokenizer and warns/falls back safely on mismatch (issue #3646).
         """
         logger.debug("Loading tokenizer for OpenAICompatibleEmbeddingEngine...")
-        return resolve_embedding_tokenizer(
-            provider="openai_compatible",
-            model=self.model,
-            max_completion_tokens=self.max_completion_tokens,
-        )
+        return resolve_embedding_tokenizer(provider="openai_compatible", model=self.model)
