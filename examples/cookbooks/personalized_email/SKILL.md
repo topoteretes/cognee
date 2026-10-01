@@ -41,8 +41,7 @@ personalized_email/
 └── scripts/
     ├── ingest_granola.py
     ├── ingest_email.py
-    ├── draft.py
-    └── ui.py
+    └── draft.py
 ```
 
 `personalized_email.py` imports each script and calls its function in one process. Each
@@ -54,7 +53,6 @@ script also runs alone with the same options.
 | 1 | `scripts/ingest_granola.py [--days N]` | Remembers Granola meeting notes from the last 30 days by default (node set `meetings`) | cognee dataset |
 | 2 | `scripts/ingest_email.py [--emails N]` | Remembers the newest 50 inbox and 50 sent emails by default, through cognee's Gmail connector `gmail_source` (node sets `inbox`, `sent_mail`) | cognee dataset |
 | 3 | `scripts/draft.py` | Drafts a reply to the newest inbox email: facts from a `GRAPH_COMPLETION` recall over the graph, tone from a `CHUNKS` recall over `sent_mail` | nothing |
-| 4 | `scripts/ui.py` (or `--ui`) | Starts cognee's API server in this process and the UI at http://localhost:3000. Ctrl+C stops both | nothing |
 
 All scripts use the cognee dataset `personalized_email`, named once in each script.
 
@@ -65,7 +63,7 @@ From the repo root:
 ```bash
 uv run python examples/cookbooks/personalized_email/personalized_email.py --check
 uv run python examples/cookbooks/personalized_email/personalized_email.py
-uv run python examples/cookbooks/personalized_email/personalized_email.py --days 7 --ui
+uv run python examples/cookbooks/personalized_email/personalized_email.py --days 7
 ```
 
 The output looks like this (an illustration; yours comes from your own mail):
@@ -74,9 +72,18 @@ The output looks like this (an illustration; yours comes from your own mail):
 [ingest_granola] Remembered 12 Granola meetings from the last 30 days
 [ingest_email] Remembered your newest 50 inbox emails
 [ingest_email] Remembered your newest 50 sent emails
-[draft] Email: Subject: Pilot start and SSO
+[draft] Answering: Pilot start and SSO (from Priya Shah <priya@northwind.example>)
 [draft] Reply:
-Hi Priya, ...
+
+To: Priya Shah <priya@northwind.example>
+Subject: Re: Pilot start and SSO
+
+Hi Priya,
+
+...
+
+Best,
+M.
 ```
 
 The first Gmail run opens a browser to consent. Running it again re-remembers the same
@@ -93,7 +100,7 @@ content; cognee skips content it already holds, and Gmail rows are merged by mes
 2. Run `personalized_email.py`. Add `--days N` if the user named a time range for meetings,
    and `--no-granola` if they don't want Granola used.
 3. The draft is everything after the line `[draft] Reply:`. Give it to the user, and say
-   which email it answers (the `[draft] Email:` line) and which sources went in (the
+   which email it answers (the `[draft] Answering:` line) and which sources went in (the
    `[ingest_granola]` and `[ingest_email]` lines). The draft is never sent: hand it to the
    user to send.
 4. If a script fails, `personalized_email.py` exits 1 with a line naming what went wrong.
@@ -102,7 +109,6 @@ content; cognee skips content it already holds, and Gmail rows are merged by mes
 Rules: Gmail access is read-only and nothing is sent. Don't print the contents of
 `credentials.json`, `token.json` or `.env`. Steps 1 and 2 read the user's real meetings and
 mailbox and every run uses LLM credits, so run them only when the user asked for it.
-Don't pass `--ui` unless the user asked to browse the graph: it keeps running until Ctrl+C.
 
 ## Clean up
 

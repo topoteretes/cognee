@@ -2,7 +2,7 @@
 
     uv run python examples/cookbooks/personalized_email/personalized_email.py --check
     uv run python examples/cookbooks/personalized_email/personalized_email.py
-    uv run python examples/cookbooks/personalized_email/personalized_email.py --no-granola --ui
+    uv run python examples/cookbooks/personalized_email/personalized_email.py --no-granola
 
 Each script in scripts/ also runs alone. Exit codes: 0 done, 2 setup missing, 1 a script
 failed (its message says why).
@@ -17,7 +17,6 @@ from pathlib import Path
 from scripts.draft import draft
 from scripts.ingest_email import ingest_email
 from scripts.ingest_granola import ingest_granola
-from scripts.ui import open_ui
 
 from cognee.shared.logging_utils import ERROR, setup_logging
 
@@ -41,8 +40,6 @@ async def run(args: argparse.Namespace) -> None:
         await ingest_granola(args.days)
     await ingest_email(args.emails)
     await draft()
-    if args.ui:
-        await open_ui()
 
 
 if __name__ == "__main__":
@@ -51,7 +48,6 @@ if __name__ == "__main__":
     parser.add_argument("--no-granola", action="store_true", help="skip the Granola step")
     parser.add_argument("--days", type=int, default=30, help="Granola meetings to remember")
     parser.add_argument("--emails", type=int, default=50, help="emails to remember per label")
-    parser.add_argument("--ui", action="store_true", help="browse the graph afterwards")
     args = parser.parse_args()
 
     import cognee  # loads .env, so keys set there are seen by the check
