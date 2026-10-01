@@ -317,7 +317,9 @@ async def resolve_code_repository(
     return manifest_item, documents, len(skipped)
 
 
-async def resolve_code_repository_url(spec: str, user=None, dataset_id=None):
+async def resolve_code_repository_url(
+    spec: str, user=None, dataset_id=None, credentials: str | None = None
+):
     """Clone a hosted repository URL and build its repo-level DataItem.
 
     A GitHub/GitLab repository URL passed to ``add()`` (see ``resolve_repo.code_repo_clone_url``) is
@@ -325,7 +327,8 @@ async def resolve_code_repository_url(spec: str, user=None, dataset_id=None):
     exactly like a local code project -- one ``code_repo`` manifest for the
     CODE_REPO cognify route plus the repository's documents as individual
     items. Returns ``(manifest_item, document_paths, skip_count)``; the
-    manifest carries the credential-free URL as ``repo_url``.
+    manifest carries the credential-free URL as ``repo_url``. ``credentials``
+    authenticates the clone of a private repository (see ``resolve_repo_source``).
     """
     clone_url = code_repo_clone_url(spec)
     if clone_url is None:
@@ -333,10 +336,35 @@ async def resolve_code_repository_url(spec: str, user=None, dataset_id=None):
             f"'{redact_repo_spec(spec)}' is not a repository URL add() can clone; "
             "expected https://github.com/<owner>/<repo>, a gitlab.com project, or a .git URL."
         )
-    repo_path = await resolve_repo_source(clone_url)
+    repo_path = await resolve_repo_source(clone_url, credentials=credentials)
     return await resolve_code_repository(
         repo_path, user=user, dataset_id=dataset_id, source_url=redact_repo_spec(clone_url)
     )
+
+
+async def resolve_code_repository_urls(data, credentials: str, user=None, dataset_id=None):
+    """Clone the repository URLs in ``data`` with ``credentials``, ahead of the add pipeline.
+
+    The pipeline resolves repository URLs itself, but without credentials, so a
+    private repository would fail to clone there. Each URL is replaced by its
+    manifest DataItem and document paths, which the pipeline then takes as
+    already resolved; every other item is returned unchanged and in order.
+    """
+    items = data if isinstance(data, list) else [data]
+    if not any(isinstance(item, str) and code_repo_clone_url(item) for item in items):
+        return data
+
+    resolved = []
+    for item in items:
+        if isinstance(item, str) and code_repo_clone_url(item) is not None:
+            manifest_item, document_paths, _skipped = await resolve_code_repository_url(
+                item, user=user, dataset_id=dataset_id, credentials=credentials
+            )
+            resolved.append(manifest_item)
+            resolved.extend(str(path) for path in document_paths)
+        else:
+            resolved.append(item)
+    return resolved
 
 
 async def extract_code_repo_graph(
@@ -349,7 +377,7 @@ async def extract_code_repo_graph(
     Reads the stored manifest for the repo path and runs the standard code
     graph tasks on the ORIGINAL directory (enola writes its .enola snapshot
     there). One repository node, cross-file edges, one graph read per repo.
-    No LLM; embeddings only with ``index_vectors`` (``cognify(index_vectors=True)``).
+    No LLM; embeddings only with ``index_vectors`` (``cognify(codegraph_config={"index_vectors": True})``).
     """
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
     from cognee.tasks.code_graph.extract_code_graph import (

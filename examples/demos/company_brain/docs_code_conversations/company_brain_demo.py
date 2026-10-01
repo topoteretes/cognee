@@ -96,10 +96,13 @@ async def index_code(cognee, root):
     repo.mkdir(parents=True, exist_ok=True)
     (repo / "payments.py").write_text(CODE)
     print("\nIndexing the sample code:", flush=True)
-    # index_vectors writes CodeSymbol embeddings too, so the final
+    # codegraph_config index_vectors writes CodeSymbol embeddings too, so the final
     # GRAPH_COMPLETION answer can reach the code alongside text and lessons.
     await cognee.remember(
-        str(repo), dataset_name=DATASET, index_vectors=True, self_improvement=False
+        str(repo),
+        dataset_name=DATASET,
+        codegraph_config={"index_vectors": True},
+        self_improvement=False,
     )
     facts = await cognee.search(
         query_type=cognee.SearchType.CODE,

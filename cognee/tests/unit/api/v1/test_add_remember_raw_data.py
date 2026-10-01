@@ -213,7 +213,7 @@ def test_remember_forwards_index_vectors_with_repo_urls(client):
 
         assert response.status_code == 200, response.text
         assert mock_remember.call_args.args[0] == [REPO_URL, "/srv/other/repo"]
-        assert mock_remember.call_args.kwargs["index_vectors"] is True
+        assert mock_remember.call_args.kwargs["codegraph_config"] == {"index_vectors": True}
         assert mock_remember.call_args.kwargs["content_type"] is None
 
 

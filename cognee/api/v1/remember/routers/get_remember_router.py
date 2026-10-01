@@ -462,8 +462,8 @@ def get_remember_router() -> APIRouter:
                 ),
             )
 
-        # index_vectors reaches cognify(); the session-cache and skills paths
-        # never run it, so the flag would be silently ignored — reject instead.
+        # index_vectors reaches cognify() as codegraph_config; the session-cache
+        # and skills paths never run it, so it is rejected here as a 400.
         if index_vectors and (session_id or content_type):
             raise HTTPException(
                 status_code=400,
@@ -550,7 +550,7 @@ def get_remember_router() -> APIRouter:
                 content_type=content_type or None,
                 skills_text=skills_text or None,
                 skill_name=skill_name or None,
-                **({"index_vectors": True} if index_vectors else {}),
+                **({"codegraph_config": {"index_vectors": True}} if index_vectors else {}),
                 **({"config": config_to_use} if config_to_use else {}),
                 **({"graph_model": graph_model_parsed} if graph_model_parsed else {}),
                 # HTTP contract: an errored blocking run is reported as the 409

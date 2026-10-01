@@ -12,7 +12,7 @@ SearchType.CODE does not require an LLM API key or embedding model.
 
 Prefer a one-liner? cognee.remember(repo_path_or_github_url) stores the
 repository and builds the same graph through cognify's CODE_REPO route (pass
-index_vectors=True to also embed the code facts). This example assembles the
+codegraph_config={"index_vectors": True} to also embed the code facts). This example assembles the
 pipeline explicitly so each step stays visible.
 
 For cross-repository paths, generate one Enola append/multi-repository snapshot
