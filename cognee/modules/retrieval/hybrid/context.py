@@ -5,14 +5,28 @@ from cognee.modules.retrieval.hybrid.facts import format_facts
 from cognee.modules.retrieval.hybrid.results import display_value, payload, result_id
 
 
-def format_hybrid_context(global_context: str, retrieved_objects: Any) -> str:
+def format_hybrid_context(
+    global_context: str,
+    retrieved_objects: Any,
+    preamble: str = "",
+    passage_notes: dict[str, str] | None = None,
+) -> str:
+    """The context string: global context, passages, entities, facts.
+
+    ``preamble`` is a section placed before the passages and ``passage_notes``
+    maps a chunk id to one line rendered above its passage; the temporal
+    retriever uses both to tell the model which passages are dated inside the
+    question's window. Plain hybrid retrieval passes neither.
+    """
     retrieved_objects = retrieved_objects or {}
     sections = []
 
     if global_context:
         sections.append(global_context)
+    if preamble:
+        sections.append(preamble)
 
-    passages = format_passages(retrieved_objects.get("chunks", []))
+    passages = format_passages(retrieved_objects.get("chunks", []), passage_notes)
     if passages:
         sections.append(passages)
 
@@ -72,14 +86,16 @@ def extract_context_object_ids(retrieved_objects: Any) -> dict[str, list[str]] |
     return used_ids or None
 
 
-def format_passages(chunks: list[Any]) -> str:
+def format_passages(chunks: list[Any], notes: dict[str, str] | None = None) -> str:
     passages = []
     for chunk in chunks or []:
         chunk_payload = payload(chunk)
         text = display_value(chunk_payload.get("text"))
         if not text:
             continue
-        passages.append(_metadata_lines(chunk_payload.get("external_metadata")) + text)
+        note = (notes or {}).get(result_id(chunk) or "")
+        note_line = f"{note}\n" if note else ""
+        passages.append(note_line + _metadata_lines(chunk_payload.get("external_metadata")) + text)
     if not passages:
         return ""
     return "## Relevant passages\n" + "\n---\n".join(passages)

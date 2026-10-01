@@ -6,12 +6,16 @@ from unittest.mock import AsyncMock
 import pytest
 
 from cognee.modules.retrieval.temporal_hybrid.matching import (
+    UNDATED_NOTE,
     anchors_from_neighborhood,
     chunks_containing,
+    empty_anchors,
     extract_query_interval,
+    passage_notes,
     rerank_hybrid,
     slice_hybrid,
     to_epoch_ms,
+    window_preamble,
 )
 from cognee.modules.retrieval.temporal_hybrid_retriever import TemporalHybridRetriever
 
@@ -124,7 +128,7 @@ def test_chunks_containing_follows_contains_edges_only_from_chunks():
         _edge("c2", "x", "contains"),
     ]
 
-    assert chunks_containing({"ada"}, nodes, edges) == {"c1"}
+    assert chunks_containing({"ada"}, nodes, edges) == {"c1": {"ada"}}
 
 
 # --- rerank ----------------------------------------------------------------------
@@ -316,3 +320,127 @@ async def test_temporal_retriever_propagates_hybrid_errors(monkeypatch):
     hybrid_fetch.side_effect = RuntimeError("hybrid down")
     with pytest.raises(RuntimeError, match="hybrid down"):
         await retriever.get_retrieved_objects(query="in 1950")
+
+
+# --- context notes: what the model is told about the window -------------------
+
+
+def test_anchors_keep_the_matched_dates_per_chunk_and_entity():
+    nodes = [
+        _node("c1", "DocumentChunk"),
+        _node("ts", "Timestamp", timestamp_str="1950"),
+        _node("ada", "Entity", name="Ada Lovelace"),
+    ]
+    edges = [_edge("c1", "ts", "contains"), _edge("ada", "ts", "born_at")]
+
+    anchors = anchors_from_neighborhood({"ts"}, nodes, edges)
+
+    assert anchors["chunk_times"] == {"c1": {"1950"}}
+    assert anchors["entity_times"] == {"ada": {"1950"}}
+    assert anchors["entity_names"] == {"ada": "Ada Lovelace"}
+
+
+def test_passage_notes_name_own_dates_inherited_dates_or_the_absence():
+    anchors = {
+        **empty_anchors(),
+        "chunk_times": {"c1": {"1950-03", "1950"}},
+        "chunk_via": {"c2": {"ada"}},
+        "entity_times": {"ada": {"1950"}},
+        "entity_names": {"ada": "Ada Lovelace"},
+    }
+    chunks = [{"id": "c1", "text": "a"}, {"id": "c2", "text": "b"}, {"id": "c3", "text": "c"}]
+
+    assert passage_notes(chunks, anchors) == {
+        "c1": "time: 1950, 1950-03",
+        "c2": "time: 1950 (through Ada Lovelace)",
+        "c3": UNDATED_NOTE,
+    }
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "period"),
+    [
+        (_utc(1950, 1, 1), _utc(1951, 1, 1), "1950-01-01 to 1951-01-01"),
+        (None, _utc(1900, 1, 1), "before 1900-01-01"),
+        (_utc(1969, 7, 20, 20, 17), None, "from 1969-07-20 20:17:00 onward"),
+    ],
+)
+def test_window_preamble_states_the_period(start, end, period):
+    text = window_preamble(start, end, anchored=True)
+    assert text.startswith("## Time window\n")
+    assert f"Question period: {period} (UTC, end exclusive)." in text
+    assert "No passage or entity" not in text
+    assert "No passage or entity in this context is dated inside this period." in (
+        window_preamble(start, end, anchored=False)
+    )
+
+
+@pytest.mark.asyncio
+async def test_temporal_context_marks_every_passage(monkeypatch):
+    ts_neighborhood = (
+        [
+            _node("c2", "DocumentChunk"),
+            _node("ts_1950", "Timestamp", timestamp_str="1950"),
+            _node("e2", "Entity", name="Ada"),
+        ],
+        [_edge("c2", "ts_1950", "contains"), _edge("e2", "ts_1950", "born_at")],
+    )
+    entity_neighborhood = (
+        [_node("c3", "DocumentChunk"), _node("e2", "Entity", name="Ada")],
+        [_edge("c3", "e2", "contains")],
+    )
+    retriever, _engine, _fetch, _extract = _retriever(
+        monkeypatch,
+        timestamps=[{"id": "ts_1950", "timestamp_str": "1950", "time_at": 0, "time_until": 1}],
+        neighborhoods={("ts_1950",): ts_neighborhood, ("e2",): entity_neighborhood},
+        interval=(_utc(1950, 1, 1), _utc(1951, 1, 1), None),
+        candidates=_candidates(),
+    )
+    retriever.top_k = 3
+    result = await retriever.get_retrieved_objects(query="in 1950")
+    context = await retriever.get_context_from_objects(
+        query="in 1950", retrieved_objects={**result, "facts": []}
+    )
+
+    assert context.startswith("## Time window\nQuestion period: 1950-01-01 to 1951-01-01")
+    assert "## Relevant passages\ntime: 1950\nin 1950\n---\n" in context
+    assert "time: 1950 (through Ada)\nalso 1950\n---\n" in context
+    assert f"{UNDATED_NOTE}\nunrelated" in context
+    assert "No passage or entity" not in context
+
+
+@pytest.mark.asyncio
+async def test_temporal_context_says_when_nothing_in_the_window_matched(monkeypatch):
+    retriever, _engine, _fetch, _extract = _retriever(
+        monkeypatch,
+        timestamps=[],
+        neighborhoods={},
+        interval=(_utc(1800, 1, 1), _utc(1801, 1, 1), None),
+        candidates=_candidates(),
+    )
+    result = await retriever.get_retrieved_objects(query="in 1800")
+    context = await retriever.get_context_from_objects(
+        query="in 1800", retrieved_objects={**result, "facts": []}
+    )
+
+    assert "No passage or entity in this context is dated inside this period." in context
+    assert context.count(UNDATED_NOTE) == 1 + len(result["chunks"])  # preamble + each passage
+
+
+@pytest.mark.asyncio
+async def test_temporal_context_without_a_window_is_the_plain_hybrid_one(monkeypatch):
+    retriever, _engine, _fetch, _extract = _retriever(
+        monkeypatch,
+        timestamps=[],
+        neighborhoods={},
+        interval=(None, None, "no_time_constraint"),
+        candidates=_candidates(),
+    )
+    result = await retriever.get_retrieved_objects(query="who?")
+    context = await retriever.get_context_from_objects(
+        query="who?", retrieved_objects={**result, "facts": []}
+    )
+
+    assert "Time window" not in context
+    assert "time:" not in context
+    assert context.startswith("## Relevant passages\nunrelated")

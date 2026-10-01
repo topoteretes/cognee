@@ -68,35 +68,123 @@ def anchors_from_neighborhood(timestamp_ids: set[str], nodes, edges) -> dict:
     when it ``contains`` a matched timestamp; an entity is anchored when any of
     its edges points at one (``born_at``, ``occurred_on``, ``begins_at`` …: the
     relationship name is not inspected, the target is what matters).
+    ``chunk_times`` / ``entity_times`` keep the matched timestamps' strings per
+    anchored node, and ``entity_names`` the anchored entities' names, for the
+    notes the context carries.
     """
-    types = {str(node_id): (properties or {}).get("type") for node_id, properties in nodes}
+    properties_by_id = {str(node_id): (properties or {}) for node_id, properties in nodes}
+    types = {node_id: properties.get("type") for node_id, properties in properties_by_id.items()}
     chunk_ids: set[str] = set()
     entity_ids: set[str] = set()
+    chunk_times: dict[str, set[str]] = {}
+    entity_times: dict[str, set[str]] = {}
     for source, target, relationship, _properties in edges:
         source_id, target_id = str(source), str(target)
         if target_id not in timestamp_ids:
             continue
+        time_name = str(properties_by_id.get(target_id, {}).get("timestamp_str") or target_id)
         if types.get(source_id) == "DocumentChunk" and relationship == "contains":
             chunk_ids.add(source_id)
+            chunk_times.setdefault(source_id, set()).add(time_name)
         elif types.get(source_id) == "Entity":
             entity_ids.add(source_id)
-    return {"chunk_ids": chunk_ids, "entity_ids": entity_ids}
-
-
-def chunks_containing(entity_ids: set[str], nodes, edges) -> set[str]:
-    """Chunk ids whose ``contains`` edge points at one of ``entity_ids``."""
-    types = {str(node_id): (properties or {}).get("type") for node_id, properties in nodes}
+            entity_times.setdefault(source_id, set()).add(time_name)
+    entity_names = {
+        entity_id: str(properties_by_id.get(entity_id, {}).get("name") or entity_id)
+        for entity_id in entity_ids
+    }
     return {
-        str(source)
-        for source, target, relationship, _properties in edges
-        if relationship == "contains"
-        and str(target) in entity_ids
-        and types.get(str(source)) == "DocumentChunk"
+        "chunk_ids": chunk_ids,
+        "entity_ids": entity_ids,
+        "chunk_times": chunk_times,
+        "entity_times": entity_times,
+        "entity_names": entity_names,
+        "chunk_via": {},
     }
 
 
+def chunks_containing(entity_ids: set[str], nodes, edges) -> dict[str, set[str]]:
+    """Chunk id -> the ids in ``entity_ids`` its ``contains`` edges point at."""
+    types = {str(node_id): (properties or {}).get("type") for node_id, properties in nodes}
+    via: dict[str, set[str]] = {}
+    for source, target, relationship, _properties in edges:
+        source_id, target_id = str(source), str(target)
+        if (
+            relationship == "contains"
+            and target_id in entity_ids
+            and types.get(source_id) == "DocumentChunk"
+        ):
+            via.setdefault(source_id, set()).add(target_id)
+    return via
+
+
 def empty_anchors() -> dict:
-    return {"timestamp_ids": set(), "chunk_ids": set(), "entity_ids": set()}
+    return {
+        "timestamp_ids": set(),
+        "chunk_ids": set(),
+        "entity_ids": set(),
+        "chunk_times": {},
+        "entity_times": {},
+        "entity_names": {},
+        "chunk_via": {},
+    }
+
+
+UNDATED_NOTE = "time: not dated inside the window"
+
+
+def passage_notes(chunks: list, anchors: dict) -> dict[str, str]:
+    """One ``time:`` line per passage: the matched dates it contains, the dates
+    it inherits through an anchored entity it mentions, or a statement that it
+    has neither — so the model never has to guess which passages the window
+    actually matched."""
+    notes: dict[str, str] = {}
+    for chunk in chunks:
+        chunk_id = result_id(chunk)
+        if chunk_id is None:
+            continue
+        own = anchors["chunk_times"].get(chunk_id)
+        if own:
+            notes[chunk_id] = "time: " + ", ".join(sorted(own))
+            continue
+        via = anchors["chunk_via"].get(chunk_id)
+        if via:
+            times = sorted(
+                {t for entity_id in via for t in anchors["entity_times"].get(entity_id, ())}
+            )
+            names = sorted(anchors["entity_names"].get(entity_id, entity_id) for entity_id in via)
+            notes[chunk_id] = f"time: {', '.join(times)} (through {', '.join(names)})"
+            continue
+        notes[chunk_id] = UNDATED_NOTE
+    return notes
+
+
+def _bound(moment: datetime) -> str:
+    if (moment.hour, moment.minute, moment.second) == (0, 0, 0):
+        return moment.strftime("%Y-%m-%d")
+    return moment.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def window_preamble(start: datetime | None, end: datetime | None, anchored: bool) -> str:
+    """The section that states the question's window and how to read the notes."""
+    if start is not None and end is not None:
+        period = f"{_bound(start)} to {_bound(end)}"
+    elif end is not None:
+        period = f"before {_bound(end)}"
+    else:
+        period = f"from {_bound(start)} onward"
+    lines = [
+        "## Time window",
+        f"Question period: {period} (UTC, end exclusive).",
+        (
+            'A passage whose "time:" line names a date is dated inside this period. '
+            f'A passage marked "{UNDATED_NOTE}" may describe another time: '
+            "do not attribute the question's period to it."
+        ),
+    ]
+    if not anchored:
+        lines.append("No passage or entity in this context is dated inside this period.")
+    return "\n".join(lines)
 
 
 def _summaries_for(summaries: dict, chunks: list) -> dict:

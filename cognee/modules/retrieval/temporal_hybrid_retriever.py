@@ -5,8 +5,11 @@ graph adapter then returns the Timestamp nodes inside the window
 (``get_timestamps_in_range``, a native query on Ladybug, Neo4j and the Postgres
 demo, a scan elsewhere), their one-hop neighbourhood names the chunks and
 entities anchored to them, and the oversized candidate set is reordered so the
-anchored candidates come first before the final limit. Context formatting and
-completion are inherited unchanged.
+anchored candidates come first before the final limit. The context then
+states the question's window and marks every passage with the matched dates
+it carries, inherits through an anchored entity, or lacks — the model is told
+what the window matched instead of inferring it from the order. Completion is
+inherited unchanged.
 
 get_retrieved_objects returns the plain hybrid result shape — the reranked
 view, or the baseline slice on fallback. Diagnostics for the last query live
@@ -17,6 +20,7 @@ import asyncio
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.unified import get_unified_engine
+from cognee.modules.retrieval.hybrid.context import format_hybrid_context
 from cognee.modules.retrieval.hybrid.results import empty_hybrid_result
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 from cognee.modules.retrieval.temporal_hybrid.matching import (
@@ -24,9 +28,11 @@ from cognee.modules.retrieval.temporal_hybrid.matching import (
     chunks_containing,
     empty_anchors,
     extract_query_interval,
+    passage_notes,
     rerank_hybrid,
     slice_hybrid,
     to_epoch_ms,
+    window_preamble,
 )
 
 # Bounds on the neighbourhood reads: one question rarely names a window with
@@ -74,10 +80,31 @@ class TemporalHybridRetriever(HybridRetriever):
             entity_nodes, entity_edges = await graph.get_neighborhood(
                 sorted(anchors["entity_ids"]), depth=1, edge_types=["contains"]
             )
-            anchors["chunk_ids"] |= chunks_containing(
+            anchors["chunk_via"] = chunks_containing(
                 anchors["entity_ids"], entity_nodes, entity_edges
             )
+            anchors["chunk_ids"] |= set(anchors["chunk_via"])
         return {**anchors, "timestamp_ids": timestamp_ids}
+
+    async def get_context_from_objects(self, query=None, query_batch=None, retrieved_objects=None):
+        """Hybrid context plus the window section and per-passage ``time:`` notes.
+
+        Without a window (no time in the question, or an invalid one) the
+        context is the plain hybrid one.
+        """
+        if query_batch or self.last_interval == (None, None):
+            return await super().get_context_from_objects(
+                query=query, query_batch=query_batch, retrieved_objects=retrieved_objects
+            )
+        global_context = await self._build_global_context_section(query)
+        start, end = self.last_interval
+        chunks = (retrieved_objects or {}).get("chunks") or []
+        return format_hybrid_context(
+            global_context,
+            retrieved_objects,
+            preamble=window_preamble(start, end, bool(self.last_anchors["chunk_ids"])),
+            passage_notes=passage_notes(chunks, self.last_anchors),
+        )
 
     async def get_retrieved_objects(self, query=None, query_batch=None) -> dict:
         if query_batch:
