@@ -165,7 +165,7 @@ def _bound(moment: datetime) -> str:
     return moment.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def window_preamble(start: datetime | None, end: datetime | None, anchored: bool) -> str:
+def window_preamble(start: datetime | None, end: datetime | None) -> str:
     """The section that states the question's window and how to read the notes."""
     if start is not None and end is not None:
         period = f"{_bound(start)} to {_bound(end)}"
@@ -177,13 +177,11 @@ def window_preamble(start: datetime | None, end: datetime | None, anchored: bool
         "## Time window",
         f"Question period: {period} (UTC, end exclusive).",
         (
-            'A passage whose "time:" line names a date is dated inside this period. '
-            f'A passage marked "{UNDATED_NOTE}" may describe another time: '
-            "do not attribute the question's period to it."
+            'A passage whose "time:" line names a date is dated inside this period in the '
+            f'graph. A passage marked "{UNDATED_NOTE}" has no such date: judge its timing '
+            "from its own text, and do not assume it refers to the question's period."
         ),
     ]
-    if not anchored:
-        lines.append("No passage or entity in this context is dated inside this period.")
     return "\n".join(lines)
 
 

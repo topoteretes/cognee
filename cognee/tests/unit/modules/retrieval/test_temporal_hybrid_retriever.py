@@ -366,13 +366,9 @@ def test_passage_notes_name_own_dates_inherited_dates_or_the_absence():
     ],
 )
 def test_window_preamble_states_the_period(start, end, period):
-    text = window_preamble(start, end, anchored=True)
+    text = window_preamble(start, end)
     assert text.startswith("## Time window\n")
     assert f"Question period: {period} (UTC, end exclusive)." in text
-    assert "No passage or entity" not in text
-    assert "No passage or entity in this context is dated inside this period." in (
-        window_preamble(start, end, anchored=False)
-    )
 
 
 @pytest.mark.asyncio
@@ -406,11 +402,13 @@ async def test_temporal_context_marks_every_passage(monkeypatch):
     assert "## Relevant passages\ntime: 1950\nin 1950\n---\n" in context
     assert "time: 1950 (through Ada)\nalso 1950\n---\n" in context
     assert f"{UNDATED_NOTE}\nunrelated" in context
-    assert "No passage or entity" not in context
 
 
 @pytest.mark.asyncio
-async def test_temporal_context_says_when_nothing_in_the_window_matched(monkeypatch):
+async def test_temporal_context_is_plain_hybrid_when_nothing_in_the_window_matched(monkeypatch):
+    """A period stored as two points has no match for a year inside it; the
+    passage text still says "1803 to 1815", and a "not dated here" note would
+    override it."""
     retriever, _engine, _fetch, _extract = _retriever(
         monkeypatch,
         timestamps=[],
@@ -423,8 +421,9 @@ async def test_temporal_context_says_when_nothing_in_the_window_matched(monkeypa
         query="in 1800", retrieved_objects={**result, "facts": []}
     )
 
-    assert "No passage or entity in this context is dated inside this period." in context
-    assert context.count(UNDATED_NOTE) == 1 + len(result["chunks"])  # preamble + each passage
+    assert retriever.last_reason == "no_temporal_match"
+    assert "Time window" not in context
+    assert UNDATED_NOTE not in context
 
 
 @pytest.mark.asyncio

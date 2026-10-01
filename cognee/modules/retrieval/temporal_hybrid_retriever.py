@@ -89,10 +89,14 @@ class TemporalHybridRetriever(HybridRetriever):
     async def get_context_from_objects(self, query=None, query_batch=None, retrieved_objects=None):
         """Hybrid context plus the window section and per-passage ``time:`` notes.
 
-        Without a window (no time in the question, or an invalid one) the
-        context is the plain hybrid one.
+        The notes exist to separate the passages the window matched from the
+        rest, so they are added only when it matched something. With no window,
+        or a window that matched nothing, the context is the plain hybrid one:
+        a graph that stores a period as two points has no match for a year
+        inside it, and telling the model "no passage is dated here" would
+        override what the passage text itself says.
         """
-        if query_batch or self.last_interval == (None, None):
+        if query_batch or self.last_interval == (None, None) or not self.last_anchors["chunk_ids"]:
             return await super().get_context_from_objects(
                 query=query, query_batch=query_batch, retrieved_objects=retrieved_objects
             )
@@ -102,7 +106,7 @@ class TemporalHybridRetriever(HybridRetriever):
         return format_hybrid_context(
             global_context,
             retrieved_objects,
-            preamble=window_preamble(start, end, bool(self.last_anchors["chunk_ids"])),
+            preamble=window_preamble(start, end),
             passage_notes=passage_notes(chunks, self.last_anchors),
         )
 
