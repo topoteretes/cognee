@@ -13,10 +13,13 @@ concurrency across every pipeline in the process, which also bounds memory:
 each in-flight batch holds its own activations. With one thread, a call runs
 its batches one after another.
 
-Calls on the shared model need no lock. The runtime's per-call state changes
-are idempotent for inference (eval mode, ``is_training=False``), and this was
-checked directly: two pipelines cognified at once with the lock removed, calls
-overlapping on the model, produced a graph identical to the sequential one.
+Calls on the shared model need no lock. The runtime writes three things per
+call, all idempotent for inference: eval mode, ``is_training=False``, and, on
+the ``extract`` path with no ``max_len`` (the schema probe), a lazily cached
+default collator that two concurrent probes may each construct, with equivalent
+results. This was checked directly: two pipelines cognified at once with the
+lock removed, calls overlapping on the model, produced a graph identical to the
+sequential one.
 
 Concurrency never changes the output. The long-text path is reproduced step for
 step (the same windows, the same batches of windows in the same order, the same
@@ -235,7 +238,7 @@ def container_memory_free() -> int | None:
     return min(remaining) if remaining else None
 
 
-def auto_inference_threads(batch_size: int = DEFAULT_BATCH_SIZE) -> int:
+def auto_inference_threads() -> int:
     """How many model batches this machine can run at once, at full speed.
 
     The CPU bound is half of the CPUs torch will use: its intra-op thread
@@ -244,6 +247,13 @@ def auto_inference_threads(batch_size: int = DEFAULT_BATCH_SIZE) -> int:
     inside available memory, less a reserve, where "available" is the tighter
     of the machine's free memory and a container's remaining limit, so a busy
     machine or a small pod gets fewer threads instead of swapping or an OOM kill.
+
+    The memory bound assumes batches of ``DEFAULT_BATCH_SIZE`` windows, the
+    pipeline's default. The pool is sized once per process and its first user
+    is the per-document schema probe, which has no batch size of its own, so
+    sizing on a caller's batch size would size on the wrong one. A pipeline
+    built with a larger ``gliner_batch_size`` holds proportionally more
+    activations per batch and should set ``GLINER_INFERENCE_THREADS`` itself.
     """
     import psutil
     import torch
@@ -258,30 +268,31 @@ def auto_inference_threads(batch_size: int = DEFAULT_BATCH_SIZE) -> int:
     container_free = container_memory_free()
     if container_free is not None:
         available = min(available, container_free)
-    per_batch = BYTES_PER_CONCURRENT_BATCH * batch_size / DEFAULT_BATCH_SIZE
-    memory_bound = 1 + int(max(0, available - MEMORY_RESERVE_BYTES) // per_batch)
+    memory_bound = 1 + int(max(0, available - MEMORY_RESERVE_BYTES) // BYTES_PER_CONCURRENT_BATCH)
     return max(1, min(cpu_bound, memory_bound))
 
 
-def inference_threads(batch_size: int = DEFAULT_BATCH_SIZE) -> int:
+def inference_threads() -> int:
     """The configured concurrency (GLINER_INFERENCE_THREADS), auto-sized when 0."""
     configured = get_cognify_config().gliner_inference_threads
     if configured < 0:
         raise ValueError(f"GLINER_INFERENCE_THREADS must be >= 0, got {configured}")
-    return configured or auto_inference_threads(batch_size)
+    return configured or auto_inference_threads()
 
 
-def _inference_pool(batch_size: int) -> ThreadPoolExecutor | None:
+def _inference_pool() -> ThreadPoolExecutor | None:
     """The process-wide pool that runs model batches, or None for one thread.
 
     Sized once, on first use, and shared by every pipeline in the process, so
     concurrent documents queue behind one another instead of multiplying the
-    memory in flight.
+    memory in flight. The size assumes ``DEFAULT_BATCH_SIZE`` windows per
+    batch (see ``auto_inference_threads``); a call's own batch size does not
+    resize it.
     """
     global _pool, _pool_size
     with _pool_lock:
         if _pool_size is None:
-            _pool_size = inference_threads(batch_size)
+            _pool_size = inference_threads()
             if _pool_size > 1:
                 _pool = ThreadPoolExecutor(_pool_size, thread_name_prefix="gliner")
             logger.info("GLiNER inference: %d concurrent model batch(es)", _pool_size)
@@ -395,7 +406,7 @@ def extract_batch(
         return [{} for _ in texts]
 
     built = build_gliner_schema(extractor, schema)
-    pool = _inference_pool(batch_size)
+    pool = _inference_pool()
     if pool is not None:
         return _extract_long_concurrently(
             extractor,
@@ -445,7 +456,7 @@ def extract_once(
 
     # Through the same pool as batch extraction, so a schema probe counts
     # against the same concurrency (and memory) bound.
-    pool = _inference_pool(DEFAULT_BATCH_SIZE)
+    pool = _inference_pool()
     if pool is not None:
         return pool.submit(run).result()
     return run()

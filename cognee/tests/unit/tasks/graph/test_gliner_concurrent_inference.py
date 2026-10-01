@@ -168,10 +168,14 @@ def test_auto_sizing_takes_the_tighter_of_cpu_and_memory(
     assert extractor_module.auto_inference_threads() == expected
 
 
-def test_larger_batches_count_for_more_memory(machine):
+def test_sizing_assumes_the_default_batch_size(machine):
+    """The pool is sized once, by its first user, which is the schema probe:
+    it has no batch size of its own, so sizing is pinned to DEFAULT_BATCH_SIZE
+    rather than taken from whichever call arrives first. A larger
+    gliner_batch_size needs GLINER_INFERENCE_THREADS set by hand."""
     machine(10, 12)
-    assert extractor_module.auto_inference_threads(batch_size=16) == 5
-    assert extractor_module.auto_inference_threads(batch_size=32) == 3
+    assert extractor_module.auto_inference_threads() == 5
+    assert extractor_module.DEFAULT_BATCH_SIZE == 16
 
 
 def test_configured_thread_count_wins_over_auto_sizing(monkeypatch):
@@ -201,17 +205,17 @@ def test_negative_thread_count_is_rejected(monkeypatch):
 
 
 def test_one_thread_keeps_the_runtimes_long_text_call():
-    """The single-threaded path is the unchanged public call, under the lock."""
+    """The single-threaded path is the unchanged public call, batches run in turn."""
     extractor_module.reset_inference_pool()
-    assert extractor_module._inference_pool(16) is None
+    assert extractor_module._inference_pool() is None
 
 
 def test_several_threads_share_one_pool(monkeypatch):
-    monkeypatch.setattr(extractor_module, "inference_threads", lambda batch_size=16: 3)
+    monkeypatch.setattr(extractor_module, "inference_threads", lambda: 3)
     extractor_module.reset_inference_pool()
-    first = extractor_module._inference_pool(16)
+    first = extractor_module._inference_pool()
     assert first is not None and first._max_workers == 3
-    assert extractor_module._inference_pool(32) is first, "one pool per process"
+    assert extractor_module._inference_pool() is first, "one pool per process"
 
 
 def test_no_cgroup_files_means_no_container_limits(cgroup):
@@ -409,9 +413,9 @@ def test_concurrent_callers_share_the_pool_without_mixing_results():
 
 def test_repeated_extraction_does_not_grow_the_thread_count(monkeypatch):
     """The process-wide pool is reused: many calls never exceed its size in threads."""
-    monkeypatch.setattr(extractor_module, "inference_threads", lambda batch_size=16: 3)
+    monkeypatch.setattr(extractor_module, "inference_threads", lambda: 3)
     extractor_module.reset_inference_pool()
-    pool = extractor_module._inference_pool(OPTIONS["batch_size"])
+    pool = extractor_module._inference_pool()
     model = window_model()
     for _ in range(10):
         extractor_module._extract_long_concurrently(model, pool, TEXTS, object(), **OPTIONS)
