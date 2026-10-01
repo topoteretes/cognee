@@ -8,11 +8,18 @@ name: release_mcp.yml
 # hand, which is how the package sat at 0.5.5 for seven weeks while ~40 commits
 # (the whole FastMCP 3 migration) went unpublished.
 #
-# Same supply-chain posture as release.yml: PyPI Trusted Publishing over OIDC
-# (no API token), PEP 740 attestations on the uploaded files, and a SLSA build
-# provenance attestation hosted by GitHub. One-time PyPI setup is described in
-# docs/supply_chain_provenance.md — the `cognee-mcp` project needs its own
-# trusted publisher entry; the one registered for `cognee` does not cover it.
+# Auth: unlike release.yml, this uploads with the PYPI_TOKEN secret. The
+# `cognee-mcp` project has no trusted publisher on PyPI — the one registered for
+# `cognee` does not cover it, and only the project owner can add one — so the
+# first OIDC run (2026-10-01) died at the upload with `invalid-publisher` and
+# 0.5.6 went out by hand with this same token. The token costs the PEP 740
+# attestations on PyPI, which only Trusted Publishing produces; the SLSA build
+# provenance attestation hosted by GitHub is unaffected.
+#
+# The way back is built in: with no PYPI_TOKEN secret the publish step uses
+# Trusted Publishing on its own. Register the publisher, delete the secret, and
+# nothing in this file has to change — docs/supply_chain_provenance.md has the
+# fields.
 on:
   workflow_dispatch:
 
@@ -26,7 +33,7 @@ jobs:
     name: Release cognee-mcp to PyPI from ${{ github.ref_name }}
     permissions:
       contents: write       # push the cognee-mcp-v* tag
-      id-token: write       # OIDC: Trusted Publishing + signing attestations
+      id-token: write       # OIDC: signing attestations (+ Trusted Publishing once the token is gone)
       attestations: write   # Persist the SLSA build provenance attestation
     runs-on: ubuntu-latest
     env:
@@ -135,12 +142,27 @@ jobs:
         with:
           subject-path: "cognee-mcp/dist/*"
 
+      - name: Report how the upload will authenticate
+        # Says which path the next step takes before it takes it. The two fail
+        # differently (a rejected token is a 403, a missing publisher is
+        # `invalid-publisher`) and neither message names the cause.
+        env:
+          HAS_PYPI_TOKEN: ${{ secrets.PYPI_TOKEN != '' }}
+        run: |
+          if [ "${HAS_PYPI_TOKEN}" = "true" ]; then
+            echo "::notice::Uploading with the PYPI_TOKEN secret (no PEP 740 attestations)."
+          else
+            echo "::notice::No PYPI_TOKEN secret: uploading via Trusted Publishing, which needs the cognee-mcp publisher registered on PyPI."
+          fi
+
       - name: Publish cognee-mcp ${{ steps.meta.outputs.version }} to PyPI
-        # Trusted Publishing (OIDC) — no API token. The action generates and
-        # uploads PEP 740 digital attestations by default.
+        # The action picks its path from `password`. Non-empty: token auth, and
+        # it warns and skips attestations, which need OIDC. Empty: Trusted
+        # Publishing, with PEP 740 attestations uploaded by default.
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2 (twine 7.0.0: accepts Metadata-Version 2.5)
         with:
           packages-dir: cognee-mcp/dist/
+          password: ${{ secrets.PYPI_TOKEN }}
 
       - name: Tag the released commit
         # After the upload, not before: a tag that points at an unpublished
