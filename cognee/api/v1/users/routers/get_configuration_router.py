@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Form, Path
 from pydantic import Field
 
 from cognee.api.DTO import InDTO
-from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.methods import get_authenticated_user, get_visible_user_ids
 from cognee.modules.users.methods import (
     get_principal_all_configuration as method_get_principal_all_configuration,
 )
@@ -89,9 +89,11 @@ def get_configuration_router() -> APIRouter:
           GET /api/v1/configuration/get_user_configuration/.
 
         ## Response
-        Returns the stored configuration data as a JSON object. Returns an empty object {}
-        with HTTP 200 (not 404) when the authenticated user has no configuration with that id,
-        including when the id belongs to another user's configuration.
+        Returns the stored configuration data as a JSON object. The id may name a
+        configuration of the authenticated user or of an agent user they are the parent
+        of. Returns an empty object {} with HTTP 200 (not 404) when neither has a
+        configuration with that id, including when the id belongs to another user's
+        configuration.
         """
         return await method_get_principal_configuration(config_id=config_id, principal_id=user.id)
 
@@ -100,14 +102,19 @@ def get_configuration_router() -> APIRouter:
         user: User = Depends(get_authenticated_user),
     ):
         """
-        List all configurations stored by the authenticated user.
+        List all configurations stored by the authenticated user and by the agent users
+        they are the parent of.
 
         ## Response
         Returns a JSON list of records of the form {"id", "ownerId", "name", "configuration",
-        "createdAt", "updatedAt"}. Returns an empty list when none exist. Use the "id" value
-        with GET /api/v1/configuration/get_user_configuration/{config_id} to fetch a single
+        "createdAt", "updatedAt"}; "ownerId" tells the user's own records from an agent's.
+        Returns an empty list when none exist. Use the "id" value with
+        GET /api/v1/configuration/get_user_configuration/{config_id} to fetch a single
         configuration's data.
         """
-        return await method_get_principal_all_configuration(principal_id=user.id)
+        records = []
+        for owner_id in await get_visible_user_ids(user.id):
+            records.extend(await method_get_principal_all_configuration(principal_id=owner_id))
+        return records
 
     return router
