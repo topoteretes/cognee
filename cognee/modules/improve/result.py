@@ -39,6 +39,9 @@ REASON_NO_SESSION_IDS = "no_session_ids"
 REASON_DISABLED_BY_CONFIG = "disabled_by_config"
 REASON_ABORTED_BY_FATAL_STAGE = "aborted_by_fatal_stage"
 REASON_BACKEND_UNSUPPORTED = "backend_unsupported"
+# An earlier stage failed because the LLM budget is exhausted; every stage
+# after it is skipped, since it would fail the same way.
+REASON_BUDGET_EXHAUSTED = "budget_exhausted"
 
 
 class StageResult(BaseModel):
@@ -87,6 +90,30 @@ class StageResult(BaseModel):
     @property
     def run_info_stamp(self) -> dict | None:
         return self._run_info_stamp
+
+    @property
+    def budget_exhausted(self) -> bool:
+        """True when the stage errored because the LLM budget is exhausted.
+
+        The one place both shapes of an errored stage are classified. A stage
+        that raised carries its exception, which is classified like any LLM
+        error. A stage whose wrapped pipeline reported ``PipelineRunErrored``
+        without raising carries no exception, only the run's ``error_class``
+        and the ``error`` text taken from its ``error_message``.
+        """
+        if self.status != "errored":
+            return False
+
+        # Lazy: importing cognee.infrastructure.llm loads the LLM gateway, and
+        # this module is imported by everything that only reads a result.
+        from cognee.infrastructure.llm.exceptions import (
+            is_budget_exhausted_error,
+            is_budget_exhausted_record,
+        )
+
+        if self._exception is not None and is_budget_exhausted_error(self._exception):
+            return True
+        return is_budget_exhausted_record(getattr(self.run, "error_class", None), self.error)
 
     @classmethod
     def skipped(cls, stage: str, reason: str) -> "StageResult":

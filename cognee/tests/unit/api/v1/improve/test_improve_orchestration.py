@@ -128,6 +128,34 @@ async def test_session_stage_runs_when_session_ids_given(harness):
 
 
 @pytest.mark.asyncio
+async def test_explicit_improve_is_never_gated_by_the_auto_improve_admission(harness):
+    """The host's admission check decides about the improves remember() starts
+    on its own. A caller who asks for an improve gets one."""
+    from cognee.modules.improve import (
+        clear_auto_improve_admission,
+        register_auto_improve_admission,
+    )
+
+    asked = []
+
+    async def out_of_credit(**context):
+        asked.append(context)
+        return "insufficient_credits"
+
+    calls = []
+    harness.use_stages([FakeStage("a", calls=calls), FakeStage("b", calls=calls)])
+    register_auto_improve_admission(out_of_credit)
+    try:
+        result = await harness.improve(session_ids=["chat_1"])
+    finally:
+        clear_auto_improve_admission()
+
+    assert asked == []
+    assert calls == ["a", "b"]
+    assert result.status == "completed"
+
+
+@pytest.mark.asyncio
 async def test_lock_held_returns_every_stage_skipped_never_empty_dict(harness):
     calls = []
     harness.use_stages([FakeStage("a", calls=calls), FakeStage("b", calls=calls)])
