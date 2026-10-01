@@ -121,7 +121,7 @@ async def sync_recent_issues(credential: IntegrationCredential, limit: int = 50)
     from cognee.modules.integrations.linear.adapter import access_token_for
     from cognee.modules.users.methods import get_user
 
-    data = await graphql(access_token_for(credential), _RECENT_ISSUES_QUERY, {"limit": limit})
+    data = await graphql(await access_token_for(credential), _RECENT_ISSUES_QUERY, {"limit": limit})
     issues = ((data.get("issues") or {}).get("nodes")) or []
     if not issues:
         logger.info("Linear organization %s has no issues to sync", credential.provider_account_id)

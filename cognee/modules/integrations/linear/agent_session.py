@@ -52,9 +52,11 @@ async def handle_agent_session(credential: IntegrationCredential, payload: dict[
     # circular.
     from cognee.modules.integrations.linear.adapter import access_token_for
 
+    # An expiring token is refreshed here, ahead of the acknowledgement. The
+    # refresh has its own short timeout so it stays inside the 10 seconds.
     try:
-        access_token = access_token_for(credential)
-    except Exception:  # a bad stored payload must not crash the detached handler
+        access_token = await access_token_for(credential)
+    except Exception:  # a bad payload or a failed refresh must not crash the detached handler
         logger.exception(
             "Linear agent session %s: no usable token for organization %s",
             agent_session_id,

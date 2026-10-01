@@ -59,7 +59,7 @@ def mocks(monkeypatch):
     monkeypatch.setattr(_remember_module, "remember", mocked.remember)
     monkeypatch.setattr(_users_methods, "get_user", mocked.get_user)
     # Imported lazily inside sync_recent_issues (circular-import seam).
-    monkeypatch.setattr(adapter_module, "access_token_for", lambda _credential: "lin_tok")
+    monkeypatch.setattr(adapter_module, "access_token_for", AsyncMock(return_value="lin_tok"))
     return mocked
 
 

@@ -77,7 +77,7 @@ def mocks(monkeypatch):
     monkeypatch.setattr(session_module, "cognee_search", mocked.search)
     monkeypatch.setattr(session_module, "get_user", mocked.get_user)
     # Imported lazily inside handle_agent_session, so patched at its home.
-    monkeypatch.setattr(adapter_module, "access_token_for", lambda _credential: "lin_tok")
+    monkeypatch.setattr(adapter_module, "access_token_for", AsyncMock(return_value="lin_tok"))
     return mocked
 
 
@@ -136,3 +136,21 @@ async def test_refusal_only_results_produce_the_no_information_response(mocks):
     kind, activity_type, body = mocks.calls[-1]
     assert (kind, activity_type) == ("activity", "response")
     assert body == "No relevant information found in cognee memory."
+
+
+@pytest.mark.asyncio
+async def test_every_activity_is_posted_with_the_token_access_token_for_returned(mocks):
+    await handle_agent_session(_credential(), _created_payload())
+
+    assert [call.args[0] for call in mocks.activity.await_args_list] == ["lin_tok", "lin_tok"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_refresh_ends_the_turn_without_raising_or_posting(mocks, monkeypatch):
+    monkeypatch.setattr(
+        adapter_module, "access_token_for", AsyncMock(side_effect=RuntimeError("refresh failed"))
+    )
+
+    await handle_agent_session(_credential(), _created_payload())
+
+    assert mocks.calls == []
