@@ -560,8 +560,11 @@ def _abort_run(
 
     The exception is the stage's own when it raised — its type is what the HTTP
     layer maps onto a status code — and a synthetic one when the wrapped
-    pipeline only reported ``PipelineRunErrored`` without raising. Either way it
-    carries the partial ``ImproveResult`` as ``improve_result``.
+    pipeline only reported ``PipelineRunErrored`` without raising. The synthetic
+    one keeps the type that matters to a caller: a stage that stopped on an
+    exhausted LLM budget raises ``LLMPaymentRequiredError`` (402) on both
+    paths. Either way it carries the partial ``ImproveResult`` as
+    ``improve_result``.
 
     ``reason`` is what the remaining stages are skipped with: the abort itself,
     or the more specific ``budget_exhausted`` when that is why the stage failed.
@@ -578,11 +581,19 @@ def _abort_run(
 
     error = stage_result.exception
     if error is None:
-        error = CogneeSystemError(
-            message=f"improve: fatal stage '{stage.name}' errored: {stage_result.error}",
-            name="ImproveFatalStageError",
-            log=False,
-        )
+        if reason == REASON_BUDGET_EXHAUSTED:
+            from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
+
+            error = LLMPaymentRequiredError(
+                f"improve: fatal stage '{stage.name}' stopped on an exhausted LLM budget: "
+                f"{stage_result.error}"
+            )
+        else:
+            error = CogneeSystemError(
+                message=f"improve: fatal stage '{stage.name}' errored: {stage_result.error}",
+                name="ImproveFatalStageError",
+                log=False,
+            )
 
     try:
         error.improve_result = result  # type: ignore[attr-defined]

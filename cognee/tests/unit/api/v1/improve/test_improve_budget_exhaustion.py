@@ -178,6 +178,78 @@ async def test_fatal_stage_on_the_budget_still_raises_and_names_the_budget(harne
 
 
 @pytest.mark.asyncio
+async def test_fatal_stage_whose_pipeline_reported_the_budget_raises_the_typed_error(harness):
+    """Nothing was raised for the orchestrator to re-raise: the stage's pipeline
+    only reported the failure. The abort must still carry the 402, or the HTTP
+    layer and RememberResult.improve_error are left string-matching the text."""
+    errored_run = _budget_errored_run(harness)
+    harness.use_stages(
+        [
+            FakeStage(
+                "fatal_one",
+                fatal=True,
+                run=lambda _i: StageResult.from_pipeline_run(
+                    "fatal_one", {harness.dataset.id: errored_run}
+                ),
+            ),
+            FakeStage("after_fatal"),
+        ]
+    )
+
+    with pytest.raises(LLMPaymentRequiredError) as excinfo:
+        await harness.improve()
+
+    assert excinfo.value.status_code == 402
+    # What the stage reported is kept in the message.
+    assert "fatal_one" in excinfo.value.message
+    assert "LLM provider requires payment" in excinfo.value.message
+    partial = excinfo.value.improve_result
+    assert partial.stages[0].exception is None
+    assert _outcomes(partial.stages) == [
+        ("fatal_one", "errored", None),
+        ("after_fatal", "skipped", REASON_BUDGET_EXHAUSTED),
+    ]
+    assert partial.error == partial.stages[0].error
+
+
+@pytest.mark.asyncio
+async def test_fatal_stage_whose_pipeline_reported_another_failure_stays_generic(harness):
+    """Only a budget failure is typed as one; any other reported failure keeps
+    the generic abort error and its 500."""
+    errored_run = PipelineRunErrored(
+        pipeline_run_id=uuid.uuid4(),
+        dataset_id=harness.dataset.id,
+        dataset_name="docs",
+        error_class="RuntimeError",
+        error_message="RuntimeError: graph store unreachable",
+    )
+    harness.use_stages(
+        [
+            FakeStage(
+                "fatal_one",
+                fatal=True,
+                run=lambda _i: StageResult.from_pipeline_run(
+                    "fatal_one", {harness.dataset.id: errored_run}
+                ),
+            ),
+            FakeStage("after_fatal"),
+        ]
+    )
+
+    with pytest.raises(Exception) as excinfo:
+        await harness.improve()
+
+    assert not isinstance(excinfo.value, LLMPaymentRequiredError)
+    assert excinfo.value.name == "ImproveFatalStageError"
+    assert excinfo.value.status_code != 402
+    assert _outcomes(excinfo.value.improve_result.stages)[1] == (
+        "after_fatal",
+        "skipped",
+        REASON_ABORTED_BY_FATAL_STAGE,
+    )
+
+
+@pytest.mark.asyncio
 async def test_fatal_stage_failing_for_another_reason_keeps_the_abort_reason(harness):
     """The budget reason is only for budget failures, in both shapes."""
     harness.use_stages(

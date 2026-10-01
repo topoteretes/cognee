@@ -44,7 +44,6 @@ features.** See [Contributing](#-contributing-a-new-example) for the precise cat
 |---|---|
 | [`sessions.py`](guides/sessions.py) | Session-scoped memory via `session_id` |
 | [`session_distillation.py`](guides/session_distillation.py) | Distilling a session into durable preferences |
-| [`auto_improve_admission.py`](guides/auto_improve_admission.py) | A host application declining the automatic `improve()` after `remember()` with `register_auto_improve_admission` |
 | [`global_context_index.py`](guides/global_context_index.py) | Building the index with `improve(build_global_context_index=True)` and updating it incrementally |
 | [`global_context_index_recall.py`](guides/global_context_index_recall.py) | What `include_global_context_index` adds to `GRAPH_COMPLETION` retrieval |
 | [`importance_weight.py`](guides/importance_weight.py) | Boosting specific memories in retrieval ranking |

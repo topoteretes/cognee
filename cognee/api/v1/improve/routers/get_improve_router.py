@@ -92,6 +92,8 @@ def get_improve_router() -> APIRouter:
 
         ## Error Codes
         - **400 Bad Request**: Neither dataset_id nor dataset_name provided
+        - **402 Payment Required**: The fatal `persist_session_qa` stage stopped
+          on an exhausted LLM budget. Same body as the 409 below.
         - **409 Conflict**: The fatal `persist_session_qa` stage failed — for a
           Cognee error the body carries the abort reason and the partial
           `improve_result` (what ran before the abort); a non-Cognee error
@@ -140,10 +142,13 @@ def get_improve_router() -> APIRouter:
             if partial is not None:
                 # The fatal-stage abort (_abort_run attaches the partial result):
                 # the documented 409, with what ran before the abort in the body
-                # — the exception alone would reach clients as a bare 500.
+                # — the exception alone would reach clients as a bare 500. An
+                # abort on an exhausted LLM budget keeps its own 402, so a
+                # client can tell "pay" from "retry" by the status alone.
                 logger.exception("Improve run aborted by its fatal stage")
+                status_code = 402 if getattr(error, "status_code", None) == 402 else 409
                 return JSONResponse(
-                    status_code=409,
+                    status_code=status_code,
                     content={
                         "error": str(getattr(error, "message", None) or error),
                         "improve_result": partial.model_dump(mode="json"),
