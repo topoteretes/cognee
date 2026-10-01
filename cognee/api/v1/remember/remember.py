@@ -631,10 +631,17 @@ class RememberResult:
         improve: The ``ImproveResult`` of the automatic ``improve()`` that
             followed the remember (``self_improvement=True``), one entry per
             stage with its status. ``None`` when no improve ran — because it
-            was turned off, debounced, or is still running in the background.
+            was turned off, debounced, declined by the host (see
+            ``improve_skipped``), or is still running in the background.
         improve_error: Why the automatic improve failed, when it did. The
             remember itself succeeded in that case: ``status`` stays
             ``"completed"`` / ``"session_stored"`` and only this field is set.
+        improve_skipped: Why the automatic improve was not started, when the
+            host application's admission check declined it
+            (``cognee.modules.improve.register_auto_improve_admission``): a
+            short machine-readable reason such as ``"insufficient_credits"``.
+            The data was stored as usual and ``improve`` stays ``None``; a
+            later improve covers what this one would have. ``None`` otherwise.
 
     Example::
 
@@ -683,6 +690,8 @@ class RememberResult:
         # (A5). An improve failure never flips `status`; it lands here.
         self.improve: ImproveResult | None = None
         self.improve_error: str | None = None
+        # The reason a host admission check gave for not starting it at all.
+        self.improve_skipped: str | None = None
         self._task: asyncio.Task | None = None
         self._started_at: float = time.monotonic()
 
@@ -716,6 +725,8 @@ class RememberResult:
             parts.append(f"improve={getattr(self.improve, 'status', None)!r}")
         if self.improve_error:
             parts.append(f"improve_error={self.improve_error!r}")
+        if self.improve_skipped:
+            parts.append(f"improve_skipped={self.improve_skipped!r}")
         return f"RememberResult({', '.join(parts)})"
 
     def __str__(self):
@@ -748,10 +759,12 @@ class RememberResult:
             d["improve"] = dump(mode="json") if callable(dump) else self.improve
         if self.improve_error:
             d["improve_error"] = self.improve_error
+        if self.improve_skipped:
+            d["improve_skipped"] = self.improve_skipped
         return d
 
     def _attach_improve_payload(self, payload: dict) -> None:
-        """Rebuild ``improve`` / ``improve_error`` from a server's JSON response."""
+        """Rebuild ``improve`` / ``improve_error`` / ``improve_skipped`` from a server's JSON."""
         if not isinstance(payload, dict):
             return
         improve_payload = payload.get("improve")
@@ -765,6 +778,8 @@ class RememberResult:
                 self.improve = improve_payload  # type: ignore[assignment]
         if payload.get("improve_error"):
             self.improve_error = str(payload["improve_error"])
+        if payload.get("improve_skipped"):
+            self.improve_skipped = str(payload["improve_skipped"])
 
     def __bool__(self):
         """True if status is completed or session_stored."""
@@ -942,7 +957,10 @@ async def remember(
             triplet embeddings and indexing. The outcome lands on
             ``RememberResult.improve`` / ``.improve_error``; a failed
             improve never marks the remember itself as errored.
-            ``IMPROVE_AUTO_ENABLED=false`` overrides this to off.
+            ``IMPROVE_AUTO_ENABLED=false`` overrides this to off, and a
+            host admission check can decline a single run before it starts
+            (``cognee.modules.improve.register_auto_improve_admission``;
+            the reason lands on ``RememberResult.improve_skipped``).
         session_ids: Session IDs handed to that ``improve()`` call so
             their Q&A, agent traces and distilled lessons are bridged
             into the permanent graph in the same run. Only used when
@@ -1254,7 +1272,7 @@ async def remember(
                 "Call cognee.disconnect() to estimate locally."
             )
 
-        from cognee.infrastructure.llm import get_max_chunk_tokens
+        from cognee.infrastructure.llm import resolve_chunk_size
         from cognee.modules.chunking.TextChunker import TextChunker
         from cognee.modules.cognify.estimator import estimate_remember_dry_run
         from cognee.shared.data_models import KnowledgeGraph
@@ -1262,7 +1280,7 @@ async def remember(
         return await estimate_remember_dry_run(
             data,
             chunker=chunker or TextChunker,
-            chunk_size=chunk_size or await get_max_chunk_tokens(),
+            chunk_size=await resolve_chunk_size(chunk_size),
             graph_model=kwargs.get("graph_model") or KnowledgeGraph,
             custom_prompt=custom_prompt,
         )
@@ -1844,6 +1862,30 @@ async def _remember_inner(
         if self_improvement and not auto_improve:
             logger.debug("remember: automatic improve disabled or unavailable")
 
+        # Host admission: the application embedding cognee may decline the
+        # automatic improve before it starts (a tenant with no LLM budget left
+        # would only fail at the first LLM call). Asked only when an improve
+        # would otherwise run, on both paths, and before the session debounce
+        # below is consulted — a bridge that never starts must not spend the
+        # debounce window. The data is stored either way; the reason is
+        # reported on the result. The helper is fail-open and never raises.
+        improve_skipped: str | None = None
+        if auto_improve:
+            from cognee.modules.improve.admission import auto_improve_skip_reason
+
+            improve_skipped = await auto_improve_skip_reason(
+                user=user,
+                dataset_id=dataset_id,
+                session_id=session_id or None,
+                session_ids=[session_id] if session_id else list(session_ids or []),
+            )
+            if improve_skipped:
+                auto_improve = False
+                logger.info(
+                    "remember: automatic improve skipped by the host admission check (%s)",
+                    improve_skipped,
+                )
+
         # Session memory: store in session cache, then optionally bridge to graph
         if session_id:
             operation_context.set_session_id(session_id)
@@ -1855,6 +1897,7 @@ async def _remember_inner(
                 session_ids=[session_id],
             )
             result.elapsed_seconds = time.monotonic() - result._started_at
+            result.improve_skipped = improve_skipped
 
             # Debounce (B6): bridge only after enough new entries or enough time
             # since the last automatic improve for this session. The default
@@ -1928,6 +1971,7 @@ async def _remember_inner(
             dataset_id=str(dataset_id) if dataset_id else None,
             session_ids=session_ids,
         )
+        result.improve_skipped = improve_skipped
 
         # Permanent memory: add + cognify (+ optional improve)
         async def _run():

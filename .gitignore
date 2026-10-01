@@ -193,7 +193,7 @@ cognee/cache/
 .data_storage/
 .cognee_cache/
 
-# Storage for the company-brain demo (examples/demos/company_brain/)
+# Storage for the company-brain demo (examples/demos/company_brain/docs_code_conversations/)
 .cognee-readme-demo/
 .artifacts/
 .anon_id
@@ -226,4 +226,5 @@ pr_body.md
 
 # Scratch data/system dirs written by the keyless e2e script
 cognee/tests/e2e/keyless/.keyless_run/
+cognee/tests/e2e/keyless/.chunk_budget_run/
 cognee/tests/e2e/keyless/.crash_run/

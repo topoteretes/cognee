@@ -45,7 +45,7 @@ class CognifyConfig(BaseSettings):
     # concurrency divided across the processes). Output is identical at every
     # setting; scripts using it need an ``if __name__ == "__main__":`` guard.
     gliner_inference_processes: int = 1
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     def to_dict(self) -> dict:
         return {
