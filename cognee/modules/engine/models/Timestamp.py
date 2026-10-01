@@ -15,16 +15,22 @@ class Timestamp(DataPoint):
     records how much of it was stated, so ``1950`` and ``1950-01-01`` stay
     distinguishable although their calendar fields are the same. The calendar
     fields and ``time_at`` (milliseconds since the epoch, UTC) hold the lower
-    bound of that period, with unstated parts filled by the earliest value.
+    bound of that period, with unstated parts filled by the earliest value;
+    ``time_until`` is the period's exclusive upper bound, so a time window
+    overlaps this timestamp exactly when ``time_at < window_end`` and
+    ``time_until > window_start`` — the test the graph adapters run.
     ``name`` repeats ``timestamp_str``: it is what graph renderers and the
-    hybrid retrieval context label a node by. It is filled from
-    ``timestamp_str`` when a caller does not pass it.
+    hybrid retrieval context label a node by. Both ``name`` and ``time_until``
+    are filled in when a caller does not pass them.
     """
 
     name: str = ""
     timestamp_str: str = Field(...)
     precision: TimestampPrecision = "second"
     time_at: int = Field(...)
+    # Exclusive upper bound in ms; defaults to one second after ``time_at``, the
+    # period a full ``YYYY-MM-DD HH:MM:SS`` timestamp names.
+    time_until: int = 0
     year: int = Field(...)
     month: int = Field(...)
     day: int = Field(...)
@@ -38,7 +44,12 @@ class Timestamp(DataPoint):
 
     @model_validator(mode="before")
     @classmethod
-    def _name_defaults_to_timestamp_str(cls, data: Any) -> Any:
-        if isinstance(data, dict) and not data.get("name") and data.get("timestamp_str"):
-            return {**data, "name": data["timestamp_str"]}
-        return data
+    def _fill_defaults(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        filled = dict(data)
+        if not filled.get("name") and filled.get("timestamp_str"):
+            filled["name"] = filled["timestamp_str"]
+        if not filled.get("time_until") and isinstance(filled.get("time_at"), int):
+            filled["time_until"] = filled["time_at"] + 1000
+        return filled

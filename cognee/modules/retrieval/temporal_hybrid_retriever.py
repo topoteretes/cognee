@@ -1,18 +1,16 @@
-"""Temporal filter on top of HybridRetriever: the TEMPORAL search type (SDK-828).
+"""Temporal rerank on top of HybridRetriever: the TEMPORAL search type (SDK-828).
 
-Ported from the temporal POC (examples/advanced_guides/temporal_awareness_example/
-temporal_hybrid_retriever.py). Replaces the old TemporalRetriever, which read the
-Event graph of the parallel temporal pipeline; this one reads the Timestamp nodes
-and *_at edges the default cognify produces (SDK-827).
+The candidate fetch and the query-interval extraction run concurrently. The
+graph adapter then returns the Timestamp nodes inside the window
+(``get_timestamps_in_range``, a native query on Ladybug, Neo4j and the Postgres
+demo, a scan elsewhere), their one-hop neighbourhood names the chunks and
+entities anchored to them, and the oversized candidate set is reordered so the
+anchored candidates come first before the final limit. Context formatting and
+completion are inherited unchanged.
 
-The candidate fetch and the query-interval extraction run concurrently; the
-temporal index (built once per instance from one graph snapshot) then selects
-the eligible chunks, which filter the oversized candidate set before the final
-limit. Context formatting and completion are inherited unchanged.
-
-get_retrieved_objects returns the plain hybrid result shape — the filtered
+get_retrieved_objects returns the plain hybrid result shape — the reranked
 view, or the baseline slice on fallback. Diagnostics for the last query live
-on the instance: last_interval, last_reason, last_matches, last_baseline.
+on the instance: last_interval, last_reason, last_anchors, last_baseline.
 """
 
 import asyncio
@@ -22,20 +20,23 @@ from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.modules.retrieval.hybrid.results import empty_hybrid_result
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 from cognee.modules.retrieval.temporal_hybrid.matching import (
-    build_temporal_index,
-    empty_matches,
+    anchors_from_neighborhood,
+    chunks_containing,
+    empty_anchors,
     extract_query_interval,
-    filter_hybrid,
-    match_temporal_neighborhood,
+    rerank_hybrid,
     slice_hybrid,
+    to_epoch_ms,
 )
+
+# Bounds on the neighbourhood reads: one question rarely names a window with
+# more matching timestamps than this, and past it the anchored set already
+# covers far more than the candidate set can hold.
+MAX_MATCHED_TIMESTAMPS = 500
 
 
 class TemporalHybridRetriever(HybridRetriever):
-    """Hybrid retrieval filtered by temporal overlap, falling back to plain hybrid.
-
-    The temporal index is one graph snapshot; build one retriever per graph state.
-    """
+    """Hybrid retrieval reranked by temporal overlap, falling back to plain hybrid."""
 
     def __init__(self, candidate_top_k: int | None = None, top_k: int = 5, **kwargs):
         if candidate_top_k is None:
@@ -49,21 +50,34 @@ class TemporalHybridRetriever(HybridRetriever):
             **kwargs,
         )
         self.top_k = top_k
-        self._temporal_index = None
         self._reset_diagnostics()
 
     def _reset_diagnostics(self) -> None:
         self.last_interval = (None, None)
         self.last_reason = None
-        self.last_matches = empty_matches()
+        self.last_anchors = empty_anchors()
         self.last_baseline = empty_hybrid_result()
 
-    async def _index(self) -> dict:
-        if self._temporal_index is None:
-            graph = await get_graph_engine()
-            nodes, edges = await graph.get_graph_data()
-            self._temporal_index = build_temporal_index(nodes, edges)
-        return self._temporal_index
+    async def _anchors(self, start, end) -> dict:
+        """Timestamps in the window and the chunks and entities attached to them."""
+        graph = await get_graph_engine()
+        timestamps = await graph.get_timestamps_in_range(to_epoch_ms(start), to_epoch_ms(end))
+        timestamp_ids = {str(node["id"]) for node in timestamps[:MAX_MATCHED_TIMESTAMPS]}
+        if not timestamp_ids:
+            return empty_anchors()
+        nodes, edges = await graph.get_neighborhood(sorted(timestamp_ids), depth=1)
+        anchors = anchors_from_neighborhood(timestamp_ids, nodes, edges)
+        # An entity anchored to a time carries that time into every chunk that
+        # mentions it — the reception held in July 1805 dates the chunks about
+        # the reception, not just the one that names the month.
+        if anchors["entity_ids"]:
+            entity_nodes, entity_edges = await graph.get_neighborhood(
+                sorted(anchors["entity_ids"]), depth=1, edge_types=["contains"]
+            )
+            anchors["chunk_ids"] |= chunks_containing(
+                anchors["entity_ids"], entity_nodes, entity_edges
+            )
+        return {**anchors, "timestamp_ids": timestamp_ids}
 
     async def get_retrieved_objects(self, query=None, query_batch=None) -> dict:
         if query_batch:
@@ -89,13 +103,16 @@ class TemporalHybridRetriever(HybridRetriever):
             self.last_reason = reason
             return self.last_baseline
 
-        self.last_matches = match_temporal_neighborhood(await self._index(), start, end)
-        if not self.last_matches["eligible_chunk_ids"]:
+        self.last_anchors = await self._anchors(start, end)
+        if not self.last_anchors["timestamp_ids"]:
             self.last_reason = "no_temporal_match"
             return self.last_baseline
 
-        filtered = filter_hybrid(candidates, self.last_matches, self.top_k)
-        if filtered is None:
+        reranked = rerank_hybrid(candidates, self.last_anchors, self.top_k)
+        if reranked["chunks"] == self.last_baseline["chunks"] and (
+            reranked["entities"] == self.last_baseline["entities"]
+        ):
+            # Informational: the window matched, but nothing in the candidate set
+            # moved. The result is the baseline either way.
             self.last_reason = "no_candidate_overlap"
-            return self.last_baseline
-        return filtered
+        return reranked
