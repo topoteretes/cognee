@@ -196,18 +196,54 @@ def test_zero_means_auto(monkeypatch):
     assert real_inference_threads() == 4
 
 
-def test_negative_thread_count_is_rejected(monkeypatch):
-    monkeypatch.setattr(
-        extractor_module, "get_cognify_config", lambda: SimpleNamespace(gliner_inference_threads=-1)
-    )
-    with pytest.raises(ValueError, match="GLINER_INFERENCE_THREADS"):
-        real_inference_threads()
+def test_negative_thread_count_is_rejected():
+    from cognee.modules.cognify.config import CognifyConfig
+
+    # pydantic's ValidationError is a ValueError; it is raised when the config loads.
+    with pytest.raises(ValueError, match="gliner_inference_threads"):
+        CognifyConfig(gliner_inference_threads=-1)
+
+
+class OverlapCountingModel:
+    """A fake model that records the most calls ever running on it at once."""
+
+    def __init__(self):
+        self.active = 0
+        self.peak = 0
+        self._lock = threading.Lock()
+
+    def _call(self):
+        with self._lock:
+            self.active += 1
+            self.peak = max(self.peak, self.active)
+        time.sleep(0.02)  # long enough for unguarded calls to overlap
+        with self._lock:
+            self.active -= 1
+
+    def batch_extract_long(self, texts, *_args, **_options):
+        self._call()
+        return [{} for _ in texts]
+
+    def extract(self, *_args, **_options):
+        self._call()
+        return {}
 
 
 def test_one_thread_keeps_the_runtimes_long_text_call():
     """The single-threaded path is the unchanged public call, batches run in turn."""
     extractor_module.reset_inference_pool()
     assert extractor_module._inference_pool() is None
+
+
+def test_one_thread_runs_one_model_call_at_a_time(monkeypatch):
+    """With no pool, concurrent pipelines take turns, which bounds their memory."""
+    monkeypatch.setattr(extractor_module, "build_gliner_schema", lambda *_: object())
+    model, schema = OverlapCountingModel(), SimpleNamespace(is_empty=False)
+    with ThreadPoolExecutor(4) as callers:
+        for _ in range(2):
+            callers.submit(extractor_module.extract_batch, model, ["text"], schema)
+            callers.submit(extractor_module.extract_once, model, "text", schema)
+    assert model.peak == 1
 
 
 def test_several_threads_share_one_pool(monkeypatch):
