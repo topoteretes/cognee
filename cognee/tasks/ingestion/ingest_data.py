@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
@@ -114,6 +115,43 @@ def _source_uri_from_input(data_item: Any) -> str | None:
         except (OSError, ValueError):
             return None
     return None
+
+
+def _union_node_sets(
+    call_node_set: list[str] | None, item_node_set: list[str] | None
+) -> list[str] | None:
+    """Combine the call-level node_set with a DataItem's own node_set.
+
+    Call-first, order-preserving, deduplicated on the NodeSet id key, so two
+    spellings that map to one graph node keep only the first. With no
+    item-level node_set this returns ``call_node_set`` untouched (not even
+    deduped), exactly as before this field existed. A bare string on either
+    side is one name, never iterated character by character.
+    """
+    if not item_node_set:
+        return call_node_set
+
+    def as_names(node_set: list[str] | str | None) -> list[str]:
+        if node_set is None:
+            return []
+        if isinstance(node_set, str):
+            return [node_set]
+        return list(node_set)
+
+    seen: set[UUID] = set()
+    combined: list[str] = []
+    for name in as_names(call_node_set) + as_names(item_node_set):
+        if not isinstance(name, str) or not name.strip():
+            continue
+        try:
+            key = generate_node_id(f"NodeSet:{name}")
+        except UnicodeEncodeError:
+            # A lone surrogate cannot become a NodeSet id; drop it, not the item.
+            continue
+        if key not in seen:
+            seen.add(key)
+            combined.append(name)
+    return combined or None
 
 
 async def ingest_data(
@@ -332,6 +370,7 @@ async def ingest_data(
             item_data_id = None
             item_external_metadata = None
             item_system_metadata = None
+            item_node_set = None
 
             if isinstance(data_item, DataItem):
                 underlying_data = data_item.data
@@ -339,6 +378,9 @@ async def ingest_data(
                 item_data_id = data_item.data_id
                 item_external_metadata = data_item.external_metadata
                 item_system_metadata = data_item.system_metadata
+                item_node_set = data_item.node_set
+
+            effective_node_set = _union_node_sets(node_set, item_node_set)
 
             # Retrieve cached intermediate results from pre-loop to avoid re-processing
             cached = precomputed_items.get(id(data_item), {})
@@ -423,8 +465,8 @@ async def ingest_data(
                     ext_metadata["_cognee"] = cognee_metadata
                 cognee_metadata.setdefault("source_uri", source_uri)
 
-            if node_set:
-                ext_metadata["node_set"] = node_set
+            if effective_node_set:
+                ext_metadata["node_set"] = effective_node_set
 
             if data_point is not None:
                 # Content-change detection: reset pipeline_status when content changed
@@ -473,7 +515,7 @@ async def ingest_data(
                 # and break every later cognify of the dataset.
                 if item_system_metadata is not None or content_changed:
                     data_point.system_metadata = item_system_metadata
-                data_point.node_set = json.dumps(node_set) if node_set else None
+                data_point.node_set = json.dumps(effective_node_set) if effective_node_set else None
                 data_point.tenant_id = user.tenant_id if user.tenant_id else None
                 # Absent means "leave unchanged": a re-ingest without a label
                 # (current_label None) must not clear a previously stored one.
@@ -505,7 +547,7 @@ async def ingest_data(
                     raw_content_hash=storage_file_metadata["content_hash"],
                     external_metadata=ext_metadata,
                     system_metadata=item_system_metadata,
-                    node_set=json.dumps(node_set) if node_set else None,
+                    node_set=json.dumps(effective_node_set) if effective_node_set else None,
                     data_size=original_file_metadata["file_size"],
                     tenant_id=user.tenant_id if user.tenant_id else None,
                     pipeline_status={},
