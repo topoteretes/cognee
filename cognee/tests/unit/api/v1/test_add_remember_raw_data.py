@@ -372,3 +372,49 @@ def test_remember_forwards_self_improvement_without_defaulting_false(client, fla
             assert mock_remember.call_args.kwargs["self_improvement"] is flag
         if not session_entry:
             assert mock_remember.call_args.args[0] == ["memory"]
+
+
+def test_remember_rejects_code_content_type_with_file_uploads(client):
+    # Parity with the removed route: a repository ingest does not take uploads.
+    with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
+        mock_remember.return_value = remember_completed()
+
+        response = client.post(
+            "/api/v1/remember",
+            data={"datasetName": "test_dataset", "content_type": "code", "raw_data": [REPO_URL]},
+            files={"data": ("notes.txt", b"hello", "text/plain")},
+        )
+
+        assert response.status_code == 400, response.text
+        assert "does not accept file uploads" in response.json()["detail"]
+        mock_remember.assert_not_called()
+
+
+def test_remember_rejects_code_content_type_without_raw_data(client):
+    with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
+        mock_remember.return_value = remember_completed()
+
+        response = client.post(
+            "/api/v1/remember",
+            data={"datasetName": "test_dataset", "content_type": "code"},
+        )
+
+        assert response.status_code == 400, response.text
+        assert "requires at least one repository path" in response.json()["detail"]
+        mock_remember.assert_not_called()
+
+
+def test_plain_ingestion_still_accepts_uploads_beside_raw_data(client):
+    # The two refusals above are scoped to the deprecated content type; an
+    # ordinary request may mix uploads and raw_data as it always could.
+    with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
+        mock_remember.return_value = remember_completed()
+
+        response = client.post(
+            "/api/v1/remember",
+            data={"datasetName": "test_dataset", "raw_data": [REPO_URL]},
+            files={"data": ("notes.txt", b"hello", "text/plain")},
+        )
+
+        assert response.status_code == 200, response.text
+        assert mock_remember.call_args.args[0][-1] == REPO_URL
