@@ -182,6 +182,67 @@ def _fold_codegraph_kwargs(kwargs: dict) -> None:
         kwargs["codegraph_config"] = {**legacy, **(kwargs.get("codegraph_config") or {})}
 
 
+async def _attach_item_identity(result: "RememberResult") -> None:
+    """Name each result item by what it is, from the stored row's system_metadata.
+
+    The pipeline reports an item as its ``data_id`` and nothing else: the row
+    does not exist yet when the per-item result is built (ingestion mints it
+    during the run), so the identity has to be read back afterwards. One
+    indexed lookup over the ids already on the result.
+
+    Adds ``kind`` (the row's ``system_metadata["source"]`` -- ``code_repo`` for a
+    repository manifest, ``code`` for a code file), ``source`` (the repository's
+    credential-free URL, or its path for a local project) and ``path``. Items
+    whose row carries no such metadata -- ordinary documents -- are untouched,
+    and any failure here leaves the items exactly as the pipeline reported them:
+    this names what was stored, it never decides whether the remember succeeded.
+    """
+    from uuid import UUID
+
+    items = [item for item in (result.items or []) if item.get("id")]
+    if not items:
+        return
+    try:
+        from sqlalchemy import select
+
+        from cognee.infrastructure.databases.relational import get_relational_engine
+        from cognee.modules.data.models.Data import Data
+
+        by_id = {}
+        for item in items:
+            try:
+                by_id.setdefault(UUID(str(item["id"])), []).append(item)
+            except (TypeError, ValueError):
+                continue
+        if not by_id:
+            return
+
+        db_engine = get_relational_engine()
+        async with db_engine.get_async_session() as session:
+            rows = (
+                (await session.execute(select(Data).filter(Data.id.in_(list(by_id)))))
+                .scalars()
+                .all()
+            )
+            metadata_by_id = {row.id: dict(row.system_metadata or {}) for row in rows}
+
+        for data_id, matching_items in by_id.items():
+            metadata = metadata_by_id.get(data_id) or {}
+            kind = metadata.get("source")
+            if not kind:
+                continue
+            for item in matching_items:
+                item["kind"] = kind
+                repo_url = metadata.get("repo_url")
+                repo_path = metadata.get("repo_path")
+                if repo_url or repo_path:
+                    item["source"] = repo_url or repo_path
+                if repo_path:
+                    item["path"] = repo_path
+    except Exception:
+        logger.debug("Could not attach item identity to the remember result", exc_info=True)
+
+
 PRESORT_FOLDERS_ENV = "PRESORT_FOLDERS_ENABLED"
 
 
@@ -1009,9 +1070,12 @@ async def remember(
             ``data`` is stored as one ``code_repo`` row by ``add()`` and built
             by cognify's CODE_REPO route. ``codegraph_config`` (see
             ``CodeGraphConfig``) sets ``index_vectors`` to also embed the code
-            facts this call builds, and ``repo_credentials`` to clone private
-            repository URLs; the top-level ``index_vectors=`` /
-            ``repo_credentials=`` spellings are still accepted.
+            facts this call builds, ``repo_credentials`` to clone private
+            repository URLs, and ``include_documents=False`` to index the code
+            graph only (no README/docs ingestion); the top-level
+            ``index_vectors=`` / ``repo_credentials=`` spellings are still
+            accepted. The deprecated ``content_type="code"`` is read as
+            ``include_documents=False``, the behaviour it used to have.
         skill_improvement: Internal skill-improvement control dict used with
             ``SkillRunEntry`` or ``content_type="skills"``. ``apply=True``
             requires an existing ``proposal_id``.
@@ -1043,12 +1107,19 @@ async def remember(
 
     # content_type="code" was removed (SDK-793): a repository is ordinary data
     # and builds through add() + cognify(). Callers still passing it keep
-    # working; the value is dropped here, before any path reads it.
+    # working -- and keep the behaviour they had, which is why the value is
+    # translated rather than dropped: the removed route indexed the code graph
+    # only, so it means include_documents=False. An explicit codegraph_config
+    # still wins. Translated here, before any path reads content_type.
     if kwargs.get("content_type") == "code":
         kwargs.pop("content_type")
+        codegraph_config = dict(kwargs.get("codegraph_config") or {})
+        codegraph_config.setdefault("include_documents", False)
+        kwargs["codegraph_config"] = codegraph_config
         logger.warning(
-            "remember(content_type='code') is deprecated and ignored: pass the repository "
-            "path or URL as data; use codegraph_config for index_vectors / repo_credentials."
+            "remember(content_type='code') is deprecated: pass the repository path or URL "
+            'as data with codegraph_config={"include_documents": False} for the same '
+            "code-graph-only ingestion. Reading it as that for now."
         )
 
     # Migration dispatch: a MemorySource streams COGX records from an external
@@ -1853,6 +1924,7 @@ async def _remember_inner(
             )
 
             result._resolve(cognify_result)
+            await _attach_item_identity(result)
 
             if auto_improve:
                 from cognee.api.v1.improve import improve

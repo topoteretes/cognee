@@ -133,8 +133,11 @@ async def add(
                  reads ``repo_credentials``: a token used to clone private
                  GitHub/GitLab repository URLs in ``data``. It reaches git only
                  through environment config, never the URL or the stored rows.
-                 ``index_vectors`` is read by cognify() and ignored here. Not
-                 supported while connected to a remote instance.
+                 It also reads ``include_documents`` (default True): set it False
+                 to index a repository's code graph only, leaving its README and
+                 docs un-ingested. ``index_vectors`` is read by cognify() and
+                 ignored here. ``repo_credentials`` is not supported while
+                 connected to a remote instance.
         extraction_rules: Optional dictionary of rules (e.g., CSS selectors, XPath) for extracting specific content from web pages using BeautifulSoup
         tavily_config: Optional configuration for Tavily API, including API key and extraction settings
         soup_crawler_config: Optional configuration for BeautifulSoup crawler, specifying concurrency, crawl delay, and extraction rules.
@@ -305,14 +308,17 @@ async def add(
         ),
     ]
 
-    # The pipeline clones repository URLs itself, but without credentials: a
-    # private repository has to be cloned here, with the token, before it runs.
-    if codegraph_config.get("repo_credentials"):
-        from cognee.tasks.code_graph.code_repo import resolve_code_repository_urls
+    # The pipeline resolves repositories itself, but always without credentials
+    # and always with their documents. A call that answers either differently
+    # has to resolve them here, before the pipeline runs.
+    include_documents = codegraph_config.get("include_documents", True)
+    if codegraph_config.get("repo_credentials") or not include_documents:
+        from cognee.tasks.code_graph.code_repo import resolve_code_repositories
 
-        data = await resolve_code_repository_urls(
+        data = await resolve_code_repositories(
             data,
-            credentials=codegraph_config["repo_credentials"],
+            credentials=codegraph_config.get("repo_credentials"),
+            include_documents=include_documents,
             user=user,
             dataset_id=authorized_dataset.id,
         )

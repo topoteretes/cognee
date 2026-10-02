@@ -102,7 +102,18 @@ async def resolve_data_directories(
             # clone it and resolve it like the local project directory below --
             # one code_repo manifest plus the repo's documents. Deferred import:
             # code_repo reaches back into this package (dlt_utils).
-            from cognee.tasks.code_graph.resolve_repo import code_repo_clone_url
+            from cognee.tasks.code_graph.resolve_repo import (
+                SSH_REPO_SPEC_MESSAGE,
+                code_repo_clone_url,
+                is_ssh_repo_spec,
+            )
+
+            # An ssh remote names a repository and nothing else, so falling
+            # through to the text path below would store the spec string as a
+            # document -- a silent wrong result. http(s) URLs are NOT checked
+            # this way: most of them really are web pages.
+            if is_ssh_repo_spec(item):
+                raise IngestionError(message=SSH_REPO_SPEC_MESSAGE)
 
             if code_repo_clone_url(item) is not None:
                 from cognee.tasks.code_graph.code_repo import resolve_code_repository_url

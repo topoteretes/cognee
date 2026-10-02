@@ -122,9 +122,10 @@ async def test_codegraph_config_is_rejected_with_session_id(permanent_pipeline):
 
 
 @pytest.mark.asyncio
-async def test_removed_code_content_type_is_ignored(permanent_pipeline):
-    # Existing callers keep working: the value is dropped and the repository
-    # runs through add() + cognify() like any other input, credentials included.
+async def test_removed_code_content_type_keeps_its_behaviour(permanent_pipeline):
+    # Existing callers keep working AND keep what they had: the removed route
+    # indexed the code graph only, so the value is read as
+    # include_documents=False rather than dropped.
     result = await remember_module.remember(
         "https://github.com/acme/private",
         dataset_id=uuid4(),
@@ -135,9 +136,56 @@ async def test_removed_code_content_type_is_ignored(permanent_pipeline):
     )
 
     assert result.status == "completed"
-    assert permanent_pipeline["add"]["codegraph_config"] == {"repo_credentials": "tok123"}
+    assert permanent_pipeline["add"]["codegraph_config"] == {
+        "repo_credentials": "tok123",
+        "include_documents": False,
+    }
     assert "content_type" not in permanent_pipeline["add"]
     assert "content_type" not in permanent_pipeline["cognify"]
+
+
+@pytest.mark.asyncio
+async def test_explicit_include_documents_wins_over_the_content_type_default(permanent_pipeline):
+    # The translation is a default, not an override: a caller that asks for the
+    # documents while still sending the deprecated value gets them.
+    await remember_module.remember(
+        "https://github.com/acme/api",
+        dataset_id=uuid4(),
+        user=SimpleNamespace(id=uuid4()),
+        self_improvement=False,
+        content_type="code",
+        codegraph_config={"include_documents": True},
+    )
+
+    assert permanent_pipeline["add"]["codegraph_config"] == {"include_documents": True}
+
+
+@pytest.mark.asyncio
+async def test_code_content_type_with_session_id_is_still_refused(permanent_pipeline):
+    # The removed route rejected this instead of writing a repository path into
+    # the session cache; the translation keeps that refusal.
+    with pytest.raises(ValueError, match="only supported for normal ingestion"):
+        await remember_module.remember(
+            "/some/repo",
+            session_id="s1",
+            user=SimpleNamespace(id=uuid4()),
+            content_type="code",
+        )
+
+    assert permanent_pipeline == {}
+
+
+@pytest.mark.asyncio
+async def test_include_documents_reaches_add(permanent_pipeline):
+    await remember_module.remember(
+        "/some/repo",
+        dataset_id=uuid4(),
+        user=SimpleNamespace(id=uuid4()),
+        self_improvement=False,
+        codegraph_config={"include_documents": False},
+    )
+
+    assert permanent_pipeline["add"]["codegraph_config"] == {"include_documents": False}
 
 
 @pytest.mark.asyncio

@@ -217,9 +217,9 @@ def test_remember_forwards_index_vectors_with_repo_urls(client):
         assert mock_remember.call_args.kwargs["content_type"] is None
 
 
-def test_remember_ignores_the_removed_code_content_type(client):
+def test_remember_reads_the_removed_code_content_type_as_code_only(client):
     # The old request shape (content_type=code + a repository in raw_data) keeps
-    # working: the value is dropped and the repository is ordinary raw_data.
+    # working AND keeps its behaviour: that route indexed the code graph only.
     with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
         mock_remember.return_value = remember_completed()
 
@@ -231,6 +231,61 @@ def test_remember_ignores_the_removed_code_content_type(client):
         assert response.status_code == 200, response.text
         assert mock_remember.call_args.args[0] == [REPO_URL]
         assert mock_remember.call_args.kwargs["content_type"] is None
+        assert mock_remember.call_args.kwargs["codegraph_config"] == {"include_documents": False}
+
+
+def test_remember_combines_code_content_type_with_index_vectors(client):
+    with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
+        mock_remember.return_value = remember_completed()
+
+        response = client.post(
+            "/api/v1/remember",
+            data={
+                "datasetName": "test_dataset",
+                "content_type": "code",
+                "raw_data": [REPO_URL],
+                "index_vectors": "true",
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        assert mock_remember.call_args.kwargs["codegraph_config"] == {
+            "index_vectors": True,
+            "include_documents": False,
+        }
+
+
+def test_remember_rejects_code_content_type_with_session_id(client):
+    # Parity with the removed route: a repository is not session-cache data.
+    with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
+        mock_remember.return_value = remember_completed()
+
+        response = client.post(
+            "/api/v1/remember",
+            data={
+                "datasetName": "test_dataset",
+                "content_type": "code",
+                "raw_data": [REPO_URL],
+                "session_id": "s1",
+            },
+        )
+
+        assert response.status_code == 400, response.text
+        assert "session_id" in response.json()["detail"]
+        mock_remember.assert_not_called()
+
+
+def test_remember_sends_no_codegraph_config_for_plain_ingestion(client):
+    with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
+        mock_remember.return_value = remember_completed()
+
+        response = client.post(
+            "/api/v1/remember",
+            data={"datasetName": "test_dataset", "raw_data": ["a plain note"]},
+        )
+
+        assert response.status_code == 200, response.text
+        assert "codegraph_config" not in mock_remember.call_args.kwargs
 
 
 def test_remember_rejects_unknown_content_types(client):

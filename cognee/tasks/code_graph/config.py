@@ -6,13 +6,22 @@ from typing import TypedDict, cast
 class CodeGraphConfig(TypedDict, total=False):
     """Options for code files and code repositories, passed as ``codegraph_config``.
 
-    ``add()`` reads ``repo_credentials``; ``cognify()`` reads ``index_vectors``;
-    ``remember()`` hands the same dict to both, so each takes what it needs.
+    ``add()`` reads ``repo_credentials`` and ``include_documents``; ``cognify()``
+    reads ``index_vectors``; ``remember()`` hands the same dict to both, so each
+    takes what it needs.
     """
 
     # Also embed the code facts the run builds, so completion search types can
     # reach the code. Off by default: SearchType.CODE reads the graph only.
     index_vectors: bool
+    # Also ingest the repository's document files (README, docs, ...) as
+    # ordinary documents, alongside its code graph. On by default, as a
+    # directory add has always done. False indexes the code graph only -- the
+    # behaviour the removed ``content_type="code"`` route had, and what the
+    # GitHub sync wants: no LLM extraction or embeddings for a repo's prose.
+    # Documents are excluded regardless when no LLM API key is configured,
+    # since their pipelines need one.
+    include_documents: bool
     # Token for cloning private GitHub/GitLab repository URLs (e.g. a GitHub App
     # installation token). It reaches git only through environment config,
     # never the URL, so nothing stored or logged carries it.
