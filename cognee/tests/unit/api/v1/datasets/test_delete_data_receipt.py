@@ -22,8 +22,6 @@ datasets_module = importlib.import_module("cognee.api.v1.datasets.datasets")
 data_methods_module = importlib.import_module("cognee.modules.data.methods")
 forget_module = importlib.import_module("cognee.api.v1.forget.forget")
 
-pytestmark = pytest.mark.asyncio
-
 
 @asynccontextmanager
 async def _context(*_args, **_kwargs):
@@ -59,6 +57,7 @@ async def _run(dataset_id, data_id, user, dataset, listings, deleted_elements, *
         return await datasets_module.datasets.delete_data(dataset_id, data_id, user, **kwargs)
 
 
+@pytest.mark.asyncio
 async def test_receipt_reports_removed_elements_and_verified_absence():
     dataset_id, data_id, owner_id = uuid4(), uuid4(), uuid4()
     user = SimpleNamespace(id=uuid4())
@@ -82,6 +81,7 @@ async def test_receipt_reports_removed_elements_and_verified_absence():
     }
 
 
+@pytest.mark.asyncio
 async def test_receipt_reports_data_remaining_when_relist_still_shows_the_row():
     """``data_remaining`` is observed from the re-list, never assumed."""
     dataset_id, data_id, owner_id = uuid4(), uuid4(), uuid4()
@@ -100,6 +100,7 @@ async def test_receipt_reports_data_remaining_when_relist_still_shows_the_row():
     assert result["deleted_edges"] == 0
 
 
+@pytest.mark.asyncio
 async def test_receipt_marks_dataset_deleted_when_emptied_and_requested():
     dataset_id, data_id, owner_id = uuid4(), uuid4(), uuid4()
     user = SimpleNamespace(id=uuid4())
@@ -123,6 +124,7 @@ async def test_receipt_marks_dataset_deleted_when_emptied_and_requested():
     assert result["data_remaining"] is False
 
 
+@pytest.mark.asyncio
 async def test_receipt_for_untracked_id_reports_no_data_record():
     """The custom-graph-model path (no Data row) still returns a full receipt."""
     dataset_id, data_id, owner_id = uuid4(), uuid4(), uuid4()
@@ -156,6 +158,7 @@ async def test_receipt_for_untracked_id_reports_no_data_record():
     }
 
 
+@pytest.mark.asyncio
 async def test_receipt_uses_resolved_legacy_id():
     """A legacy id resolves to the current row; the receipt names the resolved id."""
     dataset_id, legacy_id, resolved_id, owner_id = uuid4(), uuid4(), uuid4(), uuid4()
@@ -187,6 +190,7 @@ async def test_receipt_uses_resolved_legacy_id():
     assert result["data_remaining"] is False
 
 
+@pytest.mark.asyncio
 async def test_forget_data_item_passes_the_receipt_through():
     """``forget(data_id=...)`` exposes the receipt fields alongside its own keys."""
     dataset_id, data_id = uuid4(), uuid4()
@@ -211,6 +215,7 @@ async def test_forget_data_item_passes_the_receipt_through():
     assert result == receipt
 
 
+@pytest.mark.asyncio
 async def test_forget_data_item_keeps_the_resolved_id_over_a_legacy_input():
     """A legacy id passed to ``forget`` resolves inside ``delete_data``; the
     receipt names the resolved id and ``forget`` must not overwrite it with the
