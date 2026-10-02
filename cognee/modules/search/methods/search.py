@@ -493,8 +493,17 @@ async def search_in_datasets_context(
                     return await get_retriever_output(**retriever_kwargs)
                 except NoDataError as error:
                     if dataset is None:
-                        # Shared single-tenant graph, no dataset to name.
-                        raise
+                        # Shared single-tenant graph, no dataset to name: still a
+                        # result, not a failure — empty, with the retriever's
+                        # reason on ``error``.
+                        logger.warning("No searchable memory: %s", error.message)
+                        return _no_data_payload(
+                            None,
+                            reason=error.message,
+                            query_type=query_type,
+                            query_text=query_text,
+                            only_context=only_context,
+                        )
                     raise DatasetNoDataError(dataset, error) from error
 
         tasks.append(_search_without_context())
@@ -551,42 +560,23 @@ def _collect_dataset_results(
     query_text: str,
     only_context: bool,
 ) -> list[SearchResultPayload]:
-    """Turn the fan-out's per-dataset outcomes into one entry per dataset, or one error.
+    """Turn the fan-out's per-dataset outcomes into one entry per dataset.
 
-    A dataset without searchable memory fails the search only when *every* searched
-    dataset is in that state; then one NoDataError (404) names each of them and what
-    it is missing. Otherwise the list keeps one entry per dataset, in request order:
-    a dataset that could not be searched comes back with empty results and its reason
-    on ``error``, so the caller is told what happened without losing the siblings'
-    answers (``datasets=None`` means "every dataset the user can read", so a single
-    freshly created dataset must not take down unscoped search). Any other exception
+    A dataset without searchable memory is a result, not a failure: it comes back
+    with empty results and its reason on ``error`` (shaped exactly like a query
+    miss, so callers that only read ``search_result`` see ``[]``), and a warning
+    names it. This holds when every searched dataset is in that state too — a
+    dataset that exists but was never cognified, or a freshly created one, is the
+    normal state of a store before its first ingestion, and a search over it has
+    the same answer as a search that found nothing: no results. Callers that want
+    to tell the two apart read ``error`` (``verbose=True`` over ``search()``).
+    The list keeps one entry per dataset, in request order, so one empty dataset
+    never costs the siblings' answers under ``datasets=None``. Any other exception
     propagates unchanged and fails the whole search.
     """
     for outcome in outcomes:
         if isinstance(outcome, BaseException) and not isinstance(outcome, DatasetNoDataError):
             raise outcome
-
-    no_data = [outcome for outcome in outcomes if isinstance(outcome, DatasetNoDataError)]
-    if no_data and len(no_data) == len(outcomes):
-        if len(no_data) == 1:
-            only = no_data[0]
-            raise NoDataError(
-                message=(
-                    f"No searchable memory in dataset '{only.dataset.name}' "
-                    f"(id: {only.dataset.id}): {only.reason}"
-                ),
-                status_code=only.status_code,
-            )
-        lines = "\n".join(
-            f"- '{error.dataset.name}' (id: {error.dataset.id}): {error.reason}"
-            for error in no_data
-        )
-        raise NoDataError(
-            message=(
-                f"No searchable memory in any of the {len(no_data)} searched datasets:\n{lines}"
-            ),
-            status_code=no_data[0].status_code,
-        )
 
     payloads: list[SearchResultPayload] = []
     for outcome in outcomes:
@@ -606,28 +596,31 @@ def _collect_dataset_results(
 
 
 def _no_data_payload(
-    error: DatasetNoDataError,
+    error: DatasetNoDataError | None,
     *,
     query_type: SearchType,
     query_text: str,
     only_context: bool,
+    reason: str | None = None,
 ) -> SearchResultPayload:
     """The entry a dataset without searchable memory gets: empty results plus the reason.
 
     Shaped like a query miss for the same request (``[]`` under ``search_result``,
     an empty context for ``only_context``) so existing callers see what they always
-    saw; only ``error`` is new.
+    saw; only ``error`` is new. ``error`` is ``None`` for the shared single-tenant
+    graph, which has no dataset to name — pass the retriever's ``reason`` then.
     """
+    dataset = error.dataset if error is not None else None
     return SearchResultPayload(
         result_object=[],
         context=[] if only_context else None,
         search_type=query_type,
         only_context=only_context,
         question=query_text,
-        dataset_name=error.dataset.name,
-        dataset_id=error.dataset.id,
-        dataset_tenant_id=error.dataset.tenant_id,
-        error=error.reason,
+        dataset_name=dataset.name if dataset is not None else None,
+        dataset_id=dataset.id if dataset is not None else None,
+        dataset_tenant_id=dataset.tenant_id if dataset is not None else None,
+        error=error.reason if error is not None else reason,
     )
 
 
