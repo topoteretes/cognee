@@ -7,6 +7,7 @@ from collections import OrderedDict
 from enum import Enum
 from os import path
 from typing import (  # noqa: UP035 - typing.List is a distinct origin key, not an annotation
+    Any,
     List,
     Optional,
     Union,
@@ -57,6 +58,65 @@ _ORIGIN_DEFAULT_FACTORIES = {
     set: set,
     tuple: tuple,
 }
+# Stamped with "now" whenever a DataPoint is constructed, so they differ on
+# every re-ingest of identical content and say nothing about whether it changed.
+_VOLATILE_PAYLOAD_FIELDS = ("created_at", "updated_at")
+
+
+def _id_in_predicate(ids: list[str]) -> str:
+    """``id = '...'`` / ``id IN (...)`` with escaped string literals.
+
+    Built explicitly rather than from Python's tuple repr so single quotes in
+    an id cannot break the LanceDB SQL grammar (mirrors how search() escapes
+    ``name`` values).
+    """
+    escaped_ids = [id_.replace("'", "''") for id_ in ids]
+    if len(escaped_ids) == 1:
+        return f"id = '{escaped_ids[0]}'"
+    return "id IN ({})".format(", ".join(f"'{id_}'" for id_ in escaped_ids))
+
+
+def _reusable_vector(
+    data_point: DataPoint, embeddable_text: Any, stored_row: dict | None, vector_size: int
+) -> list[float] | None:
+    """The stored vector, when it was embedded from exactly ``embeddable_text``.
+
+    A stored row's vector is ``embed(payload[index_field])``, so an unchanged
+    index field means re-embedding would return the vector already stored. The
+    dataset context refuses to run against a store built by another embedding
+    model (``ensure_embedding_model_matches``), so the model is the same too.
+    """
+    if stored_row is None or embeddable_text is None:
+        return None
+    index_fields = data_point.metadata.get("index_fields") or []
+    if not index_fields:
+        return None
+    stored_text = (stored_row.get("payload") or {}).get(index_fields[0])
+    if isinstance(stored_text, str):
+        stored_text = stored_text.strip()
+    if stored_text != embeddable_text:
+        return None
+    vector = stored_row.get("vector")
+    if vector is None or len(vector) != vector_size:
+        return None
+    return list(vector)
+
+
+def _payload_unchanged(stored_row: dict | None, lance_data_point: Any) -> bool:
+    """True when ``lance_data_point``'s payload is the one already stored.
+
+    Only asked for points whose stored vector was reused: equal payloads then
+    mean an equal index field, so the stored vector is still that text's
+    embedding and writing the row would store what is already there.
+    """
+    if stored_row is None:
+        return False
+    stored_payload = dict(stored_row.get("payload") or {})
+    incoming_payload = lance_data_point.payload.model_dump()
+    for field in _VOLATILE_PAYLOAD_FIELDS:
+        stored_payload.pop(field, None)
+        incoming_payload.pop(field, None)
+    return stored_payload == incoming_payload
 
 
 class IndexSchema(DataPoint):
@@ -440,6 +500,26 @@ class LanceDBAdapter(VectorDBInterface):
         connection = await self.get_connection()
         return await connection.open_table(collection_name)
 
+    async def _fetch_rows_by_id(
+        self, collection, collection_name: str, ids: list[str], columns: list[str]
+    ) -> dict:
+        """Stored rows for ``ids`` (only ``columns``, which must include id), keyed by id.
+
+        Best-effort: if the lookup fails (e.g. empty table, schema mismatch the
+        migration path will handle) the caller proceeds as if nothing is
+        stored, which is the full re-embed-and-upsert behaviour.
+        """
+        if not ids:
+            return {}
+        try:
+            rows = await collection.query().where(_id_in_predicate(ids)).select(columns).to_list()
+        except Exception as e:
+            logger.debug(
+                "Existing-row lookup failed for '%s': %s", collection_name, e, exc_info=True
+            )
+            return {}
+        return {row["id"]: row for row in rows}
+
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set with any prior rows."""
         payload_schema = type(data_points[0])
@@ -453,12 +533,30 @@ class LanceDBAdapter(VectorDBInterface):
                     )
 
         collection = await self.get_collection(collection_name)
-
-        data_vectors = await self.embed_data(
-            [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
-        )
-
+        incoming_ids = [str(dp.id) for dp in data_points]
         vector_size = self.embedding_engine.get_vector_size()
+
+        # Re-ingesting unchanged content is the common case (every cognify
+        # re-indexes the edge types and entities it touched), so embed only the
+        # data points whose embeddable text differs from what is stored. This
+        # read is outside the lock on purpose: embedding is the slow part, and a
+        # stored vector for identical text is correct whatever happens next.
+        stored_rows = await self._fetch_rows_by_id(
+            collection, collection_name, incoming_ids, ["id", "vector", "payload"]
+        )
+        embeddable_texts = [DataPoint.get_embeddable_data(dp) for dp in data_points]
+        data_vectors = [
+            _reusable_vector(dp, text, stored_rows.get(str(dp.id)), vector_size)
+            for dp, text in zip(data_points, embeddable_texts)
+        ]
+        reused_vector_ids = {
+            str(dp.id) for dp, vector in zip(data_points, data_vectors) if vector is not None
+        }
+        to_embed = [index for index, vector in enumerate(data_vectors) if vector is None]
+        if to_embed:
+            fresh_vectors = await self.embed_data([embeddable_texts[index] for index in to_embed])
+            for index, vector in zip(to_embed, fresh_vectors):
+                data_vectors[index] = vector
 
         # One LanceDataPoint class per (payload schema, vector size), cached
         # globally. Building a new class per call — let alone per record —
@@ -476,36 +574,14 @@ class LanceDBAdapter(VectorDBInterface):
         lance_data_points: list = []
         try:
             async with self.VECTOR_DB_LOCK:
+                existing_rows = await self._fetch_rows_by_id(
+                    collection, collection_name, incoming_ids, ["id", "payload"]
+                )
                 existing_belongs_to_set: dict[str, list] = {}
-                incoming_ids = [str(dp.id) for dp in data_points]
-                if incoming_ids:
-                    # Build the WHERE predicate explicitly with escaped string
-                    # literals rather than relying on Python's tuple repr —
-                    # mirrors how search() escapes `name` values to keep
-                    # single-quotes from breaking the LanceDB SQL grammar.
-                    escaped_ids = [id_.replace("'", "''") for id_ in incoming_ids]
-                    if len(escaped_ids) == 1:
-                        where_clause = f"id = '{escaped_ids[0]}'"
-                    else:
-                        id_list = ", ".join(f"'{id_}'" for id_ in escaped_ids)
-                        where_clause = f"id IN ({id_list})"
-                    try:
-                        existing_rows = await collection.query().where(where_clause).to_list()
-                        for row in existing_rows:
-                            row_payload = row.get("payload") or {}
-                            prior = row_payload.get("belongs_to_set") or []
-                            if prior:
-                                existing_belongs_to_set[row["id"]] = list(prior)
-                    except Exception as e:
-                        # Best-effort: if the lookup fails (e.g. empty table,
-                        # schema mismatch the migration path will handle),
-                        # fall through to the standard upsert.
-                        logger.debug(
-                            "belongs_to_set merge lookup failed for '%s': %s",
-                            collection_name,
-                            e,
-                            exc_info=True,
-                        )
+                for row_id, row in existing_rows.items():
+                    prior = (row.get("payload") or {}).get("belongs_to_set") or []
+                    if prior:
+                        existing_belongs_to_set[row_id] = list(prior)
 
                 def create_lance_data_point(data_point: DataPoint, vector: list[float]):
                     lance_cls, payload_model = _lance_cls_for(data_point)
@@ -554,12 +630,30 @@ class LanceDBAdapter(VectorDBInterface):
                     deduped_lance_points[dp.id] = dp
                 lance_data_points = list(deduped_lance_points.values())
 
-                await (
-                    collection.merge_insert("id")
-                    .when_matched_update_all()
-                    .when_not_matched_insert_all()
-                    .execute(self._records_for_write(lance_data_points))
-                )
+                # A merge_insert commits a new table version (a fragment, plus
+                # deletion files for the rows it replaces) even when every row
+                # it writes is identical to the stored one. Skip those rows,
+                # and the write itself when nothing changed.
+                changed_points = [
+                    point
+                    for point in lance_data_points
+                    if point.id not in reused_vector_ids
+                    or not _payload_unchanged(existing_rows.get(point.id), point)
+                ]
+                if len(changed_points) < len(lance_data_points):
+                    logger.debug(
+                        "Skipping %d unchanged of %d rows in '%s'",
+                        len(lance_data_points) - len(changed_points),
+                        len(lance_data_points),
+                        collection_name,
+                    )
+                if changed_points:
+                    await (
+                        collection.merge_insert("id")
+                        .when_matched_update_all()
+                        .when_not_matched_insert_all()
+                        .execute(self._records_for_write(changed_points))
+                    )
         except (ValueError, OSError, RuntimeError) as e:
             # Two LanceDB schema-drift failure modes are recoverable by rebuilding
             # the table via Pydantic validation (which fills defaults from the

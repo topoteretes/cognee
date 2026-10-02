@@ -119,6 +119,9 @@ class RemoteQuery(_BuilderChain):
     def where(self, predicate: str) -> RemoteQuery:
         return self._add("where", predicate)
 
+    def select(self, columns: list[str]) -> RemoteQuery:
+        return self._add("select", columns)
+
     async def to_list(self) -> list:
         return await self._terminal("to_list")
 
