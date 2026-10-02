@@ -10,7 +10,6 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
@@ -21,6 +20,7 @@ from cognee.modules.data.methods import (
     resolve_data_id,
 )
 from cognee.modules.data.models import Data
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.ingestion import save_data_to_file_detailed
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.ingestion.identify_many import identify_many
@@ -144,7 +144,7 @@ def _union_node_sets(
         if not isinstance(name, str) or not name.strip():
             continue
         try:
-            key = generate_node_id(f"NodeSet:{name}")
+            key = NodeSet.id_for(name)
         except UnicodeEncodeError:
             # A lone surrogate cannot become a NodeSet id; drop it, not the item.
             continue
