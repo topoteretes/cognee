@@ -6,6 +6,7 @@ partition semantics: code and manifests go to the repo item, prose stays in
 the document pipeline, and binaries/dotfiles can never abort an add.
 """
 
+import importlib
 import json
 from pathlib import Path
 
@@ -328,8 +329,6 @@ async def test_data_without_repository_urls_is_returned_unchanged(monkeypatch):
 
 @pytest.fixture
 def local_paths_disabled(monkeypatch, tmp_path):
-    import importlib
-
     # The directory must resolve as a local path for the check to be reached.
     monkeypatch.setenv("COGNEE_ALLOWED_LOCAL_FILE_ROOTS", str(tmp_path))
 
@@ -547,3 +546,58 @@ async def test_plain_directory_is_left_to_the_pipeline(tmp_path):
     data = [str(folder)]
 
     assert await code_repo_module.resolve_code_repositories(data, include_documents=False) is data
+
+
+@pytest.mark.asyncio
+async def test_refused_local_paths_are_never_probed(tmp_path, monkeypatch, llm_key_set):
+    """ACCEPT_LOCAL_FILE_PATH=false is checked before anything touches the disk.
+
+    The eager hook runs ahead of the in-pipeline resolver, which applies the same
+    gate before it probes. Resolving or stat-ing a caller-supplied path here
+    first would let a refused caller learn whether a directory exists and
+    whether it looks like a code project.
+    """
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+
+    storage_module = importlib.import_module("cognee.tasks.ingestion.save_data_item_to_storage")
+
+    repo = _make_repo(tmp_path)
+    monkeypatch.setattr(storage_module.settings, "accept_local_file_path", False)
+
+    def _never(*_args, **_kwargs):
+        raise AssertionError("the filesystem must not be touched for a refused path")
+
+    monkeypatch.setattr(code_repo_module, "detect_code_project", _never)
+    monkeypatch.setattr(
+        "cognee.infrastructure.files.utils.local_path_safety.resolve_local_path", _never
+    )
+
+    data = [str(repo)]
+    # Not intercepted: the item is handed on untouched and the pipeline's own
+    # resolver raises the refusal.
+    assert await code_repo_module.resolve_code_repositories(data, include_documents=False) is data
+
+
+@pytest.mark.asyncio
+async def test_repository_urls_still_resolve_when_local_paths_are_refused(
+    tmp_path, monkeypatch, llm_key_set
+):
+    """The gate is about caller-supplied paths; a clone cognee makes is its own."""
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+
+    storage_module = importlib.import_module("cognee.tasks.ingestion.save_data_item_to_storage")
+
+    clone = _make_repo(tmp_path)
+    monkeypatch.setattr(storage_module.settings, "accept_local_file_path", False)
+
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None):
+        return clone
+
+    monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
+
+    resolved = await code_repo_module.resolve_code_repositories(
+        ["https://github.com/org/repo"], include_documents=False
+    )
+
+    assert len(resolved) == 1
+    assert resolved[0].system_metadata["source"] == "code_repo"

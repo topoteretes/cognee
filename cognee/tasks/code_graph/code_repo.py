@@ -391,9 +391,18 @@ async def resolve_code_repositories(
     from cognee.tasks.code_graph.resolve_repo import SSH_REPO_SPEC_MESSAGE, is_ssh_repo_spec
     from cognee.tasks.ingestion.save_data_item_to_storage import settings as save_data_settings
 
+    # Read before anything reaches the filesystem. A deployment that refuses
+    # caller-supplied local paths must not have one resolved, stat-ed, or probed
+    # for project markers here -- the in-pipeline resolver checks the same gate
+    # before it probes, and this hook runs ahead of it. With the gate off such an
+    # item is simply not intercepted; the pipeline then raises the refusal.
+    accept_local_paths = save_data_settings.accept_local_file_path
+
     def _local_project(item) -> Path | None:
         """``item`` as a local code-project directory, or None for anything else."""
-        if not isinstance(item, str) or code_repo_clone_url(item) is not None:
+        if not accept_local_paths or not isinstance(item, str):
+            return None
+        if code_repo_clone_url(item) is not None:
             return None
         try:
             path = resolve_local_path(item, must_exist=True)
@@ -432,14 +441,6 @@ async def resolve_code_repositories(
 
         project_path = _local_project(item)
         if project_path is not None:
-            if not save_data_settings.accept_local_file_path:
-                from cognee.modules.ingestion.exceptions import IngestionError
-
-                raise IngestionError(
-                    message="Local directories are not accepted "
-                    "(ACCEPT_LOCAL_FILE_PATH=false). Pass a repository URL "
-                    "or upload the files instead."
-                )
             manifest_item, document_paths, _skipped = await resolve_code_repository(
                 project_path,
                 user=user,
