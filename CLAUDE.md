@@ -807,6 +807,8 @@ await cognee.recall("my question", datasets=["my_project"])
 
 `remember()`/`add()` without `dataset_name` target the default dataset `main_dataset`; `recall()`/`search()` span all accessible datasets unless one is given.
 
+**Session companion datasets.** `POST /api/v1/datasets/{dataset_id}/session-companion` creates, or on later calls verifies, the dataset's `<name>-agent_sessions` companion: an ordinary dataset owned by the primary's owner, with the id `POST /datasets` would derive for that owner and name, and a copy of every permission the primary carries, written in one transaction. The agent plugins route a session's Q&A and traces there so the primary graph stays free of conversational chatter, and recall across both. Only the owner or an agent user provisioned by the owner may call it (403 otherwise); a companion whose permissions have drifted from the primary's is a 409, never silently rewritten, and the client then writes to the primary. The response keys are plain snake_case because the plugins read them literally. Implementation: `cognee/modules/data/methods/provision_session_companion.py`.
+
 ### DataPoints
 Atomic knowledge units that form the foundation of graph structures. All graph nodes extend the `DataPoint` base class with versioning and metadata support.
 
