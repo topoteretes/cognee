@@ -351,6 +351,7 @@ async def recall(
     datasets: list[str] | None = None,
     dataset_ids: list[UUID] | None = None,
     top_k: int = 15,
+    min_score: float | None = None,
     auto_route: bool = True,
     scope: str | list[str] | None = None,
     system_prompt: str | None = None,
@@ -401,6 +402,9 @@ async def recall(
         datasets: Dataset names to search within.
         dataset_ids: Dataset UUIDs to search within. Takes precedence over datasets.
         top_k: Maximum results to return (default *15*).
+        min_score: Optional minimum fused hybrid score. When no hybrid chunk
+            reaches it, recall returns no graph context. Only applies to
+            HYBRID_COMPLETION; omitted preserves the existing behavior.
         auto_route: If True and query_type is None, classify the query
             automatically. If False, fall back to HYBRID_COMPLETION.
         response_model: Pydantic model class for structured completion output.
@@ -437,6 +441,14 @@ async def recall(
     """
     from cognee import __version__ as cognee_version
     from cognee.shared.utils import send_telemetry
+
+    if min_score is not None:
+        if isinstance(min_score, bool) or not isinstance(min_score, (int, float)) or min_score < 0:
+            raise CogneeValidationError(message="min_score must be a non-negative number or null.")
+        retriever_specific_config = {
+            **(retriever_specific_config or {}),
+            "min_score": float(min_score),
+        }
 
     # Fold the first-class response_model param into retriever_specific_config,
     # the channel the retriever registry already reads. Doing this up front means
@@ -554,6 +566,7 @@ async def recall(
                 datasets=datasets,
                 dataset_ids=dataset_ids,
                 top_k=top_k,
+                min_score=min_score,
                 scope=forward_scope,
                 system_prompt=system_prompt,
                 node_name=node_name,
