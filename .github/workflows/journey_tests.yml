@@ -1,9 +1,10 @@
 name: Reusable Product Journey Tests
 
-# High-level product contract tests (cognee/tests/journeys). The mock tier needs
-# no secrets, so it runs for fork PRs too and gives them a real signal.
-# Real-LLM runs of the same journeys are wired separately (nightly) via
-# COGNEE_JOURNEY_MODE=llm.
+# High-level product contract tests (cognee/tests/journeys).
+#
+# mode: mock (default) needs no secrets, so it runs for fork PRs too and gives
+# them a real signal. mode: llm runs the same journeys against the real
+# providers from secrets; nightly_tests.yml calls it that way.
 
 on:
   workflow_call:
@@ -16,28 +17,58 @@ on:
         required: false
         type: string
         default: ''
+      mode:
+        description: "'mock' (deterministic, no secrets) or 'llm' (real providers)."
+        required: false
+        type: string
+        default: 'mock'
+    secrets:
+      # Only read when mode == 'llm'. Callers pass `secrets: inherit`.
+      LLM_PROVIDER:
+        required: false
+      LLM_MODEL:
+        required: false
+      LLM_ENDPOINT:
+        required: false
+      LLM_API_KEY:
+        required: false
+      LLM_API_VERSION:
+        required: false
+      EMBEDDING_PROVIDER:
+        required: false
+      EMBEDDING_MODEL:
+        required: false
+      EMBEDDING_ENDPOINT:
+        required: false
+      EMBEDDING_API_KEY:
+        required: false
 
 env:
   RUNTIME__LOG_LEVEL: ERROR
   ENV: 'dev'
   TELEMETRY_DISABLED: '1'
-  COGNEE_JOURNEY_MODE: mock
-  # Mock mode never calls a provider; config validation still wants these present.
-  LLM_PROVIDER: openai
-  LLM_MODEL: openai/gpt-5-mini
-  LLM_API_KEY: mock-key
-  EMBEDDING_PROVIDER: openai
-  EMBEDDING_MODEL: openai/text-embedding-3-small
-  EMBEDDING_DIMENSIONS: '256'
-  EMBEDDING_API_KEY: mock-key
-  COGNEE_SKIP_PREFLIGHT: '1'
+  COGNEE_JOURNEY_MODE: ${{ inputs.mode }}
+  # llm: provider settings from secrets. mock: never called, but config
+  # validation still wants the variables present.
+  LLM_PROVIDER: ${{ inputs.mode == 'llm' && secrets.LLM_PROVIDER || 'openai' }}
+  LLM_MODEL: ${{ inputs.mode == 'llm' && secrets.LLM_MODEL || 'openai/gpt-5-mini' }}
+  LLM_ENDPOINT: ${{ inputs.mode == 'llm' && secrets.LLM_ENDPOINT || '' }}
+  LLM_API_KEY: ${{ inputs.mode == 'llm' && secrets.LLM_API_KEY || 'mock-key' }}
+  LLM_API_VERSION: ${{ inputs.mode == 'llm' && secrets.LLM_API_VERSION || '' }}
+  EMBEDDING_PROVIDER: ${{ inputs.mode == 'llm' && secrets.EMBEDDING_PROVIDER || 'openai' }}
+  EMBEDDING_MODEL: ${{ inputs.mode == 'llm' && secrets.EMBEDDING_MODEL || 'openai/text-embedding-3-small' }}
+  EMBEDDING_ENDPOINT: ${{ inputs.mode == 'llm' && secrets.EMBEDDING_ENDPOINT || '' }}
+  EMBEDDING_API_KEY: ${{ inputs.mode == 'llm' && secrets.EMBEDDING_API_KEY || 'mock-key' }}
+  EMBEDDING_DIMENSIONS: ${{ inputs.mode == 'llm' && '300' || '256' }}
+  COGNEE_SKIP_PREFLIGHT: ${{ inputs.mode == 'mock' && '1' || '' }}
   COGNEE_SKIP_CONNECTION_TEST: 'true'
 
 jobs:
-  journeys-mock:
-    name: Product Journeys (mock LLM)
+  journeys:
+    name: Product Journeys (${{ inputs.mode }} LLM)
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    # llm mode makes a few hundred provider calls; observed ~30 min locally.
+    timeout-minutes: ${{ inputs.mode == 'llm' && 90 || 30 }}
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
@@ -53,10 +84,10 @@ jobs:
       - name: Memory correctness, sessions, lifecycle, idempotency, HTTP API
         run: |
           uv run pytest cognee/tests/journeys -m "journey and not quickstart" \
-            -v --timeout=1500 -p no:cacheprovider -W ignore
+            -v --timeout=4800 -p no:cacheprovider -W ignore
 
-  quickstart-mock:
-    name: Quickstart in a fresh venv (wheel install)
+  quickstart:
+    name: Quickstart in a fresh venv (${{ inputs.mode }} LLM, wheel install)
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
