@@ -178,10 +178,14 @@ jobs:
           extra-dependencies: "turso"
 
       # Adapter behavior against a real embedded libSQL DB (no LLM needed).
+      # Covers both the vector adapter and the graph adapter (node_set
+      # tagging/detagging, delete_edge_triples).
       - name: Run Turso adapter unit tests
         env:
           ENV: 'dev'
-        run: uv run pytest cognee/tests/unit/infrastructure/databases/vector/test_turso_adapter.py -v
+        run: |
+          uv run pytest cognee/tests/unit/infrastructure/databases/vector/test_turso_adapter.py -v
+          uv run pytest cognee/tests/e2e/turso/test_turso_adapter.py -v
 
       # Full search-type e2e suite, run against Turso via VECTOR_DB_PROVIDER.
       - name: Run Turso search tests

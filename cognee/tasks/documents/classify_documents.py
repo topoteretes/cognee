@@ -1,5 +1,6 @@
 import json
 
+from cognee.modules.chunking.external_metadata import node_set_names_from_external_metadata
 from cognee.modules.data.models import Data
 from cognee.modules.data.processing.document_types import (
     AudioDocument,
@@ -13,8 +14,7 @@ from cognee.modules.data.processing.document_types import (
     TextDocument,
     UnstructuredDocument,
 )
-from cognee.modules.engine.models.node_set import NodeSet
-from cognee.modules.engine.utils.generate_node_id import generate_node_id
+from cognee.modules.engine.models.node_set import node_sets_from_names
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.tasks.code_graph.code_files import is_code_sourced
 from cognee.tasks.code_graph.code_repo import is_code_repo_sourced
@@ -82,25 +82,11 @@ def update_node_set(document):
         - document: The document object which contains external_metadata from which the
           node_set will be extracted.
     """
-    try:
-        external_metadata = json.loads(document.external_metadata)
-    except json.JSONDecodeError:
+    node_set = node_set_names_from_external_metadata(document.external_metadata)
+    if node_set is None:
         return
 
-    if not isinstance(external_metadata, dict):
-        return
-
-    if "node_set" not in external_metadata:
-        return
-
-    node_set = external_metadata["node_set"]
-    if not isinstance(node_set, list):
-        return
-
-    document.belongs_to_set = [
-        NodeSet(id=generate_node_id(f"NodeSet:{node_set_name}"), name=node_set_name)
-        for node_set_name in node_set
-    ]
+    document.belongs_to_set = node_sets_from_names(node_set)
     document.source_node_set = ", ".join(node_set)
 
 
