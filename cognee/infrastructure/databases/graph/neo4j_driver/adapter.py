@@ -2539,6 +2539,37 @@ class Neo4jAdapter(GraphDBInterface):
 
         return ", ".join(f"'{uid}'" for uid in time_ids_list)
 
+    async def get_timestamps_in_range(
+        self, start: int | None, end: int | None
+    ) -> list[dict[str, Any]]:
+        """Timestamp nodes whose ``[time_at, time_until)`` overlaps ``[start, end)``."""
+        conditions = ["n.type = 'Timestamp'"]
+        params: dict[str, Any] = {}
+        if end is not None:
+            conditions.append("n.time_at < $window_end")
+            params["window_end"] = int(end)
+        if start is not None:
+            conditions.append("coalesce(n.time_until, n.time_at + 1000) > $window_start")
+            params["window_start"] = int(start)
+        cypher = f"""
+        MATCH (n:`{BASE_LABEL}`)
+        WHERE {" AND ".join(conditions)}
+        RETURN n.id AS id, n.timestamp_str AS timestamp_str, n.time_at AS time_at,
+               coalesce(n.time_until, n.time_at + 1000) AS time_until
+        ORDER BY time_at, id
+        """
+        rows = await self.query(cypher, params)
+        return [
+            {
+                "id": row["id"],
+                "type": "Timestamp",
+                "timestamp_str": row["timestamp_str"],
+                "time_at": row["time_at"],
+                "time_until": row["time_until"],
+            }
+            for row in rows
+        ]
+
     async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
         """
         Retrieve a batch of triplets (start_node, relationship, end_node) from the graph.

@@ -203,6 +203,14 @@ if cache_config.shared_ladybug_lock:
     from cognee.infrastructure.databases.cache.get_cache_engine import get_cache_engine
 
 
+def _json_string(value: Any) -> str:
+    """A string field read back through json_extract, unquoted."""
+    if value is None:
+        return ""
+    text = str(value)
+    return text[1:-1] if len(text) >= 2 and text[0] == text[-1] == '"' else text
+
+
 class LadybugAdapter(GraphDBInterface):
     """
     Adapter for Ladybug graph database operations with improved consistency and async support.
@@ -3834,6 +3842,47 @@ class LadybugAdapter(GraphDBInterface):
         time_ids_list = [item[0] for item in time_nodes]
 
         return time_ids_list
+
+    async def get_timestamps_in_range(
+        self, start: int | None, end: int | None
+    ) -> list[dict[str, Any]]:
+        """Timestamp nodes whose ``[time_at, time_until)`` overlaps ``[start, end)``."""
+        conditions = ["time_at IS NOT NULL"]
+        params: dict[str, Any] = {}
+        if end is not None:
+            conditions.append("time_at < $window_end")
+            params["window_end"] = int(end)
+        if start is not None:
+            conditions.append("time_until > $window_start")
+            params["window_start"] = int(start)
+        # Properties live in a JSON string column; the casts run only on Timestamp
+        # nodes (filtered first) and tolerate a missing or empty field, as the
+        # temporal pipeline's collect_time_ids does.
+        query_str = f"""
+        MATCH (n:Node)
+        WHERE n.type = 'Timestamp'
+        WITH n,
+             json_extract(n.properties, '$.time_at') AS at_str,
+             json_extract(n.properties, '$.time_until') AS until_str
+        WITH n,
+             CASE WHEN at_str IS NULL OR at_str = '' THEN NULL ELSE CAST(at_str AS INT64) END AS time_at,
+             CASE WHEN until_str IS NULL OR until_str = '' THEN NULL ELSE CAST(until_str AS INT64) END AS until_raw
+        WITH n, time_at, COALESCE(until_raw, time_at + 1000) AS time_until
+        WHERE {" AND ".join(conditions)}
+        RETURN n.id, json_extract(n.properties, '$.timestamp_str'), time_at, time_until
+        ORDER BY time_at, n.id
+        """
+        rows = await self.query(query_str, params)
+        return [
+            {
+                "id": row[0],
+                "type": "Timestamp",
+                "timestamp_str": _json_string(row[1]),
+                "time_at": row[2],
+                "time_until": row[3],
+            }
+            for row in rows
+        ]
 
     async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
         """
