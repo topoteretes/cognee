@@ -48,17 +48,39 @@ def _methods_called_on(variable_names: set) -> set:
     return called
 
 
+# Table methods the adapter calls only on its local-mode branch (guarded by
+# ``not self._subprocess_mode`` in ``_compact_collection``): in subprocess mode
+# the whole compaction crosses the boundary as ``optimize(**options)`` and the
+# worker calls these on the real table.
+_LOCAL_ONLY_TABLE_METHODS = {"to_lance", "checkout_latest"}
+
+
 def test_proxy_forwards_every_table_method_the_adapter_calls():
     # The adapter binds an open table to one of these before using it.
     called = _methods_called_on({"collection", "table"})
     assert called, "parsed no table calls — the adapter's naming changed"
 
-    missing = {name for name in called if not hasattr(RemoteLanceDBTable, name)}
+    missing = {
+        name
+        for name in called
+        if name not in _LOCAL_ONLY_TABLE_METHODS and not hasattr(RemoteLanceDBTable, name)
+    }
 
     assert not missing, (
         f"LanceDBAdapter calls {sorted(missing)} on a table, but RemoteLanceDBTable "
         "does not forward it. Subprocess mode is the default, so this raises "
         "AttributeError in normal operation while passing in local mode."
+    )
+
+
+def test_optimize_forwards_compaction_options():
+    """The bounded compaction's options must reach the worker, not be dropped."""
+    import inspect
+
+    params = inspect.signature(RemoteLanceDBTable.optimize).parameters.values()
+    assert any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params), (
+        "RemoteLanceDBTable.optimize must accept **options so LanceDBAdapter.compact "
+        "can run the bounded compaction inside the worker"
     )
 
 

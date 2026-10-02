@@ -293,15 +293,24 @@ class RemoteLanceDBTable:
             Request(op=OP_TABLE_DELETE, handle_id=self.handle_id, args=(where_expr,))
         )
 
-    async def optimize(self) -> None:
-        """Compact the table (mirrors ``lancedb.AsyncTable.optimize``).
+    async def optimize(self, **options) -> dict | None:
+        """Compact the table.
 
-        Materializes deletion vectors into clean fragments — lance 0.32 reads
-        and merge_inserts can panic on tables carrying fresh deletion vectors,
-        so callers that bulk-delete (e.g. id migrations) compact afterwards."""
-        await self._session.call_async(
-            Request(op=OP_TABLE_OPTIMIZE, handle_id=self.handle_id, args=())
+        Without options this is lancedb's own ``AsyncTable.optimize``: it
+        materializes deletion vectors into clean fragments, which callers that
+        bulk-delete (e.g. id migrations) rely on. With options
+        (``target_rows_per_fragment``, ``retention_seconds``, ``max_tasks``) the
+        worker runs the bounded compaction in
+        ``cognee_db_workers.lancedb_compaction`` and returns its stats."""
+        resp = await self._session.call_async(
+            Request(
+                op=OP_TABLE_OPTIMIZE,
+                handle_id=self.handle_id,
+                args=(),
+                kwargs=dict(options),
+            )
         )
+        return resp.result
 
     def query(self) -> RemoteQuery:
         return RemoteQuery(self._session, self.handle_id, OP_TABLE_QUERY_EXECUTE, ())
