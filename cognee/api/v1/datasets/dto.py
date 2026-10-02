@@ -28,3 +28,7 @@ class DataDTO(OutDTO):
     # rendered a size column against this row; without the field it read
     # undefined and showed a dash for every file.
     data_size: int | None = None
+    # MD5 of the ingested payload (see cognee.modules.data.content_hash). Lets
+    # a client that knows what it added find the row again via
+    # GET /datasets/{id}/data?content_hash=... without listing everything.
+    content_hash: str | None = None
