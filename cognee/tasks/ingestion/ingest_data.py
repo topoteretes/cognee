@@ -479,6 +479,7 @@ async def ingest_data(
                 # (current_label None) must not clear a previously stored one.
                 if current_label is not None:
                     data_point.label = current_label
+                data_point.importance_weight = importance_weight
 
                 if content_changed:
                     data_point.pipeline_status = {}

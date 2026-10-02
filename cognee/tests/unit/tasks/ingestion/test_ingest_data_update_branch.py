@@ -10,6 +10,30 @@ def test_data_model_has_data_size_column_not_file_size():
     assert "file_size" not in columns
 
 
+def test_ingest_data_update_branch_assigns_importance_weight():
+    """Regression test for #3372: the update branch in store_data_to_dataset
+    must assign `data_point.importance_weight` alongside the other fields.
+    The create branch sets it as a constructor kwarg (not an `ast.Assign`),
+    so this assignment test only sees the update path.
+    """
+    source_path = Path(__file__).parents[4] / "tasks" / "ingestion" / "ingest_data.py"
+    tree = ast.parse(source_path.read_text())
+
+    assigned_attrs = {
+        node.targets[0].attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and isinstance(node.targets[0], ast.Attribute)
+        and isinstance(node.targets[0].value, ast.Name)
+        and node.targets[0].value.id == "data_point"
+    }
+
+    assert "importance_weight" in assigned_attrs, (
+        "update branch does not assign data_point.importance_weight: "
+        "re-ingesting a file would never update the column"
+    )
+
+
 def test_ingest_data_update_branch_assigns_data_size():
     """Regression test for #3160: the update branch in store_data_to_dataset
     must assign to `data_point.data_size`, the actual mapped column, not the
