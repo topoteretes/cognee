@@ -359,8 +359,9 @@ def get_remember_router() -> APIRouter:
 
         ## Error Codes
         - **400 Bad Request**: Neither datasetId nor datasetName provided, unsupported
-          content_type, invalid graph_model JSON/schema, or index_vectors with
-          session_id or content_type
+          content_type, invalid graph_model JSON/schema, index_vectors with
+          session_id or content_type, or a deprecated content_type="code" request
+          that carries session_id, file uploads, or no raw_data entry
         - **409 Conflict**: Error during processing
         """
         # Swagger UI submits an untouched file list as one blank part; treat it
@@ -400,6 +401,21 @@ def get_remember_router() -> APIRouter:
                         "are stored in the permanent graph, not a session cache."
                     ),
                 )
+            if data:
+                # Checked here, before raw_data is merged into `data` below:
+                # this is the last point at which an upload is distinguishable
+                # from a repository spec. The removed route refused the
+                # combination outright, and it stays ambiguous — a repository
+                # ingest suppresses the repo's own documents, which says
+                # nothing about what to do with files the caller attached.
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "content_type='code' does not accept file uploads — pass repository "
+                        "paths or git URLs via 'raw_data'. To ingest individual code "
+                        "files, upload them under their real filename without content_type."
+                    ),
+                )
             logger.warning(
                 "POST /remember content_type='code' is deprecated: pass the repository "
                 "path or URL in raw_data; it is read as code-graph-only ingestion "
@@ -419,6 +435,18 @@ def get_remember_router() -> APIRouter:
                     "'cogx-archive' take file uploads."
                 ),
             )
+        if code_only and not raw_items:
+            # Reported as the missing repository rather than as the generic
+            # "nothing to ingest" below: the caller said this was a repository
+            # ingest, so name the field that carries one.
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "content_type='code' requires at least one repository path or "
+                    "git URL in 'raw_data'."
+                ),
+            )
+
         # None (not []) when nothing was sent: the skills and archive paths
         # below distinguish "no uploads" by falsiness either way, and
         # remember() sees the same value it always did.
