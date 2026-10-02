@@ -11,10 +11,23 @@ The other graph adapters - ladybug, neo4j, postgres, turso - raise or have no
 handler on all four.
 """
 
+import sys
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+# Mock the optional AWS dependencies when they are not installed: the adapter
+# imports botocore.config at module level and langchain_aws behind a guard, and
+# the macOS/Windows unit legs run without the aws/neptune extras.
+if "langchain_aws" not in sys.modules:
+    sys.modules["langchain_aws"] = MagicMock()
+try:
+    import botocore
+except ImportError:
+    mock_botocore = MagicMock()
+    sys.modules["botocore"] = mock_botocore
+    sys.modules["botocore.config"] = mock_botocore.config
 
 from cognee.infrastructure.databases.graph.neptune_driver.adapter import NeptuneGraphDB
 
