@@ -9,8 +9,8 @@ with one graph model, so a person in the database, the assignee of a ticket and 
 the meeting notes become one node. Then you ask questions that no single source can
 answer, browse the graph in the UI, or let Claude Code or Codex query it over MCP.
 
-Agents run this cookbook through the `company-brain` skill,
-[`.agents/skills/company-brain/SKILL.md`](../../../../.agents/skills/company-brain/SKILL.md).
+Agents run this cookbook through the `company-brain-multi-source` skill,
+[`.agents/skills/company-brain-multi-source/SKILL.md`](../../../../.agents/skills/company-brain-multi-source/SKILL.md).
 
 ## What it needs
 

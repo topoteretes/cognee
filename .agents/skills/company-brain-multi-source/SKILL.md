@@ -1,9 +1,9 @@
 ---
-name: company-brain
+name: company-brain-multi-source
 description: Build one company memory from a SQL database, a support ticket export and a folder of documents, linked into one graph by cognee, then answer questions that need several of those sources together. Use when someone wants to connect their company's database, tickets and docs, or asks who owns, decided or is handling something across them. Runs locally; reads the sources, writes only to cognee's memory.
 ---
 
-# Company brain
+# Company brain: multi-source
 
 Runs the company brain cookbook in `examples/cookbooks/company_brain/multi_source/`. It
 remembers a SQL database, a ticket export and a docs folder in the cognee dataset
