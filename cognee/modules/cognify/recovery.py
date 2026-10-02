@@ -17,7 +17,12 @@ from cognee.modules.data.models import Dataset
 from cognee.modules.pipelines.exceptions import AbandonedPipelineRunError
 from cognee.modules.pipelines.methods import get_unterminated_pipeline_runs
 from cognee.modules.pipelines.operations.log_pipeline_run_error import log_pipeline_run_error
+from cognee.modules.pipelines.operations.run_tasks_with_telemetry import (
+    PIPELINE_RUN_ERRORED,
+    pipeline_run_telemetry_properties,
+)
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import send_telemetry
 
 logger = get_logger("cognify.recovery")
 
@@ -116,6 +121,7 @@ async def recover_stale_pipeline_runs_on_startup() -> None:
                 pipeline_run.dataset_id,
                 rollback_handler is not None,
             )
+            _send_abandoned_run_telemetry(pipeline_run)
         except Exception:
             logger.exception(
                 "Startup recovery failed for %s run %s",
@@ -142,3 +148,28 @@ async def _close_as_abandoned(pipeline_run, dataset) -> None:
         origin=getattr(pipeline_run, "origin", None),
         parent_operation_id=getattr(pipeline_run, "parent_operation_id", None),
     )
+
+
+def _send_abandoned_run_telemetry(pipeline_run) -> None:
+    """Emit the terminal telemetry event the dead process never sent.
+
+    The run's ``Pipeline Run Started`` went out when it began; without this the
+    warehouse counts an abandoned run as a silent gap forever while the local
+    ``pipeline_runs`` table shows it closed. ``pipeline_name`` is the pipeline
+    id, as the live emitter sends it; ``exception_type`` is the class the ERRORED
+    row carries. Never raises: telemetry must not turn a successful recovery
+    into a logged failure.
+    """
+    try:
+        user_id = getattr(pipeline_run, "user_id", None)
+        tenant_id = getattr(pipeline_run, "tenant_id", None)
+        properties = pipeline_run_telemetry_properties(
+            pipeline_run.pipeline_id, pipeline_run.pipeline_run_id, tenant_id
+        ) | {"exception_type": AbandonedPipelineRunError.__name__, "recovered_at_startup": True}
+        send_telemetry(
+            PIPELINE_RUN_ERRORED,
+            SimpleNamespace(id=user_id, tenant_id=tenant_id) if user_id else None,
+            additional_properties=properties,
+        )
+    except Exception:
+        logger.debug("Abandoned-run telemetry skipped", exc_info=True)

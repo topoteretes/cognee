@@ -55,9 +55,98 @@ class TelemetryAggregateExtractTest(unittest.TestCase):
         )
 
     def _provider_rows(self):
-        result = self.connection.execute(self.extract.QUERIES["provider_stack_daily"])
+        return self._rows("provider_stack_daily")
+
+    def _rows(self, query_name):
+        result = self.connection.execute(self.extract.QUERIES[query_name])
         columns = [column[0] for column in result.description]
         return [dict(zip(columns, row)) for row in result.fetchall()]
+
+    def _insert_event(self, tracking_event, version, properties, user="deployment-a"):
+        self.connection.execute(
+            """INSERT INTO analytics.main.pipeline_events VALUES
+               (current_date, ?, ?, ?, ?, NULL, NULL)""",
+            [tracking_event, version, json.dumps(properties), user],
+        )
+
+    def test_error_types_are_class_names_or_buckets(self):
+        self._insert_event("Pipeline Run Errored", "1.6.0", {"exception_type": "ValueError"})
+        self._insert_event("Pipeline Run Errored", "1.6.0", {"exception_type": "ValueError"}, "b")
+        self._insert_event("Pipeline Run Errored", "1.6.0", {})
+        self._insert_event(
+            "Pipeline Run Errored", "1.6.0", {"exception_type": "person@example.com"}
+        )
+        self._insert_event("Pipeline Run Completed", "1.6.0", {"exception_type": "ValueError"})
+        rows = {row["exception_type"]: row for row in self._rows("pipeline_error_types_daily")}
+        self.assertEqual(set(rows), {"ValueError", "unknown", "redacted"})
+        self.assertEqual(rows["ValueError"]["errors"], 2)
+        self.assertEqual(rows["ValueError"]["distinct_identities"], 2)
+        self.assertEqual(rows["unknown"]["errors"], 1)
+        self.assertEqual(rows["redacted"]["errors"], 1)
+
+    def test_embedding_and_extractor_dimensions_are_redacted_like_the_llm_ones(self):
+        self._insert_event(
+            "Pipeline Run Completed",
+            "1.6.0",
+            {
+                "llm": {"provider": "openai", "model": "gpt"},
+                "embedding": {"provider": "fastembed", "model": "BAAI/bge-small-en-v1.5"},
+                "graph_extractor": "gliner_demo",
+                "graph": {"provider": "kuzu"},
+                "vector": {"provider": "lancedb"},
+                "relational": {"provider": "sqlite"},
+            },
+        )
+        self._insert_event(
+            "Pipeline Run Completed",
+            "1.6.0",
+            {
+                "llm": {"provider": "openai", "model": "gpt"},
+                "embedding": {"provider": "custom", "model": "custom/person@example.com"},
+                "graph_extractor": "llm",
+                "graph": {"provider": "kuzu"},
+                "vector": {"provider": "lancedb"},
+                "relational": {"provider": "sqlite"},
+            },
+            "b",
+        )
+        rows = {row["graph_extractor"]: row for row in self._provider_rows()}
+        self.assertEqual(rows["gliner_demo"]["embedding_provider"], "fastembed")
+        self.assertEqual(rows["gliner_demo"]["embedding_model"], "baai/bge-small-en-v1.5")
+        self.assertEqual(rows["llm"]["embedding_model"], "redacted")
+
+    def test_runs_are_classified_once_from_all_their_events(self):
+        """Events fire per data item and recovery closes a run with one event; runs
+        are counted by pipeline_run_id so a killed multi-item run balances."""
+
+        def run(run_id, *events):
+            for event in events:
+                self._insert_event(f"Pipeline Run {event}", "1.6.0", {"pipeline_run_id": run_id})
+
+        run("run-completed", "Started", "Started", "Completed", "Completed")
+        run("run-killed", "Started", "Started", "Started", "Errored")  # recovery: one event
+        run("run-mixed", "Started", "Started", "Completed", "Errored")
+        run("run-silent", "Started")
+        run("run-no-start", "Completed")  # its Started never arrived: not counted
+        self._insert_event("Pipeline Run Started", "1.5.4", {})  # legacy, no run id
+
+        (row,) = self._rows("pipeline_runs_daily")
+        self.assertEqual(row["version"], "1.6.0")
+        self.assertEqual(row["runs_started"], 4)
+        self.assertEqual(row["runs_completed"], 1)
+        self.assertEqual(row["runs_errored"], 2)
+        self.assertEqual(row["runs_silent"], 1)
+
+    def test_error_types_count_items_and_runs_separately(self):
+        for run_id in ("run-a", "run-a", "run-b"):
+            self._insert_event(
+                "Pipeline Run Errored",
+                "1.6.0",
+                {"exception_type": "ValueError", "pipeline_run_id": run_id},
+            )
+        (row,) = self._rows("pipeline_error_types_daily")
+        self.assertEqual(row["errors"], 3)
+        self.assertEqual(row["runs"], 2)
 
     def test_redacts_identifiers_in_provider_dimensions(self):
         for value in (

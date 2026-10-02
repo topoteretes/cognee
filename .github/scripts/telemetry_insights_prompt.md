@@ -7,10 +7,12 @@ You are running inside a scheduled GitHub Action for the cognee repository. Your
 `telemetry_aggregates/*.csv` (already extracted for you; covers the last ~70 days so you can compute day-over-day, week-over-week, and month-over-month comparisons yourself):
 
 - `daily_event_volumes.csv` — day, tracking_event, version, origin (`sdk`/`cloud`/`cli`/unknown — the surface split), self_hosted, events, distinct_identities
-- `pipeline_outcomes_daily.csv` — day, version, started/completed/errored counts for graph-build pipeline runs (+ identities_with_errors)
+- `pipeline_outcomes_daily.csv` — day, version, started/completed/errored event counts for graph-build pipelines — one event per data item, so these do not balance per run (+ identities_with_errors)
+- `pipeline_runs_daily.csv` — day, version, runs_started, runs_completed, runs_errored, runs_silent: pipeline runs joined by `pipeline_run_id` and classified once (errored if any item errored; silent if the run never reached a Completed or Errored event, the true silent gap; runs started on the extract day may still be running). Only builds that send `pipeline_run_id` appear here
+- `pipeline_error_types_daily.csv` — day, version, exception_type (the Python class of the error that ended a run — `CancelledError` is a cancelled run, `AbandonedPipelineRunError` a run closed by startup recovery after its process died; `unknown` is an event from a build before the field), errors (one per failed data item), runs (distinct failed runs; 0 for builds before `pipeline_run_id`), distinct_identities
 - `sdk_exec_outcomes_daily.csv` — day, version, operation (search/add/cognify), started/completed/errored
 - `api_endpoint_daily.csv` — day, endpoint route, version, events, distinct_identities (the FastAPI surface)
-- `provider_stack_daily.csv` — day, llm/graph/vector/relational provider (+ llm_model), version, completed_runs, identities
+- `provider_stack_daily.csv` — day, llm/embedding/graph/vector/relational provider (+ llm_model, embedding_model, graph_extractor `llm`/`gliner_demo` — the keyless default shows as embedding fastembed + extractor gliner_demo), version, completed_runs, identities
 - `search_type_daily.csv` — day, SearchType enum, version, events
 - `version_lifecycle.csv` — version, self_hosted, first_seen/last_seen, events, identities
 

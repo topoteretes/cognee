@@ -200,8 +200,8 @@ def embedding_settings_configured(config) -> bool:
     )
 
 
-def resolve_embedding_defaults(config, llm_config) -> tuple[str | None, str | None, int | None]:
-    """Return the ``(provider, model, dimensions)`` the embedding engine runs with.
+def keyless_embedding_defaults_apply(config, llm_config) -> bool:
+    """True when embeddings run on the local fastembed default instead of the config.
 
     The OpenAI default embedder only works because ``LLM_API_KEY`` is reused
     for it. With no embedding setting configured and no usable LLM key, that
@@ -213,7 +213,29 @@ def resolve_embedding_defaults(config, llm_config) -> tuple[str | None, str | No
     """
     from cognee.modules.preflight import keyless_local_defaults_apply
 
-    if not embedding_settings_configured(config) and keyless_local_defaults_apply(llm_config):
+    return not embedding_settings_configured(config) and keyless_local_defaults_apply(llm_config)
+
+
+def resolve_embedding_names(config, llm_config) -> tuple[str | None, str | None]:
+    """The ``(provider, model)`` embeddings run with, without touching any registry.
+
+    Pure: the telemetry settings payload reports the embedder through this, so
+    it cannot raise ``KeylessEmbedderNotInstalledError`` — that stays with the
+    engine, in ``resolve_embedding_defaults``.
+    """
+    if keyless_embedding_defaults_apply(config, llm_config):
+        return DEFAULT_LOCAL_EMBEDDING_PROVIDER, DEFAULT_LOCAL_EMBEDDING_MODEL
+    return config.embedding_provider, config.embedding_model
+
+
+def resolve_embedding_defaults(config, llm_config) -> tuple[str | None, str | None, int | None]:
+    """Return the ``(provider, model, dimensions)`` the embedding engine runs with.
+
+    See ``keyless_embedding_defaults_apply`` for when the local default applies;
+    its vector size is read from fastembed's registry, so a missing ``fastembed``
+    surfaces here as ``KeylessEmbedderNotInstalledError``.
+    """
+    if keyless_embedding_defaults_apply(config, llm_config):
         dimensions = _resolve_embedding_dimensions(
             DEFAULT_LOCAL_EMBEDDING_PROVIDER, DEFAULT_LOCAL_EMBEDDING_MODEL
         )

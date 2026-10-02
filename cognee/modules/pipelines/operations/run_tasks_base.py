@@ -11,7 +11,7 @@ from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.provenance_config import get_provenance_config
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
-from cognee.shared.utils import send_telemetry
+from cognee.shared.utils import send_telemetry, telemetry_exception_type
 
 from ..tasks.task import Task
 
@@ -158,16 +158,18 @@ async def handle_task(
     """Handle common task workflow with logging, telemetry, and error handling."""
     task_type = running_task.task_type
 
+    # Every ``* Task *`` event of this invocation carries the same properties;
+    # pipeline_run_id joins them to their pipeline's events in the warehouse.
+    task_properties = {
+        "task_name": running_task.executable.__name__,
+        "cognee_version": cognee_version,
+        "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
+    }
+    if ctx is not None and ctx.pipeline_run_id is not None:
+        task_properties["pipeline_run_id"] = str(ctx.pipeline_run_id)
+
     logger.info(f"{task_type} task started: `{running_task.executable.__name__}`")
-    send_telemetry(
-        f"{task_type} Task Started",
-        user,
-        additional_properties={
-            "task_name": running_task.executable.__name__,
-            "cognee_version": cognee_version,
-            "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
-        },
-    )
+    send_telemetry(f"{task_type} Task Started", user, additional_properties=dict(task_properties))
 
     # Pass ctx only to tasks that declare it in their signature.
     # Task caches this check as accepts_ctx at construction time.
@@ -231,30 +233,27 @@ async def handle_task(
 
             logger.info(f"{task_type} task completed: `{task_name}`")
             send_telemetry(
-                f"{task_type} Task Completed",
-                user,
-                additional_properties={
-                    "task_name": task_name,
-                    "cognee_version": cognee_version,
-                    "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
-                },
+                f"{task_type} Task Completed", user, additional_properties=dict(task_properties)
             )
 
-        except Exception as error:
+        except BaseException as error:
+            # BaseException, not Exception: a cancelled or closed task (CancelledError,
+            # GeneratorExit) must still emit its terminal event, or its Started event
+            # is a permanent silent gap in the warehouse. Re-raised below.
             span.set_status(StatusCode.ERROR, str(error))
             span.record_exception(error)
 
-            logger.exception(
-                f"{task_type} task errored: `{task_name}`\n",
-            )
+            if isinstance(error, Exception):
+                logger.exception(
+                    f"{task_type} task errored: `{task_name}`\n",
+                )
+            else:
+                logger.info(f"{task_type} task cancelled: `{task_name}` ({type(error).__name__})")
             send_telemetry(
                 f"{task_type} Task Errored",
                 user,
-                additional_properties={
-                    "task_name": task_name,
-                    "cognee_version": cognee_version,
-                    "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
-                },
+                additional_properties=task_properties
+                | {"exception_type": telemetry_exception_type(error)},
             )
             raise
 
