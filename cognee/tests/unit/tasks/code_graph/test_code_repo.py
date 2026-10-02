@@ -300,7 +300,7 @@ async def test_repository_urls_are_cloned_with_credentials_ahead_of_the_pipeline
 
     monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
 
-    resolved = await code_repo_module.resolve_code_repository_urls(
+    resolved = await code_repo_module.resolve_code_repositories(
         ["plain text note", "https://github.com/org/private"], credentials="tok123"
     )
 
@@ -323,7 +323,7 @@ async def test_data_without_repository_urls_is_returned_unchanged(monkeypatch):
     monkeypatch.setattr(code_repo_module, "resolve_repo_source", refuse)
     data = "https://example.com/article"
 
-    assert await code_repo_module.resolve_code_repository_urls(data, credentials="tok") is data
+    assert await code_repo_module.resolve_code_repositories(data, credentials="tok") is data
 
 
 @pytest.fixture
@@ -469,3 +469,81 @@ async def test_code_repo_route_embeds_only_with_index_vectors(tmp_path, monkeypa
     await extract_code_repo_graph([data_item], index_vectors=index_vectors)
 
     assert add_points.await_args.kwargs["graph_only"] is (not index_vectors)
+
+
+@pytest.mark.asyncio
+async def test_documents_omitted_for_a_code_graph_only_caller(tmp_path, llm_key_set):
+    """include_documents=False indexes the code graph alone, LLM key or not."""
+    repo = _make_repo(tmp_path)
+
+    from cognee.tasks.code_graph.code_repo import resolve_code_repository
+
+    manifest_item, documents, _skipped = await resolve_code_repository(
+        repo, include_documents=False
+    )
+
+    assert documents == []
+    # The manifest is unaffected: the code graph is built from the same files.
+    assert manifest_item.system_metadata["source"] == "code_repo"
+    assert manifest_item.system_metadata["file_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_local_project_resolves_eagerly_without_documents(tmp_path, llm_key_set):
+    """A local code project is intercepted ahead of the pipeline for include_documents."""
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+    from cognee.tasks.ingestion.data_item import DataItem
+
+    repo = _make_repo(tmp_path)
+
+    resolved = await code_repo_module.resolve_code_repositories(
+        ["plain text note", str(repo)], include_documents=False
+    )
+
+    assert resolved[0] == "plain text note"
+    assert len(resolved) == 2, resolved
+    assert isinstance(resolved[1], DataItem)
+    assert resolved[1].system_metadata["source"] == "code_repo"
+
+
+@pytest.mark.asyncio
+async def test_local_project_resolves_eagerly_with_documents(tmp_path, llm_key_set):
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+
+    repo = _make_repo(tmp_path)
+
+    resolved = await code_repo_module.resolve_code_repositories([str(repo)], include_documents=True)
+
+    assert {Path(item).name for item in resolved[1:]} == {"README.md", "notes.txt"}
+
+
+@pytest.mark.asyncio
+async def test_repository_url_resolves_eagerly_without_documents(tmp_path, monkeypatch):
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+
+    clone = _make_repo(tmp_path)
+
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None):
+        return clone
+
+    monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
+
+    resolved = await code_repo_module.resolve_code_repositories(
+        ["https://github.com/org/private"], credentials="tok123", include_documents=False
+    )
+
+    assert len(resolved) == 1, resolved
+    assert resolved[0].system_metadata["repo_url"] == "https://github.com/org/private"
+
+
+@pytest.mark.asyncio
+async def test_plain_directory_is_left_to_the_pipeline(tmp_path):
+    """Only code projects are intercepted; an ordinary folder passes through."""
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+
+    folder = tmp_path / "notes"
+    folder.mkdir()
+    (folder / "a.md").write_text("# a")
+    data = [str(folder)]
+
+    assert await code_repo_module.resolve_code_repositories(data, include_documents=False) is data

@@ -238,6 +238,7 @@ async def resolve_code_repository(
     user=None,
     dataset_id=None,
     source_url: str | None = None,
+    include_documents: bool = True,
 ):
     """Build the repo-level DataItem (and the document file list) for a project.
 
@@ -254,13 +255,18 @@ async def resolve_code_repository(
     instead of emitted: their routes need an LLM (images transcribe at add
     time, text is LLM-chunked at cognify), so they would only fail later. The
     code graph itself never needs one — a key-less repo add still works fully.
+    ``include_documents=False`` returns no document paths at all, for callers
+    that index the code graph only (``codegraph_config={"include_documents":
+    False}``, and the deprecated ``content_type="code"`` that maps onto it).
     """
     from cognee.infrastructure.llm.config import get_llm_config
     from cognee.tasks.ingestion.data_item import DataItem
 
     covered, documents, skipped = partition_repo_files(directory)
 
-    if documents and not get_llm_config().llm_api_key:
+    if not include_documents:
+        documents = []
+    elif documents and not get_llm_config().llm_api_key:
         logger.warning(
             "No LLM API key configured (LLM_API_KEY): excluding %d document file(s) of "
             "the code project from processing — their pipelines need an LLM (image "
@@ -318,7 +324,11 @@ async def resolve_code_repository(
 
 
 async def resolve_code_repository_url(
-    spec: str, user=None, dataset_id=None, credentials: str | None = None
+    spec: str,
+    user=None,
+    dataset_id=None,
+    credentials: str | None = None,
+    include_documents: bool = True,
 ):
     """Clone a hosted repository URL and build its repo-level DataItem.
 
@@ -331,7 +341,8 @@ async def resolve_code_repository_url(
     ``RepoCloneFile``: the clone is cognee's, so its files are stored even when
     ``ACCEPT_LOCAL_FILE_PATH=false`` refuses caller-supplied paths.
     ``credentials`` authenticates the clone of a private repository (see
-    ``resolve_repo_source``).
+    ``resolve_repo_source``). ``include_documents=False`` returns the manifest
+    alone (see ``resolve_code_repository``).
     """
     from cognee.tasks.ingestion.repo_clone_file import RepoCloneFile
 
@@ -343,33 +354,94 @@ async def resolve_code_repository_url(
         )
     repo_path = await resolve_repo_source(clone_url, credentials=credentials)
     manifest_item, document_paths, skip_count = await resolve_code_repository(
-        repo_path, user=user, dataset_id=dataset_id, source_url=redact_repo_spec(clone_url)
+        repo_path,
+        user=user,
+        dataset_id=dataset_id,
+        source_url=redact_repo_spec(clone_url),
+        include_documents=include_documents,
     )
     return manifest_item, [RepoCloneFile(Path(path)) for path in document_paths], skip_count
 
 
-async def resolve_code_repository_urls(data, credentials: str, user=None, dataset_id=None):
-    """Clone the repository URLs in ``data`` with ``credentials``, ahead of the add pipeline.
+async def resolve_code_repositories(
+    data,
+    credentials: str | None = None,
+    include_documents: bool = True,
+    user=None,
+    dataset_id=None,
+):
+    """Resolve the code repositories in ``data`` ahead of the add pipeline.
 
-    The pipeline resolves repository URLs itself, but without credentials, so a
-    private repository would fail to clone there. Each URL is replaced by its
-    manifest DataItem and document paths, which the pipeline then takes as
-    already resolved; every other item is returned unchanged and in order.
+    ``resolve_data_directories`` resolves repositories itself, inside the
+    pipeline, but it is generic plumbing with no access to this call's
+    ``codegraph_config``: it always clones without credentials and always
+    emits the repository's documents. A call that needs either option
+    answered differently has to resolve its repositories here, before the
+    pipeline runs — both ``resolve_data_directories`` call sites then see
+    items that are already resolved and pass them through untouched.
+
+    Intercepts hosted repository URLs (``code_repo_clone_url``) and local
+    code-project directories (``detect_code_project``); every other item is
+    returned unchanged and in order, and ``data`` is returned as-is when it
+    holds no repository at all. A local directory is refused when
+    ``ACCEPT_LOCAL_FILE_PATH=false``, the same gate (and message) the
+    in-pipeline path applies.
     """
+    from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+    from cognee.tasks.ingestion.save_data_item_to_storage import settings as save_data_settings
+
+    def _local_project(item) -> Path | None:
+        """``item`` as a local code-project directory, or None for anything else."""
+        if not isinstance(item, str) or code_repo_clone_url(item) is not None:
+            return None
+        try:
+            path = resolve_local_path(item, must_exist=True)
+        except (FileNotFoundError, OSError, ValueError):
+            return None
+        return path if path.is_dir() and detect_code_project(path) else None
+
     items = data if isinstance(data, list) else [data]
-    if not any(isinstance(item, str) and code_repo_clone_url(item) for item in items):
+    if not any(
+        (isinstance(item, str) and code_repo_clone_url(item)) or _local_project(item) is not None
+        for item in items
+    ):
         return data
 
     resolved = []
     for item in items:
         if isinstance(item, str) and code_repo_clone_url(item) is not None:
             manifest_item, documents, _skipped = await resolve_code_repository_url(
-                item, user=user, dataset_id=dataset_id, credentials=credentials
+                item,
+                user=user,
+                dataset_id=dataset_id,
+                credentials=credentials,
+                include_documents=include_documents,
             )
             resolved.append(manifest_item)
             resolved.extend(documents)
-        else:
-            resolved.append(item)
+            continue
+
+        project_path = _local_project(item)
+        if project_path is not None:
+            if not save_data_settings.accept_local_file_path:
+                from cognee.modules.ingestion.exceptions import IngestionError
+
+                raise IngestionError(
+                    message="Local directories are not accepted "
+                    "(ACCEPT_LOCAL_FILE_PATH=false). Pass a repository URL "
+                    "or upload the files instead."
+                )
+            manifest_item, document_paths, _skipped = await resolve_code_repository(
+                project_path,
+                user=user,
+                dataset_id=dataset_id,
+                include_documents=include_documents,
+            )
+            resolved.append(manifest_item)
+            resolved.extend(str(path) for path in document_paths)
+            continue
+
+        resolved.append(item)
     return resolved
 
 

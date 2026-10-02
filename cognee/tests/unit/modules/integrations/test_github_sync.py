@@ -3,7 +3,8 @@
 Token minting, repo listing, and remember() are mocked — what's under test is
 the orchestration: one dataset per installation, each repo remembered by its
 credential-free clone URL with the installation token in
-``codegraph_config["repo_credentials"]``, one failing repo not stopping the
+``codegraph_config["repo_credentials"]`` and code-graph-only ingestion
+(``include_documents=False``), one failing repo not stopping the
 rest, and the full-installation default when no explicit repo list is given.
 """
 
@@ -82,7 +83,12 @@ async def test_default_sync_covers_every_installation_repo(mocks):
         assert call.kwargs == {
             "dataset_name": "github_acme_org",
             "user": mocks.owner,
-            "codegraph_config": {"repo_credentials": "tok123"},
+            # include_documents=False: the sync indexes code graphs, so an
+            # installation's READMEs never reach LLM extraction or embeddings.
+            "codegraph_config": {
+                "repo_credentials": "tok123",
+                "include_documents": False,
+            },
             "self_improvement": False,
             "raise_on_error": False,
         }

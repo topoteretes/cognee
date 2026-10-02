@@ -1009,9 +1009,12 @@ async def remember(
             ``data`` is stored as one ``code_repo`` row by ``add()`` and built
             by cognify's CODE_REPO route. ``codegraph_config`` (see
             ``CodeGraphConfig``) sets ``index_vectors`` to also embed the code
-            facts this call builds, and ``repo_credentials`` to clone private
-            repository URLs; the top-level ``index_vectors=`` /
-            ``repo_credentials=`` spellings are still accepted.
+            facts this call builds, ``repo_credentials`` to clone private
+            repository URLs, and ``include_documents=False`` to index the code
+            graph only (no README/docs ingestion); the top-level
+            ``index_vectors=`` / ``repo_credentials=`` spellings are still
+            accepted. The deprecated ``content_type="code"`` is read as
+            ``include_documents=False``, the behaviour it used to have.
         skill_improvement: Internal skill-improvement control dict used with
             ``SkillRunEntry`` or ``content_type="skills"``. ``apply=True``
             requires an existing ``proposal_id``.
@@ -1043,12 +1046,19 @@ async def remember(
 
     # content_type="code" was removed (SDK-793): a repository is ordinary data
     # and builds through add() + cognify(). Callers still passing it keep
-    # working; the value is dropped here, before any path reads it.
+    # working -- and keep the behaviour they had, which is why the value is
+    # translated rather than dropped: the removed route indexed the code graph
+    # only, so it means include_documents=False. An explicit codegraph_config
+    # still wins. Translated here, before any path reads content_type.
     if kwargs.get("content_type") == "code":
         kwargs.pop("content_type")
+        codegraph_config = dict(kwargs.get("codegraph_config") or {})
+        codegraph_config.setdefault("include_documents", False)
+        kwargs["codegraph_config"] = codegraph_config
         logger.warning(
-            "remember(content_type='code') is deprecated and ignored: pass the repository "
-            "path or URL as data; use codegraph_config for index_vectors / repo_credentials."
+            "remember(content_type='code') is deprecated: pass the repository path or URL "
+            'as data with codegraph_config={"include_documents": False} for the same '
+            "code-graph-only ingestion. Reading it as that for now."
         )
 
     # Migration dispatch: a MemorySource streams COGX records from an external

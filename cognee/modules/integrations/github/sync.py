@@ -12,9 +12,9 @@ The token reaches git only through environment config; the URL and
 everything stored from it stay credential-free.
 
 The code graph is searchable via ``SearchType.CODE``; code facts are not
-embedded (``index_vectors`` stays off). The repository's documents (README,
-docs) are ingested as ordinary documents when an LLM key is configured, so
-they run LLM extraction and are embedded.
+embedded (``index_vectors`` stays off) and the repositories' documents are
+not ingested (``include_documents`` off), so a sync makes no LLM or
+embedding calls however many repositories it covers.
 
 One dataset per installation (``github_<org>``), not per repository —
 per-repo datasets would mean one isolated database per repo under backend
@@ -129,7 +129,14 @@ async def sync_repositories(
                 clone_url(full_name),
                 dataset_name=dataset_name,
                 user=owner,
-                codegraph_config={"repo_credentials": token},
+                codegraph_config={
+                    "repo_credentials": token,
+                    # The code graph is the point of the sync: indexing every
+                    # repository's README and docs would mean LLM extraction
+                    # and embeddings for an installation's whole prose, on
+                    # every webhook.
+                    "include_documents": False,
+                },
                 # The code graph is the point of the sync; no session to bridge.
                 self_improvement=False,
                 raise_on_error=False,

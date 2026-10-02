@@ -259,7 +259,8 @@ def get_remember_router() -> APIRouter:
                 "Set to 'skills' to ingest SKILL.md files as dataset-scoped Skill nodes, "
                 "or 'cogx-archive' to import an uploaded archive. Leave empty for normal "
                 "ingestion, including code repositories (pass git URLs or server-local "
-                "repo paths via 'raw_data'). The removed 'code' value is accepted and ignored."
+                "repo paths via 'raw_data'). The removed 'code' value is still accepted "
+                "and read as code-graph-only ingestion."
             ),
         ),
         import_mode: str | None = Form(
@@ -340,7 +341,9 @@ def get_remember_router() -> APIRouter:
         - **content_type** (Optional[str]): Set to "skills" to ingest SKILL.md files as
           Skill nodes; omit for normal ingestion. Code repositories need no content type:
           a GitHub/GitLab URL or server-local repo path in raw_data is stored as one
-          data item and built by cognify's CODE_REPO route.
+          data item and built by cognify's CODE_REPO route. The removed "code" value is
+          still accepted and read as code-graph-only ingestion (the repository's README
+          and docs are not ingested), the behaviour it had.
         - **index_vectors** (Optional[bool]): Also embed the code facts of the code files
           and repositories this call builds (default false). Normal ingestion only.
 
@@ -381,12 +384,26 @@ def get_remember_router() -> APIRouter:
             )
 
         # content_type='code' was removed (SDK-793): a repository in raw_data is
-        # ordinary data. Clients still sending it keep working; it is dropped.
-        if content_type == "code":
+        # ordinary data. Clients still sending it keep working, and keep the
+        # behaviour they had -- that route indexed the code graph only, so the
+        # value is read as include_documents=False rather than dropped.
+        code_only = content_type == "code"
+        if code_only:
             content_type = None
+            if session_id:
+                # Parity with the removed route, which rejected the combination
+                # instead of writing a repository path into the session cache.
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "session_id is not applicable to a code repository; code graphs "
+                        "are stored in the permanent graph, not a session cache."
+                    ),
+                )
             logger.warning(
-                "POST /remember content_type='code' is deprecated and ignored: pass the "
-                "repository path or URL in raw_data."
+                "POST /remember content_type='code' is deprecated: pass the repository "
+                "path or URL in raw_data; it is read as code-graph-only ingestion "
+                "(no README/docs)."
             )
 
         # String inputs join the uploads as one item list, uploads first. Drop
@@ -558,7 +575,16 @@ def get_remember_router() -> APIRouter:
                 content_type=content_type or None,
                 skills_text=skills_text or None,
                 skill_name=skill_name or None,
-                **({"codegraph_config": {"index_vectors": True}} if index_vectors else {}),
+                **(
+                    {
+                        "codegraph_config": {
+                            **({"index_vectors": True} if index_vectors else {}),
+                            **({"include_documents": False} if code_only else {}),
+                        }
+                    }
+                    if index_vectors or code_only
+                    else {}
+                ),
                 **({"config": config_to_use} if config_to_use else {}),
                 **({"graph_model": graph_model_parsed} if graph_model_parsed else {}),
                 # HTTP contract: an errored blocking run is reported as the 409
