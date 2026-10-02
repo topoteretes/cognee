@@ -6,7 +6,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.models import PrincipalCapability
 from cognee.modules.users.permissions.permission_types import (
     CAPABILITY_TYPES,
-    USER_MANAGEMENT_ALLOWED_ROLE_NAMES,
+    LEGACY_ALL_CAPABILITY_ROLE_NAMES,
 )
 
 
@@ -15,7 +15,7 @@ async def get_role_capabilities(role_id: UUID, tenant_id: UUID, role_name: str) 
         Return every capability a member receives by being in this role.
 
         That is the capabilities granted to the role itself. A role named in the
-        deprecated USER_MANAGEMENT_ALLOWED_ROLE_NAMES set carries the whole
+        deprecated LEGACY_ALL_CAPABILITY_ROLE_NAMES set carries the whole
         catalog instead, because has_grant_permission lets its members pass
         every check whether or not any rows were granted to it.
 
@@ -29,7 +29,7 @@ async def get_role_capabilities(role_id: UUID, tenant_id: UUID, role_name: str) 
     Returns:
         set[str]: Capability names the role carries.
     """
-    if role_name in USER_MANAGEMENT_ALLOWED_ROLE_NAMES:
+    if role_name in LEGACY_ALL_CAPABILITY_ROLE_NAMES:
         return set(CAPABILITY_TYPES)
 
     db_engine = get_relational_engine()

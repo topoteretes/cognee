@@ -190,7 +190,7 @@ isolation; `REQUIRE_AUTHENTICATION=false` with access control on is ignored
   Removing a user from a tenant drops their personal capabilities there, and
   deleting a role drops the role's.
 - **Deprecated fallback: the `admin` role name.** Members of a role named
-  `admin` (`USER_MANAGEMENT_ALLOWED_ROLE_NAMES`) pass every capability check
+  `admin` (`LEGACY_ALL_CAPABILITY_ROLE_NAMES`) pass every capability check
   until the role is granted the capabilities it needs; the fallback sits in
   `has_grant_permission`, so it also passes the grant and revoke checks.
 

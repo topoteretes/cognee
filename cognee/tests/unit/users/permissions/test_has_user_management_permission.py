@@ -103,7 +103,7 @@ async def test_has_user_management_permission_non_owner_wrong_role_denied(monkey
         return set()
 
     async def fake_get_user_role_names(_user_id, _tenant_id):
-        return ["member"]  # not in USER_MANAGEMENT_ALLOWED_ROLE_NAMES
+        return ["member"]  # not in LEGACY_ALL_CAPABILITY_ROLE_NAMES
 
     monkeypatch.setattr(_perm_mod, "get_effective_capabilities", fake_get_capabilities)
     monkeypatch.setattr(_perm_mod, "get_user_role_names_in_tenant", fake_get_user_role_names)

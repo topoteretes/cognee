@@ -24,13 +24,16 @@ CAPABILITY_TYPES: frozenset[str] = frozenset(
     {MANAGE_USERS, GRANT_CAPABILITIES, REVOKE_CAPABILITIES}
 )
 
-# Deprecated in favour of granting capabilities. Kept because a tenant that has
-# not been migrated yet has no capability rows at all, so resolution returns an
-# empty set for everyone but the owner and this set is the only thing still
-# letting its "admin" role act. A role named here passes every check that goes
-# through has_grant_permission, whatever capability it asks for.
+# Role names whose members pass EVERY capability check, by name alone: a role
+# called "admin" counts as holding the whole catalog (has_grant_permission,
+# get_role_capabilities) whether or not any capability row was granted to it.
+# Legacy: before the capability layer this was how user management was
+# authorised, and a tenant that has not been migrated yet has no capability
+# rows at all, so this set is the only thing still letting its "admin" role
+# act. Note what it means in practice: any group that happens to be called
+# "admin" holds manage_users, grant_capabilities and revoke_capabilities.
 #
 # Remove it once existing "admin" roles have been granted the capabilities they
 # need through the capability endpoints on the permissions router. Removing it
 # before then locks those tenants out.
-USER_MANAGEMENT_ALLOWED_ROLE_NAMES: frozenset[str] = frozenset({"admin"})
+LEGACY_ALL_CAPABILITY_ROLE_NAMES: frozenset[str] = frozenset({"admin"})
