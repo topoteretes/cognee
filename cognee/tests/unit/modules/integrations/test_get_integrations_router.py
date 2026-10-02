@@ -469,3 +469,26 @@ def test_a_non_ascii_nonce_cookie_is_filtered_out_not_a_crash():
     # itself raise TypeError, before ever reaching the real one.
     assert _install_nonce_matches(_FakeRequest(), "fake", "someone-elses-nonce") is False
     assert _install_nonce_matches(_FakeRequest(), "fake", "realnonce") is True
+
+
+@pytest.mark.asyncio
+async def test_spawned_integration_work_is_registered_for_the_shutdown_drain():
+    import asyncio
+
+    from cognee.infrastructure import background_tasks
+
+    router_module = importlib.import_module(
+        "cognee.api.v1.integrations.routers.get_integrations_router"
+    )
+    gate, finished = asyncio.Event(), []
+
+    async def work():
+        await gate.wait()
+        finished.append(True)
+
+    before = set(background_tasks._BACKGROUND_TASKS)
+    router_module._spawn_background(work(), description="test work")
+    assert len(background_tasks._BACKGROUND_TASKS - before) == 1
+    gate.set()
+    assert await background_tasks.wait_for_background_tasks(timeout=2)
+    assert finished == [True]
