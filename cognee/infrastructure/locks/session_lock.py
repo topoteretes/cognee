@@ -1,4 +1,4 @@
-"""Per-session lock primitives — in-process asyncio registry.
+"""Per-session lock primitives — in-process, event-loop-agnostic registry.
 
 Three primitives:
 
@@ -14,38 +14,45 @@ Three primitives:
 * ``try_acquire_improve_lock_many(keys)`` /
   ``release_improve_lock_many(keys)`` — non-blocking claim for
   long-running ``improve()`` calls. The claim is atomic: a
-  registry-wide ``asyncio.Lock`` protects a set of held keys, and
+  registry-wide lock protects a set of held keys, and
   the check-and-add happens inside that critical section so two
   callers can't both see "free" and both think they won.
   ``request_improve_rerun_many`` / ``release_or_rerun_improve_lock_many``
   carry a lock loser's "there is a newer tail" signal to the holder,
   which then runs one more pass before releasing (SDK-593).
 
+The registries hand out :class:`LoopAgnosticLock` objects and are guarded
+by ``threading.Lock`` (held only for dict/set ops): cached locks outlive
+any single event loop, and an ``asyncio.Lock`` binds to the first loop that
+awaits it (see ``loop_agnostic_lock.py`` for the failure modes).
+
 Scope: single-worker FastAPI. For multi-worker deployments, layer a
 row-level SQL advisory lock or Redis SETNX on top — the call sites
 are factored so that's a local change.
 """
 
-import asyncio
+import threading
 from collections.abc import AsyncGenerator, Iterable
 from contextlib import asynccontextmanager
 from typing import Any
 
 from cognee.shared.logging_utils import get_logger
 
+from .loop_agnostic_lock import LoopAgnosticLock
+
 logger = get_logger("session_lock")
 
 
-_locks: dict[tuple[str, str], asyncio.Lock] = {}
-_registry_lock = asyncio.Lock()
+_locks: dict[tuple[str, str], LoopAgnosticLock] = {}
+_registry_lock = threading.Lock()
 
 
-async def _get_lock(session_id: str, op: str) -> asyncio.Lock:
+async def _get_lock(session_id: str, op: str) -> LoopAgnosticLock:
     key = (session_id, op)
-    async with _registry_lock:
+    with _registry_lock:
         lock = _locks.get(key)
         if lock is None:
-            lock = asyncio.Lock()
+            lock = LoopAgnosticLock()
             _locks[key] = lock
         return lock
 
@@ -68,24 +75,23 @@ async def session_lock(session_id: str, op: str = "write") -> AsyncGenerator[Non
         yield
 
 
-# Turn locks are registered per event loop, unlike ``_locks`` above: an ``asyncio.Lock``
-# is bound to the loop that awaited it, so reusing one from a different loop raises
-# RuntimeError. Keying by loop means a fresh loop always gets its own empty table, so a
-# lock is never reused across loops. Like ``_locks``, entries are never expired — that's
-# the same trade-off the registry above already makes.
-_turn_lock_registries: dict[asyncio.AbstractEventLoop, dict[tuple[str, str], asyncio.Lock]] = {}
-_turn_registry_guard = asyncio.Lock()
+# Turn locks used to be registered per event loop as a workaround for
+# asyncio.Lock's loop binding, which meant two turns on different loops were
+# NOT serialized. LoopAgnosticLock removes the constraint: one registry, and
+# turns on the same identity serialize regardless of which loop runs them.
+# Like ``_locks``, entries are never expired — the same trade-off the registry
+# above already makes.
+_turn_locks: dict[tuple[str, str], LoopAgnosticLock] = {}
+_turn_registry_guard = threading.Lock()
 
 
-async def _get_turn_lock(user_id: Any, session_id: Any) -> asyncio.Lock:
-    loop = asyncio.get_running_loop()
+async def _get_turn_lock(user_id: Any, session_id: Any) -> LoopAgnosticLock:
     key = (str(user_id), str(session_id))
-    async with _turn_registry_guard:
-        registry = _turn_lock_registries.setdefault(loop, {})
-        lock = registry.get(key)
+    with _turn_registry_guard:
+        lock = _turn_locks.get(key)
         if lock is None:
-            lock = asyncio.Lock()
-            registry[key] = lock
+            lock = LoopAgnosticLock()
+            _turn_locks[key] = lock
         return lock
 
 
@@ -116,7 +122,7 @@ _improving_sessions: set[str] = set()
 # ``release_or_rerun_improve_lock_many``; a fresh claim clears them, since a
 # new holder starts with a full watermark pass anyway.
 _rerun_requested: set[str] = set()
-_improve_registry_lock = asyncio.Lock()
+_improve_registry_lock = threading.Lock()
 
 
 async def try_acquire_improve_lock_many(keys: Iterable[str]) -> bool:
@@ -135,7 +141,7 @@ async def try_acquire_improve_lock_many(keys: Iterable[str]) -> bool:
     if not wanted:
         return True
 
-    async with _improve_registry_lock:
+    with _improve_registry_lock:
         if any(key in _improving_sessions for key in wanted):
             return False
         _improving_sessions.update(wanted)
@@ -155,7 +161,7 @@ async def release_improve_lock_many(keys: Iterable[str]) -> None:
     wanted = [key for key in keys if key]
     if not wanted:
         return
-    async with _improve_registry_lock:
+    with _improve_registry_lock:
         _improving_sessions.difference_update(wanted)
 
 
@@ -171,7 +177,7 @@ async def request_improve_rerun_many(keys: Iterable[str]) -> bool:
     wanted = [key for key in keys if key]
     if not wanted:
         return False
-    async with _improve_registry_lock:
+    with _improve_registry_lock:
         held = [key for key in wanted if key in _improving_sessions]
         if not held:
             return False
@@ -184,7 +190,7 @@ async def has_pending_improve_rerun(keys: Iterable[str]) -> bool:
     wanted = [key for key in keys if key]
     if not wanted:
         return False
-    async with _improve_registry_lock:
+    with _improve_registry_lock:
         return any(key in _rerun_requested for key in wanted)
 
 
@@ -202,7 +208,7 @@ async def release_or_rerun_improve_lock_many(
     """
     wanted = [key for key in keys if key]
     watched = [key for key in rerun_keys if key]
-    async with _improve_registry_lock:
+    with _improve_registry_lock:
         pending = [key for key in watched if key in _rerun_requested and key in _improving_sessions]
         if pending:
             _rerun_requested.difference_update(pending)

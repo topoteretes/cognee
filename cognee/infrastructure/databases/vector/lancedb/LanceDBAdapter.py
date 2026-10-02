@@ -39,6 +39,7 @@ from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
 from ..stored_vector_size import choose_stored_vector_size
 from ..vector_db_interface import VectorDBInterface
+from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 
 logger = get_logger("LanceDBAdapter")
 _NO_DEFAULT = object()
@@ -188,7 +189,9 @@ class LanceDBAdapter(VectorDBInterface):
         self.url = url
         self.api_key = api_key
         self.embedding_engine = embedding_engine
-        self.VECTOR_DB_LOCK = asyncio.Lock()
+        # Loop-agnostic: the adapter is cached across event loops, and an
+        # asyncio.Lock binds to the first loop that awaits it.
+        self.VECTOR_DB_LOCK = LoopAgnosticLock()
         # Guards lifecycle state — the ``connection``, ``_session`` and
         # ``_permanently_closed`` triple must be observed/mutated atomically
         # so a concurrent ``close()`` can't be silently overwritten by an

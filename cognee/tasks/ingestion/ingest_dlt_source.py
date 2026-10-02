@@ -20,6 +20,7 @@ from cognee.tasks.ingestion.exceptions.exceptions import (
     UnsupportedDBProviderError,
 )
 from cognee.tasks.ingestion.get_dlt_destination import get_dlt_destination
+from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 
 try:
     import dlt
@@ -30,7 +31,8 @@ logger = get_logger("ingest_dlt_source")
 
 # Serializes dlt staging runs: one shared pipeline name means one shared dlt
 # working directory, which concurrent runs corrupt (see the lock's use below).
-_staging_lock = asyncio.Lock()
+# Loop-agnostic: module-level, so it outlives any single event loop.
+_staging_lock = LoopAgnosticLock()
 
 # Strict identifier pattern — only allow alphanumerics, underscores, dots, and hyphens
 _SAFE_IDENT_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")

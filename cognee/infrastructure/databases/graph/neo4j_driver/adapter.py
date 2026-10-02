@@ -43,6 +43,8 @@ from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import ERROR, get_logger
 from cognee.tasks.temporal_graph.models import Timestamp
 
+from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
+
 from .deadlock_retry import deadlock_retry
 from .neo4j_metrics_utils import (
     count_self_loops,
@@ -201,7 +203,9 @@ class Neo4jAdapter(GraphDBInterface):
         # calls so two concurrent updates to the same artifact within this
         # adapter instance cannot overwrite each other (the atomic fold path in
         # add_nodes/add_edges does not need it).
-        self._source_ref_change_lock = asyncio.Lock()
+        # Loop-agnostic: the adapter is cached across event loops, and an
+        # asyncio.Lock binds to the first loop that awaits it.
+        self._source_ref_change_lock = LoopAgnosticLock()
 
     async def close(self) -> None:
         """

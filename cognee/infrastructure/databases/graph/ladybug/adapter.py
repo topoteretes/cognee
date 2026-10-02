@@ -53,6 +53,7 @@ from cognee.modules.observability.tracing import (
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.temporal_graph.models import Timestamp
+from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 
 logger = get_logger()
 
@@ -358,9 +359,11 @@ class LadybugAdapter(GraphDBInterface):
                 self._ensure_schema()
             else:
                 self._initialize_connection()
-        self.LADYBUG_ASYNC_LOCK = asyncio.Lock()
-        self._source_ref_change_lock = asyncio.Lock()
-        self._connection_lock = asyncio.Lock()
+        # Loop-agnostic: the adapter is cached across event loops, and an
+        # asyncio.Lock binds to the first loop that awaits it.
+        self.LADYBUG_ASYNC_LOCK = LoopAgnosticLock()
+        self._source_ref_change_lock = LoopAgnosticLock()
+        self._connection_lock = LoopAgnosticLock()
         # Set when ``open_connections == 0``; used by transient teardown
         # paths (e.g. ``delete_graph``) to wait for in-flight queries to
         # finish before dropping native resources. ``close()`` does NOT use
