@@ -301,7 +301,7 @@ def get_datasets_router() -> APIRouter:
 
     @router.delete(
         "/{dataset_id}/data/{data_id}",
-        response_model=None,
+        response_model=dict,
         responses={404: {"model": ErrorResponseDTO}},
     )
     async def delete_data(
@@ -327,7 +327,11 @@ def get_datasets_router() -> APIRouter:
         - **data_id** (UUID): The unique identifier of the data item to delete
 
         ## Response
-        No content returned on successful deletion.
+        A deletion receipt: ``status`` (``"success"``), ``dataset_id``, ``data_id``,
+        ``data_record_found`` (a Data row for the id existed), ``deleted_nodes`` /
+        ``deleted_edges`` (graph elements removed), ``data_remaining`` (``false`` when
+        a re-list of the dataset after the delete no longer shows the Data row — the
+        verified outcome) and ``dataset_deleted`` (always ``false`` here).
 
         ## Error Codes
         - **401 Unauthorized**: Dataset doesn't exist or user lacks delete permission
@@ -335,7 +339,7 @@ def get_datasets_router() -> APIRouter:
 
         ## Notes
         Deleting a data_id not tracked in the dataset is treated as a custom-graph-model
-        deletion and returns success.
+        deletion and returns success with ``data_record_found: false``.
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
@@ -348,7 +352,7 @@ def get_datasets_router() -> APIRouter:
             },
         )
 
-        await datasets.delete_data(dataset_id, data_id, user)
+        return await datasets.delete_data(dataset_id, data_id, user)
 
     @router.get("/{dataset_id}/graph", response_model=GraphDTO)
     async def get_dataset_graph(

@@ -248,7 +248,7 @@ async def _forget_data_item(data_id: UUID, dataset_ref: str | UUID, user: Any) -
 
     dataset_id = await _resolve_dataset_id(dataset_ref, user)
 
-    await datasets.delete_data(
+    receipt = await datasets.delete_data(
         dataset_id=dataset_id,
         data_id=data_id,
         user=user,
@@ -261,7 +261,12 @@ async def _forget_data_item(data_id: UUID, dataset_ref: str | UUID, user: Any) -
         dataset_id,
         user.id,
     )
-    return {"data_id": str(data_id), "dataset_id": str(dataset_id), "status": "success"}
+    # Pass the deletion receipt through (deleted_nodes / deleted_edges /
+    # data_remaining / ...) so callers can verify the outcome without
+    # re-listing the dataset; the historical keys keep their values.
+    result = dict(receipt) if isinstance(receipt, dict) else {}
+    result.update({"data_id": str(data_id), "dataset_id": str(dataset_id), "status": "success"})
+    return result
 
 
 async def _forget_dataset_memory(dataset_ref: str | UUID, user: Any) -> dict:

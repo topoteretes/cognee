@@ -207,7 +207,7 @@ async def test_api_delete_data_uses_graph_provenance_when_ledger_has_no_nodes():
     ):
         result = await datasets_module.datasets.delete_data(dataset_id, data_id, user)
 
-    assert result == {"status": "success"}
+    assert result["status"] == "success"
     graph_delete.assert_awaited_once_with(dataset_id, data_id)
     ledger_delete.assert_not_called()
     legacy_delete.assert_not_called()
@@ -246,7 +246,7 @@ async def test_api_delete_data_uses_legacy_when_no_ledger_nodes_and_unmarked_gra
     ):
         result = await datasets_module.datasets.delete_data(dataset_id, data_id, user)
 
-    assert result == {"status": "success"}
+    assert result["status"] == "success"
     graph_delete.assert_awaited_once_with(dataset_id, data_id)
     ledger_delete.assert_not_called()
     legacy_delete.assert_awaited_once_with(data, "soft")
@@ -288,7 +288,7 @@ async def test_api_delete_data_uses_ledger_delete_when_ledger_has_nodes():
     ):
         result = await datasets_module.datasets.delete_data(dataset_id, data_id, user)
 
-    assert result == {"status": "success"}
+    assert result["status"] == "success"
     ledger_delete.assert_awaited_once_with(dataset_id, data_id, user.id)
     graph_delete.assert_not_called()
     legacy_delete.assert_not_called()
