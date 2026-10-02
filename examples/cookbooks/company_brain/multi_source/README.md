@@ -1,37 +1,106 @@
-# Company brain: three sources, one graph
+# Company brain: your database, tickets and docs in one graph
 
-This guide builds a small company brain for a fictional company, Acorn Analytics. It
-ingests three kinds of data into one cognee dataset, links them into one knowledge graph,
-serves the graph through the API and the UI, and connects Claude Code or Codex to it.
+One memory for your company, built from the three kinds of data most companies already
+have: a relational database (HR, projects, customers), a support ticket export, and a
+folder of documents (meeting notes, postmortems, memos).
 
-| Source | Kind | File | Node set |
-|---|---|---|---|
-| HR and project database | relational | `data/company.db` (built from `data/schema.sql`) | `hr_database` |
-| Support desk export | structured | `data/tickets.json` | `support_tickets` |
-| Meeting notes, a postmortem, a planning memo | unstructured | `data/docs/*.md` | `company_docs` |
+cognee remembers each source in one dataset (`company_brain`) and extracts all of them
+with one graph model, so a person in the database, the assignee of a ticket and a name in
+the meeting notes become one node. Then you ask questions that no single source can
+answer, browse the graph in the UI, or let Claude Code or Codex query it over MCP.
 
-Some people, projects and customers appear in all three sources. For example, Dana Kim is
-an employee in the database, the assignee of ticket T-1041, and the owner of a fix in the
-Atlas meeting notes. The goal is for cognee to turn those three mentions into one node.
+Agents run this cookbook through the `company-brain` skill,
+[`.agents/skills/company-brain/SKILL.md`](../../../../.agents/skills/company-brain/SKILL.md).
 
-For code memory and lessons learned in a conversation, see the sibling demo in
-[`../docs_code_conversations/`](../docs_code_conversations/).
+## What it needs
 
-## 1. Set up
+| What | Why | Where |
+|---|---|---|
+| `LLM_API_KEY` | cognee extracts the graph and answers with an LLM (OpenAI by default) | `.env` at the repo root |
+| A SQL database (optional) | Any database SQLAlchemy can reach, read through dlt's `sql_database` | `--database` URL |
+| A ticket export (optional) | One JSON or CSV file from your support desk | `--tickets` path |
+| A docs folder (optional) | Meeting notes, postmortems, memos: any documents cognee reads | `--docs` path |
+| Node.js 20+ and npm (for `--ui`) | Runs the UI. Without them, cognee falls back to Docker | your machine |
+
+Pass at least one source. Without data of your own, try the sample first.
+
+## Try it on the sample company
+
+The sample is Acorn Analytics, a fictional company, in `sample/`: an HR and project
+database, a ticket export and three documents. Some people, projects and customers appear
+in all three. `setup.py` builds the database from `sample/schema.sql`; no accounts or data
+of yours are needed, only `LLM_API_KEY`.
 
 ```bash
-uv venv && source .venv/bin/activate
-uv pip install cognee          # or, in this repo: uv pip install -e .
-echo 'LLM_API_KEY="sk-..."' > .env
+uv run python examples/cookbooks/company_brain/multi_source/setup.py
+uv run python examples/cookbooks/company_brain/multi_source/company_brain.py --sample
 ```
 
-- The relational source uses `dlt`, which ships with cognee. No extra is needed.
-- The UI needs Node.js 20+ and npm. Without them, `cognee.start_ui` falls back to Docker.
-- The script sets `ENABLE_BACKEND_ACCESS_CONTROL=false` unless your `.env` sets it.
-  This is local single-user mode: the script, the API server and the MCP server read the
-  same databases, and the API needs no login.
+`--sample` points every source at `sample/` and asks a question that needs all three:
 
-## 2. The graph model
+```text
+[ingest] Remembered the database (employee_profiles, project_profiles, customer_profiles)
+[ingest] Remembered the tickets in .../sample/tickets.json
+[ingest] Remembered the docs in .../sample/docs
+[ask] Q: Who is handling Brightline Retail's open high-priority ticket, which team are they on, and what fix was decided for it?
+[ask] A: Dana Kim is handling it. She's on the Search team (owner of Atlas). The agreed fix is to change the indexer to read every file in the Brightline catalog feed and re-index the catalog.
+```
+
+The ticket says who is assigned, the database says which team she is on, and the meeting
+notes say what fix was decided. The answer joins them because Dana Kim is one node.
+
+## Run it on your data
+
+```bash
+uv run python examples/cookbooks/company_brain/multi_source/company_brain.py --check \
+    --database postgresql://user:password@host/hr --tickets ~/exports/tickets.json \
+    --docs ~/Documents/company
+uv run python examples/cookbooks/company_brain/multi_source/company_brain.py \
+    --database postgresql://user:password@host/hr --tables employees,projects \
+    --tickets ~/exports/tickets.json --docs ~/Documents/company \
+    --ask "Who owns the open billing incident, and what did we decide to do about it?"
+```
+
+- `--database` takes a SQLAlchemy URL (`postgresql://...`, `mysql+pymysql://...`,
+  `sqlite:///path/to.db`). Every row of `--tables` becomes one document; without
+  `--tables`, every table and view is read. Rows read best as sentences, so a view that
+  joins your tables into readable text (see the `*_profiles` views in
+  `sample/schema.sql`) extracts better than raw foreign keys.
+- Running it again re-remembers the same content; cognee skips content it already holds.
+- Later questions don't need the sources again: `scripts/ask.py "question"`.
+
+## Steps
+
+```
+multi_source/
+├── README.md           this file
+├── company_brain.py    checks setup, then calls the scripts in order
+├── setup.py            builds the sample database, for --sample
+├── models.py           the graph model: edit it to match your company
+├── sample/             the sample company (company.db is built, git-ignored)
+└── scripts/
+    ├── ingest.py
+    ├── ask.py
+    └── ui.py
+```
+
+`company_brain.py` imports each script and calls its function in one process. Each script
+also runs alone with the same options.
+
+| # | Command (`uv run python examples/cookbooks/company_brain/multi_source/...`) | Does | Writes |
+|---|---|---|---|
+| 0 | `company_brain.py --check [sources]` | Reports what is missing. Does no work | nothing |
+| 1 | `scripts/ingest.py [--database URL [--tables a,b]] [--tickets FILE] [--docs FOLDER]` | Remembers each source given, under its own node set (`database`, `tickets`, `docs`), extracted with `models.py` | cognee dataset |
+| 2 | `scripts/ask.py "question"` (or `--ask`) | Answers from the whole graph, across every source | nothing |
+| 3 | `scripts/ui.py` (or `--ui`) | Starts cognee's API server in this process and the UI at http://localhost:3000. Ctrl+C stops both | nothing |
+
+All scripts use the cognee dataset `company_brain`, named once in each script.
+
+They also default `ENABLE_BACKEND_ACCESS_CONTROL` to `false` (a value in `.env` still
+wins). That is local single-user mode: the scripts, the API server and the MCP server
+read one set of databases, and the API needs no login.
+
+## The graph model
 
 `models.py` defines what the LLM extracts from every source:
 
@@ -43,129 +112,42 @@ Person ──member_of──▶ Team ◀──owned_by── Project ──for_c
 Ticket ──assigned_to──▶ Person, ──about──▶ Project, ──raised_by──▶ Customer
 ```
 
-Two things make the sources link:
+Edit it to match your company: add the entities your data talks about, drop the ones it
+doesn't. Two things make the sources link, so keep them when you edit:
 
 - **Identity fields.** Every type declares `identity_fields` (`name`, or `ticket_id` for
   tickets). cognee derives the node id from those values, so "Dana Kim" extracted from the
   database and "Dana Kim" extracted from a ticket get the same id and are stored as one
   node.
 - **Consistent names.** Identity only ignores case, spaces-versus-underscores and
-  apostrophes, so "Search" and "Search team" would be two different teams. Three things
-  keep names consistent here:
-  - the sample data spells every name the same way in every file;
-  - `EXTRACTION_PROMPT` tells the LLM to copy names exactly and not to add words;
-  - `Team` and `Project` have a pydantic `field_validator` that strips the words the LLM
-    still adds now and then ("Billing team" becomes "Billing", "Project Atlas" becomes
-    "Atlas"). The node id is computed from the validated name, so both spellings land on
-    one node, and `FromIdentity` references go through the same validator.
-
-  With your own data, add validators for the variants you see, or merge duplicates
-  afterwards with `consolidate_entities_pipeline` (see
+  apostrophes, so "Search" and "Search team" would be two different teams.
+  `EXTRACTION_PROMPT` tells the LLM to copy names exactly, and `Team` and `Project` have a
+  pydantic `field_validator` that strips the words the LLM still adds now and then
+  ("Billing team" becomes "Billing"). Add validators for the variants you see in your
+  data, or merge duplicates afterwards with `consolidate_entities_pipeline` (see
   `examples/guides/entity_deduplication.py`).
 
-## 3. Ingest the three sources
-
-`company_brain.py` stores each source with its own `remember()` call into the dataset
-`company_brain`, using the same `graph_model` every time. `remember()` ingests the data,
-extracts the graph with the model, and runs `improve()` on the result:
-
-```python
-# Relational: each row of the three *_profiles views becomes one text document.
-hr_database = sql_database(
-    credentials="sqlite:///data/company.db",
-    table_names=["employee_profiles", "project_profiles", "customer_profiles"],
-    include_views=True,
-)
-hr_database.cognee_document_source = "hr_database"
-await cognee.remember(
-    hr_database,
-    dataset_name="company_brain",
-    node_set=["hr_database"],
-    graph_model=CompanyGraph,
-    custom_prompt=EXTRACTION_PROMPT,
-)
-
-# Structured: the ticket export.
-await cognee.remember(
-    "data/tickets.json",
-    dataset_name="company_brain",
-    node_set=["support_tickets"],
-    graph_model=CompanyGraph,
-    custom_prompt=EXTRACTION_PROMPT,
-)
-
-# Unstructured: the markdown documents.
-await cognee.remember(
-    ["data/docs/atlas_weekly_sync_2026-09-19.md", "data/docs/q4_planning_memo.md", ...],
-    dataset_name="company_brain",
-    node_set=["company_docs"],
-    graph_model=CompanyGraph,
-    custom_prompt=EXTRACTION_PROMPT,
-)
-```
-
-Why the relational source looks like this:
-
-- **`cognee_document_source`.** Passing a connection string such as
-  `cognee.remember("sqlite:///company.db")` also works, but it takes cognee's relational
-  path. That path builds a fixed table-and-row graph and ignores `graph_model`, so its
-  nodes would never link to the other sources. Setting `cognee_document_source` on a dlt
-  source sends each row down the document path instead, where it is extracted with the
-  graph model.
-- **The views.** The document path reads a `title` and a `content` column from each row.
-  The views in `schema.sql` join the normalized tables into sentences such as "Dana Kim works
-  in the Search team as Senior Software Engineer", so the LLM sees names instead of foreign
-  keys.
-
-What the node sets do: `node_set` tags the documents and text chunks of each source. It
-does not tag the `Person`, `Team`, `Project`, `Customer` and `Ticket` nodes; those are
-shared by every source that mentions them, which is the point of linking. So a node set
-answers "what does this source say", through a `CHUNKS` search (section 6), and the graph
+Node sets tag the documents and chunks of each source, not the `Person`, `Team`, ...
+nodes, which are shared by every source that mentions them. So a node set answers "what
+does this source say" (a `CHUNKS` recall with `node_name=["tickets"]`), and the graph
 answers "what do we know", across all sources.
 
-Run it:
+## Open the UI
 
-```bash
-uv run python examples/cookbooks/company_brain/multi_source/company_brain.py
-```
+Add `--ui`, or run `scripts/ui.py` later. Open http://localhost:3000 and select the
+`company_brain` dataset. The mind map shows the extracted entities grouped by type, with
+one node per person connected to their team, projects, tickets and manager.
 
-The script empties cognee's store with `cognee.prune`, ingests the three sources (about
-two minutes), prints a verification report (section 6), then starts the API server on
-http://localhost:8000 and the UI on http://localhost:3000. Stop it with Ctrl+C.
-
-> **The prune deletes all data cognee has stored locally**, not only this demo's. It keeps
-> the graph limited to the demo, which the UI needs: in single-user mode every dataset
-> shares one graph, so older data would otherwise show up next to the company brain. To
-> keep existing data, point `DATA_ROOT_DIRECTORY` and `SYSTEM_ROOT_DIRECTORY` in `.env` at
-> empty folders before running.
-
-- `--no-ui` builds and verifies without starting the servers.
-- `--api-port 8010 --ui-port 3010` uses other ports when 8000 or 3000 is taken. Use the
-  same API port in the MCP commands in section 5.
-
-## 4. Open the UI
-
-Open http://localhost:3000 and select the `company_brain` dataset.
-
-- The mind map shows the extracted entities grouped by type (Person, Team, Project,
-  Customer, Ticket), with one `Dana Kim` node connected to the Search team, the Atlas and
-  Harbor projects, ticket T-1041, and her manager Marco Rossi.
-- The sources panel lists the three node sets with their documents. The entities are
-  counted under "Uncategorized": node sets tag each source's documents and chunks, not
-  the entities, which are shared by every source that mentions them (see section 3).
-
-To start the servers later without ingesting again, run `cognee-cli -ui`.
-
-## 5. Connect Claude Code or Codex
+## Connect Claude Code or Codex
 
 The coding agents talk to cognee through the cognee MCP server. Run it in API mode,
 pointed at the running API server, so the agent reads the same graph as the UI. Without
 `--api-url`, the MCP server opens its own local databases and sees a different, empty
 brain.
 
-Keep `company_brain.py` (or `cognee-cli -ui`) running, then warm up the MCP server once.
-The first `uvx` run downloads cognee, and even a cached start takes about 20 seconds,
-longer than an agent waits on a first launch:
+Keep `scripts/ui.py` running, then warm up the MCP server once. The first `uvx` run
+downloads cognee, and even a cached start takes about 20 seconds, longer than an agent
+waits on a first launch:
 
 ```bash
 uvx cognee-mcp --help
@@ -194,102 +176,16 @@ args = ["cognee-mcp", "--api-url", "http://localhost:8000"]
 startup_timeout_sec = 60
 ```
 
-Then ask the agent a question that needs all three sources:
+Then ask the agent a question that needs several sources, for example on the sample:
 
 > Use cognee to recall: who is handling Brightline Retail's open high-priority ticket,
 > which team are they on, and what fix was decided for it?
 
-The agent calls the cognee `recall` tool (`mcp__cognee__recall` in Claude Code) and
-should answer: Dana Kim, on the Search team, who will change the Atlas indexer to read
-every file in the catalog feed and re-index Brightline Retail's catalog; until then
-Brightline can trigger a manual re-index from the admin page.
-
-To check the connection without an interactive session, run Claude Code headless:
+## Clean up
 
 ```bash
-claude -p "Use the cognee recall tool: which team is Dana Kim on?" \
-  --allowedTools mcp__cognee__recall
+uv run cognee-cli forget --dataset company_brain
 ```
 
-If your API server requires authentication (`ENABLE_BACKEND_ACCESS_CONTROL=true`), pass
-a token with `--api-token <token>`.
-
-## 6. Check that it worked
-
-The script prints this report after ingestion. The answers are LLM-written, so wording
-varies between runs; the facts should not.
-
-**Nodes per type.** One node per real entity, with no duplicates:
-
-```
-Customer  3
-Person    8
-Project   4
-Team      4
-Ticket    5
-```
-
-A higher count means one entity was stored under two names. Look in the graph view for
-near-duplicates such as "Search" and "Search team", or a component extracted as its own
-project ("Ledger email worker" next to "Ledger"). Fix spelling variants with a validator
-in `models.py` and wrong kinds of entity with a rule in `EXTRACTION_PROMPT`.
-
-**One node per person, linked across sources.** Dana Kim is one node, and its edges come
-from different sources: team and manager from the HR database, the ticket from the
-export.
-
-```
-Dana Kim: 1 Person node, connected to
-  member_of    Team     Search
-  works_on     Project  Atlas
-  works_on     Project  Harbor
-  reports_to   Person   Marco Rossi
-  assigned_to  Ticket   T-1041
-```
-
-**Per-source search.** A `CHUNKS` search with `node_name` returns text from that source
-only:
-
-```python
-from cognee.modules.search.types import SearchType
-
-await cognee.recall(
-    "Who works on the Atlas project?",
-    query_type=SearchType.CHUNKS,
-    datasets=["company_brain"],
-    node_name=["support_tickets"],
-)
-```
-
-`hr_database` returns the Atlas, Dana Kim and Marco Rossi profile rows,
-`support_tickets` returns the ticket export, and `company_docs` returns the meeting
-notes, the postmortem and the memo. Use `CHUNKS` for this: in this setup the completion
-search types (`GRAPH_COMPLETION`, `RAG_COMPLETION`) answer from the whole graph even when
-`node_name` is given.
-
-**Cross-source question.** Without a filter, the question from section 5 needs one fact
-from each source: the assignee comes from the ticket export, the team from the HR
-database, and the decided fix from the meeting notes.
-
-## Troubleshooting
-
-- **"Another next dev server is already running."** Next.js runs one dev server per
-  checkout of `cognee-frontend`. Stop the other one (the message prints its PID), or keep
-  it and open the URL it prints; it talks to the API server on port 8000 by default.
-- **Port 8000 or 3000 is taken.** Pass `--api-port` and `--ui-port`.
-- **The agent says it found nothing.** Check that the MCP server was registered with
-  `--api-url` and the same API port the script prints.
-- **The cognee MCP server fails to connect or times out.** Run `uvx cognee-mcp --help`
-  once to download it, then raise the client's startup timeout (`MCP_TIMEOUT=60000` for
-  Claude Code, `startup_timeout_sec = 60` for Codex).
-
-## Files
-
-| File | What it is |
-|---|---|
-| `company_brain.py` | Ingests the three sources, prints the verification report, starts the API and UI |
-| `models.py` | The `CompanyGraph` model and the extraction prompt |
-| `data/schema.sql` | Tables, rows and profile views of the HR database |
-| `data/company.db` | The database built from `schema.sql` (rebuilt automatically if deleted) |
-| `data/tickets.json` | The support desk export |
-| `data/docs/` | Meeting notes, a postmortem and a planning memo |
+The `follow_up_agent/` cookbook writes to the same `company_brain` dataset, so this also
+removes what it remembered.

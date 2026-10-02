@@ -199,6 +199,8 @@ cognee/cache/
 # Account credentials for the cookbooks (examples/cookbooks/)
 examples/cookbooks/**/credentials.json
 examples/cookbooks/**/token.json
+# Sample databases the cookbooks' setup.py builds
+examples/cookbooks/**/sample/*.db
 .artifacts/
 .anon_id
 

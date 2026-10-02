@@ -1,8 +1,5 @@
--- Relational source for the company brain guide: Acorn Analytics' HR and project database.
--- Regenerate the database with:
---   rm -f examples/cookbooks/company_brain/multi_source/data/company.db
---   sqlite3 examples/cookbooks/company_brain/multi_source/data/company.db < examples/cookbooks/company_brain/multi_source/data/schema.sql
--- (company_brain.py rebuilds it from this file with Python's sqlite3 when it is missing.)
+-- Sample relational source for the company brain cookbook: Acorn Analytics' HR and
+-- project database. setup.py builds sample/company.db from this file.
 --
 -- The tables are normalized. The three *_profiles views join them into one readable
 -- row per entity with `id`, `title` and `content` columns: cognee's dlt document path
