@@ -129,7 +129,7 @@ async def test_delete_uses_edge_text_for_edge_type_delete_ids():
     )
 
     graph_engine = AsyncMock()
-    graph_engine.get_graph_data.return_value = ([], [])
+    graph_engine.get_edge_retrieval_texts_in_use.return_value = set()
     vector_engine = AsyncMock()
 
     with (
@@ -168,3 +168,5 @@ async def test_delete_uses_edge_text_for_edge_type_delete_ids():
     graph_engine.delete_nodes.assert_awaited_once_with(
         [str(EdgeType.id_for("Alice works at Acme."))]
     )
+    graph_engine.get_edge_retrieval_texts_in_use.assert_awaited_once_with({"Alice works at Acme."})
+    graph_engine.get_graph_data.assert_not_awaited()
