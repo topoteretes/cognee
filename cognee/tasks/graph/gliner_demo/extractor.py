@@ -10,10 +10,11 @@ torch's intra-op pool, so running several batches at once is what uses the rest
 of the CPU. Torch releases the GIL inside its kernels, so threads run truly in
 parallel without a second copy of the model. A process-wide pool bounds the
 concurrency across every pipeline in the process, which also bounds memory:
-each in-flight batch holds its own activations. With one thread, a call runs
-its batches one after another.
+each in-flight batch holds its own activations. With one thread there is no
+pool; a lock makes calls take turns, so one batch runs at a time.
 
-Calls on the shared model need no lock. The runtime writes three things per
+Calls on the shared model need no lock for correctness (the one-thread lock
+only bounds memory). The runtime writes three things per
 call, all idempotent for inference: eval mode, ``is_training=False``, and, on
 the ``extract`` path with no ``max_len`` (the schema probe), a lazily cached
 default collator that two concurrent probes may each construct, with equivalent
@@ -101,6 +102,10 @@ _load_lock = threading.Lock()
 _pool: ThreadPoolExecutor | None = None
 _pool_size: int | None = None
 _pool_lock = threading.Lock()
+# With one thread there is no pool to bound concurrency, so this lock makes
+# concurrent callers take turns on the model: without it every pipeline's
+# batch would be in flight at once, each holding its own activations.
+_inference_lock = threading.Lock()
 
 
 def require_gliner2() -> None:
@@ -275,8 +280,6 @@ def auto_inference_threads() -> int:
 def inference_threads() -> int:
     """The configured concurrency (GLINER_INFERENCE_THREADS), auto-sized when 0."""
     configured = get_cognify_config().gliner_inference_threads
-    if configured < 0:
-        raise ValueError(f"GLINER_INFERENCE_THREADS must be >= 0, got {configured}")
     return configured or auto_inference_threads()
 
 
@@ -418,17 +421,18 @@ def extract_batch(
             window_words=window_words,
             window_overlap_words=window_overlap_words,
         )
-    return extractor.batch_extract_long(
-        list(texts),
-        built,
-        batch_size=batch_size,
-        threshold=threshold,
-        include_confidence=True,
-        include_spans=True,
-        chunk_size=window_words,
-        chunk_overlap=window_overlap_words,
-        overlap_policy=OVERLAP_POLICY,
-    )
+    with _inference_lock:
+        return extractor.batch_extract_long(
+            list(texts),
+            built,
+            batch_size=batch_size,
+            threshold=threshold,
+            include_confidence=True,
+            include_spans=True,
+            chunk_size=window_words,
+            chunk_overlap=window_overlap_words,
+            overlap_policy=OVERLAP_POLICY,
+        )
 
 
 def extract_once(
@@ -459,7 +463,8 @@ def extract_once(
     pool = _inference_pool()
     if pool is not None:
         return pool.submit(run).result()
-    return run()
+    with _inference_lock:
+        return run()
 
 
 async def extract_batch_async(

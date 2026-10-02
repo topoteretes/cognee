@@ -1,6 +1,7 @@
 import os
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.exceptions import CogneeConfigurationError
@@ -37,7 +38,7 @@ class CognifyConfig(BaseSettings):
     # (env: GLINER_INFERENCE_THREADS). 0 (default) sizes it to the machine:
     # half of torch's thread count, capped by free memory. 1 keeps the
     # single-threaded behaviour. Output is identical at every setting.
-    gliner_inference_threads: int = 0
+    gliner_inference_threads: int = Field(default=0, ge=0)
     model_config = SettingsConfigDict(extra="allow")
 
     def to_dict(self) -> dict:
