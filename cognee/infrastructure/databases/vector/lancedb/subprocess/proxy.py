@@ -6,6 +6,7 @@ a subprocess that only imports ``lancedb`` + ``pyarrow`` (no cognee).
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import multiprocessing as mp
 from typing import Any
 
@@ -26,7 +27,9 @@ from cognee_db_workers.lancedb_protocol import (
     OP_OPEN_TABLE,
     OP_TABLE_ADD,
     OP_TABLE_COUNT_ROWS,
+    OP_TABLE_CREATE_INDEX,
     OP_TABLE_DELETE,
+    OP_TABLE_LIST_INDICES,
     OP_TABLE_MERGE_INSERT_EXECUTE,
     OP_TABLE_NAMES,
     OP_TABLE_OPTIMIZE,
@@ -80,6 +83,15 @@ class LanceDBSubprocessSession(SubprocessSession):
         return get_process_rss_bytes(self._proc.pid)
 
 
+@dataclasses.dataclass(frozen=True)
+class RemoteIndexConfig:
+    """What the adapter reads from ``lancedb.IndexConfig``, which does not pickle."""
+
+    name: str
+    index_type: str
+    columns: list[str]
+
+
 class _BuilderChain:
     """Accumulates fluent-builder calls on the main side; dispatches a single
     RPC on the terminal method.
@@ -131,6 +143,9 @@ class RemoteVectorSearch(_BuilderChain):
 
     def distance_type(self, metric: str) -> RemoteVectorSearch:
         return self._add("distance_type", metric)
+
+    def refine_factor(self, factor: int) -> RemoteVectorSearch:
+        return self._add("refine_factor", factor)
 
     def where(self, predicate: str) -> RemoteVectorSearch:
         return self._add("where", predicate)
@@ -301,6 +316,30 @@ class RemoteLanceDBTable:
         so callers that bulk-delete (e.g. id migrations) compact afterwards."""
         await self._session.call_async(
             Request(op=OP_TABLE_OPTIMIZE, handle_id=self.handle_id, args=())
+        )
+
+    async def list_indices(self) -> list[RemoteIndexConfig]:
+        """The table's indices (mirrors ``lancedb.AsyncTable.list_indices``)."""
+        resp = await self._session.call_async(
+            Request(op=OP_TABLE_LIST_INDICES, handle_id=self.handle_id)
+        )
+        return [RemoteIndexConfig(**index) for index in resp.result]
+
+    async def create_index(self, column: str, *, config: Any) -> None:
+        """Build an index (mirrors ``lancedb.AsyncTable.create_index``).
+
+        ``config`` is one of the ``lancedb.index`` dataclasses. It crosses the
+        process boundary as its class name and fields, and the worker builds
+        the same config again. No deadline: training reads a sample of the
+        stored vectors and takes minutes on a large table.
+        """
+        await self._session.call_async(
+            Request(
+                op=OP_TABLE_CREATE_INDEX,
+                handle_id=self.handle_id,
+                args=(column, type(config).__name__, dataclasses.asdict(config)),
+            ),
+            timeout=None,
         )
 
     def query(self) -> RemoteQuery:

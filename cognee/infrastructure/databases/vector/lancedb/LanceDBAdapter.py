@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import inspect
+import os
 import threading
 import types
 from collections import OrderedDict
@@ -17,6 +18,7 @@ from typing import (  # noqa: UP035 - typing.List is a distinct origin key, not 
 from uuid import UUID
 
 import lancedb
+from lancedb.index import IvfPq
 from lancedb.pydantic import LanceModel, Vector
 from pydantic import BaseModel
 
@@ -41,6 +43,19 @@ from ..stored_vector_size import choose_stored_vector_size
 from ..vector_db_interface import VectorDBInterface
 
 logger = get_logger("LanceDBAdapter")
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read an integer env var, falling back to the default when unset or malformed."""
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 _NO_DEFAULT = object()
 _SIMPLE_TYPE_DEFAULTS = {
     str: "",
@@ -121,6 +136,12 @@ class LanceDBAdapter(VectorDBInterface):
     _PAYLOAD_SCHEMA_CACHE_SIZE = 256
     _LANCE_DATAPOINT_CACHE_SIZE = 256
     _payload_schema_cache: "OrderedDict" = OrderedDict()
+
+    # Product quantization is trained on the stored rows and lance refuses to
+    # train on fewer than this.
+    VECTOR_INDEX_TRAINING_MIN_ROWS = 256
+    # A collection without an index is looked at again after this many writes.
+    VECTOR_INDEX_CHECK_EVERY_N_WRITES = 50
     _lance_datapoint_class_cache: "OrderedDict" = OrderedDict()
     _lance_cache_lock = threading.Lock()
 
@@ -211,6 +232,18 @@ class LanceDBAdapter(VectorDBInterface):
         #   (*,     True)  — closed, not reusable in either mode
         self._subprocess_mode = session is not None
         self._permanently_closed = False
+        # Without a vector index every search reads every stored vector, so
+        # search time and memory grow with the collection. Once a collection
+        # holds this many rows it gets a product-quantized index
+        # (LANCEDB_VECTOR_INDEX_MIN_ROWS, 0 disables). Searches then scan the
+        # compressed codes and re-rank limit * refine_factor candidates on
+        # their full vectors (LANCEDB_VECTOR_INDEX_REFINE_FACTOR).
+        self._vector_index_min_rows = _env_int("LANCEDB_VECTOR_INDEX_MIN_ROWS", 50_000)
+        self._vector_index_refine_factor = _env_int("LANCEDB_VECTOR_INDEX_REFINE_FACTOR", 10)
+        self._writes_since_index_check: dict[str, int] = {}
+        # Collections that need no further look: indexed already, or the
+        # build failed and is not attempted again by this adapter.
+        self._vector_index_settled: set[str] = set()
 
     async def get_connection(self):
         """
@@ -440,6 +473,57 @@ class LanceDBAdapter(VectorDBInterface):
         connection = await self.get_connection()
         return await connection.open_table(collection_name)
 
+    async def _index_if_due(self, collection_name: str, collection) -> None:
+        """Give the collection a vector index once it is large enough to need one.
+
+        Looked at on the first write an adapter makes to a collection and every
+        VECTOR_INDEX_CHECK_EVERY_N_WRITES after that, until the collection has
+        an index. Rows written after the build are found by an exhaustive scan
+        of the unindexed part until the table is optimized. A failed build
+        never fails the write that triggered it.
+        """
+        if self._vector_index_min_rows <= 0 or collection_name in self._vector_index_settled:
+            return
+
+        writes = self._writes_since_index_check.get(collection_name, 0)
+        self._writes_since_index_check[collection_name] = (
+            writes + 1
+        ) % self.VECTOR_INDEX_CHECK_EVERY_N_WRITES
+        if writes != 0:
+            return
+
+        try:
+            indices = await collection.list_indices()
+            if any("vector" in index.columns for index in indices):
+                self._vector_index_settled.add(collection_name)
+                return
+
+            row_count = await collection.count_rows()
+            if row_count < max(self._vector_index_min_rows, self.VECTOR_INDEX_TRAINING_MIN_ROWS):
+                return
+
+            # Settled before the build: if it fails, or takes the worker down
+            # with it, the same build is not started again on the next check.
+            self._vector_index_settled.add(collection_name)
+            logger.info(
+                "Building a vector index for LanceDB collection '%s' (%d rows)",
+                collection_name,
+                row_count,
+            )
+            # One partition: every search scans all compressed codes, so how
+            # many results are found depends on the quantization and the
+            # re-ranking alone, not on how many partitions a query probes.
+            await collection.create_index(
+                "vector", config=IvfPq(distance_type="cosine", num_partitions=1)
+            )
+        except Exception as error:
+            logger.warning(
+                "Could not build a vector index for LanceDB collection '%s': %s",
+                collection_name,
+                error,
+                exc_info=True,
+            )
+
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set with any prior rows."""
         payload_schema = type(data_points[0])
@@ -560,6 +644,7 @@ class LanceDBAdapter(VectorDBInterface):
                     .when_not_matched_insert_all()
                     .execute(self._records_for_write(lance_data_points))
                 )
+                await self._index_if_due(collection_name, collection)
         except (ValueError, OSError, RuntimeError) as e:
             # Two LanceDB schema-drift failure modes are recoverable by rebuilding
             # the table via Pydantic validation (which fills defaults from the
@@ -637,6 +722,7 @@ class LanceDBAdapter(VectorDBInterface):
                 .when_not_matched_insert_all()
                 .execute(self._records_for_write(raw_points))
             )
+            await self._index_if_due(collection_name, collection)
 
     async def _migrate_collection_schema(
         self,
@@ -1099,6 +1185,9 @@ class LanceDBAdapter(VectorDBInterface):
 
             collection = await self.get_collection(collection_name)
 
+            # A caller that passes no limit wants a distance for every row, so
+            # there is nothing an index could narrow down.
+            exhaustive = limit is None
             if limit is None:
                 limit = await collection.count_rows()
 
@@ -1131,22 +1220,21 @@ class LanceDBAdapter(VectorDBInterface):
                         f"array_has_any(payload.belongs_to_set, {literal_node_names})"
                     )
 
-                result_values = (
-                    await collection.vector_search(query_vector)
+                vector_query = (
+                    collection.vector_search(query_vector)
                     .distance_type("cosine")
                     .where(node_name_filter_string)
-                    .select(select_columns)
-                    .limit(limit)
-                    .to_list()
                 )
             else:
-                result_values = (
-                    await collection.vector_search(query_vector)
-                    .distance_type("cosine")
-                    .select(select_columns)
-                    .limit(limit)
-                    .to_list()
-                )
+                vector_query = collection.vector_search(query_vector).distance_type("cosine")
+
+            # Both calls are no-ops on a collection without a vector index.
+            if exhaustive:
+                vector_query = vector_query.bypass_vector_index()
+            elif self._vector_index_refine_factor > 1:
+                vector_query = vector_query.refine_factor(self._vector_index_refine_factor)
+
+            result_values = await vector_query.select(select_columns).limit(limit).to_list()
 
             if not result_values:
                 otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
