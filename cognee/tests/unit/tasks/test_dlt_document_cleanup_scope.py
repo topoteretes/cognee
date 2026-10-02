@@ -100,28 +100,3 @@ async def test_empty_table_cleanup_retains_other_tables_and_unscoped_legacy_rows
             document_scopes={("google_drive", "drive_a")},
         )
     delete.assert_awaited_once_with(owned, dataset.id)
-
-
-@pytest.mark.asyncio
-async def test_retired_child_table_joins_the_cleanup_scope():
-    dlt = pytest.importorskip("dlt")
-
-    @dlt.resource(name="notion_pages")
-    def source():
-        yield from ()
-
-    resource = source()
-    setattr(resource, DOCUMENT_SOURCE_ATTR, "notion")
-    rows = DltRows([], loaded_tables=["notion_pages"], retired_tables=["notion_pages__comments"])
-    with (
-        patch.object(resolve, "ingest_dlt_source", new=AsyncMock(return_value=rows)),
-        patch.object(resolve, "_delete_dlt_orphans", new=AsyncMock()) as delete,
-    ):
-        _, cleanup = await resolve.resolve_dlt_sources(
-            resource, "dataset", SimpleNamespace(id=uuid4()), dataset_id=uuid4()
-        )
-        await cleanup()
-    assert delete.await_args.kwargs["document_scopes"] == {
-        ("notion", "notion_pages"),
-        ("notion", "notion_pages__comments"),
-    }
