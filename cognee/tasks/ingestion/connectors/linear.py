@@ -560,7 +560,8 @@ class _Walker:
         return connection.get("nodes") or [], connection.get("pageInfo") or {}
 
     def _fetch_comments(self, filter_: dict, after: str | None) -> tuple[list, dict]:
-        scoped = {"issue": {"team": {"id": {"eq": self.team_id}}}, **filter_}
+        # Team scoping goes last so no key in filter_ can override it.
+        scoped = {**filter_, "issue": {"team": {"id": {"eq": self.team_id}}}}
         data = self._call(
             _COMMENTS_QUERY,
             {

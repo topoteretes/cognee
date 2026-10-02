@@ -727,3 +727,28 @@ def test_page_size_is_clamped_to_what_fits_the_complexity_limit(team, tmp_path):
     )
     pipeline.run(linear_source(team_id=TEAM, service=team, resource_name="linear_t", page_size=500))
     assert sizes and max(sizes) == linear_module.MAX_PAGE_SIZE == 50
+
+
+def test_comment_queries_stay_scoped_to_the_team_whatever_the_filter_holds(team):
+    seen = []
+    original = team.execute
+
+    def record(query, variables=None):
+        if "LinearTeamComments" in query:
+            seen.append(variables["filter"])
+        return original(query, variables)
+
+    team.execute = record
+    walker = linear_module._Walker(
+        team,
+        TEAM,
+        {},
+        _stats(),
+        check_active=None,
+        include_archived=True,
+        page_size=50,
+        max_requests=10,
+    )
+    walker._fetch_comments({"issue": {"team": {"id": {"eq": "someone-elses-team"}}}}, None)
+
+    assert seen == [{"issue": {"team": {"id": {"eq": TEAM}}}}]
