@@ -11,7 +11,7 @@ Raw data (str / bytes / file-like / list of the above) continues to
 flow through the permanent add+cognify path unchanged.
 """
 
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
@@ -28,12 +28,12 @@ class SessionTaggedEntry(BaseModel):
     the set, later entries must repeat it or omit it, and a different set is
     rejected with HTTP 409 (``ProjectTagConflictError``). ``improve()`` adds
     the pinned tags to the node sets of everything it bridges from the session
-    into the graph, so project-scoped recall (``node_name``) sees it.
+    into the graph, so project-scoped recall (``node_name``) sees it. Like the
+    call-level ``node_set`` everywhere else, the list is not size-limited.
     """
 
-    node_set: list[Annotated[str, Field(min_length=1, max_length=200)]] | None = Field(
+    node_set: list[str] | None = Field(
         default=None,
-        max_length=16,
         description=(
             "Optional project tags pinned on the session; kept on the graph nodes "
             "improve() builds from it. Immutable once set for a session."
