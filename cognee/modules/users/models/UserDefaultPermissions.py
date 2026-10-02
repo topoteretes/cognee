@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import UUID, Column, DateTime, ForeignKey
+from sqlalchemy import Column, DateTime, ForeignKey, Uuid
 
 from cognee.infrastructure.databases.relational import Base
 
@@ -10,9 +10,9 @@ class UserDefaultPermissions(Base):
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
-    user_id = Column(UUID, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(Uuid, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     permission_id = Column(
-        UUID,
+        Uuid,
         ForeignKey(
             "permissions.id", ondelete="CASCADE"
         ),  # cascade deletion when Permission is deleted
