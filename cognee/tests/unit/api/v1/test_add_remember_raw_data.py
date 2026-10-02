@@ -219,7 +219,9 @@ def test_remember_forwards_index_vectors_with_repo_urls(client):
 
 def test_remember_reads_the_removed_code_content_type_as_code_only(client):
     # The old request shape (content_type=code + a repository in raw_data) keeps
-    # working AND keeps its behaviour: that route indexed the code graph only.
+    # working AND keeps its behaviour: that route indexed the code graph only
+    # (include_documents) and cloned every raw_data entry as a repository
+    # whatever its host (treat_as_repository).
     with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
         mock_remember.return_value = remember_completed()
 
@@ -231,7 +233,31 @@ def test_remember_reads_the_removed_code_content_type_as_code_only(client):
         assert response.status_code == 200, response.text
         assert mock_remember.call_args.args[0] == [REPO_URL]
         assert mock_remember.call_args.kwargs["content_type"] is None
-        assert mock_remember.call_args.kwargs["codegraph_config"] == {"include_documents": False}
+        assert mock_remember.call_args.kwargs["codegraph_config"] == {
+            "include_documents": False,
+            "treat_as_repository": True,
+        }
+
+
+def test_remember_declares_a_repository_url_add_would_not_claim(client):
+    # The regression this half of the translation prevents: a Bitbucket URL is
+    # not matched by code_repo_clone_url, so without treat_as_repository the
+    # server would fetch and store the project's web page.
+    with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
+        mock_remember.return_value = remember_completed()
+
+        response = client.post(
+            "/api/v1/remember",
+            data={
+                "datasetName": "test_dataset",
+                "content_type": "code",
+                "raw_data": ["https://bitbucket.org/acme/api"],
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        assert mock_remember.call_args.args[0] == ["https://bitbucket.org/acme/api"]
+        assert mock_remember.call_args.kwargs["codegraph_config"]["treat_as_repository"] is True
 
 
 def test_remember_combines_code_content_type_with_index_vectors(client):
@@ -252,6 +278,7 @@ def test_remember_combines_code_content_type_with_index_vectors(client):
         assert mock_remember.call_args.kwargs["codegraph_config"] == {
             "index_vectors": True,
             "include_documents": False,
+            "treat_as_repository": True,
         }
 
 

@@ -135,9 +135,14 @@ async def add(
                  through environment config, never the URL or the stored rows.
                  It also reads ``include_documents`` (default True): set it False
                  to index a repository's code graph only, leaving its README and
-                 docs un-ingested. ``index_vectors`` is read by cognify() and
-                 ignored here. ``repo_credentials`` is not supported while
-                 connected to a remote instance.
+                 docs un-ingested. And ``treat_as_repository`` (default False):
+                 every item in ``data`` is then a repository spec, so a git
+                 remote add() would not recognise on its own — a Bitbucket or
+                 self-hosted forge URL without ``.git``, an ssh remote — is
+                 cloned instead of scraped as a web page.
+                 ``index_vectors`` is read by cognify() and ignored here.
+                 ``repo_credentials`` and ``treat_as_repository`` are not
+                 supported while connected to a remote instance.
         extraction_rules: Optional dictionary of rules (e.g., CSS selectors, XPath) for extracting specific content from web pages using BeautifulSoup
         tavily_config: Optional configuration for Tavily API, including API key and extraction settings
         soup_crawler_config: Optional configuration for BeautifulSoup crawler, specifying concurrency, crawl delay, and extraction rules.
@@ -240,6 +245,16 @@ async def add(
                 "repo_credentials is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to clone the repository locally."
             )
+        if codegraph_config.get("treat_as_repository"):
+            # client.add() whitelists its form fields and has none for this, so
+            # the remote would sniff the specs instead of cloning them -- the
+            # silent web-page ingest this option exists to prevent.
+            raise ValueError(
+                "treat_as_repository is not supported by add() while connected to a "
+                "remote Cognee instance. Use remember(..., "
+                'codegraph_config={"treat_as_repository": True}), or call '
+                "cognee.disconnect() to clone the repository locally."
+            )
         result = await client.add(data, dataset_name)
         # Wrap in a simple namespace so callers expecting .model_dump() still work
         from types import SimpleNamespace
@@ -308,17 +323,20 @@ async def add(
         ),
     ]
 
-    # The pipeline resolves repositories itself, but always without credentials
-    # and always with their documents. A call that answers either differently
-    # has to resolve them here, before the pipeline runs.
+    # The pipeline resolves repositories itself, but always without credentials,
+    # always with their documents, and only for the shapes it can recognise on
+    # its own. A call that answers any of those differently has to resolve them
+    # here, before the pipeline runs.
     include_documents = codegraph_config.get("include_documents", True)
-    if codegraph_config.get("repo_credentials") or not include_documents:
+    treat_as_repository = bool(codegraph_config.get("treat_as_repository"))
+    if codegraph_config.get("repo_credentials") or not include_documents or treat_as_repository:
         from cognee.tasks.code_graph.code_repo import resolve_code_repositories
 
         data = await resolve_code_repositories(
             data,
             credentials=codegraph_config.get("repo_credentials"),
             include_documents=include_documents,
+            treat_as_repository=treat_as_repository,
             user=user,
             dataset_id=authorized_dataset.id,
         )

@@ -123,9 +123,11 @@ async def test_codegraph_config_is_rejected_with_session_id(permanent_pipeline):
 
 @pytest.mark.asyncio
 async def test_removed_code_content_type_keeps_its_behaviour(permanent_pipeline):
-    # Existing callers keep working AND keep what they had: the removed route
-    # indexed the code graph only, so the value is read as
-    # include_documents=False rather than dropped.
+    # Existing callers keep working AND keep what they had. The removed route
+    # said two things, so the value is read as both: it indexed the code graph
+    # only (include_documents=False) and took every item as a repository spec
+    # (treat_as_repository=True). Dropping the second would quietly scrape a
+    # Bitbucket or self-hosted forge URL as a web page instead of cloning it.
     result = await remember_module.remember(
         "https://github.com/acme/private",
         dataset_id=uuid4(),
@@ -139,6 +141,7 @@ async def test_removed_code_content_type_keeps_its_behaviour(permanent_pipeline)
     assert permanent_pipeline["add"]["codegraph_config"] == {
         "repo_credentials": "tok123",
         "include_documents": False,
+        "treat_as_repository": True,
     }
     assert "content_type" not in permanent_pipeline["add"]
     assert "content_type" not in permanent_pipeline["cognify"]
@@ -157,7 +160,12 @@ async def test_explicit_include_documents_wins_over_the_content_type_default(per
         codegraph_config={"include_documents": True},
     )
 
-    assert permanent_pipeline["add"]["codegraph_config"] == {"include_documents": True}
+    assert permanent_pipeline["add"]["codegraph_config"] == {
+        "include_documents": True,
+        # Still declared: the caller overrode what to ingest, not what the
+        # items are.
+        "treat_as_repository": True,
+    }
 
 
 @pytest.mark.asyncio

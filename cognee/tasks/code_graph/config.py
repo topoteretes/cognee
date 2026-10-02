@@ -6,9 +6,9 @@ from typing import TypedDict, cast
 class CodeGraphConfig(TypedDict, total=False):
     """Options for code files and code repositories, passed as ``codegraph_config``.
 
-    ``add()`` reads ``repo_credentials`` and ``include_documents``; ``cognify()``
-    reads ``index_vectors``; ``remember()`` hands the same dict to both, so each
-    takes what it needs.
+    ``add()`` reads ``repo_credentials``, ``include_documents`` and
+    ``treat_as_repository``; ``cognify()`` reads ``index_vectors``;
+    ``remember()`` hands the same dict to both, so each takes what it needs.
     """
 
     # Also embed the code facts the run builds, so completion search types can
@@ -26,6 +26,24 @@ class CodeGraphConfig(TypedDict, total=False):
     # installation token). It reaches git only through environment config,
     # never the URL, so nothing stored or logged carries it.
     repo_credentials: str
+    # Every item in this call's data IS a repository spec -- a local directory
+    # or a git remote -- rather than something to sniff. Off by default: add()
+    # recognises repositories on its own (``code_repo_clone_url`` for URLs,
+    # ``detect_code_project`` for directories), which is deliberately
+    # conservative because most http(s) URLs really are web pages and most
+    # directories really are document trees.
+    #
+    # Turn it on when that sniffing cannot see what you have: a Bitbucket or
+    # self-hosted forge URL with no ``.git`` suffix (guessing would scrape a web
+    # page instead), an ssh remote (``git@host:owner/repo``), or a source tree
+    # with no build manifest and no ``.git``. It is also what the deprecated
+    # ``content_type="code"`` declared, and what that value is read as, so those
+    # callers keep the repository set they had.
+    #
+    # Every item is then resolved through ``resolve_repo_source``: a local
+    # directory is used in place, a remote URL is shallow-cloned. An item that
+    # is neither raises instead of being stored as text.
+    treat_as_repository: bool
 
 
 CODEGRAPH_CONFIG_KEYS = frozenset(CodeGraphConfig.__annotations__)

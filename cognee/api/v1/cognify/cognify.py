@@ -246,7 +246,8 @@ async def cognify(
                  SearchType.CODE reads the graph only. It applies only to items the
                  run actually builds — an unchanged, already-built item is skipped
                  by incremental loading and keeps its previous vectors (or none).
-                 ``repo_credentials`` is read by add() and ignored here. Not
+                 ``repo_credentials``, ``include_documents`` and
+                 ``treat_as_repository`` are read by add() and ignored here. Not
                  supported while connected to a remote instance.
 
     Returns:

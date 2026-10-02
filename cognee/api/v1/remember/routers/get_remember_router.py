@@ -260,7 +260,9 @@ def get_remember_router() -> APIRouter:
                 "or 'cogx-archive' to import an uploaded archive. Leave empty for normal "
                 "ingestion, including code repositories (pass git URLs or server-local "
                 "repo paths via 'raw_data'). The removed 'code' value is still accepted "
-                "and read as code-graph-only ingestion."
+                "and read as code-graph-only ingestion of declared repository specs -- "
+                "every raw_data entry is cloned as a repository whatever its host, which "
+                "normal ingestion only does for GitHub/GitLab URLs and .git URLs."
             ),
         ),
         import_mode: str | None = Form(
@@ -342,8 +344,10 @@ def get_remember_router() -> APIRouter:
           Skill nodes; omit for normal ingestion. Code repositories need no content type:
           a GitHub/GitLab URL or server-local repo path in raw_data is stored as one
           data item and built by cognify's CODE_REPO route. The removed "code" value is
-          still accepted and read as code-graph-only ingestion (the repository's README
-          and docs are not ingested), the behaviour it had.
+          still accepted and read as its old behaviour: the repository's README and docs
+          are not ingested, and every raw_data entry is taken as a repository spec and
+          cloned whatever its host (normal ingestion claims only GitHub/GitLab and .git
+          URLs, and leaves the rest to the web-page path).
         - **index_vectors** (Optional[bool]): Also embed the code facts of the code files
           and repositories this call builds (default false). Normal ingestion only.
 
@@ -386,8 +390,13 @@ def get_remember_router() -> APIRouter:
 
         # content_type='code' was removed (SDK-793): a repository in raw_data is
         # ordinary data. Clients still sending it keep working, and keep the
-        # behaviour they had -- that route indexed the code graph only, so the
-        # value is read as include_documents=False rather than dropped.
+        # behaviour they had, so the value is read rather than dropped: that
+        # route indexed the code graph only (include_documents=False) and took
+        # every raw_data entry as a repository spec, cloning any git remote
+        # (treat_as_repository=True). The second half matters as much as the
+        # first -- without it a Bitbucket or self-hosted forge URL, which
+        # add()'s own detection does not claim, would be fetched and stored as
+        # a web page instead of cloned.
         code_only = content_type == "code"
         if code_only:
             content_type = None
@@ -419,7 +428,7 @@ def get_remember_router() -> APIRouter:
             logger.warning(
                 "POST /remember content_type='code' is deprecated: pass the repository "
                 "path or URL in raw_data; it is read as code-graph-only ingestion "
-                "(no README/docs)."
+                "(no README/docs) of declared repository specs."
             )
 
         # String inputs join the uploads as one item list, uploads first. Drop
@@ -607,7 +616,11 @@ def get_remember_router() -> APIRouter:
                     {
                         "codegraph_config": {
                             **({"index_vectors": True} if index_vectors else {}),
-                            **({"include_documents": False} if code_only else {}),
+                            **(
+                                {"include_documents": False, "treat_as_repository": True}
+                                if code_only
+                                else {}
+                            ),
                         }
                     }
                     if index_vectors or code_only

@@ -1071,11 +1071,15 @@ async def remember(
             by cognify's CODE_REPO route. ``codegraph_config`` (see
             ``CodeGraphConfig``) sets ``index_vectors`` to also embed the code
             facts this call builds, ``repo_credentials`` to clone private
-            repository URLs, and ``include_documents=False`` to index the code
-            graph only (no README/docs ingestion); the top-level
-            ``index_vectors=`` / ``repo_credentials=`` spellings are still
-            accepted. The deprecated ``content_type="code"`` is read as
-            ``include_documents=False``, the behaviour it used to have.
+            repository URLs, ``include_documents=False`` to index the code
+            graph only (no README/docs ingestion), and
+            ``treat_as_repository=True`` to take every item as a repository
+            spec -- needed for a git remote ``add()`` does not claim on its
+            own, such as a Bitbucket or self-hosted forge URL with no ``.git``
+            suffix, or an ssh remote. The top-level ``index_vectors=`` /
+            ``repo_credentials=`` spellings are still accepted. The deprecated
+            ``content_type="code"`` is read as ``include_documents=False`` plus
+            ``treat_as_repository=True``, the behaviour it used to have.
         skill_improvement: Internal skill-improvement control dict used with
             ``SkillRunEntry`` or ``content_type="skills"``. ``apply=True``
             requires an existing ``proposal_id``.
@@ -1108,18 +1112,26 @@ async def remember(
     # content_type="code" was removed (SDK-793): a repository is ordinary data
     # and builds through add() + cognify(). Callers still passing it keep
     # working -- and keep the behaviour they had, which is why the value is
-    # translated rather than dropped: the removed route indexed the code graph
-    # only, so it means include_documents=False. An explicit codegraph_config
-    # still wins. Translated here, before any path reads content_type.
+    # translated rather than dropped. It said two things, and both have to
+    # survive the translation or the deprecation changes results silently:
+    # the removed route indexed the code graph only (include_documents=False),
+    # and it took every item as a repository spec, cloning any git remote
+    # (treat_as_repository=True). Without the second, a Bitbucket or
+    # self-hosted forge URL -- which add()'s own detection deliberately does
+    # not claim -- would be scraped as a web page instead of cloned. An
+    # explicit codegraph_config still wins over both. Translated here, before
+    # any path reads content_type.
     if kwargs.get("content_type") == "code":
         kwargs.pop("content_type")
         codegraph_config = dict(kwargs.get("codegraph_config") or {})
         codegraph_config.setdefault("include_documents", False)
+        codegraph_config.setdefault("treat_as_repository", True)
         kwargs["codegraph_config"] = codegraph_config
         logger.warning(
             "remember(content_type='code') is deprecated: pass the repository path or URL "
-            'as data with codegraph_config={"include_documents": False} for the same '
-            "code-graph-only ingestion. Reading it as that for now."
+            'as data with codegraph_config={"include_documents": False, '
+            '"treat_as_repository": True} for the same code-graph-only ingestion. '
+            "Reading it as that for now."
         )
 
     # Migration dispatch: a MemorySource streams COGX records from an external

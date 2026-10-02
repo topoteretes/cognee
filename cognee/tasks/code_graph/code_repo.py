@@ -363,10 +363,85 @@ async def resolve_code_repository_url(
     return manifest_item, [RepoCloneFile(Path(path)) for path in document_paths], skip_count
 
 
+async def resolve_declared_repositories(
+    data,
+    credentials: str | None = None,
+    include_documents: bool = True,
+    user=None,
+    dataset_id=None,
+):
+    """Resolve every item of ``data`` as a repository spec, sniffing nothing.
+
+    What ``codegraph_config={"treat_as_repository": True}`` means, and what the
+    deprecated ``content_type="code"`` declared: the caller has told us these
+    are repositories, so the conservative detection
+    (:func:`code_repo_clone_url`, :func:`detect_code_project`) is bypassed and
+    every spec goes through :func:`resolve_repo_source` — a local directory is
+    used in place, any git remote (including ssh, Bitbucket, and self-hosted
+    forges with no ``.git`` suffix) is shallow-cloned.
+
+    That breadth is the point: detection has to stay narrow because most
+    http(s) URLs are web pages, so without an explicit declaration a Bitbucket
+    URL would be scraped as one. A spec that resolves to neither a directory
+    nor a clonable remote raises rather than being stored as its own text.
+
+    Returns the manifest items (plus each repository's documents) in input
+    order.
+    """
+    from cognee.modules.ingestion.exceptions import IngestionError
+    from cognee.tasks.code_graph.resolve_repo import is_remote_repo
+    from cognee.tasks.ingestion.repo_clone_file import RepoCloneFile
+    from cognee.tasks.ingestion.save_data_item_to_storage import settings as save_data_settings
+
+    items = data if isinstance(data, list) else [data]
+    non_specs = [item for item in items if not isinstance(item, (str, Path))]
+    if non_specs or not items:
+        raise IngestionError(
+            message="codegraph_config treat_as_repository expects repository paths or git "
+            "URLs as data (a single spec or a list of them); got "
+            f"{', '.join(sorted({type(item).__name__ for item in non_specs})) or 'nothing'}. "
+            "Drop treat_as_repository to ingest file uploads or text normally."
+        )
+
+    # Local specs are read from this machine's filesystem, so they take the
+    # same gate the in-pipeline directory path applies -- a declaration that
+    # something is a repository is not a licence to read a disabled root.
+    if not save_data_settings.accept_local_file_path and any(
+        not is_remote_repo(item) for item in items
+    ):
+        raise IngestionError(
+            message="Local repository paths are not accepted "
+            "(ACCEPT_LOCAL_FILE_PATH=false). Pass a git URL instead."
+        )
+
+    resolved = []
+    for item in items:
+        repo_path = await resolve_repo_source(item, credentials=credentials)
+        remote = is_remote_repo(item)
+        manifest_item, document_paths, _skipped = await resolve_code_repository(
+            repo_path,
+            user=user,
+            dataset_id=dataset_id,
+            # redact: a spec may carry a token in its userinfo, and this is
+            # stored on the row as repo_url.
+            source_url=redact_repo_spec(item) if remote else None,
+            include_documents=include_documents,
+        )
+        resolved.append(manifest_item)
+        # A clone is cognee's own directory, so its documents are stored
+        # whatever ACCEPT_LOCAL_FILE_PATH says (see RepoCloneFile); a local
+        # repository's documents are caller-supplied paths and are not.
+        resolved.extend(
+            RepoCloneFile(Path(path)) if remote else str(path) for path in document_paths
+        )
+    return resolved
+
+
 async def resolve_code_repositories(
     data,
     credentials: str | None = None,
     include_documents: bool = True,
+    treat_as_repository: bool = False,
     user=None,
     dataset_id=None,
 ):
@@ -386,10 +461,23 @@ async def resolve_code_repositories(
     holds no repository at all. A local directory is refused when
     ``ACCEPT_LOCAL_FILE_PATH=false``, the same gate (and message) the
     in-pipeline path applies.
+
+    ``treat_as_repository`` hands the whole input to
+    :func:`resolve_declared_repositories` instead: the caller has declared what
+    these are, so nothing is sniffed and nothing falls through to text.
     """
     from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
     from cognee.tasks.code_graph.resolve_repo import SSH_REPO_SPEC_MESSAGE, is_ssh_repo_spec
     from cognee.tasks.ingestion.save_data_item_to_storage import settings as save_data_settings
+
+    if treat_as_repository:
+        return await resolve_declared_repositories(
+            data,
+            credentials=credentials,
+            include_documents=include_documents,
+            user=user,
+            dataset_id=dataset_id,
+        )
 
     def _local_project(item) -> Path | None:
         """``item`` as a local code-project directory, or None for anything else."""
@@ -403,7 +491,9 @@ async def resolve_code_repositories(
 
     items = data if isinstance(data, list) else [data]
     # Refused here as well as in resolve_data_directories: this hook runs first
-    # and would otherwise pass the spec on to be stored as text.
+    # and would otherwise pass the spec on to be stored as text. An explicit
+    # treat_as_repository returned above, so an ssh remote the caller declared
+    # is cloned rather than refused.
     for item in items:
         if is_ssh_repo_spec(item):
             from cognee.modules.ingestion.exceptions import IngestionError

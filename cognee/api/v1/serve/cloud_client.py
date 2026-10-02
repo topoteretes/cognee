@@ -153,6 +153,24 @@ class CloudClient:
         if codegraph_config.get("index_vectors") or kwargs.get("index_vectors"):
             form.add_field("index_vectors", "true")
 
+        # POST /remember carries the code graph options as one legacy field,
+        # content_type='code', which the server reads back as
+        # include_documents=False + treat_as_repository=True. A config that
+        # means exactly that travels as that field -- every spec then goes in
+        # 'raw_data' and the server resolves it as a repository, whatever the
+        # host. Any other combination has no wire representation, and
+        # forwarding it would silently build something else.
+        declared_repositories = bool(codegraph_config.get("treat_as_repository"))
+        if declared_repositories:
+            if codegraph_config.get("include_documents", False):
+                raise ValueError(
+                    "codegraph_config treat_as_repository with include_documents=True is "
+                    "not supported while connected to a remote Cognee instance; "
+                    "POST /remember can only express the two together. Drop "
+                    "include_documents, or call cognee.disconnect() to ingest locally."
+                )
+            form.add_field("content_type", "code")
+
         from cognee.tasks.code_graph.resolve_repo import (
             SSH_REPO_SPEC_MESSAGE,
             code_repo_clone_url,
@@ -166,6 +184,13 @@ class CloudClient:
             # clones it and builds the code graph; uploaded as a text file it
             # would be stored as the URL's text instead.
             nonlocal sent_repo_url
+            # Declared repositories all travel that way, whether or not this
+            # side recognises the host: the server resolves them as repository
+            # specs, which is the point of the declaration.
+            if declared_repositories:
+                form.add_field("raw_data", item)
+                sent_repo_url = True
+                return
             # The server cannot clone an ssh remote either, so uploading the
             # spec would store it as text there. Fail with the same guidance
             # the local path gives.

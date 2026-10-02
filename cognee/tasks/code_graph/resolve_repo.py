@@ -108,16 +108,15 @@ def is_ssh_repo_spec(spec) -> bool:
     These name a repository and nothing else -- unlike an http(s) URL, which may
     be a web page -- but :func:`code_repo_clone_url` does not accept them, so
     ingestion would otherwise store the spec string as a text document. Callers
-    refuse them with the instruction in that function's docstring: clone the
-    repository yourself and pass the local directory.
+    refuse them with the instruction in :data:`SSH_REPO_SPEC_MESSAGE`.
     """
     return isinstance(spec, str) and spec.strip().startswith(_SSH_REPO_PREFIXES)
 
 
 SSH_REPO_SPEC_MESSAGE = (
-    "ssh git remotes (git@host:owner/repo, ssh://...) cannot be cloned by cognee: "
-    "clone the repository yourself and pass the local directory, or pass its "
-    "https:// URL."
+    "ssh git remotes (git@host:owner/repo, ssh://...) are not recognised as repositories "
+    'by add(): pass codegraph_config={"treat_as_repository": True} to clone this one as a '
+    "repository, or give its https:// URL or a local clone's directory instead."
 )
 
 

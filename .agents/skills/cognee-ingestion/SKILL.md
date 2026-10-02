@@ -41,7 +41,10 @@ All cognee functions are async. Without `dataset_name` data goes to
   `SearchType.CODE`. A whole repository needs no content type — pass its
   path or GitHub/GitLab URL as `data`. Its README and docs are ingested as
   ordinary documents too; `codegraph_config={"include_documents": False}`
-  indexes the code graph alone.
+  indexes the code graph alone. A remote cognee does not recognise as a
+  repository (Bitbucket, a self-hosted forge with no `.git`, an ssh remote)
+  needs `codegraph_config={"treat_as_repository": True}` — without it an
+  http(s) URL is fetched as a web page.
 - **Databases and dlt sources**: a SQL connection string, a dlt
   `DltResource` / `DltSource`, or a CSV. dlt is a core dependency, so no
   extra is needed (`cognee[dlt]` is an empty compatibility extra). Options: `primary_key` (default `"id"`),
@@ -162,8 +165,8 @@ It cannot be combined with a custom `graph_model`, `temporal_cognify`,
   `"skills"` ingests into the target dataset like any other call (default
   `main_dataset`); pass `dataset_name` to keep skills in their own dataset.
   The removed `"code"` is still accepted for existing callers and read as
-  `codegraph_config={"include_documents": False}`; it still rejects
-  `session_id`.
+  `codegraph_config={"include_documents": False, "treat_as_repository": True}`
+  — both halves of what it meant; it still rejects `session_id`.
 - **Session mode needs `CACHING=true`**, and `extractor` cannot be combined
   with `session_id`.
 - **Remote mode.** After `cognee.serve(url)`, calls go to the server:
