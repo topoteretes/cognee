@@ -1823,7 +1823,7 @@ class LadybugAdapter(GraphDBInterface):
         Extract a node by its ID.
 
         This method retrieves a node's data by its identifier and returns it as a dictionary. If
-        the node is not found or an error occurs, it returns None.
+        the node is not found, it returns None. A failed query is logged and re-raised.
 
         Parameters:
         -----------
@@ -1861,8 +1861,8 @@ class LadybugAdapter(GraphDBInterface):
         Extract multiple nodes by their IDs.
 
         This method retrieves a list of nodes identified by their IDs and returns their data as
-        a list of dictionaries. It handles possible retrieval errors internally and will return
-        an empty list if no nodes are found.
+        a list of dictionaries. It returns an empty list if no nodes are found. A failed query is
+        logged and re-raised.
 
         Parameters:
         -----------
@@ -2134,7 +2134,8 @@ class LadybugAdapter(GraphDBInterface):
         Get all edges connected to a node.
 
         This method retrieves all edges that are linked to a specified node and returns them in
-        a structured format. If an error occurs or no edges exist, an empty list is returned.
+        a structured format. If no edges exist, an empty list is returned. A failed query is
+        logged and re-raised.
 
         Parameters:
         -----------
@@ -2258,8 +2259,8 @@ class LadybugAdapter(GraphDBInterface):
         Get multiple nodes by their IDs.
 
         This method retrieves properties for multiple nodes identified by their IDs and returns
-        them as a list of dictionaries. An empty list is returned if no nodes are found or an
-        error occurs.
+        them as a list of dictionaries. An empty list is returned if no nodes are found. A failed
+        query is logged and re-raised.
 
         Parameters:
         -----------
