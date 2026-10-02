@@ -34,7 +34,8 @@ async def redirecting_token_endpoint(monkeypatch):
     other, other_port = await _serve(elsewhere)
 
     async def linear(request):
-        raise web.HTTPTemporaryRedirect(f"http://localhost:{other_port}{request.path}")
+        # A fixed target: nothing from the request decides where this redirects.
+        raise web.HTTPTemporaryRedirect(f"http://localhost:{other_port}/elsewhere")
 
     origin, port = await _serve(linear)
     monkeypatch.setattr(adapter, "_TOKEN_URL", f"http://127.0.0.1:{port}/oauth/token")
