@@ -10,11 +10,12 @@ class PrincipalCapability(Base):
 
     Capabilities are tenant-scoped actions ("manage_users"), as opposed to the
     dataset permissions the ACL carries. They get their own table rather than
-    the ``*DefaultPermissions`` ones for two reasons: those tables reference the
-    dataset-permission catalog, so capability names would live next to
-    read/write/delete/share and have to be told apart by string filtering, and
-    the user-level one carries no tenant column, so a per-person grant would
-    apply in every tenant the person belongs to.
+    reusing the dataset-permission catalog, so capability names never sit next
+    to read/write/delete/share and have to be told apart by string filtering;
+    and the tenant is part of the key, so a per-person grant cannot apply in
+    every tenant the person belongs to. (The earlier ``*DefaultPermissions``
+    tables, which had both problems and were read by nothing, were dropped in
+    migration c9e1f3a5b7d2.)
 
     ``tenant_id`` is stored on every row, including those whose principal is a
     role or the tenant itself, where it is derivable. The redundancy is the

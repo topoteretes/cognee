@@ -258,7 +258,7 @@ served by the schema router (`visualize_memory_provenance` HTML,
 
 - Models: `cognee/modules/users/models/` (`ACL`, `Principal`, `Permission`,
   `Role`, `Tenant`, `UserRole`, `UserTenant`, `DatasetDatabase`,
-  `UserApiKey`, and the `*DefaultPermissions` models)
+  `UserApiKey`, `PrincipalCapability`)
 - Users, tenants, roles: `cognee/modules/users/methods/`,
   `cognee/modules/users/tenants/methods/`, `cognee/modules/users/roles/methods/`
 - Grants and checks: `cognee/modules/users/permissions/methods/`

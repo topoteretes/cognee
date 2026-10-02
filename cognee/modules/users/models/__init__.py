@@ -3,9 +3,6 @@ from .Role import Role
 from .UserRole import UserRole
 from .UserTenant import UserTenant
 from .DatasetDatabase import DatasetDatabase
-from .RoleDefaultPermissions import RoleDefaultPermissions
-from .UserDefaultPermissions import UserDefaultPermissions
-from .TenantDefaultPermissions import TenantDefaultPermissions
 from .Permission import Permission
 from .Tenant import Tenant
 from .ACL import ACL
