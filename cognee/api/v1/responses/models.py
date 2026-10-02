@@ -63,7 +63,7 @@ class ChatUsage(BaseModel):
 class ResponseRequest(InDTO):
     """Request body for the new responses endpoint (OpenAI Responses API format)"""
 
-    model: CogneeModel = CogneeModel.COGNEEV1
+    model: Union[CogneeModel, str] = CogneeModel.COGNEEV1
     input: str
     tools: list[ToolFunction] | None = None
     tool_choice: str | dict[str, Any] | None = "auto"
