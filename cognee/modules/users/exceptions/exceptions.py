@@ -61,9 +61,10 @@ class CapabilityDeniedError(PermissionDeniedError):
     the same as before this class existed.
     """
 
-    def __init__(self, capability: str):
+    def __init__(self, capability: str, log_level: str = "ERROR"):
         super().__init__(
-            message=f"User is not authorized to {capability.replace('_', ' ')} for this tenant"
+            message=f"User is not authorized to {capability.replace('_', ' ')} for this tenant",
+            log_level=log_level,
         )
 
 

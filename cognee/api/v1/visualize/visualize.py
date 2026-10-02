@@ -1,6 +1,8 @@
 import asyncio
 import json
 from collections import defaultdict
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -24,6 +26,7 @@ from cognee.modules.visualization.cognee_network_visualization import (
     build_visualization_payload,
     cognee_network_visualization,
 )
+from cognee.modules.visualization.graph_stream import STREAM_CHUNK_SIZE, stream_graph_events
 from cognee.modules.visualization.preprocessor import build_node_set_colors
 from cognee.modules.visualization.session_events import collect_session_events
 from cognee.modules.visualization.subgraph_data import (
@@ -149,6 +152,42 @@ async def fetch_dataset_graph_data(
             seed_top_k=neighborhood_seed_top_k,
             max_nodes=max_nodes,
         )
+
+
+async def stream_dataset_graph(
+    dataset: Any | None,
+    *,
+    query: str | None = None,
+    seed_node_ids: list[str] | None = None,
+    neighborhood_depth: int = DEFAULT_NEIGHBORHOOD_DEPTH,
+    neighborhood_seed_top_k: int = DEFAULT_SEED_TOP_K,
+    max_nodes: int = DEFAULT_MAX_NODES,
+    chunk_size: int = STREAM_CHUNK_SIZE,
+) -> AsyncGenerator[tuple[str, dict[str, Any]], None]:
+    """The streamed graph read for one already-authorized dataset (or none).
+
+    The streaming counterpart of ``fetch_dataset_graph_data``: the same
+    dataset-scoped database context, entered here and held until the last
+    chunk, so the whole read runs in the task that iterates this generator.
+    """
+    async with set_database_global_context_variables(
+        dataset.id if dataset else None,
+        dataset.owner_id if dataset else None,
+    ):
+        graph_engine = await get_graph_engine()
+        async with aclosing(
+            stream_graph_events(
+                graph_engine,
+                query=query,
+                seed_node_ids=seed_node_ids,
+                neighborhood_depth=neighborhood_depth,
+                seed_top_k=neighborhood_seed_top_k,
+                max_nodes=max_nodes,
+                chunk_size=chunk_size,
+            )
+        ) as events:
+            async for event in events:
+                yield event
 
 
 async def visualize_graph(

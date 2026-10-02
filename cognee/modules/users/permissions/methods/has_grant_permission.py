@@ -10,7 +10,9 @@ from cognee.modules.users.permissions.methods.get_user_role_names_in_tenant impo
 from cognee.modules.users.permissions.permission_types import USER_MANAGEMENT_ALLOWED_ROLE_NAMES
 
 
-async def has_grant_permission(requester_id: UUID, tenant_id: UUID, grant_type: str) -> bool:
+async def has_grant_permission(
+    requester_id: UUID, tenant_id: UUID, grant_type: str, log_level: str = "ERROR"
+) -> bool:
     """
     Check if requester holds a capability in a tenant.
 
@@ -26,6 +28,8 @@ async def has_grant_permission(requester_id: UUID, tenant_id: UUID, grant_type: 
         requester_id: Id of the user making the request.
         tenant_id: Id of the tenant.
         grant_type: Capability the operation needs, from CAPABILITY_TYPES.
+        log_level: level for the denial's log line; see
+            has_user_management_permission.
 
     Returns:
         True if the requester holds the capability in the tenant.
@@ -44,4 +48,4 @@ async def has_grant_permission(requester_id: UUID, tenant_id: UUID, grant_type: 
     if USER_MANAGEMENT_ALLOWED_ROLE_NAMES & set(role_names):
         return True
 
-    raise CapabilityDeniedError(grant_type)
+    raise CapabilityDeniedError(grant_type, log_level=log_level)

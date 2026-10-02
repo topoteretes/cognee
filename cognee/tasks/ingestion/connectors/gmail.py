@@ -36,6 +36,9 @@ Design
   runs call ``users.history.list(startHistoryId=...)`` and emit only the delta
   (added / changed / deleted messages).  The cursor is persisted in dlt's
   per-resource state, so re-running ``remember`` resumes where it left off.
+* **Quota** — every API call is paced against Gmail's per-user quota
+  (6,000 units/minute; fetching one message costs 20 units), so a full
+  backfill runs at roughly 250 messages/minute by default.
 * **Forget-on-delete** — messages reported as deleted/trashed by the History
   API are emitted with the ``_deleted`` hard-delete marker.  dlt removes those
   rows from its destination on ``merge``; they then fall out of the freshly
@@ -44,9 +47,10 @@ Design
 
 .. note::
    cognee's ``ingest_dlt_source`` reads at most ``max_rows_per_table`` rows
-   from the dlt destination (default 50).  For a real inbox pass
-   ``max_rows_per_table=0`` (unlimited) so orphan-cleanup compares against the
-   *whole* synced corpus rather than a truncated window.
+   from the dlt destination (default ``0``, unlimited, unless
+   ``DLT_MAX_ROWS_PER_TABLE`` is set).  Keep it unlimited for a real inbox so
+   orphan-cleanup compares against the *whole* synced corpus rather than a
+   truncated window.
 
 Privacy
 -------
@@ -61,8 +65,14 @@ from __future__ import annotations
 
 import base64
 import os
+import time
 from collections.abc import Callable, Iterator
+from datetime import datetime, timezone
 from typing import Any
+
+from limits import RateLimitItemPerMinute
+from limits.storage import MemoryStorage
+from limits.strategies import MovingWindowRateLimiter
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import dlt_utils
@@ -75,6 +85,55 @@ GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 
 # History event types we care about for incremental sync.
 _HISTORY_TYPES = ["messageAdded", "messageDeleted", "labelAdded", "labelRemoved"]
+
+# Gmail allows 6,000 quota units per user per minute; each method has a fixed
+# cost. https://developers.google.com/workspace/gmail/api/reference/quota
+# The default stays below that so other apps on the same account keep working.
+DEFAULT_QUOTA_UNITS_PER_MINUTE = 5000
+_COST_MESSAGES_GET = 20
+_COST_MESSAGES_LIST = 5
+_COST_HISTORY_LIST = 2
+_COST_GET_PROFILE = 1
+# googleapiclient retries rate limits (403/429), 5xx and dropped connections
+# with exponential backoff; 404/410 are never retried.
+_NUM_RETRIES = 6
+
+
+# ---------------------------------------------------------------------------
+# Quota pacing
+# ---------------------------------------------------------------------------
+class GmailQuota:
+    """Paces Gmail API calls so no 60-second window exceeds the quota budget.
+
+    One instance should be shared by every call made for the same mailbox.
+    """
+
+    def __init__(
+        self,
+        units_per_minute: int = DEFAULT_QUOTA_UNITS_PER_MINUTE,
+        *,
+        clock: Callable[[], float] = time.time,
+        sleep: Callable[[float], None] = time.sleep,
+    ):
+        if units_per_minute < _COST_MESSAGES_GET:
+            raise ValueError(f"units_per_minute must be at least {_COST_MESSAGES_GET}.")
+        self._item = RateLimitItemPerMinute(units_per_minute)
+        self._limiter = MovingWindowRateLimiter(MemoryStorage())
+        self._clock = clock
+        self._sleep = sleep
+
+    def acquire(self, cost: int) -> None:
+        """Block until ``cost`` units fit in the current window, then spend them."""
+        while not self._limiter.hit(self._item, "gmail", cost=cost):
+            reset_at, _ = self._limiter.get_window_stats(self._item, "gmail")
+            self._sleep(max(reset_at - self._clock(), 0.05))
+
+
+def _execute(request: Any, cost: int, quota: GmailQuota | None) -> Any:
+    """Wait for quota (when given), then run the request with Google's retries."""
+    if quota is not None:
+        quota.acquire(cost)
+    return request.execute(num_retries=_NUM_RETRIES)
 
 
 # ---------------------------------------------------------------------------
@@ -191,35 +250,55 @@ def _headers_to_dict(payload: dict | None) -> dict[str, str]:
     return headers
 
 
-def parse_message(message: dict) -> dict[str, Any]:
-    """Flatten a Gmail ``users.messages.get`` resource into a dlt row.
+def _received_at(message: dict) -> str:
+    """Gmail's ``internalDate`` (ms since epoch) as an ISO timestamp, or ""."""
+    try:
+        millis = int(message.get("internalDate"))
+    except (TypeError, ValueError):
+        return ""
+    return datetime.fromtimestamp(millis / 1000, tz=timezone.utc).isoformat()
 
-    Lists (label ids) are flattened to a comma-separated string so dlt does not
-    spawn a child table per message; this keeps the row 1:1 with a cognee
-    ``DataItem`` and the orphan-cleanup bookkeeping simple.
+
+def _document_content(message: dict, headers: dict[str, str]) -> str:
+    """Render the text cognify sees for a message: metadata lines, then the body.
+
+    Document-source rows are turned into text from their ``title``/``content``
+    columns only (see ``resolve_dlt_sources._build_document_data_item``), so
+    every field worth knowing must be folded into ``content`` to reach the
+    graph. The subject is the ``title``. HTML-only messages have no plain-text
+    body and fall back to the snippet (Gmail's short preview of the body).
+    """
+    fields = (
+        ("From", headers.get("from")),
+        ("To", headers.get("to")),
+        ("Cc", headers.get("cc")),
+        ("Date", headers.get("date")),
+        ("Received", _received_at(message)),
+        ("Labels", ", ".join(message.get("labelIds") or [])),
+        ("Thread", message.get("threadId")),
+    )
+    lines = [f"{label}: {value}" for label, value in fields if value]
+    text = (
+        _extract_plaintext(message.get("payload")).strip() or (message.get("snippet") or "").strip()
+    )
+    if text:
+        lines.extend(["", text])
+    return "\n".join(lines).strip()
+
+
+def parse_message(message: dict) -> dict[str, Any]:
+    """Turn a Gmail ``users.messages.get`` resource into a dlt row.
+
+    Only the columns Cognee reads are kept: ``id`` (the merge key), ``title``
+    and ``content`` (the text cognify sees) and the ``_deleted`` marker.
     """
     payload = message.get("payload", {}) or {}
     headers = _headers_to_dict(payload)
-    label_ids = message.get("labelIds", []) or []
-
-    internal_date_raw = message.get("internalDate")
-    try:
-        internal_date = int(internal_date_raw) if internal_date_raw is not None else 0
-    except (TypeError, ValueError):
-        internal_date = 0
 
     return {
         "id": message.get("id"),
-        "thread_id": message.get("threadId"),
-        "labels": ", ".join(label_ids),
-        "subject": headers.get("subject", ""),
-        "from": headers.get("from", ""),
-        "to": headers.get("to", ""),
-        "cc": headers.get("cc", ""),
-        "date": headers.get("date", ""),
-        "snippet": message.get("snippet", ""),
-        "body": _extract_plaintext(payload),
-        "internal_date": internal_date,
+        "title": headers.get("subject", ""),
+        "content": _document_content(message, headers),
         # Hard-delete marker (always False for live messages). Deleted/trashed
         # messages are emitted separately with _deleted=True.
         "_deleted": False,
@@ -238,6 +317,7 @@ def _list_message_ids(
     service: Any,
     label_ids: list[str] | None,
     max_results: int | None,
+    quota: GmailQuota | None = None,
 ) -> Iterator[str]:
     """Yield message ids matching the given labels, following pagination."""
     page_token = None
@@ -252,7 +332,7 @@ def _list_message_ids(
                 pageToken=page_token,
             )
         )
-        response = request.execute(num_retries=6)
+        response = _execute(request, _COST_MESSAGES_LIST, quota)
         for ref in response.get("messages", []) or []:
             yield ref["id"]
             fetched += 1
@@ -263,7 +343,12 @@ def _list_message_ids(
             return
 
 
-def _get_message(service: Any, message_id: str, stats: dict[str, int] | None = None) -> dict | None:
+def _get_message(
+    service: Any,
+    message_id: str,
+    stats: dict[str, int] | None = None,
+    quota: GmailQuota | None = None,
+) -> dict | None:
     """Fetch a full message; return None only if it is genuinely gone (404/410).
 
     A transient failure (5xx / rate-limit / network) is re-raised rather than
@@ -276,11 +361,10 @@ def _get_message(service: Any, message_id: str, stats: dict[str, int] | None = N
         stats = {}
     stats["scanned"] = stats.get("scanned", 0) + 1
     try:
-        return (
-            service.users()
-            .messages()
-            .get(userId="me", id=message_id, format="full")
-            .execute(num_retries=6)
+        return _execute(
+            service.users().messages().get(userId="me", id=message_id, format="full"),
+            _COST_MESSAGES_GET,
+            quota,
         )
     except Exception as exc:
         # Trust only the structured HTTP status: str(exc) embeds the request
@@ -294,10 +378,10 @@ def _get_message(service: Any, message_id: str, stats: dict[str, int] | None = N
         raise
 
 
-def _mailbox_history_id(service: Any) -> str | None:
+def _mailbox_history_id(service: Any, quota: GmailQuota | None = None) -> str | None:
     """Return the mailbox-wide ``historyId`` used as the incremental baseline."""
     try:
-        profile = service.users().getProfile(userId="me").execute(num_retries=6)
+        profile = _execute(service.users().getProfile(userId="me"), _COST_GET_PROFILE, quota)
         history_id = profile.get("historyId")
         return str(history_id) if history_id is not None else None
     except Exception as exc:  # pragma: no cover - network dependent
@@ -315,6 +399,7 @@ def full_backfill(
     label_ids: list[str] | None = None,
     max_results: int | None = None,
     stats: dict[str, int] | None = None,
+    quota: GmailQuota | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Yield every matching message and record the incremental baseline.
 
@@ -322,13 +407,13 @@ def full_backfill(
     missed in the window between backfill start and finish; it is written to
     ``state['last_history_id']`` for the next incremental run.
     """
-    baseline_history_id = _mailbox_history_id(service)
+    baseline_history_id = _mailbox_history_id(service, quota)
 
     count = 0
     known_ids = set(state.get("known_ids", []))
     present_ids = set()
-    for message_id in _list_message_ids(service, label_ids, max_results):
-        message = _get_message(service, message_id, stats)
+    for message_id in _list_message_ids(service, label_ids, max_results, quota):
+        message = _get_message(service, message_id, stats, quota)
         if message is None:
             continue
         count += 1
@@ -348,7 +433,15 @@ def full_backfill(
         state.pop("last_history_id", None)
     if baseline_history_id is not None and max_results is None:
         state["last_history_id"] = baseline_history_id
-    logger.info("Full backfill yielded %d message(s).", count)
+    if max_results is None:
+        logger.info("Loaded all %d message(s); the next sync fetches only changes.", count)
+    else:
+        logger.info(
+            "Loaded the newest %d message(s) (max_results=%d); no cursor saved, so the "
+            "next sync loads them again.",
+            count,
+            max_results,
+        )
 
 
 def incremental_fetch(
@@ -357,6 +450,7 @@ def incremental_fetch(
     *,
     label_ids: list[str] | None = None,
     stats: dict[str, int] | None = None,
+    quota: GmailQuota | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Yield only changes since ``state['last_history_id']`` via the History API.
 
@@ -372,7 +466,7 @@ def incremental_fetch(
     start_history_id = state.get("last_history_id")
     if not start_history_id:
         # No cursor yet — caller should have backfilled. Be defensive.
-        yield from full_backfill(service, state, label_ids=label_ids, stats=stats)
+        yield from full_backfill(service, state, label_ids=label_ids, stats=stats, quota=quota)
         return
 
     page_token = None
@@ -382,7 +476,7 @@ def incremental_fetch(
 
     while True:
         try:
-            response = (
+            response = _execute(
                 service.users()
                 .history()
                 .list(
@@ -391,19 +485,22 @@ def incremental_fetch(
                     historyTypes=_HISTORY_TYPES,
                     labelId=(label_ids[0] if label_ids else None),
                     pageToken=page_token,
-                )
-                .execute(num_retries=6)
+                ),
+                _COST_HISTORY_LIST,
+                quota,
             )
         except Exception as exc:
             # A 404 means the cursor expired — recover with a full backfill.
             status = getattr(getattr(exc, "resp", None), "status", None)
             if status == 404 or "404" in str(exc):
                 logger.warning(
-                    "History id %s expired; falling back to full backfill.",
+                    "History id %s expired; loading every message in the label again.",
                     start_history_id,
                 )
                 state.pop("last_history_id", None)
-                yield from full_backfill(service, state, label_ids=label_ids, stats=stats)
+                yield from full_backfill(
+                    service, state, label_ids=label_ids, stats=stats, quota=quota
+                )
                 return
             raise
 
@@ -439,7 +536,7 @@ def incremental_fetch(
     added_count = 0
     known_ids = set(state.get("known_ids", []))
     for msg_id in seen_added:
-        message = _get_message(service, msg_id, stats)
+        message = _get_message(service, msg_id, stats, quota)
         if message is None:
             # Genuinely gone (404/410) — treat as a deletion.
             seen_deleted.add(msg_id)
@@ -490,6 +587,7 @@ def gmail_source(
     label_ids: list[str] | None = None,
     max_results: int | None = None,
     service: Any = None,
+    quota_units_per_minute: int = DEFAULT_QUOTA_UNITS_PER_MINUTE,
 ):
     """Return a ``dlt`` resource that yields Gmail messages for ``remember``.
 
@@ -503,6 +601,10 @@ def gmail_source(
             (handy for demos/tests). ``None`` = no cap.
         service: Pre-built Gmail API client. Mainly an injection point for
             tests; when omitted an OAuth client is built from the paths above.
+        quota_units_per_minute: Gmail API quota budget for this source.
+            Gmail allows 6,000 units per user per minute and fetching one
+            message costs 20, so the default of 5,000 fetches about 250
+            messages a minute. Lower it if other apps share the account.
 
     Returns:
         A ``dlt`` resource (``gmail_messages``) configured with
@@ -525,6 +627,8 @@ def gmail_source(
         )
 
     stats: dict[str, int] = {}
+    # One budget per source (i.e. per mailbox), shared by every call in a sync.
+    quota = GmailQuota(quota_units_per_minute)
 
     @dlt.resource(
         name=resource_name,
@@ -548,7 +652,9 @@ def gmail_source(
         same_scope = resource_state.get("label_scope") == scope
 
         if same_scope and resource_state.get("last_history_id"):
-            rows = incremental_fetch(client, resource_state, label_ids=label_ids, stats=stats)
+            rows = incremental_fetch(
+                client, resource_state, label_ids=label_ids, stats=stats, quota=quota
+            )
         else:
             rows = full_backfill(
                 client,
@@ -556,6 +662,7 @@ def gmail_source(
                 label_ids=label_ids,
                 max_results=max_results,
                 stats=stats,
+                quota=quota,
             )
         yield from dlt_utils.guarded_rows(rows, check_active)
         # Do not persist the new scope if extraction fails midway through.
