@@ -537,6 +537,7 @@ async def recall(
     top_k: int = 15,
     scope: str | None = None,
     code_query: dict | None = None,
+    min_score: float | None = None,
 ) -> list:
     """Search memory with auto-routing and session awareness.
 
@@ -585,6 +586,10 @@ async def recall(
         architecture, delta. When omitted, 'code' scope runs an 'explore'
         seeded with the query text. Requires exact node names/IDs or
         structured filters, not natural-language questions.
+    min_score : float, optional
+        HYBRID_COMPLETION chunk fused-score cutoff: RRF, then importance,
+        truth, and personal factors when those are on. Higher is better.
+        Omit to keep the current top-k behavior. Not a vector distance.
 
     Returns a one-line memory-hit or empty-state summary followed by the original
     result text. Status markers do not count as hits. Empty-state checks are
@@ -606,6 +611,7 @@ async def recall(
                 top_k=normalized_top_k,
                 scope=scope_list or None,
                 code_query=code_query,
+                min_score=min_score,
             )
             empty_state = recall_marker_state(results)
             items = recall_items(results)
