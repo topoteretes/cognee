@@ -21,11 +21,14 @@ import cognee  # also loads .env, so a LINEAR_API_KEY set there is seen
 DATASET = "company_brain"  # the same in every script
 SAMPLE = Path(__file__).parent.parent / "sample"
 
-QUERY = """query($since: DateTimeOrDuration!) {
-  issues(filter: {updatedAt: {gt: $since}}, first: 250) { nodes {
-    identifier title description dueDate url
-    state { name } assignee { name } team { name } project { name }
-  } }
+QUERY = """query($since: DateTimeOrDuration!, $after: String) {
+  issues(filter: {updatedAt: {gt: $since}}, first: 250, after: $after) {
+    nodes {
+      identifier title description dueDate url
+      state { name } assignee { name } team { name } project { name }
+    }
+    pageInfo { hasNextPage endCursor }
+  }
 }"""
 
 
@@ -36,13 +39,19 @@ def linear_issues(days: int, sample: bool = False) -> list[str]:
     if not os.environ.get("LINEAR_API_KEY"):
         raise SystemExit("[ingest_linear] MISSING: LINEAR_API_KEY is not set (put it in .env).")
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    response = httpx.post(
-        "https://api.linear.app/graphql",
-        json={"query": QUERY, "variables": {"since": since}},
-        headers={"Authorization": os.environ["LINEAR_API_KEY"]},  # a personal API key
-        timeout=60,
-    )
-    issues = response.raise_for_status().json()["data"]["issues"]["nodes"]
+    issues, after = [], None
+    while True:  # 250 issues a page, the most Linear returns
+        response = httpx.post(
+            "https://api.linear.app/graphql",
+            json={"query": QUERY, "variables": {"since": since, "after": after}},
+            headers={"Authorization": os.environ["LINEAR_API_KEY"]},  # a personal API key
+            timeout=60,
+        )
+        page = response.raise_for_status().json()["data"]["issues"]
+        issues.extend(page["nodes"])
+        if not page["pageInfo"]["hasNextPage"]:
+            break
+        after = page["pageInfo"]["endCursor"]
     name = lambda field: (field or {}).get("name") or "none"
     return [
         f"Linear issue {i['identifier']}: {i['title']}\nStatus: {name(i['state'])}\n"

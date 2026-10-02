@@ -42,8 +42,14 @@ def latest_call(days: int, sample: bool = False) -> tuple[str, str]:
     since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
     headers = {"Authorization": f"Bearer {os.environ['GRANOLA_API_KEY']}"}
     api = httpx.Client(base_url="https://public-api.granola.ai/v1/", headers=headers, timeout=60)
-    listed = api.get("notes", params={"created_after": since, "page_size": 30})
-    notes = listed.raise_for_status().json()["notes"]
+    # Read every page: the API returns at most 30 notes a page, in no promised order.
+    notes, params = [], {"created_after": since, "page_size": 30}
+    while True:
+        page = api.get("notes", params=params).raise_for_status().json()
+        notes.extend(page["notes"])
+        if not page.get("hasMore"):
+            break
+        params["cursor"] = page["cursor"]
     if not notes:
         raise SystemExit(f"[follow_up] No Granola calls in the last {days} days.")
     newest = max(notes, key=lambda note: note["created_at"])
