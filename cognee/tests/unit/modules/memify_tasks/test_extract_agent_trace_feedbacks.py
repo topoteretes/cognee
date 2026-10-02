@@ -398,22 +398,22 @@ async def test_fallback_only_steps_carry_their_return_values(manager):
     assert "traced_agent succeeded." in lines  # no return value: fallback stands
 
 
-# ------------------------------------------------------------------ project tags (SDK-336)
+# ------------------------------------------------------------- session node set (SDK-336)
 
 
-def _pin(manager: FakeSessionManager, session_id: str, tags: list[str]) -> None:
-    from cognee.infrastructure.session.project_tags import (
-        PROJECT_TAGS_STATE_ID,
-        PROJECT_TAGS_STATE_KIND,
+def _pin(manager: FakeSessionManager, session_id: str, node_set: list[str]) -> None:
+    from cognee.infrastructure.session.session_node_set import (
+        SESSION_NODE_SET_STATE_ID,
+        SESSION_NODE_SET_STATE_KIND,
     )
 
     manager.context.setdefault(session_id, []).append(
-        {"id": PROJECT_TAGS_STATE_ID, "kind": PROJECT_TAGS_STATE_KIND, "node_set": tags}
+        {"id": SESSION_NODE_SET_STATE_ID, "kind": SESSION_NODE_SET_STATE_KIND, "node_set": node_set}
     )
 
 
 @pytest.mark.asyncio
-async def test_window_carries_the_sessions_pinned_project_tags(manager):
+async def test_window_carries_the_sessions_pinned_node_set(manager):
     manager.add_step("s", feedback="edit succeeded.")
     _pin(manager, "s", ["project-a"])
 
@@ -423,7 +423,7 @@ async def test_window_carries_the_sessions_pinned_project_tags(manager):
 
 
 @pytest.mark.asyncio
-async def test_untagged_sessions_yield_untagged_windows(manager):
+async def test_sessions_without_a_node_set_yield_windows_without_one(manager):
     manager.add_step("s", feedback="edit succeeded.")
 
     windows = await _extract(["s"])
@@ -432,11 +432,11 @@ async def test_untagged_sessions_yield_untagged_windows(manager):
 
 
 @pytest.mark.asyncio
-async def test_trace_tags_survive_pipeline_batching(manager, monkeypatch):
+async def test_trace_node_set_survives_pipeline_batching(manager, monkeypatch):
     """Run extract -> cognify through the real pipeline runner.
 
     The runner hands the cognify task the extractor's output as a list (a batch,
-    even of one); the tags must still reach ``cognee.add`` in the node set.
+    even of one); the pinned set must still reach ``cognee.add`` in the node set.
     """
     from unittest.mock import AsyncMock, patch
 

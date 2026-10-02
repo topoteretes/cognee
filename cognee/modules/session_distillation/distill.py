@@ -23,7 +23,6 @@ from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.session.get_session_manager import get_session_manager
-from cognee.infrastructure.session.project_tags import get_project_tags
 from cognee.infrastructure.session.session_context_builder import (
     clamped_net_helpfulness,
     coerce_active_context_entries,
@@ -32,6 +31,7 @@ from cognee.infrastructure.session.session_context_models import (
     MIN_GATE_CONFIDENCE,
     SessionContextEntry,
 )
+from cognee.infrastructure.session.session_node_set import get_session_node_set
 from cognee.infrastructure.session.session_persist_watermark import (
     get_distilled_entry_ids,
     save_distilled_entry_ids,
@@ -433,12 +433,14 @@ async def publish_distilled_lessons(
     from cognee.api.v1.add import add
     from cognee.api.v1.cognify import cognify
 
-    # Lessons inherit the session's pinned project tags, like the Q&A and trace
-    # bridges do, so project-scoped recall also sees what the session taught.
-    project_tags = await get_project_tags(get_session_manager(), scope.user_id, scope.session_id)
+    # Lessons inherit the session's pinned node set, like the Q&A and trace
+    # bridges do, so a node_name-scoped recall also sees what the session taught.
+    session_node_set = await get_session_node_set(
+        get_session_manager(), scope.user_id, scope.session_id
+    )
     node_set = list(
         dict.fromkeys(
-            [*DISTILLATE_NODE_SET, truth_session_node_set(scope.session_id), *project_tags]
+            [*DISTILLATE_NODE_SET, truth_session_node_set(scope.session_id), *session_node_set]
         )
     )
     await add(documents, dataset_id=scope.dataset.id, user=scope.user, node_set=node_set)

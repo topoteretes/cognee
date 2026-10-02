@@ -1,8 +1,8 @@
-"""Typed QA/trace entries carry project tags through remember() (SDK-336).
+"""Typed QA/trace entries carry node_set through remember() (SDK-336).
 
 The integrations plugins probe ``/openapi.json`` for a ``node_set`` property on
 the ``QAEntry`` and ``TraceEntry`` schemas before tagging capture, so the
-schema is part of the contract. The dispatcher pins the tags before it writes
+schema is part of the contract. The dispatcher pins the set before it writes
 the entry and refuses a conflicting set without writing anything.
 """
 
@@ -14,10 +14,10 @@ from uuid import uuid4
 import pytest
 
 import cognee.api.v1.remember.remember  # registers the submodule; the package re-exports the function
-from cognee.infrastructure.session.project_tags import (
-    PROJECT_TAGS_STATE_ID,
-    PROJECT_TAGS_STATE_KIND,
-    ProjectTagConflictError,
+from cognee.infrastructure.session.session_node_set import (
+    SESSION_NODE_SET_STATE_ID,
+    SESSION_NODE_SET_STATE_KIND,
+    SessionNodeSetConflictError,
 )
 from cognee.memory.entries import QAEntry, TraceEntry
 
@@ -39,7 +39,7 @@ def test_openapi_advertises_node_set_on_qa_and_trace_entries():
 
 def _session_manager(pinned: list[str] | None = None) -> MagicMock:
     rows = (
-        [{"id": PROJECT_TAGS_STATE_ID, "kind": PROJECT_TAGS_STATE_KIND, "node_set": pinned}]
+        [{"id": SESSION_NODE_SET_STATE_ID, "kind": SESSION_NODE_SET_STATE_KIND, "node_set": pinned}]
         if pinned
         else []
     )
@@ -95,7 +95,7 @@ def dispatch(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_first_tagged_qa_entry_pins_the_session_then_stores(dispatch):
+async def test_first_qa_entry_with_a_node_set_pins_the_session_then_stores(dispatch):
     manager = _session_manager()
 
     result = await dispatch(QAEntry(question="q", answer="a", node_set=["project-a"]), manager)
@@ -118,10 +118,10 @@ async def test_trace_entry_with_the_pinned_set_stores_without_rewriting_the_pin(
 
 
 @pytest.mark.asyncio
-async def test_conflicting_tags_are_refused_before_anything_is_written(dispatch):
+async def test_a_conflicting_node_set_is_refused_before_anything_is_written(dispatch):
     manager = _session_manager(pinned=["project-a"])
 
-    with pytest.raises(ProjectTagConflictError):
+    with pytest.raises(SessionNodeSetConflictError):
         await dispatch(QAEntry(question="q", answer="a", node_set=["project-b"]), manager)
 
     manager.add_qa.assert_not_awaited()
@@ -129,7 +129,7 @@ async def test_conflicting_tags_are_refused_before_anything_is_written(dispatch)
 
 
 @pytest.mark.asyncio
-async def test_untagged_entries_never_touch_the_pin(dispatch):
+async def test_entries_without_a_node_set_never_touch_the_pin(dispatch):
     manager = _session_manager()
 
     await dispatch(QAEntry(question="q", answer="a"), manager)

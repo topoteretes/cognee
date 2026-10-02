@@ -21,27 +21,27 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("memory.entries")
 
 
-class SessionTaggedEntry(BaseModel):
-    """Base for the session entries that can carry project tags.
+class SessionNodeSetEntry(BaseModel):
+    """Base for the session entries that can carry a ``node_set``.
 
-    ``node_set`` pins the session to a project: the first tagged entry binds
-    the set, later entries must repeat it or omit it, and a different set is
-    rejected with HTTP 409 (``ProjectTagConflictError``). ``improve()`` adds
-    the pinned tags to the node sets of everything it bridges from the session
-    into the graph, so project-scoped recall (``node_name``) sees it.
+    The first entry that carries one pins it on the session, later entries must
+    repeat it or omit it, and a different set is rejected with HTTP 409
+    (``SessionNodeSetConflictError``). ``improve()`` appends the pinned set to
+    the node set of everything it bridges from the session into the graph, so a
+    ``node_name``-scoped recall sees it.
     """
 
     node_set: list[Annotated[str, Field(min_length=1, max_length=200)]] | None = Field(
         default=None,
         max_length=16,
         description=(
-            "Optional project tags pinned on the session; kept on the graph nodes "
+            "Optional node set pinned on the session; kept on the graph nodes "
             "improve() builds from it. Immutable once set for a session."
         ),
     )
 
 
-class QAEntry(SessionTaggedEntry):
+class QAEntry(SessionNodeSetEntry):
     """A Q&A turn stored in the session cache.
 
     Represents a user question + assistant answer with optional
@@ -57,7 +57,7 @@ class QAEntry(SessionTaggedEntry):
     used_graph_element_ids: dict | None = None
 
 
-class TraceEntry(SessionTaggedEntry):
+class TraceEntry(SessionNodeSetEntry):
     """One step of an agent trace.
 
     Structured representation of a tool/function call — origin,

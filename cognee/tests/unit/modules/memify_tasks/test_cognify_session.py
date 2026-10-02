@@ -359,8 +359,8 @@ async def test_cognify_session_passes_user_to_add_and_cognify():
 
 
 @pytest.mark.asyncio
-async def test_project_tags_are_appended_to_the_stage_node_set():
-    """The stage node set stays first; the session's pinned tags follow (SDK-336)."""
+async def test_session_node_set_is_appended_to_the_stage_node_set():
+    """The stage node set stays first; the session's pinned set follows (SDK-336)."""
     window = SessionPersistWindow(
         user_id="test-user-123",
         session_id="test_session",

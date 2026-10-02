@@ -2,16 +2,17 @@
 
 Send `node_set: ["project-<canonical-path-hash>"]` inside a typed QA or trace entry
 to `POST /api/v1/remember/entry` (or `remember(QAEntry(..., node_set=[...]),
-session_id=...)` in the SDK). The first tagged entry pins that set on the session;
-later entries must repeat it or omit it, and a different set for the same
-authenticated user and session is rejected with HTTP 409 (`ProjectTagConflictError`
-in the SDK). An empty list means "no tags" and pins nothing, so a client can start
-untagged and tag later.
+session_id=...)` in the SDK). `node_set` takes the same node-set names `add()` does.
+The first entry that carries one pins it on the session; later entries must repeat it
+or omit it, and a different set for the same authenticated user and session is
+rejected with HTTP 409 (`SessionNodeSetConflictError` in the SDK). An empty list
+means "no node set" and pins nothing, so a client can start without one and pin it
+later.
 
-`improve(session_ids=[...])` keeps the pinned tags on everything it bridges from
-the session into the graph: the persisted Q&A (`user_sessions_from_cache`), the
+`improve(session_ids=[...])` keeps the pinned set on everything it bridges from the
+session into the graph: the persisted Q&A (`user_sessions_from_cache`), the
 persisted agent traces (`agent_trace_feedbacks`) and the distilled session lessons
-(`session_learnings`) each get the project tags appended to their node set. A
+(`session_learnings`) each get the session's node set appended to their own. A
 project-scoped read is then an ordinary recall filtered by node set:
 
 ```python
@@ -23,7 +24,7 @@ await cognee.recall(
 )
 ```
 
-User preferences are not tagged on purpose: they belong to the user and stay
+User preferences get no node set on purpose: they belong to the user and stay
 recallable from every project.
 
 The pin is taken under the session-turn lock. A single worker needs nothing

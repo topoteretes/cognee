@@ -209,7 +209,7 @@ class SessionPersistWindow:
     session_id: str
     text: str
     persisted_qa_count: int
-    # The session's pinned project tags (``project_tags``); appended to the
+    # The session's pinned node set (``session_node_set``); appended to the
     # node set the window is added under.
     node_set: tuple[str, ...] = ()
 
@@ -252,7 +252,7 @@ class TracePersistWindow:
     session_id: str
     text: str
     persisted_trace_count: int
-    # The session's pinned project tags (``project_tags``); appended to the
+    # The session's pinned node set (``session_node_set``); appended to the
     # node set the window is added under.
     node_set: tuple[str, ...] = ()
 

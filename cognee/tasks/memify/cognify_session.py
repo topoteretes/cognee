@@ -71,7 +71,7 @@ async def cognify_session(
                 window.persisted_qa_count,
             )
 
-            # The stage's node set first, then the session's pinned project tags.
+            # The stage's node set first, then the session's pinned node set.
             node_set = list(dict.fromkeys([USER_SESSIONS_NODE_SET, *window.node_set]))
             await cognee.add(
                 window.text,

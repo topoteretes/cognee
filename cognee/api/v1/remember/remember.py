@@ -508,12 +508,12 @@ async def _dispatch_session_entry(
         raise RuntimeError("Session cache unavailable — set CACHING=true to enable session memory")
 
     if isinstance(entry, (QAEntry, TraceEntry)) and entry.node_set:
-        from cognee.infrastructure.session.project_tags import bind_project_tags
+        from cognee.infrastructure.session.session_node_set import pin_session_node_set
 
-        # Pins the session's project tags before anything is written, or raises
-        # ProjectTagConflictError (HTTP 409) when the session already carries a
+        # Pins the session's node_set before anything is written, or raises
+        # SessionNodeSetConflictError (HTTP 409) when the session already carries a
         # different set.
-        await bind_project_tags(sm, user_id, session_id, entry.node_set)
+        await pin_session_node_set(sm, user_id, session_id, entry.node_set)
 
     # Resolve the dataset UUID for this session so the session_records
     # row carries dataset_id — otherwise downstream permission filtering

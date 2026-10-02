@@ -3,7 +3,7 @@ import json
 from cognee.context_global_variables import session_user
 from cognee.exceptions import CogneeSystemError
 from cognee.infrastructure.session.get_session_manager import get_session_manager
-from cognee.infrastructure.session.project_tags import get_project_tags
+from cognee.infrastructure.session.session_node_set import get_session_node_set
 from cognee.infrastructure.session.session_persist_watermark import (
     TRACE_PERSIST_WATERMARK,
     TracePersistWindow,
@@ -256,7 +256,7 @@ async def extract_agent_trace_feedbacks(
                         session_id=session_id,
                         text=f"Session ID: {session_id}\n\n" + "\n".join(normalized_trace_values),
                         persisted_trace_count=window_end,
-                        node_set=await get_project_tags(session_manager, user_id, session_id),
+                        node_set=await get_session_node_set(session_manager, user_id, session_id),
                     )
                 except Exception as error:
                     logger.warning(

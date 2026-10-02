@@ -280,8 +280,8 @@ async def test_plain_text_never_touches_the_session_manager():
 
 
 @pytest.mark.asyncio
-async def test_project_tags_are_appended_to_the_stage_node_set():
-    """The stage node set stays first; the session's pinned tags follow (SDK-336)."""
+async def test_session_node_set_is_appended_to_the_stage_node_set():
+    """The stage node set stays first; the session's pinned set follows (SDK-336)."""
     window = TracePersistWindow(
         user_id="u",
         session_id="s",

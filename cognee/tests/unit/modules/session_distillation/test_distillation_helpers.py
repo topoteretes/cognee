@@ -363,7 +363,7 @@ class TestRenderLessonDocument:
 
     @staticmethod
     def _session_manager(context_rows):
-        """Publish reads the session's pinned project tags through the context-entry API."""
+        """Publish reads the session's pinned node_set through the context-entry API."""
         return SimpleNamespace(get_session_context_entries=AsyncMock(return_value=context_rows))
 
     @pytest.mark.asyncio
@@ -374,17 +374,17 @@ class TestRenderLessonDocument:
             (
                 [
                     {
-                        "id": "session_project_node_sets",
-                        "kind": "project_node_set_state",
+                        "id": "session_node_set",
+                        "kind": "session_node_set_state",
                         "node_set": ["project-a"],
                     }
                 ],
                 ["session_learnings", "session_learnings:s-1", "project-a"],
             ),
         ],
-        ids=["untagged-session", "project-tagged-session"],
+        ids=["session-without-node-set", "session-with-node-set"],
     )
-    async def test_publish_tags_lessons_with_global_session_and_project_node_sets(
+    async def test_publish_adds_global_session_and_pinned_node_sets_to_lessons(
         self, context_rows, expected_node_set
     ):
         scope = SimpleNamespace(

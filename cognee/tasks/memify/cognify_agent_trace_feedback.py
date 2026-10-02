@@ -76,10 +76,10 @@ async def cognify_agent_trace_feedback(
             text = window.text if window is not None else item
 
             logger.info("Processing agent trace content for cognification")
-            # The stage's node set first, then the session's pinned project tags
+            # The stage's node set first, then the session's pinned node set
             # (plain-text callers carry none).
-            project_tags = window.node_set if window is not None else ()
-            node_set = list(dict.fromkeys([node_set_name, *project_tags]))
+            session_node_set = window.node_set if window is not None else ()
+            node_set = list(dict.fromkeys([node_set_name, *session_node_set]))
             await cognee.add(text, dataset_id=dataset_id, node_set=node_set, user=user)
             logger.debug("Agent trace content added to cognee with node_set: %s", node_set)
             # raise_on_error=False: one trace session's failed build must not kill
