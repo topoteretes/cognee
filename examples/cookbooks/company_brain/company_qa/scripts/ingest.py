@@ -18,9 +18,9 @@ from pathlib import Path
 # One local store for these scripts, the API server and MCP, and no login (see README.md).
 # A value in .env still wins.
 os.environ.setdefault("ENABLE_BACKEND_ACCESS_CONTROL", "false")
+os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before importing it
 
 import cognee
-from cognee.shared.logging_utils import ERROR, setup_logging
 
 sys.path.insert(0, str(Path(__file__).parent.parent))  # models.py sits next to company_qa.py
 from models import EXTRACTION_PROMPT, CompanyGraph
@@ -78,7 +78,6 @@ async def ingest(
 
 
 if __name__ == "__main__":
-    setup_logging(log_level=ERROR)
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--database", help="SQLAlchemy URL, e.g. postgresql://user:pw@host/db")
     parser.add_argument("--tables", help="comma-separated tables or views (default: all)")

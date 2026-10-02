@@ -12,9 +12,9 @@ import os
 
 # One local store for these scripts, the API server and MCP (see README.md).
 os.environ.setdefault("ENABLE_BACKEND_ACCESS_CONTROL", "false")
+os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before importing it
 
 import cognee
-from cognee.shared.logging_utils import ERROR, setup_logging
 
 DATASET = "company_brain"  # the same in every script
 
@@ -26,7 +26,6 @@ async def ask(question: str) -> None:
 
 
 if __name__ == "__main__":
-    setup_logging(log_level=ERROR)
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("question", nargs="+", help="what to ask")
     asyncio.run(ask(" ".join(parser.parse_args().question)))

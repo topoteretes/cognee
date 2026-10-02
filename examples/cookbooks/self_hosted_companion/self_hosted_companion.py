@@ -17,12 +17,12 @@ import os
 import sys
 from pathlib import Path
 
+os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before importing it
+
 from scripts.chat import chat
 from scripts.ingest_notes import ingest_notes
 from scripts.ui import open_ui
 from setup import write_sample
-
-from cognee.shared.logging_utils import ERROR, setup_logging
 
 SAMPLE = Path(__file__).parent / "sample"
 SAMPLE_QUESTION = "When is my sister's birthday, and what was I planning to get her?"
@@ -82,7 +82,6 @@ if __name__ == "__main__":
         print("[setup] OK: ready to run.")
         sys.exit(0)
 
-    setup_logging(log_level=ERROR)
     if args.sample:
         write_sample()
         print("[setup] Wrote the sample from setup.py.")

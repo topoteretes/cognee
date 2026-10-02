@@ -12,10 +12,11 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before importing it
+
 import httpx
 
 import cognee  # also loads .env, so a GRANOLA_API_KEY set there is seen
-from cognee.shared.logging_utils import ERROR, setup_logging
 
 DATASET = "personalized_email"  # the same in every script
 SAMPLE = Path(__file__).parent.parent / "sample"
@@ -63,7 +64,6 @@ async def ingest_granola(days: int = 30, sample: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    setup_logging(log_level=ERROR)
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--days", type=int, default=30, help="how far back to read meetings")
     parser.add_argument("--sample", action="store_true", help="use the sample from setup.py")

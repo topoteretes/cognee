@@ -16,12 +16,12 @@ import os
 import sys
 from pathlib import Path
 
+os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before importing it
+
 from scripts.ask import ask
 from scripts.ingest import ingest
 from scripts.ui import open_ui
 from setup import write_sample
-
-from cognee.shared.logging_utils import ERROR, setup_logging
 
 SAMPLE = Path(__file__).parent / "sample"
 SAMPLE_TABLES = ["employee_profiles", "project_profiles", "customer_profiles"]
@@ -94,7 +94,6 @@ if __name__ == "__main__":
         print("[setup] OK: ready to run.")
         sys.exit(0)
 
-    setup_logging(log_level=ERROR)
     if args.sample:
         write_sample()
         print("[setup] Wrote the sample from setup.py.")

@@ -13,9 +13,10 @@ import os
 import re
 from pathlib import Path
 
+os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before importing it
+
 import cognee
 from cognee.modules.search.types import SearchType
-from cognee.shared.logging_utils import ERROR, setup_logging
 from cognee.tasks.ingestion.connectors.gmail import build_gmail_service, parse_message
 
 DATASET = "personalized_email"  # the same in every script
@@ -80,7 +81,6 @@ async def draft(sample: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    setup_logging(log_level=ERROR)
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--sample", action="store_true", help="answer the newest sample email")
     asyncio.run(draft(parser.parse_args().sample))

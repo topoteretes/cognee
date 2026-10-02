@@ -15,11 +15,12 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before importing it
+
 import httpx
 
 import cognee  # also loads .env, so keys set there are seen
 from cognee.modules.search.types import SearchType
-from cognee.shared.logging_utils import ERROR, setup_logging
 
 DATASET = "company_brain"  # the same in every script
 SAMPLE = Path(__file__).parent.parent / "sample"
@@ -100,7 +101,6 @@ async def follow_up(days: int = 30, sample: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    setup_logging(log_level=ERROR)
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--days", type=int, default=30, help="how far back to look for a call")
     parser.add_argument("--sample", action="store_true", help="use the sample from setup.py")

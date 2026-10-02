@@ -8,10 +8,12 @@ Run alone: uv run python examples/cookbooks/self_hosted_companion/scripts/ingest
 
 import argparse
 import asyncio
+import os
 from pathlib import Path
 
+os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before importing it
+
 import cognee
-from cognee.shared.logging_utils import ERROR, setup_logging
 
 DATASET = "companion"  # the same in every script
 
@@ -25,7 +27,6 @@ async def ingest_notes(notes_folder: Path) -> None:
 
 
 if __name__ == "__main__":
-    setup_logging(log_level=ERROR)
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("notes_folder", type=Path, help="the folder of notes to remember")
     asyncio.run(ingest_notes(parser.parse_args().notes_folder))

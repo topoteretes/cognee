@@ -9,11 +9,13 @@ Run alone: uv run python examples/cookbooks/self_hosted_companion/scripts/chat.p
 
 import argparse
 import asyncio
+import os
 from datetime import datetime
+
+os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before importing it
 
 import cognee
 from cognee.modules.search.types import SearchType
-from cognee.shared.logging_utils import ERROR, setup_logging
 
 DATASET = "companion"  # the same in every script
 
@@ -53,7 +55,6 @@ async def chat(ask: str | None = None) -> None:
 
 
 if __name__ == "__main__":
-    setup_logging(log_level=ERROR)
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--ask", help="answer one message instead of an interactive chat")
     asyncio.run(chat(parser.parse_args().ask))

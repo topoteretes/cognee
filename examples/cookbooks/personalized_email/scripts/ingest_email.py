@@ -10,10 +10,12 @@ Run alone: uv run python examples/cookbooks/personalized_email/scripts/ingest_em
 
 import argparse
 import asyncio
+import os
 from pathlib import Path
 
+os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before importing it
+
 import cognee
-from cognee.shared.logging_utils import ERROR, setup_logging
 from cognee.tasks.ingestion.connectors import gmail_source
 
 DATASET = "personalized_email"  # the same in every script
@@ -57,7 +59,6 @@ async def ingest_email(count: int = 50, sample: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    setup_logging(log_level=ERROR)
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--emails", type=int, default=50, help="emails to remember per label")
     parser.add_argument("--sample", action="store_true", help="use the sample from setup.py")

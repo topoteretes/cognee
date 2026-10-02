@@ -7,9 +7,11 @@ Run alone: uv run python examples/cookbooks/self_hosted_companion/scripts/ui.py
 """
 
 import asyncio
+import os
+
+os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before importing it
 
 import cognee
-from cognee.shared.logging_utils import ERROR, setup_logging
 
 
 async def open_ui() -> None:
@@ -25,10 +27,16 @@ async def open_ui() -> None:
             return await api  # raises the startup error, such as a port in use
         await asyncio.sleep(0.2)
     spawned: list = []  # a PID, or (PID, container) when the UI runs in Docker
-    await asyncio.to_thread(cognee.start_ui, spawned.append, auto_download=True)
+    ui = await asyncio.to_thread(cognee.start_ui, spawned.append, auto_download=True)
+    if ui is None:  # cognee logged why, such as port 3000 being in use
+        server.should_exit = True
+        await api
+        raise SystemExit("[ui] The UI did not start; see the error above.")
     print("[ui] Browse the graph at http://localhost:3000. Press Ctrl+C to stop.")
     try:
         await api  # returns once uvicorn has handled Ctrl+C
+    except asyncio.CancelledError:  # Ctrl+C: stop quietly instead of with a traceback
+        pass
     finally:
         for item in spawned:
             pid, container = item if isinstance(item, tuple) else (item, None)
@@ -38,5 +46,4 @@ async def open_ui() -> None:
 
 
 if __name__ == "__main__":
-    setup_logging(log_level=ERROR)
     asyncio.run(open_ui())

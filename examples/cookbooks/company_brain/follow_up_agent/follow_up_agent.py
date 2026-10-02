@@ -16,14 +16,14 @@ import os
 import sys
 from pathlib import Path
 
+os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before importing it
+
 from scripts.follow_up import follow_up
 from scripts.ingest_email import ingest_email
 from scripts.ingest_granola import ingest_granola
 from scripts.ingest_linear import ingest_linear
 from scripts.ui import open_ui
 from setup import write_sample
-
-from cognee.shared.logging_utils import ERROR, setup_logging
 
 COOKBOOK_DIR = Path(__file__).parent
 
@@ -104,7 +104,6 @@ if __name__ == "__main__":
         print("[setup] OK: ready to run.")
         sys.exit(0)
 
-    setup_logging(log_level=ERROR)
     if args.sample:
         write_sample()
         print("[setup] Wrote the sample from setup.py.")
