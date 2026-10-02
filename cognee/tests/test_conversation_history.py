@@ -480,12 +480,13 @@ async def main():
     assert not second_entry_autofeedback.used_session_context_ids, (
         "Feedback-only turn must not claim served guidance"
     )
-    # Text: the stored answer IS the analysis output, not the independently
-    # generated answer that was discarded. Truthiness alone would not catch that
-    # -- the generated answer is truthy too.
-    expected_ack = acknowledgement_for_turn(feedback_analysis.response_to_user)
+    # Text: the stored answer IS the fixed acknowledgement, not the independently
+    # generated answer that was discarded nor the analysis model's own wording
+    # (#4296). Truthiness alone would not catch that -- the generated answer is
+    # truthy too.
+    expected_ack = acknowledgement_for_turn()
     assert stored_answer_autofeedback == expected_ack, (
-        "Feedback-only turn must store the analysis acknowledgement, not the generated answer"
+        "Feedback-only turn must store the fixed acknowledgement, not generated text"
     )
     assert getattr(second_entry_autofeedback, "feedback_text", None) is None
     assert getattr(second_entry_autofeedback, "feedback_score", None) is None

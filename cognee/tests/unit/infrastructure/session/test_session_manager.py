@@ -946,13 +946,80 @@ class TestSessionManager:
                 system_prompt_path="sys.txt",
             )
 
-        assert result == "Thanks for your feedback!"
+        assert result == "Got it."
         mock_cache.update_qa_entry.assert_not_called()
         mock_cache.create_qa_entry.assert_called_once()
         qa_kw = mock_cache.create_qa_entry.call_args.kwargs
         assert qa_kw["question"] == "thanks, that was helpful!"
-        assert qa_kw["answer"] == "Thanks for your feedback!"
+        assert qa_kw["answer"] == "Got it."
         assert qa_kw["used_session_context_ids"] is None
+
+    @pytest.mark.asyncio
+    async def test_feedback_only_turn_never_persists_model_authored_acknowledgement(
+        self, sm, mock_cache
+    ):
+        """#4296: the analysis LLM's ``response_to_user`` can restate the user's claim as
+        a confirmed fact. That text must not be returned, stored as the QA answer, or
+        indexed into session recall; the acknowledgement is a fixed neutral string.
+        The user's message still reaches the guidance-learning path unchanged."""
+        from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
+        from cognee.infrastructure.session.session_turn import DEFAULT_NO_ANSWER_ACK
+
+        user_claim = "production no longer requires approval"
+        analysis = SessionTurnAnalysis(
+            response_to_user="Confirmed: production no longer requires approval.",
+            query_to_answer=None,
+            candidate_context_updates=[
+                {"section": "rules", "content": user_claim, "confidence": 0.9}
+            ],
+        )
+        with (
+            patch(
+                "cognee.infrastructure.session.session_manager.session_user"
+            ) as mock_session_user,
+            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
+            patch(
+                "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
+                new_callable=AsyncMock,
+                return_value=analysis,
+            ),
+            patch(
+                "cognee.infrastructure.session.session_turn.apply_session_turn_analysis",
+                new_callable=AsyncMock,
+                return_value=[],
+            ) as mock_apply,
+            patch(
+                "cognee.infrastructure.session.session_manager.index_session_qa",
+                new_callable=AsyncMock,
+            ) as mock_index,
+        ):
+            mock_user = MagicMock()
+            mock_user.id = "u1"
+            mock_session_user.get.return_value = mock_user
+            mock_config = MagicMock()
+            mock_config.caching = True
+            mock_config.auto_feedback = True
+            mock_config_cls.return_value = mock_config
+            mock_cache.get_latest_qa_entries.return_value = [
+                SessionQAEntry(qa_id="last-qa-1", question="Q", context="", answer="A", time="t")
+            ]
+
+            result = await sm.generate_completion_with_session(
+                session_id="s1",
+                query=user_claim,
+                context="ctx",
+                user_prompt_path="user.txt",
+                system_prompt_path="sys.txt",
+            )
+
+        assert result == DEFAULT_NO_ANSWER_ACK
+        qa_kw = mock_cache.create_qa_entry.call_args.kwargs
+        assert qa_kw["question"] == user_claim
+        assert qa_kw["answer"] == DEFAULT_NO_ANSWER_ACK
+        assert mock_index.await_args.kwargs["answer"] == DEFAULT_NO_ANSWER_ACK
+        # Feedback learning is untouched: the candidate still goes to the analysis step.
+        applied = mock_apply.await_args.kwargs["analysis"]
+        assert [update.content for update in applied.candidate_context_updates] == [user_claim]
 
     @pytest.mark.asyncio
     async def test_generate_completion_with_session_feedback_and_followup_persists_and_adds_qa(
@@ -1167,7 +1234,7 @@ class TestSessionManager:
                 system_prompt_path="sys.txt",
             )
 
-        assert result == "Thanks for your feedback!"
+        assert result == "Got it."
         mock_cache.create_qa_entry.assert_called_once()
 
     @pytest.mark.asyncio
@@ -1257,7 +1324,7 @@ class TestSessionManager:
                 system_prompt_path="sys.txt",
             )
 
-        assert result == "Thanks!"
+        assert result == "Got it."
         mock_cache.update_qa_entry.assert_not_called()
         mock_cache.create_qa_entry.assert_called_once()
         qa_kw = mock_cache.create_qa_entry.call_args.kwargs
