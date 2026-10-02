@@ -1823,7 +1823,7 @@ class LadybugAdapter(GraphDBInterface):
         Extract a node by its ID.
 
         This method retrieves a node's data by its identifier and returns it as a dictionary. If
-        the node is not found or an error occurs, it returns None.
+        the node is not found, it returns None. A failed query is logged and re-raised.
 
         Parameters:
         -----------
@@ -1854,15 +1854,15 @@ class LadybugAdapter(GraphDBInterface):
             return None
         except Exception:
             logger.exception(f"Failed to extract node {node_id}")
-            return None
+            raise
 
     async def extract_nodes(self, node_ids: list[str]) -> list[dict[str, Any]]:
         """
         Extract multiple nodes by their IDs.
 
         This method retrieves a list of nodes identified by their IDs and returns their data as
-        a list of dictionaries. It handles possible retrieval errors internally and will return
-        an empty list if no nodes are found.
+        a list of dictionaries. It returns an empty list if no nodes are found. A failed query is
+        logged and re-raised.
 
         Parameters:
         -----------
@@ -1892,7 +1892,7 @@ class LadybugAdapter(GraphDBInterface):
             return nodes
         except Exception:
             logger.exception("Failed to extract nodes")
-            return []
+            raise
 
     # Edge Operations
 
@@ -2134,7 +2134,8 @@ class LadybugAdapter(GraphDBInterface):
         Get all edges connected to a node.
 
         This method retrieves all edges that are linked to a specified node and returns them in
-        a structured format. If an error occurs or no edges exist, an empty list is returned.
+        a structured format. If no edges exist, an empty list is returned. A failed query is
+        logged and re-raised.
 
         Parameters:
         -----------
@@ -2176,7 +2177,7 @@ class LadybugAdapter(GraphDBInterface):
             return edges
         except Exception:
             logger.exception(f"Failed to get edges for node {node_id}")
-            return []
+            raise
 
     # Neighbor Operations
 
@@ -2214,7 +2215,7 @@ class LadybugAdapter(GraphDBInterface):
             return [self._parse_node_properties(row[0]) for row in result] if result else []
         except Exception:
             logger.exception(f"Failed to get neighbours for node {node_id}")
-            return []
+            raise
 
     async def get_node(self, node_id: str) -> dict[str, Any] | None:
         """
@@ -2251,15 +2252,15 @@ class LadybugAdapter(GraphDBInterface):
             return None
         except Exception:
             logger.exception(f"Failed to get node {node_id}")
-            return None
+            raise
 
     async def get_nodes(self, node_ids: list[str]) -> list[dict[str, Any]]:
         """
         Get multiple nodes by their IDs.
 
         This method retrieves properties for multiple nodes identified by their IDs and returns
-        them as a list of dictionaries. An empty list is returned if no nodes are found or an
-        error occurs.
+        them as a list of dictionaries. An empty list is returned if no nodes are found. A failed
+        query is logged and re-raised.
 
         Parameters:
         -----------
@@ -2287,7 +2288,7 @@ class LadybugAdapter(GraphDBInterface):
             return [self._parse_node(row[0]) for row in results if row[0]]
         except Exception:
             logger.exception("Failed to get nodes")
-            return []
+            raise
 
     def _rows_to_dicts(self, rows: list, column_names: list[str]) -> list[dict[str, Any]]:
         """Convert query result rows to a list of dicts keyed by column names."""
@@ -2677,7 +2678,7 @@ class LadybugAdapter(GraphDBInterface):
             return [self._parse_node_properties(row[0]) for row in result] if result else []
         except Exception:
             logger.exception(f"Failed to get predecessors for node {node_id}")
-            return []
+            raise
 
     async def get_successors(
         self, node_id: str | UUID, edge_label: str | None = None
@@ -2731,7 +2732,7 @@ class LadybugAdapter(GraphDBInterface):
             return [self._parse_node_properties(row[0]) for row in result] if result else []
         except Exception:
             logger.exception(f"Failed to get successors for node {node_id}")
-            return []
+            raise
 
     async def get_connections(
         self, node_id: str
@@ -2794,7 +2795,7 @@ class LadybugAdapter(GraphDBInterface):
             return edges if edges else []  # Always return a list, even if empty
         except Exception:
             logger.exception(f"Failed to get connections for node {node_id}")
-            return []  # Return empty list on error
+            raise
 
     async def remove_connection_to_predecessors_of(
         self, node_ids: list[str], edge_label: str
