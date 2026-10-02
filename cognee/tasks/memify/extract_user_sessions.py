@@ -1,6 +1,7 @@
 from cognee.context_global_variables import session_user
 from cognee.exceptions import CogneeSystemError
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.infrastructure.session.project_tags import get_project_tags
 from cognee.infrastructure.session.session_persist_watermark import (
     SessionPersistWindow,
     get_persisted_qa_count,
@@ -105,6 +106,7 @@ async def extract_user_sessions(
                         session_id=session_id,
                         text=session_string,
                         persisted_qa_count=len(qa_data),
+                        node_set=await get_project_tags(session_manager, user_id, session_id),
                     )
                 except Exception as e:
                     logger.warning(f"Failed to extract session {session_id}: {e!s}", exc_info=True)

@@ -71,13 +71,15 @@ async def cognify_session(
                 window.persisted_qa_count,
             )
 
+            # The stage's node set first, then the session's pinned project tags.
+            node_set = list(dict.fromkeys([USER_SESSIONS_NODE_SET, *window.node_set]))
             await cognee.add(
                 window.text,
                 dataset_id=dataset_id,
-                node_set=[USER_SESSIONS_NODE_SET],
+                node_set=node_set,
                 user=user,
             )
-            logger.debug("Session data added to cognee with node_set: %s", USER_SESSIONS_NODE_SET)
+            logger.debug("Session data added to cognee with node_set: %s", node_set)
             # raise_on_error=False: one window's failed build must not kill the
             # whole memify run — inspect the run info instead, keep this
             # window's watermark put (so it is re-extracted and retried on the

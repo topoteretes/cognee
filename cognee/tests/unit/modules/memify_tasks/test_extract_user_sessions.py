@@ -225,3 +225,36 @@ async def test_extract_user_sessions_session_manager_error_handling(mock_user, m
             sessions.append(session)
 
         assert len(sessions) == 2
+
+
+@pytest.mark.asyncio
+async def test_window_carries_the_sessions_pinned_project_tags(mock_user, mock_qa_data):
+    """A session pinned to a project yields windows tagged with it (SDK-336)."""
+    from cognee.infrastructure.session.project_tags import (
+        PROJECT_TAGS_STATE_ID,
+        PROJECT_TAGS_STATE_KIND,
+    )
+
+    mock_session_manager = _make_mock_session_manager(mock_qa_data)
+    mock_session_manager.get_session_context_entries = AsyncMock(
+        return_value=[
+            {
+                "id": PROJECT_TAGS_STATE_ID,
+                "kind": PROJECT_TAGS_STATE_KIND,
+                "node_set": ["project-b", "project-a"],
+            }
+        ]
+    )
+
+    with (
+        patch.object(extract_user_sessions_module, "session_user") as mock_session_user,
+        patch.object(
+            extract_user_sessions_module,
+            "get_session_manager",
+            return_value=mock_session_manager,
+        ),
+    ):
+        mock_session_user.get.return_value = mock_user
+        windows = [w async for w in extract_user_sessions([{}], session_ids=["test_session"])]
+
+    assert [w.node_set for w in windows] == [("project-a", "project-b")]

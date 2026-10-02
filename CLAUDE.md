@@ -221,6 +221,8 @@ NOTE: This is how the memory API flow works under the hood; it's read as a flow 
 
 Key files: `cognee/api/v1/remember/remember.py`, `cognee/api/v1/recall/recall.py`, `cognee/api/v1/improve/improve.py`, `cognee/api/v1/forget/forget.py`
 
+**Project tags on session entries.** A typed QA or trace entry (`POST /api/v1/remember/entry`, or `remember(entry, session_id=...)`) may carry `node_set`: the project tags the entry belongs to. The first tagged entry pins that set on the session (an internal session-context row, like the improve watermarks); later entries must repeat it or omit it, and a different set is refused with HTTP 409 (`ProjectTagConflictError`), so one session never spans two projects. An empty list pins nothing. `improve()` appends the pinned tags to the node sets of everything it bridges from the session into the graph — persisted Q&A, persisted traces, and distilled lessons — so a `node_name`-scoped `recall()` over the project sees what the session stored. User preferences are deliberately not tagged: they belong to the user, not to one project. Key files: `cognee/infrastructure/session/project_tags.py`, `cognee/memory/entries.py`; example: `examples/python/session_project_memory.md`.
+
 #### IMPROVE: the orchestrator
 `improve()` is an explicit orchestrator over an ordered registry of nine stages (`cognee/modules/improve/registry.py:DEFAULT_STAGES`): `feedback_weights`, `persist_session_qa`, `persist_agent_traces`, `extract_agent_context`, `distill_sessions`, `update_user_preferences`, `build_truth_subspace`, `triplet_enrichment`, `global_context_index`. The first seven need `session_ids`; the last two work on the graph alone. Order is load-bearing (4 feeds 5, 5 feeds 7, 7 runs before 8) and a test pins it.
 

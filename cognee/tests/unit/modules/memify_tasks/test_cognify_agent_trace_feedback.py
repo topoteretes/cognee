@@ -1,5 +1,5 @@
 import sys
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -277,3 +277,30 @@ async def test_plain_text_never_touches_the_session_manager():
         patch.object(cognify_agent_trace_feedback_module, "get_session_manager", boom),
     ):
         await cognify_agent_trace_feedback("Session ID: s\n\nfeedback", dataset_id="123")
+
+
+@pytest.mark.asyncio
+async def test_project_tags_are_appended_to_the_stage_node_set():
+    """The stage node set stays first; the session's pinned tags follow (SDK-336)."""
+    window = TracePersistWindow(
+        user_id="u",
+        session_id="s",
+        text="Session ID: s\n\nedit succeeded.",
+        persisted_trace_count=1,
+        node_set=("project-a",),
+    )
+    manager = MagicMock()
+    manager.get_session_context_entries = AsyncMock(return_value=[])
+    manager.update_session_context_entry = AsyncMock(return_value=True)
+    manager.create_session_context_entry = AsyncMock(return_value=True)
+
+    with (
+        patch("cognee.add", new_callable=AsyncMock) as mock_add,
+        patch("cognee.cognify", new_callable=AsyncMock),
+        patch.object(
+            cognify_agent_trace_feedback_module, "get_session_manager", return_value=manager
+        ),
+    ):
+        await cognify_agent_trace_feedback(window, dataset_id="123")
+
+    assert mock_add.await_args.kwargs["node_set"] == ["agent_trace_feedbacks", "project-a"]
