@@ -120,17 +120,8 @@ async def publish_updated_data(
         await session.commit()
 
 
-async def mark_data_processed(
-    data_id: UUID,
-    dataset_id: UUID,
-    pipeline_names: tuple[str, ...] = (COGNIFY_PIPELINE_NAME,),
-) -> None:
-    """Stamp cognify completion so a later cognify() doesn't redo the document.
-
-    ``pipeline_names`` adds the stamp for pipelines that built the same graph
-    state under their own name (the code graph pipeline), so per-pipeline
-    item status reports them as done too.
-    """
+async def mark_data_processed(data_id: UUID, dataset_id: UUID) -> None:
+    """Stamp cognify completion so a later cognify() doesn't redo the document."""
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         data_point = (
@@ -138,9 +129,8 @@ async def mark_data_processed(
         ).scalar_one_or_none()
         if data_point is None:
             return
-        for pipeline_name in pipeline_names:
-            status_for_pipeline = data_point.pipeline_status.setdefault(pipeline_name, {})
-            status_for_pipeline[str(dataset_id)] = _completed_status()
+        status_for_pipeline = data_point.pipeline_status.setdefault(COGNIFY_PIPELINE_NAME, {})
+        status_for_pipeline[str(dataset_id)] = _completed_status()
         await session.merge(data_point)
         await session.commit()
 

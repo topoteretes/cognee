@@ -1,9 +1,10 @@
 """Unit tests for cognee.modules.integrations.github.sync.
 
-Token minting, repo listing, and remember() are mocked — what's under test
-is the orchestration: one dataset per installation, authenticated clone
-URLs handed to the code path, and the full-installation default when no
-explicit repo list is given.
+Token minting, repo listing, and remember() are mocked — what's under test is
+the orchestration: one dataset per installation, each repo remembered by its
+credential-free clone URL with the installation token in
+``codegraph_config["repo_credentials"]``, one failing repo not stopping the
+rest, and the full-installation default when no explicit repo list is given.
 """
 
 import importlib
@@ -71,17 +72,20 @@ async def test_default_sync_covers_every_installation_repo(mocks):
 
     mocks.mint.assert_awaited_once_with(42)
     mocks.list_repos.assert_awaited_once_with("tok123")
-    mocks.remember.assert_awaited_once_with(
-        [
-            "https://github.com/acme/api.git",
-            "https://github.com/acme/web.git",
-        ],
-        dataset_name="github_acme_org",
-        user=mocks.owner,
-        content_type="code",
-        repo_credentials="tok123",
-        raise_on_error=False,
-    )
+    # The URL, not a local clone: add() clones it with the token and records it
+    # as the manifest's repo_url.
+    assert [call.args for call in mocks.remember.await_args_list] == [
+        ("https://github.com/acme/api.git",),
+        ("https://github.com/acme/web.git",),
+    ]
+    for call in mocks.remember.await_args_list:
+        assert call.kwargs == {
+            "dataset_name": "github_acme_org",
+            "user": mocks.owner,
+            "codegraph_config": {"repo_credentials": "tok123"},
+            "self_improvement": False,
+            "raise_on_error": False,
+        }
 
 
 @pytest.mark.asyncio
@@ -90,9 +94,36 @@ async def test_explicit_repo_list_skips_the_listing_call(mocks):
 
     mocks.list_repos.assert_not_awaited()
     mocks.remember.assert_awaited_once()
-    (urls,) = mocks.remember.await_args.args
-    assert urls == ["https://github.com/acme/api.git"]
-    assert mocks.remember.await_args.kwargs["repo_credentials"] == "tok123"
+    assert mocks.remember.await_args.args == ("https://github.com/acme/api.git",)
+
+
+@pytest.mark.asyncio
+async def test_a_failing_repo_does_not_stop_the_rest(mocks):
+    async def remember(url, **kwargs):
+        if url.endswith("api.git"):
+            raise RuntimeError("clone failed")
+        return SimpleNamespace(status="completed", error=None)
+
+    mocks.remember.side_effect = remember
+
+    await sync_module.sync_repositories(_credential())
+
+    assert [call.args for call in mocks.remember.await_args_list] == [
+        ("https://github.com/acme/api.git",),
+        ("https://github.com/acme/web.git",),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_an_errored_repo_does_not_stop_the_rest(mocks):
+    mocks.remember.side_effect = [
+        SimpleNamespace(status="errored", error="pipeline failed"),
+        SimpleNamespace(status="completed", error=None),
+    ]
+
+    await sync_module.sync_repositories(_credential())
+
+    assert mocks.remember.await_count == 2
 
 
 @pytest.mark.asyncio

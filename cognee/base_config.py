@@ -26,8 +26,8 @@ class BaseConfig(BaseSettings):
     cache_root_directory: str = get_absolute_path(".cognee_cache")
     logs_root_directory: str = os.getenv("COGNEE_LOGS_DIR", str(Path.home() / ".cognee" / "logs"))
     # Where remote git repositories are shallow-cloned for code-graph ingestion:
-    # remember(content_type="code") and GitHub/GitLab repository URLs passed to
-    # add(). Always a local directory, even with S3 storage -- git writes a
+    # GitHub/GitLab repository URLs passed to add()/remember(), and the GitHub
+    # integration sync. Always a local directory, even with S3 storage -- git writes a
     # working tree -- and one of the always-allowed local file roots
     # (local_path_safety) so a clone's documents can be ingested by path.
     repos_root_directory: str = os.getenv(

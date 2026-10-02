@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 
 from cognee.infrastructure.files.storage.s3_config import get_s3_config
 from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.tasks.ingestion.exceptions import S3FileSystemNotFoundError
 
 
@@ -106,16 +107,29 @@ async def resolve_data_directories(
             if code_repo_clone_url(item) is not None:
                 from cognee.tasks.code_graph.code_repo import resolve_code_repository_url
 
-                manifest_item, document_paths, _skipped = await resolve_code_repository_url(
+                manifest_item, documents, _skipped = await resolve_code_repository_url(
                     item, user=user, dataset_id=dataset_id
                 )
                 resolved_data.append(manifest_item)
-                resolved_data.extend(str(path) for path in document_paths)
+                resolved_data.extend(documents)
                 continue
 
             local_path = _resolve_existing_local_path(item)
 
             if local_path and local_path.is_dir():  # If it's a directory
+                # Checked here, not only per file at storage time: a code project
+                # resolves to a manifest DataItem that never reaches that check,
+                # and cognify then reads the directory in place.
+                from cognee.tasks.ingestion.save_data_item_to_storage import (
+                    settings as save_data_settings,
+                )
+
+                if not save_data_settings.accept_local_file_path:
+                    raise IngestionError(
+                        message="Local directories are not accepted "
+                        "(ACCEPT_LOCAL_FILE_PATH=false). Pass a repository URL "
+                        "or upload the files instead."
+                    )
                 if include_subdirectories:
                     # A code project resolves to one repo item + its documents
                     # instead of a flat file list. Deferred import: code_repo
