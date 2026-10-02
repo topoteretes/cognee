@@ -136,6 +136,10 @@ async def add(
             - Pipeline run ID for tracking
             - Dataset ID where data was stored
             - Processing status and any errors
+            - ``data_ids``: the id of every ``Data`` row this call stored (or found
+              already present with identical content), in input order — use these
+              for later ``update()`` / ``datasets.delete_data()`` calls instead of
+              re-deriving ids from content
             - Execution timestamps and metadata
 
     Next Steps:
