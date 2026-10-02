@@ -24,7 +24,7 @@ const config = {
   clearMocks: true,
 };
 
-// d3 and its transitive deps ship ESM only ("type": "module"), so any suite
+// uuid, d3 and its transitive deps ship ESM only ("type": "module"), so any suite
 // that reaches them (modules/business/* imports d3-color) dies on `export`
 // with an "unexpected token" before a single assertion runs.
 //
@@ -40,7 +40,7 @@ const config = {
 // the exact shape depends on the transpilePackages it derives (today "geist"),
 // and hardcoding a replacement would silently drop those the next time they
 // change. The CSS-module entry it also sets is left alone.
-const ESM_DEPS = "d3-.*|internmap|delaunator|robust-predicates";
+const ESM_DEPS = "uuid|d3-.*|internmap|delaunator|robust-predicates";
 
 function allowEsmDeps(pattern) {
   // "/node_modules/(?!.pnpm)(?!(geist)/)" and its ".pnpm/(?!(geist)@)" sibling

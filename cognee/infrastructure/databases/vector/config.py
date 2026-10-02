@@ -57,7 +57,7 @@ class VectorConfig(BaseSettings):
     # opened the table shortly before a compaction keeps working.
     vector_db_compaction_retention_seconds: int = 300
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     @pydantic.model_validator(mode="after")
     def fill_derived(self):

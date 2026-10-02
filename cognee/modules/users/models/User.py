@@ -2,7 +2,7 @@ from uuid import UUID as uuid_UUID
 
 from fastapi_users import schemas
 from fastapi_users.db import SQLAlchemyBaseUserTableUUID
-from sqlalchemy import UUID, Column, ForeignKey
+from sqlalchemy import Column, ForeignKey, Uuid
 from sqlalchemy.orm import Mapped, relationship
 
 from .Principal import Principal
@@ -15,14 +15,14 @@ from .UserTenant import UserTenant
 class User(SQLAlchemyBaseUserTableUUID, Principal):
     __tablename__ = "users"
 
-    id = Column(UUID, ForeignKey("principals.id", ondelete="CASCADE"), primary_key=True)
+    id = Column(Uuid, ForeignKey("principals.id", ondelete="CASCADE"), primary_key=True)
 
     # Foreign key to current Tenant (Many-to-One relationship)
-    tenant_id = Column(UUID, ForeignKey("tenants.id"))
+    tenant_id = Column(Uuid, ForeignKey("tenants.id"))
 
     # Parent user — when an agent/service user creates datasets, the parent
     # inherits full permissions automatically. Null for regular human users.
-    parent_user_id = Column(UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    parent_user_id = Column(Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Many-to-Many Relationship with Roles
     roles: Mapped[list["Role"]] = relationship(
@@ -40,6 +40,16 @@ class User(SQLAlchemyBaseUserTableUUID, Principal):
 
     # ACL Relationship (One-to-Many)
     acls = relationship("ACL", back_populates="principal", cascade="all, delete")
+
+    # Capabilities granted to the user personally (One-to-Many). Deleted with
+    # the user through the ORM, as acls are, because the CASCADE on
+    # principal_capabilities.principal_id is not enforced on SQLite. Named by
+    # foreign key because granted_by also points at users.
+    capabilities = relationship(
+        "PrincipalCapability",
+        foreign_keys="PrincipalCapability.principal_id",
+        cascade="all, delete",
+    )
 
     __mapper_args__ = {
         "polymorphic_identity": "user",

@@ -20,14 +20,21 @@ def _get_or_create_entity_type(
     extracted_type: str,
     data_chunk: DocumentChunk,
     data_points_by_id: dict[str, Entity | EntityType],
-) -> EntityType:
+) -> EntityType | None:
+    """The chunk's EntityType for ``extracted_type``, or None when it has no name.
+
+    An empty or punctuation-only type from the LLM would otherwise become an
+    EntityType named "", which every reader shows as a type with no label.
+    """
+    normalized_type_name = generate_node_name(extracted_type)
+    if not normalized_type_name.strip():
+        return None
     entity_type_id = EntityType.id_for(extracted_type)
     entity_type_key = str(entity_type_id)
     existing_data_point = data_points_by_id.get(entity_type_key)
     if isinstance(existing_data_point, EntityType):
         return existing_data_point
 
-    normalized_type_name = generate_node_name(extracted_type)
     entity_type = EntityType(
         id=entity_type_id,
         name=normalized_type_name,
@@ -41,7 +48,7 @@ def _get_or_create_entity_type(
 def _get_or_create_entity(
     extracted_node: Node,
     entity_id: UUID,
-    entity_type: EntityType,
+    entity_type: EntityType | None,
     data_chunk: DocumentChunk,
     data_points_by_id: dict[str, Entity | EntityType],
 ) -> Entity:

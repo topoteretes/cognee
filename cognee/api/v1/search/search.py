@@ -86,7 +86,13 @@ async def search(
 
     Search Types & Use Cases:
 
-        **GRAPH_COMPLETION** (Default - Recommended):
+        **HYBRID_COMPLETION** (Default):
+            Document passages plus entity neighbourhoods, then LLM completion.
+            Defers to GRAPH_COMPLETION for a custom node_type, node_name with
+            node_type=None, neighborhood_depth, feedback_influence > 0, or a
+            missing chunk collection.
+
+        **GRAPH_COMPLETION**:
             Natural language Q&A using full graph context and LLM reasoning.
             Best for: Complex questions, analysis, summaries, insights.
             Returns: Conversational AI responses with graph-backed context.
@@ -135,7 +141,7 @@ async def search(
             - "What functions handle user authentication?"
 
         query_type: SearchType enum specifying the search mode.
-                   Defaults to GRAPH_COMPLETION for conversational AI responses.
+                   Defaults to HYBRID_COMPLETION.
 
         user: User context for data access permissions. Uses default if None.
 
@@ -206,7 +212,10 @@ async def search(
         - **SUMMARIES**: Fast, returns pre-computed summaries
         - **CODE**: Deterministic and model-free; request cost scales with the selected code graph
         - **FEELING_LUCKY**: Variable speed, uses LLM + search type selection intelligently
-        - **top_k**: Start with 15, increase for comprehensive analysis (max 100)
+        - **top_k**: Default 15, applied per dataset. HYBRID_COMPLETION gives each lane
+          `min(top_k, 10)`, so values above 10 do not widen it; set the lanes directly with
+          the `chunks_top_k` / `entities_top_k` / `facts_top_k` keys in
+          `retriever_specific_config` (not capped).
         - **datasets**: Specify datasets to improve speed and relevance
 
     Next Steps After Search:

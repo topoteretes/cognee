@@ -85,6 +85,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     done; \
     uv sync "$@" --extra debug --extra aws --extra api --extra postgres --extra neo4j --extra llama-index --extra dlt --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-dev --no-editable
 
+# The GLiNER runtime (keyless graph extraction): CPU-only torch from the PyTorch index
+# plus the gliner extra, baked in so a container never installs it at runtime. Runs
+# after the exact sync above, which would remove anything not in the lockfile.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    /app/.venv/bin/python -m cognee.tasks.graph.gliner_demo.install
+
 FROM python:3.12-slim-bookworm@sha256:782412e85d0f0984994c290652577d4018aff08145c85b262bb63dc0c7522254
 
 RUN apt-get update && apt-get install -y \
