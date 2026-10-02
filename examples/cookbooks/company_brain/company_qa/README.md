@@ -100,10 +100,6 @@ also runs alone with the same options.
 
 All scripts use the cognee dataset `company_brain`, named once in each script.
 
-They also default `ENABLE_BACKEND_ACCESS_CONTROL` to `false` (a value in `.env` still
-wins). That is local single-user mode: the scripts, the API server and the MCP server
-read one set of databases, and the API needs no login.
-
 ## The graph model
 
 `models.py` defines what the LLM extracts from every source:
@@ -138,8 +134,8 @@ answers "what do we know", across all sources.
 
 ## Open the UI
 
-Add `--ui`, or run `scripts/ui.py` later. Open http://localhost:3000 and select the
-`company_brain` dataset. The mind map shows the extracted entities grouped by type, with
+Add `--ui`, or run `scripts/ui.py` later. Open http://localhost:3000, sign in with the
+prefilled default user, and select the `company_brain` dataset. The mind map shows the extracted entities grouped by type, with
 one node per person connected to their team, projects, tickets and manager.
 
 ## Connect Claude Code or Codex
@@ -149,7 +145,9 @@ pointed at the running API server, so the agent reads the same graph as the UI. 
 `--api-url`, the MCP server opens its own local databases and sees a different, empty
 brain.
 
-Keep `scripts/ui.py` running, then warm up the MCP server once. The first `uvx` run
+Keep `scripts/ui.py` running and create an API key on the UI's API Keys page
+(http://localhost:3000/api-keys); the MCP server sends it with every request. Then warm
+up the MCP server once. The first `uvx` run
 downloads cognee, and even a cached start takes about 20 seconds, longer than an agent
 waits on a first launch:
 
@@ -160,7 +158,8 @@ uvx cognee-mcp --help
 **Claude Code**
 
 ```bash
-claude mcp add --scope user cognee -- uvx cognee-mcp --api-url http://localhost:8000
+claude mcp add --scope user cognee -- \
+    uvx cognee-mcp --api-url http://localhost:8000 --api-token <your API key>
 claude mcp list        # cognee: ... ✓ Connected
 ```
 
@@ -176,7 +175,7 @@ start by default, so raise `startup_timeout_sec`:
 ```toml
 [mcp_servers.cognee]
 command = "uvx"
-args = ["cognee-mcp", "--api-url", "http://localhost:8000"]
+args = ["cognee-mcp", "--api-url", "http://localhost:8000", "--api-token", "<your API key>"]
 startup_timeout_sec = 60
 ```
 

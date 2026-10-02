@@ -19,6 +19,13 @@ async def open_ui() -> None:
 
     from cognee.api.client import app
     from cognee.api.v1.ui.ui import remove_ui_container, stop_ui_pid
+    from cognee.base_config import get_base_config
+
+    # The UI signs in as cognee's default user, which has no password unless
+    # DEFAULT_USER_PASSWORD gives it one. Like `cognee-cli -ui`, give it the well-known
+    # local password: the server listens on localhost only, so only this machine can use it.
+    config = get_base_config()
+    config.default_user_password = config.default_user_password or "default_password"
 
     server = uvicorn.Server(uvicorn.Config(app, port=8000, log_level="warning"))
     api = asyncio.create_task(server.serve())

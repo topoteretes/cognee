@@ -10,8 +10,6 @@ import argparse
 import asyncio
 import os
 
-# One local store for these scripts, the API server and MCP (see README.md).
-os.environ.setdefault("ENABLE_BACKEND_ACCESS_CONTROL", "false")
 os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before importing it
 
 import cognee

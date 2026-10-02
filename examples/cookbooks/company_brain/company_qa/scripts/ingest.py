@@ -16,9 +16,6 @@ import os
 import sys
 from pathlib import Path
 
-# One local store for these scripts, the API server and MCP, and no login (see README.md).
-# A value in .env still wins.
-os.environ.setdefault("ENABLE_BACKEND_ACCESS_CONTROL", "false")
 os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before importing it
 
 import cognee
