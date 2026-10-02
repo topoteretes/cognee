@@ -1,8 +1,3 @@
----
-name: personalized-email
-description: Draft a reply to your newest Gmail email that knows what you discussed in your Granola meetings, what you promised the sender, and how you write, using cognee memory. Use when someone asks to answer or reply to their latest email in their own tone. Runs locally; reads Gmail read-only; the draft is printed, never sent.
----
-
 # Personalized email
 
 Draft email replies that already know what you discussed in meetings, what you promised,
@@ -13,15 +8,15 @@ dataset (`personalized_email`). Then it drafts a reply to the newest email in yo
 the facts come from memory, and the tone from your own sent mail. The draft is printed,
 never sent.
 
-This file is for both readers. A person can follow it top to bottom. An agent should
-follow **For agents** and run the commands as written.
+Agents run this cookbook through the `personalized-email` skill,
+[`.agents/skills/personalized-email/SKILL.md`](../../../.agents/skills/personalized-email/SKILL.md).
 
 ## What it needs
 
 | What | Why | Where |
 |---|---|---|
 | `LLM_API_KEY` | cognee extracts the graph and writes the draft with an LLM (OpenAI by default) | `.env` at the repo root |
-| `credentials.json` | Gmail OAuth client, type *Desktop app*, with the Gmail API enabled in Google Cloud | the cookbook folder, next to `SKILL.md` |
+| `credentials.json` | Gmail OAuth client, type *Desktop app*, with the Gmail API enabled in Google Cloud | the cookbook folder, next to `personalized_email.py` |
 | `token.json` | Written on the first run, after you consent in the browser. Scope: `gmail.readonly` | the cookbook folder, created for you |
 | `GRANOLA_API_KEY` | Reads your meeting notes through Granola's public API. Create one in Granola's settings | `.env` at the repo root |
 | `MY_NAME` (optional) | Your name as it appears in your email, so the draft speaks as you | `.env` at the repo root |
@@ -34,7 +29,7 @@ No Granola? Run with `--no-granola` to skip that step.
 
 ```
 personalized_email/
-├── SKILL.md                this file
+├── README.md               this file
 ├── personalized_email.py   checks setup, then calls the scripts in order
 ├── credentials.json        yours, git-ignored
 ├── token.json              yours, git-ignored, written on the first Gmail run
@@ -56,7 +51,7 @@ script also runs alone with the same options.
 
 All scripts use the cognee dataset `personalized_email`, named once in each script.
 
-## Run it (people)
+## Run it
 
 From the repo root:
 
@@ -88,27 +83,6 @@ M.
 
 The first Gmail run opens a browser to consent. Running it again re-remembers the same
 content; cognee skips content it already holds, and Gmail rows are merged by message id.
-
-## For agents
-
-1. Run `uv run python examples/cookbooks/personalized_email/personalized_email.py --check`
-   from the repo root.
-   - Exit 0: go to step 2.
-   - Exit 2: each `[setup] MISSING:` line names one fix. Don't create credentials yourself.
-     Tell the user exactly which line to fix, using the table above, and stop. If only the
-     Granola line is missing, ask whether to run with `--no-granola` instead.
-2. Run `personalized_email.py`. Add `--days N` if the user named a time range for meetings,
-   and `--no-granola` if they don't want Granola used.
-3. The draft is everything after the line `[draft] Reply:`. Give it to the user, and say
-   which email it answers (the `[draft] Answering:` line) and which sources went in (the
-   `[ingest_granola]` and `[ingest_email]` lines). The draft is never sent: hand it to the
-   user to send.
-4. If a script fails, `personalized_email.py` exits 1 with a line naming what went wrong.
-   Run that script on its own to look closer.
-
-Rules: Gmail access is read-only and nothing is sent. Don't print the contents of
-`credentials.json`, `token.json` or `.env`. Steps 1 and 2 read the user's real meetings and
-mailbox and every run uses LLM credits, so run them only when the user asked for it.
 
 ## Clean up
 

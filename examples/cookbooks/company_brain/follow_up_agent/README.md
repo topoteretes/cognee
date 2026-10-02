@@ -1,8 +1,3 @@
----
-name: follow-up-agent
-description: Turn your latest Granola call into next steps (owner, team, due date, and the Linear issue that already tracks each one) and post them to Slack, using cognee memory of your calls, Linear issues and Gmail inbox. Use when someone asks for the next steps or action items of their latest call. Runs locally; reads Gmail read-only; posts to Slack only when Slack is set up.
----
-
 # Company brain: agent for follow-up
 
 Turn your latest call into next steps, posted to Slack.
@@ -13,8 +8,8 @@ which team it belongs to, its deadline, and whether Linear already tracks it. No
 has to be in the call itself: the team comes from earlier calls, a deadline from an email,
 a tracked issue from Linear.
 
-This file is for both readers. A person can follow it top to bottom. An agent should
-follow **For agents** and run the commands as written.
+Agents run this cookbook through the `follow-up-agent` skill,
+[`.agents/skills/follow-up-agent/SKILL.md`](../../../../.agents/skills/follow-up-agent/SKILL.md).
 
 ## What it needs
 
@@ -23,7 +18,7 @@ follow **For agents** and run the commands as written.
 | `LLM_API_KEY` | cognee extracts the graph and writes the next steps with an LLM (OpenAI by default) | `.env` at the repo root |
 | `GRANOLA_API_KEY` | Reads your calls through Granola's public API. Create one in Granola's settings | `.env` at the repo root |
 | `LINEAR_API_KEY` (optional) | A personal API key (Linear: Settings → Security & access). Without it, issues are skipped | `.env` at the repo root |
-| `credentials.json` (optional) | Gmail OAuth client, type *Desktop app*, with the Gmail API enabled. Without it, email is skipped | the cookbook folder, next to `SKILL.md` |
+| `credentials.json` (optional) | Gmail OAuth client, type *Desktop app*, with the Gmail API enabled. Without it, email is skipped | the cookbook folder, next to `follow_up_agent.py` |
 | `token.json` | Written on the first Gmail run, after you consent in the browser. Scope: `gmail.readonly` | the cookbook folder, created for you |
 | `SLACK_BOT_TOKEN`, `SLACK_CHANNEL` (optional) | A Slack app with the `chat:write` bot scope, invited to the channel; the channel id. Without them, the steps are printed | `.env` at the repo root |
 | `cognee[gmail]` | The Google client libraries, for the Gmail step | `uv sync --extra gmail` |
@@ -34,7 +29,7 @@ follow **For agents** and run the commands as written.
 
 ```
 follow_up_agent/
-├── SKILL.md              this file
+├── README.md             this file
 ├── follow_up_agent.py    checks setup, then calls the scripts in order
 ├── credentials.json      yours, git-ignored (optional)
 ├── token.json            yours, git-ignored, written on the first Gmail run
@@ -60,7 +55,7 @@ script also runs alone with the same options.
 
 All scripts use the cognee dataset `company_brain`, named once in each script.
 
-## Run it (people)
+## Run it
 
 From the repo root:
 
@@ -85,28 +80,6 @@ The output looks like this (an illustration; yours comes from your own calls):
 
 The first Gmail run opens a browser to consent. Running it again re-remembers the same
 content; cognee skips content it already holds, and Gmail rows are merged by message id.
-
-## For agents
-
-1. Run `uv run python examples/cookbooks/company_brain/follow_up_agent/follow_up_agent.py --check`
-   from the repo root.
-   - Exit 0: go to step 2. `[setup] SKIPPED:` lines name optional sources that won't be
-     used; mention them to the user, but they don't block the run.
-   - Exit 2: each `[setup] MISSING:` line names one fix. Don't create credentials yourself.
-     Tell the user exactly which line to fix, using the table above, and stop.
-2. Run `follow_up_agent.py`. Add `--days N` if the user named a time range, and
-   `--no-linear` / `--no-email` if they don't want a source used.
-3. The steps are everything after the `[follow_up] Posted to Slack:` or `[follow_up] Steps`
-   line. Give them to the user, say which call they come from (the `[follow_up] Call:`
-   line), which sources went in (the `[ingest_*]` lines), and whether they were posted.
-4. If a script fails, `follow_up_agent.py` exits 1 with a line naming what went wrong. Run
-   that script on its own to look closer.
-
-Rules: Gmail access is read-only. With Slack set up, a run posts to the user's real
-channel, and every run reads the user's real calls, issues and mailbox and uses LLM
-credits, so run it only when the user asked for it. Don't print the contents of
-`credentials.json`, `token.json` or `.env`. Don't pass `--ui` unless the user asked to
-browse the graph: it keeps running until Ctrl+C.
 
 ## Clean up
 

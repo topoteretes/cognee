@@ -1,8 +1,3 @@
----
-name: self-hosted-companion
-description: Chat with a companion that knows your notes folder (a journal, an Obsidian vault, any .md or .txt files) and every earlier chat, using cognee memory with local databases. Use when someone wants to ask questions about their own notes, or to talk with a companion that remembers past conversations. Runs locally; reads the notes folder, writes only to cognee's memory.
----
-
 # Self-hosted AI companion
 
 A chat companion that knows your notes.
@@ -14,8 +9,8 @@ writes the chat into memory, so the next chat knows what you said.
 cognee's databases are local files on your machine. The LLM and the embeddings are the ones
 your `.env` configures (OpenAI by default, so set `LLM_API_KEY`).
 
-This file is for both readers. A person can follow it top to bottom. An agent should
-follow **For agents** and run the commands as written.
+Agents run this cookbook through the `self-hosted-companion` skill,
+[`.agents/skills/self-hosted-companion/SKILL.md`](../../../.agents/skills/self-hosted-companion/SKILL.md).
 
 ## What it needs
 
@@ -28,7 +23,7 @@ follow **For agents** and run the commands as written.
 
 ```
 self_hosted_companion/
-├── SKILL.md                    this file
+├── README.md                   this file
 ├── self_hosted_companion.py    checks setup, then calls the scripts in order
 └── scripts/
     ├── ingest_notes.py
@@ -48,7 +43,7 @@ script also runs alone with the same options.
 
 All scripts use the cognee dataset `companion`, named once in each script.
 
-## Run it (people)
+## Run it
 
 From the repo root:
 
@@ -69,26 +64,6 @@ you> /bye
 Running it again remembers the folder again: new notes are added and unchanged notes are
 skipped. An edited note is remembered as a new document, and its old version stays in
 memory.
-
-## For agents
-
-1. Run `uv run python examples/cookbooks/self_hosted_companion/self_hosted_companion.py --check <folder>`
-   from the repo root, with the notes folder the user named.
-   - Exit 0: go to step 2.
-   - Exit 2: each `[setup] MISSING:` line names one fix. Tell the user which line to fix,
-     using the table above, and stop.
-2. You can't type into the interactive chat, so pass the user's message with `--ask`:
-   `self_hosted_companion.py <folder> --ask "..."`. Once the folder is remembered, later
-   messages only need `scripts/chat.py --ask "..."`.
-3. The answer is everything after `[chat] companion>`. Give it to the user. Each `--ask` is
-   its own chat session, saved to memory, so a later one knows it.
-4. If a script fails, `self_hosted_companion.py` exits 1 with a line naming what went
-   wrong. Run that script on its own to look closer.
-
-Rules: the notes are the user's private files. Don't quote them beyond what answers the
-question, and don't print `.env`. Every run uses LLM credits, so run it only when the user
-asked for it. Don't pass `--ui` unless the user asked to browse the graph: it keeps running
-until Ctrl+C.
 
 ## Clean up
 
