@@ -26,10 +26,10 @@ Pass at least one source. Without data of your own, try the sample first.
 
 ## Try it on the sample company
 
-The sample is Acorn Analytics, a fictional company, in `sample/`: an HR and project
-database, a ticket export and three documents. Some people, projects and customers appear
-in all three. `setup.py` builds the database from `sample/schema.sql`; no accounts or data
-of yours are needed, only `LLM_API_KEY`.
+The sample is Acorn Analytics, a fictional company. `setup.py` holds its three sources and
+writes them to `sample/` (git-ignored): an HR and project database (`company.db`), a ticket
+export (`tickets.json`) and three documents (`docs/`). Some people, projects and customers
+appear in all three. No accounts or data of yours are needed, only `LLM_API_KEY`.
 
 ```bash
 uv run python examples/cookbooks/company_brain/multi_source/setup.py
@@ -64,8 +64,8 @@ uv run python examples/cookbooks/company_brain/multi_source/company_brain.py \
 - `--database` takes a SQLAlchemy URL (`postgresql://...`, `mysql+pymysql://...`,
   `sqlite:///path/to.db`). Every row of `--tables` becomes one document; without
   `--tables`, every table and view is read. Rows read best as sentences, so a view that
-  joins your tables into readable text (see the `*_profiles` views in
-  `sample/schema.sql`) extracts better than raw foreign keys.
+  joins your tables into readable text (see the `*_profiles` views in `SCHEMA` in
+  `setup.py`) extracts better than raw foreign keys.
 - Running it again re-remembers the same content; cognee skips content it already holds.
 - Later questions don't need the sources again: `scripts/ask.py "question"`.
 
@@ -75,9 +75,9 @@ uv run python examples/cookbooks/company_brain/multi_source/company_brain.py \
 multi_source/
 ├── README.md           this file
 ├── company_brain.py    checks setup, then calls the scripts in order
-├── setup.py            builds the sample database, for --sample
+├── setup.py            writes the sample company, for --sample
 ├── models.py           the graph model: edit it to match your company
-├── sample/             the sample company (company.db is built, git-ignored)
+├── sample/             written by setup.py, git-ignored
 └── scripts/
     ├── ingest.py
     ├── ask.py

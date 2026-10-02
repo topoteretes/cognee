@@ -31,7 +31,7 @@ SAMPLE_QUESTION = (
 
 
 def use_sample(args: argparse.Namespace) -> None:
-    """Point every source at the sample company that setup.py prepares."""
+    """Point every source at the sample company that setup.py writes."""
     args.database = f"sqlite:///{SAMPLE / 'company.db'}"
     args.tables = ",".join(SAMPLE_TABLES)
     args.tickets = SAMPLE / "tickets.json"
@@ -44,8 +44,9 @@ def missing_setup(args: argparse.Namespace) -> list[str]:
     missing = []
     if not os.environ.get("LLM_API_KEY"):
         missing.append("LLM_API_KEY is not set (put it in .env).")
-    if args.sample and not (SAMPLE / "company.db").exists():
-        missing.append("The sample database is not built. Run setup.py first.")
+    if args.sample and not SAMPLE.is_dir():
+        missing.append("The sample is not written. Run setup.py first.")
+        return missing
     if not (args.database or args.tickets or args.docs):
         missing.append("No source given. Pass --database, --tickets or --docs, or --sample.")
     if args.tickets and not args.tickets.expanduser().is_file():
