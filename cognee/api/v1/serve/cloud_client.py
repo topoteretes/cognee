@@ -153,7 +153,11 @@ class CloudClient:
         if codegraph_config.get("index_vectors") or kwargs.get("index_vectors"):
             form.add_field("index_vectors", "true")
 
-        from cognee.tasks.code_graph.resolve_repo import code_repo_clone_url
+        from cognee.tasks.code_graph.resolve_repo import (
+            SSH_REPO_SPEC_MESSAGE,
+            code_repo_clone_url,
+            is_ssh_repo_spec,
+        )
 
         sent_repo_url = False
 
@@ -162,6 +166,11 @@ class CloudClient:
             # clones it and builds the code graph; uploaded as a text file it
             # would be stored as the URL's text instead.
             nonlocal sent_repo_url
+            # The server cannot clone an ssh remote either, so uploading the
+            # spec would store it as text there. Fail with the same guidance
+            # the local path gives.
+            if is_ssh_repo_spec(item):
+                raise ValueError(SSH_REPO_SPEC_MESSAGE)
             if code_repo_clone_url(item) is not None:
                 form.add_field("raw_data", item)
                 sent_repo_url = True
