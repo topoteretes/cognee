@@ -396,3 +396,77 @@ async def test_fallback_only_steps_carry_their_return_values(manager):
     assert 'traced_agent succeeded. Output: {"answer": 42}' in lines
     assert "Looked up the Q3 revenue figures." in lines  # real summary untouched
     assert "traced_agent succeeded." in lines  # no return value: fallback stands
+
+
+# ------------------------------------------------------------- session node set (SDK-336)
+
+
+def _pin(manager: FakeSessionManager, session_id: str, node_set: list[str]) -> None:
+    from cognee.infrastructure.session.session_node_set import (
+        SESSION_NODE_SET_STATE_ID,
+        SESSION_NODE_SET_STATE_KIND,
+    )
+
+    manager.context.setdefault(session_id, []).append(
+        {"id": SESSION_NODE_SET_STATE_ID, "kind": SESSION_NODE_SET_STATE_KIND, "node_set": node_set}
+    )
+
+
+@pytest.mark.asyncio
+async def test_window_carries_the_sessions_pinned_node_set(manager):
+    manager.add_step("s", feedback="edit succeeded.")
+    _pin(manager, "s", ["project-a"])
+
+    windows = await _extract(["s"])
+
+    assert [window.node_set for window in windows] == [("project-a",)]
+
+
+@pytest.mark.asyncio
+async def test_sessions_without_a_node_set_yield_windows_without_one(manager):
+    manager.add_step("s", feedback="edit succeeded.")
+
+    windows = await _extract(["s"])
+
+    assert [window.node_set for window in windows] == [()]
+
+
+@pytest.mark.asyncio
+async def test_trace_node_set_survives_pipeline_batching(manager, monkeypatch):
+    """Run extract -> cognify through the real pipeline runner.
+
+    The runner hands the cognify task the extractor's output as a list (a batch,
+    even of one); the pinned set must still reach ``cognee.add`` in the node set.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
+    from cognee.modules.pipelines.tasks.task import Task
+    from cognee.tasks.memify.cognify_agent_trace_feedback import cognify_agent_trace_feedback
+
+    cognify_module = sys.modules["cognee.tasks.memify.cognify_agent_trace_feedback"]
+    monkeypatch.setattr(cognify_module, "get_session_manager", lambda: manager)
+    manager.add_step("s", feedback="edit succeeded.")
+    _pin(manager, "s", ["project-a"])
+    user = MagicMock(spec=User)
+    user.id = USER_ID
+    user.tenant_id = None
+    tasks = [
+        Task(extract_agent_trace_feedbacks, session_ids=["s"]),
+        Task(cognify_agent_trace_feedback, dataset_id="dataset"),
+    ]
+
+    with (
+        patch("cognee.add", new_callable=AsyncMock) as add,
+        patch("cognee.cognify", new_callable=AsyncMock) as cognify,
+    ):
+        async for _ in run_tasks_base(tasks, data=[{}], user=user):
+            pass
+
+    add.assert_awaited_once_with(
+        "Session ID: s\n\nedit succeeded.",
+        dataset_id="dataset",
+        node_set=["agent_trace_feedbacks", "project-a"],
+        user=None,
+    )
+    cognify.assert_awaited_once()

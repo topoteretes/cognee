@@ -11,7 +11,7 @@ Raw data (str / bytes / file-like / list of the above) continues to
 flow through the permanent add+cognify path unchanged.
 """
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
@@ -21,7 +21,27 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("memory.entries")
 
 
-class QAEntry(BaseModel):
+class SessionNodeSetEntry(BaseModel):
+    """Base for the session entries that can carry a ``node_set``.
+
+    The first entry that carries one pins it on the session, later entries must
+    repeat it or omit it, and a different set is rejected with HTTP 409
+    (``SessionNodeSetConflictError``). ``improve()`` appends the pinned set to
+    the node set of everything it bridges from the session into the graph, so a
+    ``node_name``-scoped recall sees it.
+    """
+
+    node_set: list[Annotated[str, Field(min_length=1, max_length=200)]] | None = Field(
+        default=None,
+        max_length=16,
+        description=(
+            "Optional node set pinned on the session; kept on the graph nodes "
+            "improve() builds from it. Immutable once set for a session."
+        ),
+    )
+
+
+class QAEntry(SessionNodeSetEntry):
     """A Q&A turn stored in the session cache.
 
     Represents a user question + assistant answer with optional
@@ -37,7 +57,7 @@ class QAEntry(BaseModel):
     used_graph_element_ids: dict | None = None
 
 
-class TraceEntry(BaseModel):
+class TraceEntry(SessionNodeSetEntry):
     """One step of an agent trace.
 
     Structured representation of a tool/function call — origin,
