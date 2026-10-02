@@ -184,8 +184,9 @@ isolation; `REQUIRE_AUTHENTICATION=false` with access control on is ignored
   (`get_unheld_capabilities`). Each row records who made the grant in
   `granted_by`; both endpoints take `capability` repeated to grant or revoke
   several at once, all or nothing. For a user principal the grant lands in
-  the `tenant_id` given, or the caller's current tenant; a role or tenant
-  principal always uses its own tenant. A missing principal or tenant answers
+  the `tenant_id` given, or the caller's current tenant, and the user must
+  already be a member of it (`CapabilityGrantToNonMemberError`, 403, says
+  so); a role or tenant principal always uses its own tenant. A missing principal or tenant answers
   like a refusal (403), so the endpoints do not reveal which ids exist.
   Removing a user from a tenant drops their personal capabilities there, and
   deleting a role drops the role's.

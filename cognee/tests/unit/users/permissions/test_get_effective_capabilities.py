@@ -858,10 +858,15 @@ async def test_deleting_a_user_drops_their_capabilities_but_keeps_what_they_gran
     from cognee.modules.users.methods import delete_user
     from cognee.modules.users.permissions.methods import get_effective_capabilities
     from cognee.modules.users.permissions.permission_types import MANAGE_USERS
+    from cognee.modules.users.tenants.methods import add_user_to_tenant
 
     seed = await _seed()
     tenant_id = seed["tenant_id"]
     leaver_id = seed["member_id"]
+    # Grants only reach members, so the person the leaver grants to joins first.
+    await add_user_to_tenant(
+        user_id=seed["outsider_id"], tenant_id=tenant_id, owner_id=seed["owner_id"]
+    )
     await grant_capability(leaver_id, tenant_id, MANAGE_USERS)
     await grant_capability(seed["outsider_id"], tenant_id, MANAGE_USERS, granted_by=leaver_id)
 
@@ -870,3 +875,25 @@ async def test_deleting_a_user_drops_their_capabilities_but_keeps_what_they_gran
     assert await _granted_by(leaver_id, tenant_id) == {}
     assert set(await _granted_by(seed["outsider_id"], tenant_id)) == {MANAGE_USERS}
     assert await get_effective_capabilities(seed["owner_id"], tenant_id)
+
+
+@pytest.mark.asyncio
+async def test_granting_to_a_user_outside_the_tenant_is_refused_and_says_why():
+    """There is no invite flow, so a grant to a non-member would only be an
+    orphan row behind a 200. It is refused with a message that names the fix;
+    the owner, who may have no membership row, is still a valid target."""
+    from cognee.modules.users.capabilities.methods import grant_capability
+    from cognee.modules.users.exceptions import CapabilityGrantToNonMemberError
+    from cognee.modules.users.permissions.permission_types import MANAGE_USERS
+
+    seed = await _seed()
+    tenant_id = seed["tenant_id"]
+
+    with pytest.raises(CapabilityGrantToNonMemberError) as refused:
+        await grant_capability(seed["outsider_id"], tenant_id, MANAGE_USERS)
+    assert "add them to the tenant" in str(refused.value)
+    assert await _granted_by(seed["outsider_id"], tenant_id) == {}
+
+    await grant_capability(seed["member_id"], tenant_id, MANAGE_USERS)
+    await grant_capability(seed["owner_id"], tenant_id, MANAGE_USERS)
+    assert set(await _granted_by(seed["member_id"], tenant_id)) == {MANAGE_USERS}
