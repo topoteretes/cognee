@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from cognee import __version__ as cognee_version
 from cognee import datasets
 from cognee.api.DTO import InDTO, OutDTO
-from cognee.api.v1.datasets.dto import DataDTO
+from cognee.api.v1.datasets.dto import DataDTO, DeleteDataReceiptDTO
 from cognee.api.v1.exceptions import DataNotFoundError
 from cognee.exceptions import CogneeApiError
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -301,7 +301,7 @@ def get_datasets_router() -> APIRouter:
 
     @router.delete(
         "/{dataset_id}/data/{data_id}",
-        response_model=dict,
+        response_model=DeleteDataReceiptDTO,
         responses={404: {"model": ErrorResponseDTO}},
     )
     async def delete_data(
@@ -327,11 +327,12 @@ def get_datasets_router() -> APIRouter:
         - **data_id** (UUID): The unique identifier of the data item to delete
 
         ## Response
-        A deletion receipt: ``status`` (``"success"``), ``dataset_id``, ``data_id``,
-        ``data_record_found`` (a Data row for the id existed), ``deleted_nodes`` /
-        ``deleted_edges`` (graph elements removed), ``data_remaining`` (``false`` when
-        a re-list of the dataset after the delete no longer shows the Data row — the
-        verified outcome) and ``dataset_deleted`` (always ``false`` here).
+        A deletion receipt (``DeleteDataReceiptDTO``, camelCase on the wire): ``status``
+        (``"success"``), ``datasetId``, ``dataId`` (the resolved id), ``dataRecordFound``
+        (a Data row for the id existed), ``deletedNodes`` / ``deletedEdges`` (graph
+        elements removed), ``dataRemaining`` (``false`` when a re-list of the dataset
+        after the delete no longer shows the Data row — the verified outcome) and
+        ``datasetDeleted`` (always ``false`` here).
 
         ## Error Codes
         - **401 Unauthorized**: Dataset doesn't exist or user lacks delete permission

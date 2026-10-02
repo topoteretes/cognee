@@ -209,3 +209,91 @@ async def test_forget_data_item_passes_the_receipt_through():
         result = await forget_module._forget_data_item(data_id, dataset_id, user)
 
     assert result == receipt
+
+
+async def test_forget_data_item_keeps_the_resolved_id_over_a_legacy_input():
+    """A legacy id passed to ``forget`` resolves inside ``delete_data``; the
+    receipt names the resolved id and ``forget`` must not overwrite it with the
+    caller's legacy value."""
+    dataset_id, legacy_id, resolved_id = uuid4(), uuid4(), uuid4()
+    user = SimpleNamespace(id=uuid4())
+    receipt = {
+        "status": "success",
+        "dataset_id": str(dataset_id),
+        "data_id": str(resolved_id),
+        "data_record_found": True,
+        "deleted_nodes": 1,
+        "deleted_edges": 0,
+        "data_remaining": False,
+        "dataset_deleted": False,
+    }
+
+    with (
+        patch.object(forget_module, "_resolve_dataset_id", AsyncMock(return_value=dataset_id)),
+        patch.object(datasets_module.datasets, "delete_data", AsyncMock(return_value=receipt)),
+    ):
+        result = await forget_module._forget_data_item(legacy_id, dataset_id, user)
+
+    assert result["data_id"] == str(resolved_id)
+    assert result == receipt
+
+
+def test_delete_route_answers_with_the_receipt_dto():
+    """``DELETE /datasets/{id}/data/{id}`` declares ``DeleteDataReceiptDTO`` and
+    serializes the receipt through it: every field present, camelCase on the wire,
+    ids as strings."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from cognee.api.v1.datasets.dto import DeleteDataReceiptDTO
+    from cognee.api.v1.datasets.routers.get_datasets_router import get_datasets_router
+    from cognee.modules.users.methods import get_authenticated_user
+
+    dataset_id, data_id = uuid4(), uuid4()
+    receipt = {
+        "status": "success",
+        "dataset_id": str(dataset_id),
+        "data_id": str(data_id),
+        "data_record_found": True,
+        "deleted_nodes": 4,
+        "deleted_edges": 3,
+        "data_remaining": False,
+        "dataset_deleted": False,
+    }
+
+    router = get_datasets_router()
+    route = next(
+        r
+        for r in router.routes
+        if getattr(r, "path", "") == "/{dataset_id}/data/{data_id}"
+        and "DELETE" in (getattr(r, "methods", None) or set())
+    )
+    assert route.response_model is DeleteDataReceiptDTO
+
+    app = FastAPI()
+    app.include_router(router, prefix="/datasets")
+    app.dependency_overrides[get_authenticated_user] = lambda: SimpleNamespace(id=uuid4())
+
+    router_module = importlib.import_module("cognee.api.v1.datasets.routers.get_datasets_router")
+
+    with (
+        patch.object(
+            router_module.datasets, "delete_data", AsyncMock(return_value=receipt)
+        ) as delete_data,
+        patch.object(router_module, "send_telemetry"),
+    ):
+        response = TestClient(app).delete(f"/datasets/{dataset_id}/data/{data_id}")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "success",
+        "datasetId": str(dataset_id),
+        "dataId": str(data_id),
+        "dataRecordFound": True,
+        "deletedNodes": 4,
+        "deletedEdges": 3,
+        "dataRemaining": False,
+        "datasetDeleted": False,
+    }
+    called_dataset_id, called_data_id, _user = delete_data.await_args.args
+    assert (called_dataset_id, called_data_id) == (dataset_id, data_id)

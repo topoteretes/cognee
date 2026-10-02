@@ -261,12 +261,14 @@ async def _forget_data_item(data_id: UUID, dataset_ref: str | UUID, user: Any) -
         dataset_id,
         user.id,
     )
-    # Pass the deletion receipt through (deleted_nodes / deleted_edges /
-    # data_remaining / ...) so callers can verify the outcome without
-    # re-listing the dataset; the historical keys keep their values.
-    result = dict(receipt) if isinstance(receipt, dict) else {}
-    result.update({"data_id": str(data_id), "dataset_id": str(dataset_id), "status": "success"})
-    return result
+    # Pass the deletion receipt through unchanged (deleted_nodes / deleted_edges /
+    # data_remaining / ...) so callers can verify the outcome without re-listing
+    # the dataset. It already carries status, dataset_id and data_id — the latter
+    # the *resolved* id, which differs from the input when a legacy id was passed,
+    # so it must not be overwritten with the caller's value.
+    if isinstance(receipt, dict):
+        return dict(receipt)
+    return {"data_id": str(data_id), "dataset_id": str(dataset_id), "status": "success"}
 
 
 async def _forget_dataset_memory(dataset_ref: str | UUID, user: Any) -> dict:
