@@ -36,14 +36,26 @@ class VectorConfig(BaseSettings):
     vector_db_host: str = ""
     vector_db_subprocess_enabled: bool = True
     vector_pool_args: str | None = None
-    # Writes-per-table threshold at which accumulated LanceDB fragments/
-    # versions are folded back down via `optimize()`. Every `merge_insert`
-    # mints a new table version *and* a new data fragment, and LanceDB never
-    # compacts on its own -- left unbounded this inflates storage, query
-    # cost and process memory without limit on a long-lived deployment
-    # (see https://github.com/topoteretes/cognee/issues/4684). Ignored by
-    # backends other than LanceDB. `0` disables background compaction.
-    vector_db_compaction_write_interval: int = 25
+    # LanceDB compaction (ignored by other backends). Every upsert appends a
+    # new fragment and leaves the superseded rows on disk, and LanceDB never
+    # reclaims them on its own -- one store reached 136 GB for ~6 GB of live
+    # vectors (https://github.com/topoteretes/cognee/issues/4684).
+    # `LanceDBAdapter.compact` runs once per pipeline run and merges only the
+    # small fragments, so a run costs at most one fragment of
+    # `target_rows_per_fragment` rows, not a rewrite of the whole table.
+    # `enabled = False` restores the uncompacted behaviour exactly.
+    vector_db_compaction_enabled: bool = True
+    # Fragments with fewer rows than this are merged; larger ones are left
+    # alone. 20k rows is ~250 MB at 3072 dims: seconds even on a slow disk.
+    vector_db_compaction_target_rows_per_fragment: int = 20_000
+    # Compaction tasks executed per maintenance pass, shared across all tables
+    # of the store (a task rewrites one group of fragments into one fragment of
+    # at most `target_rows_per_fragment` rows). An existing backlog drains over
+    # several runs instead of stalling one. `0` = no limit.
+    vector_db_compaction_max_tasks_per_run: int = 4
+    # Superseded files are deleted only once older than this, so a reader that
+    # opened the table shortly before a compaction keeps working.
+    vector_db_compaction_retention_seconds: int = 300
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 

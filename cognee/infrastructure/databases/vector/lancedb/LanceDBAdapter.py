@@ -35,6 +35,7 @@ from cognee.modules.observability.tracing import (
 )
 from cognee.modules.storage.utils import copy_model
 from cognee.shared.logging_utils import get_logger
+from cognee_db_workers.lancedb_compaction import compact_dataset
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
@@ -209,10 +210,9 @@ class LanceDBAdapter(VectorDBInterface):
         #   (*,     True)  — closed, not reusable in either mode
         self._subprocess_mode = session is not None
         self._permanently_closed = False
-        # Per-collection write counter driving periodic compaction (see
-        # `_maybe_compact`). Instance-level, not class-level: it must not be
-        # shared across adapters pointed at different LanceDB stores.
-        self._compaction_write_counts: dict[str, int] = {}
+        # Which table a maintenance pass starts with; advances every pass so a
+        # shared task budget is not always spent on the same first tables.
+        self._compaction_cursor = 0
 
     async def get_connection(self):
         """
@@ -442,53 +442,6 @@ class LanceDBAdapter(VectorDBInterface):
         connection = await self.get_connection()
         return await connection.open_table(collection_name)
 
-    async def _maybe_compact(self, collection_name: str, collection) -> None:
-        """Best-effort LanceDB compaction, run periodically as a table is written.
-
-        Every `merge_insert` mints a new table version *and* a new data
-        fragment, and LanceDB never compacts on its own:
-        https://github.com/topoteretes/cognee/issues/4684. Left alone this
-        grows without bound on a long-lived deployment -- one real-world
-        store reached 6,592 versions / 6,557 fragments across 20 tables
-        (937 MB for a 2,461-node graph) before an offline `optimize()` cut
-        it to 48 / 27 / 411 MB with identical row counts.
-
-        Runs `optimize()` every `vector_db_compaction_write_interval` writes
-        to a given table (tracked per collection, per adapter instance)
-        rather than after every write, so the cost is amortized instead of
-        paid on the hot path each time. Mirrors the same best-effort
-        compaction already used after re-keying in
-        `cognee/modules/migrations/versions/_vector_rekey.py`.
-
-        Maintenance runs after the write and uses LanceDB's default retention
-        window so recent snapshots remain readable. A failed optimization is
-        logged without failing the write that already succeeded.
-        """
-        interval = get_vectordb_config().vector_db_compaction_write_interval
-        if interval <= 0:
-            return
-
-        count = self._compaction_write_counts.get(collection_name, 0) + 1
-        self._compaction_write_counts[collection_name] = count
-        if count % interval != 0:
-            return
-
-        optimize = getattr(collection, "optimize", None)
-        if optimize is None:
-            return
-
-        try:
-            # Keep the default retention window: another reader may still use
-            # a recent version. The subprocess proxy exposes the same defaults.
-            await optimize()
-        except Exception as exc:
-            logger.warning(
-                "Periodic compaction skipped for collection '%s': %s",
-                collection_name,
-                exc,
-                exc_info=True,
-            )
-
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set with any prior rows."""
         payload_schema = type(data_points[0])
@@ -619,7 +572,6 @@ class LanceDBAdapter(VectorDBInterface):
             #      schema now requires to be non-null. Raised from the Rust side
             #      (lance-file writer) when an old-schema row is upserted against
             #      a newer schema with a non-null field and no default in storage.
-
             err = str(e)
             if "not found in target schema" not in err and "contained null values" not in err:
                 raise
@@ -631,11 +583,6 @@ class LanceDBAdapter(VectorDBInterface):
             await self._migrate_collection_schema(
                 collection_name, collection, payload_schema, lance_data_points
             )
-        else:
-            # Only on the plain (non-migration) success path: the migration
-            # path already rebuilds the table from scratch, so it starts
-            # fragment-free and needs no extra compaction here.
-            await self._maybe_compact(collection_name, collection)
 
     async def upsert_raw_vectors(
         self,
@@ -692,7 +639,114 @@ class LanceDBAdapter(VectorDBInterface):
                 .when_not_matched_insert_all()
                 .execute(self._records_for_write(raw_points))
             )
-        await self._maybe_compact(collection_name, collection)
+
+    # ------------------------------------------------------------------
+    # Compaction
+    # ------------------------------------------------------------------
+
+    _REMOTE_URL_PREFIXES = ("db://", "http://", "https://", "s3://", "gs://", "az://")
+
+    def _store_url(self) -> str | None:
+        """The LanceDB location: ``self.url`` in local mode, the remote
+        connection's URL in subprocess mode (where ``url`` may be ``None``)."""
+        return self.url or getattr(self.connection, "_url", None)
+
+    def _compaction_options(self) -> dict | None:
+        config = get_vectordb_config()
+        if not config.vector_db_compaction_enabled:
+            return None
+        return {
+            "target_rows_per_fragment": config.vector_db_compaction_target_rows_per_fragment,
+            "retention_seconds": config.vector_db_compaction_retention_seconds,
+            "max_tasks": config.vector_db_compaction_max_tasks_per_run,
+        }
+
+    async def compact(self, collection_name: str | None = None) -> dict:
+        """Fold the fragments cognee's upserts leave behind and prune old versions.
+
+        Every ``merge_insert`` appends a new fragment and leaves the superseded
+        rows on disk; LanceDB never reclaims either on its own, so a store in
+        daily use grows without bound (issue #4684: 136 GB on disk for ~6 GB of
+        live vectors). Called once per pipeline run from ``run_tasks``; a
+        no-op on a compact table.
+
+        Bounded, not whole-table: ``cognee_db_workers.lancedb_compaction``
+        merges only fragments below the configured row target, and the pass
+        executes at most ``vector_db_compaction_max_tasks_per_run`` compaction
+        tasks IN TOTAL across the store's tables (a task rewrites one group of
+        fragments into one of at most ``target_rows_per_fragment`` rows). The
+        budget is spent greedily in table order starting from a cursor that
+        advances every pass, so a backlog spread over several tables drains
+        fairly over several runs. Planning and version pruning run for every
+        table regardless; both are metadata work. Superseded files are kept
+        until their successor has aged past the retention window, so a reader
+        that opened the table a moment ago keeps working.
+
+        Runs under ``VECTOR_DB_LOCK``: a compaction commit is a Lance
+        "rewrite" transaction that a concurrent upsert pre-empts (the upsert
+        wins and the compaction raises a retryable conflict), so it is
+        serialised with this adapter's writers rather than racing them.
+
+        Skipped for remote stores (``s3://`` and friends), where every rewrite
+        is network transfer and cleanup is thousands of object deletes.
+        Fail-open per collection: a failure is logged and reported in the
+        returned stats, never raised.
+        """
+        options = self._compaction_options()
+        if options is None:
+            return {"skipped": "disabled"}
+        url = self._store_url()
+        if url and url.startswith(self._REMOTE_URL_PREFIXES):
+            return {"skipped": "remote_store"}
+
+        connection = await self.get_connection()
+        if collection_name is not None:
+            names = [collection_name]
+        else:
+            names = list(await connection.table_names())
+
+        if len(names) > 1:
+            start = self._compaction_cursor % len(names)
+            names = names[start:] + names[:start]
+            self._compaction_cursor = start + 1
+
+        budget = int(options["max_tasks"])  # 0 = unlimited
+        remaining = budget
+        results: dict = {}
+        async with self.VECTOR_DB_LOCK:
+            for name in names:
+                # Budget spent: plan and prune only, so the stats still report the
+                # work left for later runs and old versions still age out.
+                table_options = dict(
+                    options, max_tasks=remaining if budget == 0 or remaining > 0 else -1
+                )
+                try:
+                    stats = await self._compact_collection(name, table_options)
+                except Exception as exc:
+                    logger.warning(
+                        "Compaction skipped for collection '%s': %s",
+                        name,
+                        exc,
+                        exc_info=True,
+                    )
+                    results[name] = {"error": str(exc)[:200]}
+                    continue
+                results[name] = stats
+                if budget > 0:
+                    remaining = max(0, remaining - int(stats.get("executed_tasks", 0) or 0))
+        return results
+
+    async def _compact_collection(self, collection_name: str, options: dict) -> dict:
+        collection = await self.get_collection(collection_name)
+        if self._subprocess_mode:
+            # The worker owns the table; it runs the same helper and returns its stats.
+            return await collection.optimize(**options) or {}
+        # Local mode: hand the table to pylance, do the I/O off the event loop,
+        # then move the handle to the version the compaction committed.
+        dataset = await collection.to_lance()
+        stats = await asyncio.to_thread(compact_dataset, dataset, **options)
+        await collection.checkout_latest()
+        return stats
 
     async def _migrate_collection_schema(
         self,

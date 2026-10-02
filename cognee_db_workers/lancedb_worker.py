@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from .harness import (
@@ -13,6 +14,7 @@ from .harness import (
     Request,
     run_worker_loop,
 )
+from .lancedb_compaction import compact_dataset
 from .lancedb_protocol import (
     OP_CONNECT,
     OP_CREATE_TABLE,
@@ -167,7 +169,18 @@ async def _op_table_delete(registry: HandleRegistry, req: Request):
 
 async def _op_table_optimize(registry: HandleRegistry, req: Request):
     table = registry.get(req.handle_id)
-    await table.optimize()
+    if not req.kwargs:
+        # Legacy form: LanceDB's own full ``optimize`` (the id re-key migration
+        # compacts this way after a bulk delete).
+        await table.optimize()
+        return None
+    # Bounded compaction (see ``lancedb_compaction``): hand the table to
+    # pylance, do the I/O off the event loop so other requests keep flowing,
+    # then move this handle to the version the compaction committed.
+    dataset = await table.to_lance()
+    stats = await asyncio.to_thread(compact_dataset, dataset, **req.kwargs)
+    await table.checkout_latest()
+    return stats
 
 
 def _apply_chain(builder, chain_steps):

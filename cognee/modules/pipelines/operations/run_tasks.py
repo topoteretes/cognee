@@ -6,6 +6,7 @@ from uuid import UUID
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.databases.vector.compact_vector_store import compact_vector_store
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.operations import scrub_error_message
@@ -58,6 +59,13 @@ async def run_tasks(
     domain-blind). A constant list is just the degenerate resolver; items
     resolved to different lists still share this run's lifecycle — one run
     record, one database context, one rollback, one terminal status.
+
+    Once every item and batch of this dataset's run has been written, the
+    vector store's fragments are folded once (see ``LanceDBAdapter.compact``)
+    before the run is reported complete. Every pipeline gets this: a run that
+    wrote no vectors costs one plan per table, and the write-heavy ones
+    (cognify, memify) are exactly the ones that need it. The
+    ``VECTOR_DB_COMPACTION_ENABLED`` setting is the only switch.
     """
     task_resolver = tasks if callable(tasks) else None
     if not user:
@@ -270,6 +278,10 @@ async def run_tasks(
                 if hasattr(relational_engine, "push_to_s3"):
                     await relational_engine.push_to_s3()
 
+                # Fold the vector fragments this run wrote before reporting it
+                # complete. Bounded per run (LanceDBAdapter.compact) and
+                # best-effort: it never fails a run that already succeeded.
+                await compact_vector_store()
                 await log_pipeline_run_complete(
                     pipeline_run_id,
                     pipeline_id,
