@@ -27,7 +27,16 @@ def pipeline_name_for_source(source, dataset_name: str) -> str:
 
 # Community/cloud hosts can refuse unsafe older cores before ingestion starts.
 # Version 1 scopes cleanup by staging table and handles a confirmed empty table.
-DOCUMENT_SYNC_VERSION = 1
+# Version 2 reads the per-row node_set column (NODE_SET_COLUMN).
+DOCUMENT_SYNC_VERSION = 2
+
+# A document-mode row may carry its own node sets in this column, as a JSON
+# list of names (see resolve_dlt_sources._row_node_set). Every name is
+# namespaced under the source tag, so a row can never name one of cognee's
+# own node sets. The type hint is applied at load time so dlt stores the list
+# on the row as json instead of normalizing it into a child table.
+NODE_SET_COLUMN = "cognee_node_set"
+NODE_SET_COLUMN_HINT = {NODE_SET_COLUMN: {"data_type": "json", "nullable": True}}
 
 
 def guarded_rows(rows, check_active=None):

@@ -20,6 +20,10 @@ class DataItem:
     # Data.system_metadata — never merged with user external_metadata.
     system_metadata: dict | None = field(default=None)
     data_id: UUID | None = None
+    # The item's own node sets. ingest_data unions them with the call-level
+    # node_set (call first, order kept) and stores the union on the Data row,
+    # so two items in one remember() can land in different groups.
+    node_set: list[str] | None = None
 
 
 def parse_labels(labels: str | None) -> list[str | None] | None:

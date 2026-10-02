@@ -1,4 +1,5 @@
 import inspect
+from dataclasses import replace
 from tempfile import SpooledTemporaryFile
 from types import SimpleNamespace
 from typing import Any
@@ -41,14 +42,11 @@ async def _read_stream_bytes(stream: Any) -> bytes:
 
 async def materialize_stream_for_background(data_item: Any, index: int = 0) -> Any:
     if isinstance(data_item, DataItem):
-        # Copy EVERY DataItem field: dropping one here silently breaks the
-        # background path only (system_metadata carries the DLT routing stamp).
-        return DataItem(
+        # dataclasses.replace copies every other field, so a new DataItem field
+        # can never be silently dropped from the background path.
+        return replace(
+            data_item,
             data=await materialize_stream_for_background(data_item.data, index=index),
-            label=data_item.label,
-            external_metadata=data_item.external_metadata,
-            system_metadata=data_item.system_metadata,
-            data_id=data_item.data_id,
         )
 
     if isinstance(data_item, list):

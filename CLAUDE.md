@@ -239,6 +239,8 @@ The stages below are the Low level operations these call underneath.
 
 Key files: `cognee/api/v1/add/add.py`, `cognee/tasks/ingestion/ingest_data.py`
 
+A `DataItem` (`cognee/tasks/ingestion/data_item.py`) can carry its own `node_set`; `ingest_data` unions it with the call-level `node_set` (call first, order kept) and stores the union on the `Data` row, so two items in one `remember()` can land in different groups. Document-mode dlt rows name theirs in the reserved `cognee_node_set` column (a JSON list); every name is namespaced under the source tag, so provider data can never name one of cognee's own node sets, and the column is declared as json at load time so dlt keeps the list on the row instead of normalizing it into a child table.
+
 #### COGNIFY: Knowledge Graph Construction
 `cognify()` → `classify_documents` → `extract_chunks_from_documents` → `extract_graph_from_data` (LLM extracts entities/relationships using Instructor) → `summarize_text` → `add_data_points` (store in graph + vector DBs)
 

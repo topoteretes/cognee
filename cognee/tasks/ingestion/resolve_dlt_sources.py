@@ -32,7 +32,7 @@ from .create_dlt_source import (
 )
 from .data_item import DataItem
 from .dlt_row_data import DltRowData
-from .dlt_utils import document_source_tag
+from .dlt_utils import NODE_SET_COLUMN, document_source_tag
 from .ingest_dlt_source import ingest_dlt_source
 
 logger = get_logger("resolve_dlt_sources")
@@ -609,7 +609,9 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
     The row is expected to carry ``title``/``content`` columns (and optionally
     ``url``/``id``). Tagging ``system_metadata["source"] = source_tag``
     routes the document through normal cognify entity extraction rather
-    than the deterministic manifest path.
+    than the deterministic manifest path. A ``cognee_node_set`` column names
+    the row's own node sets (``_row_node_set``); they ride on the DataItem and
+    ingest_data unions them with the call-level node_set.
     """
     row_data = row.row_data
     title = _clean(row_data.get("title"))
@@ -631,7 +633,37 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
         label=title or str(row_data.get("id")),
         system_metadata=system_metadata,
         data_id=data_id,
+        node_set=_row_node_set(row_data.get(NODE_SET_COLUMN), source_tag),
     )
+
+
+def _row_node_set(raw: Any, source_tag: str) -> list[str] | None:
+    """The node sets a document row names in its ``cognee_node_set`` column.
+
+    Accepts the two read-back shapes: a json column comes back as a list, a
+    text column as the JSON string of that list (or one bare name). Every
+    name is namespaced under ``source_tag`` unless it already is, so provider
+    data can never name one of cognee's own node sets (``skills``,
+    ``user_context``, ...). Anything that is not a non-empty string is
+    ignored; the row itself is always kept.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except ValueError:
+            parsed = raw
+        raw = parsed if isinstance(parsed, list) else [parsed]
+    if not isinstance(raw, list):
+        return None
+    prefix = f"{source_tag}:"
+    names = [
+        name if name.startswith(prefix) else prefix + name
+        for name in (_clean(value) for value in raw if isinstance(value, str))
+        if name
+    ]
+    return list(dict.fromkeys(names)) or None
 
 
 def _clean(value: Any) -> str:

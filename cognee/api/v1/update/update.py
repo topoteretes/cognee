@@ -362,7 +362,7 @@ def _full_rebuild_reason(
         return RefusalReason.DISABLED, "chunk_level_diff=False was requested"
 
     data_item_changes_metadata = isinstance(data, DataItem) and (
-        data.label is not None or data.external_metadata is not None
+        data.label is not None or data.external_metadata is not None or data.node_set is not None
     )
     if node_set or data_item_changes_metadata:
         return (

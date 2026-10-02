@@ -19,6 +19,7 @@ import pytest
 import cognee.api.v1.update.update  # bind the real submodule
 from cognee.api.v1.update.incremental import RefusalReason
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
+from cognee.tasks.ingestion.data_item import DataItem
 
 update_module = sys.modules["cognee.api.v1.update.update"]
 data_methods_module = sys.modules["cognee.modules.data.methods"]
@@ -248,3 +249,26 @@ async def test_no_configs_take_the_incremental_path():
     assert (result["regions"], result["deleted_chunks"], result["added_chunks"]) == (1, 1, 2)
     assert (result["kept_chunks"], result["reindexed_chunks"], result["total_chunks"]) == (5, 0, 7)
     assert result["pipeline_run_id"] == summary["pipeline_run_id"]
+
+
+@pytest.mark.asyncio
+async def test_data_item_node_set_skips_the_incremental_path():
+    """An item's own node_set is the same kind of metadata change as the
+    call-level node_set above: the chunk-level engine reconciles chunks, not
+    node-set membership."""
+    data_id, dataset_id = uuid4(), uuid4()
+    incremental = AsyncMock()
+    full_result = _full_result(dataset_id)
+
+    p1, p2, p3, p4, p5, p6, p7, p8 = _patches(data_id, incremental, full_result)
+    with p1, p2, p3, p4, p5, p6, p7, p8:
+        result = await update_module.update(
+            data_id=data_id,
+            data=DataItem(data="new content", node_set=["notion:ws:root"]),
+            dataset_id=dataset_id,
+            user=SimpleNamespace(id=uuid4()),
+        )
+
+    incremental.assert_not_called()
+    assert result["status"] == "full_rebuild"
+    assert result["fallback"]["reason"] is RefusalReason.UNSUPPORTED_METADATA
