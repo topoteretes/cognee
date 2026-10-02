@@ -15,6 +15,11 @@ Run every command from the repo root.
 
 ## Steps
 
+Without a Granola account, or to see it work first, use the sample: run
+`uv run python examples/cookbooks/company_brain/follow_up_agent/setup.py` once, then add
+`--sample` to the commands below. It follows up a fictional call, needs only
+`LLM_API_KEY`, and never posts to Slack.
+
 1. Run `uv run python examples/cookbooks/company_brain/follow_up_agent/follow_up_agent.py --check`.
    - Exit 0: go to step 2. `[setup] SKIPPED:` lines name optional sources that won't be
      used; mention them to the user, but they don't block the run.

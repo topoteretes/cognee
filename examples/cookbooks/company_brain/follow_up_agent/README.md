@@ -25,12 +25,42 @@ Agents run this cookbook through the `follow-up-agent` skill,
 
 `credentials.json` and `token.json` are git-ignored. Never commit or print them, or the keys.
 
+## Try it on sample data
+
+`setup.py` writes sample calls, Linear issues and an email to `sample/` (git-ignored), in
+the shape Granola, Linear and Gmail give the scripts, dated relative to today. The latest
+call agrees on next steps but names no team or deadline; an earlier call, Linear and a
+bank's email hold those. Only `LLM_API_KEY` is needed, and a sample run never posts to
+Slack, even when Slack is set up.
+
+```bash
+uv run python examples/cookbooks/company_brain/follow_up_agent/setup.py
+uv run python examples/cookbooks/company_brain/follow_up_agent/follow_up_agent.py --sample
+```
+
+```text
+[ingest_granola] Remembered 2 sample calls
+[ingest_linear] Remembered 2 sample Linear issues
+[ingest_email] Remembered 1 sample inbox emails
+[follow_up] Call: Checkout v2 launch readiness
+[follow_up] Steps (a sample run, so not posted):
+*Next steps from "Checkout v2 launch readiness"*
+- Migrate card payments to 3DS2 — Owner: Omar Haddad; Team: Payments; Due date: 2026-11-01 (Kestrel Bank requirement); Linear issue: PAY-104.
+- Load-test the checkout API at 3× peak traffic — Owner: Sam Okoro; Team: Platform; Due date: 2026-10-12; Linear issue: PLAT-88.
+- Write the launch announcement (after the migration and load test) — Owner: Lena Fischer; Team: Payments; Due date: not specified; Linear issue: none.
+```
+
+Omar's team comes from the earlier call, PAY-104 from Linear, and the 3DS2 deadline from
+the bank's email: none of them is in the call itself.
+
 ## Steps
 
 ```
 follow_up_agent/
 ├── README.md             this file
 ├── follow_up_agent.py    checks setup, then calls the scripts in order
+├── setup.py              writes the sample, for --sample
+├── sample/               written by setup.py, git-ignored
 ├── credentials.json      yours, git-ignored (optional)
 ├── token.json            yours, git-ignored, written on the first Gmail run
 └── scripts/
@@ -47,10 +77,10 @@ script also runs alone with the same options.
 | # | Command (`uv run python examples/cookbooks/company_brain/follow_up_agent/...`) | Does | Writes |
 |---|---|---|---|
 | 0 | `follow_up_agent.py --check` | Reports what is missing and which optional sources are skipped. Does no work | nothing |
-| 1 | `scripts/ingest_granola.py [--days N]` | Remembers Granola calls from the last 30 days by default (node set `calls`) | cognee dataset |
-| 2 | `scripts/ingest_linear.py [--days N]` | Remembers Linear issues changed in the last 30 days by default (node set `linear`) | cognee dataset |
-| 3 | `scripts/ingest_email.py [--emails N]` | Remembers the newest 50 inbox emails by default, through cognee's Gmail connector `gmail_source` (node set `email`) | cognee dataset |
-| 4 | `scripts/follow_up.py [--days N]` | Fetches the latest call, asks a `GRAPH_COMPLETION` recall over the whole graph for its next steps, and posts them to Slack with `chat.postMessage` (or prints them) | a Slack message, when set up |
+| 1 | `scripts/ingest_granola.py [--days N] [--sample]` | Remembers Granola calls from the last 30 days by default (node set `calls`) | cognee dataset |
+| 2 | `scripts/ingest_linear.py [--days N] [--sample]` | Remembers Linear issues changed in the last 30 days by default (node set `linear`) | cognee dataset |
+| 3 | `scripts/ingest_email.py [--emails N] [--sample]` | Remembers the newest 50 inbox emails by default, through cognee's Gmail connector `gmail_source` (node set `email`) | cognee dataset |
+| 4 | `scripts/follow_up.py [--days N] [--sample]` | Fetches the latest call and the emails about it (a `CHUNKS` recall over `email`), asks a `GRAPH_COMPLETION` recall over the whole graph for its next steps, and posts them to Slack with `chat.postMessage` (or prints them) | a Slack message, when set up |
 | 5 | `scripts/ui.py` (or `--ui`) | Starts cognee's API server in this process and the UI at http://localhost:3000. Ctrl+C stops both | nothing |
 
 All scripts use the cognee dataset `company_brain`, named once in each script.

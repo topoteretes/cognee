@@ -1,5 +1,7 @@
 """Personalized email: check setup, then remember Granola and Gmail and draft a reply.
 
+    uv run python examples/cookbooks/personalized_email/setup.py    # sample data
+    uv run python examples/cookbooks/personalized_email/personalized_email.py --sample
     uv run python examples/cookbooks/personalized_email/personalized_email.py --check
     uv run python examples/cookbooks/personalized_email/personalized_email.py
     uv run python examples/cookbooks/personalized_email/personalized_email.py --no-granola
@@ -23,28 +25,33 @@ from cognee.shared.logging_utils import ERROR, setup_logging
 COOKBOOK_DIR = Path(__file__).parent
 
 
-def missing_setup(need_granola: bool) -> list[str]:
+def missing_setup(args: argparse.Namespace) -> list[str]:
     """What still has to be set up, one line each. Empty when everything is ready."""
     missing = []
     if not os.environ.get("LLM_API_KEY"):
         missing.append("LLM_API_KEY is not set (put it in .env).")
+    if args.sample:  # the sample replaces Gmail and Granola
+        if not (COOKBOOK_DIR / "sample").is_dir():
+            missing.append("The sample is not written. Run setup.py first.")
+        return missing
     if not (COOKBOOK_DIR / "credentials.json").exists():
         missing.append("Gmail OAuth client not found at credentials.json in the cookbook folder.")
-    if need_granola and not os.environ.get("GRANOLA_API_KEY"):
+    if not args.no_granola and not os.environ.get("GRANOLA_API_KEY"):
         missing.append("GRANOLA_API_KEY is not set (put it in .env), or pass --no-granola.")
     return missing
 
 
 async def run(args: argparse.Namespace) -> None:
     if not args.no_granola:
-        await ingest_granola(args.days)
-    await ingest_email(args.emails)
-    await draft()
+        await ingest_granola(args.days, args.sample)
+    await ingest_email(args.emails, args.sample)
+    await draft(args.sample)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--check", action="store_true", help="only report what is missing")
+    parser.add_argument("--sample", action="store_true", help="use the sample from setup.py")
     parser.add_argument("--no-granola", action="store_true", help="skip the Granola step")
     parser.add_argument("--days", type=int, default=30, help="Granola meetings to remember")
     parser.add_argument("--emails", type=int, default=50, help="emails to remember per label")
@@ -52,7 +59,7 @@ if __name__ == "__main__":
 
     import cognee  # loads .env, so keys set there are seen by the check
 
-    missing = missing_setup(need_granola=not args.no_granola)
+    missing = missing_setup(args)
     for line in missing:
         print(f"[setup] MISSING: {line}")
     if missing:

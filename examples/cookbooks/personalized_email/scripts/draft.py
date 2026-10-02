@@ -2,9 +2,9 @@
 
 The facts come from memory: who the sender is, what was decided in your meetings, and what
 you promised them. The tone comes from a few of your own sent emails. Set MY_NAME to your
-name as it appears in your email.
+name as it appears in your email. With --sample, it answers the newest sample email.
 
-Run alone: uv run python examples/cookbooks/personalized_email/scripts/draft.py
+Run alone: uv run python examples/cookbooks/personalized_email/scripts/draft.py [--sample]
 """
 
 import argparse
@@ -22,6 +22,7 @@ DATASET = "personalized_email"  # the same in every script
 ME = os.environ.get("MY_NAME", "me")  # your name, as it appears in your email
 COOKBOOK_DIR = Path(__file__).parent.parent
 CREDENTIALS, TOKEN = COOKBOOK_DIR / "credentials.json", COOKBOOK_DIR / "token.json"
+SAMPLE = COOKBOOK_DIR / "sample"
 
 DRAFT_PROMPT = f"""You write the reply {ME} would send to an email.
 - Answer every question with facts from the context. Never invent a date, price or promise.
@@ -32,8 +33,10 @@ DRAFT_PROMPT = f"""You write the reply {ME} would send to an email.
   no explanation and no markdown."""
 
 
-def newest_email() -> dict:
-    """The newest email in your inbox: its sender, subject and text."""
+def newest_email_text(sample: bool = False) -> str:
+    """The newest email in your inbox (or in the sample), as text: headers, then the body."""
+    if sample:
+        return max((SAMPLE / "inbox").glob("*.txt")).read_text()  # files are named in date order
     if not CREDENTIALS.exists():
         raise SystemExit(f"[draft] MISSING: Gmail OAuth client at {CREDENTIALS}")
     messages = build_gmail_service(str(CREDENTIALS), str(TOKEN)).users().messages()
@@ -41,16 +44,18 @@ def newest_email() -> dict:
     if not listed.get("messages"):
         raise SystemExit("[draft] Your Gmail inbox is empty.")
     email = parse_message(messages.get(userId="me", id=listed["messages"][0]["id"]).execute())
-    sender = re.search(r"^From: (.*)$", email["content"], re.MULTILINE)
-    return {
-        "sender": sender.group(1).strip() if sender else "",
-        "subject": email["title"],
-        "text": f"Subject: {email['title']}\n{email['content']}",
-    }
+    return f"Subject: {email['title']}\n{email['content']}"
 
 
-async def draft() -> None:
-    email = newest_email()
+def header(text: str, field: str) -> str:
+    """One header line of an email (Subject, From, ...), or ""."""
+    match = re.search(rf"^{field}: (.*)$", text, re.MULTILINE)
+    return match.group(1).strip() if match else ""
+
+
+async def draft(sample: bool = False) -> None:
+    text = newest_email_text(sample)
+    email = {"sender": header(text, "From"), "subject": header(text, "Subject"), "text": text}
     print(f"[draft] Answering: {email['subject']} (from {email['sender']})")
     own_emails = await cognee.recall(
         f"Emails written by {ME}",
@@ -76,5 +81,6 @@ async def draft() -> None:
 
 if __name__ == "__main__":
     setup_logging(log_level=ERROR)
-    argparse.ArgumentParser(description=__doc__.splitlines()[0]).parse_args()
-    asyncio.run(draft())
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--sample", action="store_true", help="answer the newest sample email")
+    asyncio.run(draft(parser.parse_args().sample))

@@ -1,14 +1,16 @@
 """Remember your Granola meeting notes from the last 30 days (node set `meetings`).
 
-Needs GRANOLA_API_KEY (create one in Granola's settings) in .env at the repo root.
+Needs GRANOLA_API_KEY (create one in Granola's settings) in .env at the repo root. With
+--sample, it reads the meetings setup.py wrote instead.
 
-Run alone: uv run python examples/cookbooks/personalized_email/scripts/ingest_granola.py [--days N]
+Run alone: uv run python examples/cookbooks/personalized_email/scripts/ingest_granola.py [--days N] [--sample]
 """
 
 import argparse
 import asyncio
 import os
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import httpx
 
@@ -16,10 +18,13 @@ import cognee  # also loads .env, so a GRANOLA_API_KEY set there is seen
 from cognee.shared.logging_utils import ERROR, setup_logging
 
 DATASET = "personalized_email"  # the same in every script
+SAMPLE = Path(__file__).parent.parent / "sample"
 
 
-def granola_notes(days: int) -> list[str]:
+def granola_notes(days: int, sample: bool = False) -> list[str]:
     """Your Granola meeting notes from the last ``days`` days, each as text."""
+    if sample:
+        return [path.read_text() for path in sorted((SAMPLE / "meetings").glob("*.txt"))]
     if not os.environ.get("GRANOLA_API_KEY"):
         raise SystemExit("[ingest_granola] MISSING: GRANOLA_API_KEY is not set (put it in .env).")
     # The API rejects microseconds and "+00:00"; it wants a plain UTC "...Z" timestamp.
@@ -45,19 +50,22 @@ def granola_notes(days: int) -> list[str]:
         params["cursor"] = page["cursor"]
 
 
-async def ingest_granola(days: int = 30) -> None:
-    notes = granola_notes(days)
+async def ingest_granola(days: int = 30, sample: bool = False) -> None:
+    notes = granola_notes(days, sample)
     if not notes:
         print(f"[ingest_granola] No Granola meetings in the last {days} days.")
         return
     await cognee.remember(
         notes, dataset_name=DATASET, node_set=["meetings"], self_improvement=False
     )
-    print(f"[ingest_granola] Remembered {len(notes)} Granola meetings from the last {days} days")
+    source = "sample meetings" if sample else f"Granola meetings from the last {days} days"
+    print(f"[ingest_granola] Remembered {len(notes)} {source}")
 
 
 if __name__ == "__main__":
     setup_logging(log_level=ERROR)
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--days", type=int, default=30, help="how far back to read meetings")
-    asyncio.run(ingest_granola(parser.parse_args().days))
+    parser.add_argument("--sample", action="store_true", help="use the sample from setup.py")
+    args = parser.parse_args()
+    asyncio.run(ingest_granola(args.days, args.sample))

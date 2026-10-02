@@ -1,15 +1,16 @@
 """Remember the Linear issues changed in the last 30 days (node set `linear`).
 
 Needs LINEAR_API_KEY, a personal API key (Linear: Settings → Security & access), in .env at
-the repo root.
+the repo root. With --sample, it reads the issues setup.py wrote instead.
 
-Run alone: uv run python examples/cookbooks/company_brain/follow_up_agent/scripts/ingest_linear.py [--days N]
+Run alone: uv run python examples/cookbooks/company_brain/follow_up_agent/scripts/ingest_linear.py [--days N] [--sample]
 """
 
 import argparse
 import asyncio
 import os
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import httpx
 
@@ -17,6 +18,7 @@ import cognee  # also loads .env, so a LINEAR_API_KEY set there is seen
 from cognee.shared.logging_utils import ERROR, setup_logging
 
 DATASET = "company_brain"  # the same in every script
+SAMPLE = Path(__file__).parent.parent / "sample"
 
 QUERY = """query($since: DateTimeOrDuration!) {
   issues(filter: {updatedAt: {gt: $since}}, first: 250) { nodes {
@@ -26,8 +28,10 @@ QUERY = """query($since: DateTimeOrDuration!) {
 }"""
 
 
-def linear_issues(days: int) -> list[str]:
+def linear_issues(days: int, sample: bool = False) -> list[str]:
     """Linear issues changed in the last ``days`` days, each as text."""
+    if sample:
+        return [path.read_text() for path in sorted((SAMPLE / "linear").glob("*.txt"))]
     if not os.environ.get("LINEAR_API_KEY"):
         raise SystemExit("[ingest_linear] MISSING: LINEAR_API_KEY is not set (put it in .env).")
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
@@ -47,17 +51,20 @@ def linear_issues(days: int) -> list[str]:
     ]
 
 
-async def ingest_linear(days: int = 30) -> None:
-    issues = linear_issues(days)
+async def ingest_linear(days: int = 30, sample: bool = False) -> None:
+    issues = linear_issues(days, sample)
     if not issues:
         print(f"[ingest_linear] No Linear issues changed in the last {days} days.")
         return
     await cognee.remember(issues, dataset_name=DATASET, node_set=["linear"], self_improvement=False)
-    print(f"[ingest_linear] Remembered {len(issues)} Linear issues from the last {days} days")
+    source = "sample Linear issues" if sample else f"Linear issues from the last {days} days"
+    print(f"[ingest_linear] Remembered {len(issues)} {source}")
 
 
 if __name__ == "__main__":
     setup_logging(log_level=ERROR)
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--days", type=int, default=30, help="how far back to read issues")
-    asyncio.run(ingest_linear(parser.parse_args().days))
+    parser.add_argument("--sample", action="store_true", help="use the sample from setup.py")
+    args = parser.parse_args()
+    asyncio.run(ingest_linear(args.days, args.sample))

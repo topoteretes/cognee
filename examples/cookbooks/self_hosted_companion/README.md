@@ -19,12 +19,33 @@ Agents run this cookbook through the `self-hosted-companion` skill,
 | `LLM_API_KEY` | cognee extracts the graph and answers with an LLM (OpenAI by default) | `.env` at the repo root |
 | A notes folder | The notes the companion knows: `.md` or `.txt` files, any depth | anywhere; pass its path |
 
+## Try it on sample notes
+
+`setup.py` writes a few journal entries to `sample/notes/` (git-ignored), dated relative to
+today. Only `LLM_API_KEY` is needed.
+
+```bash
+uv run python examples/cookbooks/self_hosted_companion/setup.py
+uv run python examples/cookbooks/self_hosted_companion/self_hosted_companion.py --sample
+```
+
+```text
+[ingest_notes] Remembered the notes in .../sample/notes
+[chat] you> When is my sister's birthday, and what was I planning to get her?
+[chat] companion> Her birthday is on October 4, 2026. You planned to give her a voucher for a pottery class at the ceramics studio on Linden Street.
+[chat] Saved this chat to memory.
+```
+
+`--sample` asks that question unless you pass `--ask`.
+
 ## Steps
 
 ```
 self_hosted_companion/
 ├── README.md                   this file
 ├── self_hosted_companion.py    checks setup, then calls the scripts in order
+├── setup.py                    writes the sample notes, for --sample
+├── sample/                     written by setup.py, git-ignored
 └── scripts/
     ├── ingest_notes.py
     ├── chat.py
@@ -36,7 +57,7 @@ script also runs alone with the same options.
 
 | # | Command (`uv run python examples/cookbooks/self_hosted_companion/...`) | Does | Writes |
 |---|---|---|---|
-| 0 | `self_hosted_companion.py --check <folder>` | Reports what is missing. Does no work | nothing |
+| 0 | `self_hosted_companion.py --check <folder \| --sample>` | Reports what is missing. Does no work | nothing |
 | 1 | `scripts/ingest_notes.py <folder>` | Remembers every note in the folder | cognee dataset |
 | 2 | `scripts/chat.py [--ask "message"]` | Chats in one session: each message is a `GRAPH_COMPLETION` recall that sees the turns before it. `/bye` ends it, and `improve(session_ids=[...])` writes the chat into memory. `--ask` answers one message and saves it the same way | cognee dataset |
 | 3 | `scripts/ui.py` (or `--ui`) | Starts cognee's API server in this process and the UI at http://localhost:3000. Ctrl+C stops both | nothing |

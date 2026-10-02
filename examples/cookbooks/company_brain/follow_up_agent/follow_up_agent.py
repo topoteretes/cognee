@@ -1,11 +1,13 @@
 """Follow-up agent: check setup, remember calls, issues and email, then post next steps.
 
+    uv run python examples/cookbooks/company_brain/follow_up_agent/setup.py    # sample data
+    uv run python examples/cookbooks/company_brain/follow_up_agent/follow_up_agent.py --sample
     uv run python examples/cookbooks/company_brain/follow_up_agent/follow_up_agent.py --check
     uv run python examples/cookbooks/company_brain/follow_up_agent/follow_up_agent.py
     uv run python examples/cookbooks/company_brain/follow_up_agent/follow_up_agent.py --no-email --ui
 
 Granola is required. Linear, Gmail and Slack are used when they are set up and skipped
-otherwise. Each script in scripts/ also runs alone. Exit codes: 0 done, 2 setup missing,
+otherwise. --sample replaces all four with the sample from setup.py and never posts. Each script in scripts/ also runs alone. Exit codes: 0 done, 2 setup missing,
 1 a script failed (its message says why).
 """
 
@@ -26,18 +28,23 @@ from cognee.shared.logging_utils import ERROR, setup_logging
 COOKBOOK_DIR = Path(__file__).parent
 
 
-def missing_setup() -> list[str]:
+def missing_setup(args: argparse.Namespace) -> list[str]:
     """What still has to be set up, one line each. Empty when everything is ready."""
     missing = []
     if not os.environ.get("LLM_API_KEY"):
         missing.append("LLM_API_KEY is not set (put it in .env).")
-    if not os.environ.get("GRANOLA_API_KEY"):
+    if args.sample:  # the sample replaces Granola, Linear and Gmail
+        if not (COOKBOOK_DIR / "sample").is_dir():
+            missing.append("The sample is not written. Run setup.py first.")
+    elif not os.environ.get("GRANOLA_API_KEY"):
         missing.append("GRANOLA_API_KEY is not set (put it in .env).")
     return missing
 
 
 def optional_sources(args: argparse.Namespace) -> dict[str, bool]:
     """Which optional sources this run uses. Each one is used only when it is set up."""
+    if args.sample:  # sample issues and email; never Slack
+        return {"linear": True, "email": True, "slack": False}
     return {
         "linear": not args.no_linear and bool(os.environ.get("LINEAR_API_KEY")),
         "email": not args.no_email and (COOKBOOK_DIR / "credentials.json").exists(),
@@ -46,12 +53,12 @@ def optional_sources(args: argparse.Namespace) -> dict[str, bool]:
 
 
 async def run(args: argparse.Namespace, sources: dict[str, bool]) -> None:
-    await ingest_granola(args.days)
+    await ingest_granola(args.days, args.sample)
     if sources["linear"]:
-        await ingest_linear(args.days)
+        await ingest_linear(args.days, args.sample)
     if sources["email"]:
-        await ingest_email(args.emails)
-    await follow_up(args.days)
+        await ingest_email(args.emails, args.sample)
+    await follow_up(args.days, args.sample)
     if args.ui:
         await open_ui()
 
@@ -59,6 +66,7 @@ async def run(args: argparse.Namespace, sources: dict[str, bool]) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--check", action="store_true", help="only report what is missing")
+    parser.add_argument("--sample", action="store_true", help="use the sample from setup.py")
     parser.add_argument("--no-linear", action="store_true", help="skip the Linear step")
     parser.add_argument("--no-email", action="store_true", help="skip the Gmail step")
     parser.add_argument("--days", type=int, default=30, help="calls and issues to remember")
@@ -68,7 +76,7 @@ if __name__ == "__main__":
 
     import cognee  # loads .env, so keys set there are seen by the check
 
-    missing = missing_setup()
+    missing = missing_setup(args)
     for line in missing:
         print(f"[setup] MISSING: {line}")
     if missing:
@@ -77,7 +85,7 @@ if __name__ == "__main__":
     skipped = {
         "linear": "Linear (LINEAR_API_KEY not set, or --no-linear): issues are not remembered.",
         "email": "Gmail (no credentials.json, or --no-email): emails are not remembered.",
-        "slack": "Slack (SLACK_BOT_TOKEN / SLACK_CHANNEL not set): steps are printed.",
+        "slack": "Slack (not set up, or a sample run): steps are printed.",
     }
     for source, used in sources.items():
         if not used:

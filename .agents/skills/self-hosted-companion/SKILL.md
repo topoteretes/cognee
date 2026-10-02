@@ -15,6 +15,10 @@ Run every command from the repo root.
 
 ## Steps
 
+Without a notes folder of the user's own, or to see it work first, use the sample: run
+`uv run python examples/cookbooks/self_hosted_companion/setup.py` once, then pass
+`--sample` in place of `<folder>` below. It needs only `LLM_API_KEY`.
+
 1. Run
    `uv run python examples/cookbooks/self_hosted_companion/self_hosted_companion.py --check <folder>`
    with the notes folder the user named.
