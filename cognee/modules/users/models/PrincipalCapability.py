@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import UUID, Column, DateTime, ForeignKey, String
+from sqlalchemy import Column, DateTime, ForeignKey, String, Uuid
 
 from cognee.infrastructure.databases.relational import Base
 
@@ -25,13 +25,13 @@ class PrincipalCapability(Base):
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
-    principal_id = Column(UUID, ForeignKey("principals.id", ondelete="CASCADE"), primary_key=True)
+    principal_id = Column(Uuid, ForeignKey("principals.id", ondelete="CASCADE"), primary_key=True)
 
     # Indexed on its own because resolution asks what a set of principals
     # holds in one tenant, which the primary key (leading on principal_id)
     # does not serve. Migration f6b8d0a2c4e6 creates the same index.
     tenant_id = Column(
-        UUID, ForeignKey("tenants.id", ondelete="CASCADE"), primary_key=True, index=True
+        Uuid, ForeignKey("tenants.id", ondelete="CASCADE"), primary_key=True, index=True
     )
 
     # A name from the CAPABILITY_TYPES catalog, not a foreign key: the catalog
@@ -44,4 +44,4 @@ class PrincipalCapability(Base):
     # does not take capabilities away from others. On Postgres the foreign key
     # sets this to NULL when they are deleted; SQLite does not enforce it, so
     # there the removed granter's id stays.
-    granted_by = Column(UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    granted_by = Column(Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
