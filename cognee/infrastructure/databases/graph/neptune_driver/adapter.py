@@ -301,12 +301,17 @@ class NeptuneGraphDB(GraphDBInterface):
             logger.error(f"Failed to add nodes in bulk: {error_msg}")
             # Fallback to individual node creation
             logger.info("Falling back to individual node creation", exc_info=True)
+            failed = []
             for node in nodes:
                 try:
                     await self.add_node(node)
-                except Exception:
+                except Exception as node_error:
                     logger.exception(f"Failed to add individual node {node.id}")
-                    continue
+                    failed.append((node.id, node_error))
+            if failed:
+                raise RuntimeError(
+                    f"Failed to add {len(failed)} of {len(nodes)} nodes after bulk fallback"
+                ) from failed[0][1]
 
     async def delete_node(self, node_id: str) -> None:
         """
@@ -364,12 +369,17 @@ class NeptuneGraphDB(GraphDBInterface):
             logger.error(f"Failed to delete nodes in bulk: {error_msg}")
             # Fallback to individual node deletion
             logger.info("Falling back to individual node deletion", exc_info=True)
+            failed = []
             for node_id in node_ids:
                 try:
                     await self.delete_node(node_id)
-                except Exception:
+                except Exception as node_error:
                     logger.exception(f"Failed to delete individual node {node_id}")
-                    continue
+                    failed.append((node_id, node_error))
+            if failed:
+                raise RuntimeError(
+                    f"Failed to delete {len(failed)} of {len(node_ids)} nodes after bulk fallback"
+                ) from failed[0][1]
 
     async def get_node(self, node_id: str) -> NodeData | None:
         """
@@ -584,6 +594,7 @@ class NeptuneGraphDB(GraphDBInterface):
                 edges_by_relationship[relationship_name] = [edge]
 
         results = {}
+        failed_edges = []
         for relationship_name, edges_for_relationship in edges_by_relationship.items():
             try:
                 quoted_relationship = _quote_relationship_type(relationship_name)
@@ -625,14 +636,19 @@ class NeptuneGraphDB(GraphDBInterface):
                         source_id, target_id, relationship_name = edge[0], edge[1], edge[2]
                         properties = edge[3] if len(edge) > 3 else {}
                         await self.add_edge(source_id, target_id, relationship_name, properties)
-                    except Exception:
+                    except Exception as edge_error:
                         logger.exception(f"Failed to add individual edge {edge[0]} -> {edge[1]}")
-                        continue
+                        failed_edges.append(((edge[0], edge[1]), edge_error))
 
         processed_count = 0
         for result in results.values():
             processed_count += result[0].get("edges_processed", 0) if result else 0
         logger.debug(f"Successfully processed {processed_count} edges in bulk operation")
+
+        if failed_edges:
+            raise RuntimeError(
+                f"Failed to add {len(failed_edges)} of {len(edges)} edges after bulk fallback"
+            ) from failed_edges[0][1]
 
     async def delete_graph(self) -> None:
         """
@@ -876,7 +892,7 @@ class NeptuneGraphDB(GraphDBInterface):
             logger.exception(
                 f"Failed to check edge existence {source_id} -> {target_id}: {error_msg}"
             )
-            return False
+            raise RuntimeError(f"Failed to check edge existence: {error_msg}") from e
 
     async def has_edges(self, edges: list[EdgeData]) -> list[EdgeData]:
         """

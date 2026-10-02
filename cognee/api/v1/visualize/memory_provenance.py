@@ -42,7 +42,7 @@ logger = get_logger()
 
 
 def _as_uuid(value):
-    """Coerce an id to ``UUID`` for a column declared ``UUID(as_uuid=True)``.
+    """Coerce an id to ``UUID`` for a column declared ``Uuid(as_uuid=True)``.
 
     On SQLite the bind processor calls ``value.hex``, which a plain string does
     not have. Callers pass either — ``get_memory_provenance_graph`` stringifies

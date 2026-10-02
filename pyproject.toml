@@ -245,7 +245,7 @@ docling-full = ["docling>=2.115,<3", "transformers>=4.55"]
 # cognee's metadata), taking torch from the PyTorch CPU index. torch is listed explicitly
 # for that (gliner2[local] requires the same range). protobuf + sentencepiece are needed
 # by the DeBERTa tokenizer fallback.
-gliner = ["gliner2[local]>=2.0.0,<3", "torch>=2.1,<3", "protobuf>=5.29.6", "sentencepiece>=0.2.0"]
+gliner = ["gliner2[local]>=2.0.0,<3", "torch>=2.1,<3", "protobuf>=5.29.6", "sentencepiece>=0.2.0", "psutil>=5.9"]
 rapidocr = ["rapidocr-onnxruntime>=1.3.0,<2"]
 
 [project.urls]
