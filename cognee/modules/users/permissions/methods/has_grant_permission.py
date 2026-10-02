@@ -7,7 +7,7 @@ from cognee.modules.users.permissions.methods.get_effective_capabilities import 
 from cognee.modules.users.permissions.methods.get_user_role_names_in_tenant import (
     get_user_role_names_in_tenant,
 )
-from cognee.modules.users.permissions.permission_types import USER_MANAGEMENT_ALLOWED_ROLE_NAMES
+from cognee.modules.users.permissions.permission_types import LEGACY_ALL_CAPABILITY_ROLE_NAMES
 
 
 async def has_grant_permission(
@@ -45,7 +45,7 @@ async def has_grant_permission(
     # Deprecated path: tenants upgrading from the role-name check would otherwise
     # lock their "admin" role out until it is granted the capability.
     role_names = await get_user_role_names_in_tenant(requester_id, tenant_id)
-    if USER_MANAGEMENT_ALLOWED_ROLE_NAMES & set(role_names):
+    if LEGACY_ALL_CAPABILITY_ROLE_NAMES & set(role_names):
         return True
 
     raise CapabilityDeniedError(grant_type, log_level=log_level)
