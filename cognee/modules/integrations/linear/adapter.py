@@ -112,6 +112,11 @@ _CONFIGURATION_ERROR_CODES = frozenset(
 )
 _CONFIGURATION_FAILURE_MEMORY = 300
 
+# A 401 on a token that a forced refresh minted less than this many seconds ago
+# is not refreshed again. Otherwise a 401 that no token cures (a proxy, a
+# suspended app user) would rotate the refresh token on every request.
+_FORCED_REFRESH_COOLDOWN = 60
+
 # viewer is the freshly installed app user (the agent identity in that
 # workspace); organization.id is what every webhook envelope routes by.
 _INSTALL_CONTEXT_QUERY = """
@@ -132,8 +137,23 @@ _refresh_locks: dict[UUID, asyncio.Lock] = {}
 _pending_retries: set[UUID] = set()
 _retry_tasks: set[asyncio.Task] = set()
 
-# When the last transient refresh failure of a credential happened, and what it was.
-_recent_failures: dict[UUID, tuple[float, Exception, float]] = {}
+# The event loop the locks and retries above belong to. A lock that was ever
+# contended is bound to its loop, and a retry left by a loop that has since been
+# torn down never ran its cleanup. Both only matter to scripts and tests that
+# call asyncio.run more than once; the server has one loop.
+_state_loop: asyncio.AbstractEventLoop | None = None
+
+# The last refresh failure of a credential: when it happened, what it was, how
+# long to remember it, and the stored token it happened for (its nonce). A
+# failure for a token that has since been replaced, by a reconnect or by another
+# process, says nothing about the new one and is ignored.
+_recent_failures: dict[UUID, tuple[float, Exception, float, bytes]] = {}
+
+# When a forced (401) refresh last succeeded for a credential, and the nonce of
+# the token it stored. A token minted that moment and still rejected will not be
+# cured by another rotation. A token that has since been replaced, by a
+# reconnect or another process, is a different token and starts clean.
+_forced_refreshed_at: dict[UUID, tuple[float, bytes]] = {}
 
 
 # The OAuth error codes worth telling apart. Anything else, including text a
@@ -151,6 +171,14 @@ _ERROR_CODES = frozenset(
         "temporarily_unavailable",
     }
 )
+
+
+class _RotationNotSaved(RuntimeError):
+    """Linear rotated the token and storing the new one failed."""
+
+
+class _NoRefreshToken(RuntimeError):
+    """The credential holds no refresh token, so it cannot be refreshed."""
 
 
 class LinearAuthError(RuntimeError):
@@ -180,6 +208,9 @@ async def refresh_access_token(
                 "client_secret": client_secret,
                 "grant_type": "refresh_token",
             },
+            # A redirect would send the refresh token and the client secret on to
+            # whatever host it names, and accept that host's answer as the tokens.
+            allow_redirects=False,
         ) as response,
     ):
         status = response.status
@@ -207,7 +238,7 @@ def _expires_at(expires_in: Any) -> datetime | None:
     return datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
 
 
-def _lifetime(expires_in: Any) -> int:
+def _lifetime(expires_in: Any, cap: int | None = _MAX_EXPIRES_IN) -> int:
     """Seconds a refreshed token lives, falling back to a day for anything unusable.
 
     Runs after Linear has already rotated the token, so a response it cannot
@@ -219,7 +250,7 @@ def _lifetime(expires_in: Any) -> int:
         seconds = int(expires_in)
     except (TypeError, ValueError, OverflowError):  # OverflowError: inf
         return _DEFAULT_EXPIRES_IN
-    return seconds if 0 < seconds <= _MAX_EXPIRES_IN else _DEFAULT_EXPIRES_IN
+    return seconds if 0 < seconds and (cap is None or seconds <= cap) else _DEFAULT_EXPIRES_IN
 
 
 def _expires_within(credential: IntegrationCredential, margin: timedelta) -> bool:
@@ -271,8 +302,11 @@ async def access_token_for(
 
     ``rejected`` is a token Linear just answered 401 to. The stored expiry can
     be wrong, or Linear can end a token early, and a refresh keyed on the
-    expiry alone would then never happen. Passing it forces one refresh,
-    unless another caller has replaced that token already.
+    expiry alone would then never happen. Passing it forces a refresh unless
+    another caller has replaced that token already, a forced refresh succeeded
+    under a minute ago (the rejected token is then returned as it is), or a
+    refresh for this stored token failed moments ago (5 seconds, 5 minutes for a
+    configuration error), in which case that error is raised.
     """
     credential = await require_active_credential(credential)
     if rejected is not None or _is_expiring(credential):
@@ -287,15 +321,33 @@ async def access_token_for(
     return token
 
 
-def _retry_refresh_later(credential: IntegrationCredential) -> None:
-    """Try the refresh once more in a minute, detached, for a workspace nobody is waiting on."""
+def _adopt_running_loop() -> None:
+    """Drop lock and retry state that belongs to an event loop that is gone."""
+    global _state_loop
+    loop = asyncio.get_running_loop()
+    if _state_loop is not loop:
+        _state_loop = loop
+        _refresh_locks.clear()
+        _pending_retries.clear()
+        _retry_tasks.clear()
+
+
+def _retry_refresh_later(
+    credential: IntegrationCredential, rejected_token: str | None = None
+) -> None:
+    """Try the refresh once more in a minute, detached, for a workspace nobody is waiting on.
+
+    ``rejected_token`` is the token a forced refresh was for. The retry needs it
+    to still refresh: the stored expiry of such a token looks fine.
+    """
+    _adopt_running_loop()
     if credential.id in _pending_retries:
         return
     _pending_retries.add(credential.id)
 
     async def _attempt() -> None:
         try:
-            await _refresh_expiring(credential, retry=False)
+            await _refresh_expiring(credential, retry=False, rejected_token=rejected_token)
         except CredentialInactiveError:
             logger.info(
                 "Linear token refresh retry for organization %s dropped: connection is gone",
@@ -328,24 +380,29 @@ def _transient_failure(
     credential: IntegrationCredential,
     error: Exception,
     retry: bool,
-    rejected: bool,
+    rejected_token: str | None,
     memory: float | None = None,
 ) -> IntegrationCredential:
-    """Handle a refresh that failed in a way that may have followed a rotation.
+    """Record a failed refresh, schedule its retry if there is one, and keep the token if it works.
 
+    With ``retry`` this is for a failure that may have followed a rotation:
     Linear may have rotated the token before the answer was lost or the save
     failed. The row still holds the spent one, which is only good for Linear's
     replay window, so do not wait for the next caller: it may come hours later
-    on a quiet workspace.
+    on a quiet workspace. A failure that no retry can cure, a configuration
+    error, passes ``retry=False`` and a longer ``memory``.
+
+    ``rejected_token`` is set for a forced refresh: that token is never kept.
     """
     _recent_failures[credential.id] = (
         time.monotonic(),
         error,
         _FAILURE_MEMORY if memory is None else memory,
+        credential.nonce,
     )
     if retry:
-        _retry_refresh_later(credential)
-    return _keep_valid_token(credential, error, rejected=rejected)
+        _retry_refresh_later(credential, rejected_token)
+    return _keep_valid_token(credential, error, rejected=rejected_token is not None)
 
 
 async def call_with_token(
@@ -356,7 +413,10 @@ async def call_with_token(
     try:
         return await call(token)
     except LinearUnauthorizedError:
-        return await call(await access_token_for(credential, rejected=token))
+        fresh = await access_token_for(credential, rejected=token)
+        if fresh == token:
+            raise  # nothing new to try
+        return await call(fresh)
 
 
 async def _refresh_expiring(
@@ -371,6 +431,7 @@ async def _refresh_expiring(
     refresh even though the stored expiry says the token is fine, unless
     another caller already replaced it.
     """
+    _adopt_running_loop()
     lock = _refresh_locks.setdefault(credential.id, asyncio.Lock())
     if rejected_token is None and lock.locked() and not _expires_within(credential, timedelta(0)):
         # Someone else is refreshing and this token still works. Waiting would
@@ -391,12 +452,31 @@ async def _refresh_expiring(
 
         # The retry exists to try again, so it never answers from the memory.
         recent = _recent_failures.get(credential.id) if retry else None
-        if recent and time.monotonic() - recent[0] < recent[2]:
-            return _keep_valid_token(credential, recent[1], rejected=stale)
+        if recent and recent[3] == credential.nonce and time.monotonic() - recent[0] < recent[2]:
+            # A fresh traceback each time: re-raising the stored object would grow
+            # its traceback, and the frames it keeps alive, with every hit.
+            return _keep_valid_token(credential, recent[1].with_traceback(None), rejected=stale)
+
+        if (
+            stale
+            and _forced_refreshed_at.get(credential.id, (float("-inf"), b""))[1] == credential.nonce
+            and time.monotonic() - _forced_refreshed_at[credential.id][0] < _FORCED_REFRESH_COOLDOWN
+        ):
+            logger.warning(
+                "Linear still rejects the token minted for organization %s moments ago; "
+                "not refreshing again",
+                credential.provider_account_id,
+            )
+            return credential
 
         rejected: LinearAuthError | None = None
+        refreshed = False
         try:
             await LinearIntegration().refresh(credential)
+        except _NoRefreshToken as error:
+            # Nothing to spend, so there is nothing to retry either; inside the
+            # margin the token still works.
+            return _keep_valid_token(credential, error, rejected=stale)
         except CredentialInactiveError:
             # The row changed while the refresh was in flight. The read below
             # tells which way: a disconnected or replaced connection raises
@@ -411,33 +491,49 @@ async def _refresh_expiring(
             elif error.code in _CONFIGURATION_ERROR_CODES:
                 logger.error(
                     "Linear rejected the app's own credentials refreshing the token for "
-                    "organization %s (%s); check LINEAR_CLIENT_ID and LINEAR_CLIENT_SECRET",
+                    "organization %s (%s); check LINEAR_CLIENT_ID and LINEAR_CLIENT_SECRET "
+                    "(the server reads them at start, so it needs a restart after a fix)",
                     credential.provider_account_id,
                     error.code,
                 )
                 return _transient_failure(
-                    credential, error, False, stale, _CONFIGURATION_FAILURE_MEMORY
+                    credential,
+                    error,
+                    False,
+                    rejected_token if stale else None,
+                    _CONFIGURATION_FAILURE_MEMORY,
                 )
             else:
                 # A 5xx from a gateway, or a body that never finished, can come
                 # after Linear rotated the token. See the next branch.
-                return _transient_failure(credential, error, retry, stale)
-        except (aiohttp.ClientError, asyncio.TimeoutError, SQLAlchemyError) as error:
-            return _transient_failure(credential, error, retry, stale)
+                return _transient_failure(
+                    credential, error, retry, rejected_token if stale else None
+                )
+        except (
+            aiohttp.ClientError,
+            asyncio.TimeoutError,
+            SQLAlchemyError,
+            _RotationNotSaved,
+        ) as error:
+            return _transient_failure(credential, error, retry, rejected_token if stale else None)
         except asyncio.CancelledError:
             if retry:
-                _retry_refresh_later(credential)
+                _retry_refresh_later(credential, rejected_token if stale else None)
             raise
         else:
             _recent_failures.pop(credential.id, None)
+            refreshed = True
 
         # refresh() writes through its own session, so the instance we were
         # handed still carries the pre-rotation ciphertext. Read the row back
         # rather than decrypting a stale one.
         try:
-            return await require_active_credential(credential)
+            current = await require_active_credential(credential)
         except CredentialInactiveError as inactive:
             raise inactive from rejected
+        if refreshed and stale:
+            _forced_refreshed_at[credential.id] = (time.monotonic(), current.nonce)
+        return current
 
 
 class LinearIntegration(OAuthIntegration):
@@ -470,6 +566,7 @@ class LinearIntegration(OAuthIntegration):
                     "client_secret": require("client_secret"),
                     "grant_type": "authorization_code",
                 },
+                allow_redirects=False,  # see refresh_access_token
             ) as response,
         ):
             if response.status != 200:
@@ -524,7 +621,14 @@ class LinearIntegration(OAuthIntegration):
             },
             account_label=organization.get("name"),
             scopes=token_response.get("scope"),
-            token_expires_at=_expires_at(_lifetime(token_response.get("expires_in"))),
+            token_expires_at=_expires_at(
+                _lifetime(
+                    token_response.get("expires_in"),
+                    # Nothing can refresh a token that came without a refresh token,
+                    # so its own lifetime is the only truth.
+                    cap=_MAX_EXPIRES_IN if "refresh_token" in token_payload else None,
+                )
+            ),
             auth_type="oauth2",
         )
 
@@ -584,7 +688,9 @@ class LinearIntegration(OAuthIntegration):
                 async with (
                     aiohttp.ClientSession(timeout=_REVOKE_TIMEOUT) as session,
                     session.post(
-                        _REVOKE_URL, data={"token": token, "token_type_hint": token_type}
+                        _REVOKE_URL,
+                        data={"token": token, "token_type_hint": token_type},
+                        allow_redirects=False,  # see refresh_access_token
                     ) as response,
                 ):
                     if response.status != 200:
@@ -620,7 +726,7 @@ class LinearIntegration(OAuthIntegration):
         token_payload = decrypt_token_payload(credential)
         refresh_token = token_payload.get("refresh_token")
         if not refresh_token:
-            raise RuntimeError(
+            raise _NoRefreshToken(
                 f"Linear credential for organization {credential.provider_account_id} "
                 f"holds no refresh token; the workspace must reconnect"
             )
@@ -652,17 +758,29 @@ class LinearIntegration(OAuthIntegration):
                 "Linear refresh for organization %s returned no refresh token; keeping the old one",
                 credential.provider_account_id,
             )
-        await update_refreshed_credential(
-            credential,
-            token_payload={
-                "access_token": refreshed["access_token"],
-                # Linear documents a new refresh token on every refresh. A response
-                # without one is off contract, and the old token is the only one
-                # left to try.
-                "refresh_token": new_refresh_token or refresh_token,
-            },
-            # Linear documents expires_in. Without one, assume the 24 hours it
-            # gives, since a missing expiry would mean never refreshing again.
-            token_expires_at=_expires_at(_lifetime(refreshed.get("expires_in"))),
-            scopes=refreshed.get("scope") or credential.scopes,
-        )
+        try:
+            await update_refreshed_credential(
+                credential,
+                token_payload={
+                    "access_token": refreshed["access_token"],
+                    # Linear documents a new refresh token on every refresh. A
+                    # response without one is off contract, and the old token is
+                    # the only one left to try.
+                    "refresh_token": new_refresh_token or refresh_token,
+                },
+                # Linear documents expires_in. Without one, assume the 24 hours
+                # it gives, since a missing expiry would mean never refreshing
+                # again.
+                token_expires_at=_expires_at(_lifetime(refreshed.get("expires_in"))),
+                scopes=refreshed.get("scope") or credential.scopes,
+            )
+        except (CredentialInactiveError, SQLAlchemyError):
+            raise
+        except Exception as error:
+            # A driver error that SQLAlchemy does not wrap (asyncpg raises OSError
+            # or its own PostgresError when it cannot connect) after Linear has
+            # rotated. The caller treats it like any lost rotation and retries.
+            raise _RotationNotSaved(
+                f"Linear rotated the token for organization {credential.provider_account_id} "
+                f"but saving it failed ({error.__class__.__name__})"
+            ) from error

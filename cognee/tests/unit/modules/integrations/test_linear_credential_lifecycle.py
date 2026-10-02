@@ -11,7 +11,9 @@ handling exists to prevent.
 import asyncio
 import os
 import time
+import traceback
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -81,6 +83,8 @@ async def linear(credential_db, monkeypatch):
     monkeypatch.setattr(adapter, "_retry_tasks", set())
     monkeypatch.setattr(adapter, "_pending_retries", set())
     monkeypatch.setattr(adapter, "_recent_failures", {})
+    monkeypatch.setattr(adapter, "_forced_refreshed_at", {})
+    monkeypatch.setattr(adapter, "_FORCED_REFRESH_COOLDOWN", 0)
     yield fake
     leftovers = list(adapter._retry_tasks)
     for task in leftovers:
@@ -379,7 +383,7 @@ def host_zone(request):
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("minutes_left", "refreshes", "host_zone"),
-    [(4, True, "America/Los_Angeles"), (6, False, "Asia/Tokyo")],
+    [(4.5, True, "America/Los_Angeles"), (5.5, False, "Asia/Tokyo")],
     indirect=["host_zone"],
 )
 async def test_the_refresh_margin_is_five_minutes(linear, host_zone, minutes_left, refreshes):
@@ -660,6 +664,7 @@ def test_the_delays_fit_the_windows_they_exist_for():
     assert 0 < adapter._RETRY_DELAY < 30 * 60
     # The failure memory must expire before the retry fires, or it would only answer from it.
     assert 0 < adapter._FAILURE_MEMORY < adapter._RETRY_DELAY
+    assert 0 < adapter._INVALID_GRANT_SETTLE
     assert adapter._REFRESH_TIMEOUT.total + adapter._INVALID_GRANT_SETTLE < 10
 
 
@@ -701,6 +706,7 @@ async def test_a_successful_refresh_clears_the_failure_memory(linear):
         adapter.time.monotonic() - 3600,
         asyncio.TimeoutError(),
         5,
+        original.nonce,
     )
 
     assert await adapter.access_token_for(original) == "access-1"
@@ -722,6 +728,7 @@ async def test_the_retry_ignores_a_failure_remembered_just_before_it_fires(linea
         adapter.time.monotonic(),
         asyncio.TimeoutError(),
         60,
+        original.nonce,
     )
     await drain_retries()
 
@@ -924,6 +931,7 @@ async def test_a_configuration_error_is_logged_loudly_and_not_retried(
         assert await adapter.access_token_for(original) == "access-0"
 
     assert code in caplog.text and "LINEAR_CLIENT_SECRET" in caplog.text
+    assert "restart" in caplog.text
     assert not adapter._retry_tasks
     assert (await persisted()).status == "active"
 
@@ -937,8 +945,348 @@ async def test_a_configuration_error_is_not_sent_again_for_minutes(linear, monke
     for _ in range(3):
         with pytest.raises(LinearAuthError):
             await adapter.access_token_for(original)
-        stamp, error, memory = adapter._recent_failures[original.id]
-        adapter._recent_failures[original.id] = (stamp - 60, error, memory)
+        stamp, error, memory, fingerprint = adapter._recent_failures[original.id]
+        adapter._recent_failures[original.id] = (stamp - 60, error, memory, fingerprint)
 
     assert endpoint.await_count == 1
     assert adapter._CONFIGURATION_FAILURE_MEMORY > adapter._FAILURE_MEMORY
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [asyncio.TimeoutError(), "cancel"],
+)
+async def test_a_lost_forced_rotation_is_retried_with_the_rejected_token(linear, failure):
+    """The stored expiry of a rejected token looks fine, so the retry must be told to force."""
+    original = await install(expires_in=12)
+    linear.replay = True
+    linear.gate = asyncio.Event() if failure == "cancel" else None
+    if failure != "cancel":
+        linear.lose_answer = failure
+    call = asyncio.create_task(adapter.access_token_for(original, rejected="access-0"))
+    if failure == "cancel":
+        await asyncio.wait_for(linear.started.wait(), 5)
+        call.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await call
+        linear.gate = None
+    else:
+        with pytest.raises(asyncio.TimeoutError):
+            await call
+    await drain_retries()
+
+    assert_recovered(linear, await persisted())
+
+
+@pytest.mark.asyncio
+async def test_a_retry_for_a_rejected_token_does_nothing_once_it_was_replaced(linear):
+    original = await install(expires_in=12)
+    linear.replay = True
+    linear.lose_answer = asyncio.TimeoutError()
+    with pytest.raises(asyncio.TimeoutError):
+        await adapter.access_token_for(original, rejected="access-0")
+    await store.update_refreshed_credential(
+        original,
+        token_payload={"access_token": "other-process", "refresh_token": "refresh-other"},
+        token_expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+        scopes=None,
+    )
+    await drain_retries()
+
+    assert linear.calls == ["refresh-0"]
+    assert store.decrypt_token_payload(await persisted())["access_token"] == "other-process"
+
+
+@pytest.mark.asyncio
+async def test_a_401_that_a_fresh_token_does_not_cure_rotates_only_once(linear, monkeypatch):
+    original = await install(expires_in=12)
+    monkeypatch.setattr(adapter, "_FORCED_REFRESH_COOLDOWN", 60)
+    call = AsyncMock(side_effect=LinearUnauthorizedError("Linear Query failed: HTTP 401"))
+
+    for _ in range(5):
+        with pytest.raises(LinearUnauthorizedError):
+            await adapter.call_with_token(original, call)
+
+    assert linear.calls == ["refresh-0"]
+
+
+@pytest.mark.asyncio
+async def test_a_token_killed_hours_later_is_still_refreshed(linear, monkeypatch):
+    original = await install(expires_in=12)
+    monkeypatch.setattr(adapter, "_FORCED_REFRESH_COOLDOWN", 60)
+    assert await adapter.access_token_for(original, rejected="access-0") == "access-1"
+    stamp, nonce = adapter._forced_refreshed_at[original.id]
+    adapter._forced_refreshed_at[original.id] = (stamp - 3600, nonce)
+
+    assert await adapter.access_token_for(original, rejected="access-1") == "access-2"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [asyncio.TimeoutError(), "memory"])
+async def test_a_transient_failure_after_a_401_never_hands_back_the_rejected_token(
+    linear, monkeypatch, failure
+):
+    original = await install(expires_in=12)
+    monkeypatch.setattr(adapter, "_RETRY_DELAY", 3600)
+    if failure == "memory":
+        adapter._recent_failures[original.id] = (
+            adapter.time.monotonic(),
+            asyncio.TimeoutError(),
+            60,
+            original.nonce,
+        )
+        failure = asyncio.TimeoutError()
+    monkeypatch.setattr(adapter, "refresh_access_token", AsyncMock(side_effect=failure))
+
+    with pytest.raises(asyncio.TimeoutError):
+        await adapter.access_token_for(original, rejected="access-0")
+
+
+@pytest.mark.asyncio
+async def test_a_configuration_error_on_a_forced_refresh_never_hands_back_the_rejected_token(
+    linear, monkeypatch
+):
+    original = await install(expires_in=12)
+    monkeypatch.setattr(
+        adapter,
+        "refresh_access_token",
+        AsyncMock(side_effect=LinearAuthError("token refresh", "invalid_client")),
+    )
+
+    with pytest.raises(LinearAuthError):
+        await adapter.access_token_for(original, rejected="access-0")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("remembered", ["transient", "configuration"])
+async def test_a_failure_remembered_for_an_old_token_is_ignored_after_a_reconnect(
+    linear, remembered
+):
+    original = await install(expires_in=12)
+    error = (
+        LinearAuthError("token refresh", "invalid_client")
+        if remembered == "configuration"
+        else asyncio.TimeoutError()
+    )
+    adapter._recent_failures[original.id] = (adapter.time.monotonic(), error, 300, original.nonce)
+    await install(original.user_id, token="reconnected", refresh="refresh-new", expires_in=12)
+    linear.valid = "refresh-new"
+
+    # Refreshes instead of raising the error remembered for the old token.
+    assert await adapter.access_token_for(original, rejected="reconnected") == "access-1"
+
+
+@pytest.mark.asyncio
+async def test_call_with_token_does_not_refresh_for_an_error_that_is_not_a_401(linear):
+    original = await install(expires_in=12)
+    call = AsyncMock(side_effect=RuntimeError("Linear Query failed: HTTP 500"))
+
+    with pytest.raises(RuntimeError, match="HTTP 500"):
+        await adapter.call_with_token(original, call)
+
+    assert call.await_count == 1
+    assert linear.calls == []
+
+
+# Read at import, before the linear fixture zeroes it for every other test.
+_FORCED_REFRESH_COOLDOWN = adapter._FORCED_REFRESH_COOLDOWN
+
+
+def _frozen_clock(monkeypatch, start):
+    """Pin adapter.time.monotonic and turn the real cooldown back on."""
+    clock = SimpleNamespace(now=start)
+    monkeypatch.setattr(adapter, "time", SimpleNamespace(monotonic=lambda: clock.now))
+    monkeypatch.setattr(adapter, "_FORCED_REFRESH_COOLDOWN", _FORCED_REFRESH_COOLDOWN)
+    return clock
+
+
+@pytest.mark.asyncio
+async def test_the_forced_refresh_cooldown_is_one_minute_from_boot(linear, monkeypatch):
+    # monotonic() counts from boot, so a host that booted seconds ago reads about 5.
+    clock = _frozen_clock(monkeypatch, start=5.0)
+    original = await install(expires_in=12)
+
+    assert await adapter.access_token_for(original, rejected="access-0") == "access-1"
+    clock.now += 30
+    assert await adapter.access_token_for(original, rejected="access-1") == "access-1"
+    clock.now += 31
+    assert await adapter.access_token_for(original, rejected="access-1") == "access-2"
+    assert linear.calls == ["refresh-0", "refresh-1"]
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_refresh_does_not_start_the_forced_cooldown(linear, monkeypatch):
+    _frozen_clock(monkeypatch, start=1000.0)
+    original = await install()  # expired
+
+    assert await adapter.access_token_for(original) == "access-1"
+    assert await adapter.access_token_for(original, rejected="access-1") == "access-2"
+
+
+@pytest.mark.asyncio
+async def test_the_forced_cooldown_does_not_hold_back_an_expiry_refresh(linear, monkeypatch):
+    _frozen_clock(monkeypatch, start=1000.0)
+    original = await install(expires_in=12)
+    assert await adapter.access_token_for(original, rejected="access-0") == "access-1"
+    await expire(original)
+
+    assert await adapter.access_token_for(original) == "access-2"
+
+
+@pytest.mark.asyncio
+async def test_the_forced_cooldown_does_not_outlive_a_reconnect(linear, monkeypatch):
+    _frozen_clock(monkeypatch, start=1000.0)
+    original = await install(expires_in=12)
+    assert await adapter.access_token_for(original, rejected="access-0") == "access-1"
+    await install(original.user_id, token="reconnected", refresh="refresh-1", expires_in=12)
+
+    # Inside the minute, but for a token this process never minted.
+    assert await adapter.access_token_for(original, rejected="reconnected") == "access-2"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [
+        LinearAuthError("token refresh", "http_500"),
+        LinearAuthError("token refresh", "invalid_client"),
+        asyncio.TimeoutError(),
+        aiohttp.ClientError(),
+    ],
+    ids=["gateway", "configuration", "timeout", "client_error"],
+)
+async def test_a_failed_refresh_after_a_401_on_an_already_replaced_token_falls_back(
+    linear, monkeypatch, failure
+):
+    # The stored token is not the one Linear rejected, so nothing condemned it,
+    # and it still has three minutes to live.
+    original = await install(expires_in=3 / 60)
+    monkeypatch.setattr(adapter, "_RETRY_DELAY", 3600)
+    monkeypatch.setattr(adapter, "refresh_access_token", AsyncMock(side_effect=failure))
+
+    assert await adapter.access_token_for(original, rejected="replaced-meanwhile") == "access-0"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [
+        ConnectionRefusedError("postgres is down"),
+        RuntimeError("a driver error SQLAlchemy does not wrap"),
+    ],
+    ids=["os_error", "other_driver_error"],
+)
+async def test_a_save_that_fails_with_an_unwrapped_driver_error_is_retried(
+    linear, monkeypatch, failure
+):
+    """asyncpg raises OSError and its own errors at connect time, outside SQLAlchemyError."""
+    original = await install()
+    linear.replay = True
+    real_update = adapter.update_refreshed_credential
+    saves = []
+
+    async def down_once(*args, **kwargs):
+        saves.append(1)
+        if len(saves) == 1:
+            raise failure
+        return await real_update(*args, **kwargs)
+
+    monkeypatch.setattr(adapter, "update_refreshed_credential", down_once)
+
+    with pytest.raises(adapter._RotationNotSaved):
+        await adapter.access_token_for(original)
+    await drain_retries()
+
+    assert_recovered(linear, await persisted())
+
+
+@pytest.mark.asyncio
+async def test_a_bug_before_the_linear_call_is_not_mistaken_for_a_lost_rotation(
+    linear, monkeypatch
+):
+    original = await install()
+
+    def boom(key):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(adapter, "require", boom)
+
+    with pytest.raises(ValueError):
+        await adapter.access_token_for(original)
+
+    assert linear.calls == []
+    assert not adapter._retry_tasks
+
+
+@pytest.mark.asyncio
+async def test_a_credential_without_a_refresh_token_keeps_using_its_token_inside_the_margin(
+    linear,
+):
+    original = await install(refresh=None, expires_in=3 / 60)
+
+    assert await adapter.access_token_for(original) == "access-0"
+    assert linear.calls == []
+    assert not adapter._retry_tasks
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rejected", [None, "access-0"])
+async def test_a_dead_credential_without_a_refresh_token_still_says_to_reconnect(linear, rejected):
+    original = await install(refresh=None, expires_in=-1 if rejected is None else 12)
+
+    with pytest.raises(RuntimeError, match="must reconnect"):
+        await adapter.access_token_for(original, rejected=rejected)
+
+
+@pytest.mark.asyncio
+async def test_the_failure_memory_does_not_grow_the_traceback(linear, monkeypatch):
+    original = await install()
+    monkeypatch.setattr(adapter, "_FAILURE_MEMORY", 60)
+    monkeypatch.setattr(adapter, "_RETRY_DELAY", 3600)
+    monkeypatch.setattr(
+        adapter,
+        "refresh_access_token",
+        AsyncMock(side_effect=LinearAuthError("token refresh", "http_500")),
+    )
+    depths = []
+    for _ in range(30):
+        with pytest.raises(LinearAuthError) as caught:
+            await adapter.access_token_for(original)
+        depths.append(len(traceback.extract_tb(caught.value.__traceback__)))
+
+    assert depths[-1] <= depths[1] + 2  # flat, not one more entry per hit
+    assert caught.value.code == "http_500"
+
+
+@pytest.mark.asyncio
+async def test_retry_state_left_by_a_dead_event_loop_does_not_block_new_retries(
+    linear, monkeypatch
+):
+    original = await install()
+    monkeypatch.setattr(adapter, "_RETRY_DELAY", 3600)
+    monkeypatch.setattr(
+        adapter, "refresh_access_token", AsyncMock(side_effect=asyncio.TimeoutError())
+    )
+    # What a loop torn down mid-refresh leaves behind.
+    monkeypatch.setattr(adapter, "_state_loop", object())
+    adapter._pending_retries.add(original.id)
+
+    with pytest.raises(asyncio.TimeoutError):
+        await adapter.access_token_for(original)
+
+    assert len(adapter._retry_tasks) == 1
+
+
+@pytest.mark.asyncio
+async def test_call_with_token_does_not_resend_when_the_refresh_had_nothing_new(
+    linear, monkeypatch
+):
+    original = await install(expires_in=12)
+    monkeypatch.setattr(adapter, "access_token_for", AsyncMock(return_value="access-0"))
+    call = AsyncMock(side_effect=LinearUnauthorizedError("Linear Query failed: HTTP 401"))
+
+    with pytest.raises(LinearUnauthorizedError):
+        await adapter.call_with_token(original, call)
+
+    assert call.await_count == 1

@@ -436,6 +436,29 @@ def test_revoke_runs_under_a_timeout_short_enough_for_two_in_a_row():
     assert 2 * adapter_module._REVOKE_TIMEOUT.total < adapter_module._TIMEOUT.total
 
 
+def test_a_token_without_a_refresh_token_keeps_its_own_long_expiry():
+    token_response = {**_TOKEN_RESPONSE, **_INSTALL_CONTEXT, "expires_in": 315359999}
+    del token_response["refresh_token"]
+
+    installation = LinearIntegration().parse_installation(token_response)
+
+    remaining = installation.token_expires_at - datetime.now(timezone.utc)
+    assert remaining > timedelta(days=3000)
+
+
+@pytest.mark.asyncio
+async def test_every_oauth_post_refuses_redirects(monkeypatch):
+    session = _fake_aiohttp(monkeypatch, _FakeSession(_FakeResponse(200, {"access_token": "a"})))
+    _stored_tokens(monkeypatch, {"access_token": "lin_access", "refresh_token": "lin_refresh"})
+
+    await adapter_module.refresh_access_token("old", client_id="id", client_secret="s")
+    await LinearIntegration().revoke_remote(_CREDENTIAL)
+    await LinearIntegration().exchange_code("the-code")
+
+    assert len(session.post_calls) == 4
+    assert all(kwargs["allow_redirects"] is False for _url, kwargs in session.post_calls)
+
+
 @pytest.mark.asyncio
 async def test_revoke_remote_opens_its_sessions_with_the_revoke_timeout(monkeypatch):
     session = _FakeSession(_FakeResponse(200))

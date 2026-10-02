@@ -15,6 +15,8 @@ from uuid import uuid4
 
 import pytest
 
+from cognee.modules.integrations.linear.client import LinearUnauthorizedError
+
 session_module = importlib.import_module("cognee.modules.integrations.linear.agent_session")
 adapter_module = importlib.import_module("cognee.modules.integrations.linear.adapter")
 
@@ -158,8 +160,6 @@ async def test_a_failed_refresh_ends_the_turn_without_raising_or_posting(mocks, 
 
 @pytest.mark.asyncio
 async def test_a_401_on_an_activity_refreshes_the_token_and_posts_it_again(mocks, monkeypatch):
-    from cognee.modules.integrations.linear.client import LinearUnauthorizedError
-
     posted = []
 
     async def activity(access_token, agent_session_id, content):
@@ -179,3 +179,73 @@ async def test_a_401_on_an_activity_refreshes_the_token_and_posts_it_again(mocks
         ("lin_tok_2", "response"),
     ]
     assert refresh.await_args_list[1].kwargs == {"rejected": "lin_tok"}
+
+
+def _rejecting(monkeypatch, rejected_types, error=None):
+    """Activities posted as (token, type); ``lin_tok`` is refused for ``rejected_types``."""
+    posted = []
+
+    async def activity(access_token, agent_session_id, content):
+        posted.append((access_token, content["type"]))
+        if access_token == "lin_tok" and content["type"] in rejected_types:
+            raise error or LinearUnauthorizedError("Linear AgentActivityCreate failed: HTTP 401")
+
+    refresh = AsyncMock(side_effect=["lin_tok", "lin_tok_2"])
+    monkeypatch.setattr(adapter_module, "access_token_for", refresh)
+    monkeypatch.setattr(session_module, "create_agent_activity", activity)
+    return posted, refresh
+
+
+@pytest.mark.asyncio
+async def test_a_401_on_the_response_refreshes_the_token_and_posts_it_again(mocks, monkeypatch):
+    posted, refresh = _rejecting(monkeypatch, {"response"})
+
+    await handle_agent_session(_credential(), _created_payload())
+
+    assert posted == [("lin_tok", "thought"), ("lin_tok", "response"), ("lin_tok_2", "response")]
+    assert refresh.await_args_list[1].kwargs == {"rejected": "lin_tok"}
+
+
+@pytest.mark.asyncio
+async def test_a_401_on_the_error_activity_refreshes_the_token_and_posts_it_again(
+    mocks, monkeypatch
+):
+    posted, refresh = _rejecting(monkeypatch, {"error"})
+    mocks.search.side_effect = RuntimeError("boom")
+
+    await handle_agent_session(_credential(), _created_payload())
+
+    assert posted == [("lin_tok", "thought"), ("lin_tok", "error"), ("lin_tok_2", "error")]
+    assert refresh.await_args_list[1].kwargs == {"rejected": "lin_tok"}
+
+
+@pytest.mark.asyncio
+async def test_a_401_with_no_new_token_to_try_is_not_posted_twice(mocks, monkeypatch):
+    posted = []
+
+    async def activity(access_token, agent_session_id, content):
+        posted.append((access_token, content["type"]))
+        raise LinearUnauthorizedError("Linear AgentActivityCreate failed: HTTP 401")
+
+    monkeypatch.setattr(adapter_module, "access_token_for", AsyncMock(return_value="lin_tok"))
+    monkeypatch.setattr(session_module, "create_agent_activity", activity)
+
+    await handle_agent_session(_credential(), _created_payload())
+
+    assert posted == [
+        ("lin_tok", "thought"),
+        ("lin_tok", "response"),
+        ("lin_tok", "error"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_an_activity_failure_that_is_not_a_401_does_not_refresh_the_token(mocks, monkeypatch):
+    posted, refresh = _rejecting(
+        monkeypatch, {"thought"}, error=RuntimeError("Linear AgentActivityCreate failed: HTTP 500")
+    )
+
+    await handle_agent_session(_credential(), _created_payload())
+
+    assert posted == [("lin_tok", "thought"), ("lin_tok", "response")]
+    assert refresh.await_count == 1

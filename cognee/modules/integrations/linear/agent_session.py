@@ -55,8 +55,10 @@ async def handle_agent_session(credential: IntegrationCredential, payload: dict[
     # circular.
     from cognee.modules.integrations.linear.adapter import access_token_for
 
-    # An expiring token is refreshed here, ahead of the acknowledgement. The
-    # refresh has its own short timeout so it stays inside the 10 seconds.
+    # An expiring token is refreshed here, ahead of the acknowledgement, with a
+    # refresh timeout short enough for the 10 seconds. A token that Linear then
+    # rejects costs one more refresh inside ``post`` below, which that bound
+    # does not cover.
     try:
         access_token = await access_token_for(credential)
     except Exception:  # a bad payload or a failed refresh must not crash the detached handler
@@ -73,7 +75,10 @@ async def handle_agent_session(credential: IntegrationCredential, payload: dict[
         try:
             await create_agent_activity(access_token, agent_session_id, content)
         except LinearUnauthorizedError:
-            access_token = await access_token_for(credential, rejected=access_token)
+            fresh = await access_token_for(credential, rejected=access_token)
+            if fresh == access_token:
+                raise  # the refresh had nothing new, so a second post would 401 again
+            access_token = fresh
             await create_agent_activity(access_token, agent_session_id, content)
 
     # The 10-second rule: acknowledge before any search/LLM work, or Linear
