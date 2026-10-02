@@ -1,12 +1,12 @@
 """Company brain: check setup, remember your company's sources, then answer across them.
 
-    uv run python examples/cookbooks/company_brain/company_qa/setup.py    # sample data
-    uv run python examples/cookbooks/company_brain/company_qa/company_qa.py --sample
+    uv run python examples/cookbooks/company_brain/company_qa/company_qa.py    # the sample
     uv run python examples/cookbooks/company_brain/company_qa/company_qa.py \
         --database postgresql://user:pw@host/hr --tickets ~/exports/tickets.json \
         --docs ~/Documents/company --ask "Who owns the Atlas fix?"
 
-Each script in scripts/ also runs alone. Exit codes: 0 done, 2 setup missing, 1 a script
+With no source given it runs on the sample company from setup.py, so it works with only
+LLM_API_KEY. Each script in scripts/ also runs alone. Exit codes: 0 done, 2 setup missing, 1 a script
 failed (its message says why).
 """
 
@@ -19,6 +19,7 @@ from pathlib import Path
 from scripts.ask import ask
 from scripts.ingest import ingest
 from scripts.ui import open_ui
+from setup import write_sample
 
 from cognee.shared.logging_utils import ERROR, setup_logging
 
@@ -28,6 +29,11 @@ SAMPLE_QUESTION = (
     "Who is handling Brightline Retail's open high-priority ticket, which team are they "
     "on, and what fix was decided for it?"
 )
+
+
+def no_sources(args: argparse.Namespace) -> bool:
+    """True when no source of your own is given, so the sample stands in."""
+    return not (args.database or args.tickets or args.docs)
 
 
 def use_sample(args: argparse.Namespace) -> None:
@@ -44,11 +50,8 @@ def missing_setup(args: argparse.Namespace) -> list[str]:
     missing = []
     if not os.environ.get("LLM_API_KEY"):
         missing.append("LLM_API_KEY is not set (put it in .env).")
-    if args.sample and not SAMPLE.is_dir():
-        missing.append("The sample is not written. Run setup.py first.")
+    if args.sample:  # setup.py writes the sample just before the run
         return missing
-    if not (args.database or args.tickets or args.docs):
-        missing.append("No source given. Pass --database, --tickets or --docs, or --sample.")
     if args.tickets and not args.tickets.expanduser().is_file():
         missing.append(f"Ticket export not found: {args.tickets}")
     if args.docs and not args.docs.expanduser().is_dir():
@@ -76,6 +79,9 @@ if __name__ == "__main__":
     parser.add_argument("--ask", help="a question to answer once the sources are remembered")
     parser.add_argument("--ui", action="store_true", help="browse the graph afterwards")
     args = parser.parse_args()
+    if not args.sample and no_sources(args):
+        print("[setup] No source given, so this runs on the sample company.")
+        args.sample = True
     if args.sample:
         use_sample(args)
 
@@ -89,4 +95,7 @@ if __name__ == "__main__":
         sys.exit(0)
 
     setup_logging(log_level=ERROR)
+    if args.sample:
+        write_sample()
+        print("[setup] Wrote the sample from setup.py.")
     asyncio.run(run(args))

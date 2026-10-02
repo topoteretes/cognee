@@ -1,13 +1,13 @@
 """Self-hosted companion: check setup, remember your notes folder, then chat.
 
-    uv run python examples/cookbooks/self_hosted_companion/setup.py    # sample notes
-    uv run python examples/cookbooks/self_hosted_companion/self_hosted_companion.py --sample
+    uv run python examples/cookbooks/self_hosted_companion/self_hosted_companion.py    # the sample
     uv run python examples/cookbooks/self_hosted_companion/self_hosted_companion.py --check ~/Documents/journal
     uv run python examples/cookbooks/self_hosted_companion/self_hosted_companion.py ~/Documents/journal
     uv run python examples/cookbooks/self_hosted_companion/self_hosted_companion.py ~/Documents/journal \
         --ask "When is my sister's birthday?"
 
-Each script in scripts/ also runs alone. Exit codes: 0 done, 2 setup missing, 1 a script
+With no notes folder given it runs on the sample notes from setup.py, so it works with
+only LLM_API_KEY. Each script in scripts/ also runs alone. Exit codes: 0 done, 2 setup missing, 1 a script
 failed (its message says why).
 """
 
@@ -20,11 +20,17 @@ from pathlib import Path
 from scripts.chat import chat
 from scripts.ingest_notes import ingest_notes
 from scripts.ui import open_ui
+from setup import write_sample
 
 from cognee.shared.logging_utils import ERROR, setup_logging
 
 SAMPLE = Path(__file__).parent / "sample"
 SAMPLE_QUESTION = "When is my sister's birthday, and what was I planning to get her?"
+
+
+def no_sources(args: argparse.Namespace) -> bool:
+    """True when no notes folder is given, so the sample stands in."""
+    return not args.notes_folder
 
 
 def use_sample(args: argparse.Namespace) -> None:
@@ -38,11 +44,7 @@ def missing_setup(args: argparse.Namespace) -> list[str]:
     missing = []
     if not os.environ.get("LLM_API_KEY"):
         missing.append("LLM_API_KEY is not set (put it in .env).")
-    if args.sample and not args.notes_folder.is_dir():
-        missing.append("The sample is not written. Run setup.py first.")
-    elif not args.notes_folder:
-        missing.append("No notes folder given. Pass its path, or --sample.")
-    elif not args.notes_folder.expanduser().is_dir():
+    if not args.sample and not args.notes_folder.expanduser().is_dir():
         missing.append(f"Notes folder not found: {args.notes_folder}")
     return missing
 
@@ -65,6 +67,9 @@ if __name__ == "__main__":
 
     import cognee  # loads .env, so keys set there are seen by the check
 
+    if not args.sample and no_sources(args):
+        print("[setup] No notes folder given, so this runs on the sample notes.")
+        args.sample = True
     if args.sample:
         use_sample(args)
 
@@ -78,4 +83,7 @@ if __name__ == "__main__":
         sys.exit(0)
 
     setup_logging(log_level=ERROR)
+    if args.sample:
+        write_sample()
+        print("[setup] Wrote the sample from setup.py.")
     asyncio.run(run(args))

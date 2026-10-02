@@ -18,18 +18,17 @@ Run every command from the repo root.
 
 1. Work out the sources. Ask the user for the ones they want: a database URL (and tables),
    a ticket export file, a docs folder. If they have none, or want to see it work first,
-   use the sample: run
-   `uv run python examples/cookbooks/company_brain/company_qa/setup.py` and pass
-   `--sample` in place of the sources below.
+   pass no sources: the run then uses the sample company (the `[setup]` line says so).
+   Tell the user the answer comes from sample data.
 2. Run
    `uv run python examples/cookbooks/company_brain/company_qa/company_qa.py --check`
-   with the sources (`--database URL [--tables a,b] --tickets FILE --docs FOLDER`, or
-   `--sample`).
+   with the sources (`--database URL [--tables a,b] --tickets FILE --docs FOLDER`), or
+   none for the sample.
    - Exit 0: go to step 3.
    - Exit 2: each `[setup] MISSING:` line names one fix. Don't create credentials yourself.
      Tell the user which line to fix, using the README's "What it needs" table, and stop.
 3. Run the same command without `--check`, adding the user's question as
-   `--ask "..."`. With `--sample` and no `--ask`, it asks a question that needs all three
+   `--ask "..."`. On the sample with no `--ask`, it asks a question that needs all three
    sample sources.
 4. The answer is everything after `[ask] A:`. Give it to the user. The `[ingest]` lines
    say which sources went in.

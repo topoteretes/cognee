@@ -25,9 +25,11 @@ Agents run this cookbook through the `self-hosted-companion` skill,
 today. Only `LLM_API_KEY` is needed.
 
 ```bash
-uv run python examples/cookbooks/self_hosted_companion/setup.py
-uv run python examples/cookbooks/self_hosted_companion/self_hosted_companion.py --sample
+uv run python examples/cookbooks/self_hosted_companion/self_hosted_companion.py
 ```
+
+With no notes folder given, the script runs `setup.py` itself and uses the sample, as below. Pass `--sample` to
+use it even when your own sources are set up.
 
 ```text
 [ingest_notes] Remembered the notes in .../sample/notes
@@ -36,7 +38,7 @@ uv run python examples/cookbooks/self_hosted_companion/self_hosted_companion.py 
 [chat] Saved this chat to memory.
 ```
 
-`--sample` asks that question unless you pass `--ask`.
+The sample run asks that question unless you pass `--ask`.
 
 ## Steps
 
@@ -57,7 +59,7 @@ script also runs alone with the same options.
 
 | # | Command (`uv run python examples/cookbooks/self_hosted_companion/...`) | Does | Writes |
 |---|---|---|---|
-| 0 | `self_hosted_companion.py --check <folder \| --sample>` | Reports what is missing. Does no work | nothing |
+| 0 | `self_hosted_companion.py --check [folder]` | Reports what is missing. Does no work | nothing |
 | 1 | `scripts/ingest_notes.py <folder>` | Remembers every note in the folder | cognee dataset |
 | 2 | `scripts/chat.py [--ask "message"]` | Chats in one session: each message is a `GRAPH_COMPLETION` recall that sees the turns before it. `/bye` ends it, and `improve(session_ids=[...])` writes the chat into memory. `--ask` answers one message and saves it the same way | cognee dataset |
 | 3 | `scripts/ui.py` (or `--ui`) | Starts cognee's API server in this process and the UI at http://localhost:3000. Ctrl+C stops both | nothing |

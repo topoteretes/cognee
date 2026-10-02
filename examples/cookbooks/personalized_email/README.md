@@ -33,9 +33,11 @@ Mira Lang promised Priya Shah pilot pricing by Friday and never sent it; yesterd
 wrote asking about it. Only `LLM_API_KEY` is needed: no Gmail or Granola account.
 
 ```bash
-uv run python examples/cookbooks/personalized_email/setup.py
-uv run python examples/cookbooks/personalized_email/personalized_email.py --sample
+uv run python examples/cookbooks/personalized_email/personalized_email.py
 ```
+
+With neither Gmail (`credentials.json`) nor `GRANOLA_API_KEY` set up, the script runs `setup.py` itself and uses the sample, as below. Pass `--sample` to
+use it even when your own sources are set up.
 
 ```text
 [ingest_granola] Remembered 2 sample meetings

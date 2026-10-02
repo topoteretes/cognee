@@ -32,11 +32,13 @@ export (`tickets.json`) and three documents (`docs/`). Some people, projects and
 appear in all three. No accounts or data of yours are needed, only `LLM_API_KEY`.
 
 ```bash
-uv run python examples/cookbooks/company_brain/company_qa/setup.py
-uv run python examples/cookbooks/company_brain/company_qa/company_qa.py --sample
+uv run python examples/cookbooks/company_brain/company_qa/company_qa.py
 ```
 
-`--sample` points every source at `sample/` and asks a question that needs all three:
+With no `--database`, `--tickets` or `--docs` given, the script runs `setup.py` itself and uses the sample, as below. Pass `--sample` to
+use it even when your own sources are set up.
+
+The sample run points every source at `sample/` and asks a question that needs all three:
 
 ```text
 [ingest] Remembered the database (employee_profiles, project_profiles, customer_profiles)

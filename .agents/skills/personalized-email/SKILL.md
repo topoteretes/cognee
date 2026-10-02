@@ -15,9 +15,10 @@ Run every command from the repo root.
 
 ## Steps
 
-Without a Gmail or Granola account, or to see it work first, use the sample: run
-`uv run python examples/cookbooks/personalized_email/setup.py` once, then add `--sample` to
-the commands below. It drafts a reply to a fictional email, and needs only `LLM_API_KEY`.
+With neither Gmail nor Granola set up, the commands below run on a sample mailbox (the
+`[setup]` line says so) and draft a reply to a fictional email; only `LLM_API_KEY` is
+needed. Tell the user the reply is to sample data. Add `--sample` to use the sample even
+when their accounts are set up.
 
 1. Run `uv run python examples/cookbooks/personalized_email/personalized_email.py --check`.
    - Exit 0: go to step 2.

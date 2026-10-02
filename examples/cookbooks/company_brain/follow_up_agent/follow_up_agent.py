@@ -1,13 +1,12 @@
 """Follow-up agent: check setup, remember calls, issues and email, then post next steps.
 
-    uv run python examples/cookbooks/company_brain/follow_up_agent/setup.py    # sample data
-    uv run python examples/cookbooks/company_brain/follow_up_agent/follow_up_agent.py --sample
     uv run python examples/cookbooks/company_brain/follow_up_agent/follow_up_agent.py --check
     uv run python examples/cookbooks/company_brain/follow_up_agent/follow_up_agent.py
     uv run python examples/cookbooks/company_brain/follow_up_agent/follow_up_agent.py --no-email --ui
 
 Granola is required. Linear, Gmail and Slack are used when they are set up and skipped
-otherwise. --sample replaces all four with the sample from setup.py and never posts. Each script in scripts/ also runs alone. Exit codes: 0 done, 2 setup missing,
+otherwise. With none of Granola, Linear or Gmail set up it runs on the sample from setup.py, so it works
+with only LLM_API_KEY; a sample run never posts to Slack. Each script in scripts/ also runs alone. Exit codes: 0 done, 2 setup missing,
 1 a script failed (its message says why).
 """
 
@@ -22,10 +21,20 @@ from scripts.ingest_email import ingest_email
 from scripts.ingest_granola import ingest_granola
 from scripts.ingest_linear import ingest_linear
 from scripts.ui import open_ui
+from setup import write_sample
 
 from cognee.shared.logging_utils import ERROR, setup_logging
 
 COOKBOOK_DIR = Path(__file__).parent
+
+
+def no_sources(args: argparse.Namespace) -> bool:
+    """True when none of Granola, Linear and Gmail is set up, so the sample stands in."""
+    return not (
+        os.environ.get("GRANOLA_API_KEY")
+        or os.environ.get("LINEAR_API_KEY")
+        or (COOKBOOK_DIR / "credentials.json").exists()
+    )
 
 
 def missing_setup(args: argparse.Namespace) -> list[str]:
@@ -33,10 +42,7 @@ def missing_setup(args: argparse.Namespace) -> list[str]:
     missing = []
     if not os.environ.get("LLM_API_KEY"):
         missing.append("LLM_API_KEY is not set (put it in .env).")
-    if args.sample:  # the sample replaces Granola, Linear and Gmail
-        if not (COOKBOOK_DIR / "sample").is_dir():
-            missing.append("The sample is not written. Run setup.py first.")
-    elif not os.environ.get("GRANOLA_API_KEY"):
+    if not args.sample and not os.environ.get("GRANOLA_API_KEY"):
         missing.append("GRANOLA_API_KEY is not set (put it in .env).")
     return missing
 
@@ -76,6 +82,10 @@ if __name__ == "__main__":
 
     import cognee  # loads .env, so keys set there are seen by the check
 
+    if not args.sample and no_sources(args):
+        print("[setup] None of Granola, Linear or Gmail is set up, so this runs on the sample.")
+        args.sample = True
+
     missing = missing_setup(args)
     for line in missing:
         print(f"[setup] MISSING: {line}")
@@ -95,4 +105,7 @@ if __name__ == "__main__":
         sys.exit(0)
 
     setup_logging(log_level=ERROR)
+    if args.sample:
+        write_sample()
+        print("[setup] Wrote the sample from setup.py.")
     asyncio.run(run(args, sources))

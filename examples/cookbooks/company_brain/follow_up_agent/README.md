@@ -34,9 +34,11 @@ bank's email hold those. Only `LLM_API_KEY` is needed, and a sample run never po
 Slack, even when Slack is set up.
 
 ```bash
-uv run python examples/cookbooks/company_brain/follow_up_agent/setup.py
-uv run python examples/cookbooks/company_brain/follow_up_agent/follow_up_agent.py --sample
+uv run python examples/cookbooks/company_brain/follow_up_agent/follow_up_agent.py
 ```
+
+With none of `GRANOLA_API_KEY`, `LINEAR_API_KEY` and Gmail (`credentials.json`) set up, the script runs `setup.py` itself and uses the sample, as below. Pass `--sample` to
+use it even when your own sources are set up.
 
 ```text
 [ingest_granola] Remembered 2 sample calls
