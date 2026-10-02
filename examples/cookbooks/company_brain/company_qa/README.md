@@ -65,8 +65,10 @@ uv run python examples/cookbooks/company_brain/company_qa/company_qa.py \
 
 - `--database` takes a SQLAlchemy URL (`postgresql://...`, `mysql+pymysql://...`,
   `sqlite:///path/to.db`). Every row of `--tables` becomes one document; without
-  `--tables`, every table and view is read. Rows read best as sentences, so a view that
-  joins your tables into readable text (see the `*_profiles` views in `SCHEMA` in
+  `--tables`, every table and view is read. A row with `title` and `content` columns is
+  used as it is; any other row is written out as one `column: value` line per column.
+  Rows read best as sentences, so a view that joins your tables into readable text with
+  `id`, `title` and `content` columns (see the `*_profiles` views in `SCHEMA` in
   `setup.py`) extracts better than raw foreign keys.
 - Running it again re-remembers the same content; cognee skips content it already holds.
 - Later questions don't need the sources again: `scripts/ask.py "question"`.
