@@ -20,6 +20,7 @@ from urllib.request import url2pathname
 from uuid import UUID
 
 from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 
@@ -652,9 +653,10 @@ def _row_node_set(raw: Any, source_tag: str, *, table_name: str = "") -> list[st
     text column as the JSON string of that list (or one bare name). Every
     name is namespaced under ``source_tag`` unless it already is, so provider
     data can never name one of cognee's own node sets (``skills``,
-    ``user_context``, ...). Anything that is not a non-empty string is
-    ignored and counted in one debug line per row (never the values); the
-    row itself is always kept.
+    ``user_context``, ...) and deduplicated by node-set identity, so two
+    spellings of one node set keep the first. Anything that is not a
+    non-empty string is ignored and counted in one debug line per row (never
+    the values); the row itself is always kept.
     """
     if raw is None:
         return None
@@ -687,7 +689,11 @@ def _row_node_set(raw: Any, source_tag: str, *, table_name: str = "") -> list[st
             len(raw) - len(names),
             NODE_SET_COLUMN,
         )
-    return list(dict.fromkeys(names)) or None
+    # One entry per node set: spellings that normalize to the same id keep the first.
+    unique: dict = {}
+    for name in names:
+        unique.setdefault(NodeSet.id_for(name), name)
+    return list(unique.values()) or None
 
 
 def _clean(value: Any) -> str:

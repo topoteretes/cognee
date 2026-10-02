@@ -186,6 +186,12 @@ class TestRowNodeSet:
         ]
         assert _row_node_set([3, None], "notion") is None
 
+    def test_spellings_of_one_node_set_keep_the_first(self):
+        """Dedupe is by node-set identity, the same normalization the graph uses."""
+        assert _row_node_set(["Project A", "project_a", "PROJECT A"], "notion") == [
+            "notion:Project A"
+        ]
+
     def test_wrong_column_type_means_no_node_set(self):
         assert _row_node_set({"not": "a list"}, "notion") is None
         assert _row_node_set(42, "notion") is None
