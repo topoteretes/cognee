@@ -26,6 +26,8 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("code_graph")
 
 _REMOTE_PREFIXES = ("https://", "http://", "git@", "ssh://")
+# The ssh half of the above: unambiguously a git remote, never a web page.
+_SSH_REPO_PREFIXES = ("git@", "ssh://")
 
 _FALSEY = {"false", "0", "no", "off"}
 
@@ -98,6 +100,25 @@ class CodeRepositoryError(CogneeSystemError):
 def is_remote_repo(spec) -> bool:
     """Whether the spec is a remote git URL rather than a local path."""
     return isinstance(spec, str) and spec.startswith(_REMOTE_PREFIXES)
+
+
+def is_ssh_repo_spec(spec) -> bool:
+    """Whether the spec is an ssh-style git remote (``git@host:owner/repo``, ``ssh://``).
+
+    These name a repository and nothing else -- unlike an http(s) URL, which may
+    be a web page -- but :func:`code_repo_clone_url` does not accept them, so
+    ingestion would otherwise store the spec string as a text document. Callers
+    refuse them with the instruction in that function's docstring: clone the
+    repository yourself and pass the local directory.
+    """
+    return isinstance(spec, str) and spec.strip().startswith(_SSH_REPO_PREFIXES)
+
+
+SSH_REPO_SPEC_MESSAGE = (
+    "ssh git remotes (git@host:owner/repo, ssh://...) cannot be cloned by cognee: "
+    "clone the repository yourself and pass the local directory, or pass its "
+    "https:// URL."
+)
 
 
 def code_repo_clone_url(spec) -> str | None:

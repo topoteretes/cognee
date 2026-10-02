@@ -388,6 +388,7 @@ async def resolve_code_repositories(
     in-pipeline path applies.
     """
     from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+    from cognee.tasks.code_graph.resolve_repo import SSH_REPO_SPEC_MESSAGE, is_ssh_repo_spec
     from cognee.tasks.ingestion.save_data_item_to_storage import settings as save_data_settings
 
     def _local_project(item) -> Path | None:
@@ -401,6 +402,14 @@ async def resolve_code_repositories(
         return path if path.is_dir() and detect_code_project(path) else None
 
     items = data if isinstance(data, list) else [data]
+    # Refused here as well as in resolve_data_directories: this hook runs first
+    # and would otherwise pass the spec on to be stored as text.
+    for item in items:
+        if is_ssh_repo_spec(item):
+            from cognee.modules.ingestion.exceptions import IngestionError
+
+            raise IngestionError(message=SSH_REPO_SPEC_MESSAGE)
+
     if not any(
         (isinstance(item, str) and code_repo_clone_url(item)) or _local_project(item) is not None
         for item in items
