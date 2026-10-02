@@ -9,8 +9,8 @@ with one graph model, so a person in the database, the assignee of a ticket and 
 the meeting notes become one node. Then you ask questions that no single source can
 answer, browse the graph in the UI, or let Claude Code or Codex query it over MCP.
 
-Agents run this cookbook through the `company-brain-multi-source` skill,
-[`.agents/skills/company-brain-multi-source/SKILL.md`](../../../../.agents/skills/company-brain-multi-source/SKILL.md).
+Agents run this cookbook through the `company-brain-company-qa` skill,
+[`.agents/skills/company-brain-company-qa/SKILL.md`](../../../../.agents/skills/company-brain-company-qa/SKILL.md).
 
 ## What it needs
 
@@ -32,8 +32,8 @@ export (`tickets.json`) and three documents (`docs/`). Some people, projects and
 appear in all three. No accounts or data of yours are needed, only `LLM_API_KEY`.
 
 ```bash
-uv run python examples/cookbooks/company_brain/multi_source/setup.py
-uv run python examples/cookbooks/company_brain/multi_source/company_brain.py --sample
+uv run python examples/cookbooks/company_brain/company_qa/setup.py
+uv run python examples/cookbooks/company_brain/company_qa/company_qa.py --sample
 ```
 
 `--sample` points every source at `sample/` and asks a question that needs all three:
@@ -52,10 +52,10 @@ notes say what fix was decided. The answer joins them because Dana Kim is one no
 ## Run it on your data
 
 ```bash
-uv run python examples/cookbooks/company_brain/multi_source/company_brain.py --check \
+uv run python examples/cookbooks/company_brain/company_qa/company_qa.py --check \
     --database postgresql://user:password@host/hr --tickets ~/exports/tickets.json \
     --docs ~/Documents/company
-uv run python examples/cookbooks/company_brain/multi_source/company_brain.py \
+uv run python examples/cookbooks/company_brain/company_qa/company_qa.py \
     --database postgresql://user:password@host/hr --tables employees,projects \
     --tickets ~/exports/tickets.json --docs ~/Documents/company \
     --ask "Who owns the open billing incident, and what did we decide to do about it?"
@@ -72,9 +72,9 @@ uv run python examples/cookbooks/company_brain/multi_source/company_brain.py \
 ## Steps
 
 ```
-multi_source/
+company_qa/
 ├── README.md           this file
-├── company_brain.py    checks setup, then calls the scripts in order
+├── company_qa.py       checks setup, then calls the scripts in order
 ├── setup.py            writes the sample company, for --sample
 ├── models.py           the graph model: edit it to match your company
 ├── sample/             written by setup.py, git-ignored
@@ -84,12 +84,12 @@ multi_source/
     └── ui.py
 ```
 
-`company_brain.py` imports each script and calls its function in one process. Each script
+`company_qa.py` imports each script and calls its function in one process. Each script
 also runs alone with the same options.
 
-| # | Command (`uv run python examples/cookbooks/company_brain/multi_source/...`) | Does | Writes |
+| # | Command (`uv run python examples/cookbooks/company_brain/company_qa/...`) | Does | Writes |
 |---|---|---|---|
-| 0 | `company_brain.py --check [sources]` | Reports what is missing. Does no work | nothing |
+| 0 | `company_qa.py --check [sources]` | Reports what is missing. Does no work | nothing |
 | 1 | `scripts/ingest.py [--database URL [--tables a,b]] [--tickets FILE] [--docs FOLDER]` | Remembers each source given, under its own node set (`database`, `tickets`, `docs`), extracted with `models.py` | cognee dataset |
 | 2 | `scripts/ask.py "question"` (or `--ask`) | Answers from the whole graph, across every source | nothing |
 | 3 | `scripts/ui.py` (or `--ui`) | Starts cognee's API server in this process and the UI at http://localhost:3000. Ctrl+C stops both | nothing |

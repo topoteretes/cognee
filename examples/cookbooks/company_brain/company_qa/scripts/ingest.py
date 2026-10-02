@@ -5,7 +5,7 @@ with one graph model (models.py). Nodes with the same identity merge, so a perso
 database, the assignee of a ticket and a name in the docs become one node. Every source is
 optional; pass the ones you have.
 
-Run alone: uv run python examples/cookbooks/company_brain/multi_source/scripts/ingest.py \
+Run alone: uv run python examples/cookbooks/company_brain/company_qa/scripts/ingest.py \
     [--database URL [--tables a,b]] [--tickets FILE] [--docs FOLDER]
 """
 
@@ -22,7 +22,7 @@ os.environ.setdefault("ENABLE_BACKEND_ACCESS_CONTROL", "false")
 import cognee
 from cognee.shared.logging_utils import ERROR, setup_logging
 
-sys.path.insert(0, str(Path(__file__).parent.parent))  # models.py sits next to company_brain.py
+sys.path.insert(0, str(Path(__file__).parent.parent))  # models.py sits next to company_qa.py
 from models import EXTRACTION_PROMPT, CompanyGraph
 
 DATASET = "company_brain"  # the same in every script

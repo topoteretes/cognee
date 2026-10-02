@@ -3,7 +3,7 @@
 The API server runs in this process, next to the databases cognee has open, and the UI runs
 as its own process. Ctrl+C stops both.
 
-Run alone: uv run python examples/cookbooks/company_brain/multi_source/scripts/ui.py
+Run alone: uv run python examples/cookbooks/company_brain/company_qa/scripts/ui.py
 """
 
 import asyncio

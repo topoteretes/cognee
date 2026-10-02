@@ -3,7 +3,7 @@
 The answer comes from the whole graph, across every source ingest.py remembered, so one
 answer can join a person from the database with their ticket and a fix from the docs.
 
-Run alone: uv run python examples/cookbooks/company_brain/multi_source/scripts/ask.py "question"
+Run alone: uv run python examples/cookbooks/company_brain/company_qa/scripts/ask.py "question"
 """
 
 import argparse

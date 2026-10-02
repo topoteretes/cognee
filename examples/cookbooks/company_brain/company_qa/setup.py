@@ -10,7 +10,7 @@ sample/ (git-ignored), in the shape of a real company's data:
 Some people, projects and customers appear in all three, so the run shows them merge into
 one node each. Only LLM_API_KEY is needed; no accounts or data of yours.
 
-Run: uv run python examples/cookbooks/company_brain/multi_source/setup.py
+Run: uv run python examples/cookbooks/company_brain/company_qa/setup.py
 """
 
 import json
@@ -20,7 +20,7 @@ from pathlib import Path
 
 SAMPLE = Path(__file__).parent / "sample"
 
-# The HR and project database, as SQL. company_brain.py --sample reads its three views.
+# The HR and project database, as SQL. company_qa.py --sample reads its three views.
 SCHEMA = """-- The tables are normalized. The three *_profiles views join them into one readable
 -- row per entity with `id`, `title` and `content` columns: cognee's dlt document path
 -- turns each such row into a text document, so the LLM sees "Dana Kim works in the Search
@@ -314,5 +314,5 @@ if __name__ == "__main__":
     print("[setup] Wrote the sample company to sample/: company.db, tickets.json, docs/.")
     print(
         "[setup] Now run: uv run python "
-        "examples/cookbooks/company_brain/multi_source/company_brain.py --sample"
+        "examples/cookbooks/company_brain/company_qa/company_qa.py --sample"
     )

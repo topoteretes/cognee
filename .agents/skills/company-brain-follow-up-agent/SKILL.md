@@ -1,5 +1,5 @@
 ---
-name: follow-up-agent
+name: company-brain-follow-up-agent
 description: Turn your latest Granola call into next steps (owner, team, due date, and the Linear issue that already tracks each one) and post them to Slack, using cognee memory of your calls, Linear issues and Gmail inbox. Use when someone asks for the next steps or action items of their latest call. Runs locally; reads Gmail read-only; posts to Slack only when Slack is set up.
 ---
 
@@ -52,5 +52,5 @@ Without a Granola account, or to see it work first, use the sample: run
 uv run cognee-cli forget --dataset company_brain
 ```
 
-The `multi_source/` cookbook writes to the same `company_brain` dataset, so this also
+The `company_qa/` cookbook writes to the same `company_brain` dataset, so this also
 removes what it remembered.

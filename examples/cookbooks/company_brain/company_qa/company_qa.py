@@ -1,8 +1,8 @@
 """Company brain: check setup, remember your company's sources, then answer across them.
 
-    uv run python examples/cookbooks/company_brain/multi_source/setup.py    # sample data
-    uv run python examples/cookbooks/company_brain/multi_source/company_brain.py --sample
-    uv run python examples/cookbooks/company_brain/multi_source/company_brain.py \
+    uv run python examples/cookbooks/company_brain/company_qa/setup.py    # sample data
+    uv run python examples/cookbooks/company_brain/company_qa/company_qa.py --sample
+    uv run python examples/cookbooks/company_brain/company_qa/company_qa.py \
         --database postgresql://user:pw@host/hr --tickets ~/exports/tickets.json \
         --docs ~/Documents/company --ask "Who owns the Atlas fix?"
 

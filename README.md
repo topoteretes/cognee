@@ -234,7 +234,7 @@ The UI launcher requires Node.js/npm; Docker is needed for its MCP service. See 
 ## Explore examples
 
 - [Build a small Company Brain from text, code, and session lessons](examples/cookbooks/company_brain/docs_code_conversations/company_brain_demo.py).
-- [Build a Company Brain from your database, ticket export, and docs](examples/cookbooks/company_brain/multi_source/) (or a sample company), then browse it in the UI and query it from Claude Code or Codex.
+- [Build a Company Brain from your database, ticket export, and docs](examples/cookbooks/company_brain/company_qa/) (or a sample company), then browse it in the UI and query it from Claude Code or Codex.
 - [Import memory from Mem0, Letta, Zep, or Graphiti](https://docs.cognee.ai/examples/migrate-memory-systems) using the COGX exchange format.
 - [Run with local Ollama models](https://docs.cognee.ai/guides/local-ollama), including a local embedding model.
 - [Visualize your knowledge graph](https://docs.cognee.ai/guides/graph-visualization) and inspect its connections.

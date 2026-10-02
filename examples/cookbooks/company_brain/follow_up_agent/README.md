@@ -8,8 +8,8 @@ which team it belongs to, its deadline, and whether Linear already tracks it. No
 has to be in the call itself: the team comes from earlier calls, a deadline from an email,
 a tracked issue from Linear.
 
-Agents run this cookbook through the `follow-up-agent` skill,
-[`.agents/skills/follow-up-agent/SKILL.md`](../../../../.agents/skills/follow-up-agent/SKILL.md).
+Agents run this cookbook through the `company-brain-follow-up-agent` skill,
+[`.agents/skills/company-brain-follow-up-agent/SKILL.md`](../../../../.agents/skills/company-brain-follow-up-agent/SKILL.md).
 
 ## What it needs
 
@@ -117,5 +117,5 @@ content; cognee skips content it already holds, and Gmail rows are merged by mes
 uv run cognee-cli forget --dataset company_brain
 ```
 
-The `multi_source/` cookbook writes to the same `company_brain` dataset, so this also
+The `company_qa/` cookbook writes to the same `company_brain` dataset, so this also
 removes what it remembered.
