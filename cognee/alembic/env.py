@@ -102,7 +102,9 @@ db_engine = config.attributes.get("relational_engine") or get_relational_engine(
 # always points at the real connection target on every backend.
 db_uri = db_engine.engine.url.render_as_string(hide_password=False)
 
-logging.getLogger("alembic.env").info("Using database: %s", db_engine.engine.url.render_as_string(hide_password=True))
+logging.getLogger("alembic.env").info(
+    "Using database: %s", db_engine.engine.url.render_as_string(hide_password=True)
+)
 
 config.set_section_option(
     config.config_ini_section,
