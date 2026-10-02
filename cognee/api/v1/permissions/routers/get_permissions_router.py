@@ -723,7 +723,9 @@ def get_permissions_router() -> APIRouter:
         - **403 Forbidden**: Caller lacks grant_capabilities in the target
           tenant, or the principal or tenant does not exist. These answer the
           same, so the endpoint cannot be used to discover which ids are real.
-          Also when the caller does not hold a capability they try to grant
+          Also when the caller does not hold a capability they try to grant,
+          or the principal is a user who is not a member of the tenant (that
+          one says so: add the user to the tenant first)
         """
         from cognee.modules.users.capabilities.methods import authorized_grant_capability
 

@@ -5,8 +5,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.modules.users.models import PrincipalCapability, Role, Tenant
+from cognee.modules.users.exceptions import CapabilityGrantToNonMemberError, PermissionDeniedError
+from cognee.modules.users.models import PrincipalCapability, Role, Tenant, UserTenant
 
 
 async def grant_capability(
@@ -30,9 +30,10 @@ async def grant_capability(
         The principal must belong to the tenant the grant is scoped to. A role
         from another tenant or the wrong tenant principal is rejected, because a
         row that violates that would be resolved for the wrong tenant's members.
-        Users are not checked against membership here on purpose: an invited
-        person exists before they accept, and the resolver's membership gate is
-        what keeps an early grant from being effective too early.
+        A user must already be a member of the tenant (the owner counts): there
+        is no invite flow, so a grant to a non-member would only sit as an
+        orphan row that resolves to nothing, and the caller would get a 200 for
+        a grant that did not take effect.
     Args:
         principal_id: Id of the principal (user, role or tenant).
         tenant_id: Id of the tenant the capabilities are scoped to.
@@ -42,7 +43,10 @@ async def grant_capability(
             None when there is no requester, e.g. a grant made through the SDK.
 
     Raises:
-        PermissionDeniedError: If the principal does not belong to the tenant.
+        PermissionDeniedError: If a role or tenant principal does not belong to
+            the tenant.
+        CapabilityGrantToNonMemberError: If a user principal is not a member of
+            the tenant.
     """
     # If only a single capability is provided transform it to a list
     if not isinstance(capabilities, list):
@@ -64,6 +68,20 @@ async def grant_capability(
         )
         if tenant is not None and tenant.id != tenant_id:
             raise PermissionDeniedError(message="Principal does not belong to this tenant")
+
+        if role is None and tenant is None:
+            # A user principal. The scope was already resolved and the tenant
+            # exists; what is left to check is that this person is in it.
+            scope_owner = (
+                await session.execute(select(Tenant.owner_id).where(Tenant.id == tenant_id))
+            ).scalar_one_or_none()
+            membership = await session.execute(
+                select(UserTenant.user_id).where(
+                    UserTenant.user_id == principal_id, UserTenant.tenant_id == tenant_id
+                )
+            )
+            if scope_owner != principal_id and membership.first() is None:
+                raise CapabilityGrantToNonMemberError()
 
         # dict.fromkeys drops duplicates in the request while keeping its order
         rows = [

@@ -78,6 +78,24 @@ class PermissionNotFoundError(CogneeValidationError):
         super().__init__(message, name, status_code)
 
 
+class CapabilityGrantToNonMemberError(PermissionDeniedError):
+    """A capability was granted to a user who is not a member of the tenant.
+
+    Unlike the masked CapabilityDeniedError, this one explains itself: the
+    caller has already passed the grant_capabilities check for the tenant, so
+    telling them the user has to be added first reveals nothing they could not
+    learn from the tenant's user list.
+    """
+
+    def __init__(self):
+        super().__init__(
+            message=(
+                "User is not a member of this tenant; add them to the tenant "
+                "before granting capabilities"
+            )
+        )
+
+
 class CapabilityNotFoundError(CogneeValidationError):
     """Capability name is not in the CAPABILITY_TYPES catalog"""
 
