@@ -113,6 +113,45 @@ def find_enola_binary() -> str:
     raise EnolaNotInstalledError()
 
 
+async def _run_enola(command: list[str], cwd: Path, timeout: float, subject: str) -> None:
+    """Run one enola generate command to completion; raise EnolaSnapshotError on failure."""
+    logger.info("Running enola: %s (cwd=%s)", " ".join(command), cwd)
+
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        cwd=str(cwd),
+        env={**os.environ, **_SUBPROCESS_ENV_OVERRIDES},
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    try:
+        _stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.wait()
+        raise EnolaSnapshotError(message=f"enola timed out after {timeout} seconds on {subject}.")
+
+    stderr_text = stderr.decode(errors="replace") if stderr else ""
+    if process.returncode != 0:
+        # Artifacts already in .enola/ may be from an earlier run; callers
+        # must not ingest them (the error propagates before parsing).
+        raise EnolaSnapshotError(
+            message=(
+                f"enola exited with code {process.returncode} on {subject}. "
+                f"stderr tail: {stderr_text[-2000:]}"
+            )
+        )
+
+    # enola reports the configuration it resolved on stderr ("enola: using
+    # config ..." / "enola: no mcp-arch.yaml in ..., using built-in defaults").
+    # A config decides which extractors run and which paths are ignored, so
+    # the line belongs in the ingestion log next to the snapshot it shaped.
+    for line in stderr_text.splitlines():
+        if line.startswith("enola:"):
+            logger.info("%s", line.strip())
+
+
 async def run_enola_generate(
     repo_path: str | Path,
     timeout: float = 600.0,
@@ -132,47 +171,45 @@ async def run_enola_generate(
     # AND used as cwd: enola resolves an optional mcp-arch.yaml from the
     # working directory, so this honors a repo-local config while making sure
     # an unrelated one from the caller's cwd can never narrow the run.
-    command = [binary, "--generate", str(repo_path)]
     snapshot_dir = repo_path / ".enola"
+    await _run_enola([binary, "--generate", str(repo_path)], repo_path, timeout, f"'{repo_path}'")
 
-    logger.info("Running enola: %s (cwd=%s)", " ".join(command), repo_path)
+    if not (snapshot_dir / "facts.jsonl").is_file():
+        raise EnolaSnapshotError(
+            message=f"enola completed but no facts.jsonl was found in '{snapshot_dir}'."
+        )
 
-    process = await asyncio.create_subprocess_exec(
-        *command,
-        cwd=str(repo_path),
-        env={**os.environ, **_SUBPROCESS_ENV_OVERRIDES},
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+    return snapshot_dir
+
+
+async def run_enola_cluster(
+    config_path: str | Path,
+    repo_paths: list[Path],
+    timeout: float = 600.0,
+) -> Path:
+    """Run `enola --generate` over a cluster config and return one snapshot directory.
+
+    A cluster config lists several repositories; enola links them into one
+    graph and writes that whole graph to every member's `.enola`, so any
+    member's directory is the cluster's snapshot. The first member's is
+    returned. The config's own directory is the working directory, so no
+    repository's mcp-arch.yaml narrows a run that covers all of them.
+    """
+    binary = find_enola_binary()
+    config_path = Path(config_path)
+
+    for repo_path in repo_paths:
+        if not repo_path.is_dir():
+            raise EnolaSnapshotError(message=f"Repository path '{repo_path}' is not a directory.")
+
+    await _run_enola(
+        [binary, "--generate", str(config_path)],
+        config_path.parent,
+        timeout,
+        f"the {len(repo_paths)}-repository cluster '{config_path}'",
     )
 
-    try:
-        _stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
-        process.kill()
-        await process.wait()
-        raise EnolaSnapshotError(
-            message=f"enola timed out after {timeout} seconds on '{repo_path}'."
-        )
-
-    stderr_text = stderr.decode(errors="replace") if stderr else ""
-    if process.returncode != 0:
-        # Artifacts already in .enola/ may be from an earlier run; callers
-        # must not ingest them (the error propagates before parsing).
-        raise EnolaSnapshotError(
-            message=(
-                f"enola exited with code {process.returncode} on '{repo_path}'. "
-                f"stderr tail: {stderr_text[-2000:]}"
-            )
-        )
-
-    # enola reports the configuration it resolved on stderr ("enola: using
-    # config ..." / "enola: no mcp-arch.yaml in ..., using built-in defaults").
-    # A config decides which extractors run and which paths are ignored, so
-    # the line belongs in the ingestion log next to the snapshot it shaped.
-    for line in stderr_text.splitlines():
-        if line.startswith("enola:"):
-            logger.info("%s", line.strip())
-
+    snapshot_dir = repo_paths[0] / ".enola"
     if not (snapshot_dir / "facts.jsonl").is_file():
         raise EnolaSnapshotError(
             message=f"enola completed but no facts.jsonl was found in '{snapshot_dir}'."

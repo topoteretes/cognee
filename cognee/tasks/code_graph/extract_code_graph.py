@@ -133,9 +133,15 @@ def _describe_fact(kind: str, props: dict) -> str | None:
 def map_facts_to_data_points(
     facts: list[dict],
     repo_path: str | Path | None = None,
+    repo_scope: str | None = None,
 ) -> list[DataPoint]:
-    """Map parsed enola facts to DataPoints, prepending one CodeRepository per repo."""
+    """Map parsed enola facts to DataPoints, prepending one CodeRepository per repo.
+
+    repo_scope narrows a multi-repo snapshot to one member: only that
+    repository's facts are mapped, and repo_path is that member's directory.
+    """
     fallback_repo = _resolve_fallback_repo(facts, repo_path)
+    primary_repo = repo_scope or fallback_repo
 
     repositories: dict[str, CodeRepository] = {}
 
@@ -144,12 +150,12 @@ def map_facts_to_data_points(
             repositories[repo] = CodeRepository(
                 id=fact_node_id(repo, "repository", repo),
                 name=repo,
-                path=str(repo_path) if repo_path and repo == fallback_repo else repo,
+                path=str(repo_path) if repo_path and repo == primary_repo else repo,
             )
         return repositories[repo]
 
     # Always create the primary repository node, even for an empty snapshot.
-    _get_repository(fallback_repo)
+    _get_repository(primary_repo)
 
     entities: list[DataPoint] = []
     skipped_facts = 0
@@ -174,6 +180,8 @@ def map_facts_to_data_points(
             continue
 
         repo = _fact_repo(fact, fallback_repo)
+        if repo_scope is not None and repo != repo_scope:
+            continue
         node_id = fact_node_id(repo, kind, name)
         if node_id in seen_ids:
             # Same-named facts of the same kind collapse into one node (see
@@ -581,12 +589,17 @@ async def extract_code_graph(
     repo_path: str | Path | None = None,
     snapshot_dir: str | Path | None = None,
     timeout: float = 600.0,
+    repo_scope: str | None = None,
 ) -> list[DataPoint]:
     """Run enola on repo_path (or reuse an existing snapshot) and return DataPoints.
 
     The returned list composes with the add_data_points task downstream. Typed
     relations are persisted separately by add_code_graph_edges, which re-reads
     the same snapshot after the nodes exist in the graph.
+
+    repo_scope loads one member of a multi-repo snapshot (snapshot_dir is then
+    the cluster's snapshot and repo_path the member's directory): the skip
+    check reads that member's repository node and only its facts are mapped.
     """
     # When used as the first pipeline task, the pipeline payload arrives as the
     # first positional argument; accept a repo path there, ignore anything else.
@@ -611,7 +624,7 @@ async def extract_code_graph(
 
     snapshot_id = snapshot_identity(snapshot_dir, receipt)
     if snapshot_id is not None:
-        fallback_repo = _resolve_fallback_repo(facts, repo_path)
+        fallback_repo = repo_scope or _resolve_fallback_repo(facts, repo_path)
         try:
             stored_id = await _stored_snapshot_identity(fallback_repo)
         except Exception as error:
@@ -628,7 +641,7 @@ async def extract_code_graph(
             )
             return []
 
-    data_points = map_facts_to_data_points(facts, repo_path=repo_path)
+    data_points = map_facts_to_data_points(facts, repo_path=repo_path, repo_scope=repo_scope)
     logger.info("Mapped %d enola fact(s) to %d data point(s).", len(facts), len(data_points))
     return data_points
 
@@ -817,6 +830,7 @@ async def add_code_graph_edges(
     repo_path: str | Path | None = None,
     snapshot_dir: str | Path | None = None,
     ctx: Optional["PipelineContext"] = None,
+    repo_scope: str | None = None,
 ) -> list[DataPoint]:
     """Insert typed relation edges (calls/imports/...) after add_data_points ran.
 
@@ -826,6 +840,11 @@ async def add_code_graph_edges(
     edges from earlier ingestions of the same repos are swept, and the
     snapshot identity is stamped on the repository node so the next unchanged
     ingestion can skip entirely. Passthrough: returns data_points unchanged.
+
+    With repo_scope (one member of a multi-repo snapshot) only edges touching
+    that repository are written, and only when the other endpoint is already
+    in the graph: an edge into a member loaded later is written by that
+    member's load, so the members can load in any order, one at a time.
     """
     from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 
@@ -858,10 +877,26 @@ async def add_code_graph_edges(
                 for source, target, relationship, _properties in existing_edges
             }
 
+        writable_edges = edges
+        if repo_scope is not None:
+            fallback_repo = _resolve_fallback_repo(facts, repo_path)
+            scope_ids = _current_code_node_ids(
+                [fact for fact in facts if _fact_repo(fact, fallback_repo) == repo_scope],
+                repo_scope,
+            )
+            known_ids = scope_ids | {str(node_id) for node_id, _properties in existing_nodes}
+            writable_edges = [
+                edge
+                for edge in edges
+                if (str(edge[0]) in scope_ids or str(edge[1]) in scope_ids)
+                and str(edge[0]) in known_ids
+                and str(edge[1]) in known_ids
+            ]
+
         # Delta writes: only edges the graph does not already have.
         new_edges = [
             edge
-            for edge in edges
+            for edge in writable_edges
             if (str(edge[0]), str(edge[1]), edge[2]) not in existing_edge_keys
         ]
         logger.info(
@@ -918,7 +953,13 @@ async def add_code_graph_edges(
         # Stamp last: only a load that added, swept, and got here may record
         # its snapshot id, so a crashed run can never be skipped-past later.
         await _stamp_snapshot_identity(
-            graph_engine, facts, repo_path, snapshot_id, delta, receipt=receipt
+            graph_engine,
+            facts,
+            repo_path,
+            snapshot_id,
+            delta,
+            receipt=receipt,
+            repo_scope=repo_scope,
         )
     finally:
         # Direct edge writes, sweeps, and ledger writes may partially succeed.
@@ -1022,11 +1063,17 @@ async def _stamp_snapshot_identity(
     snapshot_id: str | None,
     delta: dict | None = None,
     receipt: dict | None = None,
+    repo_scope: str | None = None,
 ) -> None:
-    """Record the loaded snapshot's identity, delta and receipt on the repository nodes."""
+    """Record the loaded snapshot's identity, delta and receipt on the repository nodes.
+
+    With repo_scope only that member is stamped: the other members of the
+    snapshot have not loaded yet, and a stamp would make their load skip.
+    """
     if snapshot_id is None:
         return
-    fallback_repo = _resolve_fallback_repo(facts, repo_path)
+    fallback_repo = repo_scope or _resolve_fallback_repo(facts, repo_path)
+    repos = {repo_scope} if repo_scope else _snapshot_repos(facts, fallback_repo)
     last_receipt = receipt_projection(receipt)
     repositories = [
         CodeRepository(
@@ -1037,7 +1084,7 @@ async def _stamp_snapshot_identity(
             last_delta=delta,
             last_receipt=last_receipt,
         )
-        for repo in sorted(_snapshot_repos(facts, fallback_repo))
+        for repo in sorted(repos)
     ]
     await graph_engine.add_nodes(repositories)
 
@@ -1047,12 +1094,14 @@ def get_code_graph_tasks(
     snapshot_dir: str | Path | None = None,
     timeout: float = 600.0,
     index_vectors: bool = False,
+    repo_scope: str | None = None,
 ) -> list[Task]:
     """Build the ordered task list for the enola code graph pipeline.
 
     index_vectors is opt-in because SearchType.CODE uses graph indexes only.
     Enable it when the same code facts must also feed semantic/completion
-    retrievers, which may require an embedding provider API key.
+    retrievers, which may require an embedding provider API key. repo_scope
+    loads one member of the multi-repo snapshot in snapshot_dir.
     """
     return [
         # EXTRACT: run enola and map its facts to DataPoints
@@ -1061,9 +1110,15 @@ def get_code_graph_tasks(
             repo_path=repo_path,
             snapshot_dir=snapshot_dir,
             timeout=timeout,
+            repo_scope=repo_scope,
         ),
         # LOAD: persist graph nodes; vector indexing is explicitly opt-in
         Task(add_code_graph_data_points, graph_only=not index_vectors),
         # LOAD: persist the typed relations as explicit graph edges
-        Task(add_code_graph_edges, repo_path=repo_path, snapshot_dir=snapshot_dir),
+        Task(
+            add_code_graph_edges,
+            repo_path=repo_path,
+            snapshot_dir=snapshot_dir,
+            repo_scope=repo_scope,
+        ),
     ]

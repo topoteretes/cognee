@@ -407,8 +407,13 @@ async def extract_code_repo_graph(
     graph tasks on the ORIGINAL directory (enola writes its .enola snapshot
     there, exactly like remember(content_type="code")). One repository node,
     cross-file edges, one graph read per repo. No LLM, no embeddings.
+
+    A dataset holding several repositories is one enola cluster: the first of
+    its rows to get here loads all of them from one snapshot, with the edges
+    between repositories (see cluster.load_dataset_cluster).
     """
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
+    from cognee.tasks.code_graph.cluster import load_dataset_cluster
     from cognee.tasks.code_graph.extract_code_graph import (
         add_code_graph_data_points,
         add_code_graph_edges,
@@ -432,6 +437,9 @@ async def extract_code_repo_graph(
                 "the original directory at cognify time. Re-add the repository from "
                 "its current location."
             )
+
+        if await load_dataset_cluster(ctx):
+            continue
 
         data_points = await extract_code_graph(repo_path=repo_path)
         state = await add_code_graph_data_points(data_points, ctx=ctx, graph_only=True)
