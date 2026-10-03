@@ -492,6 +492,23 @@ async def main():
                 f"Repositories left pending for {pipeline_name}: {processing}"
             )
 
+        # Two repositories in one dataset are one enola cluster: both come from
+        # the same snapshot, and each keeps the path it was remembered from.
+        async with set_database_global_context_variables(remember_dataset.id, user.id):
+            nodes, edges = await _graph_snapshot()
+        repositories = _named(_by_type(nodes, "CodeRepository"))
+        assert set(repositories) == {repo_path.name, second_repo_path.name}, repositories
+        assert len({repo.get("last_snapshot_id") for repo in repositories.values()}) == 1, (
+            f"The dataset's repositories were not extracted together: {repositories}"
+        )
+        for path in (repo_path, second_repo_path):
+            stored_path = repositories[path.name].get("path")
+            assert os.path.realpath(stored_path) == os.path.realpath(path), (
+                f"Repository '{path.name}' does not carry its own path: {stored_path}"
+            )
+        dangling = [e for e in edges if e[0] not in nodes or e[1] not in nodes]
+        assert not dangling, f"Cluster load left dangling edges: {dangling[:3]}"
+
         await cognee.forget(data_id=UUID(first_data_id), dataset_id=remember_dataset.id)
 
         async with set_database_global_context_variables(remember_dataset.id, user.id):
