@@ -28,8 +28,18 @@ def sanitize_value(value: Any) -> Any:
         return [sanitize_value(item) for item in value[:MAX_TRACE_CONTAINER_ITEMS]]
     if isinstance(value, dict):
         sanitized: dict[str, Any] = {}
-        for key, item in list(value.items())[:MAX_TRACE_CONTAINER_ITEMS]:
-            sanitized[str(key)] = sanitize_value(item)
+        items = [(str(key), item) for key, item in list(value.items())[:MAX_TRACE_CONTAINER_ITEMS]]
+        reserved_keys = {key for key, _ in items}
+        for key, item in items:
+            sanitized_key = key
+            if sanitized_key in sanitized:
+                # Keep literal keys available for entries that appear later.
+                suffix = 2
+                sanitized_key = f"{key}_{suffix}"
+                while sanitized_key in sanitized or sanitized_key in reserved_keys:
+                    suffix += 1
+                    sanitized_key = f"{key}_{suffix}"
+            sanitized[sanitized_key] = sanitize_value(item)
         return sanitized
     if hasattr(value, "id") and hasattr(value, "__class__"):
         return {
