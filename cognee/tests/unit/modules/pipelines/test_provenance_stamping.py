@@ -52,7 +52,7 @@ def _stamp_provenance(data, pipeline_name, task_name, visited=None):
         if data.source_task is None:
             data.source_task = task_name
 
-        for field_name in data.model_fields:
+        for field_name in type(data).model_fields:
             field_value = getattr(data, field_name, None)
             if field_value is not None:
                 _stamp_provenance(field_value, pipeline_name, task_name, visited)
