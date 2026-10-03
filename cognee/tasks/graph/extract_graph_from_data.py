@@ -9,6 +9,7 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm.extraction import extract_content_graph
 from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.engine.utils.temporal_hints import temporal_hints_for_chunk
 from cognee.modules.graph.utils import (
     attach_new_edges_to_data_points,
     collect_stored_data_points,
@@ -221,13 +222,20 @@ async def extract_graph_from_data(
         extracted = calculate_chunk_graphs(data_chunks, graph_model, custom_prompt, **kwargs)
         chunk_graphs = await extracted if inspect.isawaitable(extracted) else extracted
     else:
+        # Sequential on purpose: each document's rolling date base must advance
+        # in chunk order before the extractions run concurrently.
+        temporal_hints = [temporal_hints_for_chunk(chunk) for chunk in data_chunks]
         with pipeline_stage("extraction"):
             chunk_graphs = await asyncio.gather(
                 *[
                     extract_content_graph(
-                        chunk.text, graph_model, custom_prompt=custom_prompt, **kwargs
+                        chunk.text,
+                        graph_model,
+                        custom_prompt=custom_prompt,
+                        temporal_hints=hints,
+                        **kwargs,
                     )
-                    for chunk in data_chunks
+                    for chunk, hints in zip(data_chunks, temporal_hints)
                 ]
             )
     cache_entity_embeddings = kwargs.get("cache_entity_embeddings")
