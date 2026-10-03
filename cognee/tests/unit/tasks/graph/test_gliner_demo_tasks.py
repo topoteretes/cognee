@@ -195,6 +195,39 @@ def _edges(result):
     )
 
 
+def test_mapping_time_labels_become_timestamp_nodes_when_they_parse():
+    """SDK-827: GLiNER dates take the same route as the LLM prompt's Timestamp nodes."""
+    graph = knowledge_graph_from_gliner_result(
+        {
+            "entities": {
+                "date": ["7 November 1867", "1867-11-07", "November 7"],
+                "year": ["1969"],
+                "time_period": ["1891", "the 1960s"],
+                "organization": ["1984"],
+            }
+        }
+    )
+    assert sorted((node.type, node.name, node.id) for node in graph.nodes) == [
+        ("Timestamp", "1867-11-07", "timestamp:1867-11-07"),  # both mentions, one node
+        ("Timestamp", "1891", "timestamp:1891"),
+        ("Timestamp", "1969", "timestamp:1969"),
+        ("date", "November 7", "date:november 7"),  # year-less: stays a date entity
+        ("organization", "1984", "organization:1984"),  # not a time label
+        ("time_period", "the 1960s", "time_period:the 1960s"),
+    ]
+
+
+def test_edge_to_a_timestamp_resolves_through_the_original_mention():
+    mapped, edges = _edges(
+        {
+            "entities": {"event": ["Curie's birth"], "date": ["7 November 1867"]},
+            "relation_extraction": {"occurred_on": [["Curie's birth", "7 November 1867"]]},
+        }
+    )
+    assert edges == [("event:curie's birth", "occurred_on", "timestamp:1867-11-07")]
+    assert (mapped.candidate_edges, mapped.kept_edges) == (1, 1)
+
+
 def test_edge_exact_match_is_case_and_punctuation_insensitive():
     mapped, edges = _edges(
         {
