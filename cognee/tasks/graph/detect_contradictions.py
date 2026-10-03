@@ -27,9 +27,11 @@ from cognee.infrastructure.engine import DataPoint, is_internal_node
 from cognee.infrastructure.llm import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.modules.cognify.config import get_cognify_config
+from cognee.modules.pipelines.models.PipelineContext import PipelineContext
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.graph.models import ContradictionList
+from cognee.tasks.provenance.record_provenance import record_edges_provenance
 
 logger = get_logger("detect_contradictions")
 
@@ -141,7 +143,9 @@ def _contradiction_endpoints(
 
 
 @task_summary("Checked {n} item(s) for contradictions")
-async def detect_contradictions(data_points: list[DataPoint], **kwargs) -> list[DataPoint]:
+async def detect_contradictions(
+    data_points: list[DataPoint], ctx: PipelineContext | None = None, **kwargs
+) -> list[DataPoint]:
     """Flag facts touched by the current ingestion that contradict each other.
 
     Tuning comes from ``CognifyConfig``: ``contradiction_confidence_threshold``
@@ -151,6 +155,8 @@ async def detect_contradictions(data_points: list[DataPoint], **kwargs) -> list[
     Args:
         data_points: The items produced by the current cognify run. Their
             extracted entities identify which region of the graph to inspect.
+        ctx: Pipeline context (injected); only used to attribute the audit
+            ledger rows written for the ``contradicts`` edges.
 
     Returns:
         The unchanged ``data_points`` list, so the task can be appended to a pipeline.
@@ -234,6 +240,11 @@ async def detect_contradictions(data_points: list[DataPoint], **kwargs) -> list[
         if contradiction_edges:
             await graph_engine.add_edges(contradiction_edges)
             logger.info("Flagged %s contradiction(s) in the graph.", len(contradiction_edges))
+            # These edges bypass add_data_points, so the audit ledger is written
+            # here (non-fatal; no-op unless PROVENANCE_TRACKING is on).
+            await record_edges_provenance(
+                contradiction_edges, ctx, activity="detect_contradictions"
+            )
     except Exception as error:
         # Contradiction detection is auxiliary and must never break ingestion.
         logger.warning("Contradiction detection skipped due to an error: %s", error, exc_info=True)

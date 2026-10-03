@@ -23,6 +23,7 @@ from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElem
 from cognee.modules.graph.methods.try_delete_data_by_graph_provenance import (
     try_delete_data_by_graph_provenance,
 )
+from cognee.modules.provenance.tombstones import tombstone_deleted_elements
 from cognee.modules.users.methods.get_user import get_user
 from cognee.shared.logging_utils import get_logger
 
@@ -43,7 +44,11 @@ async def delete_data_nodes_and_edges(
     # graphs use this unified path; old/unmarked graphs stay on the ledger path.
     provenance_result = await try_delete_data_by_graph_provenance(dataset_id, data_id)
     if provenance_result is not None:
-        return DeletedGraphElements.from_source_ref_removal(provenance_result)
+        deleted = DeletedGraphElements.from_source_ref_removal(provenance_result)
+        # The audit ledger must stop asserting what the graph no longer holds
+        # (non-fatal; a no-op unless PROVENANCE_TRACKING wrote rows for them).
+        await tombstone_deleted_elements(dataset_id, deleted, user=user, data_id=data_id)
+        return deleted
 
     if backend_access_control_enabled():
         affected_nodes = await get_data_related_nodes(dataset_id, data_id)
@@ -125,4 +130,6 @@ async def delete_data_nodes_and_edges(
                 exc_info=True,
             )
 
-    return DeletedGraphElements.from_ledger_rows(affected_nodes or [], affected_edges or [])
+    deleted = DeletedGraphElements.from_ledger_rows(affected_nodes or [], affected_edges or [])
+    await tombstone_deleted_elements(dataset_id, deleted, user=user, data_id=data_id)
+    return deleted

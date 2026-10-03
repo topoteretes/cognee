@@ -21,6 +21,16 @@ class CognifyConfig(BaseSettings):
     # Opt-in audit-grade provenance ledger (env: PROVENANCE_TRACKING). Default
     # OFF so the standard cognify pipeline is unchanged.
     provenance_tracking: bool = False
+    # External anchoring of the ledger's hash chain (env: PROVENANCE_ANCHOR_KEY,
+    # PROVENANCE_ANCHOR_PATH). With a key set, ``cognee-cli provenance anchor``
+    # / ``POST /api/v1/provenance/anchor`` sign the chain head with HMAC-SHA256
+    # and append the anchor to the anchor file (default
+    # ``{system_root}/provenance_anchors.jsonl``). A verify that includes the
+    # anchors then proves the ledger has not been rewritten *and re-chained*
+    # since the anchor — the one attack a self-contained hash chain cannot
+    # detect. Never serialized by ``to_dict``.
+    provenance_anchor_key: str | None = None
+    provenance_anchor_path: str | None = None
     # Which implementation fills the extract-and-summarize step of the default
     # cognify pipeline (env: GRAPH_EXTRACTOR). "auto" (default) runs the LLM
     # path when a usable LLM key is configured and the GLiNER demo otherwise;
