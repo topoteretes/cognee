@@ -49,7 +49,9 @@ async def app(manager, monkeypatch):
     ds_allowed, ds_denied = uuid4(), uuid4()
 
     async def _authorized(user, dataset_id, permission_type="read"):
-        return SimpleNamespace(id=dataset_id) if dataset_id == ds_allowed else None
+        if dataset_id != ds_allowed:
+            return None
+        return SimpleNamespace(id=dataset_id, owner_id=uuid4())
 
     monkeypatch.setattr(router_module, "get_authorized_dataset", AsyncMock(side_effect=_authorized))
 
@@ -160,6 +162,25 @@ class TestLedgerWalks:
             "broken_links": [],
             "dataset_id": str(ds),
         }
+
+    async def test_drift_requires_dataset_and_read_access(self, client, monkeypatch):
+        from cognee.modules.provenance.manager import ProvenanceManager
+
+        calls = []
+
+        async def _drift(self, dataset_id, owner_id=None):
+            calls.append((dataset_id, owner_id))
+            return {"valid": True, "dataset_id": str(dataset_id), "checked": 0}
+
+        monkeypatch.setattr(ProvenanceManager, "check_drift", _drift)
+        ds_ok, ds_no = client.app.state.ds_allowed, client.app.state.ds_denied
+
+        assert (await client.get("/api/v1/provenance/drift")).status_code == 422
+        denied = await client.get("/api/v1/provenance/drift", params={"dataset_id": str(ds_no)})
+        assert denied.status_code == 403 and calls == []
+        ok = await client.get("/api/v1/provenance/drift", params={"dataset_id": str(ds_ok)})
+        assert ok.status_code == 200 and ok.json()["valid"] is True
+        assert calls[0][0] == ds_ok
 
     async def test_whole_ledger_walks_are_superuser_only(self, client):
         for route in ("verify", "check", "statistics", "export"):

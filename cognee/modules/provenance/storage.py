@@ -212,6 +212,28 @@ async def iter_live_with_prefix(prefix: str, page_size: int = 1000) -> AsyncIter
             last_entity_id = rows[-1][0]
 
 
+async def iter_live_entries(prefix: str, page_size: int = 1000) -> AsyncIterator[ProvenanceEntry]:
+    """Like ``iter_live_with_prefix`` but yields full entries (drift check)."""
+    last_entity_id: str | None = None
+    async with get_async_session() as session:
+        while True:
+            statement = select(ProvenanceEntryRow).where(
+                ProvenanceEntryRow.entity_id.like(f"{prefix}%"),
+                ProvenanceEntryRow.invalidated.is_not(True),
+            )
+            if last_entity_id is not None:
+                statement = statement.where(ProvenanceEntryRow.entity_id > last_entity_id)
+            statement = statement.order_by(ProvenanceEntryRow.entity_id.asc()).limit(page_size)
+            rows = (await session.execute(statement)).scalars().all()
+            if not rows:
+                return
+            for row in rows:
+                entry = ProvenanceEntry.from_row(row)
+                if canonical_entity_id(entry) == entry.entity_id:
+                    yield entry
+            last_entity_id = rows[-1].entity_id
+
+
 async def iter_live_by_bundle(
     bundle_id: str, prefix: str | None = None, page_size: int = 1000
 ) -> AsyncIterator[ProvenanceEntry]:

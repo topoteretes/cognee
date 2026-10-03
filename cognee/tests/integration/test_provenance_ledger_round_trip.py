@@ -17,6 +17,8 @@ from collections import Counter
 import pytest
 
 import cognee
+from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.data.methods import get_datasets_by_name
 from cognee.modules.engine.operations.setup import setup
@@ -86,6 +88,34 @@ async def test_ledger_round_trip(tmp_path, monkeypatch):
     lineage = await manager.get_lineage(edge_key)
     assert lineage["entity_count"] >= 2
     assert lineage["integrity_verified"] is True
+
+    # 1b. snapshots: every node row carries one; the graph matches the ledger.
+    entity_key = None
+    for key in sorted(live_before):
+        if key.startswith("rel:"):
+            continue
+        row = await manager.get_provenance(key)
+        if row["entity_type"] == "entity" and row["metadata"].get("snapshot"):
+            entity_key = key
+            break
+    assert entity_key is not None
+    entity_row = await manager.get_provenance(entity_key)
+    assert entity_row["metadata"]["snapshot"]["fields"]["name"]
+    drift_before = await manager.check_drift(dataset_id, user.id)
+    assert drift_before["valid"] is True, drift_before
+    assert drift_before["checked"] > 0 and drift_before["unsnapshotted"] == 0
+
+    # An out-of-band graph edit (no cognee write path) is reported as drift,
+    # while the ledger's own chain stays valid — the gap the snapshot closes.
+    async with set_database_global_context_variables(dataset_id, user.id):
+        graph = await get_graph_engine()
+        raw_id = entity_key.split(":", 1)[1]
+        assert await graph.update_node(raw_id, {"description": "edited behind cognee's back"})
+    drift_after = await manager.check_drift(dataset_id, user.id)
+    assert drift_after["valid"] is False
+    [drifted] = [d for d in drift_after["drifted"] if d["entity_id"] == entity_key]
+    assert drifted["delta"]["description"][1] == "edited behind cognee's back"
+    await _assert_intact(manager, dataset_id)
 
     # 2. forget(memory_only) tombstones everything ---------------------------- #
     await cognee.forget(dataset=dataset_name, memory_only=True, user=user)

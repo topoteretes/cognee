@@ -46,6 +46,7 @@ from cognee.modules.graph.utils.get_graph_from_model import get_graph_from_model
 from cognee.modules.pipelines.models.PipelineContext import PipelineContext
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.modules.provenance import get_provenance_manager
+from cognee.modules.provenance.snapshot import snapshot_metadata
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("record_provenance")
@@ -274,6 +275,7 @@ async def record_provenance(
                         metadata={
                             "name": getattr(node, "name", None),
                             "type": getattr(node, "type", type(node).__name__),
+                            **snapshot_metadata(node),
                         },
                         **common,
                     )
@@ -301,6 +303,7 @@ async def record_provenance(
                         or getattr(document, "name", None)
                         or "",
                         entity_type="document",
+                        metadata=snapshot_metadata(document),
                         **common,
                     )
 
@@ -317,6 +320,7 @@ async def record_provenance(
                     start_index=chunk_index,
                     end_index=chunk_index,
                     chunk_size=getattr(chunk, "chunk_size", None),
+                    **snapshot_metadata(chunk),
                     **common,
                 )
 
@@ -340,6 +344,7 @@ async def record_provenance(
                     metadata={
                         "name": getattr(entity, "name", None),
                         "type": _entity_type_name(entity),
+                        **snapshot_metadata(entity),
                     },
                     **common,
                 )

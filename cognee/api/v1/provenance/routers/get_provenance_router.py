@@ -124,6 +124,21 @@ def get_provenance_router() -> APIRouter:
         await _authorize_scope(user, dataset_id)
         return await get_provenance_manager().check(strict=strict, dataset_id=dataset_id)
 
+    @router.get("/drift", summary="Compare the ledger's snapshots with the graph")
+    @log_usage(function_name="GET /v1/provenance/drift", log_type="api_endpoint")
+    async def drift(
+        dataset_id: UUID = Query(...),
+        user: User = Depends(get_authenticated_user),
+    ) -> dict[str, Any]:
+        """Each live node row carries a content snapshot; this re-reads the node
+        from the graph and reports rows whose content changed out of band
+        (`drifted`, with a field delta) or vanished without a tombstone
+        (`missing_in_graph`)."""
+        dataset = await get_authorized_dataset(user, dataset_id, "read")
+        if dataset is None:
+            raise HTTPException(status_code=403, detail=f"No read access to dataset {dataset_id}.")
+        return await get_provenance_manager().check_drift(dataset_id, dataset.owner_id)
+
     @router.get("/statistics", summary="Ledger statistics")
     @log_usage(function_name="GET /v1/provenance/statistics", log_type="api_endpoint")
     async def statistics(

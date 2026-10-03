@@ -34,6 +34,7 @@ from . import storage
 from .integrity import canonical_entity_id, compute_checksum, verify_checksum
 from .models import ProvenanceEntry
 from .models.ProvenanceEntry import utc_now_iso
+from .snapshot import diff_snapshots
 
 logger = get_logger("provenance_manager")
 
@@ -137,6 +138,12 @@ class ProvenanceManager:
                 parent_id = source
             explicit_parent_supplied = parent_id is not None
 
+            metadata_out = dict(metadata or {})
+            if existing_row is not None:
+                decision = self._mutation_decision(existing_row, metadata_out, kwargs)
+                if decision == "noop":
+                    return ProvenanceEntry.from_row(existing_row)
+
             now = utc_now_iso()
             archived_history_id = None
             old_snapshot = None
@@ -161,7 +168,7 @@ class ProvenanceManager:
                 entity_id=entity_id,
                 entity_type=kwargs.get("entity_type", "entity"),
                 activity_id=kwargs.get("activity_id", "entity_tracking"),
-                metadata=dict(metadata or {}),
+                metadata=metadata_out,
                 timestamp=now,
                 first_seen=first_seen,
                 last_updated=now,
@@ -188,6 +195,43 @@ class ProvenanceManager:
             return entry
 
         return write
+
+    @staticmethod
+    def _mutation_decision(
+        existing_row: Any, metadata: dict[str, Any], kwargs: dict[str, Any]
+    ) -> str:
+        """Decide what a re-track of an existing entity row means.
+
+        With a snapshot on both sides (see ``snapshot.py``):
+
+        - identical content, same owning document, no explicit revision intent
+          -> ``"noop"``: the mention is not a new version;
+        - otherwise -> ``"version"``, and ``metadata["delta"]`` is filled with
+          the field-level difference against the previous snapshot.
+
+        Without snapshots (callers that pass only name/type) every re-track
+        versions, as before. A tombstoned row is never a no-op: re-tracking it
+        is a resurrection.
+        """
+        new_snapshot = metadata.get("snapshot")
+        old_metadata = getattr(existing_row, "entry_metadata", None) or {}
+        old_snapshot = old_metadata.get("snapshot") if isinstance(old_metadata, dict) else None
+        if not (isinstance(new_snapshot, dict) and isinstance(old_snapshot, dict)):
+            return "version"
+
+        delta = diff_snapshots(old_snapshot.get("fields"), new_snapshot.get("fields"))
+        unchanged = (
+            not delta
+            and old_snapshot.get("hash") == new_snapshot.get("hash")
+            and not existing_row.invalidated
+            and existing_row.source_ref_key == kwargs.get("source_ref_key")
+            and not kwargs.get("revision_type")
+            and not kwargs.get("supersedes")
+        )
+        if unchanged:
+            return "noop"
+        metadata["delta"] = delta
+        return "version"
 
     @staticmethod
     async def _resurrect_or_noop(
@@ -461,6 +505,9 @@ class ProvenanceManager:
             entry.invalidated_by = agent_id
             entry.invalidation_reason = reason
             entry.previous_version_id = archived_history_id
+            # The snapshot stays (it is what was retracted); the previous
+            # version's delta does not describe this event.
+            entry.metadata = {k: v for k, v in entry.metadata.items() if k != "delta"}
             if metadata:
                 entry.metadata = {**entry.metadata, **metadata}
             entry.sequence_id = next_seq
@@ -591,6 +638,12 @@ class ProvenanceManager:
                 version_dict["revision_type"] = entry.revision_type
             if entry.supersedes:
                 version_dict["supersedes"] = entry.supersedes
+            if isinstance(entry.metadata, dict):
+                snapshot = entry.metadata.get("snapshot")
+                if isinstance(snapshot, dict) and snapshot.get("hash"):
+                    version_dict["content_hash"] = snapshot["hash"]
+                if "delta" in entry.metadata:
+                    version_dict["delta"] = entry.metadata["delta"]
             if entry.invalidated:
                 # A tombstone version: who retracted it and why, so the history
                 # reads "asserted by A, retracted by B" rather than as a third
@@ -755,6 +808,12 @@ class ProvenanceManager:
             "errors": len(missing_refs),
             "dataset_id": str(dataset_id) if dataset_id is not None else None,
         }
+
+    async def check_drift(self, dataset_id: Any, owner_id: Any = None) -> dict[str, Any]:
+        """Compare each live node row's snapshot with the graph (see ``drift.py``)."""
+        from . import drift
+
+        return await drift.check_drift(dataset_id, owner_id)
 
     async def anchor(self) -> dict[str, Any] | None:
         """Sign the chain head and append it to the external anchor file.

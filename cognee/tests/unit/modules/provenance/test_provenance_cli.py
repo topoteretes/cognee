@@ -134,6 +134,46 @@ class TestActions:
             await command._anchor(_parse("anchor"))
         assert raised.value.error_code == 1
 
+    async def test_drift_needs_a_dataset_and_exits_2_on_drift(self, manager, monkeypatch, capsys):
+        from types import SimpleNamespace
+
+        from cognee.modules.provenance.manager import ProvenanceManager
+
+        command = ProvenanceCommand()
+        with pytest.raises(CliCommandException) as raised:
+            await command._drift(_parse("drift"))
+        assert raised.value.error_code == 1
+
+        ds, owner = uuid4(), uuid4()
+
+        async def _user(user_id=None):
+            return SimpleNamespace(id=owner)
+
+        async def _dataset(user, dataset_id, permission_type="read"):
+            return SimpleNamespace(id=dataset_id, owner_id=owner)
+
+        monkeypatch.setattr("cognee.cli.user_resolution.resolve_cli_user", _user, raising=False)
+        monkeypatch.setattr(
+            "cognee.modules.data.methods.get_authorized_dataset", _dataset, raising=False
+        )
+
+        async def _drift(self, dataset_id, owner_id=None):
+            return {
+                "valid": False,
+                "dataset_id": str(dataset_id),
+                "checked": 2,
+                "unsnapshotted": 0,
+                "drifted": [{"entity_id": f"{ds}:n1", "delta": {"description": ["a", "b"]}}],
+                "missing_in_graph": [f"{ds}:n2"],
+            }
+
+        monkeypatch.setattr(ProvenanceManager, "check_drift", _drift)
+        with pytest.raises(CliCommandException) as raised:
+            await command._drift(_parse("drift", "--dataset-id", str(ds)))
+        assert raised.value.error_code == 2
+        out = capsys.readouterr().out
+        assert "changed" in out and "missing" in out and "description" in out
+
     async def test_conflicting_scope_flags(self, manager):
         with pytest.raises(CliCommandException):
             await ProvenanceCommand()._stats(

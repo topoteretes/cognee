@@ -32,7 +32,11 @@ Reading it: ``ProvenanceManager`` (``get_lineage`` / ``revision_history`` /
 dataset-scopable), ``cognee-cli provenance`` and ``/api/v1/provenance``.
 ``anchors.py`` adds external HMAC anchors of the chain head
 (``PROVENANCE_ANCHOR_KEY`` / ``PROVENANCE_ANCHOR_PATH``) — the defense against
-a ledger that is rewritten and re-chained in place.
+a ledger that is rewritten and re-chained in place. ``snapshot.py`` puts a
+compact content snapshot on every node row (field deltas between versions,
+no-op suppression of identical re-mentions) and ``drift.py`` compares those
+snapshots with the live graph — the defense against a graph edited behind
+the ledger's back.
 
 Three env flags govern three of these systems and must not be mixed up:
 

@@ -306,6 +306,41 @@ async def _task_names(provenance_flag, contradiction_flag=False):
     return [task.executable.__name__ for task in tasks]
 
 
+class TestSnapshotsAtTheWriter:
+    """Real DataPoints get a mutation snapshot; identical re-records are no-ops."""
+
+    @pytest.mark.asyncio
+    async def test_snapshot_recorded_and_duplicate_batch_is_noop(self, manager):
+        from cognee.infrastructure.engine import DataPoint
+
+        class City(DataPoint):
+            name: str
+            description: str | None = None
+            metadata: dict = {"index_fields": ["name"]}
+
+        dataset_id, data_id = uuid4(), uuid4()
+        ctx = _ctx(dataset_id=dataset_id)
+        ctx.data_item = SimpleNamespace(id=data_id)
+        city = City(name="Paris", description="capital")
+
+        await record_provenance([city], ctx)
+        entry = await manager.get_provenance(f"{dataset_id}:{city.id}")
+        assert entry["metadata"]["snapshot"]["fields"]["description"] == "capital"
+        total = (await manager.get_statistics())["total_entries"]
+
+        # Same content, same document (another chunk batch of the same run).
+        await record_provenance([City(name="Paris", description="capital", id=city.id)], ctx)
+        assert (await manager.get_statistics())["total_entries"] == total
+
+        # Edited content: one new version carrying the delta.
+        await record_provenance(
+            [City(name="Paris", description="capital of France", id=city.id)], ctx
+        )
+        history = await manager.revision_history(f"{dataset_id}:{city.id}")
+        assert len(history) == 2
+        assert history[1]["delta"] == {"description": ["capital", "capital of France"]}
+
+
 class TestPipelineWiring:
     def test_flag_defaults_off_and_lands_in_to_dict(self):
         with patch.dict(os.environ, {}, clear=True):

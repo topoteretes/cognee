@@ -92,6 +92,10 @@ re-chained since the last anchor. Exit code 2 means the ledger failed.
         add_scope(p_stats)
         add_format(p_stats)
 
+        p_drift = sub.add_parser("drift", help="Compare ledger snapshots with the graph")
+        add_scope(p_drift)
+        add_format(p_drift)
+
         for name, help_text in (
             ("lineage", "Upstream lineage of one entity"),
             ("history", "Version history of one entity"),
@@ -125,6 +129,7 @@ re-chained since the last anchor. Exit code 2 means the ledger failed.
             "verify": self._verify,
             "check": self._check,
             "stats": self._stats,
+            "drift": self._drift,
             "lineage": self._lineage,
             "history": self._history,
             "entry": self._entry,
@@ -266,6 +271,48 @@ re-chained since the last anchor. Exit code 2 means the ledger failed.
             for entity_type, count in sorted(stats["entity_types"].items()):
                 fmt.echo(f"  {entity_type:<16} {count}")
 
+    async def _drift(self, args: argparse.Namespace) -> None:
+        dataset_id = await self._resolve_dataset_id(args)
+        if dataset_id is None:
+            fmt.error("drift needs --dataset or --dataset-id (the graph is read per dataset).")
+            raise CliCommandException("Dataset required", error_code=1)
+        from cognee.cli.user_resolution import resolve_cli_user
+        from cognee.modules.data.methods import get_authorized_dataset
+
+        user = await resolve_cli_user(getattr(args, "user_id", None))
+        dataset = await get_authorized_dataset(user, dataset_id, "read")
+        if dataset is None:
+            fmt.error(f"Dataset {dataset_id} not found or not readable.")
+            raise CliCommandException("Dataset not found", error_code=1)
+
+        result = await self._manager().check_drift(dataset_id, dataset.owner_id)
+        if args.output_format == "json":
+            _print_json(result)
+        else:
+            if result["valid"]:
+                fmt.success(
+                    f"Graph matches the ledger: {result['checked']} node(s) checked"
+                    + (
+                        f", {result['unsnapshotted']} without a snapshot"
+                        if result["unsnapshotted"]
+                        else ""
+                    )
+                    + "."
+                )
+            else:
+                fmt.error(
+                    f"Drift: {len(result['drifted'])} changed, "
+                    f"{len(result['missing_in_graph'])} missing in graph "
+                    f"(of {result['checked']} checked)."
+                )
+                for item in result["drifted"][:20]:
+                    fields = ", ".join(item["delta"]) or "?"
+                    fmt.echo(f"  changed  {item['entity_id']}  [{fields}]")
+                for entity_id in result["missing_in_graph"][:20]:
+                    fmt.echo(f"  missing  {entity_id}")
+        if not result["valid"]:
+            raise CliCommandException("Ledger drift detected", error_code=2)
+
     async def _lineage(self, args: argparse.Namespace) -> None:
         lineage = await self._manager().get_lineage(args.entity_id)
         if not lineage:
@@ -308,6 +355,10 @@ re-chained since the last anchor. Exit code 2 means the ledger failed.
                     f"v{version['version']}  by {version['author']} at {version['recorded_at']}"
                     f"  valid {version['valid_from']} -> {until}"
                 )
+                for field, (old, new) in (version.get("delta") or {}).items():
+                    fmt.echo(
+                        f"      {field}: {json.dumps(old, default=str)} -> {json.dumps(new, default=str)}"
+                    )
 
     async def _entry(self, args: argparse.Namespace) -> None:
         entry = await self._manager().get_provenance(args.entity_id)
