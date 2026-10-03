@@ -120,3 +120,45 @@ async def test_no_match_query_returns_zero_scored_chunks():
     # LexicalRetriever still returns top_k payloads for a no-match query; all score 0.0.
     assert len(results) == 2
     assert all(score == 0.0 for _, score in results)
+
+
+@pytest.mark.asyncio
+async def test_get_context_from_objects_with_scores():
+    # get_context_from_objects must consume the (payload, score) tuples produced
+    # when with_scores=True; historically it indexed the tuple as a dict and
+    # raised TypeError.
+    corpus = {
+        "chunk_a": "alpha beta",
+        "chunk_b": "gamma delta",
+    }
+    retriever = BM25ChunksRetriever(top_k=3, with_scores=True)
+
+    with _patch_graph(corpus):
+        objects = await retriever.get_retrieved_objects("alpha")
+        context = await retriever.get_context_from_objects("alpha", objects)
+
+    assert context == "alpha beta\ngamma delta"
+
+
+@pytest.mark.asyncio
+async def test_get_context_from_objects_without_scores():
+    # Without scores, get_retrieved_objects returns plain payloads; context
+    # extraction must keep working in that mode too.
+    corpus = {
+        "chunk_a": "alpha beta",
+        "chunk_b": "gamma delta",
+    }
+    retriever = BM25ChunksRetriever(top_k=3)
+
+    with _patch_graph(corpus):
+        objects = await retriever.get_retrieved_objects("alpha")
+        context = await retriever.get_context_from_objects("alpha", objects)
+
+    assert context == "alpha beta\ngamma delta"
+
+
+@pytest.mark.asyncio
+async def test_get_context_from_objects_empty():
+    retriever = BM25ChunksRetriever(top_k=3, with_scores=True)
+
+    assert await retriever.get_context_from_objects("alpha", []) == ""
