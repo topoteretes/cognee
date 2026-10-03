@@ -709,6 +709,9 @@ def get_remember_router() -> APIRouter:
           skill_run entries.
         - **skill_improvement** (Optional[dict]): Skill improvement details forwarded to
           remember when recording a skill run.
+        - **self_improvement** (Optional[bool]): Forwarded to remember for compatibility. Typed
+          session entries do not run automatic graph improvement, regardless of this value. This
+          does not control explicit skill_improvement.
 
         ## Response
         The returned ``RememberResult`` includes ``entry_type`` and
