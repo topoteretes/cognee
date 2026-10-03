@@ -13,7 +13,6 @@ import json
 import mimetypes
 import os
 import sys
-import tempfile
 from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
@@ -718,13 +717,17 @@ class CogneeClient:
                         )
                     }
 
-                tmp_dir = None
                 if content_base64:
+                    from io import BytesIO
+
+                    from starlette.datastructures import UploadFile
+
+                    # Hand the bytes over the way the HTTP route does, as an
+                    # upload object. A temp-file path would be treated as a local
+                    # path, so outside COGNEE_ALLOWED_LOCAL_FILE_ROOTS the path
+                    # string itself would be stored as the document.
                     safe_name, raw_bytes = self._decode_upload(filename, content_base64)
-                    tmp_dir = tempfile.mkdtemp(prefix="cognee_upload_")
-                    remember_data = os.path.join(tmp_dir, safe_name)
-                    with open(remember_data, "wb") as f:
-                        f.write(raw_bytes)
+                    remember_data = [UploadFile(file=BytesIO(raw_bytes), filename=safe_name)]
                 else:
                     remember_data = data
 
@@ -741,18 +744,7 @@ class CogneeClient:
                 if not self_improvement:
                     kwargs["self_improvement"] = False
 
-                try:
-                    result = await self.cognee.remember(**kwargs)
-                finally:
-                    if tmp_dir is not None:
-                        try:
-                            os.unlink(remember_data)
-                        except OSError:
-                            pass
-                        try:
-                            os.rmdir(tmp_dir)
-                        except OSError:
-                            pass
+                result = await self.cognee.remember(**kwargs)
 
                 return {
                     "status": getattr(result, "status", "completed"),
