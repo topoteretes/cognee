@@ -67,7 +67,7 @@ def fake_sm(monkeypatch):
     # The session package re-exports get_session_manager, shadowing the
     # submodule — resolve the submodule explicitly and patch its attribute.
     sm_module = importlib.import_module("cognee.infrastructure.session.get_session_manager")
-    monkeypatch.setattr(sm_module, "get_session_manager", lambda: sm)
+    monkeypatch.setattr(sm_module, "get_session_manager", lambda dataset_id=None: sm)
 
     async def _noop_setup():
         return None

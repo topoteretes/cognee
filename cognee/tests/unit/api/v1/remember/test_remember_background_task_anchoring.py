@@ -76,7 +76,7 @@ async def test_background_remember_task_is_anchored_until_done(monkeypatch):
 async def test_session_bridge_task_is_anchored_until_done(monkeypatch):
     release = asyncio.Event()
 
-    async def fake_add_to_session(session_id, data, user):
+    async def fake_add_to_session(session_id, data, user, dataset_id=None):
         return None
 
     async def fake_improve(*args, **kwargs):

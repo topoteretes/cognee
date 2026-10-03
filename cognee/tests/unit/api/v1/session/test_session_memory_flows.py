@@ -1029,12 +1029,13 @@ async def test_self_improvement_controls_session_bridge_without_skipping_cache(f
         patch.object(_pkg_improve, "improve", improve),
     ):
         kwargs = {} if flag is None else {"self_improvement": flag}
+        dataset_id = uuid4()
         result = await _get_remember_module().remember(
-            "memory", session_id="s1", dataset_id=uuid4(), user=user, **kwargs
+            "memory", session_id="s1", dataset_id=dataset_id, user=user, **kwargs
         )
         if result._task is not None:
             await result._task
-    store.assert_awaited_once_with("s1", "memory", user)
+    store.assert_awaited_once_with("s1", "memory", user, dataset_id=dataset_id)
     assert improve.await_count == (0 if flag is False else 1)
     assert result.status == "session_stored"
 
