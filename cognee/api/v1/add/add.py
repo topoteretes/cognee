@@ -1,9 +1,7 @@
 from typing import Any, BinaryIO
-from urllib.parse import urlparse
 from uuid import UUID
 
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
-from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.engine.operations.setup import setup
@@ -21,6 +19,10 @@ from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline
 from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
     resolve_authorized_user_dataset,
 )
+from cognee.modules.pipelines.models.PipelineRunInfo import (
+    PipelineRunAlreadyCompleted,
+    PipelineRunCompleted,
+)
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
@@ -32,25 +34,6 @@ from cognee.tasks.ingestion.resolve_dlt_sources import resolve_dlt_sources
 from cognee.tasks.ingestion.utils import materialize_stream_for_background
 
 logger = get_logger()
-
-
-def _add_pipeline_needs_llm(data: Any, preferred_loaders: list | None) -> bool:
-    """Only known plain-text inputs can safely skip the LLM check."""
-    if preferred_loaders:
-        return True
-
-    data_items = data if isinstance(data, list) else [data]
-    for data_item in data_items:
-        data_item = data_item.data if isinstance(data_item, DataItem) else data_item
-        if not isinstance(data_item, str) or urlparse(data_item).scheme:
-            return True
-        try:
-            resolve_local_path(data_item, must_exist=True)
-        except (FileNotFoundError, OSError, ValueError):
-            pass
-        else:
-            return True
-    return False
 
 
 async def add(
@@ -141,7 +124,9 @@ async def add(
         graph_db_config: Optional configuration for graph database (for custom setups).
         dataset_id: Optional specific dataset UUID to use instead of dataset_name.
         run_in_background: If True, starts ingestion asynchronously and returns immediately.
-                          If False (default), waits for completion before returning.
+                           DLT orphan cleanup is skipped; propagating upstream deletions
+                           requires a successful foreground sync.
+                           If False (default), waits for completion before returning.
         extraction_rules: Optional dictionary of rules (e.g., CSS selectors, XPath) for extracting specific content from web pages using BeautifulSoup
         tavily_config: Optional configuration for Tavily API, including API key and extraction settings
         soup_crawler_config: Optional configuration for BeautifulSoup crawler, specifying concurrency, crawl delay, and extraction rules.
@@ -250,12 +235,17 @@ async def add(
                 transformed[item] = {}
         preferred_loaders = transformed
 
-    # Validate only the ingestion work this call will perform. Obvious direct
-    # text is LLM-free; inputs whose loader is not known yet stay conservative.
+    # add() stages data and makes no LLM call of its own, so it validates the
+    # embedding side of the provider config only. Whether the run needs an LLM
+    # is decided where the LLM is used: remember() and cognify() from their
+    # task lists, and the media loaders -- the one ingestion step that calls
+    # the LLM -- at the moment they would (``require_llm_for_media``). Keyless
+    # ingestion (local GLiNER extractor, local embedder) is a supported mode,
+    # and a guess made here about a file whose loader is not resolved yet was
+    # blocking it.
     from cognee.modules.preflight import validate_provider_config
 
-    add_pipeline_needs_llm = _add_pipeline_needs_llm(data, preferred_loaders)
-    validate_provider_config(needs_llm=add_pipeline_needs_llm)
+    validate_provider_config(needs_llm=False)
 
     await setup()
 
@@ -294,7 +284,7 @@ async def add(
             authorized_dataset.id,
             preferred_loaders,
             importance_weight,
-            needs_llm=add_pipeline_needs_llm,
+            needs_llm=False,
         ),
     ]
 
@@ -323,11 +313,13 @@ async def add(
     # Background runs must not depend on caller/request-scoped stream lifetimes.
     # Materialize stream-like inputs into owned in-memory buffers up front.
     if run_in_background:
-        # Detached pipelines run one-at-a-time (to avoid DB write conflicts)
-        # and commit later, so we cannot safely defer cleanup past their commit
-        # from here without racing them. Run it up front instead.
+        # The detached pipeline has not committed when this call returns.
+        # Never delete the previous data without proof its replacement succeeded.
         if orphan_cleanup is not None:
-            await orphan_cleanup()
+            logger.warning(
+                "Skipping DLT orphan cleanup for background ingestion; "
+                "reload the affected source in the foreground to propagate upstream deletions."
+            )
             orphan_cleanup = None
         data = await materialize_stream_for_background(data)
 
@@ -350,16 +342,17 @@ async def add(
         skip_connection_test=skip_connection_test,
     )
 
-    # Foreground runs: the fresh rows are committed by pipeline_executor_func
-    # above, so it's now safe to clean up orphans. (Background runs already ran
-    # this up front and set orphan_cleanup to None.)
-    if orphan_cleanup is not None:
-        await orphan_cleanup()
-
     # run_pipeline_blocking returns {dataset_id: PipelineRunInfo} but callers
     # expect a single PipelineRunInfo (add always processes one dataset).
     if isinstance(result, dict) and len(result) == 1:
         result = next(iter(result.values()))
+
+    # Executors may return an error result rather than raise. Only a successful
+    # foreground completion proves it is safe to remove the previous records.
+    if orphan_cleanup is not None and isinstance(
+        result, (PipelineRunCompleted, PipelineRunAlreadyCompleted)
+    ):
+        await orphan_cleanup()
 
     _duration_ms = (_time.monotonic_ns() - _add_start_ns) / 1_000_000
     _attrs = {

@@ -15,6 +15,10 @@ fails open: every stage failure is recorded and the next stage still runs —
 except the one ``fatal`` stage, ``persist_session_qa``, where losing session
 Q&A would be data loss: it stops the run and raises, carrying the partial
 ``ImproveResult`` on the exception (decision D2).
+
+One failure is not stage-local: an exhausted LLM budget. Every later stage
+would fail on it the same way, so the run stops at the first stage that hits
+it and the remaining stages are ``skipped: budget_exhausted``.
 """
 
 import asyncio
@@ -39,6 +43,7 @@ from cognee.modules.improve import (
     DEFAULT_STAGES,
     MEMIFY_PASSTHROUGH_KEYS,
     REASON_ABORTED_BY_FATAL_STAGE,
+    REASON_BUDGET_EXHAUSTED,
     REASON_LOCK_HELD,
     BaseStage,
     GraphCapabilities,
@@ -120,12 +125,21 @@ async def improve(
 
     Every stage but the last two is session-fed and is skipped with
     ``no_session_ids`` when no ``session_ids`` were given. Stages named in
-    ``IMPROVE_STAGES_DISABLED`` are skipped with ``disabled_by_config``. A run
+    ``IMPROVE_STAGES_DISABLED`` are skipped with ``disabled_by_config``. The
+    stages that draft text with an LLM (``extract_agent_context``,
+    ``distill_sessions``, ``global_context_index``) are skipped with
+    ``no_llm_configured`` when no usable LLM is configured, so a keyless
+    install still bridges sessions and traces into the graph. A run
     that loses the improve lock — another run is already touching the same
     sessions or dataset — returns a result whose every stage is
     ``skipped: lock_held``. A failure in ``persist_session_qa`` stops the run
     and raises, because silently losing session Q&A would be data loss; every
     other failure is recorded and the remaining stages still run.
+
+    The exception to that last rule is an exhausted LLM budget (a 402 from the
+    provider or the gateway in front of it): the stages after the one that hit
+    it would fail the same way, so they are ``skipped: budget_exhausted`` and
+    the run ends there, without a further pass. ``status`` is ``errored``.
 
     A session-keyed run that loses the claim to a run holding one of its
     sessions asks that holder for one more pass (``rerun_requested`` on the
@@ -191,6 +205,7 @@ async def improve(
                 passes += 1
                 if passes > 1:
                     result.start_rerun_pass()
+                budget_exhausted = False
                 for index, stage in enumerate(stages):
                     stage_result = await execute_stage(stage, inputs)
                     result.record(stage_result)
@@ -201,9 +216,41 @@ async def improve(
                         operation.merge_run_info(
                             stage_result.run_info_stamp, allow_overwrite=passes > 1
                         )
+                    remaining_stages = stages[index + 1 :]
+                    # An exhausted LLM budget is not this stage's problem alone:
+                    # every later stage would spend one more failing call on it.
+                    # The stage stays recorded as it ended; the rest is skipped
+                    # with the reason. Whether the run also raises is still the
+                    # fatal stage's decision, below.
+                    budget_exhausted = stage_result.budget_exhausted
                     if stage.fatal and stage_result.status == "errored":
-                        raise _abort_run(result, stages[index + 1 :], stage, stage_result)
+                        raise _abort_run(
+                            result,
+                            remaining_stages,
+                            stage,
+                            stage_result,
+                            reason=(
+                                REASON_BUDGET_EXHAUSTED
+                                if budget_exhausted
+                                else REASON_ABORTED_BY_FATAL_STAGE
+                            ),
+                        )
+                    if budget_exhausted:
+                        _skip_stages(result, remaining_stages, REASON_BUDGET_EXHAUSTED)
+                        logger.warning(
+                            "improve: stage '%s' failed because the LLM budget is exhausted; "
+                            "run stopped, %d remaining stage(s) skipped",
+                            stage.name,
+                            len(remaining_stages),
+                        )
+                        break
 
+                if budget_exhausted:
+                    # No further pass either: it would fail the same way. The
+                    # plain release in the finally frees the claim, and a rerun
+                    # request still pending is left to the next claimant — as
+                    # after a fatal abort or at the pass bound below.
+                    break
                 if not session_keys:
                     break
                 if passes >= IMPROVE_MAX_RERUN_PASSES:
@@ -495,21 +542,34 @@ def _skip_lock_held_run(
     return result
 
 
+def _skip_stages(result: ImproveResult, stages: Sequence[BaseStage], reason: str) -> None:
+    """Record every stage in ``stages`` as skipped with ``reason``, in order."""
+    for stage in stages:
+        result.record(StageResult.skipped(stage.name, reason))
+
+
 def _abort_run(
     result: ImproveResult,
     remaining_stages: Sequence[BaseStage],
     stage: BaseStage,
     stage_result: StageResult,
+    *,
+    reason: str = REASON_ABORTED_BY_FATAL_STAGE,
 ) -> BaseException:
     """Mark the rest of the run aborted and build the exception the loop raises.
 
     The exception is the stage's own when it raised — its type is what the HTTP
     layer maps onto a status code — and a synthetic one when the wrapped
-    pipeline only reported ``PipelineRunErrored`` without raising. Either way it
-    carries the partial ``ImproveResult`` as ``improve_result``.
+    pipeline only reported ``PipelineRunErrored`` without raising. The synthetic
+    one keeps the type that matters to a caller: a stage that stopped on an
+    exhausted LLM budget raises ``LLMPaymentRequiredError`` (402) on both
+    paths. Either way it carries the partial ``ImproveResult`` as
+    ``improve_result``.
+
+    ``reason`` is what the remaining stages are skipped with: the abort itself,
+    or the more specific ``budget_exhausted`` when that is why the stage failed.
     """
-    for remaining_stage in remaining_stages:
-        result.record(StageResult.skipped(remaining_stage.name, REASON_ABORTED_BY_FATAL_STAGE))
+    _skip_stages(result, remaining_stages, reason)
     result.error = stage_result.error
     logger.error(
         "improve: fatal stage '%s' failed, run stopped: %s", stage.name, stage_result.error
@@ -521,11 +581,19 @@ def _abort_run(
 
     error = stage_result.exception
     if error is None:
-        error = CogneeSystemError(
-            message=f"improve: fatal stage '{stage.name}' errored: {stage_result.error}",
-            name="ImproveFatalStageError",
-            log=False,
-        )
+        if reason == REASON_BUDGET_EXHAUSTED:
+            from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
+
+            error = LLMPaymentRequiredError(
+                f"improve: fatal stage '{stage.name}' stopped on an exhausted LLM budget: "
+                f"{stage_result.error}"
+            )
+        else:
+            error = CogneeSystemError(
+                message=f"improve: fatal stage '{stage.name}' errored: {stage_result.error}",
+                name="ImproveFatalStageError",
+                log=False,
+            )
 
     try:
         error.improve_result = result  # type: ignore[attr-defined]

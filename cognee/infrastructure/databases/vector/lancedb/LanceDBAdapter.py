@@ -37,6 +37,7 @@ from cognee.shared.logging_utils import get_logger
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
+from ..stored_vector_size import choose_stored_vector_size
 from ..vector_db_interface import VectorDBInterface
 
 logger = get_logger("LanceDBAdapter")
@@ -81,6 +82,9 @@ class IndexSchema(DataPoint):
     chunk_index: int | None = None
     source_chunk_id: str | None = None
     importance_weight: float | None = 0.5
+    # Document external_metadata as JSON text, copied onto chunks at ingest so
+    # hybrid retrieval can surface allowlisted keys straight from the payload.
+    external_metadata: str | None = None
 
     metadata: dict = {"index_fields": ["text"]}
     belongs_to_set: list[str] = []
@@ -387,6 +391,29 @@ class LanceDBAdapter(VectorDBInterface):
         connection = await self.get_connection()
         collection_names = await connection.table_names()
         return collection_name in collection_names
+
+    async def get_stored_vector_size(self) -> int | None:
+        """Width of the vectors already in this store, or None when nothing is stored yet.
+
+        Every table's ``vector`` column is a fixed-size list of the embedding
+        width that built it. Read once per dataset by the dataset context to
+        record the width for rows that predate the recorded embedding model.
+
+        Reads every table rather than stopping at the first: a store built
+        across an ``EMBEDDING_MODEL`` change holds two widths, and which one
+        gets recorded must not depend on listing order (see
+        ``choose_stored_vector_size``).
+        """
+        connection = await self.get_connection()
+        widths = []
+        for table_name in await connection.table_names():
+            schema = await (await connection.open_table(table_name)).schema()
+            if "vector" not in schema.names:
+                continue
+            list_size = getattr(schema.field("vector").type, "list_size", None)
+            if isinstance(list_size, int):
+                widths.append(list_size)
+        return choose_stored_vector_size(widths, self.name)
 
     async def create_collection(self, collection_name: str, payload_schema: BaseModel):
         """Create the LanceDB table for `collection_name` if it does not already exist."""
@@ -1422,6 +1449,7 @@ class LanceDBAdapter(VectorDBInterface):
                     chunk_index=getattr(data_point, "chunk_index", None),
                     source_chunk_id=getattr(data_point, "source_chunk_id", None),
                     importance_weight=getattr(data_point, "importance_weight", None),
+                    external_metadata=getattr(data_point, "external_metadata", None),
                     belongs_to_set=(data_point.belongs_to_set or []),
                 )
                 for data_point in data_points

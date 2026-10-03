@@ -22,6 +22,9 @@ _mod_sm = importlib.import_module("cognee.infrastructure.session.get_session_man
 _pkg_improve = importlib.import_module("cognee.api.v1.improve")
 _mod_query_router = importlib.import_module("cognee.api.v1.recall.query_router")
 _mod_search_methods = importlib.import_module("cognee.modules.search.methods.search")
+_mod_authorized_dataset = importlib.import_module(
+    "cognee.modules.data.methods.get_authorized_dataset"
+)
 
 
 @contextmanager
@@ -982,3 +985,84 @@ class TestRecallResponseModelParam:
             await recall_mod.recall("test", query_type=SearchType.GRAPH_COMPLETION)
 
         assert remote_client.recall.await_args.kwargs["response_schema"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag", [None, False, True])
+@pytest.mark.parametrize("background", [False, True])
+async def test_self_improvement_opt_out_keeps_permanent_ingestion(flag, background):
+    user = MagicMock()
+    user.id = "u1"
+    add, cognify, improve = AsyncMock(), AsyncMock(return_value={"status": "ok"}), AsyncMock()
+    with (
+        _patch_remember_startup(),
+        patch("cognee.api.v1.add.add", add),
+        patch("cognee.api.v1.cognify.cognify", cognify),
+        patch.object(_pkg_improve, "improve", improve),
+        patch("cognee.modules.users.methods.get_default_user", AsyncMock(return_value=user)),
+        patch.object(
+            _get_remember_module(),
+            "resolve_authorized_user_datasets",
+            AsyncMock(return_value=(user, "")),
+        ),
+    ):
+        kwargs = {} if flag is None else {"self_improvement": flag}
+        result = await _get_remember_module().remember(
+            "memory", run_in_background=background, **kwargs
+        )
+        if result._task is not None:
+            await result._task
+    add.assert_awaited_once()
+    assert add.call_args.kwargs["data"] == "memory"
+    cognify.assert_awaited_once()
+    assert improve.await_count == (0 if flag is False else 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag", [None, False, True])
+async def test_self_improvement_controls_session_bridge_without_skipping_cache(flag):
+    user = MagicMock(id="u1")
+    store, improve = AsyncMock(), AsyncMock()
+    with (
+        _patch_remember_startup(),
+        patch.object(_get_remember_module(), "_add_to_session", store),
+        patch.object(_pkg_improve, "improve", improve),
+    ):
+        kwargs = {} if flag is None else {"self_improvement": flag}
+        result = await _get_remember_module().remember(
+            "memory", session_id="s1", dataset_id=uuid4(), user=user, **kwargs
+        )
+        if result._task is not None:
+            await result._task
+    store.assert_awaited_once_with("s1", "memory", user)
+    assert improve.await_count == (0 if flag is False else 1)
+    assert result.status == "session_stored"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag", [None, False, True])
+async def test_typed_api_session_entry_never_runs_automatic_improvement(flag):
+    from cognee.memory import QAEntry
+
+    user = MagicMock(id=uuid4())
+    manager = MagicMock(is_available=True)
+    manager.add_qa = AsyncMock(return_value="qa1")
+    improve = AsyncMock()
+    with (
+        _patch_remember_startup(),
+        patch.object(_mod_sm, "get_session_manager", return_value=manager),
+        patch.object(_pkg_improve, "improve", improve),
+        patch.object(
+            _mod_authorized_dataset, "get_authorized_dataset", AsyncMock(return_value=None)
+        ),
+        patch("cognee.modules.session_lifecycle.metrics.ensure_and_touch_session", AsyncMock()),
+    ):
+        kwargs = {} if flag is None else {"self_improvement": flag}
+        result = await _get_remember_module().remember(
+            QAEntry(question="", answer="memory", context=""), session_id="s1", user=user, **kwargs
+        )
+    manager.add_qa.assert_awaited_once()
+    assert manager.add_qa.call_args.kwargs["answer"] == "memory"
+    improve.assert_not_awaited()
+    assert result._task is None
+    assert result.status == "session_stored"

@@ -12,6 +12,7 @@ Heavy imports stay inside ``gate``/``run`` so importing this package pulls in
 nothing but pydantic and the config modules.
 """
 
+from cognee.modules.preflight import llm_available
 from cognee.shared.logging_utils import get_logger
 
 from .constants import AGENT_TRACE_FEEDBACKS_NODE_SET
@@ -30,6 +31,10 @@ REASON_TRIPLET_EMBEDDING_DISABLED = "triplet_embedding_disabled"
 REASON_NO_WRITES_SINCE_LAST_IMPROVE = "no_writes_since_last_improve"
 REASON_NO_NEW_SESSION_ENTRIES = "no_new_entries"
 REASON_NO_NEW_TRACE_STEPS = "no_new_trace_steps"
+# The stage drafts text with an LLM and no usable one is configured (keyless
+# installs run on GLiNER + fastembed); the stages that only cognify or embed
+# are not gated on this — cognify resolves its own extractor.
+REASON_NO_LLM_CONFIGURED = "no_llm_configured"
 
 
 def _already_completed(stage_name: str, reason: str) -> StageResult:
@@ -181,6 +186,8 @@ class ExtractAgentContextStage(BaseStage):
             return REASON_SESSION_MANAGER_UNAVAILABLE
         if not session_manager.is_auto_feedback_enabled():
             return REASON_AUTO_FEEDBACK_DISABLED
+        if not llm_available():
+            return REASON_NO_LLM_CONFIGURED
         return None
 
     async def run(self, inputs: ImproveRunInputs) -> StageResult:
@@ -229,6 +236,11 @@ class DistillSessionsStage(BaseStage):
 
     name = "distill_sessions"
     needs_sessions = True
+
+    def gate(self, inputs: ImproveRunInputs) -> str | None:
+        if not llm_available():
+            return REASON_NO_LLM_CONFIGURED
+        return None
 
     async def run(self, inputs: ImproveRunInputs) -> StageResult:
         from cognee.modules.session_distillation import distill_session
@@ -451,6 +463,8 @@ class GlobalContextIndexStage(BaseStage):
     def gate(self, inputs: ImproveRunInputs) -> str | None:
         if not inputs.build_global_context_index:
             return REASON_OPT_IN_DISABLED
+        if not llm_available():
+            return REASON_NO_LLM_CONFIGURED
         return None
 
     async def run(self, inputs: ImproveRunInputs) -> StageResult:

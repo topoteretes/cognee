@@ -17,6 +17,12 @@ from cognee.infrastructure.files.storage.config import file_storage_config
 from cognee.infrastructure.llm.config import LLMConfig
 
 
+async def fake_ensure_embedding_model_matches(_dataset_database):
+    """The registry/embedding check is a collaborator of the bind step like the
+    others faked here; these tests are about slots and config resolution."""
+    return
+
+
 @pytest.mark.asyncio
 async def test_database_context_sets_and_resets_current_dataset_id(monkeypatch):
     dataset_id = uuid4()
@@ -124,6 +130,10 @@ async def test_dataset_database_configs_persist_after_exit(monkeypatch):
         fake_get_or_create_dataset_database,
     )
     monkeypatch.setattr(
+        "cognee.context_global_variables.ensure_embedding_model_matches",
+        fake_ensure_embedding_model_matches,
+    )
+    monkeypatch.setattr(
         "cognee.context_global_variables.resolve_dataset_database_connection_info",
         fake_resolve_connection_info,
     )
@@ -206,6 +216,10 @@ async def test_storage_resolves_under_dataset_owner_for_acl_grantee(monkeypatch)
         fake_get_or_create_dataset_database,
     )
     monkeypatch.setattr(
+        "cognee.context_global_variables.ensure_embedding_model_matches",
+        fake_ensure_embedding_model_matches,
+    )
+    monkeypatch.setattr(
         "cognee.context_global_variables.resolve_dataset_database_connection_info",
         fake_resolve_connection_info,
     )
@@ -284,6 +298,10 @@ async def test_user_id_is_optional(monkeypatch):
         fake_get_or_create_dataset_database,
     )
     monkeypatch.setattr(
+        "cognee.context_global_variables.ensure_embedding_model_matches",
+        fake_ensure_embedding_model_matches,
+    )
+    monkeypatch.setattr(
         "cognee.context_global_variables.resolve_dataset_database_connection_info",
         fake_resolve_connection_info,
     )
@@ -347,6 +365,10 @@ async def test_denied_caller_never_reaches_dataset_storage(monkeypatch):
     monkeypatch.setattr(
         "cognee.context_global_variables.get_or_create_dataset_database",
         fake_get_or_create_dataset_database,
+    )
+    monkeypatch.setattr(
+        "cognee.context_global_variables.ensure_embedding_model_matches",
+        fake_ensure_embedding_model_matches,
     )
     monkeypatch.setattr(
         "cognee.infrastructure.databases.dataset_queue.dataset_queue", FakeDatasetQueue
@@ -499,6 +521,10 @@ async def test_successful_enter_keeps_the_slot_until_exit(monkeypatch):
     monkeypatch.setattr("cognee.context_global_variables._get_dataset_owner_id", fake_owner)
     monkeypatch.setattr(
         "cognee.context_global_variables.get_or_create_dataset_database", fake_get_or_create
+    )
+    monkeypatch.setattr(
+        "cognee.context_global_variables.ensure_embedding_model_matches",
+        fake_ensure_embedding_model_matches,
     )
     monkeypatch.setattr(
         "cognee.context_global_variables.resolve_dataset_database_connection_info", fake_resolve

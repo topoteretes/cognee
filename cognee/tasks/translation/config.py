@@ -85,7 +85,7 @@ class TranslationConfig(BaseSettings):
     min_text_length_for_detection: int = 10
     skip_detection_for_short_text: bool = True
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     def to_dict(self) -> dict:
         return {

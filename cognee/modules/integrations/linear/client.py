@@ -24,6 +24,11 @@ GRAPHQL_URL = "https://api.linear.app/graphql"
 
 _TIMEOUT = aiohttp.ClientTimeout(total=30)
 
+
+class LinearUnauthorizedError(RuntimeError):
+    """Linear answered 401: the token was rejected, whatever its stored expiry says."""
+
+
 _AGENT_ACTIVITY_CREATE_MUTATION = """
 mutation AgentActivityCreate($input: AgentActivityCreateInput!) {
   agentActivityCreate(input: $input) {
@@ -65,6 +70,8 @@ async def graphql(
             headers={"Authorization": f"Bearer {access_token}"},
         ) as response,
     ):
+        if response.status == 401:
+            raise LinearUnauthorizedError(f"Linear {operation} failed: HTTP 401")
         if response.status != 200:
             raise RuntimeError(f"Linear {operation} failed: HTTP {response.status}")
         body: dict[str, Any] = await response.json()

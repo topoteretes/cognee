@@ -44,9 +44,24 @@ Build memory for Agents and query from any client that speaks MCP – in your t
 - Integrated logging – all actions written to a rotating file (see get_log_file_location()) and mirrored to console in dev
 - Session-aware memory – store fast session cache entries or permanent graph memory through one `remember` tool
 - Focused recall – query memory through one `recall` tool with optional session and search controls
+- **Code graph search** – inspect indexed symbols, dependencies, architecture, and change impact with `code_search`
 - Simple deletion – remove a dataset or all owned memory through one `forget` tool
 
 Please refer to our documentation [here](https://docs.cognee.ai/how-to-guides/deployment/mcp) for further information.
+
+### Code graph search
+
+Use `code_search` for deterministic queries against an indexed code dataset. Select an operation and pass its operation-specific filters in `arguments`:
+
+```json
+{
+  "operation": "query_facts",
+  "arguments": {"kinds": ["module", "symbol"], "limit": 100},
+  "datasets": "sample-code-dataset"
+}
+```
+
+Supported operations are `query_facts`, `explore`, `traverse`, `find_path`, `impact_analysis`, `insights`, `architecture`, and `delta`.
 
 ## 🚀 Quick Start
 
@@ -153,7 +168,6 @@ If you'd rather run cognee-mcp in a container, you have two options:
       - `mistral` - Mistral models
       - `ollama` / `huggingface` - Local model support
       - `docs` - Document processing
-      - `codegraph` - Code analysis
       - `tracing` - OpenTelemetry tracing
       - `redis` - Redis support
       - And more (see [pyproject.toml](https://github.com/topoteretes/cognee/blob/main/pyproject.toml) for full list)
@@ -521,6 +535,45 @@ The MCP server exposes four tools (three memory tools pinned in `tools/list`, pl
 - **forget**: Delete memory by dataset name or id, a single data item by `data_id`, or delete all owned memory with `everything=True`
 - **cognify_status**: Check the progress of background ingestion started by `remember(background=True)`. Unadvertised by default; discoverable via `search_tools` and callable by name
 
+### Recall result summaries
+
+`recall` (the MCP memory-search tool) starts every successful response with a
+summary, followed by the same result body as before:
+
+```text
+3 memories found (2 from sessions, 1 from project docs)
+[session] ...
+```
+
+The count is the number of returned memory entries, not `top_k`, underlying
+chunks used to synthesize an answer, or system status messages. Source and dataset
+hints use metadata already present in the returned entries; no recency lookup or
+extra LLM call is made.
+
+Empty results distinguish an empty memory graph, indexing in progress, indexing
+failure, and no match. When available, progress is displayed as, for example,
+`still indexing — 12/40 items processed, retry shortly`. These are data items,
+not an inferred chunk count. A graph with no recorded indexing run is reported
+as not yet indexed. If the status check fails or exceeds its two-second budget,
+the summary explicitly says memory status is unavailable. Successful hits do
+not trigger status checks.
+
+The MCP content remains a single `TextContent` block. Text consumers can separate
+line one from the unchanged body with `text.partition("\n")`. Machine consumers
+can read `content[0]._meta["cognee/memory"]`, containing `count` and `state`.
+
+`state` is one of four values, one per action a caller can take:
+
+| state | meaning |
+| --- | --- |
+| `found` | memory contributed; `count` is how many entries |
+| `indexing` | ingestion is still running — retry shortly |
+| `build_failed` | ingestion failed — check `cognify_status` |
+| `none` | nothing to return |
+
+`indexing` additionally carries `completed`/`total` when the pipeline reports
+them. Tool errors retain their existing `Error:` response.
+
 ### Tool surface (`COGNEE_MCP_TOOL_MODE`)
 
 Advertising every tool up front costs agent context and hurts tool-selection accuracy, so by default the server pins a small set in `tools/list` and makes the rest discoverable through FastMCP's built-in `search_tools`. **Unadvertised tools stay callable by name.**
@@ -585,8 +638,14 @@ rm -rf "$DATA_ROOT/.cognee_system" "$DATA_ROOT/.data_storage"
 # Store permanent memory
 remember(data="Cognee MCP now exposes a focused memory API.", dataset_name="main_dataset")
 
-# Store session memory
-remember(data="Temporary working note", session_id="agent-session-1")
+# Store permanent memory without the automatic improve stage (add + cognify still run)
+remember(data="A new fact", dataset_name="main_dataset", self_improvement=False)
+
+# The opt-out also applies to file uploads and background=True ingestion
+remember(data="A new fact", self_improvement=False, background=True)
+
+# Store session memory without a background graph bridge in direct mode
+remember(data="Temporary working note", session_id="agent-session-1", self_improvement=False)
 
 # Recall from memory
 recall(query="What changed in the MCP server?", session_id="agent-session-1")
@@ -594,6 +653,14 @@ recall(query="What changed in the MCP server?", session_id="agent-session-1")
 # Delete one dataset
 forget(dataset="main_dataset")
 ```
+
+`self_improvement` defaults to `True`; only an explicit `False` is forwarded, so
+`True` leaves the core default in charge. In permanent mode, `False` disables
+automatic improvement without skipping ingestion or graph building.
+In **direct session mode**, it disables the automatic session-to-graph bridge while
+still storing the session entry. In **API session mode**, MCP uses typed QA entries,
+which stay in the session cache for all flag values; the flag does not enable a
+graph bridge there. It does not control separately requested skill improvement.
 
 
 ### Select an uploaded ontology for a write

@@ -74,9 +74,15 @@ class CloudClient:
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
+            # trust_env: honour HTTP(S)_PROXY / NO_PROXY like every other HTTP
+            # client cognee uses. aiohttp ignores them by default, which in a
+            # proxied environment (corporate egress, Docker Sandboxes' credential
+            # proxy) sends requests around the proxy — a proxy-managed API key
+            # then never gets substituted and the server sees the placeholder.
             self._session = aiohttp.ClientSession(
                 headers={"X-Api-Key": self.api_key},
                 timeout=self.DEFAULT_TIMEOUT,
+                trust_env=True,
             )
         return self._session
 
@@ -451,14 +457,40 @@ class CloudClient:
             return UpdateResult.model_validate(await resp.json()).model_dump()
 
     async def list_data(self, dataset_id: UUID) -> list:
-        """GET /api/v1/datasets/{dataset_id}/data — the documents in a dataset."""
-        session = await self._get_session()
+        """Traverse bounded pages, deduplicating overlaps during concurrent ingest.
 
-        async with session.get(f"{self.service_url}/api/v1/datasets/{dataset_id}/data") as resp:
-            if resp.status >= 400:
-                body = await resp.text()
-                raise RuntimeError(f"Remote list_data failed ({resp.status}): {body}")
-            return await resp.json()
+        This is not a snapshot: inserts/deletes can make rows unreachable during
+        offset traversal. Above offset 1,000,000 the server rejects requests;
+        /data/count still reports the full dataset size.
+        """
+        session = await self._get_session()
+        rows = []
+        seen_ids = set()
+        limit = 1000
+        offset = 0
+        while True:
+            async with session.get(
+                f"{self.service_url}/api/v1/datasets/{dataset_id}/data",
+                params={"limit": limit, "offset": offset},
+            ) as resp:
+                if resp.status >= 400:
+                    body = await resp.text()
+                    raise RuntimeError(f"Remote list_data failed ({resp.status}): {body}")
+                page = await resp.json()
+            if not isinstance(page, list):
+                raise RuntimeError("Remote list_data returned an invalid document list")
+            page_ids = {str(row["id"]) for row in page if isinstance(row, dict) and "id" in row}
+            if len(page) > limit or (page and page_ids and page_ids <= seen_ids):
+                raise RuntimeError("Remote server did not honor dataset pagination")
+            # Advance by consumed server rows, independently of deduplication.
+            offset += len(page)
+            for row in page:
+                row_id = str(row["id"])
+                if row_id not in seen_ids:
+                    seen_ids.add(row_id)
+                    rows.append(row)
+            if len(page) < limit:
+                return rows
 
     async def cognify(self, datasets: Any = None, **kwargs) -> dict:
         """POST /api/v1/cognify — build the knowledge graph."""

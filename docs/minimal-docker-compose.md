@@ -64,8 +64,8 @@ curl -X POST http://localhost:8000/api/v1/search \
 ## Keeping data across restarts
 
 The minimal file above stores everything inside the container, so removing the
-container removes your data. To persist it, point Cognee's data directories at
-a named volume:
+container removes your data. To persist it, mount a named volume at the
+image's built-in storage path:
 
 ```yaml
 services:
@@ -76,14 +76,21 @@ services:
     environment:
       LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY to your OpenAI API key}
       ENABLE_BACKEND_ACCESS_CONTROL: "false"
-      DATA_ROOT_DIRECTORY: /cognee-data/data
-      SYSTEM_ROOT_DIRECTORY: /cognee-data/system
     volumes:
-      - cognee_data:/cognee-data
+      - cognee_storage:/cognee-storage
 
 volumes:
-  cognee_data:
+  cognee_storage:
 ```
+
+> **Note:** `/cognee-storage` is the authoritative storage path baked into the
+> image (its `Dockerfile` defaults `DATA_ROOT_DIRECTORY` and
+> `SYSTEM_ROOT_DIRECTORY` under it, pre-created and owned by the non-root
+> `cognee` user, uid 1000) — the same convention the repository's
+> [`docker-compose.yml`](../docker-compose.yml) uses. You can relocate storage
+> (e.g. to `/cognee-data`) by overriding `DATA_ROOT_DIRECTORY` and
+> `SYSTEM_ROOT_DIRECTORY`, but a fresh named volume mounted at a custom path is
+> created root-owned, so you must also make it writable for uid 1000.
 
 ## Going further
 

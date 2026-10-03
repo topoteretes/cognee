@@ -16,8 +16,12 @@ Tests that never touch the relational database are unaffected.
 
 import asyncio
 import logging
+from contextlib import ExitStack
+from unittest.mock import patch
 
 import pytest
+
+from cognee.tests.utils.keyless_gate_targets import KEYLESS_GATE_PATCH_TARGETS
 
 logger = logging.getLogger(__name__)
 
@@ -46,3 +50,17 @@ def _relational_db_for_unit_tests():
     )
 
     create_relational_engine.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _keyless_gates_see_a_usable_llm():
+    """Unit tests mock the LLM call itself; the keyless gates must not skip it.
+
+    CI has no key, so tests that mock the downstream LLM call would otherwise
+    take the keyless branch. A meta-test keeps this target list synchronized
+    with module-level ``llm_available`` imports.
+    """
+    with ExitStack() as stack:
+        for target in KEYLESS_GATE_PATCH_TARGETS:
+            stack.enter_context(patch(target, return_value=True))
+        yield

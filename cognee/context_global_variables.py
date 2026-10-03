@@ -8,6 +8,9 @@ from typing_extensions import Self
 from cognee.base_config import get_base_config
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.graph.config import get_graph_config, get_graph_context_config
+from cognee.infrastructure.databases.utils.ensure_embedding_model_matches import (
+    ensure_embedding_model_matches,
+)
 from cognee.infrastructure.databases.utils.get_or_create_dataset_database import (
     get_or_create_dataset_database,
 )
@@ -343,6 +346,10 @@ class DatabaseContextManager:
         graph_db_config.set(graph_config)
         vector_db_config.set(vector_config)
         file_storage_config.set(storage_config)
+
+        # With this dataset's vector store bound: refuse a configured embedding
+        # model whose width differs from the one that built the dataset.
+        await ensure_embedding_model_matches(dataset_database)
 
     async def _apply(self) -> None:
         if self._applied:

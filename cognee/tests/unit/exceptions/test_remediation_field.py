@@ -17,6 +17,7 @@ from cognee.exceptions import (
     remediation_for,
 )
 from cognee.infrastructure.llm.exceptions import LLMAPIKeyNotSetError
+from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.tasks.ingestion.exceptions.exceptions import (
     S3FileSystemNotFoundError,
     UnsupportedDBProviderError,
@@ -62,6 +63,10 @@ def test_remediation_for_prefers_own_hint_and_never_repeats():
     assert remediation_for(RuntimeError("unrelated")) is None
 
 
+def test_domain_permission_denial_has_no_llm_remediation():
+    assert remediation_for(PermissionDeniedError(log=False)) is None
+
+
 def test_no_hint_embeds_the_marker_it_is_labelled_with():
     """Every consumer labels the hint itself, so no hint may carry its own "Fix:".
 
@@ -104,3 +109,30 @@ async def test_rest_handler_adds_remediation_key_only_when_known():
 
     without = await exception_handler(None, CogneeApiError("plain", "Plain"))
     assert set(json.loads(without.body)) == {"detail"}
+
+
+@pytest.mark.parametrize(
+    "message,anchor",
+    [
+        (
+            "litellm.NotFoundError: The model `text-embeding-3-small` does not exist",
+            "EMBEDDING_MODEL",
+        ),
+        ("No module named 'transformers'", "cognee[huggingface]"),
+    ],
+)
+def test_embedding_misconfiguration_rows(message, anchor):
+    assert anchor in find_remediation(message)
+
+
+def test_cognee_not_found_errors_do_not_match_the_model_row():
+    hint = find_remediation("EntityNotFoundError: Entity not found. (Status code: 404)")
+    assert hint is None or "EMBEDDING_MODEL" not in hint
+
+
+def test_auto_log_line_includes_the_message(caplog):
+    import logging
+
+    with caplog.at_level(logging.ERROR):
+        CogneeApiError("the real cause", "Boom", status_code=422)
+    assert any("the real cause" in r.getMessage() for r in caplog.records)

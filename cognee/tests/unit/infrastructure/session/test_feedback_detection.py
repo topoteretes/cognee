@@ -10,7 +10,10 @@ from cognee.infrastructure.session.feedback_detection import (
     detect_feedback,
     is_auto_feedback_enabled,
 )
-from cognee.infrastructure.session.feedback_models import FeedbackDetectionResult
+from cognee.infrastructure.session.feedback_models import (
+    FeedbackDetectionResult,
+    SessionTurnAnalysis,
+)
 from cognee.infrastructure.session.session_context_models import (
     CandidateContextUpdate,
     CandidateLessonLearnedUpdate,
@@ -375,3 +378,21 @@ class TestRatingSectionFollowsAutoFeedback:
 
     def test_module_does_not_read_the_personalization_flag(self):
         assert not hasattr(feedback_detection_module, "get_base_config")
+
+
+@pytest.mark.asyncio
+async def test_turn_analysis_is_skipped_without_a_usable_llm():
+    """Keyless setups skip the per-turn analysis before any LLM client is built (SDK-753)."""
+    with (
+        patch.object(feedback_detection_module, "llm_available", return_value=False),
+        patch(
+            "cognee.infrastructure.session.feedback_detection.LLMGateway.acreate_structured_output",
+            new_callable=AsyncMock,
+        ) as mock_llm,
+    ):
+        result = await feedback_detection_module.analyze_turn_for_session_context(
+            "Was that answer right?"
+        )
+
+    assert result == SessionTurnAnalysis()
+    mock_llm.assert_not_awaited()

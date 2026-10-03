@@ -5,7 +5,7 @@ import { CogneeInstance } from "@/modules/instances/types";
 import { DataFile } from "./useData";
 import deleteDataset from "../datasets/deleteDataset";
 import getDatasets from "../datasets/getDatasets";
-import getDatasetData from "../datasets/getDatasetData";
+import { getAllDatasetData } from "../datasets/getDatasetData";
 import deleteDatasetData from "../datasets/deleteDatasetData";
 import searchDataset from "../datasets/searchDataset";
 import getVisualization from "../datasets/visualizeDataset";
@@ -101,7 +101,7 @@ function useDatasets(instance: CogneeInstance, searchValue: string, onReady?: ()
   }, [fetchDatasets]);
 
   const fetchDatasetData = useCallback((datasetId: string) => {
-    return getDatasetData(datasetId, instance)
+    return getAllDatasetData(datasetId, instance)
       .then((data) => {
         const datasetIndex = datasets.findIndex((dataset) => dataset.id === datasetId);
 

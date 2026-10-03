@@ -208,6 +208,10 @@ async def test_cognee_client_api_improve_omits_defaults():
 
 @pytest.mark.asyncio
 async def test_cognee_client_local_improve_returns_the_result_as_json_dict():
+    # This package pins a RELEASED cognee (see pyproject), which may predate the
+    # improve orchestrator. The client's job here is forwarding, and the rest of
+    # this module pins that without the module; only this test needs the types.
+    pytest.importorskip("cognee.modules.improve")
     from cognee.modules.improve import ImproveResult, StageResult
 
     class FakeCognee:
@@ -283,7 +287,9 @@ async def test_mcp_remember_background_forwards_self_improvement(monkeypatch):
     monkeypatch.setattr(server, "cognee_client", fake_client)
     tracked = []
 
-    def track(coro):
+    def track(coro, **kwargs):
+        # dataset= is passed by remember(); accepted here so the stub tracks the
+        # real signature rather than pinning an older one.
         tracked.append(coro)
 
     monkeypatch.setattr(server, "_track_background", track)

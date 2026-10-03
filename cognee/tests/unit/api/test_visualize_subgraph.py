@@ -9,8 +9,9 @@ import json
 import re
 import sys
 from contextlib import asynccontextmanager
+from functools import partial
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
@@ -23,8 +24,21 @@ import pytest
 # grab the module object from sys.modules and patch on it (patch.object), which
 # is import-order independent.
 from cognee.api.v1.visualize.visualize import visualize_graph as _visualize_graph
+from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 
 visualize_module = sys.modules["cognee.api.v1.visualize.visualize"]
+
+
+def _mock_engine():
+    """A mocked engine with no native bounded read, so it takes the interface default.
+
+    A bare MagicMock would answer ``iter_bounded_neighborhood`` with another
+    MagicMock, which is not an async iterator.
+    """
+    engine = MagicMock()
+    engine.iter_bounded_neighborhood = partial(GraphDBInterface.iter_bounded_neighborhood, engine)
+    engine.get_entity_type_names = AsyncMock(return_value={})
+    return engine
 
 
 def _chain_graph(node_count: int = 20):
@@ -73,7 +87,7 @@ async def test_query_default_renders_expected_subgraph(tmp_path):
     full_graph = _chain_graph(20)
     # Neighborhood around node "10": nodes 9-11, edges 9-10 and 10-11.
     subgraph = ([full_graph[0][i] for i in (9, 10, 11)], [full_graph[1][9], full_graph[1][10]])
-    engine = MagicMock()
+    engine = _mock_engine()
     engine.get_graph_data = AsyncMock(return_value=full_graph)
     engine.get_neighborhood = AsyncMock(return_value=subgraph)
 
@@ -93,7 +107,7 @@ async def test_query_default_renders_expected_subgraph(tmp_path):
 @pytest.mark.asyncio
 async def test_full_true_renders_entire_graph(tmp_path):
     full_graph = _chain_graph(20)
-    engine = MagicMock()
+    engine = _mock_engine()
     engine.get_graph_data = AsyncMock(return_value=full_graph)
     engine.get_neighborhood = AsyncMock()
 
@@ -109,7 +123,7 @@ async def test_full_true_renders_entire_graph(tmp_path):
 async def test_explicit_seed_ids_render_subgraph(tmp_path):
     full_graph = _chain_graph(20)
     subgraph = ([full_graph[0][i] for i in (9, 10, 11)], [full_graph[1][9], full_graph[1][10]])
-    engine = MagicMock()
+    engine = _mock_engine()
     engine.get_neighborhood = AsyncMock(return_value=subgraph)
     engine.get_graph_data = AsyncMock()
 
@@ -125,7 +139,7 @@ async def test_explicit_seed_ids_render_subgraph(tmp_path):
 async def test_recall_result_provenance_seeds_subgraph(tmp_path):
     full_graph = _chain_graph(20)
     subgraph = ([full_graph[0][i] for i in (9, 10, 11)], [full_graph[1][9], full_graph[1][10]])
-    engine = MagicMock()
+    engine = _mock_engine()
     engine.get_neighborhood = AsyncMock(return_value=subgraph)
 
     recall_result = [SimpleNamespace(used_graph_element_ids={"node_ids": ["10"]})]
@@ -140,7 +154,7 @@ async def test_recall_result_provenance_seeds_subgraph(tmp_path):
 async def test_no_seed_falls_back_to_degree(tmp_path):
     full_graph = _chain_graph(20)
     subgraph = ([full_graph[0][i] for i in (9, 10, 11)], [full_graph[1][9], full_graph[1][10]])
-    engine = MagicMock()
+    engine = _mock_engine()
     engine.get_top_degree_node_ids = AsyncMock(return_value=["10"])
     engine.get_graph_data = AsyncMock(
         side_effect=AssertionError("degree seeds must not load the full graph")

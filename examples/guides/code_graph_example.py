@@ -5,8 +5,8 @@ What it shows:
     - Querying the resulting graph deterministically with SearchType.CODE
 
 Requirements:
-    - The enola binary — pip install "cognee[codegraph]" (ships it as the
-      enola-cli wheel), or set ENOLA_PATH to an enola binary you installed
+    - The enola binary included with cognee, or an explicit binary set through
+      ENOLA_PATH
 
 SearchType.CODE does not require an LLM API key or embedding model.
 

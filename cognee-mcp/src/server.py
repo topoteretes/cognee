@@ -8,6 +8,7 @@ import sys
 from collections import deque
 from contextlib import redirect_stdout
 from datetime import datetime, timezone
+from typing import Literal
 
 import fastmcp
 import uvicorn
@@ -45,9 +46,23 @@ except ImportError:
     from tool_registry import DEFAULT_TAG, MEMORY_TAG, ToolRegistry
 
 try:
-    from .server_utils import format_recall_results, parse_csv_list, validate_top_k
+    from .server_utils import (
+        RecallState,
+        format_recall_results,
+        parse_csv_list,
+        recall_items,
+        recall_marker_state,
+        validate_top_k,
+    )
 except ImportError:
-    from server_utils import format_recall_results, parse_csv_list, validate_top_k
+    from server_utils import (
+        RecallState,
+        format_recall_results,
+        parse_csv_list,
+        recall_items,
+        recall_marker_state,
+        validate_top_k,
+    )
 
 
 try:
@@ -89,6 +104,9 @@ def _tool_error_text(prefix: str, error: Exception) -> str:
 _TASK_ERROR_HISTORY = 50
 _task_errors: dict[str, deque[tuple[str, str]]] = {}
 _MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+# Total budget for empty-recall diagnostics. get_recall_state derives every hop's
+# timeout from this, so it bounds the work rather than cancelling it mid-flight.
+_RECALL_STATE_TIMEOUT_SECONDS = 5.0
 
 # Strong references to in-flight background tasks. asyncio's event loop only keeps
 # weak references to tasks, so a fire-and-forget task can be GC'd mid-execution if
@@ -96,13 +114,17 @@ _MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 # done_callback removes them on completion. See:
 # https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task
 _background_tasks: set[asyncio.Task] = set()
+_background_task_datasets: dict[asyncio.Task, str] = {}
 
 
-def _track_background(coro) -> asyncio.Task:
+def _track_background(coro, *, dataset: str | None = None) -> asyncio.Task:
     """Spawn a background task and pin it so the event loop won't GC it."""
     task = asyncio.create_task(coro)
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
+    if dataset is not None:
+        _background_task_datasets[task] = dataset
+        task.add_done_callback(lambda done: _background_task_datasets.pop(done, None))
     return task
 
 
@@ -352,8 +374,9 @@ async def remember(
     self-improvement loop (improve) unless self_improvement=False.
 
     With session_id (session memory): Stores the data in the session
-    cache only. Fast, no entity extraction. Omit session_id when the
-    content should be stored as permanent graph memory.
+    cache. Direct mode may also bridge it to the graph in the background;
+    API mode uses typed cache entries and does not bridge to the graph.
+    Omit session_id when the content should be stored as permanent graph memory.
 
     Pass either `data` (text) or `filename` + `content_base64` (a file
     upload, up to 10 MB), not both. File uploads are permanent-memory
@@ -374,9 +397,15 @@ async def remember(
         agent-scoped dataset (e.g. "cursor_vscode_memory"), or
         "main_dataset" if no client identity is detected.
     session_id : str, optional
-        Session ID. When set, stores in session cache only.
+        Session ID. Stores in cache; direct mode may also bridge to the graph
+        unless self_improvement is False.
     custom_prompt : str, optional
         Custom prompt for entity extraction (permanent mode only).
+    self_improvement : bool
+        False skips automatic improvement after permanent ingestion; add and
+        cognify still run. In direct session mode, False disables the background
+        session-to-graph bridge. API session entries are cache-only regardless
+        of this flag. Default True.
     ontology_key : str or list[str], optional
         One or more uploaded ontology keys for extraction (permanent mode only).
         API mode uses ontologies uploaded by the authenticated API user. Local
@@ -388,10 +417,6 @@ async def remember(
         deadline shorter than ingestion takes. Ignored with session_id, which
         is already fast. Errors surface via cognify_status, not the return
         value.
-    self_improvement : bool
-        Run the improve loop (triplet enrichment and, with sessions, the
-        session bridge) after cognify. Permanent mode only; default True.
-        Pass False for a plain add + cognify ingestion.
     """
     if content_base64 and data:
         return [
@@ -457,7 +482,8 @@ async def remember(
                 custom_prompt=custom_prompt,
                 ontology_key=ontology_key,
                 self_improvement=self_improvement,
-            )
+            ),
+            dataset=dataset_name,
         )
         queued = f"'{filename}'" if content_base64 else "text"
         return [
@@ -509,6 +535,8 @@ async def recall(
     session_id: str | None = None,
     system_prompt: str | None = None,
     top_k: int = 15,
+    scope: str | None = None,
+    code_query: dict | None = None,
 ) -> list:
     """Search memory with auto-routing and session awareness.
 
@@ -543,11 +571,32 @@ async def recall(
         on the server.
     top_k : int
         Maximum results to return (default: 15).
+    scope : str, optional
+        Comma-separated memory sources to include: 'graph', 'session',
+        'session_first', 'trace', 'session_context', 'tools', 'code', 'all',
+        'auto'. Defaults to 'auto' (session first when session_id is set,
+        else graph). 'tools' and 'code' are explicit opt-in only. 'code' runs
+        a deterministic code-graph query and tags results source='code'.
+    code_query : dict, optional
+        'code' scope only: structured operation and arguments for the
+        deterministic code-graph query, e.g. {"operation": "query_facts",
+        "property": "language", "limit": 500}. Supported operations:
+        query_facts, explore, traverse, find_path, impact_analysis, insights,
+        architecture, delta. When omitted, 'code' scope runs an 'explore'
+        seeded with the query text. Requires exact node names/IDs or
+        structured filters, not natural-language questions.
+
+    Returns a one-line memory-hit or empty-state summary followed by the original
+    result text. Status markers do not count as hits. Empty-state checks are
+    best-effort; indexing progress is shown only when available.
     """
     with redirect_stdout(sys.stderr):
         try:
             normalized_top_k = validate_top_k(top_k)
             dataset_list = parse_csv_list(datasets)
+            scope_list = parse_csv_list(scope)
+            if code_query is not None and not isinstance(code_query, dict):
+                raise ValueError("code_query must be a JSON object (dict).")
             results = await cognee_client.recall(
                 query_text=query,
                 search_type=search_type,
@@ -555,17 +604,110 @@ async def recall(
                 session_id=session_id,
                 system_prompt=system_prompt,
                 top_k=normalized_top_k,
+                scope=scope_list or None,
+                code_query=code_query,
             )
+            empty_state = recall_marker_state(results)
+            items = recall_items(results)
+            queued = any(
+                not task.done() and (not dataset_list or dataset in dataset_list)
+                for task, dataset in _background_task_datasets.items()
+            )
+            if not items and queued:
+                empty_state = RecallState("indexing")
+            elif not items and empty_state is None:
+                try:
+                    deadline = asyncio.get_running_loop().time() + _RECALL_STATE_TIMEOUT_SECONDS
+                    empty_state = await asyncio.wait_for(
+                        cognee_client.get_recall_state(dataset_list, deadline=deadline),
+                        timeout=_RECALL_STATE_TIMEOUT_SECONDS,
+                    )
+                except Exception:
+                    logger.debug("Recall empty-state diagnostics unavailable", exc_info=True)
+                    empty_state = RecallState("none")
             return [
                 types.TextContent(
                     type="text",
-                    text=format_recall_results(results, json_encoder=JSONEncoder),
+                    text=format_recall_results(
+                        results,
+                        json_encoder=JSONEncoder,
+                        items=items,
+                        empty_state=empty_state,
+                    ),
+                    _meta={
+                        "cognee/memory": {
+                            "count": len(items),
+                            "state": "found"
+                            if items
+                            else (empty_state or RecallState("none")).state,
+                        }
+                    },
                 )
             ]
         except Exception as e:
             error_msg = _tool_error_text("Recall failed", e)
             logger.exception(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
+
+
+@registry.tool(tags={DEFAULT_TAG})
+async def code_search(
+    operation: Literal[
+        "query_facts",
+        "explore",
+        "traverse",
+        "find_path",
+        "impact_analysis",
+        "insights",
+        "architecture",
+        "delta",
+    ],
+    arguments: dict | None = None,
+    datasets: str | None = None,
+    query: str = "",
+    top_k: int = 15,
+) -> list:
+    """Search Cognee's indexed code graph with a structured operation.
+
+    This tool is for source-code structure, symbols, call/dependency paths,
+    impact, architecture, and index changes. It does not search conversational
+    memory. Choose an operation and pass its operation-specific fields in
+    ``arguments``. For example, use operation="query_facts" with
+    arguments={"kinds": ["module", "symbol"], "limit": 100}, or
+    operation="impact_analysis" with arguments={"seeds": ["UserService"]}.
+
+    Parameters
+    ----------
+    operation : str
+        Code-graph operation: query_facts, explore, traverse, find_path,
+        impact_analysis, insights, architecture, or delta.
+    arguments : dict, optional
+        Operation-specific structured arguments. Do not include an "operation"
+        key here; select it with the operation parameter.
+    datasets : str, optional
+        Comma-separated Cognee dataset names containing indexed code.
+    query : str
+        Optional seed text, primarily used by explore when no explicit seed is
+        supplied in arguments.
+    top_k : int
+        Maximum number of results to return (default: 15).
+    """
+    code_arguments = arguments or {}
+    if "operation" in code_arguments:
+        return [
+            types.TextContent(
+                type="text",
+                text='Error: Select the operation with the "operation" parameter, not in arguments.',
+            )
+        ]
+    return await recall(
+        query=query,
+        search_type="CODE",
+        datasets=datasets,
+        top_k=top_k,
+        scope="code",
+        code_query={"operation": operation, **code_arguments},
+    )
 
 
 @registry.tool(tags={DEFAULT_TAG, MEMORY_TAG})

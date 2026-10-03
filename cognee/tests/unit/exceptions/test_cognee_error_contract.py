@@ -49,6 +49,8 @@ PACKAGE_ROOT = Path(cognee.__file__).parent
 SAMPLE_ARGUMENTS = {
     "conflicts": [{"name": "report.txt", "data_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"}],
     "attribute": "sample_attribute",
+    # CapabilityDeniedError builds its message from the capability it refused.
+    "capability": "sample_capability",
     # DatasetNoDataError (search fan-out) wraps a retriever error for one dataset.
     "dataset": SimpleNamespace(
         name="sample_dataset", id="sample-dataset-id", tenant_id="sample-tenant-id"
@@ -75,6 +77,13 @@ SAMPLE_ARGUMENTS = {
     "provider": "sample-provider",
     "search_type": "sample-search",
     "status_code": 400,
+    # GlinerInstallError: which install step failed (lock, metadata, installer, torch, ...).
+    "step": "sample-step",
+    # EmbeddingDimensionMismatchError: the model that built a dataset vs the configured one.
+    "stored_model": "sample-provider/old-model",
+    "stored_dimensions": 384,
+    "configured_model": "sample-provider/new-model",
+    "configured_dimensions": 1536,
     "value": 1,
 }
 
@@ -207,7 +216,7 @@ def _import_family_modules():
         try:
             importlib.import_module(_module_name(path))
         except Exception:
-            # Modules behind optional extras (codegraph, scraping, neptune, ...)
+            # Modules behind optional extras (scraping, neptune, ...)
             # may not import in a minimal environment. The static test above
             # already covers them; here we simply skip what we cannot load.
             logger.debug("Skipping item after error in _import_family_modules", exc_info=True)

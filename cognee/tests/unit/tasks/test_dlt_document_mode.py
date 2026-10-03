@@ -41,6 +41,7 @@ def test_is_dlt_sourced_only_true_for_dlt_source():
 
 def test_build_document_data_item_tags_a_non_dlt_source():
     row = SimpleNamespace(
+        table_name="notion_pages",
         row_data={
             "id": "p1",
             "url": "https://example.com/p1",
@@ -58,14 +59,18 @@ def test_build_document_data_item_tags_a_non_dlt_source():
     assert is_dlt_sourced(item.system_metadata) is False
     assert item.system_metadata["url"] == "https://example.com/p1"
     assert item.system_metadata["external_id"] == "p1"
+    assert item.system_metadata["table_name"] == "notion_pages"
     assert item.data_id == data_id
     # title becomes an H1 prefixed to the content body.
     assert item.data.startswith("# My Page")
     assert "body text" in item.data
+    # Document rows are always stored as literal text, titled or not.
+    assert item.literal_text is True
 
 
 def test_build_document_data_item_without_title_is_just_content():
     row = SimpleNamespace(
+        table_name="wiki_pages",
         row_data={"id": "x", "content": "plain body"},
         content_hash="h",
     )
@@ -73,3 +78,17 @@ def test_build_document_data_item_without_title_is_just_content():
     assert item.data == "plain body"
     assert item.system_metadata["source"] == "wiki"
     assert item.system_metadata["title"] is None
+    assert item.literal_text is True
+
+
+def test_build_document_data_item_untitled_url_content_is_marked_literal():
+    # An untitled row whose content is just a URL must never be fetched as one;
+    # literal_text=True is what tells ingest_data to store it as plain text.
+    row = SimpleNamespace(
+        table_name="wiki_pages",
+        row_data={"id": "y", "content": "https://example.com/x"},
+        content_hash="h2",
+    )
+    item = _build_document_data_item(row, uuid5(NAMESPACE_OID, "y"), "wiki")
+    assert item.data == "https://example.com/x"
+    assert item.literal_text is True

@@ -353,6 +353,29 @@ async def test_pending_extraction_noop_below_interval(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_pending_extraction_noop_without_a_usable_llm(monkeypatch):
+    sm = FakeSessionManager(traces=[_trace("step-1"), _trace("step-2"), _trace("step-3")])
+
+    async def unexpected_llm(text_input, system_prompt, response_model):
+        raise AssertionError("LLM should not run when none is configured")
+
+    monkeypatch.setattr(agent_context_extraction, "llm_available", lambda: False)
+    monkeypatch.setattr(
+        agent_context_extraction.LLMGateway,
+        "acreate_structured_output",
+        unexpected_llm,
+    )
+
+    touched = await extract_pending_agent_context(
+        session_manager=sm, user_id="u", session_id="s", min_new_traces=3, overlap=1
+    )
+
+    assert touched == []
+    assert sm.trace_session_last_n_calls == []
+    assert sm.store == []
+
+
+@pytest.mark.asyncio
 async def test_pending_extraction_runs_at_interval_and_sets_watermark(monkeypatch):
     sm = FakeSessionManager(traces=[_trace("step-1"), _trace("step-2"), _trace("step-3")])
     _patch_llm(

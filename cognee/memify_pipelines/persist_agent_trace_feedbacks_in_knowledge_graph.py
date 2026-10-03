@@ -65,6 +65,7 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
             session_ids=session_ids,
             raw_trace_content=raw_trace_content,
             last_n_steps=last_n_steps,
+            needs_llm=False,
         )
     ]
     enrichment_tasks = [
@@ -73,6 +74,7 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
             dataset_id=dataset_to_write[0].id,
             node_set_name=node_set_name,
             user=user,
+            needs_llm=False,
         ),
     ]
 
