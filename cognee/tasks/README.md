@@ -16,9 +16,8 @@ task's output, `enriches`, `ctx` injection, `Drop`) are documented in
 | 2 | `documents.extract_chunks_from_documents` | `Document` → `DocumentChunk`s (uses `cognee.modules.chunking`) |
 | 3 | `graph.extract_graph_from_data` | chunks → chunks with `Entity`/`EntityType` nodes and edges attached (LLM, or GLiNER with `extractor="gliner_demo"`) |
 | 4 | `summarization.summarize_text` | chunks → `TextSummary` nodes (LLM) |
-| 5 | `storage.add_data_points` | data points → written to graph + vector DB (+ edge evidence) |
-| 6 | `provenance.record_provenance` | audit-ledger rows, when `PROVENANCE_TRACKING=true` |
-| 7 | `graph.detect_contradictions` | `contradicts` edges, when `CONTRADICTION_DETECTION=true` |
+| 5 | `storage.add_data_points` | data points → written to graph + vector DB (+ edge evidence; + audit-ledger rows when `PROVENANCE_TRACKING=true`) |
+| 6 | `graph.detect_contradictions` | `contradicts` edges, when `CONTRADICTION_DETECTION=true` (+ audit-ledger rows for them) |
 
 `cognify(temporal_cognify=True)` swaps steps 3–4 for `temporal_graph.extract_events_and_timestamps`
 → `temporal_graph.extract_knowledge_graph_from_events`. The dlt route adds
@@ -40,7 +39,7 @@ task's output, `enriches`, `ctx` injection, `Drop`) are documented in
 | `ingestion/` | Ingest and normalise inputs for `add()`: resolve paths/directories, save to storage, dedup, dlt sources, relational-DB migration | `ingest_data`, `resolve_data_directories`, `save_data_item_to_storage`, `resolve_dlt_sources`, `migrate_relational_database` |
 | `memify/` | Enrichment tasks: session and agent-trace persistence, feedback weights, entity dedup/consolidation, triplet embeddings, global context index | `extract_subgraph`, `cognify_session`, `apply_feedback_weights`, `extract_feedback_qas`, `detect_entity_duplicates`, … |
 | `presort/` | Pre-organise a folder before ingestion (`remember(dry_run="presort")`): classify, hash, dedup, version and PII detection, proposed groupings | `build_report`, `classify_files`, `detect_duplicates`, `detect_pii`, `group_files`, `apply_presort_graph` |
-| `provenance/` | Write audit-ledger provenance entries for a pipeline run | `record_provenance` |
+| `provenance/` | Write audit-ledger provenance entries; `add_data_points` calls the storage hook, the task form is for custom pipelines that store data points another way | `record_provenance_at_storage`, `record_provenance` |
 | `schema/` | Ingest a relational database schema as graph nodes | `ingest_database_schema` |
 | `storage/` | Persist data points: graph + vector writes, index rebuilds, fact validity (`close_node`) | `add_data_points`, `index_data_points`, `index_graph_edges` |
 | `summarization/` | LLM summaries of chunks and code | `summarize_text`, `summarize_code` |

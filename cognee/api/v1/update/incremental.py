@@ -86,6 +86,7 @@ from cognee.modules.graph.methods.delete_chunks_incremental import (
     delete_chunks_incremental,
     edge_endpoints,
 )
+from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElements
 from cognee.modules.ingestion import classify, save_data_to_file
 from cognee.modules.ontology.get_default_ontology_resolver import (
     get_default_ontology_resolver,
@@ -100,6 +101,7 @@ from cognee.modules.pipelines.operations.log_pipeline_run_complete import (
 from cognee.modules.pipelines.operations.log_pipeline_run_error import log_pipeline_run_error
 from cognee.modules.pipelines.operations.log_pipeline_run_start import log_pipeline_run_start
 from cognee.modules.pipelines.utils import generate_pipeline_id
+from cognee.modules.provenance.tombstones import tombstone_deleted_elements
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
@@ -378,6 +380,25 @@ def _misindexed_chunks(document: Document, stored_chunks: list[dict]) -> list[Do
         for position, node in enumerate(stored_chunks)
         if int(node.get("chunk_index", -1)) != position
     ]
+
+
+async def _retire_replaced_chunks(chunk_ids: list[str], dataset_id, data_id, user) -> None:
+    """Hard-delete replaced chunks' output and retract it in the audit ledger.
+
+    The replacement chunks were recorded by ``add_data_points``; this closes
+    the ledger side of the swap so lineage shows what the edit removed.
+    Tombstoning never raises — a ledger problem must not fail the update.
+    """
+    removal = await delete_chunks_incremental(chunk_ids, dataset_id, data_id)
+    if removal is None:
+        return
+    await tombstone_deleted_elements(
+        dataset_id,
+        DeletedGraphElements.from_source_ref_removal(removal),
+        user=user,
+        data_id=data_id,
+        reason="chunks_replaced",
+    )
 
 
 async def _restore_repositioned_chunks(chunks: list[DocumentChunk], _context) -> None:
@@ -941,13 +962,13 @@ async def _write_and_publish(
             summaries, ctx=context, embed_triplets=cognify_config.triplet_embedding
         )
         if cognify_config.contradiction_detection:
-            await detect_contradictions(summaries)
+            await detect_contradictions(summaries, ctx=context)
     if reused_chunks:
         await _restore_repositioned_chunks(reused_chunks, context)
 
     # -- Delete replaced chunks + summaries + chunk-orphaned entities --------- #
     if plan.deleted_ids:
-        await delete_chunks_incremental(plan.deleted_ids, dataset_id, data_id)
+        await _retire_replaced_chunks(plan.deleted_ids, dataset_id, data_id, user)
 
     # -- Renumber kept chunks whose position shifted --------------------------- #
     shifted_chunks = [

@@ -38,7 +38,6 @@ from cognee.tasks.graph import detect_contradictions
 from cognee.tasks.graph.exceptions import InvalidDataChunksError
 from cognee.tasks.graph.extract_graph_from_data import extract_graph_from_data
 from cognee.tasks.graph.resolve_temporal_contradictions import resolve_temporal_contradictions
-from cognee.tasks.provenance import record_provenance
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization.models import TextSummary
 
@@ -369,11 +368,8 @@ async def get_gliner_demo_tasks(
             needs_llm=False,
         ),
     ]
-
-    if track_provenance:
-        tasks.append(
-            Task(record_provenance, task_config={"batch_size": chunks_per_batch}, needs_llm=False)
-        )
+    # ``track_provenance`` is accepted for signature compatibility only: the
+    # audit ledger is recorded by add_data_points at the storage seam.
 
     if check_contradictions:
         tasks.append(Task(detect_contradictions, task_config={"batch_size": chunks_per_batch}))

@@ -192,6 +192,38 @@ async def test_flags_contradiction_as_graph_edge():
 
 
 @pytest.mark.asyncio
+async def test_contradiction_edges_are_handed_to_the_audit_ledger():
+    """The edges bypass add_data_points, so the task records them itself."""
+    chunks = [_summary([_entity("alice"), _entity("1990")])]
+    engine = _mock_graph_engine()
+    llm_result = ContradictionList(
+        contradictions=[
+            Contradiction(first_fact_id="F0", second_fact_id="F1", reason="r", confidence=0.95)
+        ]
+    )
+    ctx = SimpleNamespace(pipeline_run_id="run-1")
+
+    with (
+        _patched_config(),
+        patch.object(dc_module, "get_graph_engine", new_callable=AsyncMock, return_value=engine),
+        patch.object(
+            dc_module.LLMGateway,
+            "acreate_structured_output",
+            new_callable=AsyncMock,
+            return_value=llm_result,
+        ),
+        patch.object(dc_module, "record_edges_provenance", new_callable=AsyncMock) as ledger,
+    ):
+        await detect_contradictions(chunks, ctx=ctx)
+
+    ledger.assert_awaited_once()
+    recorded_edges, recorded_ctx = ledger.await_args.args
+    assert recorded_edges == engine.add_edges.await_args.args[0]
+    assert recorded_ctx is ctx
+    assert ledger.await_args.kwargs == {"activity": "detect_contradictions"}
+
+
+@pytest.mark.asyncio
 async def test_low_confidence_contradiction_is_not_flagged():
     chunks = [_summary([_entity("alice"), _entity("1990")])]
     engine = _mock_graph_engine()

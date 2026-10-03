@@ -18,8 +18,21 @@ JOINS to the graph source-ref system by storing the existing source-ref key on
 every ledger entry (``source_ref_key``) instead of inventing a new identifier.
 
 It never touches graph marking, never overwrites ``source_*`` fields, and is
-written by a passive, opt-in cognify task (``PROVENANCE_TRACKING``, default
-off) that can never break ingestion.
+written passively at the ``add_data_points`` storage seam (opt-in via
+``PROVENANCE_TRACKING``, default off; ``cognee/tasks/provenance/``) so every
+pipeline that stores DataPoints is covered, and it can never break ingestion.
+Deletions reach it the same way: the graph delete choke points, cognify
+rollback and incremental update call ``tombstones.py``, which turns
+hard-deleted elements into ``invalidate`` tombstones (never row deletes) and
+can never break a delete. A later re-ingest of the same content resurrects
+them, tombstone kept in the version history.
+
+Reading it: ``ProvenanceManager`` (``get_lineage`` / ``revision_history`` /
+``verify_chain`` / ``check`` / ``get_statistics`` / ``export``, all
+dataset-scopable), ``cognee-cli provenance`` and ``/api/v1/provenance``.
+``anchors.py`` adds external HMAC anchors of the chain head
+(``PROVENANCE_ANCHOR_KEY`` / ``PROVENANCE_ANCHOR_PATH``) — the defense against
+a ledger that is rewritten and re-chained in place.
 
 Three env flags govern three of these systems and must not be mixed up:
 

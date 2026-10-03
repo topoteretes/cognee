@@ -42,6 +42,7 @@ from cognee.api.v1.memify.routers import get_memify_router
 from cognee.api.v1.ontologies.routers.get_ontology_router import get_ontology_router
 from cognee.api.v1.permissions.routers import get_permissions_router
 from cognee.api.v1.proposals.routers import get_proposals_router
+from cognee.api.v1.provenance.routers import get_provenance_router
 from cognee.api.v1.recall.routers import get_recall_router
 from cognee.api.v1.remember.routers import get_remember_router
 from cognee.api.v1.responses.routers import get_responses_router
@@ -404,6 +405,8 @@ app.include_router(get_settings_router(), prefix="/api/v1/settings", tags=["sett
 app.include_router(get_visualize_router(), prefix="/api/v1/visualize", tags=["visualize"])
 
 app.include_router(get_schema_router(), prefix="/api/v1/schema", tags=["schema"])
+
+app.include_router(get_provenance_router(), prefix="/api/v1/provenance", tags=["provenance"])
 
 app.include_router(get_skills_router(), prefix="/api/v1/skills", tags=["skills"])
 app.include_router(get_proposals_router(), prefix="/api/v1/proposals", tags=["skills"])

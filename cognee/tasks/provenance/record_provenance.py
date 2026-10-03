@@ -1,14 +1,24 @@
-"""Opt-in cognify task writing the audit-grade provenance ledger.
+"""Opt-in writer of the audit-grade provenance ledger.
 
-Pipeline seam: spliced in by ``get_default_tasks`` right after
-``add_data_points`` (node ids are persisted and stable) and before the
-contradiction-detection spread, when the ``provenance_tracking`` CognifyConfig
-flag is on (env ``PROVENANCE_TRACKING``, default off).
+Storage seam: ``add_data_points`` calls ``record_provenance_at_storage`` after
+its graph/vector writes succeeded (node ids are persisted and stable), when
+the ``provenance_tracking`` CognifyConfig flag is on (env
+``PROVENANCE_TRACKING``, default off). Hooking the one place every DataPoint
+batch passes through — not a cognify-only pipeline task — is what makes the
+ledger cover ``improve()`` enrichment, the code-graph routes, skills, the
+temporal path and custom pipelines alike. The storage hook records only
+dataset-scoped batches (a ``ctx`` with a dataset): without a scope the keys
+would be unprefixed and tenants would share version chains.
 
-For every item this ingestion produced it appends document -> chunk -> entity
+``record_provenance`` is the same writer as a pipeline ``Task`` for custom
+pipelines that store data points some other way; it records unconditionally
+(flag and scope are the caller's call). Do not put both in one pipeline —
+every entity would be versioned twice.
+
+For every item a batch produced it appends document -> chunk -> entity
 -> relationship lineage entries to the relational ``provenance_entries``
 ledger, joined to graph provenance by the existing source-ref key. All entries
-for one task invocation are committed as ONE chained transaction
+for one invocation are committed as ONE chained transaction
 (``manager.batch()``), matching the pipeline's batching convention.
 
 Tenant/dataset scoping: cognee entity ids are globally deterministic
@@ -23,7 +33,7 @@ made_from/is_part_of/contains shape are covered by a generic fallback that
 walks the model with ``get_graph_from_model`` (the same traversal
 ``add_data_points`` uses) and records every node and edge.
 
-Hard constraints, mirroring ``detect_contradictions``: the task returns its
+Hard constraints, mirroring ``detect_contradictions``: the writer returns its
 input unchanged and swallows all of its own errors — provenance can never
 break ingestion. Missing ctx, missing dataset/data ids, or raw items with no
 document degrade to entries with ``source_ref_key=None``, never a raise.
@@ -31,6 +41,7 @@ document degrade to entries with ``source_ref_key=None``, never a raise.
 
 from cognee.infrastructure.databases.provenance import data_item_id, make_source_ref_key
 from cognee.infrastructure.engine import DataPoint
+from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.graph.utils.get_graph_from_model import get_graph_from_model
 from cognee.modules.pipelines.models.PipelineContext import PipelineContext
 from cognee.modules.pipelines.tasks.task import task_summary
@@ -38,6 +49,93 @@ from cognee.modules.provenance import get_provenance_manager
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("record_provenance")
+
+
+def provenance_tracking_enabled() -> bool:
+    """The ``PROVENANCE_TRACKING`` switch, read fresh (settings are cached)."""
+    return bool(get_cognify_config().provenance_tracking)
+
+
+async def record_provenance_at_storage(
+    data_points: list, ctx: PipelineContext | None = None
+) -> list:
+    """The storage-seam hook ``add_data_points`` calls after a successful write.
+
+    Records only when the flag is on and the batch is dataset-scoped; returns
+    the input unchanged either way and never raises.
+    """
+    try:
+        if not provenance_tracking_enabled():
+            return data_points
+        if _scope_from_ctx(ctx) is None:
+            logger.debug("Ledger recording skipped: batch has no dataset scope")
+            return data_points
+    except Exception as error:  # config read failure must not break storage
+        logger.warning("Provenance gate failed; recording skipped: %s", error, exc_info=True)
+        return data_points
+    return await record_provenance(data_points, ctx=ctx)
+
+
+async def record_edges_provenance(
+    edges: list, ctx: PipelineContext | None = None, *, activity: str = "edge_write"
+) -> int:
+    """Record bare graph edges written outside ``add_data_points`` as ledger
+    relationships (contradiction edges today; ``activity`` names the writer).
+
+    ``edges`` are ``(source_id, target_id, relationship_name, properties)``
+    tuples. Properties that describe the assertion (``reason``, ``confidence``,
+    both fact texts) land in the row: ``confidence`` on its column, the rest in
+    ``metadata``. Same gate and degradation as the storage hook: flag on,
+    dataset-scoped, never raises. Returns the number of edges queued.
+    """
+    try:
+        if not edges or not provenance_tracking_enabled():
+            return 0
+        scope = _scope_from_ctx(ctx)
+        if scope is None:
+            logger.debug("Ledger edge recording skipped: no dataset scope")
+            return 0
+
+        run_id = str(ctx.pipeline_run_id) if ctx and ctx.pipeline_run_id else None
+        common = {
+            "activity_id": f"{activity}:{run_id}" if run_id else activity,
+            "agent_id": _agent_from_ctx(ctx),
+            "bundle_id": run_id,
+            "source_ref_key": _source_ref_key_from_ctx(ctx),
+        }
+        batch = get_provenance_manager().batch()
+        for edge in edges:
+            if not isinstance(edge, (tuple, list)) or len(edge) < 3:
+                continue
+            source_id = f"{scope}:{edge[0]}"
+            target_id = f"{scope}:{edge[1]}"
+            relationship_name = edge[2]
+            properties = edge[3] if len(edge) > 3 and isinstance(edge[3], dict) else {}
+            metadata = {
+                key: value
+                for key, value in properties.items()
+                if key
+                not in ("relationship_name", "source_node_id", "target_node_id", "confidence")
+                and isinstance(value, (str, int, float, bool))
+            }
+            metadata["relationship_name"] = relationship_name
+            kwargs = dict(common)
+            confidence = properties.get("confidence")
+            if isinstance(confidence, (int, float)):
+                kwargs["confidence"] = float(confidence)
+            batch.track_relationship(
+                f"rel:{source_id}:{relationship_name}:{target_id}",
+                source="",
+                used_entities=[source_id, target_id],
+                metadata=metadata,
+                **kwargs,
+            )
+        queued = len(batch)
+        await batch.commit()
+        return queued
+    except Exception as error:
+        logger.warning("Provenance edge recording failed (non-fatal): %s", error, exc_info=True)
+        return 0
 
 
 def _agent_from_ctx(ctx: PipelineContext | None) -> str:
@@ -101,10 +199,10 @@ async def record_provenance(
 ) -> list[DataPoint]:
     """Append ledger entries for everything this ingestion produced.
 
-    Receives the batch ``add_data_points`` returns: ``TextSummary`` items
+    Receives the batch ``add_data_points`` stored: ``TextSummary`` items
     wrapping chunks via ``made_from``, ``DocumentChunk`` objects directly, or
     custom-schema DataPoints (generic traversal). Returns the input unchanged
-    so it can be appended to any pipeline.
+    so it can also be appended to any pipeline as a ``Task``.
     """
     if not isinstance(data_points, list) or not data_points:
         return data_points
