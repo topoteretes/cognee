@@ -60,6 +60,7 @@ def _provider_dimension(property_path: str, *, max_length: int | None = None) ->
 EVENT_ALLOWLIST = (
     "cognee.search EXECUTION STARTED",
     "cognee.search EXECUTION COMPLETED",
+    "cognee.search EXECUTION ERRORED",
     "cognee.add EXECUTION STARTED",
     "cognee.add EXECUTION COMPLETED",
     "cognee.cognify EXECUTION STARTED",
