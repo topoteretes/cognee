@@ -6,6 +6,7 @@ direction-preserving edge re-pointing, duplicate + embedding deletion, the
 dry_run no-op) and the pipeline *wiring* (tasks and config passed to memify).
 """
 
+import re
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
@@ -16,6 +17,8 @@ from cognee.exceptions import CogneeValidationError
 from cognee.memify_pipelines.consolidate_entities import consolidate_entities_pipeline
 from cognee.modules.engine.models.Entity import Entity
 from cognee.tasks.memify.consolidate_entities import (
+    PairVerdict,
+    PairVerdicts,
     _node_degrees,
     _pick_canonical,
     _union_belongs_to_set,
@@ -482,3 +485,184 @@ async def test_pipeline_wires_memify_tasks_and_config():
     assert detect_config["protect_node_types"] == ["City"]
     # detect and merge receive the same config object.
     assert merge_config == detect_config
+
+
+# --------------------------------------------------------------------------- #
+# judge
+# --------------------------------------------------------------------------- #
+LLM = "cognee.tasks.memify.consolidate_entities.LLMGateway.acreate_structured_output"
+PROMPT = "cognee.tasks.memify.consolidate_entities.read_query_prompt"
+
+ID_MLP332 = str(Entity.id_for("mlp-332"))
+ID_MLP333 = str(Entity.id_for("mlp-333"))
+
+
+def _judge_graph(nodes_and_types):
+    nodes = [
+        (node_id, {"name": name, "type": "Entity", "description": desc})
+        for node_id, name, type_name, desc in nodes_and_types
+    ]
+    type_names = {type_name for _, _, type_name, _ in nodes_and_types}
+    nodes += [(f"type-{t}", {"name": t, "type": "EntityType"}) for t in type_names]
+    edges = [
+        (node_id, f"type-{type_name}", "is_a", {}) for node_id, _, type_name, _ in nodes_and_types
+    ]
+    graph = _graph_mock()
+    graph.get_graph_data = AsyncMock(return_value=(nodes, edges))
+    return graph
+
+
+def _verdicts(*same_flags):
+    return PairVerdicts(
+        verdicts=[
+            PairVerdict(pair_id=f"p{i}", same=flag, reason="test")
+            for i, flag in enumerate(same_flags)
+        ]
+    )
+
+
+@pytest.mark.asyncio
+async def test_judge_off_by_default_makes_no_llm_calls():
+    graph = _judge_graph([(ID_NYC, "NYC", "City", "a"), (ID_NYCITY, "New York City", "City", "b")])
+    vector = _vector_mock()
+    vector.embed_data = AsyncMock(return_value=[[1.0, 0.0], [0.99, 0.14]])
+    llm = AsyncMock()
+
+    with (
+        patch(GRAPH, new=AsyncMock(return_value=graph)),
+        patch(VECTOR, return_value=vector),
+        patch(LLM, llm),
+    ):
+        result = await detect_entity_duplicates(None, config={"similarity_threshold": 0.9})
+
+    assert len(result["clusters"]) == 1
+    llm.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_judge_drops_pairs_the_llm_rejects():
+    graph = _judge_graph(
+        [
+            (ID_NYC, "NYC", "City", "New York"),
+            (ID_NYCITY, "New York City", "City", "New York"),
+            (ID_MLP332, "mlp-332", "Ticket", "Fix login"),
+            (ID_MLP333, "mlp-333", "Ticket", "Fix logout"),
+        ]
+    )
+    vector = _vector_mock()
+    # Both pairs sit above the threshold; only the LLM can tell them apart.
+    vector.embed_data = AsyncMock(return_value=[[1.0, 0.0], [0.99, 0.14], [0.0, 1.0], [0.14, 0.99]])
+    llm = AsyncMock(return_value=_verdicts(True, False))
+
+    with (
+        patch(GRAPH, new=AsyncMock(return_value=graph)),
+        patch(VECTOR, return_value=vector),
+        patch(LLM, llm),
+        patch(PROMPT, return_value="judge"),
+    ):
+        result = await detect_entity_duplicates(
+            None, config={"similarity_threshold": 0.9, "judge": True}
+        )
+
+    names = sorted(sorted(m["name"] for m in c) for c in result["clusters"])
+    assert names == [["NYC", "New York City"]]
+    llm.assert_awaited_once()
+    rendered = llm.await_args.kwargs["text_input"]
+    assert "mlp-332" in rendered and "Fix logout" in rendered
+
+
+@pytest.mark.asyncio
+async def test_judge_treats_llm_failure_as_not_confirmed():
+    graph = _judge_graph([(ID_NYC, "NYC", "City", "a"), (ID_NYCITY, "New York City", "City", "b")])
+    vector = _vector_mock()
+    vector.embed_data = AsyncMock(return_value=[[1.0, 0.0], [0.99, 0.14]])
+    llm = AsyncMock(side_effect=RuntimeError("boom"))
+
+    with (
+        patch(GRAPH, new=AsyncMock(return_value=graph)),
+        patch(VECTOR, return_value=vector),
+        patch(LLM, llm),
+        patch(PROMPT, return_value="judge"),
+    ):
+        result = await detect_entity_duplicates(
+            None, config={"similarity_threshold": 0.9, "judge": True}
+        )
+
+    assert result["clusters"] == []
+
+
+@pytest.mark.asyncio
+async def test_judge_protected_types_are_judged_instead_of_skipped():
+    id_a, id_b = str(uuid4()), str(uuid4())
+    graph = _judge_graph(
+        [(id_a, "2026-08-03", "date", "release day"), (id_b, "2026-08-03", "date", "release")]
+    )
+    vector = _vector_mock()
+    vector.embed_data = AsyncMock(return_value=[[1.0, 0.0], [1.0, 0.0]])
+    llm = AsyncMock(return_value=_verdicts(True))
+
+    with (
+        patch(GRAPH, new=AsyncMock(return_value=graph)),
+        patch(VECTOR, return_value=vector),
+        patch(LLM, llm),
+        patch(PROMPT, return_value="judge"),
+    ):
+        skipped = await detect_entity_duplicates(
+            None, config={"protect_node_types": ["date"], "judge": True}
+        )
+        judged = await detect_entity_duplicates(
+            None,
+            config={"protect_node_types": ["date"], "judge": True, "judge_protected_types": True},
+        )
+
+    assert skipped["clusters"] == []
+    assert len(judged["clusters"]) == 1
+    assert llm.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_judge_batches_pairs_and_respects_batch_size():
+    ids = [str(uuid4()) for _ in range(5)]
+    graph = _judge_graph([(i, f"thing{n}", "Thing", "d") for n, i in enumerate(ids)])
+    vector = _vector_mock()
+    vector.embed_data = AsyncMock(return_value=[[1.0, 0.0]] * 5)  # one 5-cluster, 10 pairs
+
+    async def echo_all_same(text_input, **_):
+        pair_ids = re.findall(r"pair_id: (p\d+)", text_input)
+        return PairVerdicts(
+            verdicts=[PairVerdict(pair_id=pid, same=True, reason="t") for pid in pair_ids]
+        )
+
+    llm = AsyncMock(side_effect=echo_all_same)
+
+    with (
+        patch(GRAPH, new=AsyncMock(return_value=graph)),
+        patch(VECTOR, return_value=vector),
+        patch(LLM, llm),
+        patch(PROMPT, return_value="judge"),
+    ):
+        result = await detect_entity_duplicates(None, config={"judge": True, "judge_batch_size": 2})
+
+    assert llm.await_count == 5
+    assert [len(re.findall(r"pair_id:", c.kwargs["text_input"])) for c in llm.await_args_list] == [
+        2
+    ] * 5
+    assert len(result["clusters"]) == 1 and len(result["clusters"][0]) == 5
+
+
+def test_rebuild_clusters_splits_a_chained_cluster_by_confirmed_pairs():
+    from cognee.tasks.memify.consolidate_entities import _rebuild_clusters
+
+    a, b, c, d = ({"id": i, "name": i} for i in "abcd")
+    # One chained cluster; only a~b and c~d were confirmed.
+    rebuilt = _rebuild_clusters([[a, b, c, d]], {("a", "b"), ("c", "d")})
+    assert [[m["id"] for m in g] for g in rebuilt] == [["a", "b"], ["c", "d"]]
+
+
+def test_cluster_pairs_skips_oversized_clusters():
+    from cognee.tasks.memify.consolidate_entities import _cluster_pairs
+
+    small = [{"id": "1", "name": "x"}, {"id": "2", "name": "y"}]
+    big = [{"id": str(i), "name": "z"} for i in range(10)]
+    pairs = _cluster_pairs([small, big], max_cluster_size=5)
+    assert pairs == [(small[0], small[1])]
