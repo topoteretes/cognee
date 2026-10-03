@@ -12,6 +12,8 @@ exist (COG-5835). This module removes the contaminated session state:
   elements the delete removed, then follow the intra-session provenance chain
   (turn -> feedback entry -> context lesson -> later turns that consumed the
   lesson) to a fixpoint.
+* ``invalidate_sessions_for_user`` — ``forget(everything=True)`` drops every
+  session the caller owns, and no one else's.
 
 Both are best-effort by contract: they must never fail the delete that
 triggered them, so callers wrap them in non-fatal try/except and all cache
@@ -35,7 +37,7 @@ from cognee.infrastructure.session.session_persist_watermark import (
 )
 from cognee.shared.logging_utils import get_logger
 
-from .metrics import list_sessions_for_dataset, list_unattributed_sessions
+from .metrics import list_sessions_for_dataset, list_sessions_for_user, list_unattributed_sessions
 
 logger = get_logger("invalidate_sessions")
 
@@ -51,6 +53,43 @@ async def invalidate_sessions_for_dataset(dataset_id: UUID) -> dict:
         return {"sessions_considered": 0, "sessions_deleted": 0}
 
     sessions = await list_sessions_for_dataset(dataset_id)
+    deleted = await _delete_sessions(session_manager, sessions)
+
+    if sessions:
+        logger.info(
+            "Session invalidation: deleted %d/%d session(s) for dataset %s",
+            deleted,
+            len(sessions),
+            dataset_id,
+        )
+    return {"sessions_considered": len(sessions), "sessions_deleted": deleted}
+
+
+async def invalidate_sessions_for_user(user_id: UUID) -> dict:
+    """Delete every session owned by the user from the session cache.
+
+    Used by ``forget(everything=True)``. Only the caller's sessions are
+    removed; sessions belonging to other users are left untouched.
+    """
+    session_manager = get_session_manager()
+    if not session_manager.is_available:
+        return {"sessions_considered": 0, "sessions_deleted": 0}
+
+    sessions = await list_sessions_for_user(user_id)
+    deleted = await _delete_sessions(session_manager, sessions)
+
+    if sessions:
+        logger.info(
+            "Session invalidation: deleted %d/%d session(s) for user %s",
+            deleted,
+            len(sessions),
+            user_id,
+        )
+    return {"sessions_considered": len(sessions), "sessions_deleted": deleted}
+
+
+async def _delete_sessions(session_manager, sessions: list[tuple[UUID, str]]) -> int:
+    """Delete each (user_id, session_id) session; failures are logged, not raised."""
     deleted = 0
     for user_id, session_id in sessions:
         try:
@@ -64,15 +103,7 @@ async def invalidate_sessions_for_dataset(dataset_id: UUID) -> dict:
                 error,
                 exc_info=True,
             )
-
-    if sessions:
-        logger.info(
-            "Session invalidation: deleted %d/%d session(s) for dataset %s",
-            deleted,
-            len(sessions),
-            dataset_id,
-        )
-    return {"sessions_considered": len(sessions), "sessions_deleted": deleted}
+    return deleted
 
 
 async def invalidate_sessions_for_deleted_data(

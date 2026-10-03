@@ -18,6 +18,7 @@ from cognee.modules.session_lifecycle.invalidate_sessions import (
     _invalidate_session_entries,
     invalidate_sessions_for_dataset,
     invalidate_sessions_for_deleted_data,
+    invalidate_sessions_for_user,
 )
 
 USER_ID = str(uuid4())
@@ -514,6 +515,85 @@ async def test_list_unattributed_sessions_returns_null_dataset_id_rows():
                 (unattributed_b, user_b),
                 (attributed, user_a),
             ):
+                row = await session.get(SessionRecord, (session_id, user_id))
+                if row:
+                    await session.delete(row)
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_invalidate_sessions_for_user_leaves_other_users_sessions(session_manager):
+    """Only the caller's sessions are deleted; another user's session survives."""
+    other_user_id = str(uuid4())
+    await _seed_qa(session_manager, "qa_mine")
+    await session_manager._cache.create_qa_entry(
+        other_user_id,
+        SESSION_ID,
+        question="other question",
+        context="context",
+        answer="other answer",
+        qa_id="qa_other",
+    )
+
+    with (
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.get_session_manager",
+            return_value=session_manager,
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.list_sessions_for_user",
+            new=AsyncMock(return_value=[(USER_ID, SESSION_ID)]),
+        ),
+    ):
+        result = await invalidate_sessions_for_user(USER_ID)
+
+    assert result == {"sessions_considered": 1, "sessions_deleted": 1}
+    assert await session_manager.get_session(user_id=USER_ID, session_id=SESSION_ID) == []
+    assert await session_manager.get_session(user_id=other_user_id, session_id=SESSION_ID) != []
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_for_user_returns_only_that_users_rows():
+    """The listing query filters on user_id, across attributed and unattributed rows."""
+    from datetime import datetime, timezone
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.session_lifecycle.metrics import list_sessions_for_user
+    from cognee.modules.session_lifecycle.models import SessionRecord
+
+    now = datetime.now(timezone.utc)
+    user_a = uuid4()
+    user_b = uuid4()
+    rows = (
+        (f"session_a_attributed_{user_a}", user_a, uuid4()),
+        (f"session_a_unattributed_{user_a}", user_a, None),
+        (f"session_b_{user_b}", user_b, None),
+    )
+
+    engine = get_relational_engine()
+    async with engine.engine.begin() as conn:
+        await conn.run_sync(SessionRecord.metadata.create_all)
+
+    async with engine.get_async_session() as session:
+        for session_id, user_id, dataset_id in rows:
+            session.add(
+                SessionRecord(
+                    session_id=session_id,
+                    user_id=user_id,
+                    dataset_id=dataset_id,
+                    status="running",
+                    started_at=now,
+                    last_activity_at=now,
+                )
+            )
+        await session.commit()
+
+    try:
+        listed = set(await list_sessions_for_user(user_a))
+        assert listed == {(user_a, rows[0][0]), (user_a, rows[1][0])}
+    finally:
+        async with engine.get_async_session() as session:
+            for session_id, user_id, _ in rows:
                 row = await session.get(SessionRecord, (session_id, user_id))
                 if row:
                     await session.delete(row)
