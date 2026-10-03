@@ -760,6 +760,34 @@ class CogneeClient:
                     "session_id": session_id,
                 }
 
+    async def search_sources(
+        self,
+        query: str,
+        source_hint: str | None = None,
+        dataset_ids: list[str] | None = None,
+        include_connections: bool = True,
+        top_k: int = 10,
+    ) -> dict:
+        payload = {
+            "query": query,
+            "source_hint": source_hint,
+            "dataset_ids": dataset_ids,
+            "include_connections": include_connections,
+            "top_k": top_k,
+        }
+        if self.use_api:
+            response = await self.client.post(
+                f"{self.api_url}/api/v1/datasets/source-search",
+                json=payload,
+                headers=self._get_headers(),
+                follow_redirects=False,
+                timeout=300,
+            )
+            response.raise_for_status()
+            return response.json()
+        with redirect_stdout(sys.stderr):
+            return await self.cognee.sources.search(**payload)
+
     async def get_recall_state(
         self, datasets: list[str] | None = None, *, deadline: float | None = None
     ) -> RecallState:

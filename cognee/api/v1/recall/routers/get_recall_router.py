@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
@@ -66,6 +67,9 @@ class RecallPayloadDTO(InDTO):
             "Restrict results to these node sets (the node_set values passed to "
             "/v1/add or /v1/remember). Omit to search all nodes."
         ),
+    )
+    node_name_filter_operator: Literal["AND", "OR"] = Field(
+        default="OR", description="Combine node-set filters using AND or OR."
     )
     top_k: int | None = Field(default=15)
     only_context: bool = Field(
@@ -304,6 +308,7 @@ def get_recall_router() -> APIRouter:
                 dataset_ids=payload.dataset_ids,
                 system_prompt=payload.system_prompt,
                 node_name=payload.node_name,
+                node_name_filter_operator=payload.node_name_filter_operator,
                 top_k=payload.top_k,
                 verbose=payload.verbose,
                 only_context=payload.only_context,
