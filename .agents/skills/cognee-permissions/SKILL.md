@@ -165,9 +165,35 @@ isolation; `REQUIRE_AUTHENTICATION=false` with access control on is ignored
   never a silent fall back to shared databases. Switch backends or set
   `ENABLE_BACKEND_ACCESS_CONTROL=false`. The support matrix is in CLAUDE.md
   ("Multi-Tenant Access Control").
-- **User management by role name.** Tenant owners, and members of roles
-  named `admin` (`USER_MANAGEMENT_ALLOWED_ROLE_NAMES`), can manage tenant
-  users. Any group that happens to be called "admin" gets that power.
+- **User management is a capability.** `manage_users` is a tenant-scoped
+  capability in `principal_capabilities`, granted to a tenant (every member),
+  a role (its members) or a user (that person, in that tenant) and resolved
+  as their union (`get_effective_capabilities`); the tenant owner holds every
+  capability. Every check goes through
+  `has_grant_permission(requester, tenant, capability)`;
+  `has_user_management_permission` is that check for `manage_users`. Creating
+  roles, assigning them and adding users to a tenant need `manage_users`, not
+  ownership. Assigning a role has one more rule (`require_role_capabilities`):
+  the requester must hold every capability the role carries, and a role named
+  `admin` counts as carrying all of them.
+- **Grant/revoke endpoints** ride the permissions router
+  (`POST`/`DELETE /permissions/capabilities/{principal_id}`) and are gated by
+  capabilities of their own: granting needs `grant_capabilities`, revoking
+  needs `revoke_capabilities`, and neither comes with `manage_users`. A
+  granter can only pass on capabilities they hold themselves
+  (`get_unheld_capabilities`). Each row records who made the grant in
+  `granted_by`; both endpoints take `capability` repeated to grant or revoke
+  several at once, all or nothing. For a user principal the grant lands in
+  the `tenant_id` given, or the caller's current tenant, and the user must
+  already be a member of it (`CapabilityGrantToNonMemberError`, 403, says
+  so); a role or tenant principal always uses its own tenant. A missing principal or tenant answers
+  like a refusal (403), so the endpoints do not reveal which ids exist.
+  Removing a user from a tenant drops their personal capabilities there, and
+  deleting a role drops the role's.
+- **Deprecated fallback: the `admin` role name.** Members of a role named
+  `admin` (`LEGACY_ALL_CAPABILITY_ROLE_NAMES`) pass every capability check
+  until the role is granted the capabilities it needs; the fallback sits in
+  `has_grant_permission`, so it also passes the grant and revoke checks.
 
 ## How it works
 
@@ -233,7 +259,7 @@ served by the schema router (`visualize_memory_provenance` HTML,
 
 - Models: `cognee/modules/users/models/` (`ACL`, `Principal`, `Permission`,
   `Role`, `Tenant`, `UserRole`, `UserTenant`, `DatasetDatabase`,
-  `UserApiKey`, and the `*DefaultPermissions` models)
+  `UserApiKey`, `PrincipalCapability`)
 - Users, tenants, roles: `cognee/modules/users/methods/`,
   `cognee/modules/users/tenants/methods/`, `cognee/modules/users/roles/methods/`
 - Grants and checks: `cognee/modules/users/permissions/methods/`
@@ -250,9 +276,11 @@ served by the schema router (`visualize_memory_provenance` HTML,
   it in the handler registry (or at runtime with
   `use_dataset_database_handler()`), otherwise multi-tenant mode refuses to
   start with it.
-- **Not merged yet: capabilities (PR #4302).** A planned
-  `principal_capabilities` table would grant tenant-scoped actions (first
-  `manage_users`) instead of matching the `admin` role name. None of it is
-  on `dev`; do not write code against it until it lands.
+- **New capability:** add the name to `CAPABILITY_TYPES` in
+  `permission_types.py` and gate the operation with
+  `has_grant_permission(requester_id, tenant_id, <name>)`; the owner holds it
+  immediately, everyone else once it is granted. Dataset permissions
+  (`read`/`write`/`delete`/`share`) stay in the ACL and are rejected by
+  `validate_capability`.
 - Tests: `cognee/tests/unit/users/`, `cognee/tests/unit/modules/users/`, and
   the examples above.
