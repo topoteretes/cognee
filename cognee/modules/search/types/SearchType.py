@@ -21,4 +21,5 @@ class SearchType(str, Enum):
     AGENTIC_COMPLETION = "AGENTIC_COMPLETION"
     CODE = "CODE"
     GRAPH_REPORT = "GRAPH_REPORT"
+    BROAD = "BROAD"
     SKILLS = "SKILLS"
