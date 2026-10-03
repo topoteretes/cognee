@@ -14,6 +14,10 @@ Environment variables (prefix ``IMPROVE_``)::
     IMPROVE_DEBOUNCE_SECONDS=0         # ... or after T seconds
     IMPROVE_STAGES_DISABLED=a,b        # csv of stage names to skip
     IMPROVE_FEEDBACK_ALPHA=0.1         # learning rate for feedback weights, (0, 1]
+    IMPROVE_IDLE_CONSOLIDATION_ENABLED=false           # bridge idle sessions before they expire
+    IMPROVE_IDLE_CONSOLIDATION_AFTER_SECONDS=1800      # idle this long before consolidating
+    IMPROVE_IDLE_CONSOLIDATION_INTERVAL_SECONDS=600    # API server sweep interval
+    IMPROVE_IDLE_CONSOLIDATION_BATCH_SIZE=50           # sessions considered per sweep
 """
 
 from functools import lru_cache
@@ -40,6 +44,16 @@ class ImproveConfig(BaseSettings):
     # ``disabled_by_config``. Read as a comma-separated string.
     stages_disabled: Annotated[list[str], NoDecode] = []
     feedback_alpha: float = DEFAULT_FEEDBACK_ALPHA
+    # Idle-session consolidation: session memory lives in the cache under a
+    # TTL, and only remember() bridges it into the graph. A session written
+    # through recall()/search(), or whose last entries were debounced, would
+    # otherwise expire without ever reaching long-term memory. When enabled,
+    # sessions idle for ``idle_consolidation_after_seconds`` that still hold
+    # unpersisted Q&A are bridged with the same improve() remember() runs.
+    idle_consolidation_enabled: bool = False
+    idle_consolidation_after_seconds: float = 1800.0
+    idle_consolidation_interval_seconds: float = 600.0
+    idle_consolidation_batch_size: int = 50
 
     model_config = SettingsConfigDict(env_prefix="IMPROVE_", extra="ignore")
 
@@ -71,6 +85,17 @@ class ImproveConfig(BaseSettings):
     def _seconds_non_negative(cls, value: float) -> float:
         if value < 0:
             raise ValueError("debounce_seconds must be >= 0")
+        return value
+
+    @field_validator(
+        "idle_consolidation_after_seconds",
+        "idle_consolidation_interval_seconds",
+        "idle_consolidation_batch_size",
+    )
+    @classmethod
+    def _idle_consolidation_positive(cls, value: float, info) -> float:
+        if value <= 0:
+            raise ValueError(f"{info.field_name} must be > 0")
         return value
 
 

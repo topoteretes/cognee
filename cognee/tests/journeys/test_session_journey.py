@@ -109,3 +109,46 @@ async def test_session_recall_falls_through_to_graph_when_session_has_no_match(
     assert "ness" in _texts(results), (
         f"graph fact not reached when the session had no keyword match: {_texts(results)[:300]}"
     )
+
+
+@pytest.mark.journey
+@pytest.mark.asyncio
+async def test_idle_session_is_consolidated_into_long_term_memory(clean_env, default_user):
+    """A session nobody bridged reaches the graph once it goes idle.
+
+    The session is written without the automatic improve, the state a
+    debounced remember() or a recall()-only conversation leaves behind. Before
+    consolidation the fact lives only in the expiring session cache; one sweep
+    after the idle threshold bridges it, and a second sweep finds nothing left.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from cognee.modules.improve import consolidate_idle_sessions
+
+    seed = await cognee.remember(
+        "Title: Harbour notes\n\nThe harbour master of Quillon is Tomas Ferreira.",
+        dataset_name=DATASET,
+    )
+    assert seed.status == "completed"
+
+    stored = await cognee.remember(
+        FACT, dataset_name=DATASET, session_id=SESSION, self_improvement=False
+    )
+    assert stored.status == "session_stored"
+
+    before = await cognee.recall(QUESTION, datasets=[DATASET])
+    assert not any(t in _texts(before) for t in EXPECTED), (
+        "fact reached the graph without any bridge; the scenario is not reproduced"
+    )
+
+    later = datetime.now(timezone.utc) + timedelta(hours=1)
+    report = await consolidate_idle_sessions(now=later)
+    assert (str(default_user.id), SESSION) in report.consolidated, f"not bridged: {report!r}"
+
+    after = await cognee.recall(QUESTION, datasets=[DATASET])
+    assert any(t in _texts(after) for t in EXPECTED), (
+        f"consolidated fact not recalled from the graph: {_texts(after)[:300]}"
+    )
+
+    again = await consolidate_idle_sessions(now=later)
+    assert again.consolidated == [], f"session bridged twice: {again!r}"

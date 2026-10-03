@@ -528,6 +528,36 @@ async def list_sessions_for_dataset(dataset_id: UUIDType) -> list[tuple[UUIDType
     return [(row.user_id, row.session_id) for row in rows]
 
 
+async def list_idle_sessions(
+    *,
+    idle_before: datetime,
+    active_after: datetime | None = None,
+    limit: int = 50,
+) -> list[tuple[UUIDType, str, UUIDType | None]]:
+    """Return (user_id, session_id, dataset_id) for sessions idle since ``idle_before``.
+
+    ``active_after`` drops sessions whose last activity is older than it — the
+    caller passes ``now - session TTL`` so sessions the cache has already
+    expired are not considered. Oldest activity first, so the sessions closest
+    to expiry are handled first when ``limit`` cuts the list.
+    """
+    conditions = [SessionRecord.last_activity_at <= idle_before]
+    if active_after is not None:
+        conditions.append(SessionRecord.last_activity_at >= active_after)
+
+    engine = get_relational_engine()
+    async with engine.get_async_session() as session:
+        rows = (
+            await session.execute(
+                select(SessionRecord.user_id, SessionRecord.session_id, SessionRecord.dataset_id)
+                .where(and_(*conditions))
+                .order_by(SessionRecord.last_activity_at.asc())
+                .limit(limit)
+            )
+        ).all()
+    return [(row.user_id, row.session_id, row.dataset_id) for row in rows]
+
+
 async def list_unattributed_sessions() -> list[tuple[UUIDType, str]]:
     """Return (user_id, session_id) pairs for sessions with no dataset attribution.
 

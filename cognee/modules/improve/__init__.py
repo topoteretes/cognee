@@ -25,6 +25,7 @@ from .constants import (
     USER_PREFERENCES_NODE_SET,
     USER_SESSIONS_NODE_SET,
 )
+from .idle_consolidation import IdleConsolidationReport, consolidate_idle_sessions
 from .inputs import MEMIFY_PASSTHROUGH_KEYS, ImproveRunInputs
 from .registry import (
     DEFAULT_STAGES,
@@ -63,12 +64,14 @@ __all__ = [
     "AutoImproveAdmission",
     "BaseStage",
     "GraphCapabilities",
+    "IdleConsolidationReport",
     "ImproveConfig",
     "ImproveResult",
     "ImproveRunInputs",
     "StageResult",
     "auto_improve_skip_reason",
     "clear_auto_improve_admission",
+    "consolidate_idle_sessions",
     "evaluate_gate",
     "execute_stage",
     "get_improve_config",
