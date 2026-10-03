@@ -14,7 +14,8 @@ Hard rules enforced here:
 - Identifier-bearing provider/model settings are bucketed as 'redacted'
   before grouping, so custom deployment names cannot stop the daily export.
 - A post-write guard fails the job if any output header matches the
-  denylist or any cell matches identifier patterns (email, UUID, ak_ hash).
+  denylist or any cell matches identifier patterns (email, UUID, ak_ hash,
+  home-directory path, Windows drive letter).
 
 Output: telemetry_aggregates/*.csv covering the last WINDOW_DAYS days
 (default 70, so the analyzer can compute week-over-week and month-over-month
@@ -39,6 +40,8 @@ CELL_PATTERNS = (
     re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"),  # email
     re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"),  # uuid
     re.compile(r"\bak_[0-9a-f]{16,}\b"),  # key hash
+    re.compile(r"(^|[/\\])(home|users|root)[/\\]", re.IGNORECASE),  # home-directory path
+    re.compile(r"^[a-zA-Z]:[/\\]"),  # Windows drive letter
 )
 _SQL_CELL_PATTERN = "|".join(pattern.pattern for pattern in CELL_PATTERNS).replace("'", "''")
 

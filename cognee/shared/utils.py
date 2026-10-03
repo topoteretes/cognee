@@ -175,6 +175,69 @@ def _sanitize_nested_properties(obj: Any, property_names: list[str]) -> Any:
         return obj
 
 
+def _is_absolute_model_path(value: str) -> bool:
+    if not value:
+        return False
+    if value[0] in "/~\\":
+        return True
+    return len(value) >= 3 and value[0].isalpha() and value[1] == ":" and value[2] in "/\\"
+
+
+def _is_path_like_model(value: str) -> bool:
+    if _is_absolute_model_path(value) or "\\" in value:
+        return True
+    return "//" in value and not value.startswith("//")
+
+
+def _model_path_basename(path: str) -> str:
+    name = path.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+    if not name or (len(name) == 2 and name[1] == ":"):
+        return "local-path"
+    return name
+
+
+def _rewrite_path_like_model(model: str) -> str:
+    """Rewrite a filesystem-like model identifier to its basename.
+
+    Hosted names such as ``openai/gpt-4o`` are unchanged. A provider prefix
+    in ``provider//abs/path`` (or ``provider/C:\\...``) is kept as
+    ``provider/basename``. An empty basename becomes ``local-path``.
+    """
+    if not _is_path_like_model(model):
+        return model
+
+    provider: str | None = None
+    path = model
+    if "//" in model and not model.startswith("//"):
+        provider, remainder = model.split("//", 1)
+        path = "/" + remainder
+    elif "/" in model:
+        prefix, remainder = model.split("/", 1)
+        if _is_absolute_model_path(remainder):
+            provider = prefix
+            path = remainder
+
+    basename = _model_path_basename(path)
+    if provider:
+        return f"{provider}/{basename}"
+    return basename
+
+
+def _rewrite_nested_model_paths(obj: Any) -> Any:
+    """Rewrite every nested string ``model`` value that looks like a filesystem path."""
+    if isinstance(obj, dict):
+        new_obj = {}
+        for key, value in obj.items():
+            if key == "model" and isinstance(value, str):
+                new_obj[key] = _rewrite_path_like_model(value)
+            else:
+                new_obj[key] = _rewrite_nested_model_paths(value)
+        return new_obj
+    if isinstance(obj, list):
+        return [_rewrite_nested_model_paths(item) for item in obj]
+    return obj
+
+
 # A single ClientSession is reused across telemetry calls to avoid the
 # per-call DNS + TCP + TLS handshake to `proxy_url`. The session is bound to
 # the asyncio loop it was created on; if the loop changes (tests, reload), the
@@ -406,6 +469,7 @@ def send_telemetry(
     additional_properties = _sanitize_nested_properties(
         obj=additional_properties, property_names=TELEMETRY_SANITIZED_PROPERTIES
     )
+    additional_properties = _rewrite_nested_model_paths(additional_properties)
     resolved_user_id, tenant_id = _resolve_identity(user if user is not None else user_id)
     anonymous_id = str(get_anonymous_id())
     persistent_id = str(get_persistent_id())
