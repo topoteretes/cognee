@@ -7,6 +7,11 @@ pytest.importorskip("neo4j")
 from cognee.infrastructure.databases.graph.neo4j_driver.adapter import Neo4jAdapter
 
 
+@pytest.fixture(autouse=True)
+def _relational_db_for_unit_tests():
+    pass
+
+
 def _make_adapter() -> Neo4jAdapter:
     return Neo4jAdapter(
         "bolt://unused",
@@ -108,3 +113,21 @@ async def test_get_connections_handles_missing_edge_properties():
     connections = await adapter.get_connections("node-a")
 
     assert connections == [({"id": "node-a"}, {"relationship_name": "knows"}, {"id": "node-b"})]
+
+
+@pytest.mark.asyncio
+async def test_get_nodeset_subgraph_rejects_invalid_operator():
+    adapter = _make_adapter()
+    adapter.query = AsyncMock(return_value=[])
+
+    with pytest.raises(
+        ValueError,
+        match="node_name_filter_operator must be 'OR' or 'AND'",
+    ):
+        await adapter.get_nodeset_subgraph(
+            object,
+            ["Alpha"],
+            node_name_filter_operator="and",
+        )
+
+    adapter.query.assert_not_awaited()
