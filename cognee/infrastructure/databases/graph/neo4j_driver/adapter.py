@@ -1295,15 +1295,24 @@ class Neo4jAdapter(GraphDBInterface):
 
             A list of edges connecting to the specified node, represented as tuples of details.
         """
+        # Match edges on either traversal side, but report endpoints in the
+        # relationship's true stored direction. The queried node may be the
+        # start or the end of `r`; projecting startNode(r)/endNode(r) keeps the
+        # tuple as (source_id, target_id) regardless of which side we matched,
+        # so incoming edges are no longer reported with inverted endpoints.
         query = f"""
         MATCH (n: `{BASE_LABEL}`{{id: $node_id}})-[r]-(m)
-        RETURN n, r, m
+        RETURN startNode(r).id AS source_id, endNode(r).id AS target_id, r
         """
 
         results = await self.query(query, {"node_id": node_id})
 
         return [
-            (result["n"]["id"], result["m"]["id"], {"relationship_name": result["r"][1]})
+            (
+                result["source_id"],
+                result["target_id"],
+                {"relationship_name": result["r"][1]},
+            )
             for result in results
         ]
 

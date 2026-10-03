@@ -108,3 +108,43 @@ async def test_get_connections_handles_missing_edge_properties():
     connections = await adapter.get_connections("node-a")
 
     assert connections == [({"id": "node-a"}, {"relationship_name": "knows"}, {"id": "node-b"})]
+
+
+@pytest.mark.asyncio
+async def test_get_edges_reports_true_edge_direction():
+    """get_edges is matched undirected, but must return endpoints in the
+    relationship's true stored direction — (source_id, target_id) — regardless
+    of which traversal side the queried node sits on. The adapter projects
+    startNode(r)/endNode(r), so an *incoming* edge stored as
+    (node-b)-[:reports_to]->(node-a) is reported as ("node-b", "node-a", ...)
+    even when queried from node-a, matching add_edge/has_edges/get_connections."""
+    adapter = _make_adapter()
+    # ``result.data()`` serializes a relationship as [start_props, type, end_props],
+    # so ``result["r"][1]`` is the relationship name.
+    adapter.query = AsyncMock(
+        return_value=[
+            {
+                "source_id": "node-b",
+                "target_id": "node-a",
+                "r": ({"id": "node-b"}, "reports_to", {"id": "node-a"}),
+            }
+        ]
+    )
+
+    edges = await adapter.get_edges("node-a")
+
+    assert edges == [("node-b", "node-a", {"relationship_name": "reports_to"})]
+
+
+@pytest.mark.asyncio
+async def test_get_edges_projects_start_and_end_node_ids():
+    """The query must project the relationship's own endpoints so direction is
+    independent of traversal side — not the matched-node ids ``n``/``m``."""
+    adapter = _make_adapter()
+    adapter.query = AsyncMock(return_value=[])
+
+    await adapter.get_edges("node-a")
+
+    query = adapter.query.await_args.args[0]
+    assert "startNode(r).id AS source_id" in query
+    assert "endNode(r).id AS target_id" in query
