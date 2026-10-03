@@ -1,1 +1,44 @@
 Generic single-database configuration with an async dbapi.
+
+Authoring a migration
+---------------------
+
+Always let Alembic mint the revision id:
+
+    uv run alembic revision -m "short description"
+
+Never type a revision id by hand. The id is not a label — it is the value
+written into every deployed database's `alembic_version` table, which is the
+only record of where that database sits in the chain. Once a release ships, the
+id can never be changed: renaming it orphans every database already stamped
+with it.
+
+Hand-typed ids look like `a1b2c3d4e5f6` or `d4e5f6a7b8c9`, and they collide.
+`b2c3d4e5f6a7` already names two different migrations — `add_search_history_indexes`
+here and `add_renewal_amount_currency_to_user_subscription` in the Cloud
+migration trees that vendor a copy of this chain. That collision was only
+fixable because no production database had stamped the losing id yet.
+
+`tools/check_alembic_revision_ids.py` enforces this. It runs from pre-commit and
+in the unit-test suite, and checks that:
+
+  * the module's `revision` matches its filename prefix;
+  * the id is 12 lowercase hex characters (the format `rev_id()` produces);
+  * no two migrations share an id;
+  * every `down_revision` resolves and the chain has exactly one head;
+  * newly added ids do not look hand-typed (existing ids are exempt — they are
+    already stamped in real databases).
+
+Downstream consumers
+--------------------
+
+This chain is vendored and re-chained by the Cloud migration trees, so a
+migration added here becomes someone else's port. Two habits keep that cheap:
+
+  * guard DDL with an existence check (`if "table" in inspector.get_table_names(): return`)
+    so the migration composes with a database that already has the table;
+  * keep `down_revision` pointing at the previous revision in this repo only —
+    downstream re-parents it, and a merge-shaped chain here multiplies that work.
+
+The graph/vector data migrations are a separate chain with its own rules; see
+`cognee/modules/migrations/README.md`.
