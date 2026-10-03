@@ -1,7 +1,8 @@
-import hashlib
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import BinaryIO
+
+from cognee.modules.data.content_hash import compute_content_hash
 
 from .IngestionData import IngestionData
 
@@ -43,7 +44,7 @@ class TextData(IngestionData):
             self.metadata = {}
 
         data_contents = self.data.encode("utf-8")
-        hash_contents = hashlib.md5(data_contents).hexdigest()
+        hash_contents = compute_content_hash(data_contents)
         self.metadata["name"] = "text_" + hash_contents + ".txt"
         self.metadata["content_hash"] = hash_contents
         # Describe the payload the same way reading the stored ".txt" back would
