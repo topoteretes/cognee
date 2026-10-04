@@ -169,7 +169,7 @@ async def handle_task(
         task_properties["pipeline_run_id"] = str(ctx.pipeline_run_id)
 
     logger.info(f"{task_type} task started: `{running_task.executable.__name__}`")
-    send_telemetry(f"{task_type} Task Started", user, additional_properties=dict(task_properties))
+    send_telemetry(f"{task_type} Task Started", user, additional_properties=task_properties)
 
     # Pass ctx only to tasks that declare it in their signature.
     # Task caches this check as accepts_ctx at construction time.
@@ -233,7 +233,7 @@ async def handle_task(
 
             logger.info(f"{task_type} task completed: `{task_name}`")
             send_telemetry(
-                f"{task_type} Task Completed", user, additional_properties=dict(task_properties)
+                f"{task_type} Task Completed", user, additional_properties=task_properties
             )
 
         except BaseException as error:
@@ -249,12 +249,21 @@ async def handle_task(
                 )
             else:
                 logger.info(f"{task_type} task cancelled: `{task_name}` ({type(error).__name__})")
-            send_telemetry(
-                f"{task_type} Task Errored",
-                user,
-                additional_properties=task_properties
-                | {"exception_type": telemetry_exception_type(error)},
-            )
+            # Tasks nest: this task's loop drives the tasks after it, so one failure
+            # unwinds through every upstream task's handler. Only the task where it
+            # happened reports it; the ones above re-raise without an event, so
+            # "which task failed" has one answer in the warehouse.
+            if not getattr(error, "_cognee_task_errored_reported", False):
+                try:
+                    error._cognee_task_errored_reported = True
+                except AttributeError:
+                    pass
+                send_telemetry(
+                    f"{task_type} Task Errored",
+                    user,
+                    additional_properties=task_properties
+                    | {"exception_type": telemetry_exception_type(error)},
+                )
             raise
 
 

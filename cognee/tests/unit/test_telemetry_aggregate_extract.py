@@ -290,14 +290,13 @@ class TelemetryAggregateExtractTest(unittest.TestCase):
         buckets = {row["session_count_bucket"] for row in self._rows("improve_daily")}
         self.assertEqual(buckets, {"0", "1", "2-5", "6+", "unknown"})
 
-    def test_sdk_error_types_cover_search_recall_and_cognify(self):
+    def test_sdk_error_types_cover_search_and_recall_only(self):
         self._insert_event(
             "cognee.search EXECUTION ERRORED", "1.6.3", {"exception_type": "PermissionDeniedError"}
         )
         self._insert_event(
             "cognee.recall ERRORED", "1.6.3", {"exception_type": "CancelledError"}, "b"
         )
-        self._insert_event("cognee.cognify EXECUTION ERRORED", "1.6.3", {}, "c")
         self._insert_event("cognee.search EXECUTION COMPLETED", "1.6.3", {}, "d")
         rows = {
             (row["tracking_event"], row["exception_type"])
@@ -308,7 +307,6 @@ class TelemetryAggregateExtractTest(unittest.TestCase):
             {
                 ("cognee.search EXECUTION ERRORED", "PermissionDeniedError"),
                 ("cognee.recall ERRORED", "CancelledError"),
-                ("cognee.cognify EXECUTION ERRORED", "unknown"),
             },
         )
 

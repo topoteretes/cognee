@@ -316,7 +316,8 @@ QUERIES: dict[str, str] = {
         GROUP BY ALL ORDER BY day, events DESC
     """,
     # Failures of the SDK operations that have a terminal error event (SDK-775):
-    # search, recall and cognify, by error class.
+    # search and recall, by error class. cognify failures are pipeline events
+    # (pipeline_error_types_daily); no cognify EXECUTION event is emitted.
     "sdk_error_types_daily": f"""
         SELECT ingestion_date AS day, {_VERSION} AS version, {_ORIGIN} AS origin,
                tracking_event, {_EXCEPTION_TYPE} AS exception_type,
@@ -324,8 +325,7 @@ QUERIES: dict[str, str] = {
                count(DISTINCT {_IDENT}) AS distinct_identities
         FROM analytics.main.pipeline_events
         WHERE {_BASE_FILTER} AND tracking_event IN (
-            'cognee.search EXECUTION ERRORED', 'cognee.recall ERRORED',
-            'cognee.cognify EXECUTION ERRORED')
+            'cognee.search EXECUTION ERRORED', 'cognee.recall ERRORED')
         GROUP BY ALL ORDER BY day, errors DESC
     """,
     # HTTP failures (SDK-775): the API layer's exception event, by route template,

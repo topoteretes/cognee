@@ -21,23 +21,28 @@ def tenant_label(tenant_id) -> str:
     return str(tenant_id) if tenant_id else "Single User Tenant"
 
 
-def pipeline_run_telemetry_properties(pipeline_name, pipeline_run_id, tenant_id) -> dict:
+def pipeline_run_telemetry_properties(
+    pipeline_name, pipeline_run_id, tenant_id, *, recovered: bool = False
+) -> dict:
     """The properties every ``Pipeline Run *`` event carries.
 
     ``pipeline_run_id`` is the run's random UUID (``generate_pipeline_run_id``):
     the join key between a run's Started event and its terminal one, without
     which the warehouse can only compare counts. Startup recovery
     (``cognee.modules.cognify.recovery``) builds the Errored event for an
-    abandoned run from this same function so the two emitters cannot drift.
+    abandoned run from this same function so the two emitters cannot drift;
+    with ``recovered=True`` the event carries neither this process's version nor
+    its provider stack, because the dead run may have had other ones and the run
+    record keeps neither. Its Started event has them.
     """
     properties = {
         "pipeline_name": str(pipeline_name),
-        "cognee_version": cognee_version,
+        "cognee_version": "unknown" if recovered else cognee_version,
         "tenant_id": tenant_label(tenant_id),
     }
     if pipeline_run_id is not None:
         properties["pipeline_run_id"] = str(pipeline_run_id)
-    return properties | get_current_settings()
+    return properties if recovered else properties | get_current_settings()
 
 
 async def run_tasks_with_telemetry(
@@ -54,13 +59,13 @@ async def run_tasks_with_telemetry(
 
     try:
         logger.info("Pipeline run started: `%s`", pipeline_name)
-        send_telemetry(PIPELINE_RUN_STARTED, user, additional_properties=dict(properties))
+        send_telemetry(PIPELINE_RUN_STARTED, user, additional_properties=properties)
 
         async for result in run_tasks_base(tasks, data, user, ctx):
             yield result
 
         logger.info("Pipeline run completed: `%s`", pipeline_name)
-        send_telemetry(PIPELINE_RUN_COMPLETED, user, additional_properties=dict(properties))
+        send_telemetry(PIPELINE_RUN_COMPLETED, user, additional_properties=properties)
     except BaseException as error:
         # asyncio.CancelledError and GeneratorExit are BaseExceptions, not
         # Exceptions: a run cancelled by a shutdown, or this generator closed by

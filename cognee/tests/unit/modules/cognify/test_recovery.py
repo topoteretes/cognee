@@ -255,7 +255,10 @@ async def test_closing_an_abandoned_run_emits_the_terminal_event_its_process_nev
     assert properties["exception_type"] == "AbandonedPipelineRunError"
     assert properties["recovered_at_startup"] is True
     assert properties["tenant_id"] == str(run.tenant_id)
-    assert properties["llm"] == {"provider": "openai"}
+    # The dead run's version and provider stack are not known here; its Started
+    # event carries them. Nothing of the recovering process is claimed for it.
+    assert properties["cognee_version"] == "unknown"
+    assert "llm" not in properties and "embedding" not in properties
     assert user.id == run.user_id
     assert user.tenant_id == run.tenant_id
 

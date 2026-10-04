@@ -47,7 +47,7 @@ def test_model_settings_that_are_paths_leave_as_the_local_path_label(monkeypatch
 
     monkeypatch.setattr(
         settings_module,
-        "get_llm_config",
+        "get_llm_context_config",
         lambda: SimpleNamespace(llm_provider="custom", llm_model="/Users/alice/models/x.gguf"),
     )
     monkeypatch.setattr(
@@ -58,3 +58,16 @@ def test_model_settings_that_are_paths_leave_as_the_local_path_label(monkeypatch
 
     assert payload["llm"] == {"provider": "custom", "model": "local_path"}
     assert payload["embedding"] == {"provider": "custom", "model": "local_path"}
+
+
+def test_llm_half_reads_the_same_context_config_as_the_embedding_half(monkeypatch):
+    """A per-call LLMConfig must describe the whole event, not only its embedder."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        settings_module,
+        "get_llm_context_config",
+        lambda: SimpleNamespace(llm_provider="anthropic", llm_model="anthropic/claude"),
+    )
+    payload = settings_module.get_current_settings()
+    assert payload["llm"] == {"provider": "anthropic", "model": "anthropic/claude"}
