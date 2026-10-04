@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from pydantic import BaseModel
 
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.LLMGateway import LLMGateway, _strip_surrogates
 
 _CONFIG_TARGET = "cognee.infrastructure.llm.LLMGateway.get_llm_config"
 _CLIENT_TARGET = (
@@ -26,6 +26,26 @@ def _mock_config():
     config = Mock()
     config.structured_output_framework = "instructor"
     return config
+
+
+def test_strip_surrogates_decodes_valid_utf16_surrogate_pair():
+    pair = chr(0xD83D) + chr(0xDE00)
+    assert _strip_surrogates(pair) == "\U0001f600"
+    mixed = f"café {pair} done"
+    assert _strip_surrogates(mixed) == "café \U0001f600 done"
+
+
+def test_strip_surrogates_replaces_lone_high_and_low_surrogates():
+    lone_high = f"before {chr(0xD83D)} after"
+    lone_low = f"before {chr(0xDE00)} after"
+    cleaned_high = _strip_surrogates(lone_high)
+    cleaned_low = _strip_surrogates(lone_low)
+    assert "\ufffd" in cleaned_high
+    assert "\ufffd" in cleaned_low
+    assert "\ud83d" not in cleaned_high
+    assert "\ude00" not in cleaned_low
+    cleaned_high.encode("utf-8")
+    cleaned_low.encode("utf-8")
 
 
 @pytest.mark.asyncio

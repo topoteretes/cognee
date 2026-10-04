@@ -15,19 +15,17 @@ T = TypeVar("T", bound="BaseModel | str")
 
 def _strip_surrogates(s: str) -> str:
     """
-    Replace unpaired UTF-16 surrogate code points that cannot be encoded to UTF-8.
+    Normalize UTF-16 surrogate code units so the string is encodable as UTF-8.
 
     A lone/unpaired surrogate is a valid Python `str` but is not valid UTF-8. Left
     unstripped it crashes request serialization in every provider client (OpenAI,
     Anthropic, Gemini, Ollama, ...) with a `UnicodeEncodeError`, since the request
     body is eventually encoded to bytes. Applied once here, at the single call site
     every structured-output/text call routes through, rather than per-adapter, so
-    no provider is left unprotected. Round-tripping through UTF-8 with
-    `errors="replace"` removes/replaces surrogates while leaving normal text --
-    including valid multi-byte characters and properly paired surrogate emoji --
-    unchanged.
+    no provider is left unprotected. Valid high/low surrogate pairs are decoded to
+    their Unicode scalar; lone surrogates are replaced. Other characters are unchanged.
     """
-    return s.encode("utf-8", errors="replace").decode("utf-8")
+    return s.encode("utf-16-le", "surrogatepass").decode("utf-16-le", "replace")
 
 
 def _inject_agent_memory(text_input: str) -> str:
