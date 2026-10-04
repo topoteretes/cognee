@@ -13,6 +13,12 @@ on:
     # runs on the same sha, seconds apart, on every PR).
     types: [opened, synchronize, reopened]
   workflow_dispatch:
+    inputs:
+      simulate-fork:
+        description: "Run as a fork PR would: secret-dependent suites skip, the rest run with provider settings cleared"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -40,8 +46,9 @@ jobs:
         id: check
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          SIMULATE_FORK: ${{ inputs.simulate-fork }}
         run: |
-          if [ -n "$LLM_API_KEY" ]; then
+          if [ -n "$LLM_API_KEY" ] && [ "$SIMULATE_FORK" != "true" ]; then
             echo "has-secrets=true" >> "$GITHUB_OUTPUT"
           else
             echo "has-secrets=false" >> "$GITHUB_OUTPUT"
@@ -170,26 +177,29 @@ jobs:
     name: Slow End-to-End Tests
     uses: ./.github/workflows/slow_e2e_tests.yml
     needs: [ build-ci-env, ci-context ]
-    if: ${{ !cancelled() && needs.ci-context.outputs.has-secrets == 'true' }}
+    if: ${{ !cancelled() }}
     with:
+      has-secrets: ${{ needs.ci-context.outputs.has-secrets == 'true' }}
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
 
   graph-db-tests:
     name: Graph Database Tests
     needs: [ build-ci-env, ci-context ]
-    if: ${{ !cancelled() && needs.ci-context.outputs.has-secrets == 'true' }}
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/graph_db_tests.yml
     with:
+      has-secrets: ${{ needs.ci-context.outputs.has-secrets == 'true' }}
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
 
   vector-db-tests:
     name: Vector DB Tests
     needs: [ build-ci-env, ci-context ]
-    if: ${{ !cancelled() && needs.ci-context.outputs.has-secrets == 'true' }}
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/vector_db_tests.yml
     with:
+      has-secrets: ${{ needs.ci-context.outputs.has-secrets == 'true' }}
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
 
@@ -267,24 +277,29 @@ jobs:
   integration-tests:
     name: Run Integration Tests
     needs: [ build-ci-env, ci-context ]
-    if: ${{ !cancelled() && needs.ci-context.outputs.has-secrets == 'true' }}
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/integration_tests.yml
     with:
+      has-secrets: ${{ needs.ci-context.outputs.has-secrets == 'true' }}
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
 
   mcp-test:
     name: MCP Tests
     needs: [ ci-context ]
-    if: ${{ !cancelled() && needs.ci-context.outputs.has-secrets == 'true' }}
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/test_mcp.yml
+    with:
+      has-secrets: ${{ needs.ci-context.outputs.has-secrets == 'true' }}
     secrets: inherit
 
   docker-compose-test:
     name: Docker Compose Test
     needs: [ ci-context ]
-    if: ${{ !cancelled() && needs.ci-context.outputs.has-secrets == 'true' }}
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/docker_compose.yml
+    with:
+      has-secrets: ${{ needs.ci-context.outputs.has-secrets == 'true' }}
     secrets: inherit
 
   docker-ci-test:

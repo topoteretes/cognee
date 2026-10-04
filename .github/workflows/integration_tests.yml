@@ -7,17 +7,23 @@ permissions:
 on:
   workflow_call:
     inputs:
+      has-secrets:
+        required: false
+        type: boolean
+        default: true
       ci-image:
         required: false
         type: string
         default: ''
 
 env:
+  CI_HAS_SECRETS: ${{ inputs.has-secrets }}
   COGNEE_SKIP_CONNECTION_TEST: 'true'
 
 jobs:
   integration-retrieval:
     name: Integration - Retrieval (${{ matrix.split-group }}/4)
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
@@ -82,7 +88,9 @@ jobs:
           extra-dependencies: "scraping"
 
       - name: Run Document & Task Tests
-        run: uv run pytest cognee/tests/integration/documents/ cognee/tests/integration/tasks/ --splits 2 --group ${{ matrix.split-group }}
+        run: |
+          source .github/scripts/keyless_ci_env.sh
+          uv run pytest cognee/tests/integration/documents/ cognee/tests/integration/tasks/ --splits 2 --group ${{ matrix.split-group }}
 
   integration-infra:
     name: Integration - Infrastructure (${{ matrix.split-group }}/3)
@@ -118,10 +126,13 @@ jobs:
           extra-dependencies: "scraping fastembed"
 
       - name: Run Infrastructure Tests
-        run: uv run pytest cognee/tests/integration/infrastructure/ --splits 3 --group ${{ matrix.split-group }}
+        run: |
+          source .github/scripts/keyless_ci_env.sh
+          uv run pytest cognee/tests/integration/infrastructure/ --splits 3 --group ${{ matrix.split-group }}
 
   integration-web:
     name: Integration - Web
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     env:
@@ -189,4 +200,6 @@ jobs:
           extra-dependencies: "scraping redis"
 
       - name: Run Deletion & Misc Tests
-        run: uv run pytest cognee/tests/integration/test_delete_edge_cases.py cognee/tests/integration/shared/
+        run: |
+          source .github/scripts/keyless_ci_env.sh
+          uv run pytest cognee/tests/integration/test_delete_edge_cases.py cognee/tests/integration/shared/

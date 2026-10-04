@@ -11,6 +11,10 @@ permissions:
 on:
   workflow_call:
     inputs:
+      has-secrets:
+        required: false
+        type: boolean
+        default: true
       databases:
         required: false
         type: string
@@ -26,6 +30,7 @@ on:
         required: false
 
 env:
+  CI_HAS_SECRETS: ${{ inputs.has-secrets }}
   COGNEE_SKIP_CONNECTION_TEST: 'true'
 
 jobs:
@@ -33,7 +38,7 @@ jobs:
     name: PostgreSQL Tests
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
-    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'postgres') }}
+    if: ${{ inputs.has-secrets && (inputs.databases == 'all' || contains(inputs.databases, 'postgres')) }}
     services:
       postgres:
         image: ghcr.io/topoteretes/pgvector:pg17
@@ -128,10 +133,13 @@ jobs:
           VECTOR_DB_USERNAME: cognee
           VECTOR_DB_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           VECTOR_DATASET_DATABASE_HANDLER: pgvector
-        run: uv run python ./cognee/tests/test_permissions.py
+        run: |
+          source .github/scripts/keyless_ci_env.sh
+          uv run python ./cognee/tests/test_permissions.py
 
   run-lancedb-tests:
     name: LanceDB Tests
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
@@ -164,7 +172,7 @@ jobs:
     name: Turso Tests
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
-    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'turso') }}
+    if: ${{ inputs.has-secrets && (inputs.databases == 'all' || contains(inputs.databases, 'turso')) }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -232,4 +240,6 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-        run: uv run pytest cognee/tests/test_permissions.py -v --log-level=INFO
+        run: |
+          source .github/scripts/keyless_ci_env.sh
+          uv run pytest cognee/tests/test_permissions.py -v --log-level=INFO

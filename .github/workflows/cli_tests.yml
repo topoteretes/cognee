@@ -56,6 +56,7 @@ on:
         required: false
 
 env:
+  CI_HAS_SECRETS: ${{ inputs.has-secrets }}
   RUNTIME__LOG_LEVEL: ERROR
   ENV: 'dev'
   COGNEE_SKIP_CONNECTION_TEST: 'true'
@@ -89,7 +90,6 @@ jobs:
 
   cli-integration-tests:
     name: CLI Integration Tests
-    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     env:
@@ -121,11 +121,12 @@ jobs:
           cognee_version: ${{ inputs.cognee_version }}
 
       - name: Run CLI Integration Tests
-        run: uv run pytest cognee/tests/cli_tests/cli_integration_tests/ -v
+        run: |
+          source .github/scripts/keyless_ci_env.sh
+          uv run pytest cognee/tests/cli_tests/cli_integration_tests/ -v
 
   cli-functionality-tests:
     name: CLI Functionality Tests
-    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     env:
@@ -158,6 +159,7 @@ jobs:
 
       - name: Test CLI Help Commands
         run: |
+          source .github/scripts/keyless_ci_env.sh
           uv run python -m cognee.cli._cognee --help
           uv run python -m cognee.cli._cognee --version
           uv run python -m cognee.cli._cognee add --help
@@ -168,6 +170,7 @@ jobs:
 
       - name: Test CLI Config Subcommands
         run: |
+          source .github/scripts/keyless_ci_env.sh
           uv run python -m cognee.cli._cognee config get --help
           uv run python -m cognee.cli._cognee config set --help
           uv run python -m cognee.cli._cognee config list --help
@@ -176,6 +179,7 @@ jobs:
 
       - name: Test CLI Error Handling
         run: |
+          source .github/scripts/keyless_ci_env.sh
           # Test invalid command (should fail gracefully)
           ! uv run python -m cognee.cli._cognee invalid_command
 

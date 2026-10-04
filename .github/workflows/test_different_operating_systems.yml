@@ -52,6 +52,7 @@ on:
         required: false
 
 env:
+  CI_HAS_SECRETS: ${{ inputs.has-secrets }}
   RUNTIME__LOG_LEVEL: ERROR
   ENV: 'dev'
 
@@ -648,7 +649,6 @@ jobs:
 
   run-soft-deletion-test:
     name: Soft Delete test ${{ matrix.python-version }} on ${{ matrix.os }}
-    if: ${{ inputs.has-secrets }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -693,11 +693,13 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-        run: uv run python ./cognee/tests/test_delete_default_graph.py
+        shell: bash
+        run: |
+          source .github/scripts/keyless_ci_env.sh mock-llm
+          uv run python ./cognee/tests/test_delete_default_graph.py
 
   run-hard-deletion-test:
     name: Custom Graph Delete test ${{ matrix.python-version }} on ${{ matrix.os }}
-    if: ${{ inputs.has-secrets }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -742,4 +744,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-        run: uv run python ./cognee/tests/test_delete_custom_graph.py
+        shell: bash
+        run: |
+          source .github/scripts/keyless_ci_env.sh
+          uv run python ./cognee/tests/test_delete_custom_graph.py
