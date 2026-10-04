@@ -146,8 +146,40 @@ def test_unknown_backend_raises_value_error_listing_all_backends():
 
     message = str(exc_info.value)
     assert "bogus" in message
-    for backend in ("redis", "fs", "tapes", "sqlite", "postgres"):
+    for backend in ("redis", "fs", "tapes", "headroom", "sqlite", "postgres"):
         assert f"'{backend}'" in message
+
+
+def test_headroom_backend_returns_headroom_adapter(tmp_path):
+    headroom_mod = importlib.import_module(
+        "cognee.infrastructure.databases.cache.headroom.HeadroomCacheAdapter"
+    )
+    with (
+        patch.object(headroom_mod, "_ensure_headroom_installed"),
+        patch(
+            "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
+            return_value={"data_root_directory": str(tmp_path)},
+        ),
+    ):
+        engine = _create_engine("headroom")
+
+    assert isinstance(engine, headroom_mod.HeadroomCacheAdapter)
+    # Factory defaults: Headroom's own shared store and its torch-free embedder.
+    assert engine.headroom_db_path is None
+    assert engine.headroom_embedder == "onnx"
+    engine.cache.close()
+
+
+def test_headroom_backend_without_headroom_installed_raises():
+    from cognee.infrastructure.databases.exceptions import HeadroomNotInstalledError
+
+    # Import the adapter module first so the patched find_spec only sees the install check.
+    importlib.import_module("cognee.infrastructure.databases.cache.headroom.HeadroomCacheAdapter")
+    with (
+        patch("importlib.util.find_spec", return_value=None),
+        pytest.raises(HeadroomNotInstalledError),
+    ):
+        _create_engine("headroom")
 
 
 def test_redis_backend_returns_redis_adapter():

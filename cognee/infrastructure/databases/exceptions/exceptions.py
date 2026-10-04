@@ -270,6 +270,31 @@ class SharedLadybugLockRequiresRedisError(CogneeConfigurationError):
 SharedKuzuLockRequiresRedisError = SharedLadybugLockRequiresRedisError
 
 
+class HeadroomNotInstalledError(CogneeConfigurationError):
+    """
+    Raised when CACHE_BACKEND=headroom is selected but the `headroom-ai` package
+    (or its sqlite-vec vector index) is not importable.
+
+    headroom-ai is not a cognee extra: its `click` floor is incompatible with the
+    `deepeval` extra, so it is installed alongside cognee like the community adapters.
+    """
+
+    def __init__(
+        self,
+        message: str = (
+            "CACHE_BACKEND=headroom requires the `headroom-ai` package, which is not installed."
+        ),
+        name: str = "HeadroomNotInstalledError",
+        status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
+    ):
+        super().__init__(
+            message,
+            name,
+            status_code,
+            remediation="Install it next to cognee: pip install headroom-ai sqlite-vec",
+        )
+
+
 class DatabaseCredentialsError(CogneeConfigurationError):
     """
     Raised when database credentials are incomplete or invalid.

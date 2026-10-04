@@ -16,6 +16,7 @@ from .exceptions import (
     MissingQueryParameterError,
     MutuallyExclusiveQueryParametersError,
     CacheConnectionError,
+    HeadroomNotInstalledError,
     SessionQAEntryValidationError,
     SessionParameterValidationError,
     DatabaseCredentialsError,

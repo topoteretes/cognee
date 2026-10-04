@@ -10,7 +10,8 @@
   ACLs, datasets, pipeline runs, search history. Always shared, never
   isolated per dataset. Entry point ``get_relational_engine()``.
 * ``cache/`` -- ``CacheDBInterface`` session-cache backends: ``sql`` (SQLite
-  default / Postgres), ``redis``, ``fs``, ``tapes``.
+  default / Postgres), ``redis``, ``fs``, and the FS-based mirrors ``tapes``
+  and ``headroom`` (each QA turn also pushed to an external memory system).
 * ``dataset_database_handler/`` -- per-user+dataset database provisioning for
   ``ENABLE_BACKEND_ACCESS_CONTROL``; ``supported_dataset_database_handlers.py``
   is the support matrix. ``dataset_queue/`` caps concurrent embedded engines.
