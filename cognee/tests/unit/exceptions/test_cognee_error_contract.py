@@ -49,6 +49,8 @@ PACKAGE_ROOT = Path(cognee.__file__).parent
 SAMPLE_ARGUMENTS = {
     "conflicts": [{"name": "report.txt", "data_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"}],
     "attribute": "sample_attribute",
+    # CapabilityDeniedError builds its message from the capability it refused.
+    "capability": "sample_capability",
     # DatasetNoDataError (search fan-out) wraps a retriever error for one dataset.
     "dataset": SimpleNamespace(
         name="sample_dataset", id="sample-dataset-id", tenant_id="sample-tenant-id"

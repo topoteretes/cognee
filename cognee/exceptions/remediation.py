@@ -20,6 +20,10 @@ The failure modes that show up most often on a clean install are:
 4. **Unreachable custom endpoint** — user pointed ``EMBEDDING_ENDPOINT`` or
    ``LLM_ENDPOINT`` at a URL that resolves but does not respond.
 5. **Wrong ontology path** — ``--ontology-file`` argument does not exist.
+6. **Unknown model** — a mis-typed ``EMBEDDING_MODEL`` / ``LLM_MODEL`` the
+   provider does not serve (404).
+7. **Missing ``transformers``** — a HuggingFace tokenizer or engine without
+   the ``cognee[huggingface]`` extra installed.
 
 Each of these otherwise triggers a raw stack trace from deep in the pipeline.
 This module lifts a short, prescriptive hint next to the error so the user
@@ -87,6 +91,21 @@ _TABLE: tuple[tuple[tuple[str, ...], str], ...] = (
             "URL, that the host is running, and that the port is open. "
             "Unset EMBEDDING_ENDPOINT to fall back to the provider default."
         ),
+    ),
+    (
+        # Real error: litellm.NotFoundError, re-raised unwrapped by the embedding
+        # engine ("litellm.NotFoundError: The model `x` does not exist"). Kept to
+        # litellm's spelling so cognee's own *NotFoundError classes never match.
+        ("litellm.notfounderror", "model_not_found"),
+        (
+            "The provider does not serve the configured model. Check the spelling "
+            "of EMBEDDING_MODEL (or LLM_MODEL) and that the model is available on "
+            "the configured provider and endpoint."
+        ),
+    ),
+    (
+        ("no module named 'transformers'",),
+        ('transformers is not installed. Install it with: pip install "cognee[huggingface]"'),
     ),
     (
         ("ontology file not found",),

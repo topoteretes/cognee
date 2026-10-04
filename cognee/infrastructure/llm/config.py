@@ -194,7 +194,7 @@ class LLMConfig(BaseSettings):
 
     baml_registry: Any | None = None
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     @model_validator(mode="before")
     @classmethod
