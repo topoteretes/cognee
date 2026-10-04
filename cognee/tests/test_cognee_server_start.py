@@ -10,6 +10,9 @@ from pathlib import Path
 
 import requests
 
+from cognee.modules.preflight import llm_available
+from cognee.tests.utils.ci_search_type import completion_or_chunks
+
 DEFAULT_USER_EMAIL = "default_user@example.com"
 # The default user has no password until a server started with
 # DEFAULT_USER_PASSWORD sets it once. This test logs in over HTTP, so it pins
@@ -87,7 +90,10 @@ class TestCogneeServerStart(unittest.TestCase):
 
         # Add request
         url = "http://127.0.0.1:8000/api/v1/add"
-        file_path = Path(os.path.join(Path(__file__).parent, "test_data/example.png"))
+        # Image ingestion needs an LLM to describe the image; without a key (fork
+        # PRs) the same flow runs on a text document.
+        test_file = "example.png" if llm_available() else "Natural_language_processing.txt"
+        file_path = Path(os.path.join(Path(__file__).parent, "test_data", test_file))
         headers = {"Authorization": auth_var}
 
         dataset_name = f"test_{uuid.uuid4().hex[:8]}"
@@ -198,7 +204,7 @@ class TestCogneeServerStart(unittest.TestCase):
             "Content-Type": "application/json",
         }
 
-        payload = {"searchType": "GRAPH_COMPLETION", "query": "What's in the document?"}
+        payload = {"searchType": completion_or_chunks().value, "query": "What's in the document?"}
 
         search_response = requests.post(url, headers=headers, json=payload, timeout=50)
         if search_response.status_code not in [200, 201]:
