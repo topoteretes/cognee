@@ -15,10 +15,12 @@ libraries and no live credentials are required, so these run in CI. Coverage:
 """
 
 import base64
+from types import SimpleNamespace
 
 import pytest
 
 from cognee.tasks.ingestion.connectors.gmail import (
+    GmailQuota,
     full_backfill,
     gmail_source,
     incremental_fetch,
@@ -142,7 +144,7 @@ class FakeGmailService:
 # ---------------------------------------------------------------------------
 # parse_message
 # ---------------------------------------------------------------------------
-def test_parse_message_flattens_headers_body_and_labels():
+def test_parse_message_keeps_only_the_columns_cognee_reads():
     msg = _make_message(
         "m1",
         subject="Lunch?",
@@ -152,13 +154,9 @@ def test_parse_message_flattens_headers_body_and_labels():
     )
     row = parse_message(msg)
 
+    assert set(row) == {"id", "title", "content", "_deleted"}
     assert row["id"] == "m1"
-    assert row["thread_id"] == "t_m1"
-    assert row["subject"] == "Lunch?"
-    assert row["from"] == "alice@example.com"
-    assert row["body"] == "Want to grab lunch tomorrow?"
-    assert row["labels"] == "INBOX, IMPORTANT"  # list flattened, no child table
-    assert row["internal_date"] == 1700000000000
+    assert row["title"] == "Lunch?"
     assert row["_deleted"] is False
 
 
@@ -176,13 +174,72 @@ def test_parse_message_handles_multipart_prefers_text_plain():
             ],
         },
     }
-    assert parse_message(msg)["body"] == "plain wins"
+    assert parse_message(msg)["content"].endswith("\n\nplain wins")
 
 
-def test_parse_message_tolerates_missing_internal_date():
+def test_parse_message_tolerates_an_empty_payload():
     row = parse_message({"id": "m3", "payload": {}})
-    assert row["internal_date"] == 0
-    assert row["body"] == ""
+    assert row == {"id": "m3", "title": "", "content": "", "_deleted": False}
+
+
+def test_parse_message_emits_title_and_content_for_document_ingestion():
+    msg = _make_message(
+        "m4",
+        subject="Invoice #42",
+        sender="billing@example.com",
+        body="Your invoice is attached.",
+    )
+    row = parse_message(msg)
+
+    assert row["title"] == "Invoice #42"
+    assert row["content"].split("\n") == [
+        "From: billing@example.com",
+        "To: me@example.com",
+        "Received: 2023-11-14T22:13:20+00:00",
+        "Labels: INBOX",
+        "Thread: t_m4",
+        "",
+        "Your invoice is attached.",
+    ]
+
+
+def test_parse_message_content_falls_back_to_snippet_for_html_only_mail():
+    msg = {
+        "id": "m5",
+        "threadId": "t",
+        "labelIds": [],
+        "snippet": "Preview of an HTML newsletter",
+        "payload": {
+            "mimeType": "text/html",
+            "headers": [{"name": "Subject", "value": "News"}],
+            "body": {"data": _b64("<p>html only</p>")},
+        },
+    }
+    row = parse_message(msg)
+
+    assert row["content"].endswith("\n\nPreview of an HTML newsletter")
+
+
+def test_parsed_message_becomes_a_non_empty_document():
+    # Regression (SDK-799): document-source rows are read through their
+    # title/content columns only, so a Gmail row without them was ingested
+    # as an empty document and cognify built nothing.
+    from types import SimpleNamespace
+    from uuid import NAMESPACE_OID, uuid5
+
+    from cognee.tasks.ingestion.resolve_dlt_sources import _build_document_data_item
+
+    row = parse_message(
+        _make_message("m6", subject="Lunch?", sender="alice@example.com", body="Tomorrow at noon?")
+    )
+    dlt_row = SimpleNamespace(table_name="gmail_messages", row_data=row, content_hash="h")
+
+    item = _build_document_data_item(dlt_row, uuid5(NAMESPACE_OID, "m6"), "gmail")
+
+    assert item.data.startswith("# Lunch?")
+    assert "From: alice@example.com" in item.data
+    assert "Tomorrow at noon?" in item.data
+    assert item.system_metadata["external_id"] == "m6"
 
 
 # ---------------------------------------------------------------------------
@@ -561,3 +618,74 @@ def test_e2e_changing_labels_backfills_existing_messages(tmp_path):
     # Keeping the same selection takes the incremental path on the next run.
     service.get_errors = {"project": 503}
     pipeline.run(gmail_source(service=service, label_ids=["Label_project"]))
+
+
+# ---------------------------------------------------------------------------
+# GmailQuota: pacing
+# ---------------------------------------------------------------------------
+class _FakeClock:
+    """Deterministic clock whose sleep() just advances time."""
+
+    def __init__(self):
+        self.now = 0.0
+        self.sleeps = []
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+@pytest.fixture
+def make_quota(monkeypatch):
+    """Build a GmailQuota whose pacing window and sleeps run on a fake clock."""
+    import limits.storage.memory
+
+    clock = _FakeClock()
+    # The limits moving window reads time.time() internally.
+    monkeypatch.setattr(limits.storage.memory, "time", SimpleNamespace(time=clock))
+
+    def _make(units_per_minute=6000):
+        return GmailQuota(units_per_minute, clock=clock, sleep=clock.sleep), clock
+
+    return _make
+
+
+def test_quota_keeps_every_minute_under_the_budget(make_quota):
+    quota, clock = make_quota(units_per_minute=6000)
+
+    fetched = 0
+    while True:
+        quota.acquire(20)  # one messages.get
+        if clock.now >= 60.0:
+            break
+        fetched += 1
+
+    # 6,000 units / 20 per fetch = 300 fetches in the first minute, no more.
+    assert fetched == 300
+
+
+def test_quota_does_not_wait_within_the_budget(make_quota):
+    quota, clock = make_quota(units_per_minute=6000)
+    quota.acquire(20)
+    quota.acquire(5)
+    assert clock.sleeps == []
+
+
+def test_quota_rejects_a_budget_too_small_for_one_fetch():
+    with pytest.raises(ValueError):
+        GmailQuota(10)
+
+
+def test_backfill_paces_every_call_through_the_quota(make_quota):
+    quota, clock = make_quota(units_per_minute=600)  # 30 fetches a minute
+    service = FakeGmailService(messages=[_make_message(f"m{i}") for i in range(40)])
+
+    rows = list(full_backfill(service, {}, label_ids=["INBOX"], quota=quota))
+
+    assert len(rows) == 40
+    # 1 (profile) + 5 (list) + 40 * 20 (gets) = 806 units, over a 600-unit
+    # budget, so the last fetches wait for the first minute's window to pass.
+    assert clock.now >= 60.0

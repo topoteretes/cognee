@@ -93,7 +93,7 @@ class OntologyEnvConfig(BaseSettings):
     # ``ontology_config["authoritative_sources"]`` overrides it.
     ontology_authoritative_sources: str = ""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow", populate_by_name=True)
+    model_config = SettingsConfigDict(extra="allow", populate_by_name=True)
 
     @field_validator("ontology_mode", mode="before")
     @classmethod

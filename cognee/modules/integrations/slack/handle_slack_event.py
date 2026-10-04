@@ -13,9 +13,11 @@ Slack delivers events at-least-once (3 retries: immediate, 1 min, 5 min) and
 does NOT guarantee ordering between event types, so every handler here is
 idempotent and independent of the others.
 
-Message/mention events for ingestion are deliberately absent — that requires
-Slack Marketplace approval (non-Marketplace apps get channel-history reads
-throttled to 1 req/min).
+History ingestion uses an opt-in, resumable source refresh (history_sync.py),
+including edits/deletions and replies to old threads. It does not depend on
+receiving every message event while the server is online. Internal apps have
+Slack's normal history rate tier; commercially distributed apps may have
+stricter limits, which the history client honors.
 """
 
 import json

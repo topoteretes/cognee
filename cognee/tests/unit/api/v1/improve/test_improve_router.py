@@ -248,3 +248,34 @@ def test_fatal_stage_failure_returns_409_with_the_partial_result(client, monkeyp
     assert "persist_session_qa" in body["error"]
     stages = body["improve_result"]["stages"]
     assert [stage["status"] for stage in stages] == ["completed", "errored", "skipped"]
+
+
+def test_fatal_stage_stopped_on_the_budget_returns_402_with_the_partial_result(client, monkeypatch):
+    """An abort on an exhausted LLM budget keeps the error's own 402 instead of
+    being flattened to the 409 every other abort gets, with the same body."""
+    from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
+
+    improve_pkg = importlib.import_module("cognee.api.v1.improve")
+    partial = ImproveResult(
+        dataset_id=DATASET_ID,
+        dataset_name="docs",
+        session_ids=["s1"],
+        stages=[
+            StageResult.completed("feedback_weights"),
+            StageResult.errored("persist_session_qa", "LLM budget exhausted"),
+            StageResult.skipped("persist_agent_traces", "budget_exhausted"),
+        ],
+        memify_run={},
+    )
+    error = LLMPaymentRequiredError("LLM budget exhausted: persist_session_qa stopped")
+    error.improve_result = partial
+    monkeypatch.setattr(improve_pkg, "improve", AsyncMock(side_effect=error))
+
+    resp = client.post("/improve", json={"datasetName": "docs", "sessionIds": ["s1"]})
+
+    assert resp.status_code == 402
+    body = resp.json()
+    assert "persist_session_qa" in body["error"]
+    stages = body["improve_result"]["stages"]
+    assert [stage["status"] for stage in stages] == ["completed", "errored", "skipped"]
+    assert stages[2]["reason"] == "budget_exhausted"

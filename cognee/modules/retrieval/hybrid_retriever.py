@@ -26,6 +26,7 @@ from cognee.modules.retrieval.hybrid.entities import (
     pin_grounded_entities,
     search_entities,
 )
+from cognee.modules.retrieval.hybrid.external_metadata import project_external_metadata
 from cognee.modules.retrieval.hybrid.facts import (
     edge_rank_by_id,
     resolve_facts_top_k,
@@ -81,6 +82,8 @@ class HybridRetriever(BaseRetriever):
         facts_top_k: int | None = 5,
         ontology_grounding: bool | None = None,
         ontology_resolver: BaseOntologyResolver | None = None,
+        include_external_metadata: bool = False,
+        external_metadata_keys: list[str] | None = None,
     ):
         self.chunks_top_k = chunks_top_k if chunks_top_k is not None else 5
         self.entities_top_k = entities_top_k if entities_top_k is not None else 5
@@ -103,6 +106,11 @@ class HybridRetriever(BaseRetriever):
         # ONTOLOGY_QUERY_GROUNDING, an explicit resolver overrides the configured one.
         self.ontology_grounding = ontology_grounding
         self.ontology_resolver = ontology_resolver
+        # Opt-in: surface allowlisted keys of the document external_metadata
+        # stored on each chunk. Off by default, so returned objects and the
+        # prompt stay exactly as before.
+        self.include_external_metadata = include_external_metadata
+        self.external_metadata_keys = list(external_metadata_keys or [])
 
     def ground_query(self, query: str | None) -> QueryGrounding:
         """Resolve the query's terms against the ontology; empty when none is configured."""
@@ -175,6 +183,11 @@ class HybridRetriever(BaseRetriever):
                 personal_influence=get_base_config().personalization_influence,
             ),
             self._retrieve_entities_and_facts(query, query_vector, grounding),
+        )
+        project_external_metadata(
+            chunk_objects.get("chunks", []),
+            self.include_external_metadata,
+            self.external_metadata_keys,
         )
         result = {**chunk_objects, "entities": entities, "facts": facts}
         grounding_block = grounding.to_context_block()

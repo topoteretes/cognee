@@ -235,6 +235,11 @@ class NodeEdgeVectorSearch:
         node_name_filter_operator: str,
     ):
         """Searches one collection and returns results or empty list if not found."""
+        if collection_name == self.edge_collection:
+            # Edge types are shared vocabulary, not node-set members: they only score
+            # edges the graph projection already scoped, so the node filter never
+            # applies to them (the hybrid retriever does the same).
+            node_name = None
         try:
             return await vector_engine.search(
                 collection_name=collection_name,
