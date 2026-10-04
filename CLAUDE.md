@@ -903,6 +903,7 @@ shutdown = visualization_server(port=8080)  # synchronous; returns a shutdown ca
 - Set `LITELLM_LOG="DEBUG"` for verbose LLM logs (default: "ERROR")
 - Enable debug mode: `ENV="development"` or `ENV="debug"`
 - Disable telemetry: `TELEMETRY_DISABLED=1`
+- Telemetry events carry `telemetry_origin`: `sdk` by default, and `cli`, `mcp` or `api` when the process is the CLI, the MCP server or the API app (each entrypoint sets the default; an explicit `TELEMETRY_ORIGIN`, e.g. `cloud`, wins). Failed `search()`/`recall()` calls end with an `ERRORED` event naming the error class only; pipeline events carry `pipeline_run_id` and, on failure, `exception_type`. A model setting that is a filesystem path is reported as `local_path`.
 - Check logs in structured format (uses structlog)
 - Use `debugpy` optional dependency for debugging: `pip install cognee[debug]`
 
