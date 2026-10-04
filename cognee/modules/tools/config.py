@@ -40,7 +40,7 @@ class ToolsConfig(BaseSettings):
     # rolls back and marks the proposal failed when exceeded.
     text_to_sql_max_affected_rows: int = 50
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     def sql_connections(self) -> dict[str, dict[str, Any]]:
         """Parse ``tool_sql_connections`` into name → options dicts.

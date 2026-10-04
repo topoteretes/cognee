@@ -40,6 +40,7 @@ from cognee.infrastructure.databases.vector.embeddings.OpenAICompatibleEmbedding
 )
 from cognee.infrastructure.llm import utils as llm_utils
 from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
+from cognee.infrastructure.llm.tokenizer.HuggingFace import adapter as hf_adapter
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
 
 BGE = "BAAI/bge-small-en-v1.5"
@@ -48,10 +49,11 @@ BGE = "BAAI/bge-small-en-v1.5"
 def _hf_tokenizer(model_max_length: int) -> HuggingFaceTokenizer:
     """A resolved HuggingFace tokenizer whose repo declares ``model_max_length``
     and whose model adds no special tokens (so the limit is used as is)."""
-    tokenizer = HuggingFaceTokenizer.__new__(HuggingFaceTokenizer)
-    tokenizer.tokenizer = MagicMock(init_kwargs={"model_max_length": model_max_length})
-    tokenizer.tokenizer.num_special_tokens_to_add.return_value = 0
-    return tokenizer
+    with (
+        patch.object(hf_adapter, "_load", return_value=(lambda text: text.split(), 0)),
+        patch.object(hf_adapter, "_declared_input_limit", return_value=model_max_length),
+    ):
+        return HuggingFaceTokenizer(model="org/model")
 
 
 # ---------------------------------------------------------------------------
