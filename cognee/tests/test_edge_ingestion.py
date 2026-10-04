@@ -1,10 +1,10 @@
-import os
 import asyncio
-import cognee
+import os
 import pathlib
-
-from cognee.infrastructure.databases.graph import get_graph_engine
 from collections import Counter
+
+import cognee
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 

@@ -1,16 +1,14 @@
 import os
 from uuid import UUID
-from typing import Optional
 
-from cognee.infrastructure.databases.vector.create_vector_engine import (
-    aevict_vector_engines_for_database,
-)
-from cognee.modules.users.models import User
-from cognee.modules.users.models import DatasetDatabase
 from cognee.base_config import get_base_config
-from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
+from cognee.infrastructure.databases.vector import get_vectordb_config
+from cognee.infrastructure.databases.vector.create_vector_engine import (
+    vector_engine_cache,
+)
 from cognee.infrastructure.files.storage.get_file_storage import get_file_storage
+from cognee.modules.users.models import DatasetDatabase, User
 
 
 class LanceDBDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
@@ -19,7 +17,7 @@ class LanceDBDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     """
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: UUID | None, user: User | None) -> dict:
         """Create local LanceDB dataset connection details for a user's dataset."""
         vector_config = get_vectordb_config()
         base_config = get_base_config()
@@ -50,12 +48,12 @@ class LanceDBDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         # (in subprocess mode, a worker) that races the just-torn-down one.
         # Evict every cached engine for this database, wait for their
         # in-flight closes to finish (a close deferred behind an idle holder
-        # is not waited on; see aevict_vector_engines_for_database), then
+        # is not waited on; see vector_engine_cache.aevict_for_database), then
         # remove the on-disk store directly.
         # Server-backed handlers (e.g. PGVector) are different on purpose:
         # they drop the per-dataset database over a connection, so no file
         # handling applies there.
-        await aevict_vector_engines_for_database(dataset_database.vector_database_name)
+        await vector_engine_cache.aevict_for_database(dataset_database.vector_database_name)
 
         databases_directory_path = os.path.dirname(dataset_database.vector_database_url)
         file_storage = get_file_storage(databases_directory_path)

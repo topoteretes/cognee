@@ -1,0 +1,143 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/topoteretes/cognee/catalog/schema.json",
+  "title": "CogneeCatalogEntry",
+  "description": "Schema for a single entry in the Cognee Integrations Hub and Use-Case Gallery. One YAML file under catalog/entries/{integrations,use-cases,packages}/ per entry. See docs/contributing/add-catalog-entry.md.",
+  "type": "object",
+  "required": [
+    "id",
+    "title",
+    "kind",
+    "stack",
+    "tags",
+    "summary",
+    "what_youll_build",
+    "quickstart",
+    "expected_output",
+    "difficulty"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Stable machine identifier. Lowercase, dashes, no spaces. Must match the filename stem.",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "minLength": 2,
+      "maxLength": 64
+    },
+    "title": {
+      "type": "string",
+      "description": "Human-readable title as it appears in the Hub.",
+      "minLength": 2,
+      "maxLength": 120
+    },
+    "kind": {
+      "type": "string",
+      "description": "Which view an entry belongs to. Integrations and packages appear in the Integrations Hub; use-cases appear in the Use-Case Gallery.",
+      "enum": ["integration", "use-case", "package"]
+    },
+    "stack": {
+      "type": "string",
+      "description": "Primary technology bucket. Drives filtering in the rendered Hub. `use-case` is reserved for entries where the stack is orthogonal to the outcome.",
+      "enum": [
+        "llm-provider",
+        "vector-store",
+        "graph-store",
+        "relational-store",
+        "framework",
+        "agent-runtime",
+        "workflow-tool",
+        "observability",
+        "loader",
+        "use-case"
+      ]
+    },
+    "tags": {
+      "type": "array",
+      "description": "Free-form filter tags. Redundant with stack on purpose so users can search by outcome (`document-qa`) or provider (`openai`) without a taxonomy war.",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9-]*$",
+        "minLength": 2,
+        "maxLength": 32
+      },
+      "minItems": 1,
+      "maxItems": 12,
+      "uniqueItems": true
+    },
+    "summary": {
+      "type": "string",
+      "description": "One sentence, shown on the Hub card. Answer: does this work with my stack.",
+      "minLength": 10,
+      "maxLength": 240
+    },
+    "what_youll_build": {
+      "type": "string",
+      "description": "One sentence promising a concrete outcome. Answer: what do I get if I follow the quickstart.",
+      "minLength": 10,
+      "maxLength": 240
+    },
+    "quickstart": {
+      "type": "string",
+      "description": "Copy-paste block that gets a newcomer running. Include install, env, and a single run command. Multi-line YAML block scalar. No shell prompts, no wrapping backticks.",
+      "minLength": 10
+    },
+    "expected_output": {
+      "type": "string",
+      "description": "Concrete output the user should see after the quickstart. Ranges/summaries are fine; exact values are not required.",
+      "minLength": 10
+    },
+    "difficulty": {
+      "type": "string",
+      "description": "Rough effort estimate for a new user, not a code-complexity rating.",
+      "enum": ["easy", "medium", "advanced"]
+    },
+    "repo": {
+      "type": "string",
+      "description": "Owning repository in `owner/name` form. Required for integrations and packages, optional for use-cases (which typically live in cognee/examples).",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
+    "path": {
+      "type": "string",
+      "description": "Path within `repo` to the source. Required for integrations and packages. Loader confirms the path resolves.",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "example_path": {
+      "type": "string",
+      "description": "Path to a runnable example. Required for use-cases; optional for integrations and packages. Loader confirms the file exists.",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "inventory_slug": {
+      "type": "string",
+      "description": "Slug in cognee-integrations/integrations/inventory.yml this entry corresponds to. Used by the drift check so an inventory entry without a catalog entry (or vice versa) fails CI.",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "minLength": 2,
+      "maxLength": 64
+    },
+    "docs_url": {
+      "type": "string",
+      "description": "Optional link to a longer doc page (e.g. docs.cognee.ai/integrations/openai).",
+      "format": "uri"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"kind": {"enum": ["integration", "package"]}}
+      },
+      "then": {
+        "required": ["repo", "path"]
+      }
+    },
+    {
+      "if": {
+        "properties": {"kind": {"const": "use-case"}}
+      },
+      "then": {
+        "required": ["example_path"]
+      }
+    }
+  ]
+}

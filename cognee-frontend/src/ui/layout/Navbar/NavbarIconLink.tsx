@@ -10,6 +10,7 @@ interface NavbarIconLinkProps {
   link: string;
   isActive: boolean;
   external?: boolean;
+  collapsed?: boolean;
   onClick?: () => void;
 }
 
@@ -19,13 +20,14 @@ export default function NavbarIconLink({
   link,
   isActive,
   external,
+  collapsed = false,
   onClick,
 }: NavbarIconLinkProps) {
   const classes = classNames(
     "flex items-center gap-[10px] rounded-[6px] px-3 py-2 text-[14px] transition-colors",
     {
       "font-medium": isActive,
-      "": !isActive,
+      "justify-center": collapsed,
     }
   );
 
@@ -40,13 +42,14 @@ export default function NavbarIconLink({
       href={link}
       className={classes}
       style={linkStyle}
+      title={collapsed ? text : undefined}
       {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
       onClick={onClick}
       onMouseEnter={!isActive ? (e) => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; } : undefined}
       onMouseLeave={!isActive ? (e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; } : undefined}
     >
       {icon}
-      {text}
+      {!collapsed && text}
     </Link>
   );
 }

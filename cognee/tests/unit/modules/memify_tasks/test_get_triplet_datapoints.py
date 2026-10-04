@@ -1,13 +1,13 @@
 import sys
-import pytest
 from unittest.mock import AsyncMock, patch
 
-from cognee.tasks.memify.get_triplet_datapoints import get_triplet_datapoints
+import pytest
+
+from cognee.infrastructure.engine import DataPoint
 from cognee.modules.engine.models import Triplet
 from cognee.modules.engine.models.Entity import Entity
-from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.models.EdgeType import EdgeType
-
+from cognee.tasks.memify.get_triplet_datapoints import get_triplet_datapoints
 
 get_triplet_datapoints_module = sys.modules["cognee.tasks.memify.get_triplet_datapoints"]
 

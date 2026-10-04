@@ -1,18 +1,25 @@
 """Per-session lock primitives — in-process asyncio registry.
 
-Two primitives:
+Three primitives:
 
 * ``session_lock(session_id, op)`` — async context manager that
   serializes concurrent tasks on the same ``(session_id, op)`` key.
   Used for short read-modify-write flows (``update_qa``,
   ``add_feedback``, ``delete_qa``).
 
-* ``try_acquire_improve_lock(session_id)`` /
-  ``release_improve_lock(session_id)`` — non-blocking claim for
+* ``session_turn_lock(user_id, session_id)`` — async context manager
+  that serializes whole session turns for one cache identity, so two
+  quick turns cannot read the same state and overwrite each other.
+
+* ``try_acquire_improve_lock_many(keys)`` /
+  ``release_improve_lock_many(keys)`` — non-blocking claim for
   long-running ``improve()`` calls. The claim is atomic: a
   registry-wide ``asyncio.Lock`` protects a set of held keys, and
   the check-and-add happens inside that critical section so two
   callers can't both see "free" and both think they won.
+  ``request_improve_rerun_many`` / ``release_or_rerun_improve_lock_many``
+  carry a lock loser's "there is a newer tail" signal to the holder,
+  which then runs one more pass before releasing (SDK-593).
 
 Scope: single-worker FastAPI. For multi-worker deployments, layer a
 row-level SQL advisory lock or Redis SETNX on top — the call sites
@@ -20,8 +27,9 @@ are factored so that's a local change.
 """
 
 import asyncio
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterable
 from contextlib import asynccontextmanager
+from typing import Any
 
 from cognee.shared.logging_utils import get_logger
 
@@ -60,6 +68,39 @@ async def session_lock(session_id: str, op: str = "write") -> AsyncGenerator[Non
         yield
 
 
+# Turn locks are registered per event loop, unlike ``_locks`` above: an ``asyncio.Lock``
+# is bound to the loop that awaited it, so reusing one from a different loop raises
+# RuntimeError. Keying by loop means a fresh loop always gets its own empty table, so a
+# lock is never reused across loops. Like ``_locks``, entries are never expired — that's
+# the same trade-off the registry above already makes.
+_turn_lock_registries: dict[asyncio.AbstractEventLoop, dict[tuple[str, str], asyncio.Lock]] = {}
+_turn_registry_guard = asyncio.Lock()
+
+
+async def _get_turn_lock(user_id: Any, session_id: Any) -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    key = (str(user_id), str(session_id))
+    async with _turn_registry_guard:
+        registry = _turn_lock_registries.setdefault(loop, {})
+        lock = registry.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            registry[key] = lock
+        return lock
+
+
+@asynccontextmanager
+async def session_turn_lock(user_id: Any, session_id: Any) -> AsyncGenerator[None, None]:
+    """Serialize full concurrent turns for one cache user/session identity."""
+    if not user_id or not session_id:
+        yield
+        return
+
+    lock = await _get_turn_lock(user_id, session_id)
+    async with lock:
+        yield
+
+
 # ----- Non-blocking improve-lock claim ---------------------------------------
 #
 # asyncio.Lock has no ``acquire_nowait`` on current Python, and the
@@ -70,30 +111,119 @@ async def session_lock(session_id: str, op: str = "write") -> AsyncGenerator[Non
 # registry lock's critical section, so the test is atomic.
 
 _improving_sessions: set[str] = set()
+# Keys whose current holder was asked for one more pass by a run that found
+# them held (``request_improve_rerun_many``). Consumed by
+# ``release_or_rerun_improve_lock_many``; a fresh claim clears them, since a
+# new holder starts with a full watermark pass anyway.
+_rerun_requested: set[str] = set()
 _improve_registry_lock = asyncio.Lock()
 
 
-async def try_acquire_improve_lock(session_id: str) -> bool:
-    """Atomically claim the improve-lock for ``session_id``.
+async def try_acquire_improve_lock_many(keys: Iterable[str]) -> bool:
+    """Atomically claim the improve-lock for every key in ``keys``, or none.
 
-    Returns ``True`` iff we got it. The caller MUST call
-    ``release_improve_lock`` when done (use try/finally). Returns
-    ``False`` immediately when another task already holds the lock —
-    callers should no-op rather than wait.
+    One claim per ``improve()`` run, keyed by what the run touches: every
+    session id it was given plus ``f"dataset:{dataset_id}"`` (see
+    ``improve_lock_keys``). Same held-set, same registry lock as the single-key claim; the
+    all-or-nothing check-and-add happens inside one critical section, so two
+    overlapping runs that share any key cannot both win. Returns ``True`` iff
+    every key was claimed — the caller MUST then call
+    ``release_improve_lock_many`` with the same keys (use try/finally).
+    Empty or all-falsy ``keys`` need no exclusion and return ``True``.
     """
-    if not session_id:
-        return True  # no-op sessions don't need exclusion
+    wanted = [key for key in keys if key]
+    if not wanted:
+        return True
 
     async with _improve_registry_lock:
-        if session_id in _improving_sessions:
+        if any(key in _improving_sessions for key in wanted):
             return False
-        _improving_sessions.add(session_id)
+        _improving_sessions.update(wanted)
+        _rerun_requested.difference_update(wanted)
         return True
 
 
-async def release_improve_lock(session_id: str) -> None:
-    """Release the improve-lock for ``session_id``. Idempotent."""
-    if not session_id:
+async def release_improve_lock_many(keys: Iterable[str]) -> None:
+    """Release every key claimed by ``try_acquire_improve_lock_many``.
+
+    Not holder-scoped: it drops the keys whoever holds them, so a run must
+    release its claim exactly once — a second release after another run
+    re-claimed the keys would drop THAT run's claim. Unconditional about rerun
+    requests: one still pending on a key is left for the next claimant, whose
+    full pass covers it.
+    """
+    wanted = [key for key in keys if key]
+    if not wanted:
         return
     async with _improve_registry_lock:
-        _improving_sessions.discard(session_id)
+        _improving_sessions.difference_update(wanted)
+
+
+async def request_improve_rerun_many(keys: Iterable[str]) -> bool:
+    """Ask whoever holds any of ``keys`` to run one more pass before letting go.
+
+    Called by a run that lost its lock claim. Returns ``True`` iff at least one
+    key is currently held, i.e. the request reached a holder; a request on a
+    free key would have nobody to fulfil it and is not recorded. The caller can
+    then return without retrying: everything above the watermarks when the
+    holder's extra pass runs — including this caller's newer tail — is covered.
+    """
+    wanted = [key for key in keys if key]
+    if not wanted:
+        return False
+    async with _improve_registry_lock:
+        held = [key for key in wanted if key in _improving_sessions]
+        if not held:
+            return False
+        _rerun_requested.update(held)
+        return True
+
+
+async def has_pending_improve_rerun(keys: Iterable[str]) -> bool:
+    """Read-only: is a rerun request pending on any of ``keys``? Consumes nothing."""
+    wanted = [key for key in keys if key]
+    if not wanted:
+        return False
+    async with _improve_registry_lock:
+        return any(key in _rerun_requested for key in wanted)
+
+
+async def release_or_rerun_improve_lock_many(
+    keys: Iterable[str], *, rerun_keys: Iterable[str]
+) -> bool:
+    """Release every key — unless a rerun is pending on one of ``rerun_keys``.
+
+    One critical section decides both: when a request is pending on a
+    ``rerun_keys`` key we still hold, the request is consumed, EVERY key stays
+    claimed, and ``False`` says "run the stages once more". Otherwise all
+    ``keys`` are released and ``True`` is returned. Doing the check and the
+    release under the same registry lock means no request can land between
+    "checked" and "released" and be lost.
+    """
+    wanted = [key for key in keys if key]
+    watched = [key for key in rerun_keys if key]
+    async with _improve_registry_lock:
+        pending = [key for key in watched if key in _rerun_requested and key in _improving_sessions]
+        if pending:
+            _rerun_requested.difference_update(pending)
+            return False
+        _improving_sessions.difference_update(wanted)
+        return True
+
+
+def improve_lock_keys(
+    session_ids: Iterable[str] | None, dataset_id: Any, user_id: Any
+) -> tuple[str, ...]:
+    """The claim keys for one improve run: its session ids plus its dataset id.
+
+    Session keys carry the user id because session state is scoped per
+    ``(user_id, session_id)`` everywhere else — two users who both call a
+    session "chat" must never block each other. Every run also claims the
+    dataset key, session-fed or not, so a session-keyed bridge run and a
+    dataset-keyed run over the same dataset exclude each other — improves for
+    one dataset serialize; an overlapping claim loses and returns ``lock_held``.
+    """
+    sessions = tuple(
+        f"session:{user_id}:{session_id}" for session_id in (session_ids or ()) if session_id
+    )
+    return (*sessions, f"dataset:{dataset_id}")

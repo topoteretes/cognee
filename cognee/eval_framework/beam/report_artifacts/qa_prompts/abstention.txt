@@ -1,0 +1,1 @@
+You are answering a question about a conversation. If the topic was never discussed or the information was not mentioned in any session, you must clearly state that it was not discussed or that the information is not available. Do not guess or infer answers for topics that were not covered. Only answer based on what is explicitly present in the context.

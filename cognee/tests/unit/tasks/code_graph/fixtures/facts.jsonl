@@ -1,0 +1,18 @@
+{"kind": "module", "name": "app", "file": "app/main.go", "line": 1, "repo": "acme/shop", "props": {"language": "go"}, "relations": [{"type": "declares", "target": "main"}, {"kind": "imports", "to": "utils"}]}
+{"kind": "module", "name": "utils", "file": "utils/utils.go", "line": 1, "repo": "acme/shop", "props": {"language": "go"}, "relations": []}
+{"kind": "symbol", "name": "main", "file": "app/main.go", "line": 12, "repo": "acme/shop", "props": {"symbol_kind": "function"}, "relations": [{"rel": "calls", "target_name": "helper"}, {"type": "instantiates", "target": "Config"}]}
+{not valid json — this line must be skipped by the parser
+{"kind": "symbol", "name": "helper", "file": "utils/utils.go", "line": 8, "repo": "acme/shop", "props": {"symbol_kind": "function"}, "relations": [{"type": "calls", "target": "ghost_function"}]}
+
+{"kind": "symbol", "name": "Config", "file": "app/config.go", "line": 5, "repo": "acme/shop", "props": {"symbol_kind": "struct"}, "relations": [{"type": "has_method", "target": "Load"}]}
+{"kind": "symbol", "name": "Load", "file": "app/config.go", "line": 21, "repo": "acme/shop", "props": {"symbol_kind": "method"}, "relations": []}
+{"kind": "symbol", "name": "Storer", "file": "store/store.go", "line": 4, "repo": "acme/shop", "props": {"symbol_kind": "interface"}, "relations": []}
+{"kind": "symbol", "name": "PostgresStore", "file": "store/postgres.go", "line": 10, "repo": "acme/shop", "props": {"symbol_kind": "class"}, "relations": [{"type": "implements", "target": "Storer"}, {"foo": "bar"}]}
+{"kind": "symbol", "name": "MAX_RETRIES", "file": "app/config.go", "line": 3, "repo": "acme/shop", "props": {"symbol_kind": "constant"}, "relations": []}
+{"kind": "symbol", "name": "log_level", "file": "app/config.go", "line": 4, "repo": "acme/shop", "props": {"symbol_kind": "variable"}, "relations": []}
+{"kind": "symbol", "name": "Color", "file": "app/theme.go", "line": 2, "repo": "acme/shop", "props": {"symbol_kind": "enum"}, "relations": []}
+{"kind": "symbol", "name": "OrderID", "file": "app/types.go", "line": 6, "repo": "acme/shop", "props": {"symbol_kind": "type"}, "relations": []}
+{"kind": "route", "name": "GET /orders", "file": "app/routes.go", "line": 14, "repo": "acme/shop", "props": {"method": "GET", "path": "/orders"}, "relations": [{"type": "handled_by", "target": "helper"}]}
+{"kind": "storage", "name": "orders_table", "file": "store/postgres.go", "line": 30, "repo": "acme/shop", "props": {"storage_type": "postgres_table"}, "relations": []}
+{"kind": "dependency", "name": "github.com/lib/pq", "repo": "acme/shop", "props": {"version": "v1.10.9"}, "relations": []}
+{"kind": "service", "name": "shop-api", "file": "app/main.go", "line": 1, "repo": "acme/shop", "props": {"port": 8080}, "relations": [{"type": "depends_on", "target": "github.com/lib/pq"}, {"type": "injects", "target": "PostgresStore"}]}

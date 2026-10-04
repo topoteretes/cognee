@@ -13,7 +13,7 @@ import {
 } from "@/modules/configuration/pipelineSettings";
 
 const CHUNK_SIZE_OPTIONS = [128, 256, 512, 1024, 2048, 4096, 8192];
-const CHUNKS_PER_BATCH_OPTIONS = [1, 5, 10, 20, 50, 100];
+const CHUNKS_PER_BATCH_OPTIONS = [1, 5, 10, 20, 50, 100, 5000];
 const TOP_K_OPTIONS = [5, 10, 20, 30, 50, 100, 200];
 
 interface Props {

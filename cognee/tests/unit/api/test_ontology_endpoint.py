@@ -1,8 +1,10 @@
-import pytest
 import uuid
-from fastapi.testclient import TestClient
-from unittest.mock import Mock
 from types import SimpleNamespace
+from unittest.mock import Mock
+
+import pytest
+from fastapi.testclient import TestClient
+
 from cognee.api.client import app
 from cognee.modules.users.methods import get_authenticated_user
 

@@ -32,6 +32,14 @@ Here are the available `SearchType` tools and their specific functions:
   - Combining multiple pieces of information
   - Getting a single, coherent answer that is generated from relevant text passages
 
+* **`HYBRID_COMPLETION`**: Combines retrieved document passages with entity neighbourhoods from the graph.
+
+  **Best for:**
+
+  - Questions that need both source passages and the entities they mention
+  - Ordinary Q&A over mixed document-and-graph memory
+  - Queries that are neither a pure chunk lookup nor a multi-hop graph walk
+
 * **`GRAPH_COMPLETION`**: The `GRAPH_COMPLETION` search type leverages the graph structure to provide more contextually aware completions.
 
   **Best for:**
@@ -98,6 +106,9 @@ Response: `CHUNKS`
 
 Query: "Explain Einstein's contributions to physics"
 Response: `RAG_COMPLETION`
+
+Query: "Which carrier handles pkg-15335 and what is its current status?"
+Response: `HYBRID_COMPLETION`
 
 Query: "Provide a comprehensive analysis of how these papers contribute to the field"
 Response: `GRAPH_COMPLETION`

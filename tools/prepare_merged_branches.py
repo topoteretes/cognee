@@ -53,7 +53,7 @@ def parse_anchor_date(anchor_date: str | None) -> date | None:
         return None
 
     try:
-        return datetime.strptime(anchor_date, "%Y-%m-%d").date()
+        return datetime.strptime(anchor_date, "%Y-%m-%d").replace(tzinfo=timezone.utc).date()
     except ValueError as exc:
         raise ValueError(
             f"Invalid --anchor-date value {anchor_date!r}. Expected YYYY-MM-DD."

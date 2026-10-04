@@ -29,4 +29,3 @@ class BaseContextProvider(ABC):
             - query (str): The original query string used to extract the entities and retrieve
               context.
         """
-        pass

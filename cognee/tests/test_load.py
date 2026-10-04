@@ -1,6 +1,6 @@
+import asyncio
 import os
 import pathlib
-import asyncio
 import time
 
 import cognee

@@ -118,6 +118,20 @@ export function createHttpClient() {
   const resRegistry = makeRegistry<ResponseInterceptor>();
   const errRegistry = makeRegistry<ErrorInterceptor>();
 
+  // Every client instance (singleton, pod, management, ...) gets a unique
+  // correlation ID on every outgoing request, so backends and log aggregators
+  // can join on it — registered here rather than via an opt-in setup call
+  // because pod.ts/management.ts each build their own createHttpClient()
+  // instance, so a registration on the shared singleton alone never reached them.
+  reqRegistry.use((ctx) => ({
+    ...ctx,
+    headers: {
+      "X-Request-Id": crypto.randomUUID(),
+      // Allow callers to override with their own trace ID (e.g. OpenTelemetry).
+      ...ctx.headers,
+    },
+  }));
+
   let activeLogger: HttpLogger | null = null;
 
   function emitLog(event: HttpLogEvent): void {
@@ -228,6 +242,12 @@ export function createHttpClient() {
             return result;
           }
         }
+
+        // Checked directly against our own controller rather than e.name: on
+        // Safari (pre-17.4), fetch doesn't propagate the custom TimeoutError
+        // abort reason and throws a generic AbortError instead, which would
+        // otherwise leak past normalizeError's e.name check straight into the UI.
+        if (timeoutController.signal.aborted) throw new Error("Request timed out.");
 
         throw normalizeError(e);
       } finally {

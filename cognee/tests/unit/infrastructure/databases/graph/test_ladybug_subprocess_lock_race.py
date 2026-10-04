@@ -11,13 +11,14 @@ the worker process to actually exit, and retries the open on transient lock
 contention.
 
 Drives the REAL graph-engine cache (`create_graph_engine` / `acreate_graph_engine`
-/ `evict_graph_engine`) in subprocess mode — no LLM or full cognee config needed.
+/ `graph_engine_cache.evict`) in subprocess mode — no LLM or full cognee config needed.
 """
 
 from __future__ import annotations
 
 import gc
 import os
+import sys
 
 import pytest
 
@@ -26,19 +27,32 @@ pytest.importorskip("ladybug")
 from cognee.infrastructure.databases.graph.get_graph_engine import (
     acreate_graph_engine,
     create_graph_engine,
-    evict_graph_engine,
+    graph_engine_cache,
+)
+
+# These tests construct subprocess workers explicitly, so the
+# *_SUBPROCESS_ENABLED=false the Windows CI jobs set cannot keep them from
+# spawning. On Windows the spawned child intermittently deadlocks at
+# interpreter startup (a python.exe frozen at ~3.8 MB that never signals
+# ready) and pytest hangs on it until the job timeout -- observed with the
+# watchdog on runs 33643650, 33648260941 and 33729891452. Tracked as
+# SDK-540; unskip these when its fix lands. Full coverage continues on the
+# ubuntu and macOS legs.
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="explicit worker spawn deadlocks intermittently on Windows (SDK-540)",
 )
 
 
 def _config(tmp_path) -> dict:
-    return dict(
-        graph_database_provider="ladybug",
-        graph_file_path=os.path.join(str(tmp_path), "graphdir"),
-        graph_database_subprocess_enabled=True,
+    return {
+        "graph_database_provider": "ladybug",
+        "graph_file_path": os.path.join(str(tmp_path), "graphdir"),
+        "graph_database_subprocess_enabled": True,
         # Small pools keep the worker cheap to spawn in tests.
-        kuzu_buffer_pool_size=1 << 28,
-        kuzu_max_db_size=1 << 30,
-    )
+        "kuzu_buffer_pool_size": 1 << 28,
+        "kuzu_max_db_size": 1 << 30,
+    }
 
 
 async def _evict_after_use(cfg, *, use_async):
@@ -48,7 +62,7 @@ async def _evict_after_use(cfg, *, use_async):
     engine = await acreate_graph_engine(**cfg) if use_async else create_graph_engine(**cfg)
     await engine.query("MATCH (n) RETURN 1 LIMIT 1")
     del engine
-    evict_graph_engine(**cfg)
+    graph_engine_cache.evict(**cfg)
     gc.collect()
 
 
@@ -90,7 +104,7 @@ async def test_handle_reresolves_after_eviction(tmp_path):
     # Simulate teardown: evict the cached engine. The handle pins the proxy, so
     # its next access detects the stale pin, drops it (deferred close releases
     # the lock off-loop), and re-resolves a fresh engine for the same path.
-    evict_graph_engine(**cfg)
+    graph_engine_cache.evict(**cfg)
     gc.collect()
 
     await handle.query("MATCH (n) RETURN 1 LIMIT 1")  # must NOT raise "is closed"

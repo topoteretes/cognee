@@ -1,4 +1,3 @@
-from typing import List, Optional
 import asyncio
 
 from cognee.infrastructure.context.BaseContextProvider import BaseContextProvider
@@ -19,14 +18,14 @@ class TripletSearchContextProvider(BaseContextProvider):
     def __init__(
         self,
         top_k: int = 3,
-        collections: List[str] = None,
-        properties_to_project: List[str] = None,
+        collections: list[str] | None = None,
+        properties_to_project: list[str] | None = None,
     ):
         self.top_k = top_k
         self.collections = collections
         self.properties_to_project = properties_to_project
 
-    def _get_entity_text(self, entity: DataPoint) -> Optional[str]:
+    def _get_entity_text(self, entity: DataPoint) -> str | None:
         """Concatenates available entity text fields with graceful fallback."""
         texts = []
         if hasattr(entity, "name") and entity.name:
@@ -40,10 +39,10 @@ class TripletSearchContextProvider(BaseContextProvider):
 
     def _get_search_tasks(
         self,
-        entities: List[DataPoint],
+        entities: list[DataPoint],
         query: str,
         memory_fragment: CogneeGraph,
-    ) -> List:
+    ) -> list:
         """Creates search tasks for valid entities."""
         tasks = [
             brute_force_triplet_search(
@@ -58,12 +57,12 @@ class TripletSearchContextProvider(BaseContextProvider):
         ]
         return tasks
 
-    async def _format_triplets(self, triplets: List, entity_name: str) -> str:
+    async def _format_triplets(self, triplets: list, entity_name: str) -> str:
         """Format triplets into readable text."""
         direct_text = format_triplets(triplets)
         return f"Context for {entity_name}:\n{direct_text}\n---\n"
 
-    async def _results_to_context(self, entities: List[DataPoint], results: List) -> str:
+    async def _results_to_context(self, entities: list[DataPoint], results: list) -> str:
         """Formats search results into context string."""
         triplets = []
 
@@ -77,7 +76,7 @@ class TripletSearchContextProvider(BaseContextProvider):
 
         return "\n".join(triplets) if triplets else "No relevant context found."
 
-    async def get_context(self, entities: List[DataPoint], query: str) -> str:
+    async def get_context(self, entities: list[DataPoint], query: str) -> str:
         """Get context for each entity using brute force triplet search."""
         if not entities:
             return "No entities provided for context search."

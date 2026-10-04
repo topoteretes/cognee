@@ -8,6 +8,7 @@ import CogneeUser from "@/modules/users/CogneeUser";
 import isCloudEnvironment from "@/utils/isCloudEnvironment";
 
 import Image from "next/image";
+import Link from "next/link";
 import HelpMenu from "./HelpMenu";
 import ProfileMenu from "./ProfileMenu";
 import { useFilter } from "./FilterContext";
@@ -53,11 +54,18 @@ const ROUTE_LABELS: Record<string, string> = {
   "/": "Overview", "/dashboard": "Overview",
   "/datasets": "Brain", "/sessions": "Sessions", "/search": "Search",
   "/knowledge-graph": "Mindmap",
-  "/schema": "Memory Schema",
+  // /business is the same page as /knowledge-graph (page.tsx re-exports
+  // BusinessPage) but had no entry here, so visiting it directly fell back
+  // to a derived "Business" breadcrumb while the nav-linked /knowledge-graph
+  // correctly showed "Mindmap" for identical content.
+  "/business": "Mindmap",
   "/integrations": "Integrations",
   "/api-keys": "API Keys",
   "/settings": "Settings",
   "/onboarding": "Onboarding", "/members": "Members",
+  "/memory-gap-analysis": "Memory coverage",
+  "/analytics": "Analytics",
+  "/activity": "Activity",
 };
 
 // ── TopBar ──
@@ -143,7 +151,12 @@ export default function TopBar() {
 
         {/* 2. Page name */}
         {isDatasetDetail ? (
-          <><Slash /><span style={{ fontSize: 14, fontWeight: 500, color: "rgba(237,236,234,0.7)" }}>Documents</span></>
+          <>
+            <Slash />
+            <Link href="/datasets" className="hover:opacity-70" style={{ fontSize: 14, fontWeight: 500, color: "rgba(237,236,234,0.55)" }}>Brain</Link>
+            <Slash />
+            <span style={{ fontSize: 14, fontWeight: 500, color: "rgba(237,236,234,0.7)" }}>Documents</span>
+          </>
         ) : basePath !== "/" && basePath !== "/dashboard" ? (
           <><Slash /><span style={{ fontSize: 14, fontWeight: 500, color: "rgba(237,236,234,0.7)" }}>{pageName}</span></>
         ) : null}

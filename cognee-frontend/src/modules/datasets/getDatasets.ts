@@ -9,5 +9,5 @@ export default function getDatasets(instance: CogneeInstance, signal?: AbortSign
     signal,
     timeoutMs,
   };
-  return instance.fetch("/v1/datasets/", init).then((response) => response.json());
+  return instance.fetch("/v1/datasets", init).then((response) => response.json());
 }

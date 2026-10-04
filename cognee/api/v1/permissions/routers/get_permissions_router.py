@@ -1,15 +1,17 @@
-from typing import List, Union
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, Query
 from fastapi.responses import JSONResponse
 
 from cognee import __version__ as cognee_version
+from cognee.api.DTO import InDTO
+from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.models import User
+from cognee.modules.users.permissions.methods import (
+    authorized_get_principal_datasets as method_authorized_get_principal_datasets,
+)
 from cognee.modules.users.tenants.methods.get_tenant_roles import (
     get_tenant_roles as method_get_tenant_roles,
-)
-from cognee.modules.users.tenants.methods.get_users_in_role import (
-    get_users_in_role as method_get_users_in_roles,
 )
 from cognee.modules.users.tenants.methods.get_user_roles import (
     get_user_roles as method_get_user_roles,
@@ -17,12 +19,12 @@ from cognee.modules.users.tenants.methods.get_user_roles import (
 from cognee.modules.users.tenants.methods.get_user_tenants import (
     get_user_tenants as method_get_user_tenants,
 )
+from cognee.modules.users.tenants.methods.get_users_in_role import (
+    get_users_in_role as method_get_users_in_roles,
+)
 from cognee.modules.users.tenants.methods.get_users_in_tenant import (
     get_users_in_tenant as method_get_users_in_tenant,
 )
-from cognee.modules.users.models import User
-from cognee.api.DTO import InDTO
-from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
 
 
@@ -41,7 +43,7 @@ def get_permissions_router() -> APIRouter:
             examples=["read"],
             description="Permission to grant. One of 'read', 'write', 'delete', 'share'.",
         ),
-        dataset_ids: List[UUID] = Body(
+        dataset_ids: list[UUID] = Body(
             ...,
             examples=[["a1b2c3d4-5717-4562-b3fc-2c963f66afa6"]],
             description=(
@@ -75,9 +77,9 @@ def get_permissions_router() -> APIRouter:
         """
         send_telemetry(
             "Permissions API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
-                "endpoint": f"POST /v1/permissions/datasets/{str(principal_id)}",
+                "endpoint": f"POST /v1/permissions/datasets/{principal_id!s}",
                 "dataset_ids": str(dataset_ids),
                 "principal_id": str(principal_id),
                 "cognee_version": cognee_version,
@@ -100,7 +102,7 @@ def get_permissions_router() -> APIRouter:
     @permissions_router.delete("/datasets/{principal_id}")
     async def revoke_datasets_permission_from_principal(
         permission_name: str,
-        dataset_ids: List[UUID],
+        dataset_ids: list[UUID],
         principal_id: UUID,
         user: User = Depends(get_authenticated_user),
     ):
@@ -116,9 +118,9 @@ def get_permissions_router() -> APIRouter:
         """
         send_telemetry(
             "Permissions API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
-                "endpoint": f"DELETE /v1/permissions/datasets/{str(principal_id)}",
+                "endpoint": f"DELETE /v1/permissions/datasets/{principal_id!s}",
                 "dataset_ids": str(dataset_ids),
                 "principal_id": str(principal_id),
                 "cognee_version": cognee_version,
@@ -140,6 +142,58 @@ def get_permissions_router() -> APIRouter:
             status_code=200, content={"message": "Permission revoked from principal"}
         )
 
+    @permissions_router.get("/principals/{principal_id}/datasets")
+    async def get_principal_datasets(
+        principal_id: UUID,
+        permission_name: str = Query(
+            "read",
+            examples=["read"],
+            description="Permission to read back. One of 'read', 'write', 'delete', 'share'.",
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        List the datasets a principal holds a permission on.
+
+        A principal is a user, a role or a tenant. What the caller may ask about
+        depends on which: themselves or any user if they can manage users; a role
+        of this tenant they belong to, or any of its roles if they can manage
+        users; and only the tenant they are currently in. Results are always
+        narrowed to the caller's current tenant.
+
+        ## Path Parameters
+        - **principal_id** (UUID): The principal UUID — a user, role or tenant.
+
+        ## Request Parameters
+        - **permission_name** (str): Permission to list. Defaults to "read".
+
+        ## Response
+        Returns a JSON list of dataset objects the principal has that permission on.
+
+        ## Error Codes
+        - **403 Forbidden**: Caller may not ask about this principal
+        - **404 Not Found**: Principal does not exist in the caller's tenant
+        """
+        send_telemetry(
+            "Permissions API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"GET /v1/permissions/principals/{principal_id!s}/datasets",
+                "principal_id": str(principal_id),
+                "permission_name": permission_name,
+                "cognee_version": cognee_version,
+            },
+        )
+
+        datasets = await method_authorized_get_principal_datasets(
+            principal_id, permission_name, user.id
+        )
+
+        return JSONResponse(
+            status_code=200,
+            content=[dataset.to_json() for dataset in datasets],
+        )
+
     @permissions_router.post("/roles")
     async def create_role(
         role_name: str = Query(
@@ -152,9 +206,10 @@ def get_permissions_router() -> APIRouter:
         """
         Create a new role.
 
-        This endpoint creates a new role with the specified name. Roles are used
-        to group permissions and can be assigned to users to manage access control
-        more efficiently. The authenticated user becomes the owner of the created role.
+        This endpoint creates a new role with the specified name in the caller's
+        current tenant. Roles are used to group permissions and can be assigned to
+        users to manage access control more efficiently. The authenticated user
+        must be able to manage users in the tenant; the tenant owner always can.
 
         ## Request Parameters
         - **role_name** (str): The name of the role to create
@@ -164,11 +219,12 @@ def get_permissions_router() -> APIRouter:
 
         ## Error Codes
         - **400 Bad Request**: Invalid role name or role already exists
+        - **403 Forbidden**: User cannot manage users in their current tenant
         - **500 Internal Server Error**: Error creating the role
         """
         send_telemetry(
             "Permissions API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/permissions/roles",
                 "role_name": role_name,
@@ -204,9 +260,9 @@ def get_permissions_router() -> APIRouter:
         """
         send_telemetry(
             "Permissions API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
-                "endpoint": f"DELETE /v1/permissions/roles/{str(role_id)}",
+                "endpoint": f"DELETE /v1/permissions/roles/{role_id!s}",
                 "role_id": str(role_id),
                 "cognee_version": cognee_version,
             },
@@ -236,7 +292,9 @@ def get_permissions_router() -> APIRouter:
 
         This endpoint assigns a user to a specific role, granting them all the
         permissions associated with that role. The authenticated user must be
-        the owner of the role or have appropriate administrative permissions.
+        able to manage users in the role's tenant, and must hold every
+        capability the role carries: managing users is not a way to reach
+        capabilities the caller was never given. The tenant owner always can.
 
         ## Path Parameters
         - **user_id** (UUID): The UUID of the user to add to the role
@@ -249,15 +307,18 @@ def get_permissions_router() -> APIRouter:
 
         ## Error Codes
         - **400 Bad Request**: Invalid user or role ID
-        - **403 Forbidden**: User doesn't have permission to assign roles
-        - **404 Not Found**: User or role doesn't exist
+        - **403 Forbidden**: User cannot manage users in the tenant, or the role
+          carries a capability the user does not hold
+        - **404 Not Found**: User or role doesn't exist, or the user is not a
+          member of the role's tenant
+        - **409 Conflict**: The user already has the role
         - **500 Internal Server Error**: Error adding user to role
         """
         send_telemetry(
             "Permissions API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
-                "endpoint": f"POST /v1/permissions/users/{str(user_id)}/roles",
+                "endpoint": f"POST /v1/permissions/users/{user_id!s}/roles",
                 "user_id": str(user_id),
                 "role_id": str(role_id),
                 "cognee_version": cognee_version,
@@ -287,9 +348,9 @@ def get_permissions_router() -> APIRouter:
         """
         send_telemetry(
             "Permissions API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
-                "endpoint": f"DELETE /v1/permissions/users/{str(user_id)}/roles",
+                "endpoint": f"DELETE /v1/permissions/users/{user_id!s}/roles",
                 "user_id": str(user_id),
                 "role_id": str(role_id),
                 "cognee_version": cognee_version,
@@ -313,7 +374,7 @@ def get_permissions_router() -> APIRouter:
 
         This endpoint assigns a user to a specific tenant, allowing them to access
         resources and data associated with that tenant. The authenticated user must
-        be the owner of the tenant or have appropriate administrative permissions.
+        be able to manage users in the tenant; the tenant owner always can.
 
         ## Path Parameters
         - **user_id** (UUID): The UUID of the user to add to the tenant
@@ -332,9 +393,9 @@ def get_permissions_router() -> APIRouter:
         """
         send_telemetry(
             "Permissions API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
-                "endpoint": f"POST /v1/permissions/users/{str(user_id)}/tenants",
+                "endpoint": f"POST /v1/permissions/users/{user_id!s}/tenants",
                 "user_id": str(user_id),
                 "tenant_id": str(tenant_id),
                 "cognee_version": cognee_version,
@@ -377,9 +438,9 @@ def get_permissions_router() -> APIRouter:
         """
         send_telemetry(
             "Permissions API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
-                "endpoint": f"DELETE /v1/permissions/tenants/{str(tenant_id)}/users/{str(user_id)}",
+                "endpoint": f"DELETE /v1/permissions/tenants/{tenant_id!s}/users/{user_id!s}",
                 "tenant_id": str(tenant_id),
                 "user_id": str(user_id),
                 "cognee_version": cognee_version,
@@ -413,7 +474,7 @@ def get_permissions_router() -> APIRouter:
         """
         send_telemetry(
             "Permissions API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/permissions/tenants",
                 "tenant_name": tenant_name,
@@ -448,9 +509,9 @@ def get_permissions_router() -> APIRouter:
         """
         send_telemetry(
             "Permissions API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
-                "endpoint": f"POST /v1/permissions/tenants/{str(payload.tenant_id)}",
+                "endpoint": f"POST /v1/permissions/tenants/{payload.tenant_id!s}",
                 "tenant_id": str(payload.tenant_id),
             },
         )
@@ -470,19 +531,17 @@ def get_permissions_router() -> APIRouter:
         user: User = Depends(get_authenticated_user),
     ):
         """
-        List all roles in a tenant.
+        List roles in a tenant.
 
-        The authenticated user must be the tenant owner or have user-management
-        permission (e.g. Admin role) in the tenant.
+        Callers who are the tenant owner or have user-management permission (e.g.
+        Admin role) see every role in the tenant. Other callers see only the roles
+        they are a member of.
 
         ## Path Parameters
         - **tenant_id** (UUID): The UUID of the tenant (find yours via GET /api/v1/permissions/tenants/me)
 
         ## Response
         Returns a JSON list of roles: [{"id", "name", "description", "user_count"}].
-
-        ## Error Codes
-        - **403 Forbidden**: Caller lacks user-management permission in the tenant
         """
         role_list = await method_get_tenant_roles(tenant_id=tenant_id, user=user)
 
@@ -497,7 +556,8 @@ def get_permissions_router() -> APIRouter:
         """
         List the users assigned to a role.
 
-        The authenticated user must have user-management permission in the tenant.
+        Visible to members of the role itself, and to callers with user-management
+        permission in the tenant.
 
         ## Path Parameters
         - **tenant_id** (UUID): The UUID of the tenant
@@ -507,7 +567,8 @@ def get_permissions_router() -> APIRouter:
         Returns a JSON list of users: [{"id", "name"}] (name is the user's email).
 
         ## Error Codes
-        - **403 Forbidden**: Caller lacks user-management permission in the tenant
+        - **403 Forbidden**: Caller is not a member of the role and lacks user-management permission
+        - **404 Not Found**: The role does not exist in this tenant
         """
         user_list = await method_get_users_in_roles(tenant_id=tenant_id, role_id=role_id, user=user)
         return JSONResponse(status_code=200, content=user_list)
@@ -528,10 +589,12 @@ def get_permissions_router() -> APIRouter:
         - **user_id** (UUID): The UUID of the user whose roles to list (find user ids via GET /api/v1/permissions/tenants/{tenant_id}/users)
 
         ## Response
-        Returns a JSON list of roles: [{"id", "name"}].
+        Returns a JSON list of roles scoped to this tenant: [{"id", "name"}].
+        A member with no roles in the tenant receives an empty list.
 
         ## Error Codes
         - **403 Forbidden**: Caller lacks user-management permission in the tenant
+        - **404 Not Found**: User does not exist or is not a member of this tenant
         """
         role_list = await method_get_user_roles(tenant_id=tenant_id, user_id=user_id, user=user)
         return JSONResponse(status_code=200, content=role_list)
@@ -575,5 +638,146 @@ def get_permissions_router() -> APIRouter:
         """
         tenants_list = await method_get_user_tenants(user=user)
         return JSONResponse(status_code=200, content=tenants_list)
+
+    @permissions_router.get("/tenants/{tenant_id}/capabilities/me")
+    async def get_my_capabilities_in_tenant(
+        tenant_id: UUID,
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        List the capabilities the authenticated user has in a tenant.
+
+        Capabilities are tenant-scoped actions (as opposed to dataset permissions)
+        and are the union of what the tenant and the caller's roles in it grant.
+        The tenant owner holds all of them.
+
+        The caller must belong to the tenant. A tenant they are not a member of
+        and one that does not exist both answer 403, so the endpoint cannot be
+        used to discover which tenant ids are real.
+
+        Intended for the client to decide which controls to show. It is not an
+        authorization boundary on its own: every endpoint still enforces its own
+        capability, since anyone who knows the URL can call it without the UI.
+
+        ## Path Parameters
+        - **tenant_id** (UUID): The UUID of the tenant (find yours via GET /api/v1/permissions/tenants/me)
+
+        ## Response
+        Returns a JSON object: {"capabilities": ["manage_users", ...]}.
+
+        ## Error Codes
+        - **403 Forbidden**: Caller is not a member of the tenant, or it does not exist
+        """
+        from cognee.modules.users.capabilities.methods import (
+            authorized_get_effective_capabilities,
+        )
+
+        capabilities = await authorized_get_effective_capabilities(user.id, tenant_id)
+
+        return JSONResponse(status_code=200, content={"capabilities": capabilities})
+
+    @permissions_router.post("/capabilities/{principal_id}")
+    async def give_capability_to_principal(
+        principal_id: UUID,
+        capability: list[str] = Query(
+            ...,
+            examples=[["manage_users"]],
+            description=(
+                "Capability to grant. Must be in the capability catalog. Repeat the "
+                "parameter to grant several at once: ?capability=a&capability=b."
+            ),
+        ),
+        tenant_id: UUID | None = Query(
+            default=None,
+            description=(
+                "Tenant the grant is scoped to when the principal is a user. "
+                "Defaults to the caller's current tenant. Ignored for a role or a "
+                "tenant, whose own tenant is always used."
+            ),
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Grant one or more capabilities to a principal: a user, a role, or a
+        whole tenant.
+
+        Granting to the tenant reaches every current and future member; granting
+        to a role reaches its members; granting to a user reaches that person in
+        the given tenant only. The same endpoint serves all three because a
+        capability row is (principal, tenant, capability) regardless of what the
+        principal is.
+
+        The caller needs the grant_capabilities capability in the target
+        tenant, and must hold every capability they grant: granting passes on
+        what the caller has, never more. The tenant owner holds everything,
+        which is how the first grant gets made. The caller is recorded as the
+        granter of each new grant.
+
+        Several capabilities can be granted in one call by repeating the
+        capability parameter. The batch is all or nothing: an unknown name
+        rejects the whole request and nothing is written. Granting is
+        idempotent.
+
+        ## Error Codes
+        - **400 Bad Request**: A capability is not in the catalog
+        - **403 Forbidden**: Caller lacks grant_capabilities in the target
+          tenant, or the principal or tenant does not exist. These answer the
+          same, so the endpoint cannot be used to discover which ids are real.
+          Also when the caller does not hold a capability they try to grant,
+          or the principal is a user who is not a member of the tenant (that
+          one says so: add the user to the tenant first)
+        """
+        from cognee.modules.users.capabilities.methods import authorized_grant_capability
+
+        await authorized_grant_capability(principal_id, capability, user.id, tenant_id)
+
+        return JSONResponse(status_code=200, content={"message": "Capability granted."})
+
+    @permissions_router.delete("/capabilities/{principal_id}")
+    async def revoke_capability_from_principal(
+        principal_id: UUID,
+        capability: list[str] = Query(
+            ...,
+            examples=[["manage_users"]],
+            description=(
+                "Capability to take away. Repeat the parameter to revoke several at "
+                "once: ?capability=a&capability=b."
+            ),
+        ),
+        tenant_id: UUID | None = Query(
+            default=None,
+            description=(
+                "Tenant the revoke is scoped to when the principal is a user. "
+                "Defaults to the caller's current tenant. Ignored for a role or a "
+                "tenant, whose own tenant is always used."
+            ),
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Take one or more capabilities away from a principal: a user, a role, or
+        a tenant.
+
+        A member keeps the capability if another level still grants it, since
+        resolution is a union. Revoking something the principal never had
+        succeeds and changes nothing, so a retry is safe.
+
+        The caller needs the revoke_capabilities capability in the target
+        tenant; the tenant owner always has it.
+
+        Several capabilities can be revoked in one call by repeating the
+        capability parameter, all or nothing like granting.
+
+        ## Error Codes
+        - **400 Bad Request**: A capability is not in the catalog
+        - **403 Forbidden**: Caller lacks revoke_capabilities in the target
+          tenant, or the principal or tenant does not exist. These answer the
+          same, so the endpoint cannot be used to discover which ids are real
+        """
+        from cognee.modules.users.capabilities.methods import authorized_revoke_capability
+
+        await authorized_revoke_capability(principal_id, capability, user.id, tenant_id)
+
+        return JSONResponse(status_code=200, content={"message": "Capability revoked."})
 
     return permissions_router

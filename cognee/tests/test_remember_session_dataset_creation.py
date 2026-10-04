@@ -61,9 +61,12 @@ async def test_session_remember_creates_dataset_before_background_improve(clean_
     seen = {}
 
     async def fake_improve(dataset, *, session_ids=None, user=None, **kwargs):
+        # remember() bridges sessions by dataset UUID, so resolve by id.
+        from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
+
         resolver = user or await get_default_user()
-        existing = await get_datasets_by_name([str(dataset)], resolver.id)
-        seen["dataset_present_at_improve"] = bool(existing)
+        existing = await get_authorized_dataset(resolver, dataset, "write")
+        seen["dataset_present_at_improve"] = existing is not None and existing.name == dataset_name
         return {}
 
     improve_pkg = importlib.import_module("cognee.api.v1.improve")

@@ -1,20 +1,20 @@
-from fastapi.responses import JSONResponse
-from fastapi import File, UploadFile as UF, Depends, Form, Query, status
-from typing import Optional, Annotated
-from fastapi import APIRouter
-from fastapi.encoders import jsonable_encoder
-from typing import List
+from typing import Annotated
 from uuid import UUID
+
+from fastapi import APIRouter, Depends, File, Form, Query, status
+from fastapi import UploadFile as UF
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from pydantic import WithJsonSchema
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_authenticated_user
-from cognee.shared.utils import send_telemetry
+
 from cognee import __version__ as cognee_version
-from cognee.modules.pipelines.models.PipelineRunInfo import (
-    PipelineRunErrored,
-)
 from cognee.api.DTO import ErrorResponse
+from cognee.api.v1.update.result import UpdateResult
+from cognee.exceptions import CogneeApiError
+from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import send_telemetry
 
 # NOTE: Needed because of: https://github.com/fastapi/fastapi/discussions/14975
 #       Once issue is resolved on Swagger side it can be removed.
@@ -28,11 +28,17 @@ def get_update_router() -> APIRouter:
 
     @router.patch(
         "",
-        response_model=None,
+        response_model=UpdateResult,
         responses={
             403: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
-            500: {"model": ErrorResponse},
+            500: {
+                "model": UpdateResult | ErrorResponse,
+                "description": (
+                    "The rebuild's cognify run errored (an UpdateResult with status "
+                    '"failed", naming the error) or an unexpected error occurred.'
+                ),
+            },
         },
     )
     async def update(
@@ -49,18 +55,26 @@ def get_update_router() -> APIRouter:
             description="UUID of the dataset containing the document to update.",
             examples=["a1b2c3d4-e5f6-7890-abcd-ef1234567890"],
         ),
-        data: List[UploadFile] = File(
-            default=None,
+        data: list[UploadFile] = File(
+            ...,
             description=(
-                "New version of the document that replaces the existing one. The existing "
-                "document is deleted before the replacement is ingested, so always provide "
-                "a file."
+                "New version of the document that replaces the existing one. With "
+                "chunk_level_diff enabled (default) only the chunks affected by the "
+                "edit are replaced; otherwise the document is deleted and re-ingested."
             ),
         ),
-        node_set: Optional[List[str]] = Form(
+        node_set: list[str] | None = Form(
             default=[""],
             examples=[["user_memories"]],
             description="Node identifiers for graph organization and access control.",
+        ),
+        chunk_level_diff: bool = Query(
+            default=True,
+            description=(
+                "Diff the new content against the stored text and re-ingest only the "
+                "affected chunks. Falls back to the full rebuild (memory dropped, row refreshed) "
+                "when chunk-level preconditions are not met."
+            ),
         ),
         user: User = Depends(get_authenticated_user),
     ):
@@ -77,21 +91,42 @@ def get_update_router() -> APIRouter:
         - **data** (List[UploadFile]): New version of the document that replaces the existing one.
         - **node_set** (Optional[List[str]]): List of node identifiers for graph organization and access control.
                  Used for grouping related data points in the knowledge graph.
+        - **chunk_level_diff** (bool, query, default true): Replace only the chunks affected
+                 by the edit instead of re-ingesting the whole document.
 
         ## Response
-        Returns pipeline run information for the update (delete + re-add + cognify) operation.
+        One body on every path (`UpdateResult`), a superset of the chunk-level summary
+        returned before:
+        - **status**: `"incremental"` (chunks replaced), `"unchanged"` (no content change),
+          `"full_rebuild"` (memory dropped and rebuilt from the new content) or `"failed"` (the rebuild's
+          cognify run errored; `error` says why, and the call can be retried).
+        - **regions**, **deleted_chunks**, **added_chunks**, **reused_chunks**,
+          **kept_chunks**, **reindexed_chunks**, **total_chunks**: the chunk-level
+          counters; `null` on a rebuild, which has no diff.
+        - **data_id**, **dataset_id**: the document, the handle to retry with.
+        - **duration_seconds**: wall-clock time of the update.
+        - **pipeline_run_id**: the run to inspect; `null` for a no-op.
+        - **fallback**: set on every rebuild; its `reason` names why the chunk-level path
+          did not run (`disabled`, `unsupported_metadata`, `custom_extraction_config`,
+          `per_call_db_config`, `unsupported_backend`, `unsupported_chunker`,
+          `no_baseline`, `chunks_not_tiling`, `unreadable_text`) and `detail` says it in
+          a sentence.
+        - **error**: `error_class` and `message` when `status` is `"failed"`.
 
         ## Error Codes
         - **422 Unprocessable Entity**: data_id or dataset_id missing or not a valid UUID
         - **403 Forbidden**: User lacks write permission on the dataset
-        - **500 Internal Server Error**: Pipeline run errored or an unexpected error occurred during the update
+        - **404 Not Found**: data_id resolves to no document in the dataset
+        - **500 Internal Server Error**: the rebuild's cognify run errored (body is the
+          `UpdateResult` with status `"failed"`) or an unexpected error occurred
 
         ## Notes
-        - The existing document is deleted and replaced by the uploaded file, then the dataset is re-cognified.
+        - Chunk-level updates keep unaffected chunks, their entities, and their summaries
+          untouched; only the edited region is re-extracted.
         """
         send_telemetry(
             "Update API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "PATCH /v1/update",
                 "dataset_id": str(dataset_id),
@@ -104,32 +139,29 @@ def get_update_router() -> APIRouter:
         from cognee.api.v1.update import update as cognee_update
 
         try:
-            update_run = await cognee_update(
+            result = await cognee_update(
                 data_id=data_id,
                 data=data,
                 dataset_id=dataset_id,
                 user=user,
-                node_set=node_set if node_set else None,
+                node_set=node_set if node_set and node_set != [""] else None,
+                chunk_level_diff=chunk_level_diff,
             )
 
-            # If any cognify run errored return JSONResponse with proper error status code
-            if any(isinstance(v, PipelineRunErrored) for v in update_run.values()):
-                first_err = next(
-                    (v for v in update_run.values() if isinstance(v, PipelineRunErrored)), None
-                )
-                detail = getattr(first_err, "error", None) if first_err else None
-                if not detail:
-                    detail = str(first_err) if first_err else "Pipeline run errored"
-
+            if result["status"] == "failed":
+                # Same body as a success, so the client can read the error and
+                # retry this document; the status code still says it failed.
                 return JSONResponse(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    content=ErrorResponse(
-                        error="Pipeline run errored",
-                        detail=detail,
-                    ).model_dump(),
+                    content=jsonable_encoder(result),
                 )
-            return update_run
+            return result
 
+        except CogneeApiError:
+            # Typed API errors (e.g. UpdateTargetNotFoundError -> 404) carry
+            # their own status codes — let the app-level handler map them
+            # instead of flattening everything into a 500.
+            raise
         except Exception as error:
             logger.exception("Update failed")
             return JSONResponse(

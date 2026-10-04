@@ -1,13 +1,13 @@
 import argparse
 import asyncio
 import os
-from typing import Optional
 
-from cognee.cli.reference import SupportsCliCommand
+import cognee.cli.echo as fmt
 from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.config import CHUNKER_CHOICES
-import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.hints import hint_recall
+from cognee.cli.reference import SupportsCliCommand
 
 
 class CognifyCommand(SupportsCliCommand):
@@ -164,7 +164,7 @@ After successful cognify processing, use `cognee search` to query the knowledge 
                     )
                     return result
                 except Exception as e:
-                    raise CliCommandInnerException(f"Failed to cognify: {str(e)}") from e
+                    raise CliCommandInnerException(f"Failed to cognify: {e!s}") from e
 
             result = asyncio.run(run_cognify())
 
@@ -183,7 +183,12 @@ After successful cognify processing, use `cognee search` to query the knowledge 
                 if args.verbose and result:
                     fmt.echo(f"Processing results: {result}")
 
+            # The hint uses the first dataset supplied or a placeholder so it
+            # copy-pastes cleanly when the user targeted all data.
+            hint_dataset = args.datasets[0] if args.datasets else "<dataset-name>"
+            hint_recall(hint_dataset)
+
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(f"Error during cognification: {str(e)}", error_code=1) from e
+            raise CliCommandException(f"Error during cognification: {e!s}", error_code=1) from e

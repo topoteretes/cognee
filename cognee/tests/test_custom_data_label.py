@@ -1,7 +1,8 @@
 import asyncio
+
 import cognee
-from cognee.shared.logging_utils import setup_logging, ERROR
 from cognee.api.v1.search import SearchType
+from cognee.shared.logging_utils import ERROR, setup_logging
 
 
 async def main():
@@ -46,13 +47,8 @@ async def main():
 
     from fastapi.encoders import jsonable_encoder
 
-    data = [
-        dict(
-            **jsonable_encoder(data),
-            dataset_id=dataset_id,
-        )
-        for data in dataset_data
-    ]
+    # Data rows are dataset-scoped: the encoded row carries dataset_id itself.
+    data = [jsonable_encoder(data) for data in dataset_data]
 
     # Check if label is properly added and stored
     assert data[0]["label"] == "test_item"

@@ -12,12 +12,22 @@ from ..models.Result import Result
 async def get_history(user_id: UUID, limit: int = 10) -> list[dict[str, Any]]:
     db_engine = get_relational_engine()
 
+    # Both sides of the union must project the same columns in the same
+    # order, so dataset_id is selected on each.
     queries_query = select(
-        Query.id, Query.text.label("text"), Query.created_at, literal("user").label("user")
+        Query.id,
+        Query.text.label("text"),
+        Query.created_at,
+        literal("user").label("user"),
+        Query.dataset_id,
     ).filter(Query.user_id == user_id)
 
     results_query = select(
-        Result.id, Result.value.label("text"), Result.created_at, literal("system").label("user")
+        Result.id,
+        Result.value.label("text"),
+        Result.created_at,
+        literal("system").label("user"),
+        Result.dataset_id,
     ).filter(Result.user_id == user_id)
 
     history_query = queries_query.union(results_query).order_by("created_at")

@@ -1,7 +1,7 @@
 ## The Objective of these tests is to cover the search - prepare search results behavior (later to be removed)
 
 import types
-from uuid import uuid4, uuid5, UUID, NAMESPACE_OID
+from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 
 import pytest
 from pydantic import BaseModel
@@ -17,7 +17,10 @@ class DummyDataset(BaseModel):
     owner_id: object
 
 
-def _ds(name="ds1", tenant_id=uuid5(NAMESPACE_OID, "t1")):
+_TENANT_1 = uuid5(NAMESPACE_OID, "t1")
+
+
+def _ds(name="ds1", tenant_id=_TENANT_1):
     return DummyDataset(
         id=uuid5(NAMESPACE_OID, name), name=name, tenant_id=tenant_id, owner_id=uuid4()
     )
@@ -37,15 +40,18 @@ def _patch_search_side_effects(monkeypatch, search_mod):
     We only patch unavoidable side effects (telemetry + query/result logging).
     """
 
-    async def dummy_log_query(_query_text, _query_type, _user_id):
+    async def dummy_log_query(*_args, **_kwargs):
         return types.SimpleNamespace(id="qid-1")
 
     async def dummy_log_result(*_args, **_kwargs):
         return None
 
     monkeypatch.setattr(search_mod, "send_telemetry", lambda *a, **k: None)
-    monkeypatch.setattr(search_mod, "log_query", dummy_log_query)
-    monkeypatch.setattr(search_mod, "log_result", dummy_log_result)
+    import importlib
+
+    history_mod = importlib.import_module("cognee.modules.search.operations.log_search_history")
+    monkeypatch.setattr(history_mod, "log_query", dummy_log_query)
+    monkeypatch.setattr(history_mod, "log_result", dummy_log_result)
 
     yield
 

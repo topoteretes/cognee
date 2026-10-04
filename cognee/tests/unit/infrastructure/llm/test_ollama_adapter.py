@@ -31,6 +31,25 @@ async def _null_rate_limiter():
     yield
 
 
+@pytest.mark.parametrize(
+    ("configured_model", "expected_model"),
+    [
+        ("llama3.1:8b", "llama3.1:8b"),
+        ("ollama/llama3.1:8b", "llama3.1:8b"),
+    ],
+)
+def test_adapter_uses_bare_ollama_model_name(configured_model, expected_model):
+    adapter = OllamaAPIAdapter(
+        endpoint="http://localhost:11434/v1",
+        api_key="ollama",
+        model=configured_model,
+        name="ollama",
+        max_completion_tokens=128,
+    )
+
+    assert adapter.model == expected_model
+
+
 @pytest.mark.asyncio
 async def test_acreate_structured_output_awaits_async_client():
     adapter = OllamaAPIAdapter(
@@ -58,3 +77,56 @@ async def test_acreate_structured_output_awaits_async_client():
     # ...not offloaded to a worker thread, and its result is returned unchanged.
     assert not to_thread_spy.called, "structured call must be awaited natively, not offloaded"
     assert result is sentinel
+
+
+@pytest.mark.asyncio
+async def test_acreate_structured_output_injects_ollama_num_ctx():
+    adapter = OllamaAPIAdapter(
+        endpoint="http://localhost:11434/v1",
+        api_key="ollama",
+        model="llama3",
+        name="ollama",
+        max_completion_tokens=128,
+        ollama_num_ctx=4096,
+    )
+
+    sentinel = _Resp(value="ok")
+    adapter.aclient = Mock()
+    adapter.aclient.chat.completions.create = AsyncMock(return_value=sentinel)
+
+    with patch(f"{_MODULE}.llm_rate_limiter_context_manager", _null_rate_limiter):
+        result = await adapter.acreate_structured_output("hello", "system prompt", _Resp)
+
+    adapter.aclient.chat.completions.create.assert_awaited_once()
+    _, kwargs = adapter.aclient.chat.completions.create.call_args
+    assert "extra_body" in kwargs
+    assert kwargs["extra_body"] == {"num_ctx": 4096}
+    assert result is sentinel
+
+
+@pytest.mark.asyncio
+async def test_acreate_structured_output_str_response_injects_ollama_num_ctx():
+    adapter = OllamaAPIAdapter(
+        endpoint="http://localhost:11434/v1",
+        api_key="ollama",
+        model="llama3",
+        name="ollama",
+        max_completion_tokens=128,
+        ollama_num_ctx=4096,
+    )
+
+    sentinel = Mock()
+    sentinel.choices = [Mock()]
+    sentinel.choices[0].message = Mock()
+    sentinel.choices[0].message.content = "plain string response"
+    adapter.client = Mock()
+    adapter.client.chat.completions.create = AsyncMock(return_value=sentinel)
+
+    with patch(f"{_MODULE}.llm_rate_limiter_context_manager", _null_rate_limiter):
+        result = await adapter.acreate_structured_output("hello", "system prompt", str)
+
+    adapter.client.chat.completions.create.assert_awaited_once()
+    _, kwargs = adapter.client.chat.completions.create.call_args
+    assert "extra_body" in kwargs
+    assert kwargs["extra_body"] == {"num_ctx": 4096}
+    assert result == "plain string response"

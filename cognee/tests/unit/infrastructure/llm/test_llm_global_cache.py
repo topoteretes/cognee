@@ -12,6 +12,8 @@ import pytest
 
 from cognee.context_global_variables import (
     llm_config as llm_config_ctx,
+)
+from cognee.context_global_variables import (
     set_database_global_context_variables,
 )
 from cognee.infrastructure.llm.config import LLMConfig, get_llm_context_config
@@ -19,7 +21,6 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
     _get_llm_client_cached,
     get_llm_client,
 )
-
 
 # Two plain OpenAI configs that differ only by model, so the test can assert the
 # active model changes when a context config is applied.
@@ -65,9 +66,9 @@ async def test_set_database_global_context_variables_applies_llm_config(monkeypa
     # depend on the ambient .env providing a global LLM_API_KEY.
     assert get_llm_client(raise_api_key_error=False).model != OPENAI_MODEL
 
-    async with set_database_global_context_variables(
-        "test_dataset", uuid4(), llm_config=_openai_config()
-    ):
+    # A dataset id (not a name) keeps this hermetic: names are resolved to ids
+    # via a user lookup before publishing, and this test's user does not exist.
+    async with set_database_global_context_variables(uuid4(), uuid4(), llm_config=_openai_config()):
         client = get_llm_client()
         assert client.model == OPENAI_MODEL
         assert client.endpoint == ""

@@ -58,7 +58,7 @@ export function UseCaseSlider(): React.ReactElement {
         .usecase-slider { overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; cursor: grab; user-select: none; }
         .usecase-slider::-webkit-scrollbar { display: none; }
         .usecase-slider.is-dragging { cursor: grabbing; }
-        .usecase-card { transition: border-color 200ms, box-shadow 200ms, background 200ms; flex: 0 0 280px; height: 160px; border-radius: 14px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); text-decoration: none; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(0,0,0,0.45); backdrop-filter: blur(12px); text-align: center; }
+        .usecase-card { transition: border-color 200ms, box-shadow 200ms, background 200ms; flex: 0 0 280px; height: 160px; border-radius: 0; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); text-decoration: none; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(0,0,0,0.45); backdrop-filter: blur(12px); text-align: center; }
         .usecase-card:hover { border-color: var(--color-cognee-lavender-tint-35); box-shadow: 0 8px 32px var(--color-cognee-lavender-tint-20); background: rgba(0,0,0,0.6); }
       `}</style>
 
@@ -77,7 +77,7 @@ export function UseCaseSlider(): React.ReactElement {
           <button
             onClick={() => scrollBy(-320)}
             aria-label="Scroll use cases left"
-            style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", zIndex: 3, width: 36, height: 36, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.15)", background: "rgba(20,20,22,0.85)", backdropFilter: "blur(8px)", color: "#EDECEA", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+            style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", zIndex: 3, width: 36, height: 36, borderRadius: 0, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(20,20,22,0.85)", backdropFilter: "blur(8px)", color: "#EDECEA", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="15 18 9 12 15 6" />
@@ -88,7 +88,7 @@ export function UseCaseSlider(): React.ReactElement {
           <button
             onClick={() => scrollBy(320)}
             aria-label="Scroll use cases right"
-            style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", zIndex: 3, width: 36, height: 36, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.15)", background: "rgba(20,20,22,0.85)", backdropFilter: "blur(8px)", color: "#EDECEA", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+            style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", zIndex: 3, width: 36, height: 36, borderRadius: 0, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(20,20,22,0.85)", backdropFilter: "blur(8px)", color: "#EDECEA", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="9 18 15 12 9 6" />

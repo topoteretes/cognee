@@ -1,4 +1,5 @@
 from fastapi import status
+
 from cognee.exceptions import CogneeValidationError
 
 
@@ -13,6 +14,4 @@ class WrongTaskTypeError(CogneeValidationError):
         name: str = "WrongTaskTypeError",
         status_code=status.HTTP_400_BAD_REQUEST,
     ):
-        self.message = message
-        self.name = name
-        self.status_code = status_code
+        super().__init__(message, name, status_code)

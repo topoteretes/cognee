@@ -3,6 +3,7 @@ from dataclasses import asdict
 import pytest
 from pydantic import BaseModel
 
+from cognee.context_global_variables import llm_config as llm_config_ctx
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.infrastructure.llm.exceptions import LLMAPIKeyNotSetError
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api import (
@@ -16,6 +17,10 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
     _get_llm_client_cached,
     _raise_for_missing_api_key,
     _unfreeze_from_cache,
+    get_llm_client,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.ollama.adapter import (
+    OllamaAPIAdapter,
 )
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.openai import (
     adapter as openai_adapter,
@@ -126,6 +131,30 @@ def test_api_key_validation_still_happens_before_cache_lookup():
         raise_api_key_error=True,
         use_managed_identity=True,
     )
+
+
+def test_inferred_ollama_provider_uses_bare_model_name(monkeypatch):
+    for environment_variable in ("LLM_PROVIDER", "LLM_MODEL", "LLM_ENDPOINT", "LLM_API_KEY"):
+        monkeypatch.delenv(environment_variable, raising=False)
+
+    config = LLMConfig(
+        llm_model="ollama/llama3.1:8b",
+        llm_api_key="ollama",
+        llm_endpoint="http://localhost:11434/v1",
+        _env_file=None,
+    )
+    token = llm_config_ctx.set(config)
+    _get_llm_client_cached.cache_clear()
+
+    try:
+        client = get_llm_client()
+    finally:
+        llm_config_ctx.reset(token)
+        _get_llm_client_cached.cache_clear()
+
+    assert config.llm_provider == LLMProvider.OLLAMA.value
+    assert isinstance(client, OllamaAPIAdapter)
+    assert client.model == "llama3.1:8b"
 
 
 def test_openai_adapter_preserves_default_instructor_mode_for_non_gpt5_models(monkeypatch):
