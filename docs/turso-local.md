@@ -166,6 +166,7 @@ that silently ran on SQLite would fail.
 | Bind parameters must be `None`, numbers, `str` or `bytes` (no `register_adapter`) | raw `text()` statements binding `datetime`/`UUID` | SQLAlchemy-typed columns are unaffected; raw statements use a typed `bindparam` |
 | Quoted identifiers are stored lowercased in `sqlite_master` | `has_collection` by exact name, PascalCase collection detection | case-insensitive lookup; collections detected by schema (`id, payload, vector`) |
 | Parenthesized joins in a FROM clause (`JOIN (a JOIN b ON …)`) are rejected | SQLAlchemy emits them for joined-table inheritance (`User`/`Tenant` are `Principal` subclasses) | the dialect's compiler (`turso/compiler.py`) flattens the tree into a left-deep join chain |
+| A join chain that combines several inner joins, a constant filter and a `LEFT JOIN` can drop a join condition and return extra rows; an affected query returns the wrong rows on every run | none known: no current cognee query has the shape, but users and permissions are read through joins on this engine | avoid the shape in new SQL, or check its rows against stock SQLite; `test_turso_engine_bugs.py` reproduces the smallest case and starts failing once a pyturso release fixes it |
 | `VACUUM` requires an experimental engine flag | none (cognee never runs `VACUUM`) | – |
 | MVCC files are unreadable by stock SQLite | external tooling on a live `mvcc` database | switch the file to `wal` first |
 | One synchronous connection used from two threads at once aborts the process (Rust panic) | the vector adapter shares one connection | every call runs under `_connection_lock`; keep it that way |
@@ -201,3 +202,8 @@ be retired.
    (0.7.2): for the stored array `["Bücher"]` it returns `Bücher`, where stock SQLite
    returns `Bücher`. `payload ->> je.fullkey` and `json_extract(payload, je.fullkey)` decode
    correctly.
+10. A join condition is dropped (0.7.2): with `u=(2,1)`, `a=(1,1)`, `p=(3,1)` and `b` empty
+    (`id INTEGER PRIMARY KEY, k INTEGER`), `SELECT u.id, a.id FROM u JOIN a ON u.id = a.id AND
+    a.k = 1 JOIN p ON p.k = a.k LEFT JOIN b ON u.k = b.k` returns `(2, 1)`; stock SQLite returns
+    no rows. Removing the constant filter, the third inner table or the `LEFT JOIN` gives the
+    right result; moving the conditions to `WHERE` does not.
