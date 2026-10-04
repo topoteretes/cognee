@@ -2,6 +2,7 @@ import os
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.exceptions import CogneeConfigurationError
@@ -39,6 +40,11 @@ class CognifyConfig(BaseSettings):
     # for environments installed at build time.
     gliner_auto_install: bool = True
     gliner_torch_index_url: str = "https://download.pytorch.org/whl/cpu"
+    # How many GLiNER model batches run at once, sharing one loaded model
+    # (env: GLINER_INFERENCE_THREADS). 0 (default) sizes it to the machine:
+    # half of torch's thread count, capped by free memory. 1 keeps the
+    # single-threaded behaviour. Output is identical at every setting.
+    gliner_inference_threads: int = Field(default=0, ge=0)
     model_config = SettingsConfigDict(extra="allow")
 
     def to_dict(self) -> dict:
@@ -54,6 +60,7 @@ class CognifyConfig(BaseSettings):
             "graph_extractor": self.graph_extractor,
             "gliner_auto_install": self.gliner_auto_install,
             "gliner_torch_index_url": self.gliner_torch_index_url,
+            "gliner_inference_threads": self.gliner_inference_threads,
             "summary_method": self.summary_method,
         }
 
