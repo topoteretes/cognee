@@ -316,13 +316,14 @@ class datasets:
                         dataset_data = None
 
                 # A dataset's code repositories are extracted together, so the
-                # ones that remain still describe the deleted one: rebuild them.
+                # ones that remain still describe the deleted one: mark them
+                # for re-extraction by the next cognify() of the dataset.
                 if dataset_data is not None and was_code_repo:
                     from cognee.tasks.code_graph.cluster import (
-                        refresh_dataset_code_graph_after_delete,
+                        mark_dataset_code_repos_for_rebuild,
                     )
 
-                    await refresh_dataset_code_graph_after_delete(dataset, user)
+                    await mark_dataset_code_repos_for_rebuild(dataset)
 
             return {"status": "success"}
 

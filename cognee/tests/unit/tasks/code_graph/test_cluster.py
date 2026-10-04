@@ -14,11 +14,10 @@ from cognee.tasks.code_graph.cluster import (
     DatasetCodeSnapshot,
     code_repo_path,
     load_dataset_cluster,
+    mark_dataset_code_repos_for_rebuild,
     refresh_dataset_code_graph,
-    refresh_dataset_code_graph_after_delete,
     resolve_member_labels,
     snapshot_dataset_code_repos,
-    write_cluster_config,
 )
 from cognee.tasks.code_graph.extract_code_graph import (
     add_code_graph_data_points,
@@ -71,7 +70,20 @@ GOLF_ROUTE = str(fact_node_id("golf", "route", "/api/rounds"))
 REACHES = (UI_ROUTE, GOLF_ROUTE, "reaches_route")
 
 
-def _write_snapshot(directory, facts=CLUSTER_FACTS, snapshot_id=SNAPSHOT_ID, remote=None):
+def _write_snapshot(
+    directory,
+    facts=CLUSTER_FACTS,
+    snapshot_id=SNAPSHOT_ID,
+    remote=None,
+    label=None,
+    label_snapshot_id=None,
+):
+    """A member's ``.enola`` as a cluster run leaves it.
+
+    ``label`` adds the ``snapshot.meta.json`` enola writes, carrying the
+    member's own ``repo_label`` (for ``label_snapshot_id``, default this
+    snapshot). Without it only the contract files are present.
+    """
     snapshot_dir = directory / ".enola"
     snapshot_dir.mkdir(parents=True, exist_ok=True)
     (snapshot_dir / "facts.jsonl").write_text("\n".join(json.dumps(fact) for fact in facts) + "\n")
@@ -79,6 +91,9 @@ def _write_snapshot(directory, facts=CLUSTER_FACTS, snapshot_id=SNAPSHOT_ID, rem
     if remote:
         receipt["git"] = {"remote": remote}
     (snapshot_dir / "receipt.json").write_text(json.dumps(receipt))
+    if label is not None:
+        meta = {"repo_label": label, "snapshot_id": label_snapshot_id or snapshot_id}
+        (snapshot_dir / "snapshot.meta.json").write_text(json.dumps(meta))
     return snapshot_dir
 
 
@@ -106,28 +121,7 @@ def _repos(tmp_path, *names):
     return paths
 
 
-# --- the cluster config and its members ---------------------------------------
-
-
-def test_cluster_config_lists_absolute_paths_under_the_dataset_directory(monkeypatch, tmp_path):
-    monkeypatch.setattr(cluster_module, "cluster_directory", lambda dataset_id: tmp_path / "c")
-    odd = tmp_path / "re: po"
-
-    config_path = write_cluster_config(uuid4(), [tmp_path / "golf", odd])
-
-    assert config_path == tmp_path / "c" / "cluster.yaml"
-    assert config_path.read_text() == (
-        f'repos:\n  - "{tmp_path / "golf"}"\n  - {json.dumps(str(odd))}\n'
-    )
-
-
-def test_cluster_directory_falls_back_to_the_clones_directory_for_remote_storage(monkeypatch):
-    base_config_module = importlib.import_module("cognee.base_config")
-    config = SimpleNamespace(system_root_directory="s3://bucket/system", repos_root_directory="/r")
-    monkeypatch.setattr(base_config_module, "get_base_config", lambda: config)
-    dataset_id = uuid4()
-
-    assert str(cluster_module.cluster_directory(dataset_id)) == f"/r/code_clusters/{dataset_id}"
+# --- the cluster's members ----------------------------------------------------
 
 
 def test_code_repo_path_reads_metadata_as_dict_or_json_string(tmp_path):
@@ -138,7 +132,49 @@ def test_code_repo_path_reads_metadata_as_dict_or_json_string(tmp_path):
     assert code_repo_path(SimpleNamespace(system_metadata=None)) is None
 
 
+def test_member_label_is_the_one_enola_wrote_for_this_snapshot(tmp_path):
+    """enola records each member's label; it wins over anything derivable."""
+    first, second = _repos(tmp_path, "one", "two")
+    _write_snapshot(first, remote="github.com/acme/golf", label="golf-api")
+    _write_snapshot(second, label="ui")
+
+    labels = resolve_member_labels([first, second], {"golf-api", "ui"}, snapshot_id=SNAPSHOT_ID)
+
+    assert labels == ["golf-api", "ui"]
+
+
+def test_members_with_the_same_written_label_are_not_a_cluster(tmp_path):
+    first, second = _repos(tmp_path, "one", "two")
+    _write_snapshot(first, label="web")
+    _write_snapshot(second, label="web")
+
+    assert resolve_member_labels([first, second], {"web"}, snapshot_id=SNAPSHOT_ID) is None
+
+
+def test_stale_written_label_is_ignored_and_derived_instead(tmp_path):
+    """A meta file from an earlier run describes another snapshot: not trusted."""
+    golf, ui = _repos(tmp_path, "golf", "ui")
+    _write_snapshot(golf, label="old-golf", label_snapshot_id="sha256:older")
+    _write_snapshot(ui, label="ui")
+
+    labels = resolve_member_labels([golf, ui], {"golf", "ui"}, snapshot_id=SNAPSHOT_ID)
+
+    assert labels == ["golf", "ui"]
+
+
+def test_derived_label_avoids_one_another_member_was_written(tmp_path):
+    """A member without a meta file never takes a label a written member holds."""
+    first, second = _repos(tmp_path, "web", "web-b")
+    _write_snapshot(first)
+    _write_snapshot(second, label="web")
+
+    labels = resolve_member_labels([first, second], {"web", "web-b"}, snapshot_id=SNAPSHOT_ID)
+
+    assert labels is None  # "web" is taken and the directory name is the only candidate
+
+
 def test_member_label_is_the_remote_name_else_the_directory_name(tmp_path):
+    """Without a written label: the git remote's name, else the directory name."""
     golf, ui = _repos(tmp_path, "checkout-1", "ui")
     _write_snapshot(golf, remote="github.com/acme/golf")
     _write_snapshot(ui)
@@ -178,10 +214,9 @@ async def test_a_single_repository_is_not_snapshotted_as_a_cluster(monkeypatch, 
 
 @pytest.mark.asyncio
 async def test_cluster_snapshot_runs_enola_once_and_labels_each_member(monkeypatch, tmp_path):
-    golf, ui = _repos(tmp_path, "golf", "ui")
-    snapshot_dir = _write_snapshot(golf)
-    _write_snapshot(ui)
-    monkeypatch.setattr(cluster_module, "cluster_directory", lambda dataset_id: tmp_path / "c")
+    golf, ui = _repos(tmp_path, "checkout", "ui")
+    snapshot_dir = _write_snapshot(golf, label="golf")
+    _write_snapshot(ui, label="ui")
     run_cluster = AsyncMock(return_value=snapshot_dir)
     monkeypatch.setattr(cluster_module, "run_enola_cluster", run_cluster)
     golf_row, ui_row = _row(golf), _row(ui)
@@ -190,7 +225,10 @@ async def test_cluster_snapshot_runs_enola_once_and_labels_each_member(monkeypat
         uuid4(), [(golf_row, golf), (ui_row, ui)], timeout=10.0
     )
 
-    run_cluster.assert_awaited_once_with(tmp_path / "c" / "cluster.yaml", [golf, ui], timeout=20.0)
+    # One enola run over both directories, no config written anywhere: the
+    # timeout covers the whole cluster, per repository.
+    run_cluster.assert_awaited_once_with([golf, ui], timeout=20.0)
+    assert not list(tmp_path.rglob("cluster.yaml"))
     assert snapshot.snapshot_dir == snapshot_dir
     assert [(member.data, member.label) for member in snapshot.members] == [
         (golf_row, "golf"),
@@ -383,62 +421,143 @@ async def test_refresh_without_a_cluster_runs_each_repository_unscoped(refresh_e
         assert _task_kwargs(call)["snapshot_dir"] is None
 
 
-@pytest.mark.asyncio
-async def test_refresh_after_delete_never_raises(monkeypatch, refresh_env):
+@pytest.fixture
+def delete_env(monkeypatch, refresh_env):
     env = refresh_env
-    invalidated = []
+    env.invalidated = []
     monkeypatch.setattr(
         code_retriever_module,
         "invalidate_code_graph_snapshot_cache",
-        lambda dataset_id=None: invalidated.append(dataset_id),
+        lambda dataset_id=None: env.invalidated.append(dataset_id),
     )
-    env.snapshot_mock.side_effect = RuntimeError("enola missing")
+    env.reset = AsyncMock()
+    publish_module = importlib.import_module("cognee.modules.data.methods.publish_updated_data")
+    monkeypatch.setattr(publish_module, "reset_data_pipeline_status", env.reset)
+    return env
 
-    await refresh_dataset_code_graph_after_delete(env.dataset, env.user)
 
+@pytest.mark.asyncio
+async def test_delete_marks_the_remaining_repositories_for_the_next_cognify(delete_env):
+    """A delete never runs enola: the survivors lose their stamps instead."""
+    env = delete_env
+
+    await mark_dataset_code_repos_for_rebuild(env.dataset)
+
+    env.snapshot_mock.assert_not_awaited()
     env.pipeline.assert_not_awaited()
-    assert invalidated == [env.dataset.id]
+    assert env.invalidated == [env.dataset.id]
+    assert [call.args[:2] for call in env.reset.await_args_list] == [
+        (env.golf_row.id, env.dataset.id),
+        (env.ui_row.id, env.dataset.id),
+    ]
+    assert {call.kwargs["pipeline_names"] for call in env.reset.await_args_list} == {
+        ("cognify_pipeline", "code_graph_pipeline")
+    }
+
+
+@pytest.mark.asyncio
+async def test_delete_marking_never_raises(delete_env):
+    env = delete_env
+    env.reset.side_effect = RuntimeError("relational db away")
+
+    await mark_dataset_code_repos_for_rebuild(env.dataset)
+
+    assert env.invalidated == [env.dataset.id]
 
 
 # --- the cognify CODE_REPO route ----------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_route_loads_every_member_under_its_own_row_once_per_run(monkeypatch, refresh_env):
+@pytest.fixture
+def route_env(monkeypatch, refresh_env):
     env = refresh_env
-    cluster_module._run_snapshots.clear()
-    extract = AsyncMock(return_value=["point"])
-    load = AsyncMock(side_effect=lambda points, ctx=None, graph_only=True: points)
-    edges = AsyncMock()
-    monkeypatch.setattr(extract_module, "extract_code_graph", extract)
-    monkeypatch.setattr(extract_module, "add_code_graph_data_points", load)
-    monkeypatch.setattr(extract_module, "add_code_graph_edges", edges)
+    cluster_module._cluster_runs.clear()
+    env.extract = AsyncMock(return_value=["point"])
+    env.load = AsyncMock(side_effect=lambda points, ctx=None, graph_only=True: points)
+    env.edges = AsyncMock()
+    monkeypatch.setattr(extract_module, "extract_code_graph", env.extract)
+    monkeypatch.setattr(extract_module, "add_code_graph_data_points", env.load)
+    monkeypatch.setattr(extract_module, "add_code_graph_edges", env.edges)
+    return env
+
+
+@pytest.mark.asyncio
+async def test_route_loads_every_member_under_its_own_row_once_per_run(route_env):
+    env = route_env
     ctx = PipelineContext(
         user=env.user, data_item=env.ui_row, dataset=env.dataset, pipeline_run_id=uuid4()
     )
 
     assert await load_dataset_cluster(ctx) is True
-    # The dataset's second row reaches the route in the same pipeline run.
+    # The dataset's second row reaches the route in the same pipeline run:
+    # the cluster is already loaded, so it neither snapshots nor loads again.
     assert await load_dataset_cluster(ctx) is True
 
     env.snapshot_mock.assert_awaited_once()
-    assert [call.kwargs["repo_scope"] for call in extract.await_args_list[:2]] == ["golf", "ui"]
-    assert [call.kwargs["ctx"].data_item for call in load.await_args_list[:2]] == [
+    assert [call.kwargs["repo_scope"] for call in env.extract.await_args_list] == ["golf", "ui"]
+    assert [call.kwargs["ctx"].data_item for call in env.load.await_args_list] == [
         env.golf_row,
         env.ui_row,
     ]
-    assert [call.kwargs["ctx"].data_item for call in edges.await_args_list[:2]] == [
+    assert [call.kwargs["ctx"].data_item for call in env.edges.await_args_list] == [
         env.golf_row,
         env.ui_row,
+    ]
+    # Once loaded, the run keeps its verdict but not the snapshot.
+    run = cluster_module._cluster_runs[str(env.dataset.id)]
+    assert (run.done, run.is_cluster, run.snapshot) == (True, True, None)
+
+
+@pytest.mark.asyncio
+async def test_route_snapshots_again_for_a_new_pipeline_run(route_env):
+    env = route_env
+    first = PipelineContext(
+        user=env.user, data_item=env.ui_row, dataset=env.dataset, pipeline_run_id=uuid4()
+    )
+    second = PipelineContext(
+        user=env.user, data_item=env.ui_row, dataset=env.dataset, pipeline_run_id=uuid4()
+    )
+
+    assert await load_dataset_cluster(first) is True
+    assert await load_dataset_cluster(second) is True
+
+    assert env.snapshot_mock.await_count == 2
+    # One entry per dataset, whatever the number of runs.
+    assert list(cluster_module._cluster_runs) == [str(env.dataset.id)]
+
+
+@pytest.mark.asyncio
+async def test_route_retries_a_failed_member_load_from_the_same_snapshot(route_env):
+    env = route_env
+    env.edges.side_effect = [RuntimeError("graph write failed"), None, None]
+    ctx = PipelineContext(
+        user=env.user, data_item=env.ui_row, dataset=env.dataset, pipeline_run_id=uuid4()
+    )
+
+    with pytest.raises(RuntimeError):
+        await load_dataset_cluster(ctx)
+    assert await load_dataset_cluster(ctx) is True
+
+    # The snapshot was taken once; the second row walked the members again
+    # (the loaded one is then skipped by its stamp inside extract_code_graph).
+    env.snapshot_mock.assert_awaited_once()
+    assert [call.kwargs["repo_scope"] for call in env.extract.await_args_list] == [
+        "golf",
+        "golf",
+        "ui",
     ]
 
 
 @pytest.mark.asyncio
-async def test_route_leaves_a_single_repository_to_the_caller(refresh_env):
-    env = refresh_env
-    cluster_module._run_snapshots.clear()
+async def test_route_leaves_a_single_repository_to_the_caller(route_env):
+    env = route_env
     env.snapshot_mock.return_value = None
-    ctx = PipelineContext(user=env.user, data_item=env.ui_row, dataset=env.dataset)
+    ctx = PipelineContext(
+        user=env.user, data_item=env.ui_row, dataset=env.dataset, pipeline_run_id=uuid4()
+    )
 
     assert await load_dataset_cluster(ctx) is False
+    # The verdict is remembered for the run, so the next row does not snapshot again.
+    assert await load_dataset_cluster(ctx) is False
+    env.snapshot_mock.assert_awaited_once()
     assert await load_dataset_cluster(None) is False

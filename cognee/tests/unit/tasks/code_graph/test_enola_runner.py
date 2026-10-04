@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import json
 
 import pytest
 
@@ -83,8 +84,10 @@ class _FakeProcess:
     def __init__(self, returncode, stderr=b""):
         self.returncode = returncode
         self._stderr = stderr
+        self.stdin_received = None
 
-    async def communicate(self):
+    async def communicate(self, input=None):
+        self.stdin_received = input
         return b"", self._stderr
 
     def kill(self):
@@ -147,3 +150,101 @@ async def test_run_enola_generate_returns_snapshot_dir(monkeypatch, tmp_path):
 
     assert snapshot_dir == repo_path / ".enola"
     assert (snapshot_dir / "facts.jsonl").is_file()
+
+
+# --- clusters: the config is rendered from the members and never persisted ---
+
+
+def test_render_cluster_config_lists_absolute_paths_and_disables_history(tmp_path):
+    odd = tmp_path / "re: po"
+
+    config = enola_module.render_cluster_config([tmp_path / "golf", odd])
+
+    assert config == (
+        f'repos:\n  - "{tmp_path / "golf"}"\n  - {json.dumps(str(odd))}\nhistory:\n  enabled: false\n'
+    )
+
+
+def _cluster_repos(tmp_path):
+    golf, ui = tmp_path / "golf", tmp_path / "ui"
+    golf.mkdir()
+    ui.mkdir()
+    return golf, ui
+
+
+def _capture_subprocess(monkeypatch, on_run):
+    calls = []
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        process = _FakeProcess(returncode=0)
+        calls.append((args, kwargs, process))
+        on_run()
+        return process
+
+    monkeypatch.setattr(enola_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_run_enola_cluster_pipes_the_config_and_writes_no_file(monkeypatch, tmp_path):
+    fake_binary = _make_fake_binary(tmp_path)
+    monkeypatch.setenv("ENOLA_PATH", str(fake_binary))
+    monkeypatch.setattr(enola_module.os, "name", "posix")
+    golf, ui = _cluster_repos(tmp_path)
+
+    def write_snapshot():
+        (golf / ".enola").mkdir(exist_ok=True)
+        (golf / ".enola" / "facts.jsonl").write_text("")
+
+    calls = _capture_subprocess(monkeypatch, write_snapshot)
+
+    snapshot_dir = await enola_module.run_enola_cluster([golf, ui], timeout=5.0)
+
+    assert snapshot_dir == golf / ".enola"
+    (args, kwargs, process), *_ = calls
+    assert args == (str(fake_binary), "--generate", "/dev/stdin")
+    assert kwargs["stdin"] == asyncio.subprocess.PIPE
+    assert process.stdin_received == enola_module.render_cluster_config([golf, ui]).encode()
+    # Neutral working directory, nothing written next to the repositories.
+    assert kwargs["cwd"] not in {str(golf), str(ui)}
+    assert not list(tmp_path.rglob("*.yaml"))
+
+
+@pytest.mark.asyncio
+async def test_run_enola_cluster_on_windows_uses_a_temporary_file_it_removes(monkeypatch, tmp_path):
+    fake_binary = _make_fake_binary(tmp_path)
+    monkeypatch.setenv("ENOLA_PATH", str(fake_binary))
+    monkeypatch.setattr(enola_module.os, "name", "nt")
+    monkeypatch.setattr(enola_module.tempfile, "gettempdir", lambda: str(tmp_path))
+    golf, ui = _cluster_repos(tmp_path)
+    seen_configs = []
+
+    def write_snapshot():
+        (golf / ".enola").mkdir(exist_ok=True)
+        (golf / ".enola" / "facts.jsonl").write_text("")
+        # The config exists while enola runs ...
+        seen_configs.extend(path.read_text() for path in tmp_path.glob("cognee-enola-cluster-*"))
+
+    calls = _capture_subprocess(monkeypatch, write_snapshot)
+
+    await enola_module.run_enola_cluster([golf, ui], timeout=5.0)
+
+    (args, _kwargs, process), *_ = calls
+    assert args[:2] == (str(fake_binary), "--generate")
+    assert args[2].endswith(".yaml") and process.stdin_received is None
+    assert seen_configs == [enola_module.render_cluster_config([golf, ui])]
+    # ... and is gone once it has exited.
+    assert not list(tmp_path.glob("cognee-enola-cluster-*"))
+
+
+@pytest.mark.asyncio
+async def test_run_enola_cluster_rejects_a_missing_repository_before_running(monkeypatch, tmp_path):
+    fake_binary = _make_fake_binary(tmp_path)
+    monkeypatch.setenv("ENOLA_PATH", str(fake_binary))
+    golf, _ui = _cluster_repos(tmp_path)
+    calls = _capture_subprocess(monkeypatch, lambda: None)
+
+    with pytest.raises(enola_module.EnolaSnapshotError):
+        await enola_module.run_enola_cluster([golf, tmp_path / "gone"])
+
+    assert calls == []

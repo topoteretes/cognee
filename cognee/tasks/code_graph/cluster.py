@@ -3,8 +3,7 @@
 A repository extracted on its own cannot see the others: a frontend's HTTP call
 names a path, and only a snapshot that also covers the backend can say which
 route serves it. enola links repositories when it is given a cluster config
-(a YAML file listing them), and writes the whole linked graph to every
-member's ``.enola``.
+listing them, and writes the whole linked graph to every member's ``.enola``.
 
 A dataset is the cluster. When it holds more than one ``code_repo`` Data row,
 :func:`snapshot_dataset_code_repos` runs enola once over all of them and the
@@ -12,6 +11,11 @@ code graph tasks then load that snapshot one member at a time
 (``repo_scope``), each under its own Data row, so ``forget(data_id=...)``
 still removes exactly one repository. A dataset with a single repository
 keeps the per-repository run.
+
+The cluster has no state of its own on disk. Its members are the dataset's
+``code_repo`` rows, whose ``system_metadata.repo_path`` names the directory;
+the config enola needs is rendered from those rows at run time and piped to
+it (see :func:`cognee.tasks.code_graph.enola.run_enola_cluster`).
 
 The cluster is always refreshed as a whole. Loading one member from an older
 snapshot would keep cross-repository facts the current one no longer holds.
@@ -25,14 +29,16 @@ from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.code_graph.enola import parse_enola_snapshot, run_enola_cluster
+from cognee.tasks.code_graph.enola import (
+    parse_enola_snapshot,
+    run_enola_cluster,
+    snapshot_identity,
+)
 
 if TYPE_CHECKING:
     from cognee.modules.pipelines.models import PipelineContext
 
 logger = get_logger("code_graph")
-
-CLUSTER_CONFIG_NAME = "cluster.yaml"
 
 
 @dataclass(frozen=True)
@@ -83,33 +89,26 @@ async def dataset_code_repo_rows(dataset_id: UUID) -> list:
     return [row for row in await get_dataset_data(dataset_id) if is_code_repo_sourced(row)]
 
 
-def cluster_directory(dataset_id: UUID) -> Path:
-    """Where a dataset's cluster config lives.
+def _written_label(repo_path: Path, snapshot_id: str | None) -> str | None:
+    """The label enola gave a member in the snapshot just taken, or None.
 
-    Under the system directory, or under the repository clones directory when
-    the system directory is remote: enola reads the config from local disk.
+    A cluster run writes ``snapshot.meta.json`` into every member's
+    ``.enola`` with the member's own ``repo_label`` — the exact name its
+    facts carry. The file is enola's own bookkeeping rather than part of the
+    documented snapshot contract, so it is only trusted when it describes
+    this snapshot (same ``snapshot_id``) and the caller falls back to
+    deriving the label when it is missing or stale.
     """
-    from cognee.base_config import get_base_config
-
-    config = get_base_config()
-    root = config.system_root_directory
-    if not root or str(root).startswith("s3://"):
-        root = config.repos_root_directory
-    return Path(root) / "code_clusters" / str(dataset_id)
-
-
-def write_cluster_config(dataset_id: UUID, repo_paths: list[Path]) -> Path:
-    """Write the dataset's cluster config and return its path.
-
-    Paths are absolute, so the config means the same thing wherever it sits.
-    JSON strings are valid YAML scalars and quote any path safely.
-    """
-    directory = cluster_directory(dataset_id)
-    directory.mkdir(parents=True, exist_ok=True)
-    config_path = directory / CLUSTER_CONFIG_NAME
-    lines = ["repos:"] + [f"  - {json.dumps(str(path))}" for path in repo_paths]
-    config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return config_path
+    try:
+        meta = json.loads((repo_path / ".enola" / "snapshot.meta.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(meta, dict):
+        return None
+    if snapshot_id is not None and meta.get("snapshot_id") != snapshot_id:
+        return None
+    label = meta.get("repo_label")
+    return label if isinstance(label, str) and label else None
 
 
 def _label_candidates(repo_path: Path) -> list[str]:
@@ -133,21 +132,37 @@ def _label_candidates(repo_path: Path) -> list[str]:
     return candidates
 
 
-def resolve_member_labels(repo_paths: list[Path], fact_labels: set[str]) -> list[str] | None:
+def resolve_member_labels(
+    repo_paths: list[Path],
+    fact_labels: set[str],
+    snapshot_id: str | None = None,
+) -> list[str] | None:
     """The enola label of each member, or None when they cannot be told apart.
 
-    Members are taken in cluster order, as enola takes them: a label an
-    earlier member holds is not available to a later one. Among the rest, a
-    candidate the snapshot's facts actually carry wins, and a member that
-    produced no facts keeps its first free candidate. Members are loaded by
-    label, so one left without a label of its own means no cluster.
+    A member whose ``.enola`` carries the label enola wrote for this snapshot
+    uses it as is. For the rest the label is derived: members are taken in
+    cluster order, as enola takes them, a label another member holds is not
+    available, a candidate the snapshot's facts actually carry wins, and a
+    member that produced no facts keeps its first free candidate. Members are
+    loaded by label, so one left without a label of its own — or two members
+    claiming the same written label — means no cluster.
     """
+    written = [_written_label(repo_path, snapshot_id) for repo_path in repo_paths]
+    taken = [label for label in written if label is not None]
+    if len(set(taken)) != len(taken):
+        return None
+
     labels: list[str] = []
-    for repo_path in repo_paths:
-        free = [label for label in _label_candidates(repo_path) if label not in labels]
+    for repo_path, written_label in zip(repo_paths, written):
+        if written_label is not None:
+            labels.append(written_label)
+            continue
+        free = [label for label in _label_candidates(repo_path) if label not in taken]
         if not free:
             return None
-        labels.append(next((label for label in free if label in fact_labels), free[0]))
+        label = next((label for label in free if label in fact_labels), free[0])
+        labels.append(label)
+        taken.append(label)
     return labels
 
 
@@ -177,12 +192,13 @@ async def snapshot_dataset_code_repos(
         return None
 
     repo_paths = [repo_path for _data, repo_path in members]
-    config_path = write_cluster_config(dataset_id, repo_paths)
-    snapshot_dir = await run_enola_cluster(config_path, repo_paths, timeout=timeout * len(members))
+    snapshot_dir = await run_enola_cluster(repo_paths, timeout=timeout * len(members))
 
-    facts, _receipt = parse_enola_snapshot(snapshot_dir)
+    facts, receipt = parse_enola_snapshot(snapshot_dir)
     fact_labels = {fact["repo"] for fact in facts if isinstance(fact.get("repo"), str)}
-    labels = resolve_member_labels(repo_paths, fact_labels)
+    labels = resolve_member_labels(
+        repo_paths, fact_labels, snapshot_id=snapshot_identity(snapshot_dir, receipt)
+    )
     if labels is None:
         logger.warning(
             "The repositories of dataset %s do not have distinct names; "
@@ -279,51 +295,80 @@ def pipeline_errored(pipeline_result: Any) -> bool:
     return "Errored" in getattr(run_info, "status", "")
 
 
-async def refresh_dataset_code_graph_after_delete(dataset: Any, user: Any) -> None:
-    """Rebuild the remaining repositories after one was deleted from a dataset.
+async def mark_dataset_code_repos_for_rebuild(dataset: Any) -> None:
+    """Mark the remaining repositories for re-extraction after one was deleted.
 
     The deleted repository's nodes are already gone, and its edges with them.
     What is left are the other members' facts about it (a client call still
     naming the route it reached) and the cluster's own findings, which only a
-    fresh snapshot without that repository corrects. Never raises: the delete
-    has succeeded, and a later remember() or cognify() of the dataset rebuilds
-    the graph the same way.
+    fresh snapshot without that repository corrects. That snapshot is not
+    taken here — a delete must not turn into an enola run over the whole
+    dataset — but on the next ``cognify()`` of the dataset: the survivors'
+    completion stamps are dropped so cognify processes them again instead of
+    skipping them as done, the same rule ``forget(memory_only=True)``
+    follows. Never raises: the delete has succeeded.
     """
+    from cognee.modules.data.methods.publish_updated_data import reset_data_pipeline_status
     from cognee.modules.retrieval.code_retriever import invalidate_code_graph_snapshot_cache
 
     invalidate_code_graph_snapshot_cache(dataset_id=dataset.id)
     try:
-        runs = await refresh_dataset_code_graph(dataset, user)
+        rows = await dataset_code_repo_rows(dataset.id)
+        for row in rows:
+            await reset_data_pipeline_status(
+                row.id, dataset.id, pipeline_names=("cognify_pipeline", "code_graph_pipeline")
+            )
     except Exception:
         logger.exception(
-            "Could not rebuild the code graph of dataset %s after a repository was deleted.",
+            "Could not mark the code repositories of dataset %s for re-extraction after a "
+            "repository was deleted; cognify() the dataset to rebuild their graph.",
             dataset.id,
         )
         return
-    for run in runs:
-        if run.error is not None or pipeline_errored(run.pipeline_result):
-            logger.error(
-                "Could not rebuild the code graph of '%s' after a repository was deleted "
-                "from dataset %s: %s",
-                run.repo_path,
-                dataset.id,
-                run.error or "code_graph_pipeline errored",
-            )
+    if rows:
+        logger.info(
+            "Marked %d code repositor%s of dataset %s for re-extraction on the next cognify().",
+            len(rows),
+            "y" if len(rows) == 1 else "ies",
+            dataset.id,
+        )
 
 
-# The cognify CODE_REPO route runs once per Data row, and a dataset's rows run
-# concurrently inside one pipeline run. The members of a cluster must load one
-# at a time (see add_code_graph_edges), and the cluster needs one enola run per
-# pipeline run rather than one per row.
-_cluster_locks: dict[tuple[str, int], asyncio.Lock] = {}
-_run_snapshots: dict[str, tuple[str, DatasetCodeSnapshot | None]] = {}
+@dataclass
+class _ClusterRun:
+    """The cluster load of one dataset within one cognify pipeline run.
+
+    The CODE_REPO route runs once per Data row, and a dataset's rows run
+    concurrently inside one pipeline run. The members of a cluster must load
+    one at a time (see add_code_graph_edges), and the cluster needs one enola
+    run per pipeline run rather than one per row: the first row to take the
+    lock loads every member, and the rows after it only read ``is_cluster``.
+    The snapshot is dropped once the load is done, so a finished run keeps
+    nothing but two flags. One entry is kept per dataset (the newest run,
+    replaced when the run id or the event loop changes), so the registry is
+    bounded by the number of datasets this process has cognified.
+    """
+
+    run_id: str | None
+    loop_id: int
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    done: bool = False
+    is_cluster: bool = False
+    snapshot: DatasetCodeSnapshot | None = None
 
 
-def _cluster_lock(dataset_id: UUID) -> asyncio.Lock:
-    key = (str(dataset_id), id(asyncio.get_running_loop()))
-    if key not in _cluster_locks:
-        _cluster_locks[key] = asyncio.Lock()
-    return _cluster_locks[key]
+_cluster_runs: dict[str, _ClusterRun] = {}
+
+
+def _cluster_run(dataset_id: UUID, run_id: Any) -> _ClusterRun:
+    key = str(dataset_id)
+    loop_id = id(asyncio.get_running_loop())
+    run_key = str(run_id) if run_id is not None else None
+    current = _cluster_runs.get(key)
+    if current is None or current.loop_id != loop_id or current.run_id != run_key:
+        current = _ClusterRun(run_id=run_key, loop_id=loop_id)
+        _cluster_runs[key] = current
+    return current
 
 
 async def load_dataset_cluster(ctx: Optional["PipelineContext"]) -> bool:
@@ -331,9 +376,10 @@ async def load_dataset_cluster(ctx: Optional["PipelineContext"]) -> bool:
 
     Returns False when the dataset is not a cluster, and the caller then loads
     its one repository as before. Otherwise every member is loaded from one
-    cluster snapshot, each under its own Data row; members the snapshot
-    already loaded are skipped, so the dataset's other rows reaching this
-    route in the same run find nothing left to do.
+    cluster snapshot, each under its own Data row, and True is returned — for
+    the row that did the loading and for the dataset's other rows reaching
+    this route in the same pipeline run, which have nothing left to do.
+    Without a pipeline run id nothing is remembered between calls.
     """
     from cognee.tasks.code_graph.extract_code_graph import (
         add_code_graph_data_points,
@@ -342,39 +388,46 @@ async def load_dataset_cluster(ctx: Optional["PipelineContext"]) -> bool:
     )
 
     dataset_id = getattr(getattr(ctx, "dataset", None), "id", None)
-    if dataset_id is None:
+    if ctx is None or dataset_id is None:
         return False
 
-    async with _cluster_lock(dataset_id):
-        run_id = getattr(ctx, "pipeline_run_id", None)
-        cached = _run_snapshots.get(str(dataset_id))
-        if run_id is not None and cached is not None and cached[0] == str(run_id):
-            snapshot = cached[1]
-        else:
+    run_id = getattr(ctx, "pipeline_run_id", None)
+    run = _cluster_run(dataset_id, run_id)
+    async with run.lock:
+        if run.done and run.run_id is not None:
+            return run.is_cluster
+
+        if run.snapshot is None:
             repos = [
                 (row, repo_path)
                 for row in await dataset_code_repo_rows(dataset_id)
                 if (repo_path := code_repo_path(row)) is not None
             ]
-            snapshot = await snapshot_dataset_code_repos(dataset_id, repos)
-            _run_snapshots[str(dataset_id)] = (str(run_id), snapshot)
-        if snapshot is None:
+            run.snapshot = await snapshot_dataset_code_repos(dataset_id, repos)
+        if run.snapshot is None:
+            run.done = True
             return False
 
-        for member in snapshot.members:
+        for member in run.snapshot.members:
             member_ctx = replace(ctx, data_item=member.data)
             data_points = await extract_code_graph(
                 repo_path=member.repo_path,
-                snapshot_dir=snapshot.snapshot_dir,
+                snapshot_dir=run.snapshot.snapshot_dir,
                 repo_scope=member.label,
             )
             state = await add_code_graph_data_points(data_points, ctx=member_ctx, graph_only=True)
             await add_code_graph_edges(
                 state,
                 repo_path=member.repo_path,
-                snapshot_dir=snapshot.snapshot_dir,
+                snapshot_dir=run.snapshot.snapshot_dir,
                 ctx=member_ctx,
                 repo_scope=member.label,
             )
             logger.info("Code repo graph extracted for %s (%s).", member.repo_path, member.label)
+        # A failed member load leaves ``done`` unset: the next row of the run
+        # retries the load from the snapshot already taken, and the members
+        # that did load are skipped by their stamp.
+        run.done = True
+        run.is_cluster = True
+        run.snapshot = None
     return True
