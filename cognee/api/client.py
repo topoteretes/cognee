@@ -98,6 +98,11 @@ BACKGROUND_DRAIN_TIMEOUT_SECONDS = float(os.getenv("BACKGROUND_DRAIN_TIMEOUT_SEC
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Telemetry events from this process say they came from the API server (an
+    # explicit TELEMETRY_ORIGIN in the environment, e.g. the managed cloud's, wins).
+    # Set at startup, not import: importing the app module (tests, tooling) is not
+    # running the server.
+    set_default_telemetry_origin(TELEMETRY_ORIGIN_API)
     # from cognee.modules.data.deletion import prune_system, prune_data
     # await prune_data()
     # await prune_system(metadata = True)
@@ -186,10 +191,6 @@ async def lifespan(app: FastAPI):
 
     await close_telemetry_session()
 
-
-# Telemetry events from this process say they came from the API server (an
-# explicit TELEMETRY_ORIGIN in the environment, e.g. the managed cloud's, wins).
-set_default_telemetry_origin(TELEMETRY_ORIGIN_API)
 
 app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)
 

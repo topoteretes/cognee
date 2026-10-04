@@ -142,7 +142,9 @@ TELEMETRY_DATASET_NAME_PROPERTIES = ["dataset_name", "dataset"]
 
 # Where a telemetry event originates: the surface the process is. Each entrypoint
 # sets its own value as the process default (``set_default_telemetry_origin``);
-# an explicit TELEMETRY_ORIGIN in the environment (e.g. "cloud") always wins.
+# an explicit TELEMETRY_ORIGIN in the environment (e.g. "cloud") always wins. The
+# default is process-local, not an environment variable: a child process (the API
+# server `cognee-cli -ui` starts) must label itself, not inherit its parent's label.
 TELEMETRY_ORIGIN_ENV = "TELEMETRY_ORIGIN"
 TELEMETRY_ORIGIN_SDK = "sdk"
 TELEMETRY_ORIGIN_API = "api"
@@ -156,14 +158,23 @@ _PATH_LIKE_MODEL = re.compile(
 )
 
 
-def set_default_telemetry_origin(origin: str) -> None:
-    """Record the surface this process is, unless the environment already says.
+_default_telemetry_origin = TELEMETRY_ORIGIN_SDK
 
-    Called once by each entrypoint (CLI, MCP server, API app). ``send_telemetry``
-    reads TELEMETRY_ORIGIN per event, so deployments that set it themselves (the
-    managed cloud sets "cloud") keep their value; the SDK default is "sdk".
+
+def set_default_telemetry_origin(origin: str) -> None:
+    """Record the surface this process is: the origin used when TELEMETRY_ORIGIN is unset.
+
+    Called once by each entrypoint (CLI, MCP server, API app). Deployments that
+    set TELEMETRY_ORIGIN themselves (the managed cloud sets "cloud") keep their
+    value; a process that never calls this reports the SDK default.
     """
-    os.environ.setdefault(TELEMETRY_ORIGIN_ENV, origin)
+    global _default_telemetry_origin
+    _default_telemetry_origin = origin
+
+
+def telemetry_origin() -> str:
+    """The origin the next event carries: the environment's value, else the process default."""
+    return os.getenv(TELEMETRY_ORIGIN_ENV) or _default_telemetry_origin
 
 
 def telemetry_model_label(model: Any) -> Any:
@@ -536,7 +547,7 @@ def send_telemetry(
     # Where this telemetry event originates. Defaults to "sdk"; deployments such
     # as the managed cloud set TELEMETRY_ORIGIN (e.g. "cloud") so events can be
     # segmented by origin.
-    telemetry_origin = os.getenv(TELEMETRY_ORIGIN_ENV, TELEMETRY_ORIGIN_SDK)
+    origin = telemetry_origin()
     current_time = datetime.now(timezone.utc)
     payload = {
         "anonymous_id": anonymous_id,
@@ -556,7 +567,7 @@ def send_telemetry(
             "persistent_id": persistent_id,
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
-            "telemetry_origin": telemetry_origin,
+            "telemetry_origin": origin,
             **additional_properties,
         },
     }

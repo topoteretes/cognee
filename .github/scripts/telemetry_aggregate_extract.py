@@ -35,6 +35,7 @@ from pathlib import Path
 import duckdb
 
 WINDOW_DAYS = int(os.getenv("TELEMETRY_WINDOW_DAYS", "70"))
+TASK_WINDOW_DAYS = min(WINDOW_DAYS, 14)
 OUT_DIR = Path(os.getenv("TELEMETRY_OUT_DIR", "telemetry_aggregates"))
 
 # Shared by SQL redaction and the independent post-write guard.
@@ -44,9 +45,14 @@ CELL_PATTERNS = (
     re.compile(r"\bak_[0-9a-f]{16,}\b"),  # key hash
     # A filesystem path with an account directory or a drive letter: a model or
     # provider setting pointing at a local file names the OS account.
-    re.compile(r"(^|[^A-Za-z0-9])(/[Uu]sers/|/home/|/root/|[A-Za-z]:\\)[^\s,;]*"),
+    re.compile(r"(^|[^A-Za-z0-9])(/Users/|/home/|/root/|[A-Za-z]:\\)[^\s,;]*"),
 )
-_SQL_CELL_PATTERN = "|".join(pattern.pattern for pattern in CELL_PATTERNS).replace("'", "''")
+# The SQL redaction runs on lower-cased values, so it also needs the lower-case
+# macOS home directory; the post-write guard keeps the exact case, because route
+# templates legitimately contain "/users/".
+_SQL_CELL_PATTERN = "|".join(
+    [pattern.pattern for pattern in CELL_PATTERNS] + [r"(^|[^a-z0-9])/users/[^\s,;]*"]
+).replace("'", "''")
 
 
 def _provider_dimension(property_path: str, *, max_length: int | None = None) -> str:
@@ -108,6 +114,13 @@ EVENT_ALLOWLIST = (
 _IDENT = (
     "coalesce(nullif(json_extract_string(properties, '$.api_key_hash'), ''), "
     "nullif(json_extract_string(properties, '$.persistent_id'), ''), user_id)"
+)
+# Route templates. Older builds put the raw path in ``endpoint`` (a dataset or user
+# id inside it), so ids are folded back into a placeholder before grouping; the
+# guard would otherwise refuse the file, and the id is not a dimension anyway.
+_ENDPOINT = (
+    "regexp_replace(endpoint, "
+    "'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}', '{id}', 'g')"
 )
 # Surface the event came from: 'sdk' (the default), 'api', 'cli', 'mcp' (set by each
 # entrypoint since SDK-775), 'cloud' (set by the managed cloud). Safe enum.
@@ -240,7 +253,7 @@ QUERIES: dict[str, str] = {
     # FastAPI surface: which routes are hit (endpoint is a route template
     # constant like 'POST /v1/search' — no user data), by day.
     "api_endpoint_daily": f"""
-        SELECT ingestion_date AS day, endpoint, {_VERSION} AS version,
+        SELECT ingestion_date AS day, {_ENDPOINT} AS endpoint, {_VERSION} AS version,
                count(*) AS events,
                count(DISTINCT {_IDENT}) AS distinct_identities
         FROM analytics.main.pipeline_events
@@ -318,7 +331,7 @@ QUERIES: dict[str, str] = {
     # HTTP failures (SDK-775): the API layer's exception event, by route template,
     # status and error class. ``endpoint`` is a route constant, never a URL.
     "api_exceptions_daily": f"""
-        SELECT ingestion_date AS day, endpoint, {_VERSION} AS version,
+        SELECT ingestion_date AS day, {_ENDPOINT} AS endpoint, {_VERSION} AS version,
                {_closed_value("status_code", "^[1-5][0-9][0-9]$")} AS status_code,
                {_EXCEPTION_TYPE} AS exception_type,
                count(*) AS events,
@@ -371,15 +384,16 @@ QUERIES: dict[str, str] = {
         GROUP BY ALL ORDER BY day, version
     """,
     # Which task fails (SDK-775): per-task error events by task name and error
-    # class. Task events are not in the allowlist (they are most of the volume),
-    # so this query filters them on its own.
+    # class. Task events are not in the allowlist (they are most of the volume:
+    # millions of rows a week), so this query filters them on its own and reads
+    # at most TASK_WINDOW_DAYS, enough for a week-over-week comparison.
     "task_error_types_daily": f"""
         SELECT ingestion_date AS day, {_VERSION} AS version,
                {_TASK_NAME} AS task_name, {_EXCEPTION_TYPE} AS exception_type,
                count(*) AS errors,
                count(DISTINCT {_IDENT}) AS distinct_identities
         FROM analytics.main.pipeline_events
-        WHERE ingestion_date >= current_date - INTERVAL {WINDOW_DAYS} DAY
+        WHERE ingestion_date >= current_date - INTERVAL {TASK_WINDOW_DAYS} DAY
               AND tracking_event LIKE '% Task Errored'
         GROUP BY ALL ORDER BY day, errors DESC
     """,

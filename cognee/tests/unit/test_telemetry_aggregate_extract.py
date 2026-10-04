@@ -414,6 +414,29 @@ class TelemetryAggregateExtractTest(unittest.TestCase):
         self.assertEqual(rows[("extract_graph_from_data", "ValueError")]["errors"], 2)
         self.assertEqual(rows[("redacted", "unknown")]["errors"], 1)
 
+    def test_raw_ids_in_endpoints_are_folded_into_a_placeholder(self):
+        """Older builds send the raw path; the id is folded before grouping and
+        before the guard sees the file."""
+        for user in ("a", "a", "b"):
+            self._insert_event(
+                "Recall API Endpoint Invoked",
+                "1.5.4",
+                {},
+                user,
+                endpoint="POST /api/v1/recall/12345678-1234-1234-1234-123456789abc",
+            )
+        self._insert_event(
+            "API Exception Raised",
+            "1.5.4",
+            {"status_code": 404, "exception_type": "DatasetNotFoundError"},
+            endpoint="GET /api/v1/datasets/ABCDEF01-1234-1234-1234-123456789ABC/graph",
+        )
+        (row,) = self._rows("api_endpoint_daily")
+        self.assertEqual(row["endpoint"], "POST /api/v1/recall/{id}")
+        self.assertEqual(row["events"], 3)
+        (row,) = self._rows("api_exceptions_daily")
+        self.assertEqual(row["endpoint"], "GET /api/v1/datasets/{id}/graph")
+
     def test_path_like_models_are_redacted_and_rejected_by_the_guard(self):
         for model in ("/Users/alice/models/x.gguf", "C:\\Users\\alice\\x.gguf", "/home/alice/m"):
             with self.subTest(model=model):
@@ -428,8 +451,14 @@ class TelemetryAggregateExtractTest(unittest.TestCase):
         # route templates stay: lower-case segments are not account directories
         path = self.out_dir / "routes.csv"
         with path.open("w", newline="") as handle:
-            csv.writer(handle).writerows([["endpoint"], ["GET /api/v1/users/me"], ["POST /v1/add"]])
+            csv.writer(handle).writerows(
+                [["endpoint"], ["GET /api/v1/users/me"], ["GET /users/me"], ["POST /v1/add"]]
+            )
         self.extract._guard(path)
+        # ...while the SQL redaction, which lower-cases, still catches a macOS home dir
+        self.connection.execute("DELETE FROM analytics.main.pipeline_events")
+        self._insert(model="/USERS/alice/x.gguf")
+        self.assertEqual(self._provider_rows()[0]["llm_model"], "redacted")
 
 
 if __name__ == "__main__":

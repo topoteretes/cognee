@@ -109,14 +109,19 @@ def test_model_label_keeps_provider_names_and_hides_paths(model, expected):
     assert utils.telemetry_model_label(model) == expected
 
 
-def test_default_origin_is_set_once_and_never_overrides_the_environment(monkeypatch):
+def test_default_origin_is_process_local_and_the_environment_wins(monkeypatch):
     monkeypatch.delenv(utils.TELEMETRY_ORIGIN_ENV, raising=False)
+    monkeypatch.setattr(utils, "_default_telemetry_origin", utils.TELEMETRY_ORIGIN_SDK)
+    assert utils.telemetry_origin() == "sdk"
+
     utils.set_default_telemetry_origin(utils.TELEMETRY_ORIGIN_CLI)
-    assert utils.os.environ[utils.TELEMETRY_ORIGIN_ENV] == "cli"
+    assert utils.telemetry_origin() == "cli"
+    # never written to the environment: a child process must label itself
+    assert utils.TELEMETRY_ORIGIN_ENV not in utils.os.environ
 
     monkeypatch.setenv(utils.TELEMETRY_ORIGIN_ENV, "cloud")
     utils.set_default_telemetry_origin(utils.TELEMETRY_ORIGIN_API)
-    assert utils.os.environ[utils.TELEMETRY_ORIGIN_ENV] == "cloud"
+    assert utils.telemetry_origin() == "cloud"
 
 
 @pytest.mark.asyncio

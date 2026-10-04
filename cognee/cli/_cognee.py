@@ -252,7 +252,8 @@ def main() -> int:
 
     set_operation_origin(ORIGIN_CLI)
     # Telemetry events from this process say they came from the CLI (an explicit
-    # TELEMETRY_ORIGIN in the environment still wins).
+    # TELEMETRY_ORIGIN in the environment still wins). Process-local: the API
+    # server that `cognee-cli -ui` starts labels itself "api".
     set_default_telemetry_origin(TELEMETRY_ORIGIN_CLI)
 
     parser, installed_commands = _create_parser()
