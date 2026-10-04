@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
+from cognee.infrastructure.background_tasks import register_background_task
 from cognee.shared.logging_utils import get_logger
 
 from .get_vector_engine import get_vector_engine_async
@@ -51,7 +52,7 @@ async def _wait_out(pass_task: asyncio.Future) -> None:
             continue
 
 
-async def compact_vector_store() -> dict | None:
+async def _compact_vector_store_now() -> dict | None:
     """Compact the vector store bound to the current (dataset) context.
 
     Adapters that reclaim nothing on their own (LanceDB) implement ``compact``;
@@ -91,3 +92,16 @@ async def compact_vector_store() -> dict | None:
             "Vector store compaction: %s", _summarize(stats)
         )
     return stats
+
+
+async def compact_vector_store() -> asyncio.Task:
+    """Start a compaction pass in the background and return its task without waiting.
+
+    Called at the end of every cognify run, so neither the caller nor the dataset
+    lock is held for the pass. The task copies the current context, so the pass
+    compacts the dataset's own store. ``cognee.wait_for_background_tasks()`` and
+    server shutdown wait for it, and so do the adapter's ``close`` and ``prune``.
+    Dataset deletion does not: a dataset deleted while its pass runs can be left
+    with stray files under its removed directory.
+    """
+    return register_background_task(asyncio.ensure_future(_compact_vector_store_now()))

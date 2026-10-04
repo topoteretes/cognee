@@ -475,6 +475,38 @@ async def test_deletes_take_the_write_lock(tmp_path, monkeypatch):
     assert lock_held == [True]
 
 
+def _delete_right_after_open(adapter, db_path, collection, point_id, monkeypatch):
+    """Commit a delete through another handle the first time the adapter opens ``collection``."""
+    import lancedb
+
+    real_get_collection = adapter.get_collection
+    pending = [point_id]
+
+    async def get_collection(name):
+        table = await real_get_collection(name)
+        if name == collection and pending:
+            other = await (await lancedb.connect_async(db_path)).open_table(name)
+            await other.delete(f"id = '{pending.pop()}'")
+        return table
+
+    monkeypatch.setattr(adapter, "get_collection", get_collection)
+
+
+@pytest.mark.asyncio
+async def test_a_delete_before_the_rewrite_takes_the_lock_does_not_fail_it(tmp_path, monkeypatch):
+    """The rewrite plans against the version current under VECTOR_DB_LOCK, not the one
+    the table handle was opened at."""
+    adapter, db_path = _adapter(tmp_path)
+    collection = "StaleHandle_label"
+    ids = await _write_n_points(adapter, collection, 4)
+    _delete_right_after_open(adapter, db_path, collection, ids[1], monkeypatch)
+
+    stats = await adapter.compact()
+
+    assert stats[collection]["executed_tasks"] == 1, stats
+    assert len(await adapter.retrieve(collection, [str(i) for i in ids])) == 3
+
+
 @pytest.mark.asyncio
 async def test_compact_is_fail_open_per_collection(tmp_path, compaction_settings, monkeypatch):
     compaction_settings(retention_seconds=0)
@@ -689,13 +721,13 @@ async def test_compact_vector_store_never_fails_the_pipeline(monkeypatch):
         raise RuntimeError("no vector engine")
 
     monkeypatch.setattr(module, "get_vector_engine_async", _engine_getter(Exploding()))
-    assert await module.compact_vector_store() is None
+    assert await module._compact_vector_store_now() is None
 
     monkeypatch.setattr(module, "get_vector_engine_async", unavailable)
-    assert await module.compact_vector_store() is None
+    assert await module._compact_vector_store_now() is None
 
     monkeypatch.setattr(module, "get_vector_engine_async", _engine_getter(Quiet()))
-    assert await module.compact_vector_store() == {
+    assert await module._compact_vector_store_now() == {
         "Entity_name": {"planned_tasks": 1, "executed_tasks": 1}
     }
 
@@ -715,7 +747,7 @@ async def test_compact_vector_store_uses_the_async_engine_getter(monkeypatch):
     monkeypatch.setattr(module, "get_vector_engine_async", _engine_getter(Quiet()))
     with warnings.catch_warnings():
         warnings.simplefilter("error", DeprecationWarning)
-        assert await module.compact_vector_store() == {}
+        assert await module._compact_vector_store_now() == {}
 
 
 @pytest.mark.asyncio
@@ -771,7 +803,7 @@ async def test_compact_vector_store_lets_a_running_pass_finish_before_cancelling
             return {}
 
     monkeypatch.setattr(module, "get_vector_engine_async", _engine_getter(Slow()))
-    task = asyncio.ensure_future(module.compact_vector_store())
+    task = asyncio.ensure_future(module._compact_vector_store_now())
     await started.wait()
     task.cancel()
     await asyncio.sleep(0.05)
@@ -781,6 +813,29 @@ async def test_compact_vector_store_lets_a_running_pass_finish_before_cancelling
     with pytest.raises(asyncio.CancelledError):
         await task
     assert finished, "cancellation propagated while the compaction pass was still running"
+
+
+@pytest.mark.asyncio
+async def test_compact_vector_store_returns_before_the_pass_finishes(monkeypatch):
+    """Neither cognify's caller nor its dataset lock waits for the pass, yet the pass
+    runs to completion and ``wait_for_background_tasks`` drains it."""
+    from cognee.infrastructure.background_tasks import wait_for_background_tasks
+
+    module = importlib.import_module("cognee.infrastructure.databases.vector.compact_vector_store")
+    release = asyncio.Event()
+
+    class Gated:
+        async def compact(self):
+            await release.wait()
+            return {"Entity_name": {}}
+
+    monkeypatch.setattr(module, "get_vector_engine_async", _engine_getter(Gated()))
+    task = await module.compact_vector_store()
+    assert not task.done()
+
+    release.set()
+    assert await wait_for_background_tasks(timeout=5)
+    assert task.result() == {"Entity_name": {}}
 
 
 @pytest.mark.asyncio
@@ -1051,3 +1106,42 @@ async def test_prune_waits_for_a_running_compaction_pass(tmp_path, compaction_se
 
     assert events == ["pass_done", "pruned"]
     await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_close_waits_for_a_running_compaction_pass(tmp_path, compaction_settings):
+    """The pass runs in the background after cognify; closing must not tear the
+    connection (or the worker) down under its commit."""
+    adapter, _ = _adapter(tmp_path)
+    await _write_n_points(adapter, "ClosePass_label", 2)
+
+    async with adapter._compaction_lock:  # a pass in progress
+        close_task = asyncio.ensure_future(adapter.close())
+        await asyncio.sleep(0.1)
+        assert not close_task.done()
+        assert adapter.connection is not None
+    await close_task
+    assert adapter.connection is None
+
+
+@pytest.mark.asyncio
+async def test_versions_a_pass_left_pending_are_pruned_once_aged(tmp_path, compaction_settings):
+    """An adapter that stays open (a server) reclaims them without another cognify."""
+    compaction_settings(retention_seconds=1)
+    adapter, db_path = _adapter(tmp_path)
+    collection = "Followup_label"
+    await _write_n_points(adapter, collection, 4)
+
+    await adapter.compact()
+    assert _version_count(db_path, collection) > 1  # still inside the retention window
+    assert adapter._followup_prune_handle is not None
+
+    await asyncio.sleep(2.3)
+    await adapter._wait_for_open_prune()
+    assert _version_count(db_path, collection) == 1
+    assert _data_files(db_path, collection) == _referenced_files(db_path, collection)
+
+    await adapter.compact()
+    assert adapter._followup_prune_handle is not None
+    await adapter.close()
+    assert adapter._followup_prune_handle is None
