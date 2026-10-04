@@ -1,17 +1,18 @@
-from sqlalchemy.orm import relationship, Mapped
-from sqlalchemy import Column, String, ForeignKey, UUID
+from sqlalchemy import Column, ForeignKey, String, Uuid
+from sqlalchemy.orm import Mapped, relationship
+
 from .Principal import Principal
-from .UserTenant import UserTenant
 from .Role import Role
+from .UserTenant import UserTenant
 
 
 class Tenant(Principal):
     __tablename__ = "tenants"
 
-    id = Column(UUID, ForeignKey("principals.id"), primary_key=True)
+    id = Column(Uuid, ForeignKey("principals.id"), primary_key=True)
     name = Column(String, unique=False, nullable=False, index=True)
 
-    owner_id = Column(UUID, index=True)
+    owner_id = Column(Uuid, index=True)
 
     users: Mapped[list["User"]] = relationship(  # noqa: F821
         "User",

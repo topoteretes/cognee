@@ -1,9 +1,7 @@
 from datetime import datetime, timezone
-from typing import Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, DateTime, Integer, String, Text
-from sqlalchemy import UUID as SAUUID
+from sqlalchemy import JSON, DateTime, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from cognee.infrastructure.databases.relational.ModelBase import Base
@@ -25,9 +23,9 @@ class ToolWriteProposal(Base):
 
     __tablename__ = "tool_write_proposals"
 
-    id: Mapped[UUID] = mapped_column(SAUUID, primary_key=True, default=uuid4)
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
 
-    user_id: Mapped[UUID] = mapped_column(SAUUID, nullable=False, index=True)
+    user_id: Mapped[UUID] = mapped_column(Uuid, nullable=False, index=True)
     connection_name: Mapped[str] = mapped_column(String, nullable=False)
 
     status: Mapped[str] = mapped_column(String, nullable=False, default="proposed", index=True)
@@ -36,16 +34,16 @@ class ToolWriteProposal(Base):
     instruction: Mapped[str] = mapped_column(Text, nullable=False)
     # Where the inaccuracy signal came from (e.g. a contradicts edge's
     # first_fact/second_fact/reason/confidence). Never secret material.
-    evidence: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    evidence: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     sql: Mapped[str] = mapped_column(Text, nullable=False)
-    target_table: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    target_table: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Dry-run rowcount captured at proposal time (UPDATE executed and rolled
     # back). Apply re-checks the actual rowcount against this.
-    estimated_rows: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    applied_rows: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    estimated_rows: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    applied_rows: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
@@ -56,4 +54,4 @@ class ToolWriteProposal(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
-    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

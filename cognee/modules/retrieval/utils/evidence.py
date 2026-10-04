@@ -5,7 +5,7 @@ These helpers perform no database, vector, embedding, or LLM calls. They describ
 supports a particular statement in the generated answer.
 """
 
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from cognee.infrastructure.databases.provenance import make_source_ref_key
@@ -21,20 +21,20 @@ def _payload(obj: Any) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def _string(value: Any) -> Optional[str]:
+def _string(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
     return text or None
 
 
-def _score(value: Any) -> Optional[float]:
+def _score(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     return float(value)
 
 
-def _source_ref_key(dataset_id: Any, data_id: Optional[str]) -> Optional[str]:
+def _source_ref_key(dataset_id: Any, data_id: str | None) -> str | None:
     if dataset_id is None or data_id is None:
         return None
     try:
@@ -91,7 +91,7 @@ def chunk_context_evidence(
     return references
 
 
-def _node_label(node: Any) -> Optional[str]:
+def _node_label(node: Any) -> str | None:
     attributes = getattr(node, "attributes", None)
     if not isinstance(attributes, dict):
         return None
@@ -109,7 +109,7 @@ def graph_context_evidence(
         return []
 
     normalized_dataset_id = _string(dataset_id)
-    nodes: list[tuple[str, Optional[str]]] = []
+    nodes: list[tuple[str, str | None]] = []
     edges: list[tuple[str, str, str, str]] = []
     seen_node_ids: set[str] = set()
     seen_edge_ids: set[str] = set()
@@ -230,7 +230,7 @@ def append_source_evidence_text(
         return completions
 
     bullets = []
-    seen: set[tuple[Optional[str], Optional[str]]] = set()
+    seen: set[tuple[str | None, str | None]] = set()
     for reference in source_references[:5]:
         key = (reference.data_id, reference.chunk_id)
         if key in seen:

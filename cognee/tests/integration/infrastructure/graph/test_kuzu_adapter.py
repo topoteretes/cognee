@@ -7,15 +7,18 @@ main process.
 """
 
 import json
+import logging
 import os
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
 
-from cognee.shared.data_models import KnowledgeGraph
-from cognee.infrastructure.databases.graph.kuzu.adapter import KuzuAdapter
 from cognee.infrastructure.databases.graph.get_graph_engine import create_graph_engine
+from cognee.infrastructure.databases.graph.kuzu.adapter import KuzuAdapter
+from cognee.shared.data_models import KnowledgeGraph
+
+logger = logging.getLogger(__name__)
 
 DEMO_KG_PATH = os.path.join(os.path.dirname(__file__), "test_kg.json")
 
@@ -33,7 +36,7 @@ async def _close_adapter(a) -> None:
     try:
         await a.close()
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _close_adapter", exc_info=True)
 
 
 @pytest_asyncio.fixture
@@ -290,7 +293,7 @@ async def test_get_filtered_graph_data(adapter):
     await adapter.add_edges(edge_rows)
 
     # Filter by type = "Person"
-    nodes, edges = await adapter.get_filtered_graph_data([{"type": ["Person"]}])
+    nodes, _edges = await adapter.get_filtered_graph_data([{"type": ["Person"]}])
     assert len(nodes) == len(kg.nodes)  # All nodes are Person type
 
 
@@ -849,6 +852,10 @@ async def test_query_racing_with_close_does_not_leak_executor_error(kuzu_adapter
         except RuntimeError as exc:
             errors_seen.append(exc)
         except Exception as exc:  # pragma: no cover - any other type is a regression
+            logger.debug(
+                "Ignoring exception in test_query_racing_with_close_does_not_leak_executor_error.fire_query",
+                exc_info=True,
+            )
             errors_seen.append(exc)
 
     async def fire_close():

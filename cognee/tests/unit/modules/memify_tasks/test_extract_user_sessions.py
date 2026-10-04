@@ -1,11 +1,12 @@
 import sys
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from cognee.infrastructure.databases.cache.models import SessionQAEntry
-from cognee.tasks.memify.extract_user_sessions import extract_user_sessions
+import pytest
+
 from cognee.exceptions import CogneeSystemError
+from cognee.infrastructure.databases.cache.models import SessionQAEntry
 from cognee.modules.users.models import User
+from cognee.tasks.memify.extract_user_sessions import extract_user_sessions
 
 # Get the actual module object (not the function) for patching
 extract_user_sessions_module = sys.modules["cognee.tasks.memify.extract_user_sessions"]

@@ -3,10 +3,10 @@ import asyncio
 import os
 from importlib import resources
 
-from cognee.cli.reference import SupportsCliCommand
-from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
+from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.reference import SupportsCliCommand
 
 _DEMO_ARCHIVE = "demo_graph"
 _DEMO_DATASET = "demo"
@@ -133,7 +133,7 @@ Clean up with: cognee-cli forget --dataset demo
                         answers.append((query, _result_lines(results)))
                     return result, answers
                 except Exception as e:
-                    raise CliCommandInnerException(f"Demo failed: {str(e)}") from e
+                    raise CliCommandInnerException(f"Demo failed: {e!s}") from e
 
             result, answers = asyncio.run(run_demo())
 
@@ -173,4 +173,4 @@ Clean up with: cognee-cli forget --dataset demo
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(f"Error during demo: {str(e)}", error_code=1) from e
+            raise CliCommandException(f"Error during demo: {e!s}", error_code=1) from e

@@ -1,6 +1,17 @@
+"""Combine node sets, an ontology, memify() and filtered recall over three data sources.
+
+A developer intro, a bundled conversation JSON and a Zen-of-Python markdown file are remembered
+under node sets with ONTOLOGY_FILE_PATH pointing at data/basic_ontology.owl. Graphs before and
+after memify() are written to .artifacts/, then a cross-document GRAPH_COMPLETION recall and a
+node_name-filtered recall are printed.
+
+Requires: LLM_API_KEY -- edit the placeholder assigned to os.environ["LLM_API_KEY"] below.
+Run: uv run python examples/demos/comprehensive_example/cognee_comprehensive_example.py
+"""
+
 # ruff: noqa: E402
-import os
 import asyncio
+import os
 from pathlib import Path
 
 # provide your OpenAI key here
@@ -33,7 +44,7 @@ ontology_path = asset_paths["ontology"]
 # assigned later may not override defaults or `.env`. See https://docs.cognee.ai/setup-configuration/overview#using-os-environ
 os.environ["ONTOLOGY_FILE_PATH"] = ontology_path
 
-import cognee  # noqa: E402
+import cognee
 
 
 async def main():

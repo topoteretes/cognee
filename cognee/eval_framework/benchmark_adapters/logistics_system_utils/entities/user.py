@@ -8,7 +8,6 @@ from cognee.eval_framework.benchmark_adapters.logistics_system_utils.entities.en
     UserTier,
 )
 
-
 user_possible_values = {
     "weekend_delivery_eligible": [True, False],
     "user_tier": [tier.label for tier in UserTier],
@@ -35,7 +34,7 @@ class User:
         region: str,
         weekend_delivery_eligible: bool,
         default_shipping_range: str,
-    ) -> "User":
+    ) -> User:
         return cls(
             user_id=user_id,
             name=name,

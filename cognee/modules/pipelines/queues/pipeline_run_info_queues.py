@@ -1,9 +1,7 @@
-from uuid import UUID
 from asyncio import Queue
-from typing import Optional
+from uuid import UUID
 
 from cognee.modules.pipelines.models import PipelineRunInfo
-
 
 pipeline_run_info_queues = {}
 
@@ -12,7 +10,7 @@ def initialize_queue(pipeline_run_id: UUID):
     pipeline_run_info_queues[str(pipeline_run_id)] = Queue()
 
 
-def get_queue(pipeline_run_id: UUID) -> Optional[Queue]:
+def get_queue(pipeline_run_id: UUID) -> Queue | None:
     if str(pipeline_run_id) not in pipeline_run_info_queues:
         initialize_queue(pipeline_run_id)
 
@@ -30,7 +28,7 @@ def push_to_queue(pipeline_run_id: UUID, pipeline_run_info: PipelineRunInfo):
         queue.put_nowait(pipeline_run_info)
 
 
-def get_from_queue(pipeline_run_id: UUID) -> Optional[PipelineRunInfo]:
+def get_from_queue(pipeline_run_id: UUID) -> PipelineRunInfo | None:
     queue = get_queue(pipeline_run_id)
 
     item = queue.get_nowait() if queue and not queue.empty() else None

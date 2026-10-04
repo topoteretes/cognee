@@ -10,7 +10,7 @@ Reference: https://github.com/mohammadtavakoli78/BEAM/blob/main/src/evaluation/c
 import json
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from cognee.shared.logging_utils import get_logger
 
@@ -141,7 +141,7 @@ async def _judge_criterion(
     question: str,
     response: str,
     semaphore,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
     prompt = _BEAM_JUDGE_PROMPT.format(
@@ -159,7 +159,7 @@ async def _judge_criterion(
             )
             score, reason = _parse_verdict(str(raw))
         except Exception as e:
-            logger.warning(f"BEAM judge failed for criterion '{criterion}': {e}")
+            logger.warning(f"BEAM judge failed for criterion '{criterion}': {e}", exc_info=True)
             score, reason = 0.0, f"ERROR: {e}"
 
     return {"criterion": criterion, "score": score, "reason": reason}
@@ -173,9 +173,9 @@ class BEAMRubricMetric:
     """
 
     def __init__(self):
-        self.score: Optional[float] = None
-        self.reason: Optional[str] = None
-        self._verdicts: List[Dict[str, Any]] = []
+        self.score: float | None = None
+        self.reason: str | None = None
+        self._verdicts: list[dict[str, Any]] = []
 
     def measure(self, test_case) -> float:
         import asyncio
@@ -201,7 +201,7 @@ class BEAMRubricMetric:
         question = test_case.input
         response = test_case.actual_output
         metadata = getattr(test_case, "additional_metadata", {}) or {}
-        rubric: List[str] = metadata.get("rubric", [])
+        rubric: list[str] = metadata.get("rubric", [])
 
         if not rubric:
             self.score = 0.0
@@ -236,5 +236,5 @@ class BEAMRubricMetric:
         return self.score
 
     @property
-    def verdicts(self) -> List[Dict[str, Any]]:
+    def verdicts(self) -> list[dict[str, Any]]:
         return self._verdicts

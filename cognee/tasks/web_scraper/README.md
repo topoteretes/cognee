@@ -64,10 +64,7 @@ async with DefaultUrlCrawler(concurrency=5, timeout=15.0) as crawler:
 ```python
 from cognee.tasks.web_scraper import web_scraper_task
 
-graph_data = await web_scraper_task(
-    url=["https://example.com"],
-    job_name="my_scraping_job"
-)
+graph_data = await web_scraper_task(url=["https://example.com"], job_name="my_scraping_job")
 ```
 
 > [!NOTE]
@@ -79,9 +76,7 @@ graph_data = await web_scraper_task(
 from cognee.tasks.web_scraper import cron_web_scraper_task
 
 await cron_web_scraper_task(
-    url="https://example.com",
-    schedule="0 0 * * *",
-    job_name="daily_scrape"
+    url="https://example.com", schedule="0 0 * * *", job_name="daily_scrape"
 )
 ```
 

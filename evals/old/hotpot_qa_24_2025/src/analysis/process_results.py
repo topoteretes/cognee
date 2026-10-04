@@ -1,7 +1,8 @@
 import os
+
 import pandas as pd
-from analysis.get_results import read_results, validate_folder_results
 from analysis.analyze_results import create_aggregate_metrics_df
+from analysis.get_results import read_results, validate_folder_results
 
 
 def process_results(dir_path: str) -> dict:
@@ -17,7 +18,7 @@ def process_results(dir_path: str) -> dict:
     return results
 
 
-def transform_results(results: dict, metrics: list = None) -> dict:
+def transform_results(results: dict, metrics: list | None = None) -> dict:
     """Transform dictionary of lists into dictionary of dictionaries with questions as keys."""
     if metrics is None:
         metrics = ["directllm_correctness", "deepeval_correctness", "EM", "f1"]
@@ -80,7 +81,7 @@ def validate_question_consistency(transformed: dict) -> bool:
     return True
 
 
-def create_answers_df(transformed: dict, output_csv_path: str = None) -> pd.DataFrame:
+def create_answers_df(transformed: dict, output_csv_path: str | None = None) -> pd.DataFrame:
     """Create dataframe with questions as rows and answers as columns."""
 
     # Get all questions (they should be the same across files)
@@ -106,7 +107,7 @@ def create_answers_df(transformed: dict, output_csv_path: str = None) -> pd.Data
 
 
 def create_single_metric_df(
-    transformed: dict, metric: str, save_folder: str = None, save_prefix: str = None
+    transformed: dict, metric: str, save_folder: str | None = None, save_prefix: str | None = None
 ) -> pd.DataFrame:
     """Create a single dataframe for one metric, with questions as rows and files as columns."""
     # Get all questions (they should be the same across files)
@@ -134,7 +135,10 @@ def create_single_metric_df(
 
 
 def create_all_metrics_df(
-    transformed: dict, metrics: list = None, save_folder: str = None, save_prefix: str = None
+    transformed: dict,
+    metrics: list | None = None,
+    save_folder: str | None = None,
+    save_prefix: str | None = None,
 ) -> dict:
     """Create dataframes for all metrics, with questions as rows and files as columns."""
     if metrics is None:

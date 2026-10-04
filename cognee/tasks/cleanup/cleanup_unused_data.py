@@ -7,26 +7,28 @@ efficiency and storage optimization through whole-document removal.
 """
 
 import json
-from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any
-from uuid import UUID
 import os
-from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine_async
-from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.data.models import Data
-from cognee.shared.logging_utils import get_logger
-from sqlalchemy import select, or_
-import cognee
+from datetime import datetime, timedelta, timezone
+from typing import Any
+from uuid import UUID
+
 import sqlalchemy as sa
+from sqlalchemy import or_, select
+
+import cognee
+from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.modules.data.models import Data
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
 
 async def cleanup_unused_data(
-    minutes_threshold: Optional[int], dry_run: bool = True, user_id: Optional[UUID] = None
-) -> Dict[str, Any]:
+    minutes_threshold: int | None, dry_run: bool = True, user_id: UUID | None = None
+) -> dict[str, Any]:
     """
     Identify and remove unused data from the memify pipeline.
 
@@ -93,8 +95,8 @@ async def cleanup_unused_data(
 
 
 async def _cleanup_via_sql(
-    cutoff_date: datetime, dry_run: bool, user_id: Optional[UUID] = None
-) -> Dict[str, Any]:
+    cutoff_date: datetime, dry_run: bool, user_id: UUID | None = None
+) -> dict[str, Any]:
     """
     SQL-based cleanup: Query Data table for unused documents and use cognee.delete().
 
@@ -157,8 +159,8 @@ async def _cleanup_via_sql(
             )
             deleted_count += 1
             logger.info(f"Deleted document {data.id} from dataset {data.dataset_id}")
-        except Exception as e:
-            logger.error(f"Failed to delete document {data.id}: {e}")
+        except Exception:
+            logger.exception(f"Failed to delete document {data.id}")
 
     logger.info("Cleanup completed", deleted_count=deleted_count)
 

@@ -1,5 +1,6 @@
-from cognee.exceptions import CogneeSystemError
 from fastapi import status
+
+from cognee.exceptions import CogneeSystemError
 
 
 class PipelineRunFailedError(CogneeSystemError):
@@ -31,10 +32,10 @@ class CognifyFailedError(CogneeSystemError):
 
     def __init__(
         self,
-        dataset_name: str = None,
-        error_class: str = None,
-        error_message: str = None,
-        hint: str = None,
+        dataset_name: str | None = None,
+        error_class: str | None = None,
+        error_message: str | None = None,
+        hint: str | None = None,
     ):
         self.dataset_name = dataset_name
         self.error_class = error_class
@@ -51,3 +52,23 @@ class CognifyFailedError(CogneeSystemError):
         )
         message = f"Cognify failed{dataset_desc}: {cause_desc} | {hint}"
         super().__init__(message, "CognifyFailedError", status.HTTP_422_UNPROCESSABLE_CONTENT)
+
+
+class AbandonedPipelineRunError(CogneeSystemError):
+    """The process running a pipeline stopped before writing a terminal status.
+
+    Written by startup recovery as the error of the ERRORED row it closes such a
+    run with, after rolling the run's graph work back. ``error_class`` on that
+    row is how readers tell an abandoned run from one that failed on its own.
+    """
+
+    def __init__(
+        self,
+        message: str = (
+            "Pipeline run was abandoned: its process stopped before the run finished. "
+            "Startup recovery rolled the run back; re-run the pipeline."
+        ),
+        name: str = "AbandonedPipelineRunError",
+        status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
+    ):
+        super().__init__(message, name, status_code)

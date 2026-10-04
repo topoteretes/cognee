@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Literal, Optional
+from typing import Literal
 
 import pytest
 from pydantic import BaseModel, ValidationError
@@ -24,7 +24,7 @@ class Recipe(BaseModel):
     vegetarian: bool
     difficulty: Difficulty
     ingredients: list[Ingredient]
-    notes: Optional[str] = None
+    notes: str | None = None
     kind: Literal["starter", "main", "dessert"] = "main"
 
 

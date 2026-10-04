@@ -1,4 +1,14 @@
-# ruff: noqa: E402
+"""Walk the full ACL surface: per-user datasets, direct grants, then tenants and roles.
+
+user_1 (AI dataset from a bundled PDF) and user_2 (QUANTUM text) each own a dataset. Cross-user
+recall and remember raise PermissionDeniedError until user_2 grants read access. user_2 then
+creates the CogneeLab tenant and a Researcher role, adds user_3, re-creates the dataset inside the
+tenant and grants the role read access so user_3 can recall from it.
+
+Requires: LLM_API_KEY and ENABLE_BACKEND_ACCESS_CONTROL=True.
+Run: uv run python examples/demos/permissions/user_permissions_and_access_control_example.py
+"""
+
 import os
 import pathlib
 from uuid import UUID

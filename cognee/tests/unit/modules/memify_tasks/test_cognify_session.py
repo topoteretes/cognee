@@ -1,10 +1,17 @@
 import sys
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
+import pytest
+
+from cognee.exceptions import CogneeSystemError, CogneeValidationError
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.infrastructure.session.session_persist_watermark import SessionPersistWindow
+from cognee.modules.pipelines.models.PipelineRunInfo import (
+    PipelineRunCompleted,
+    PipelineRunErrored,
+)
 from cognee.tasks.memify.cognify_session import cognify_session
-from cognee.exceptions import CogneeValidationError, CogneeSystemError
 
 # Get the actual module object (not the function) for patching
 cognify_session_module = sys.modules["cognee.tasks.memify.cognify_session"]
@@ -176,6 +183,125 @@ async def test_cognify_session_errored_run_info_skips_watermark_and_continues():
         assert mock_cognify.call_count == 2
         # Only the second (successful) window advanced its watermark.
         mock_sm.update_session_context_entry.assert_called_once()
+
+
+BUDGET_SENTENCE = "Budget has been exceeded! Current cost: 20.0, Max budget: 20.0"
+
+
+def _errored_run(error_class: str, error_message: str) -> PipelineRunErrored:
+    return PipelineRunErrored(
+        pipeline_run_id=uuid4(),
+        dataset_id=uuid4(),
+        dataset_name="ds",
+        error_class=error_class,
+        error_message=error_message,
+    )
+
+
+def _completed_run() -> PipelineRunCompleted:
+    return PipelineRunCompleted(pipeline_run_id=uuid4(), dataset_id=uuid4(), dataset_name="ds")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error_class,error_message",
+    [
+        (
+            "LLMPaymentRequiredError",
+            (
+                "LLMPaymentRequiredError: LLM provider requires payment or token budget is "
+                "exhausted. (Status code: 402)"
+            ),
+        ),
+        ("RateLimitError", f"litellm.RateLimitError: {BUDGET_SENTENCE}"),
+    ],
+    ids=["converted_error", "provider_sentence"],
+)
+async def test_cognify_session_budget_errored_run_stops_at_that_window(error_class, error_message):
+    """An errored build is normally one window's problem and the loop goes on.
+    An exhausted budget is every remaining window's problem: the loop stops and
+    the error leaves as LLMPaymentRequiredError, never wrapped."""
+    windows = [
+        _window("Question: q1?\n\nAnswer: a1\n\n", persisted_qa_count=1),
+        _window("Question: q2?\n\nAnswer: a2\n\n", persisted_qa_count=2),
+        _window("Question: q3?\n\nAnswer: a3\n\n", persisted_qa_count=3),
+    ]
+    mock_sm = _mock_session_manager()
+
+    with (
+        patch("cognee.add", new_callable=AsyncMock) as mock_add,
+        patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify,
+        patch.object(cognify_session_module, "get_session_manager", return_value=mock_sm),
+    ):
+        mock_cognify.side_effect = [
+            {"ds": _completed_run()},
+            {"ds": _errored_run(error_class, error_message)},
+            {"ds": _completed_run()},
+        ]
+
+        with pytest.raises(LLMPaymentRequiredError) as exc_info:
+            await cognify_session(windows, dataset_id="123")
+
+    assert not isinstance(exc_info.value, CogneeSystemError)
+    assert exc_info.value.status_code == 402
+    assert "Failed to cognify session data" not in str(exc_info.value)
+    # The third window was never added or built.
+    assert mock_add.call_count == 2
+    assert mock_cognify.call_count == 2
+    # Only the window persisted before the failure advanced its watermark.
+    mock_sm.update_session_context_entry.assert_called_once()
+    written = mock_sm.update_session_context_entry.call_args.kwargs["merge"]
+    assert written["persisted_qa_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_cognify_session_budget_error_raised_by_cognify_is_not_wrapped():
+    """cognify(raise_on_error=False) re-raises a run-level error as it is. A
+    budget error has to stay the same typed object on its way out, or the
+    caller sees a CogneeSystemError with no way to tell what it was."""
+    budget_error = LLMPaymentRequiredError(f"LLM budget exhausted: {BUDGET_SENTENCE}")
+    windows = [
+        _window("Question: q1?\n\nAnswer: a1\n\n", persisted_qa_count=1),
+        _window("Question: q2?\n\nAnswer: a2\n\n", persisted_qa_count=2),
+    ]
+    mock_sm = _mock_session_manager()
+
+    with (
+        patch("cognee.add", new_callable=AsyncMock),
+        patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify,
+        patch.object(cognify_session_module, "get_session_manager", return_value=mock_sm),
+    ):
+        mock_cognify.side_effect = budget_error
+
+        with pytest.raises(LLMPaymentRequiredError) as exc_info:
+            await cognify_session(windows, dataset_id="123")
+
+    assert exc_info.value is budget_error
+    assert mock_cognify.call_count == 1
+    mock_sm.update_session_context_entry.assert_not_called()
+    mock_sm.create_session_context_entry.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cognify_session_provider_budget_error_leaves_as_payment_required():
+    """A budget rejection that reached this task unconverted — the provider's
+    own error — is converted here, with the original kept as its cause."""
+    provider_error = Exception(f"litellm.RateLimitError: RateLimitError: {BUDGET_SENTENCE}")
+    mock_sm = _mock_session_manager()
+
+    with (
+        patch("cognee.add", new_callable=AsyncMock),
+        patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify,
+        patch.object(cognify_session_module, "get_session_manager", return_value=mock_sm),
+    ):
+        mock_cognify.side_effect = provider_error
+
+        with pytest.raises(LLMPaymentRequiredError) as exc_info:
+            await cognify_session(_window("Question: test?"), dataset_id="123")
+
+    assert exc_info.value.__cause__ is provider_error
+    assert BUDGET_SENTENCE in exc_info.value.message
+    mock_sm.update_session_context_entry.assert_not_called()
 
 
 @pytest.mark.asyncio

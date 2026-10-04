@@ -20,12 +20,14 @@ scenarios are independent — with mocked LLM and embeddings.
 
 import asyncio
 import hashlib
+import itertools
 import re
 import shutil
 import tempfile
 from pathlib import Path
 
 import pytest
+
 from cognee.tests.e2e.incremental_update.backend_env import (
     incremental_test_backend_env,
     reset_backend_state,
@@ -41,7 +43,7 @@ def _nouns(text: str) -> list:
 
 def _pairs(text: str) -> set:
     names = _nouns(text)
-    return {(a, b) for a, b in zip(names, names[1:]) if a != b}
+    return {(a, b) for a, b in itertools.pairwise(names) if a != b}
 
 
 @pytest.fixture(scope="module")
@@ -62,7 +64,7 @@ def ownership_env():
 
     root = Path(tempfile.mkdtemp(prefix="cognee_ownership_test_"))
 
-    import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
+    import cognee  # (cognee's import runs load_dotenv(override=True))
 
     os.environ.update(
         **incremental_test_backend_env(),

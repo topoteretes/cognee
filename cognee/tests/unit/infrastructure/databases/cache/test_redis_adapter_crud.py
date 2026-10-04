@@ -1,9 +1,10 @@
 """Unit tests for RedisAdapter CRUD operations."""
 
-from datetime import datetime
-from uuid import uuid4
-import pytest
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
+
+import pytest
 
 from cognee.infrastructure.databases.exceptions import (
     CacheConnectionError,
@@ -388,7 +389,7 @@ async def test_append_agent_trace_step_sanitizes_non_json_safe_values(adapter):
         status="success",
         method_params={
             "trip_id": uuid4(),
-            "created_at": datetime(2026, 4, 14, 12, 0, 0),
+            "created_at": datetime(2026, 4, 14, 12, 0, 0, tzinfo=timezone.utc),
             "obj": _Obj(),
         },
         method_return_value={"result_id": uuid4(), "owner": _Obj()},

@@ -24,6 +24,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+
 from cognee.tests.e2e.incremental_update.backend_env import (
     incremental_test_backend_env,
     reset_backend_state,
@@ -36,7 +37,7 @@ MARKER = re.compile(r"ENT[A-Z0-9]+")
 def ownership_env():
     root = Path(tempfile.mkdtemp(prefix="cognee_chunk_ownership_test_"))
 
-    import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
+    import cognee  # (cognee's import runs load_dotenv(override=True))
 
     os.environ.update(
         **incremental_test_backend_env(),
@@ -158,9 +159,10 @@ async def _scenario():
     )
 
     # ── 3. deleting one chunk's ref keeps shared output ──────────────────── #
+    from uuid import UUID
+
     from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
     from cognee.infrastructure.databases.unified import get_unified_engine
-    from uuid import UUID
 
     unified = await get_unified_engine()
     victim_chunk = chunk_ids[0]

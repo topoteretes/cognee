@@ -1,10 +1,11 @@
-import pytest
 from unittest.mock import AsyncMock
 
-from cognee.modules.graph.models.EdgeType import EdgeType
-from cognee.modules.graph.exceptions import EntityNotFoundError
+import pytest
+
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
+from cognee.modules.graph.exceptions import EntityNotFoundError
+from cognee.modules.graph.models.EdgeType import EdgeType
 
 
 @pytest.fixture

@@ -1,17 +1,16 @@
-from cognee.shared.logging_utils import get_logger, ERROR
 import json
-from typing import List, Optional
 
-from cognee.infrastructure.files.storage import get_file_storage
 from cognee.eval_framework.corpus_builder.corpus_builder_executor import CorpusBuilderExecutor
+from cognee.eval_framework.corpus_builder.task_getters.TaskGetters import TaskGetters
+from cognee.infrastructure.databases.relational.get_relational_engine import (
+    get_relational_config,
+    get_relational_engine,
+)
+from cognee.infrastructure.files.storage import get_file_storage
+from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.models.questions_base import QuestionsBase
 from cognee.modules.data.models.questions_data import Questions
-from cognee.infrastructure.databases.relational.get_relational_engine import (
-    get_relational_engine,
-    get_relational_config,
-)
-from cognee.modules.chunking.TextChunker import TextChunker
-from cognee.eval_framework.corpus_builder.task_getters.TaskGetters import TaskGetters
+from cognee.shared.logging_utils import ERROR, get_logger
 
 logger = get_logger(level=ERROR)
 
@@ -38,7 +37,7 @@ async def run_corpus_builder(
     chunk_size=1024,
     chunker=TextChunker,
     instance_filter=None,
-) -> List[dict]:
+) -> list[dict]:
     if params.get("building_corpus_from_scratch"):
         logger.info("Corpus Builder started...")
 

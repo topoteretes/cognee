@@ -2,14 +2,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.infrastructure.databases.provenance import EdgeIdentity
+from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.modules.engine.models import Entity
 from cognee.modules.graph.utils.expand_with_nodes_and_edges import (
     attach_new_edges_to_data_points,
     construct_data_points_and_edges,
 )
-from cognee.shared.data_models import KnowledgeGraph, Node, Edge as KGEdge
+from cognee.shared.data_models import Edge as KGEdge
+from cognee.shared.data_models import KnowledgeGraph, Node
 
 
 def _make_chunk(importance_weight=0.5):
@@ -355,3 +356,17 @@ def test_entity_name_does_not_replace_entity_with_same_extracted_id():
         ("ref", "alpha")
     ]
     assert [entity.name for _, entity in chunk.contains] == ["beta", "alpha"]
+
+
+@pytest.mark.parametrize("empty_type", ["", "   ", "'"])
+def test_a_type_with_no_name_creates_no_entity_type(empty_type):
+    """SDK-794: an EntityType named "" would show as a type with no label."""
+    from cognee.modules.engine.models import EntityType
+
+    chunk = _make_chunk()
+    graph = _make_graph([Node(id="n1", name="Alice", type=empty_type, description="d")], [])
+    data_points = _construct_test_data_points([chunk], [graph])
+
+    assert not [dp for dp in data_points if isinstance(dp, EntityType)]
+    alice = next(dp for dp in data_points if isinstance(dp, Entity))
+    assert alice.is_a is None

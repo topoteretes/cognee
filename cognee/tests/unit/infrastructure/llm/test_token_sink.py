@@ -19,9 +19,9 @@ import pytest
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.streaming.token_sink import (
     TokenSink,
+    answer_scope,
     get_active_token_sink,
     requested_token_sink,
-    answer_scope,
 )
 
 
@@ -334,11 +334,10 @@ async def test_a_failure_is_reported_without_leaking_provider_detail():
     """
     sink = TokenSink()
     secret = "ContentPolicyViolation: <entire graph context and api_base>"
-    with _flag(True), _requested(sink):
-        with pytest.raises(RuntimeError):
-            async with answer_scope():
-                sink.put_delta("half")
-                raise RuntimeError(secret)
+    with _flag(True), _requested(sink), pytest.raises(RuntimeError):
+        async with answer_scope():
+            sink.put_delta("half")
+            raise RuntimeError(secret)
 
     events = await _drain(sink)
     assert [e.type for e in events] == ["delta", "error"]
@@ -352,11 +351,10 @@ async def test_cancellation_is_not_reported_as_a_failure():
     it defeats detach(), whose whole purpose is that a vanished consumer does
     not become a visible failure."""
     sink = TokenSink()
-    with _flag(True), _requested(sink):
-        with pytest.raises(asyncio.CancelledError):
-            async with answer_scope():
-                sink.put_delta("half")
-                raise asyncio.CancelledError()
+    with _flag(True), _requested(sink), pytest.raises(asyncio.CancelledError):
+        async with answer_scope():
+            sink.put_delta("half")
+            raise asyncio.CancelledError()
 
     sink.close()
     assert [e.type for e in await _drain(sink)] == ["delta"]
@@ -466,11 +464,10 @@ async def test_a_failure_carries_the_status_the_json_path_would_have_used():
             self.status_code = 402
 
     sink = TokenSink()
-    with _flag(True), _requested(sink):
-        with pytest.raises(Boom):
-            async with answer_scope(stage="generating"):
-                sink.put_delta("partial")
-                raise Boom()
+    with _flag(True), _requested(sink), pytest.raises(Boom):
+        async with answer_scope(stage="generating"):
+            sink.put_delta("partial")
+            raise Boom()
 
     errors = [e for e in await _drain(sink) if e.type == "error"]
     assert len(errors) == 1
@@ -484,11 +481,10 @@ async def test_a_failure_without_a_status_still_reports_the_error():
     """Not every exception carries one; the frame degrades to no status rather
     than inventing one."""
     sink = TokenSink()
-    with _flag(True), _requested(sink):
-        with pytest.raises(RuntimeError):
-            async with answer_scope(stage="generating"):
-                sink.put_delta("partial")
-                raise RuntimeError("boom")
+    with _flag(True), _requested(sink), pytest.raises(RuntimeError):
+        async with answer_scope(stage="generating"):
+            sink.put_delta("partial")
+            raise RuntimeError("boom")
 
     errors = [e for e in await _drain(sink) if e.type == "error"]
     assert len(errors) == 1 and errors[0].status is None

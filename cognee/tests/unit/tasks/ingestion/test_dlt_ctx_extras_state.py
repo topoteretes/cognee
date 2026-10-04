@@ -126,8 +126,8 @@ async def test_dlt_rows_index_into_their_own_collection(monkeypatch):
     DltRow_text for row-aware retrieval. The pipeline rebuilds
     data-point classes (copy_model keeps only the class NAME and fields),
     so the collection name must survive that rebuild too."""
-    from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
     from cognee.modules.chunking.models.DltRow import DltRow
+    from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
     from cognee.modules.data.processing.document_types import DltSourceDocument
     from cognee.modules.storage.utils import copy_model
     from cognee.tasks.storage.index_data_points import index_data_points as run_indexing

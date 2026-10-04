@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import sys
+from pathlib import Path
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
@@ -47,17 +48,17 @@ def _search_response(result=None):
 
 
 def _args(**overrides):
-    base = dict(
-        query_text="",
-        query_type="CODE",
-        datasets=["shop"],
-        top_k=10,
-        system_prompt=None,
-        output_format="pretty",
-        code_query=None,
-        diagram=None,
-        diagram_out=None,
-    )
+    base = {
+        "query_text": "",
+        "query_type": "CODE",
+        "datasets": ["shop"],
+        "top_k": 10,
+        "system_prompt": None,
+        "output_format": "pretty",
+        "code_query": None,
+        "diagram": None,
+        "diagram_out": None,
+    }
     base.update(overrides)
     return argparse.Namespace(**base)
 
@@ -153,10 +154,10 @@ def test_print_code_results_shows_payload_and_fenced_diagram(capsys):
 
 def test_write_diagram_raw_and_html(tmp_path):
     raw_path = write_diagram(_search_response(), str(tmp_path / "out" / "arch.mmd"))
-    assert open(raw_path, encoding="utf-8").read() == MERMAID
+    assert Path(raw_path).read_text(encoding="utf-8") == MERMAID
 
     html_path = write_diagram(_search_response(), str(tmp_path / "arch.html"))
-    page = open(html_path, encoding="utf-8").read()
+    page = Path(html_path).read_text(encoding="utf-8")
     assert page.startswith("<!doctype html>")
     assert "<title>architecture: shop</title>" in page
     assert 'class="mermaid"' in page
@@ -179,7 +180,7 @@ def test_write_diagram_renders_dot_with_graphviz(tmp_path, monkeypatch):
     dot_response = _search_response(_code_result("dot", DOT))
 
     raw = write_diagram(dot_response, str(tmp_path / "arch.dot"))
-    assert open(raw, encoding="utf-8").read() == DOT
+    assert Path(raw).read_text(encoding="utf-8") == DOT
 
     with pytest.raises(CliCommandInnerException, match="DOT format"):
         write_diagram(_search_response(), str(tmp_path / "arch.svg"))
@@ -192,7 +193,7 @@ def test_write_diagram_renders_dot_with_graphviz(tmp_path, monkeypatch):
     if shutil.which("dot") is None:
         pytest.skip("Graphviz dot is not installed")
     svg = write_diagram(dot_response, str(tmp_path / "arch.svg"))
-    assert open(svg, encoding="utf-8").read().lstrip().startswith("<?xml")
+    assert Path(svg).read_text(encoding="utf-8").lstrip().startswith("<?xml")
 
 
 # --- commands ------------------------------------------------------------------------

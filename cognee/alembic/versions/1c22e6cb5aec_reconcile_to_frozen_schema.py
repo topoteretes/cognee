@@ -38,7 +38,7 @@ nullable compromise. On SQLite, ``ADD COLUMN`` rejects non-constant defaults
 table only when such a default is involved.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op
 
@@ -46,9 +46,9 @@ from cognee.alembic.frozen_schema import frozen_metadata, reconcile
 
 # revision identifiers, used by Alembic.
 revision: str = "1c22e6cb5aec"
-down_revision: Union[str, None] = "f3a7b9c1d2e4"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "f3a7b9c1d2e4"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

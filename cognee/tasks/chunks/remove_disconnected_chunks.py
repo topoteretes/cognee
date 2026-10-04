@@ -13,7 +13,7 @@ async def remove_disconnected_chunks(data_chunks: list[DocumentChunk]) -> list[D
     """
     graph_engine = await get_graph_engine()
 
-    document_ids = set((data_chunk.document_id for data_chunk in data_chunks))
+    document_ids = {data_chunk.document_id for data_chunk in data_chunks}
 
     obsolete_chunk_ids = []
 

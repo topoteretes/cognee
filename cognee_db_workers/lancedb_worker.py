@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from .harness import (
     DEFAULT_DISPATCH,
     HandleRegistry,
@@ -19,9 +21,9 @@ from .lancedb_protocol import (
     OP_TABLE_ADD,
     OP_TABLE_COUNT_ROWS,
     OP_TABLE_DELETE,
-    OP_TABLE_OPTIMIZE,
     OP_TABLE_MERGE_INSERT_EXECUTE,
     OP_TABLE_NAMES,
+    OP_TABLE_OPTIMIZE,
     OP_TABLE_QUERY_EXECUTE,
     OP_TABLE_RELEASE,
     OP_TABLE_SCHEMA,
@@ -29,6 +31,7 @@ from .lancedb_protocol import (
     OP_TABLE_VECTOR_SEARCH_EXECUTE,
 )
 
+logger = logging.getLogger(__name__)
 
 # The connection is stored at a fixed handle id (0) since there is exactly one
 # per worker.
@@ -47,7 +50,6 @@ async def _op_connect(registry: HandleRegistry, req: Request) -> None:
 
     connection = await lancedb.connect_async(url, api_key=api_key)
     registry.register_at(_CONNECTION_HANDLE, connection)  # fixed singleton slot
-    return None
 
 
 async def _op_table_names(registry: HandleRegistry, req: Request):
@@ -92,7 +94,7 @@ def _relax_nullability(schema):
 
 
 async def _op_create_table(registry: HandleRegistry, req: Request):
-    import pyarrow as pa  # noqa: F401  # ensure pyarrow is resolved in-worker
+    import pyarrow as pa  # ensure pyarrow is resolved in-worker
 
     conn = _get_connection(registry)
     name = req.args[0]
@@ -105,7 +107,6 @@ async def _op_create_table(registry: HandleRegistry, req: Request):
     schema = pa.ipc.read_schema(pa.py_buffer(schema_bytes))
     schema = _relax_nullability(schema)
     await conn.create_table(name=name, schema=schema, exist_ok=exist_ok)
-    return None
 
 
 async def _op_open_table(registry: HandleRegistry, req: Request) -> HandleResult:
@@ -119,14 +120,12 @@ async def _op_drop_table(registry: HandleRegistry, req: Request):
     conn = _get_connection(registry)
     name = req.args[0]
     await conn.drop_table(name)
-    return None
 
 
 def _op_release_handle(registry: HandleRegistry, req: Request):
     """Drop a handle from the registry. Idempotent."""
     if req.handle_id is not None:
         registry.pop(req.handle_id)
-    return None
 
 
 async def _op_table_count_rows(registry: HandleRegistry, req: Request):
@@ -158,20 +157,17 @@ async def _op_table_add(registry: HandleRegistry, req: Request):
     table = registry.get(req.handle_id)
     records = req.args[0]
     await table.add(records)
-    return None
 
 
 async def _op_table_delete(registry: HandleRegistry, req: Request):
     table = registry.get(req.handle_id)
     where_expr = req.args[0]
     await table.delete(where_expr)
-    return None
 
 
 async def _op_table_optimize(registry: HandleRegistry, req: Request):
     table = registry.get(req.handle_id)
     await table.optimize()
-    return None
 
 
 def _apply_chain(builder, chain_steps):
@@ -227,6 +223,7 @@ async def _op_merge_insert_execute(registry: HandleRegistry, req: Request):
             "num_deleted_rows": getattr(result, "num_deleted_rows", None),
         }
     except Exception:
+        logger.debug("Falling back to None after error in _op_merge_insert_execute", exc_info=True)
         return None
 
 
