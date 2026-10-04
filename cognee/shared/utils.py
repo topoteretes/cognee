@@ -537,10 +537,19 @@ def send_telemetry(
     env = os.getenv("ENV")
     if env in ["test", "dev"]:
         return
+    try:
+        _send_telemetry(event_name, user if user is not None else user_id, additional_properties)
+    except Exception:
+        # Telemetry is best-effort and is often emitted from an except block: an
+        # error here must never surface, let alone replace the caller's exception.
+        logger.debug("Telemetry event %s dropped", event_name, exc_info=True)
+
+
+def _send_telemetry(event_name: str, user, additional_properties: dict) -> None:
     additional_properties = _sanitize_nested_properties(
         obj=additional_properties, property_names=TELEMETRY_SANITIZED_PROPERTIES
     )
-    resolved_user_id, tenant_id = _resolve_identity(user if user is not None else user_id)
+    resolved_user_id, tenant_id = _resolve_identity(user)
     anonymous_id = str(get_anonymous_id())
     persistent_id = str(get_persistent_id())
     api_key_tracking_id = _get_api_key_tracking_id()

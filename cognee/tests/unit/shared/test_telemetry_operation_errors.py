@@ -139,3 +139,16 @@ async def test_payload_carries_the_process_origin(monkeypatch):
     assert payload["event_name"] == "cognee.recall"
     assert payload["properties"]["telemetry_origin"] == "mcp"
     assert payload["properties"]["top_k"] == 3
+
+
+def test_a_failure_inside_the_sender_never_reaches_the_caller(monkeypatch):
+    """Emitters run from except blocks; a telemetry error must not replace the real one."""
+    monkeypatch.delenv("TELEMETRY_DISABLED", raising=False)
+    monkeypatch.setenv("ENV", "local")
+
+    def explode(*_, **__):
+        raise OSError("read-only home directory")
+
+    monkeypatch.setattr(utils, "get_persistent_id", explode)
+
+    utils.send_telemetry("cognee.recall ERRORED", "sdk", additional_properties={})
