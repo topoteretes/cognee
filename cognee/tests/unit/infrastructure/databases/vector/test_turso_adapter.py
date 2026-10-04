@@ -159,6 +159,27 @@ async def test_nodeset_and_filtering(adapter):
 
 
 @pytest.mark.asyncio
+async def test_nodeset_filtering_matches_escaped_names(adapter):
+    # Payloads are stored with json.dumps, so these names are JSON escapes in the
+    # stored text; the filter must still match them, in both modes.
+    names = ["Bücher", 'say "hi"', r"C:\docs", "session:u1:café"]
+    await adapter.create_data_points("DocumentChunk_text", [_Doc(text="t", belongs_to_set=names)])
+
+    async def hits(node_name, operator):
+        return await adapter.search(
+            "DocumentChunk_text",
+            query_text="t",
+            limit=None,
+            node_name=node_name,
+            node_name_filter_operator=operator,
+        )
+
+    for name in names:
+        assert len(await hits([name], "OR")) == 1, name
+    assert len(await hits(names, "AND")) == 1
+
+
+@pytest.mark.asyncio
 async def test_retrieve_by_ids(adapter):
     docs = _docs()
     await adapter.create_data_points("DocumentChunk_text", docs)
@@ -209,6 +230,20 @@ async def test_remove_tags_preserves_untagged_rows(adapter):
     assert await adapter.retrieve("DocumentChunk_text", [tagged.id]) == []
     # untagged row never had Quantum -> must survive
     assert len(await adapter.retrieve("DocumentChunk_text", [untagged.id])) == 1
+
+
+@pytest.mark.asyncio
+async def test_remove_tags_keeps_escaped_tags_intact(adapter):
+    # Payloads are stored with json.dumps, so non-ASCII, quotes and backslashes
+    # are JSON escapes in the stored text; the surviving tags must come back decoded.
+    doc = _Doc(text="tagged", belongs_to_set=["Bücher", 'say "hi"', r"C:\docs", "drop"])
+    await adapter.create_data_points("DocumentChunk_text", [doc])
+
+    await adapter.remove_belongs_to_set_tags(["drop"])
+    await adapter.remove_belongs_to_set_tags(["Bücher"])
+
+    row = (await adapter.retrieve("DocumentChunk_text", [doc.id]))[0]
+    assert row.payload["belongs_to_set"] == ['say "hi"', r"C:\docs"]
 
 
 @pytest.mark.asyncio

@@ -222,15 +222,6 @@ class TursoVectorAdapter(VectorDBInterface):
                 self._rollback(connection)
                 raise
 
-    def _run_write(self, statements: list[tuple[str, tuple]]) -> None:
-        """Execute ``statements`` inside one committed transaction (sync, locked)."""
-
-        def work(connection):
-            for sql, params in statements:
-                connection.execute(sql, params)
-
-        self._transaction(work)
-
     async def _execute(
         self,
         sql: str,
@@ -533,11 +524,15 @@ class TursoVectorAdapter(VectorDBInterface):
         where_clause = ""
         if node_name:
             placeholders = ",".join("?" for _ in node_name)
+            # The engine's json_each().value is the element's raw JSON text, with
+            # escapes for non-ASCII characters, quotes and backslashes, so names
+            # are compared on the decoded element that ``->>`` returns.
+            element = f'"{collection_name}".payload ->> je.fullkey'
             if node_name_filter_operator == "AND":
                 where_clause = (
-                    f" WHERE (SELECT count(DISTINCT je.value) FROM json_each("
+                    f" WHERE (SELECT count(DISTINCT {element}) FROM json_each("
                     f"\"{collection_name}\".payload, '$.belongs_to_set') je "
-                    f"WHERE je.value IN ({placeholders})) = ?"
+                    f"WHERE {element} IN ({placeholders})) = ?"
                 )
                 params.extend(node_name)
                 params.append(len(set(node_name)))
@@ -545,7 +540,7 @@ class TursoVectorAdapter(VectorDBInterface):
                 where_clause = (
                     f" WHERE EXISTS (SELECT 1 FROM json_each("
                     f"\"{collection_name}\".payload, '$.belongs_to_set') je "
-                    f"WHERE je.value IN ({placeholders}))"
+                    f"WHERE {element} IN ({placeholders}))"
                 )
                 params.extend(node_name)
 
@@ -641,7 +636,8 @@ class TursoVectorAdapter(VectorDBInterface):
             name for name in await self.get_table_names() if await self._is_collection(name)
         ]
 
-        tags_json = json.dumps(list(tags))
+        tag_set = set(tags)
+        tag_placeholders = ",".join("?" for _ in tags)
         node_ids_list = [str(node_id) for node_id in node_ids] if node_ids is not None else None
         failures: list[tuple[str, Exception]] = []
 
@@ -656,41 +652,32 @@ class TursoVectorAdapter(VectorDBInterface):
             # Only rows that actually contain one of the removed tags are rewritten
             # or deleted-when-empty; a row already stored with an empty
             # belongs_to_set (e.g. an untagged index row) is never collateral.
-            # Mirrors PGVector. Both statements compute the new arrays in SQL from
-            # the row as it is now, so there is no read-modify-write to race: a
-            # concurrent change to the same row is never undone from a stale read.
+            # Mirrors PGVector.
             #
-            # The table is aliased (``AS t``): the engine resolves an outer
-            # json_each() over an unqualified or quoted-name payload column wrongly
-            # inside UPDATE/DELETE (see docs/turso-local.md, upstream finding 4).
-            has_removed_tag = (
-                "json_type(t.payload, '$.belongs_to_set') = 'array' "
-                "AND EXISTS (SELECT 1 FROM json_each(t.payload, '$.belongs_to_set') je "
-                "WHERE je.value IN (SELECT value FROM json_each(?)))"
+            # The engine's json_each().value is the element's raw JSON text, with
+            # escapes for non-ASCII characters, quotes and backslashes, so tags are
+            # compared on the decoded value that ``->>`` returns.
+            select_sql = (
+                f'SELECT t.id, t.payload FROM "{table_name}" AS t '
+                f"WHERE json_type(t.payload, '$.belongs_to_set') = 'array' "
+                f"AND EXISTS (SELECT 1 FROM json_each(t.payload, '$.belongs_to_set') je "
+                f"WHERE t.payload ->> je.fullkey IN ({tag_placeholders})){id_scope}"
             )
-            # Rows left with no tags at all are deleted...
-            delete_sql = (
-                f'DELETE FROM "{table_name}" AS t WHERE {has_removed_tag} '
-                f"AND NOT EXISTS (SELECT 1 FROM json_each(t.payload, '$.belongs_to_set') je "
-                f"WHERE je.value NOT IN (SELECT value FROM json_each(?))){id_scope}"
-            )
-            # ...the rest keep the tags that were not removed.
-            update_sql = (
-                f'UPDATE "{table_name}" AS t SET payload = json_set(t.payload, '
-                f"'$.belongs_to_set', (SELECT json_group_array(je.value) "
-                f"FROM json_each(t.payload, '$.belongs_to_set') je "
-                f"WHERE je.value NOT IN (SELECT value FROM json_each(?)))) "
-                f"WHERE {has_removed_tag}{id_scope}"
-            )
-            params = (tags_json, tags_json, *scope_params)
-            statements = [(delete_sql, params), (update_sql, params)]
+            params = (*tags, *scope_params)
+
+            # The read and the writes share one transaction: under WAL it holds the
+            # write lock from the read on, under MVCC a conflict re-runs all of it,
+            # so a concurrent change to the same row is never undone from a stale read.
+            def work(connection, select_sql=select_sql, params=params, table_name=table_name):
+                rows = connection.execute(select_sql, params).fetchall()
+                self._strip_tags(connection, table_name, rows, tag_set)
 
             # One table's failure must not stop the others, but it must not be
             # lost either: every failure is re-raised together once all tables
             # have been attempted, so a stale tag never survives silently.
             try:
                 await retry_on_conflict(
-                    lambda statements=statements: asyncio.to_thread(self._run_write, statements)
+                    lambda work=work: asyncio.to_thread(self._transaction, work)
                 )
             except Exception as error:
                 logger.warning(
@@ -706,6 +693,21 @@ class TursoVectorAdapter(VectorDBInterface):
             raise RuntimeError(
                 f"remove_belongs_to_set_tags failed for {len(failures)} collection(s): {summary}"
             ) from failures[0][1]
+
+    @staticmethod
+    def _strip_tags(connection, table_name: str, rows, tag_set: set[str]) -> None:
+        """Drop ``tag_set`` from each row's belongs_to_set; delete rows left with none."""
+        for row_id, payload_text in rows:
+            payload = json.loads(payload_text) if payload_text else {}
+            remaining = [tag for tag in payload.get("belongs_to_set", []) if tag not in tag_set]
+            if remaining:
+                payload["belongs_to_set"] = remaining
+                connection.execute(
+                    f'UPDATE "{table_name}" SET payload = ? WHERE id = ?',
+                    (json.dumps(payload), row_id),
+                )
+            else:
+                connection.execute(f'DELETE FROM "{table_name}" WHERE id = ?', (row_id,))
 
     async def prune(self):
         """Drop every collection table and reset cached reflection state."""
