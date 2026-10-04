@@ -55,7 +55,9 @@ from daytona import (  # type: ignore[import-untyped]
 )
 
 SNAPSHOT_NAME = os.environ.get("COGNEE_SNAPSHOT", "cognee-memory")
-SECRET_NAME = os.environ.get("COGNEE_SECRET", "cognee-openai")
+# Name of the Daytona Secret that holds the LLM key. Only this label is ever
+# printed or passed around; the key value itself never leaves Daytona's vault.
+LLM_VAULT_ENTRY = os.environ.get("COGNEE_SECRET", "cognee-openai")
 LLM_HOST = "api.openai.com"
 LLM_MODEL = os.environ.get("LLM_MODEL", "openai/gpt-5.6-luna")
 
@@ -89,20 +91,22 @@ PHASES = (
 
 def ensure_secret(daytona: Daytona) -> str:
     """Return the placeholder of the host-scoped LLM secret, creating it on first run."""
-    existing = [s for s in daytona.secret.list(name=SECRET_NAME).items if s.name == SECRET_NAME]
+    existing = [
+        s for s in daytona.secret.list(name=LLM_VAULT_ENTRY).items if s.name == LLM_VAULT_ENTRY
+    ]
     if existing:
         return existing[0].placeholder
 
     llm_api_key = os.environ.get("LLM_API_KEY")
     if not llm_api_key:
         raise SystemExit(
-            f"Secret '{SECRET_NAME}' does not exist yet and LLM_API_KEY is not set. "
+            f"Secret '{LLM_VAULT_ENTRY}' does not exist yet and LLM_API_KEY is not set. "
             "Export LLM_API_KEY once so the Secret can be created; later runs do not need it."
         )
-    print(f"=== creating Secret '{SECRET_NAME}' (scoped to {LLM_HOST}) ===")
+    print(f"=== creating Secret '{LLM_VAULT_ENTRY}' (scoped to {LLM_HOST}) ===")
     created = daytona.secret.create(
         CreateSecretParams(
-            name=SECRET_NAME,
+            name=LLM_VAULT_ENTRY,
             value=llm_api_key,
             hosts=[LLM_HOST],
             description="OpenAI key used by cognee for entity extraction and embeddings",
@@ -172,7 +176,7 @@ def create_supervisor(daytona: Daytona, payload: Path) -> Sandbox:
             snapshot=SNAPSHOT_NAME,
             name="cognee-supervisor",
             # Env var -> Secret name. The sandbox sees the placeholder only.
-            secrets={"LLM_API_KEY": SECRET_NAME},
+            secrets={"LLM_API_KEY": LLM_VAULT_ENTRY},
             domain_allow_list=DOMAIN_ALLOW_LIST,
             labels={"app": "cognee", "demo": "handover", "role": "supervisor"},
             auto_stop_interval=30,
@@ -191,7 +195,7 @@ def fork_into(parent: Sandbox, name: str, role: str) -> Sandbox:
     child = parent.fork(name=name, timeout=180)
     # Fork copies the disk; re-assert the security posture on the new sandbox
     # rather than assume it is inherited.
-    child.update_secrets({"LLM_API_KEY": SECRET_NAME})
+    child.update_secrets({"LLM_API_KEY": LLM_VAULT_ENTRY})
     child.update_network_settings(domain_allow_list=DOMAIN_ALLOW_LIST)
     child.set_labels({"app": "cognee", "demo": "handover", "role": role})
     return child
@@ -211,10 +215,16 @@ def run_phase(sandbox: Sandbox, phase: str) -> None:
 def show_boundaries(sandbox: Sandbox, placeholder: str) -> None:
     """Prove the two isolation properties the kit promises, from inside the sandbox."""
     print(f"\n=== security check inside {sandbox.name} ===")
-    seen = run_in(sandbox, "printf '%s' \"$LLM_API_KEY\"")
-    print(
-        f"    LLM_API_KEY inside sandbox is {'the placeholder' if seen == placeholder else seen!r}"
+    # Read the value without `run_in` (which echoes command output): if the
+    # Secret binding failed, `seen` would be the real key. Report the verdict
+    # and the length only, never the value.
+    seen = (sandbox.process.exec("printf '%s' \"$LLM_API_KEY\"", timeout=20).result or "").strip()
+    verdict = (
+        "the placeholder"
+        if seen == placeholder
+        else f"NOT the placeholder ({len(seen)} chars) - Secret binding failed!"
     )
+    print(f"    LLM_API_KEY inside sandbox is {verdict}")
     probe = sandbox.process.exec(
         "python3 -c \"import urllib.request;urllib.request.urlopen('https://example.com',timeout=5)\"",
         timeout=20,
