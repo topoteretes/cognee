@@ -235,6 +235,22 @@ async def test_native_metadata_projection_pages_aliases_and_revocation(monkeypat
         )
         assert [item["id"] for item in page2["items"]] == [str(UUID(int=(10 << 124) + 4))]
         assert page2["next_cursor"] is None
+        # A sparse source never scans the dataset unboundedly: with the scan cap at
+        # one row, pages come back short (even empty, for the non-matching row) but
+        # the cursor keeps advancing, and following it covers every document.
+        monkeypatch.setattr(catalog, "MAX_SCAN_ROWS", 1)
+        collected, cursor, pages = [], None, 0
+        while True:
+            page = await catalog.source_documents(None, source_id, after=cursor, limit=2)
+            assert len(page["items"]) <= 1
+            collected.extend(item["id"] for item in page["items"])
+            pages += 1
+            cursor = page["next_cursor"]
+            if cursor is None:
+                break
+        assert pages == 4
+        assert collected == [str(UUID(int=(10 << 124) + i)) for i in (1, 3, 4)]
+        monkeypatch.setattr(catalog, "MAX_SCAN_ROWS", 10_000)
         old = await catalog.source_document(None, one.id, UUID(int=(10 << 124) + 99))
         assert old["id"] == str(UUID(int=(10 << 124) + 1))
         with pytest.raises(PermissionError):

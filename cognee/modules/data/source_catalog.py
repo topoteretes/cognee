@@ -22,6 +22,12 @@ from cognee.modules.users.permissions.methods import get_all_user_permission_dat
 
 MAX_METADATA_ROWS = 50000
 ROUTING_BATCH = 64
+# Upper bound on the Data rows one document page may examine. The node_set
+# filter runs in Python (legacy rows keep it in external_metadata), so a sparse
+# source in a large dataset would otherwise scan the whole dataset for a single
+# page. When the cap is hit the page is returned short, with a cursor at the
+# last examined row, so the caller can keep paging without missing documents.
+MAX_SCAN_ROWS = 10_000
 
 
 class SourceDescriptor(TypedDict):
@@ -370,7 +376,13 @@ async def source_documents(user, source_id, after=None, limit=100):
             stmt = stmt.where(Data.id > UUID(str(after)))
         result = await db.stream_scalars(stmt.order_by(Data.id).execution_options(yield_per=500))
         items = []
+        scanned, last_scanned_id, scan_capped = 0, None, False
         async for row in result:
+            if scanned >= MAX_SCAN_ROWS:
+                scan_capped = True
+                break
+            scanned += 1
+            last_scanned_id = str(row.id)
             names = node_names(
                 row.node_set
                 if row.node_set is not None
@@ -391,9 +403,16 @@ async def source_documents(user, source_id, after=None, limit=100):
             )
             if len(items) > limit:
                 break
+    if len(items) > limit:
+        next_cursor = items[limit - 1]["id"]
+    elif scan_capped:
+        # Rows after the cap were not examined; resume from the last one that was.
+        next_cursor = last_scanned_id
+    else:
+        next_cursor = None
     return {
         "items": items[:limit],
-        "next_cursor": items[limit - 1]["id"] if len(items) > limit else None,
+        "next_cursor": next_cursor,
         "source": target,
         "coverage": "stored_documents",
         "snapshot_isolation": False,
