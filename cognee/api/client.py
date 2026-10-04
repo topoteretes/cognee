@@ -73,6 +73,7 @@ from cognee.modules.users.methods.get_authenticated_user import (
     REQUIRE_AUTHENTICATION,
 )
 from cognee.shared.logging_utils import get_logger, setup_logging
+from cognee.shared.utils import TELEMETRY_ORIGIN_API, set_default_telemetry_origin
 
 # Ensure application logging is configured for container stdout/stderr
 setup_logging()
@@ -185,6 +186,10 @@ async def lifespan(app: FastAPI):
 
     await close_telemetry_session()
 
+
+# Telemetry events from this process say they came from the API server (an
+# explicit TELEMETRY_ORIGIN in the environment, e.g. the managed cloud's, wins).
+set_default_telemetry_origin(TELEMETRY_ORIGIN_API)
 
 app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)
 

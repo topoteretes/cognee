@@ -32,7 +32,8 @@ class TelemetryAggregateExtractTest(unittest.TestCase):
         self.connection.execute("""
             CREATE TABLE analytics.main.pipeline_events (
                 ingestion_date DATE, tracking_event VARCHAR, cognee_version VARCHAR,
-                properties JSON, user_id VARCHAR, endpoint VARCHAR, search_type VARCHAR
+                properties JSON, user_id VARCHAR, endpoint VARCHAR, search_type VARCHAR,
+                event_timestamp TIMESTAMP, task_name VARCHAR
             )
         """)
         directory = tempfile.TemporaryDirectory()
@@ -48,11 +49,7 @@ class TelemetryAggregateExtractTest(unittest.TestCase):
         }
         for provider, value in providers.items():
             properties[provider]["provider"] = value
-        self.connection.execute(
-            """INSERT INTO analytics.main.pipeline_events VALUES
-               (current_date, 'Pipeline Run Completed', '0.5.0-local', ?, ?, NULL, NULL)""",
-            [json.dumps(properties), user],
-        )
+        self._insert_event("Pipeline Run Completed", "0.5.0-local", properties, user)
 
     def _provider_rows(self):
         return self._rows("provider_stack_daily")
@@ -62,11 +59,30 @@ class TelemetryAggregateExtractTest(unittest.TestCase):
         columns = [column[0] for column in result.description]
         return [dict(zip(columns, row)) for row in result.fetchall()]
 
-    def _insert_event(self, tracking_event, version, properties, user="deployment-a"):
+    def _insert_event(
+        self,
+        tracking_event,
+        version,
+        properties,
+        user="deployment-a",
+        endpoint=None,
+        event_timestamp=None,
+        task_name=None,
+    ):
         self.connection.execute(
-            """INSERT INTO analytics.main.pipeline_events VALUES
-               (current_date, ?, ?, ?, ?, NULL, NULL)""",
-            [tracking_event, version, json.dumps(properties), user],
+            """INSERT INTO analytics.main.pipeline_events
+               (ingestion_date, tracking_event, cognee_version, properties, user_id,
+                endpoint, event_timestamp, task_name)
+               VALUES (current_date, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                tracking_event,
+                version,
+                json.dumps(properties),
+                user,
+                endpoint,
+                event_timestamp,
+                task_name,
+            ],
         )
 
     def test_error_types_are_class_names_or_buckets(self):
@@ -234,6 +250,186 @@ class TelemetryAggregateExtractTest(unittest.TestCase):
         path.write_text("user_id\n1\n")
         with self.assertRaisesRegex(SystemExit, "denylisted column"):
             self.extract._guard(path)
+
+    # ---- SDK-775: the memory API, errors by class, durations, installs ----------
+
+    def test_recall_rows_carry_closed_values_only(self):
+        self._insert_event(
+            "cognee.recall",
+            "1.6.3",
+            {"search_type": "auto", "scope": "session,graph", "auto_route": True},
+        )
+        self._insert_event(
+            "cognee.recall",
+            "1.6.3",
+            {"search_type": "GRAPH_COMPLETION", "scope": "graph", "auto_route": False},
+            "b",
+        )
+        self._insert_event(
+            "cognee.recall",
+            "1.6.3",
+            {"search_type": "person@example.com", "scope": "graph; drop", "auto_route": "maybe"},
+            "c",
+        )
+        rows = {row["search_type"]: row for row in self._rows("recall_daily")}
+        self.assertEqual(set(rows), {"auto", "GRAPH_COMPLETION", "redacted"})
+        self.assertEqual(rows["auto"]["scope"], "session,graph")
+        self.assertEqual(rows["auto"]["auto_route"], "true")
+        self.assertEqual(rows["redacted"]["scope"], "redacted")
+        self.assertEqual(rows["redacted"]["auto_route"], "redacted")
+
+    def test_improve_rows_bucket_session_counts(self):
+        for count, user in ((0, "a"), (1, "b"), (4, "c"), (9, "d")):
+            self._insert_event(
+                "cognee.improve",
+                "1.6.3",
+                {"session_count": count, "run_in_background": False},
+                user,
+            )
+        self._insert_event("cognee.improve", "1.6.3", {}, "e")
+        buckets = {row["session_count_bucket"] for row in self._rows("improve_daily")}
+        self.assertEqual(buckets, {"0", "1", "2-5", "6+", "unknown"})
+
+    def test_sdk_error_types_cover_search_recall_and_cognify(self):
+        self._insert_event(
+            "cognee.search EXECUTION ERRORED", "1.6.3", {"exception_type": "PermissionDeniedError"}
+        )
+        self._insert_event(
+            "cognee.recall ERRORED", "1.6.3", {"exception_type": "CancelledError"}, "b"
+        )
+        self._insert_event("cognee.cognify EXECUTION ERRORED", "1.6.3", {}, "c")
+        self._insert_event("cognee.search EXECUTION COMPLETED", "1.6.3", {}, "d")
+        rows = {
+            (row["tracking_event"], row["exception_type"])
+            for row in self._rows("sdk_error_types_daily")
+        }
+        self.assertEqual(
+            rows,
+            {
+                ("cognee.search EXECUTION ERRORED", "PermissionDeniedError"),
+                ("cognee.recall ERRORED", "CancelledError"),
+                ("cognee.cognify EXECUTION ERRORED", "unknown"),
+            },
+        )
+
+    def test_api_exceptions_group_by_route_status_and_class(self):
+        for status, user in ((404, "a"), (404, "b"), (500, "c")):
+            self._insert_event(
+                "API Exception Raised",
+                "1.6.3",
+                {"status_code": status, "exception_type": "DatasetNotFoundError"},
+                user,
+                endpoint="GET /api/v1/datasets/{dataset_id}",
+            )
+        self._insert_event(
+            "API Exception Raised",
+            "1.6.3",
+            {"status_code": "12345", "exception_type": "x y"},
+            "d",
+            endpoint="POST /api/v1/recall",
+        )
+        rows = {
+            (row["endpoint"], row["status_code"], row["exception_type"]): row
+            for row in self._rows("api_exceptions_daily")
+        }
+        self.assertEqual(
+            rows[("GET /api/v1/datasets/{dataset_id}", "404", "DatasetNotFoundError")]["events"], 2
+        )
+        self.assertEqual(rows[("POST /api/v1/recall", "redacted", "redacted")]["events"], 1)
+
+    def test_gliner_install_rows_keep_platform_names_only(self):
+        props = {
+            "os": "Darwin",
+            "arch": "arm64",
+            "torch_index": "pytorch-cpu",
+            "python_version": "3.12.4",
+        }
+        self._insert_event("GLiNER Runtime Install Started", "1.6.3", props)
+        self._insert_event("GLiNER Runtime Install Completed", "1.6.3", props)
+        self._insert_event(
+            "GLiNER Runtime Install Failed",
+            "1.6.3",
+            {**props, "torch_index": "https://mirror.example.com/x"},
+            "b",
+        )
+        rows = {row["tracking_event"]: row for row in self._rows("gliner_install_daily")}
+        self.assertEqual(rows["GLiNER Runtime Install Started"]["os"], "Darwin")
+        self.assertEqual(rows["GLiNER Runtime Install Completed"]["python_version"], "3.12.4")
+        self.assertEqual(rows["GLiNER Runtime Install Failed"]["torch_index"], "redacted")
+
+    def test_run_durations_are_percentiles_per_run(self):
+        from datetime import datetime, timedelta, timezone
+
+        start = datetime(2026, 10, 4, 12, 0, 0, tzinfo=timezone.utc)
+        for run_id, seconds in (("r1", 10), ("r2", 30), ("r3", 110)):
+            self._insert_event(
+                "Pipeline Run Started", "1.6.3", {"pipeline_run_id": run_id}, event_timestamp=start
+            )
+            self._insert_event(
+                "Pipeline Run Started",
+                "1.6.3",
+                {"pipeline_run_id": run_id},
+                event_timestamp=start + timedelta(seconds=1),
+            )
+            terminal = "Pipeline Run Errored" if run_id == "r3" else "Pipeline Run Completed"
+            self._insert_event(
+                terminal,
+                "1.6.3",
+                {"pipeline_run_id": run_id},
+                event_timestamp=start + timedelta(seconds=seconds),
+            )
+        self._insert_event(
+            "Pipeline Run Started", "1.6.3", {"pipeline_run_id": "silent"}, event_timestamp=start
+        )
+        self._insert_event("Pipeline Run Started", "1.5.4", {}, event_timestamp=start)  # no run id
+        (row,) = self._rows("pipeline_run_durations_daily")
+        self.assertEqual(row["runs_timed"], 3)
+        self.assertEqual(row["p50_seconds"], 30.0)
+        self.assertEqual(row["max_seconds"], 110.0)
+
+    def test_task_errors_group_by_identifier_task_names(self):
+        self._insert_event(
+            "Coroutine Task Errored",
+            "1.6.3",
+            {"exception_type": "ValueError"},
+            task_name="extract_graph_from_data",
+        )
+        self._insert_event(
+            "Coroutine Task Errored",
+            "1.6.3",
+            {"exception_type": "ValueError"},
+            "b",
+            task_name="extract_graph_from_data",
+        )
+        self._insert_event(
+            "Async Generator Task Errored", "1.6.3", {}, "c", task_name="person@example.com"
+        )
+        self._insert_event(
+            "Coroutine Task Started", "1.6.3", {}, task_name="extract_graph_from_data"
+        )
+        rows = {
+            (row["task_name"], row["exception_type"]): row
+            for row in self._rows("task_error_types_daily")
+        }
+        self.assertEqual(rows[("extract_graph_from_data", "ValueError")]["errors"], 2)
+        self.assertEqual(rows[("redacted", "unknown")]["errors"], 1)
+
+    def test_path_like_models_are_redacted_and_rejected_by_the_guard(self):
+        for model in ("/Users/alice/models/x.gguf", "C:\\Users\\alice\\x.gguf", "/home/alice/m"):
+            with self.subTest(model=model):
+                self.connection.execute("DELETE FROM analytics.main.pipeline_events")
+                self._insert(model=model)
+                self.assertEqual(self._provider_rows()[0]["llm_model"], "redacted")
+                path = self.out_dir / "unsafe.csv"
+                with path.open("w", newline="") as handle:
+                    csv.writer(handle).writerows([["llm_model"], [model]])
+                with self.assertRaisesRegex(SystemExit, "PRIVACY GUARD"):
+                    self.extract._guard(path)
+        # route templates stay: lower-case segments are not account directories
+        path = self.out_dir / "routes.csv"
+        with path.open("w", newline="") as handle:
+            csv.writer(handle).writerows([["endpoint"], ["GET /api/v1/users/me"], ["POST /v1/add"]])
+        self.extract._guard(path)
 
 
 if __name__ == "__main__":

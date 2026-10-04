@@ -1041,6 +1041,16 @@ def _agent_scoped_default_dataset() -> str:
 async def main():
     global cognee_client
 
+    # Telemetry events from this process say they came from the MCP server (an
+    # explicit TELEMETRY_ORIGIN in the environment still wins). Guarded like the
+    # operations import below: cognee-mcp may run against an older cognee.
+    try:
+        from cognee.shared.utils import TELEMETRY_ORIGIN_MCP, set_default_telemetry_origin
+
+        set_default_telemetry_origin(TELEMETRY_ORIGIN_MCP)
+    except ImportError:
+        pass
+
     # Operations run in-process by this MCP server record origin="mcp" in
     # pipeline_runs. (In client mode the remote API records origin="api".)
     # Guarded because cognee-mcp depends on cognee from PyPI (see

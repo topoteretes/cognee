@@ -4,6 +4,7 @@ import asyncio
 import http.server
 import os
 import pathlib
+import re
 import socketserver
 import ssl
 from datetime import datetime, timezone
@@ -139,6 +140,44 @@ TELEMETRY_FINGERPRINT_PREFIX = "fp:"
 TELEMETRY_DATASET_NAME_PROPERTIES = ["dataset_name", "dataset"]
 
 
+# Where a telemetry event originates: the surface the process is. Each entrypoint
+# sets its own value as the process default (``set_default_telemetry_origin``);
+# an explicit TELEMETRY_ORIGIN in the environment (e.g. "cloud") always wins.
+TELEMETRY_ORIGIN_ENV = "TELEMETRY_ORIGIN"
+TELEMETRY_ORIGIN_SDK = "sdk"
+TELEMETRY_ORIGIN_API = "api"
+TELEMETRY_ORIGIN_CLI = "cli"
+TELEMETRY_ORIGIN_MCP = "mcp"
+# A model setting that is a filesystem path (a local GGUF, a mounted checkpoint)
+# carries the account name in it. It leaves the process as this closed value.
+TELEMETRY_LOCAL_PATH_LABEL = "local_path"
+_PATH_LIKE_MODEL = re.compile(
+    r"^(/|~[/\\]|\.{1,2}[/\\]|[A-Za-z]:[/\\]|\\\\)|[/\\](Users|home|root)[/\\]"
+)
+
+
+def set_default_telemetry_origin(origin: str) -> None:
+    """Record the surface this process is, unless the environment already says.
+
+    Called once by each entrypoint (CLI, MCP server, API app). ``send_telemetry``
+    reads TELEMETRY_ORIGIN per event, so deployments that set it themselves (the
+    managed cloud sets "cloud") keep their value; the SDK default is "sdk".
+    """
+    os.environ.setdefault(TELEMETRY_ORIGIN_ENV, origin)
+
+
+def telemetry_model_label(model: Any) -> Any:
+    """The model setting as telemetry may carry it: a path becomes ``local_path``.
+
+    Provider model names (``openai/gpt-5-mini``, ``ollama/phi4:latest``) pass
+    through. A filesystem path (``/Users/<name>/models/x.gguf``, ``C:\\models\\x``)
+    names the account and the machine layout, so only the closed label leaves.
+    """
+    if isinstance(model, str) and _PATH_LIKE_MODEL.search(model):
+        return TELEMETRY_LOCAL_PATH_LABEL
+    return model
+
+
 def telemetry_exception_type(error: BaseException) -> str:
     """The class name telemetry records for ``error`` — never its message.
 
@@ -150,6 +189,53 @@ def telemetry_exception_type(error: BaseException) -> str:
     """
     root = getattr(error, "first_error", None) or error
     return type(root).__name__
+
+
+def telemetry_on_error(event_name: str):
+    """Emit ``event_name`` with the error's class when the wrapped coroutine fails.
+
+    The terminal event the Started/Completed pair of an operation lacks: without
+    it a failed ``search`` or ``recall`` is a Started with no end, indistinguishable
+    in the warehouse from a run that is still going. Carries ``exception_type``
+    only (``telemetry_exception_type``), never the message. ``BaseException`` so a
+    cancelled call ends too, as ``run_tasks_with_telemetry`` does; the error is
+    always re-raised, telemetry never changes the outcome. The ``user`` argument
+    of the call, when there is one, is the event's identity.
+    """
+    import functools
+    import inspect
+
+    def decorate(func):
+        signature = inspect.signature(func)
+
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            try:
+                return await func(*args, **kwargs)
+            except BaseException as error:
+                try:
+                    user = signature.bind_partial(*args, **kwargs).arguments.get("user")
+                except TypeError:
+                    user = None
+                send_telemetry(
+                    event_name,
+                    user if user is not None else "sdk",
+                    additional_properties={
+                        "exception_type": telemetry_exception_type(error),
+                        "cognee_version": _cognee_version(),
+                    },
+                )
+                raise
+
+        return wrapper
+
+    return decorate
+
+
+def _cognee_version() -> str:
+    from cognee import __version__
+
+    return __version__
 
 
 def _fingerprint(value: str) -> str:
@@ -450,7 +536,7 @@ def send_telemetry(
     # Where this telemetry event originates. Defaults to "sdk"; deployments such
     # as the managed cloud set TELEMETRY_ORIGIN (e.g. "cloud") so events can be
     # segmented by origin.
-    telemetry_origin = os.getenv("TELEMETRY_ORIGIN", "sdk")
+    telemetry_origin = os.getenv(TELEMETRY_ORIGIN_ENV, TELEMETRY_ORIGIN_SDK)
     current_time = datetime.now(timezone.utc)
     payload = {
         "anonymous_id": anonymous_id,

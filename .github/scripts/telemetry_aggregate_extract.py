@@ -42,6 +42,9 @@ CELL_PATTERNS = (
     re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"),  # email
     re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"),  # uuid
     re.compile(r"\bak_[0-9a-f]{16,}\b"),  # key hash
+    # A filesystem path with an account directory or a drive letter: a model or
+    # provider setting pointing at a local file names the OS account.
+    re.compile(r"(^|[^A-Za-z0-9])(/[Uu]sers/|/home/|/root/|[A-Za-z]:\\)[^\s,;]*"),
 )
 _SQL_CELL_PATTERN = "|".join(pattern.pattern for pattern in CELL_PATTERNS).replace("'", "''")
 
@@ -63,6 +66,15 @@ def _provider_dimension(property_path: str, *, max_length: int | None = None) ->
 EVENT_ALLOWLIST = (
     "cognee.search EXECUTION STARTED",
     "cognee.search EXECUTION COMPLETED",
+    "cognee.search EXECUTION ERRORED",
+    "cognee.recall",
+    "cognee.recall ERRORED",
+    "cognee.improve",
+    "cognee.forget",
+    "cognee.export",
+    "cognee.push",
+    "cognee.remember.import",
+    "cognee.remember.code_graph",
     "cognee.add EXECUTION STARTED",
     "cognee.add EXECUTION COMPLETED",
     "cognee.cognify EXECUTION STARTED",
@@ -75,6 +87,13 @@ EVENT_ALLOWLIST = (
     "Cognify API Endpoint Invoked",
     "Remember API Endpoint Invoked",
     "Remember Entry API Endpoint Invoked",
+    "Recall API Endpoint Invoked",
+    "Improve API Endpoint Invoked",
+    "Forget API Endpoint Invoked",
+    "API Exception Raised",
+    "GLiNER Runtime Install Started",
+    "GLiNER Runtime Install Completed",
+    "GLiNER Runtime Install Failed",
     "Pipeline Run Started",
     "Pipeline Run Completed",
     "Pipeline Run Errored",
@@ -90,7 +109,8 @@ _IDENT = (
     "coalesce(nullif(json_extract_string(properties, '$.api_key_hash'), ''), "
     "nullif(json_extract_string(properties, '$.persistent_id'), ''), user_id)"
 )
-# Surface the event came from: 'sdk' (default), 'cloud', 'cli', ... Safe enum.
+# Surface the event came from: 'sdk' (the default), 'api', 'cli', 'mcp' (set by each
+# entrypoint since SDK-775), 'cloud' (set by the managed cloud). Safe enum.
 _ORIGIN = "coalesce(json_extract_string(properties, '$.telemetry_origin'), 'unknown')"
 # Normalized version: strip the -local suffix so builds compare cleanly.
 _VERSION = "coalesce(regexp_replace(cognee_version, '-local$', ''), 'unknown')"
@@ -102,6 +122,38 @@ _EXCEPTION_TYPE = (
     "CASE WHEN regexp_matches(json_extract_string(properties, '$.exception_type'), "
     "'^[A-Za-z_][A-Za-z0-9_]*$') THEN json_extract_string(properties, '$.exception_type') "
     "WHEN json_extract_string(properties, '$.exception_type') IS NULL THEN 'unknown' "
+    "ELSE 'redacted' END"
+)
+
+
+def _closed_value(property_path: str, pattern: str = "^[A-Za-z0-9_.,:-]{1,64}$") -> str:
+    """A property that should be one of a small set of values, or a bucket.
+
+    ``unknown`` when the event predates the field, ``redacted`` when the value
+    is outside ``pattern`` (a fork, a typo, free text), so an unexpected value
+    can neither stop the export nor carry an identifier.
+    """
+    value = f"json_extract_string(properties, '$.{property_path}')"
+    return (
+        f"CASE WHEN {value} IS NULL THEN 'unknown' "
+        f"WHEN regexp_matches({value}, '{pattern}') THEN {value} ELSE 'redacted' END"
+    )
+
+
+# Task names are cognee function names (``extract_graph_from_data``): identifiers.
+_TASK_NAME = (
+    "CASE WHEN task_name IS NULL THEN 'unknown' "
+    "WHEN regexp_matches(task_name, '^[A-Za-z_][A-Za-z0-9_]{0,80}$') THEN task_name "
+    "ELSE 'redacted' END"
+)
+# Session counts on improve() bucketed, so the CSV carries a size class, not a number
+# that could single out a deployment.
+_SESSION_BUCKET = (
+    "CASE WHEN json_extract_string(properties, '$.session_count') IS NULL THEN 'unknown' "
+    "WHEN try_cast(json_extract_string(properties, '$.session_count') AS INTEGER) = 0 THEN '0' "
+    "WHEN try_cast(json_extract_string(properties, '$.session_count') AS INTEGER) = 1 THEN '1' "
+    "WHEN try_cast(json_extract_string(properties, '$.session_count') AS INTEGER) <= 5 THEN '2-5' "
+    "WHEN try_cast(json_extract_string(properties, '$.session_count') AS INTEGER) > 5 THEN '6+' "
     "ELSE 'redacted' END"
 )
 
@@ -223,6 +275,113 @@ QUERIES: dict[str, str] = {
         WHERE {_BASE_FILTER} AND tracking_event = 'Search API Endpoint Invoked'
               AND search_type IS NOT NULL
         GROUP BY ALL ORDER BY day, events DESC
+    """,
+    # The memory API's read side (SDK-775): how recall is called, by day, version
+    # and surface. ``search_type`` is the SearchType name or ``auto``; ``scope`` the
+    # comma-joined source list (``graph``, ``session``, ``trace``, ``code``, ...).
+    "recall_daily": f"""
+        SELECT ingestion_date AS day, {_VERSION} AS version, {_ORIGIN} AS origin,
+               {_closed_value("search_type")} AS search_type,
+               {_closed_value("scope", "^[a-z_,]+$")} AS scope,
+               {_closed_value("auto_route", "^(true|false)$")} AS auto_route,
+               count(*) AS events,
+               count(DISTINCT {_IDENT}) AS distinct_identities
+        FROM analytics.main.pipeline_events
+        WHERE {_BASE_FILTER} AND tracking_event = 'cognee.recall'
+        GROUP BY ALL ORDER BY day, events DESC
+    """,
+    # The self-improvement loop (SDK-775): improve() calls by day, version and
+    # surface, with how many sessions each call bridged (bucketed).
+    "improve_daily": f"""
+        SELECT ingestion_date AS day, {_VERSION} AS version, {_ORIGIN} AS origin,
+               {_closed_value("run_in_background", "^(true|false)$")} AS run_in_background,
+               {_SESSION_BUCKET} AS session_count_bucket,
+               count(*) AS events,
+               count(DISTINCT {_IDENT}) AS distinct_identities
+        FROM analytics.main.pipeline_events
+        WHERE {_BASE_FILTER} AND tracking_event = 'cognee.improve'
+        GROUP BY ALL ORDER BY day, events DESC
+    """,
+    # Failures of the SDK operations that have a terminal error event (SDK-775):
+    # search, recall and cognify, by error class.
+    "sdk_error_types_daily": f"""
+        SELECT ingestion_date AS day, {_VERSION} AS version, {_ORIGIN} AS origin,
+               tracking_event, {_EXCEPTION_TYPE} AS exception_type,
+               count(*) AS errors,
+               count(DISTINCT {_IDENT}) AS distinct_identities
+        FROM analytics.main.pipeline_events
+        WHERE {_BASE_FILTER} AND tracking_event IN (
+            'cognee.search EXECUTION ERRORED', 'cognee.recall ERRORED',
+            'cognee.cognify EXECUTION ERRORED')
+        GROUP BY ALL ORDER BY day, errors DESC
+    """,
+    # HTTP failures (SDK-775): the API layer's exception event, by route template,
+    # status and error class. ``endpoint`` is a route constant, never a URL.
+    "api_exceptions_daily": f"""
+        SELECT ingestion_date AS day, endpoint, {_VERSION} AS version,
+               {_closed_value("status_code", "^[1-5][0-9][0-9]$")} AS status_code,
+               {_EXCEPTION_TYPE} AS exception_type,
+               count(*) AS events,
+               count(DISTINCT {_IDENT}) AS distinct_identities
+        FROM analytics.main.pipeline_events
+        WHERE {_BASE_FILTER} AND tracking_event = 'API Exception Raised'
+              AND endpoint IS NOT NULL
+        GROUP BY ALL ORDER BY day, events DESC
+    """,
+    # The keyless first run (SDK-775): GLiNER runtime installs started, completed
+    # and failed, by platform. Versions and platform names only.
+    "gliner_install_daily": f"""
+        SELECT ingestion_date AS day, {_VERSION} AS version, tracking_event,
+               {_closed_value("os")} AS os,
+               {_closed_value("arch")} AS arch,
+               {_closed_value("torch_index")} AS torch_index,
+               {_closed_value("python_version", "^[0-9]+[.][0-9]+([.][0-9]+)?$")} AS python_version,
+               count(*) AS events,
+               count(DISTINCT {_IDENT}) AS distinct_identities
+        FROM analytics.main.pipeline_events
+        WHERE {_BASE_FILTER} AND tracking_event LIKE 'GLiNER Runtime Install%'
+        GROUP BY ALL ORDER BY day, tracking_event
+    """,
+    # How long pipeline runs take (SDK-775): Started to terminal event per
+    # ``pipeline_run_id``, in seconds, as percentiles per day and version. Only
+    # runs that ended inside the window are timed; silent runs are counted in
+    # pipeline_runs_daily instead.
+    "pipeline_run_durations_daily": f"""
+        WITH runs AS (
+            SELECT {_RUN_ID} AS run_id,
+                   min(ingestion_date) FILTER (tracking_event = 'Pipeline Run Started') AS day,
+                   min({_VERSION}) FILTER (tracking_event = 'Pipeline Run Started') AS version,
+                   min(event_timestamp) FILTER (tracking_event = 'Pipeline Run Started')
+                       AS started_at,
+                   max(event_timestamp)
+                       FILTER (tracking_event IN ('Pipeline Run Completed', 'Pipeline Run Errored'))
+                       AS ended_at
+            FROM analytics.main.pipeline_events
+            WHERE {_BASE_FILTER} AND tracking_event LIKE 'Pipeline Run%'
+                  AND {_RUN_ID} IS NOT NULL
+            GROUP BY {_RUN_ID}
+        )
+        SELECT day, version,
+               count(*) AS runs_timed,
+               round(quantile_cont(epoch(ended_at - started_at), 0.5), 1) AS p50_seconds,
+               round(quantile_cont(epoch(ended_at - started_at), 0.95), 1) AS p95_seconds,
+               round(max(epoch(ended_at - started_at)), 1) AS max_seconds
+        FROM runs
+        WHERE day IS NOT NULL AND started_at IS NOT NULL AND ended_at IS NOT NULL
+        GROUP BY ALL ORDER BY day, version
+    """,
+    # Which task fails (SDK-775): per-task error events by task name and error
+    # class. Task events are not in the allowlist (they are most of the volume),
+    # so this query filters them on its own.
+    "task_error_types_daily": f"""
+        SELECT ingestion_date AS day, {_VERSION} AS version,
+               {_TASK_NAME} AS task_name, {_EXCEPTION_TYPE} AS exception_type,
+               count(*) AS errors,
+               count(DISTINCT {_IDENT}) AS distinct_identities
+        FROM analytics.main.pipeline_events
+        WHERE ingestion_date >= current_date - INTERVAL {WINDOW_DAYS} DAY
+              AND tracking_event LIKE '% Task Errored'
+        GROUP BY ALL ORDER BY day, errors DESC
     """,
     # Version lifecycle within the window (adoption/abandonment).
     "version_lifecycle": f"""

@@ -18,6 +18,7 @@ from cognee.infrastructure.databases.vector.embeddings.config import (
 from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.modules.cognify.config import EXTRACTORS, get_cognify_config, resolve_extractor_name
+from cognee.shared.utils import telemetry_model_label
 
 
 class LLMConfig(TypedDict):
@@ -82,11 +83,12 @@ def get_current_settings() -> SettingsDict:
     return {
         "llm": {
             "provider": llm_config.llm_provider,
-            "model": llm_config.llm_model,
+            # A model that is a filesystem path leaves as "local_path", never the path.
+            "model": telemetry_model_label(llm_config.llm_model),
         },
         "embedding": {
             "provider": embedding_provider,
-            "model": embedding_model,
+            "model": telemetry_model_label(embedding_model),
         },
         "graph_extractor": _graph_extractor_setting(),
         "graph": {

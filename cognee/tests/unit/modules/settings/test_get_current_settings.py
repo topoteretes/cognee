@@ -39,3 +39,22 @@ def test_keyless_install_reports_the_demo_extractor_without_touching_the_runtime
     payload = settings_module.get_current_settings()
 
     assert payload["graph_extractor"] == "gliner_demo"
+
+
+def test_model_settings_that_are_paths_leave_as_the_local_path_label(monkeypatch):
+    """A model pointing at a local file names the OS account; telemetry carries a label."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        settings_module,
+        "get_llm_config",
+        lambda: SimpleNamespace(llm_provider="custom", llm_model="/Users/alice/models/x.gguf"),
+    )
+    monkeypatch.setattr(
+        settings_module, "resolve_embedding_names", lambda *_: ("custom", "/home/alice/embed")
+    )
+
+    payload = settings_module.get_current_settings()
+
+    assert payload["llm"] == {"provider": "custom", "model": "local_path"}
+    assert payload["embedding"] == {"provider": "custom", "model": "local_path"}
