@@ -91,12 +91,23 @@ Steps:
    (cognee default, fully known to litellm) and another GPT-5.x id.
 2. If it exists, register it before any cognee call in the LoCoMo driver:
    ```python
-   litellm.register_model({"openai/gpt-5.1-mini": {
-       "litellm_provider": "openai", "mode": "chat",
-       "max_tokens": 128000, "max_input_tokens": 400000, "max_output_tokens": 128000,
-       "supports_response_schema": True, "supports_function_calling": True,
-       "supports_reasoning": True, "supports_system_messages": True,
-       "input_cost_per_token": ..., "output_cost_per_token": ...}})
+   litellm.register_model(
+       {
+           "openai/gpt-5.1-mini": {
+               "litellm_provider": "openai",
+               "mode": "chat",
+               "max_tokens": 128000,
+               "max_input_tokens": 400000,
+               "max_output_tokens": 128000,
+               "supports_response_schema": True,
+               "supports_function_calling": True,
+               "supports_reasoning": True,
+               "supports_system_messages": True,
+               "input_cost_per_token": ...,
+               "output_cost_per_token": ...,
+           }
+       }
+   )
    ```
    Also register the bare `gpt-5.1-mini` key (litellm strips the `openai/` prefix in some lookups).
 3. Confirm with a 3-sentence `cognee.add` + `cognify` + `search` smoke that the native schema path
