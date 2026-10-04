@@ -292,7 +292,9 @@ def get_proposals_router() -> APIRouter:
                 status_code=403, content={"error": "Not authorized for this dataset"}
             )
         except ProposalNotApplicableError as error:
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            # `detail` is composed from proposal fields only (never the exception text),
+            # so it is safe to hand back to the caller.
+            return JSONResponse(status_code=409, content={"error": error.detail})
         except CogneeApiError:
             raise
         except Exception:

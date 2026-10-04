@@ -32,7 +32,16 @@ logger = get_logger("ontology_proposals")
 
 
 class ProposalNotApplicableError(ValueError):
-    """The proposal is not in ``proposed`` status or its kind is unknown."""
+    """The proposal is not in ``proposed`` status or its kind is unknown.
+
+    ``detail`` is the user-facing explanation: built only from proposal fields the
+    caller already knows (id, status, kind), so the API can return it verbatim
+    without exposing anything from the exception itself.
+    """
+
+    def __init__(self, detail: str):
+        super().__init__(detail)
+        self.detail = detail
 
 
 def _now() -> str:
