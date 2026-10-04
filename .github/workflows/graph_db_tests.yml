@@ -61,6 +61,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/test_kuzu.py
@@ -77,6 +78,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run pytest cognee/tests/unit/interfaces/graph/test_weighted_edges.py -v
@@ -122,6 +124,7 @@ jobs:
           DB_USERNAME: cognee
           DB_PASSWORD: cognee
           DB_NAME: cognee_db
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run pytest cognee/tests/e2e/postgres/test_postgres_adapter.py -v
@@ -137,6 +140,7 @@ jobs:
           VECTOR_DB_PROVIDER: pgvector
           GRAPH_DATABASE_PROVIDER: postgres
           GRAPH_DATABASE_URL: "postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db"
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run pytest cognee/tests/e2e/postgres/test_shared_schema_isolation.py -v
@@ -148,6 +152,7 @@ jobs:
           DB_USERNAME: cognee
           DB_PASSWORD: cognee
           DB_NAME: cognee_db
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run pytest cognee/tests/e2e/postgres/test_admin_helpers_concurrency.py -v
@@ -172,6 +177,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/e2e/postgres/test_graphdb_postgres.py
@@ -209,6 +215,7 @@ jobs:
           GRAPH_DATABASE_URL: ${{ steps.neo4j.outputs.neo4j-url }}
           GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
           GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/test_neo4j.py
@@ -228,6 +235,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run pytest cognee/tests/unit/interfaces/graph/test_weighted_edges.py -v

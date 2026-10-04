@@ -59,6 +59,7 @@ jobs:
         LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
         EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
         EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      shell: bash
       run: |
         source .github/scripts/keyless_ci_env.sh
         # Only variables that actually have a value: a bare `LLM_ARGS=` (empty
@@ -142,6 +143,7 @@ jobs:
       env:
         COGNEE_E2E_MANAGE_COMPOSE: '1'
         COGNEE_E2E_COMPOSE_PROFILES: 'postgres,mcp'
+      shell: bash
       run: |
         source .github/scripts/keyless_ci_env.sh
         # The suite is decoupled from the `cognee` package: --confcutdir keeps

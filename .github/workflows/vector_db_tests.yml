@@ -133,6 +133,7 @@ jobs:
           VECTOR_DB_USERNAME: cognee
           VECTOR_DB_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           VECTOR_DATASET_DATABASE_HANDLER: pgvector
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/test_permissions.py
@@ -240,6 +241,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run pytest cognee/tests/test_permissions.py -v --log-level=INFO

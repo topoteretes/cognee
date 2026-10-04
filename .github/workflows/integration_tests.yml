@@ -88,6 +88,7 @@ jobs:
           extra-dependencies: "scraping"
 
       - name: Run Document & Task Tests
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run pytest cognee/tests/integration/documents/ cognee/tests/integration/tasks/ --splits 2 --group ${{ matrix.split-group }}
@@ -126,6 +127,7 @@ jobs:
           extra-dependencies: "scraping fastembed"
 
       - name: Run Infrastructure Tests
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run pytest cognee/tests/integration/infrastructure/ --splits 3 --group ${{ matrix.split-group }}
@@ -200,6 +202,7 @@ jobs:
           extra-dependencies: "scraping redis"
 
       - name: Run Deletion & Misc Tests
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run pytest cognee/tests/integration/test_delete_edge_cases.py cognee/tests/integration/shared/

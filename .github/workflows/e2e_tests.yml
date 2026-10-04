@@ -72,6 +72,7 @@ jobs:
       # (~800 MB) before the server starts.
       - name: Prepare the keyless extractor
         if: ${{ !inputs.has-secrets }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python -m cognee.tasks.graph.gliner_demo.install
@@ -88,6 +89,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/test_cognee_server_start.py
@@ -343,6 +345,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/test_pipeline_error_propagation.py
@@ -473,6 +476,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/test_dlt_mixed_input_e2e.py
@@ -488,6 +492,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/test_dlt_update_e2e.py
@@ -575,6 +580,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/test_parallel_databases.py
@@ -603,6 +609,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/test_dataset_database_handler.py
@@ -631,6 +638,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/test_dataset_delete.py
@@ -659,6 +667,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/test_delete_data_and_dataset_if_empty.py
@@ -690,6 +699,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run pytest cognee/tests/test_permissions.py -v --log-level=INFO
@@ -749,6 +759,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/test_multi_tenancy.py
@@ -777,6 +788,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/test_custom_data_label.py
@@ -804,6 +816,7 @@ jobs:
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/test_delete_permission.py
@@ -862,6 +875,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh mock-llm
           uv run python ./cognee/tests/test_delete_two_documents_empty_store.py
@@ -929,6 +943,7 @@ jobs:
           DB_PORT: 5432
           DB_USERNAME: cognee
           DB_PASSWORD: cognee
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh mock-llm
           uv run python ./cognee/tests/test_delete_two_documents_empty_store.py
@@ -970,6 +985,7 @@ jobs:
           # (one shared graph). The graph-native provenance delete under test is
           # independent of per-dataset isolation.
           ENABLE_BACKEND_ACCESS_CONTROL: 'false'
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh mock-llm
           uv run python ./cognee/tests/test_delete_two_documents_empty_store.py
@@ -1007,6 +1023,7 @@ jobs:
           GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
           GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
           ENABLE_AUTO_MIGRATIONS: 'false'
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh mock-llm
           uv run python ./cognee/tests/test_delete_default_graph_with_legacy_data_1.py
@@ -1037,6 +1054,7 @@ jobs:
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           ENABLE_AUTO_MIGRATIONS: 'false'
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh mock-llm
           uv run python ./cognee/tests/test_delete_default_graph_with_legacy_data_2.py
@@ -1065,6 +1083,7 @@ jobs:
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           ENABLE_AUTO_MIGRATIONS: 'false'
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh mock-llm
           uv run python ./cognee/tests/test_delete_two_users_with_legacy_data.py
@@ -1092,6 +1111,7 @@ jobs:
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh mock-llm
           uv run python ./cognee/tests/test_delete_two_users_same_dataset.py
@@ -1119,6 +1139,7 @@ jobs:
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh mock-llm
           uv run python ./cognee/tests/test_delete_dataset_ladybug.py
@@ -1154,6 +1175,7 @@ jobs:
           GRAPH_DATABASE_URL: ${{ steps.neo4j.outputs.neo4j-url }}
           GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
           GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh mock-llm
           uv run python ./cognee/tests/test_delete_dataset_neo4j.py
@@ -1255,6 +1277,7 @@ jobs:
           DB_PORT: 5432
           DB_USERNAME: cognee
           DB_PASSWORD: cognee
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/test_concurrent_subprocess_access.py
@@ -1841,6 +1864,7 @@ jobs:
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           DATASET_QUEUE_ENABLED: "True"
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/e2e/dataset_queue/test_queue_serialization_e2e.py
@@ -1873,6 +1897,7 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           DATASET_QUEUE_ENABLED: "True"
           DATABASE_MAX_LRU_CACHE_SIZE: "1"
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run pytest cognee/tests/e2e/dataset_queue/test_dataset_queue_buildup.py
@@ -1934,6 +1959,7 @@ jobs:
           USAGE_LOGGING: true
           CACHE_BACKEND: 'redis'
           CACHE_HOST: ${{ inputs.ci-image != '' && 'redis' || 'localhost' }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run pytest cognee/tests/test_usage_logger_e2e.py -v --log-level=INFO || {
@@ -1971,6 +1997,7 @@ jobs:
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           ENABLE_BACKEND_ACCESS_CONTROL: "false"
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/api/test_conditional_authentication_endpoints.py
@@ -2004,6 +2031,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/api/test_backend_auth.py
@@ -2398,6 +2426,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run pytest cognee/tests/test_concurrent_cognify_e2e.py -v --log-level=INFO

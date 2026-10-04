@@ -62,6 +62,7 @@ jobs:
 
       - name: Run MCP unit tests
         working-directory: cognee-mcp
+        shell: bash
         run: |
           source ../.github/scripts/keyless_ci_env.sh
           uv run --no-sync pytest tests/
@@ -78,6 +79,7 @@ jobs:
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         working-directory: cognee-mcp
+        shell: bash
         run: |
           source ../.github/scripts/keyless_ci_env.sh
           echo "Cognee Version:"

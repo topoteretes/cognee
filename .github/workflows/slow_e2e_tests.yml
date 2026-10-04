@@ -67,6 +67,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/test_edge_centered_payload.py
@@ -97,6 +98,7 @@ jobs:
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           ENABLE_AUTO_MIGRATIONS: 'false'
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh mock-llm
           uv run python ./cognee/tests/test_delete_default_graph_with_legacy_data_1.py

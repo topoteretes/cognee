@@ -74,6 +74,7 @@ jobs:
           GRAPH_DATABASE_PROVIDER: 'ladybug'
           VECTOR_DB_PROVIDER: 'lancedb'
           DB_PROVIDER: 'sqlite'
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/test_adapter_object_caching.py
@@ -113,6 +114,7 @@ jobs:
           GRAPH_DATABASE_URL: ${{ steps.neo4j.outputs.neo4j-url }}
           GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
           GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/test_adapter_object_caching.py
@@ -169,6 +171,7 @@ jobs:
           DB_PORT: 5432
           DB_USERNAME: cognee
           DB_PASSWORD: cognee
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/test_adapter_object_caching.py
@@ -231,6 +234,7 @@ jobs:
           DB_PORT: 5432
           DB_USERNAME: cognee
           DB_PASSWORD: cognee
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/test_adapter_object_caching.py
@@ -303,6 +307,7 @@ jobs:
           GRAPH_DATABASE_USERNAME: cognee
           GRAPH_DATABASE_PASSWORD: cognee
           GRAPH_DATASET_DATABASE_HANDLER: 'postgres_graph'
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python ./cognee/tests/test_adapter_object_caching.py

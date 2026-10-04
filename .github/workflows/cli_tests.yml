@@ -121,6 +121,7 @@ jobs:
           cognee_version: ${{ inputs.cognee_version }}
 
       - name: Run CLI Integration Tests
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run pytest cognee/tests/cli_tests/cli_integration_tests/ -v
@@ -158,6 +159,7 @@ jobs:
           cognee_version: ${{ inputs.cognee_version }}
 
       - name: Test CLI Help Commands
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python -m cognee.cli._cognee --help
@@ -169,6 +171,7 @@ jobs:
           uv run python -m cognee.cli._cognee config --help
 
       - name: Test CLI Config Subcommands
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           uv run python -m cognee.cli._cognee config get --help
@@ -178,6 +181,7 @@ jobs:
           uv run python -m cognee.cli._cognee config reset --help
 
       - name: Test CLI Error Handling
+        shell: bash
         run: |
           source .github/scripts/keyless_ci_env.sh
           # Test invalid command (should fail gracefully)
