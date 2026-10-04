@@ -4,8 +4,10 @@ cognee's remote client (`serve`/`push`) opened its aiohttp session without
 `trust_env=True`, so it ignored HTTP(S)_PROXY. Inside a Docker Sandbox that
 means the request goes around the credential proxy and the placeholder API
 key is never substituted (the brain answers 401). Fix upstream:
-https://github.com/topoteretes/cognee/pull/5196. Until the kit installs a
-release that carries it, make every aiohttp session honour the proxy env.
+https://github.com/topoteretes/cognee/pull/5196, shipped in 1.6.2 — which the
+kit now installs (`cognee>=1.6.2`). This shim stays as a safety net for an
+older install, and it only covers this Python payload: a `cognee-cli push` the
+agent runs as its own process does not pass through here.
 
 Detected by reading the installed client, not by version number: a release
 cut before the fix lands (1.6.1 was) must still get the patch.

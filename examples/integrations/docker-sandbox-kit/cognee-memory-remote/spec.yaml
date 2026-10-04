@@ -46,7 +46,10 @@ environment:
 permissions:
   network:
     allow:
-      # install-time only (uv tool install cognee)
+      # Needed by setup (uv tool install cognee). Kit allow rules hold for the
+      # sandbox's whole life, not just setup, so PyPI stays reachable from the
+      # agent at runtime. To close that, bake cognee into the base image and
+      # drop these two hosts; the launcher does not remove them.
       - pypi.org
       - files.pythonhosted.org
       # ladybug (embedded graph DB used for local scratch state) fetches
@@ -59,7 +62,11 @@ setup:
       user: "1000"
       description: Create local scratch directories
     # Assumes `uv` in the base image (Docker's default sandbox images ship it).
-    - command: "uv tool install cognee"
+    # >=1.6.2: the first release whose remote client honours HTTP(S)_PROXY
+    # (#5196), which the credential proxy's placeholder substitution needs.
+    # `cognee-cli push` run by the agent has no shim in front of it, so the
+    # installed release must carry the fix itself.
+    - command: "uv tool install 'cognee>=1.6.2'"
       user: "1000"
       description: Install the cognee CLI (used locally for LLM-free transformations and push)
 
@@ -72,10 +79,18 @@ agentInstructions:
     granted; anything else returns 403. `$COGNEE_API_KEY` is a placeholder —
     the real key never enters this sandbox.
 
+    `$COGNEE_SERVICE_URL` and `$COGNEE_API_KEY` are exported by the launcher
+    (`../brainbox/run.sh`) for each `sbx exec`; they are not part of this kit.
+    A sandbox started directly (`sbx run claude --kit ./cognee-memory-remote`)
+    has them empty — set them from the launcher's output before using the brain.
+
     - Read the brain:   `cognee-cli --api-url $COGNEE_SERVICE_URL --api-key $COGNEE_API_KEY recall "question"`
     - Write a result:   `cognee-cli --api-url $COGNEE_SERVICE_URL --api-key $COGNEE_API_KEY remember "text" -d <your output dataset>`
     - Promote a locally built graph (no LLM):
                         `cognee-cli push <local dataset> --target-dataset <your output dataset> --url $COGNEE_SERVICE_URL --api-key $COGNEE_API_KEY`
+                        (needs the cognee release this kit installs, >=1.6.2; on an
+                        older install the CLI bypasses the credential proxy and the
+                        brain answers 401 — only the Python payload carries a shim)
 
     There is no LLM key in this sandbox. Local `cognee-cli remember` works
     only for LLM-free routes (code repositories). Use the brain for anything

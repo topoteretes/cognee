@@ -16,11 +16,15 @@
 #   5. walls    show the placeholder, a blocked egress, a denied dataset, the log
 #   6. revoke   drop the sandbox, the secret, the rule, and the agent's grants
 #               (--keep leaves everything up; --purge also deletes the agent and
-#               the dataset it wrote — otherwise that dataset stays for review)
+#               the dataset it wrote — otherwise that dataset stays for review
+#               and the identity's key still authenticates, with zero grants)
 #
 # Prerequisites: sbx installed + `sbx login`, `sbx policy init deny-all`, a
 # running cognee API (BRAIN_URL, default http://127.0.0.1:8011) and the owner's
 # key at ~/.cognee-plugin/api_key.json (or BRAIN_OWNER_KEY / BRAIN_OWNER_KEY_FILE).
+# The per-agent sharing policy (step 1's explicit deny rows) needs the
+# memory-workspace brain build; on a stock cognee server brain_admin.py says so
+# and runs with ACL grants only. See README "Prerequisites".
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -68,7 +72,7 @@ cleanup() {
       python3 brain_admin.py --url "$BRAIN_URL" purge --agent "$AGENT_ID" | sed 's/^/  /'
     else
       python3 brain_admin.py --url "$BRAIN_URL" revoke --agent "$AGENT_ID" | sed 's/^/  /'
-      echo "  output dataset '$OUT_DATASET' kept for review (owner: the revoked identity)"
+      echo "  output dataset '$OUT_DATASET' kept for review (owner: the revoked identity; its key still authenticates with zero grants — --purge kills it)"
     fi
   fi
 }
