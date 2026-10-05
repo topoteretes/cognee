@@ -1,18 +1,23 @@
-"""Multi-agent memory handover on Daytona sandboxes, as a fork chain.
+"""Multi-agent memory handover on Daytona sandboxes, one sandbox per phase.
 
 The Daytona port of ``examples/integrations/docker-sandbox-kit/demo/handover.sh``.
 The payload is the same ``supervisor_worker_handover.py``: two cognee users
 (supervisor, worker) sharing one embedded cognee deployment, protected by
-cognee's ACLs. What changes is how the memory travels between sandboxes.
-
-Docker Sandboxes hand the cognee state around with ``sbx cp``. Daytona can
-fork a running sandbox into a copy-on-write clone of its filesystem, so the
-handover *is* the fork::
+cognee's ACLs. What changes is how the memory travels between sandboxes::
 
     snapshot "cognee-memory"  (debian + cognee, built once, reused)
-      -> cognee-supervisor-<run>      --phase brief    (state on sandbox-local disk)
-      -> fork: cognee-worker-<run>    --phase work     (recall by UUID, prove denials, report)
-      -> fork: cognee-review-<run>    --phase review   (supervisor reads the report)
+      -> cognee-supervisor-<run>          --phase brief    (state on sandbox-local disk)
+      -> handover: cognee-worker-<run>    --phase work     (recall by UUID, prove denials, report)
+      -> handover: cognee-review-<run>    --phase review   (supervisor reads the report)
+
+A handover is a **fork** when Daytona offers one — a copy-on-write clone of a
+running Linux VM sandbox — and otherwise a **copy**: the parent's cognee state
+is archived, pulled to the host and pushed into a fresh sandbox from the
+snapshot (the ``sbx cp`` mechanism of the Docker demo). Fork exists for VM
+sandboxes only, and those need a VM-class snapshot plus VM runners in the
+region; a container sandbox answers ``422 Forking is not supported`` and
+``--handover auto`` (the default) falls back to the copy. A sandbox is stopped
+as soon as its phase is done and its state handed over.
 
 ``<run>`` is a random suffix minted per invocation, so a run never collides
 with sandboxes a previous ``--keep`` left behind, and every sandbox carries a
@@ -23,15 +28,21 @@ Every sandbox in the chain runs with:
 - ``LLM_API_KEY`` bound to an organization Secret scoped to ``api.openai.com``.
   The sandbox sees an opaque placeholder; Daytona's proxy substitutes the real
   key on requests to that host. The key never enters any sandbox.
-- a domain allow list that holds only what cognee needs at runtime. PyPI is not
-  on it: cognee is baked into the snapshot. Neither is GitHub: litellm is told
-  to use its bundled model-cost map instead of fetching it.
+- a domain allow list that holds only what cognee needs at runtime (Tier 3/4
+  organizations; on Tier 1/2 Daytona rejects a sandbox-level list and the
+  organization's tier policy applies instead — the run says which it got).
+  PyPI is not on it: cognee is baked into the snapshot. Neither is GitHub:
+  litellm is told to use its bundled model-cost map instead of fetching it.
 
 The walls are checked, not just shown: after the first phase the script proves
-from inside the sandbox that ``$LLM_API_KEY`` is the placeholder and that a
-host off the allow list is unreachable on both the explicit-proxy path and the
-direct path (a client that ignores ``HTTP(S)_PROXY`` must hit the same wall).
-A wall that does not hold fails the run; sandboxes are still cleaned up.
+from inside the sandbox that ``$LLM_API_KEY`` is the placeholder, that the
+placeholder does not authenticate outside the proxy, and that a host off the
+allow list is unreachable on both the explicit-proxy path and the direct path
+(a client that ignores ``HTTP(S)_PROXY`` must hit the same wall). A wall that
+does not hold fails the run; sandboxes are still cleaned up. One documented
+exception: on Tier 1/2 the tier policy is enforced on direct connections only
+and Daytona's egress proxy forwards anywhere; that is reported as a WARNING
+(``--strict-walls`` makes it a failure).
 
 Prerequisites::
 
@@ -44,6 +55,8 @@ Usage::
     python handover.py                # full round trip, sandboxes deleted afterwards
     python handover.py --keep         # leave the three sandboxes for inspection
     python handover.py --rebuild      # rebuild the snapshot (e.g. after a cognee release)
+    python handover.py --handover copy    # skip the fork attempt
+    python handover.py --strict-walls     # fail on the Tier 1/2 proxy-path gap
 """
 
 from __future__ import annotations
@@ -60,6 +73,7 @@ from daytona import (  # type: ignore[import-untyped]
     CreateSecretParams,
     CreateSnapshotParams,
     Daytona,
+    DaytonaBadRequestError,
     DaytonaError,
     Image,
     ListSandboxesQuery,
@@ -92,7 +106,19 @@ RUNTIME_DOMAINS = (
 )
 DOMAIN_ALLOW_LIST = ",".join(RUNTIME_DOMAINS)
 
-# A host that is NOT on the allow list; the egress probe must fail to reach it.
+# Which network wall a run ends up behind. Daytona applies the sandbox-level
+# allow list above only on Tier 3/4 organizations. On Tier 1/2 the policy is
+# set at the organization level and a sandbox-level list is rejected (HTTP
+# 400 with the message below): the sandbox then sits behind Daytona's default
+# tier policy, which blocks everything except its "essential services"
+# (package registries, git hosts, model providers — api.openai.com among
+# them). That is a wider wall than the two hosts above, so a run says which
+# one it got. https://www.daytona.io/docs/en/network-limits/
+NETWORK_POLICY_SANDBOX = "sandbox allow list"
+NETWORK_POLICY_ORGANIZATION = "organization tier policy (essential services only)"
+_ORG_POLICY_LOCKED = "cannot be overridden at the sandbox level"
+
+# A host that is on neither wall; the egress probe must fail to reach it.
 EGRESS_PROBE_URL = "https://example.com"
 
 # Minutes of inactivity before a sandbox stops. Set on the first sandbox and
@@ -198,30 +224,65 @@ def cognee_env(home: str) -> dict[str, str]:
     }
 
 
-def create_supervisor(daytona: Daytona, payload: Path, run_id: str) -> Sandbox:
-    """First sandbox in the chain: fresh from the snapshot, payload uploaded, empty memory."""
-    name = f"cognee-supervisor-{run_id}"
+def create_sandbox(
+    daytona: Daytona, name: str, role: str, run_id: str, policy: str | None
+) -> tuple[Sandbox, str]:
+    """A fresh sandbox from the snapshot with the demo's posture: Secret, labels, allow list.
+
+    Returns the sandbox and the network policy it runs behind: the sandbox-level
+    allow list when the organization's tier accepts one, otherwise the
+    organization policy (the only 400 that is retried is the one saying so).
+    Pass the policy a previous sandbox of this run got to skip the probe.
+    """
     print(f"=== creating sandbox: {name} (from snapshot) ===")
-    sandbox = daytona.create(
-        CreateSandboxFromSnapshotParams(
-            snapshot=SNAPSHOT_NAME,
-            name=name,
-            # Env var -> Secret name. The sandbox sees the placeholder only.
-            secrets={"LLM_API_KEY": LLM_VAULT_ENTRY},
-            domain_allow_list=DOMAIN_ALLOW_LIST,
-            labels=run_labels(run_id, "supervisor"),
-            auto_stop_interval=AUTO_STOP_MINUTES,
-        ),
-        timeout=180,
+    params = {
+        "snapshot": SNAPSHOT_NAME,
+        "name": name,
+        # Env var -> Secret name. The sandbox sees the placeholder only.
+        "secrets": {"LLM_API_KEY": LLM_VAULT_ENTRY},
+        "labels": run_labels(run_id, role),
+        "auto_stop_interval": AUTO_STOP_MINUTES,
+    }
+    if policy == NETWORK_POLICY_ORGANIZATION:
+        return daytona.create(CreateSandboxFromSnapshotParams(**params), timeout=180), policy
+    try:
+        sandbox = daytona.create(
+            CreateSandboxFromSnapshotParams(domain_allow_list=DOMAIN_ALLOW_LIST, **params),
+            timeout=180,
+        )
+        return sandbox, NETWORK_POLICY_SANDBOX
+    except DaytonaBadRequestError as err:
+        if _ORG_POLICY_LOCKED not in str(err):
+            raise
+    print(
+        "    this organization's tier sets network policy for every sandbox; the\n"
+        f"    sandbox-level allow list ({DOMAIN_ALLOW_LIST}) was rejected. Running behind\n"
+        f"    the {NETWORK_POLICY_ORGANIZATION} instead."
+    )
+    sandbox = daytona.create(CreateSandboxFromSnapshotParams(**params), timeout=180)
+    return sandbox, NETWORK_POLICY_ORGANIZATION
+
+
+def create_supervisor(daytona: Daytona, payload: Path, run_id: str) -> tuple[Sandbox, str]:
+    """First sandbox in the chain: fresh from the snapshot, payload uploaded, empty memory."""
+    sandbox, policy = create_sandbox(
+        daytona, f"cognee-supervisor-{run_id}", "supervisor", run_id, policy=None
     )
     home = sandbox.get_user_home_dir()
     run_in(sandbox, f"mkdir -p {home}/{STATE_DIR} {home}/{DEMO_DIR}/handover-out")
     sandbox.fs.upload_file(payload.read_bytes(), f"{home}/{DEMO_DIR}/{PAYLOAD_NAME}")
-    return sandbox
+    return sandbox, policy
+
+
+# How the memory travels between two sandboxes of the chain.
+HANDOVER_FORK = "fork"  # copy-on-write clone of the parent VM (Linux VM sandboxes only)
+HANDOVER_COPY = "copy"  # archive the state out of the parent, into a fresh sandbox
+_FORK_UNSUPPORTED = "Forking is not supported"
+STATE_ARCHIVE = "/tmp/cognee-handover.tgz"
 
 
 def fork_into(
-    parent: Sandbox, name: str, role: str, run_id: str, created: list[Sandbox]
+    parent: Sandbox, name: str, role: str, run_id: str, policy: str, created: list[Sandbox]
 ) -> Sandbox:
     """Hand the memory over: a copy-on-write clone of the parent's disk, same policy.
 
@@ -233,12 +294,91 @@ def fork_into(
     child = parent.fork(name=name, timeout=180)
     created.append(child)
     # Fork copies the disk; re-assert the security posture on the new sandbox
-    # rather than assume it is inherited.
+    # rather than assume it is inherited. (The allow list only where the tier
+    # accepted one at creation; an organization policy is not ours to set.)
     child.update_secrets({"LLM_API_KEY": LLM_VAULT_ENTRY})
-    child.update_network_settings(domain_allow_list=DOMAIN_ALLOW_LIST)
+    if policy == NETWORK_POLICY_SANDBOX:
+        child.update_network_settings(domain_allow_list=DOMAIN_ALLOW_LIST)
     child.set_autostop_interval(AUTO_STOP_MINUTES)
     child.set_labels(run_labels(run_id, role))
+    retire(parent)
     return child
+
+
+def retire(sandbox: Sandbox) -> None:
+    """Stop a sandbox whose phase is done and whose state has been handed over.
+
+    A sandbox lives for one phase. Stopping it right away keeps the mounted
+    Secret from sitting in a running VM for the rest of the run, and keeps the
+    run inside the organization's running-memory quota (three 4 GiB sandboxes
+    exceed the 10 GiB a Tier 1/2 organization gets). Cleanup still deletes it.
+    """
+    sandbox.stop(timeout=120)
+    print(f"    {sandbox.name} stopped (its phase is done; state handed over)")
+
+
+def copy_into(
+    daytona: Daytona,
+    parent: Sandbox,
+    name: str,
+    role: str,
+    run_id: str,
+    policy: str,
+    created: list[Sandbox],
+) -> Sandbox:
+    """Hand the memory over the way the Docker demo does with `sbx cp`: as an archive.
+
+    The parent's cognee state and demo directory (payload + token) are tarred,
+    pulled to the host, and pushed into a fresh sandbox created from the
+    snapshot with the same posture. Nothing else crosses: the child is a new
+    VM with only that archive in it.
+    """
+    print(f"=== copying {parent.name} -> {name} (the memory handover) ===")
+    home = parent.get_user_home_dir()
+    run_in(parent, f"tar czf {STATE_ARCHIVE} -C {home} {STATE_DIR} {DEMO_DIR}")
+    archive = parent.fs.download_file(STATE_ARCHIVE) or b""
+    run_in(parent, f"rm -f {STATE_ARCHIVE}")
+    print(f"    state archive: {len(archive) / 1e6:.1f} MB")
+    retire(parent)  # before the child exists: the quota counts running sandboxes
+    child, _ = create_sandbox(daytona, name, role, run_id, policy)
+    created.append(child)
+    child_home = child.get_user_home_dir()
+    child.fs.upload_file(archive, STATE_ARCHIVE)
+    run_in(child, f"tar xzf {STATE_ARCHIVE} -C {child_home} && rm -f {STATE_ARCHIVE}")
+    return child
+
+
+def handover(
+    daytona: Daytona,
+    parent: Sandbox,
+    name: str,
+    role: str,
+    run_id: str,
+    policy: str,
+    mode: str,
+    created: list[Sandbox],
+) -> tuple[Sandbox, str]:
+    """Move the memory from `parent` into a new sandbox; returns it and the mode used.
+
+    `auto` tries a fork first. Daytona forks Linux VM sandboxes only; a
+    container sandbox — which is what any snapshot built with the declarative
+    builder gives, and what organizations without VM runners get — answers
+    422 "Forking is not supported", and the handover falls back to the
+    archive copy. The mode that worked is returned so the next hop skips the
+    failed attempt.
+    """
+    if mode in ("auto", HANDOVER_FORK):
+        try:
+            return fork_into(parent, name, role, run_id, policy, created), HANDOVER_FORK
+        except DaytonaError as err:
+            if mode == HANDOVER_FORK or _FORK_UNSUPPORTED not in str(err):
+                raise
+            print(
+                "    fork not available: this sandbox is a container, not a Linux VM\n"
+                "    (fork needs a VM-class snapshot and VM runners in the region).\n"
+                "    Handing the memory over as an archive copy instead."
+            )
+    return copy_into(daytona, parent, name, role, run_id, policy, created), HANDOVER_COPY
 
 
 def run_phase(sandbox: Sandbox, phase: str) -> None:
@@ -252,56 +392,104 @@ def run_phase(sandbox: Sandbox, phase: str) -> None:
     )
 
 
-# Two ways out of the sandbox. Daytona enforces the domain allow list and
-# substitutes Secrets in its egress proxy, which clients reach through the
-# HTTP(S)_PROXY variables it sets. A client that ignores those variables (the
-# way aiohttp did before cognee #5196) takes the direct path, so the wall has
-# to hold there too; the second probe disables proxy handling to take it.
-_PROXY_PROBE = f"import urllib.request as u;u.urlopen('{EGRESS_PROBE_URL}',timeout=5)"
-_DIRECT_PROBE = (
-    f"import urllib.request as u;"
-    f"u.build_opener(u.ProxyHandler({{}})).open('{EGRESS_PROBE_URL}',timeout=5)"
-)
-EGRESS_PROBES = (
-    ("proxy path", f'python3 -c "{_PROXY_PROBE}"'),
-    ("direct path (proxy env ignored)", f'python3 -c "{_DIRECT_PROBE}"'),
+# Two ways out of the sandbox. Daytona sets HTTP(S)_PROXY to its egress proxy,
+# which is where Secrets are substituted; a client that ignores those
+# variables (the way aiohttp did before cognee #5196) connects directly. The
+# wall has to hold on both paths, so every probe runs twice: once through the
+# proxy, once with proxy handling disabled.
+PATHS = (
+    # (label, urllib handler expression, goes through the proxy)
+    ("proxy path", "u.ProxyHandler()", True),
+    ("direct path (proxy env ignored)", "u.ProxyHandler({})", False),
 )
 
 
-def check_boundaries(sandbox: Sandbox, placeholder: str) -> None:
+def _egress_probe(handler: str) -> str:
+    """Exit 0 when the host off the allow list answers, non-zero when it is blocked."""
+    return (
+        'python3 -c "import urllib.request as u;'
+        f"u.build_opener({handler}).open('{EGRESS_PROBE_URL}',timeout=5)\""
+    )
+
+
+def _credential_probe(handler: str) -> str:
+    """Print the HTTP status of a call to the LLM host with $LLM_API_KEY as it is in the VM.
+
+    200 would mean the value in the VM authenticates by itself, i.e. it is the
+    real key. Expected: 401 (the placeholder is not a key) or blocked.
+    """
+    return (
+        'python3 -c "import os,urllib.request as u,urllib.error as e\n'
+        f"r=u.Request('https://{LLM_HOST}/v1/models',"
+        "headers={'Authorization':'Bearer '+os.environ['LLM_API_KEY']})\n"
+        f"try: print(u.build_opener({handler}).open(r,timeout=8).status)\n"
+        "except e.HTTPError as err: print(err.code)\n"
+        "except Exception as err: print('blocked', type(err).__name__)\""
+    )
+
+
+def check_boundaries(sandbox: Sandbox, placeholder: str, policy: str, strict: bool) -> list[str]:
     """Prove the isolation properties from inside the sandbox; fail the run if one is missing.
 
     A wall that does not hold must not end in "round trip passed": every
     verdict is printed, then the first breach raises and the caller's cleanup
-    still runs.
+    still runs. One case is downgraded to a warning unless `strict`: behind an
+    organization tier policy (Tier 1/2), Daytona's egress proxy forwards to
+    hosts the firewall blocks on the direct path — the policy is enforced on
+    direct connections only. That is Daytona's wall, not one this script can
+    set, so it is reported loudly and the run goes on; `--strict-walls` makes
+    it a failure. Returns the warnings so the summary can repeat them.
     """
-    print(f"\n=== security check inside {sandbox.name} ===")
+    print(f"\n=== security check inside {sandbox.name} (network wall: {policy}) ===")
     breaches: list[str] = []
+    warnings: list[str] = []
 
     # Read the value without `run_in` (which echoes command output): if the
     # Secret binding failed, `seen` would be the real key. Report the verdict
     # and the length only, never the value.
     seen = (sandbox.process.exec("printf '%s' \"$LLM_API_KEY\"", timeout=20).result or "").strip()
     if seen == placeholder:
-        print("    LLM_API_KEY inside sandbox is the placeholder")
+        print("    credential wall: LLM_API_KEY inside the sandbox is the placeholder")
     else:
         verdict = f"LLM_API_KEY is NOT the placeholder ({len(seen)} chars): Secret binding failed"
-        print(f"    {verdict}")
+        print(f"    credential wall: {verdict}")
         breaches.append(verdict)
 
-    for label, command in EGRESS_PROBES:
-        probe = sandbox.process.exec(command, timeout=20)
-        if probe.exit_code:
-            print(f"    egress to {EGRESS_PROBE_URL} via {label}: blocked (not on the allow list)")
-        else:
+    for label, handler, via_proxy in PATHS:
+        status = (sandbox.process.exec(_credential_probe(handler), timeout=30).result or "").strip()
+        if status == "200" and not via_proxy:
             verdict = (
-                f"egress to {EGRESS_PROBE_URL} via {label}: REACHABLE, allow list not enforced"
+                f"{LLM_HOST} accepted the value held in the VM on the {label}: it is a real key"
             )
-            print(f"    {verdict}")
+            print(f"    credential wall: {verdict}")
+            breaches.append(verdict)
+        elif status == "200":
+            print(f"    credential wall: {LLM_HOST} via {label}: 200 (key substituted in transit)")
+        else:
+            print(
+                f"    credential wall: {LLM_HOST} via {label}: {status} (placeholder is not a key)"
+            )
+
+    for label, handler, via_proxy in PATHS:
+        probe = sandbox.process.exec(_egress_probe(handler), timeout=20)
+        if probe.exit_code:
+            print(f"    network wall: {EGRESS_PROBE_URL} via {label}: blocked")
+            continue
+        verdict = f"{EGRESS_PROBE_URL} via {label}: REACHABLE, {policy} not enforced"
+        if policy == NETWORK_POLICY_ORGANIZATION and via_proxy and not strict:
+            print(f"    network wall: WARNING {verdict}")
+            print(
+                "        Daytona Tier 1/2 enforces the organization policy on direct connections\n"
+                "        only; its egress proxy is not policed. Pass --strict-walls to fail on this."
+            )
+            warnings.append(verdict)
+        else:
+            print(f"    network wall: {verdict}")
             breaches.append(verdict)
 
     if breaches:
         raise RuntimeError(f"isolation breached in {sandbox.name}: " + "; ".join(breaches))
+    return warnings
 
 
 def sweep_run(daytona: Daytona, run_id: str, created: list[Sandbox]) -> None:
@@ -331,6 +519,18 @@ def main() -> None:
         "--keep", action="store_true", help="do not delete the sandboxes afterwards"
     )
     parser.add_argument("--rebuild", action="store_true", help="rebuild the cognee snapshot")
+    parser.add_argument(
+        "--strict-walls",
+        action="store_true",
+        help="fail on the Tier 1/2 proxy-path egress gap instead of warning about it",
+    )
+    parser.add_argument(
+        "--handover",
+        choices=("auto", HANDOVER_FORK, HANDOVER_COPY),
+        default="auto",
+        help="how memory moves between sandboxes: fork (Linux VM sandboxes only), "
+        "copy (archive out of the parent, into a fresh sandbox), or auto (fork, then copy)",
+    )
     args = parser.parse_args()
 
     if not os.environ.get("DAYTONA_API_KEY"):
@@ -350,16 +550,32 @@ def main() -> None:
     sandboxes: list[Sandbox] = []
     leaked: list[str] = []
     try:
-        supervisor = create_supervisor(daytona, args.payload, run_id)
+        supervisor, policy = create_supervisor(daytona, args.payload, run_id)
         sandboxes.append(supervisor)
         run_phase(supervisor, "brief")
-        check_boundaries(supervisor, placeholder)
+        wall_warnings = check_boundaries(supervisor, placeholder, policy, args.strict_walls)
 
-        worker = fork_into(supervisor, f"cognee-worker-{run_id}", "worker", run_id, sandboxes)
+        worker, mode = handover(
+            daytona,
+            supervisor,
+            f"cognee-worker-{run_id}",
+            "worker",
+            run_id,
+            policy,
+            args.handover,
+            sandboxes,
+        )
         run_phase(worker, "work")
 
-        review = fork_into(
-            worker, f"cognee-review-{run_id}", "supervisor-review", run_id, sandboxes
+        review, mode = handover(
+            daytona,
+            worker,
+            f"cognee-review-{run_id}",
+            "supervisor-review",
+            run_id,
+            policy,
+            mode,
+            sandboxes,
         )
         run_phase(review, "review")
 
@@ -368,7 +584,11 @@ def main() -> None:
         out.mkdir(exist_ok=True)
         (out / "handover_token.json").write_bytes(token or b"")
 
-        print("\nHandover round trip passed across three forked Daytona sandboxes.")
+        print("\nHandover round trip passed across three Daytona sandboxes.")
+        print(f"Handover:     {mode}")
+        print(f"Network wall: {policy}")
+        for warning in wall_warnings:
+            print(f"  WARNING {warning}")
         print(f"Token exchanged via: {out / 'handover_token.json'}")
         print(f"Dataset shared by UUID: {json.loads(token or b'{}').get('dataset_id')}")
     finally:
@@ -381,7 +601,9 @@ def main() -> None:
                 f"labels={{'demo': 'handover', 'run': '{run_id}'}}))]\""
             )
         else:
-            for sandbox in sandboxes:
+            # Children first: a forked parent cannot be deleted while a fork
+            # of it is still alive.
+            for sandbox in reversed(sandboxes):
                 try:
                     daytona.delete(sandbox)
                 except DaytonaError as err:
