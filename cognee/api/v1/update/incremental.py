@@ -82,6 +82,7 @@ from cognee.modules.data.methods import (
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data
 from cognee.modules.data.processing.document_types.Document import Document
+from cognee.modules.engine.utils.temporal_hints import attach_temporal_hints
 from cognee.modules.graph.methods.delete_chunks_incremental import (
     delete_chunks_incremental,
     edge_endpoints,
@@ -923,6 +924,11 @@ async def _write_and_publish(
     # document becomes one oversized extraction step with no intermediate
     # progress and a single all-or-nothing failure.
     batch_size = cognify_config.chunks_per_batch or DEFAULT_CHUNKS_PER_BATCH
+    # Date hints for the fresh chunks, in their order. Computed over the fresh
+    # chunks only: a year stated in a kept chunk earlier in the document does
+    # not reach them yet, and a changed year does not re-date kept chunks that
+    # inferred from it — rebuilding that context is the follow-up to SDK-821.
+    attach_temporal_hints(plan.fresh)
     for start in range(0, len(plan.fresh), batch_size):
         batch = plan.fresh[start : start + batch_size]
         # Match extract_chunks_from_documents: policies plan content, while
