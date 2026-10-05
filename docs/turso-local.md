@@ -55,9 +55,9 @@ Engine-wide settings (`TursoConfig`, env prefix `TURSO_`):
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `TURSO_JOURNAL_MODE` | `wal` | `wal`: SQLite-compatible write-ahead log, one writer at a time. `mvcc`: Turso's concurrent writes (below). |
+| `TURSO_JOURNAL_MODE` | `wal` | `wal`: SQLite-compatible write-ahead log, one writer at a time. `mvcc`: Turso's concurrent writes for the graph and vector stores (below); the relational DB and session cache always stay on `wal`. |
 | `TURSO_BUSY_TIMEOUT_MS` | `120000` | how long a writer waits for the write lock in `wal` mode before `database is locked` |
-| `TURSO_CONFLICT_RETRIES` | `5` | how many times cognee's own write paths re-run a transaction that hit a write conflict |
+| `TURSO_CONFLICT_RETRIES` | `5` | how many times the graph and vector write paths re-run a transaction that hit a write conflict |
 
 ### Runnable example
 
@@ -69,7 +69,8 @@ uv run python examples/guides/turso_local_example.py cleanup   # forget(everythi
 
 The script sets the three providers itself and keeps its files under `.turso_example/` next to it.
 `verify` runs in a new process and answers from the files `ingest` wrote, which is the persistence
-check. `TURSO_JOURNAL_MODE=mvcc` runs the same flow on concurrent writes.
+check. `TURSO_JOURNAL_MODE=mvcc` runs the same flow with the graph and vector stores on concurrent
+writes.
 
 ### Migrating from the previous `turso` provider
 
@@ -77,18 +78,34 @@ Before this version the `turso` provider ran on plain SQLite (`aiosqlite`) for t
 graph layers and on `libsql-experimental` for vectors. Existing local files need no migration: a
 WAL-mode file written by stock SQLite opens on the Turso engine and vice versa (verified both
 ways). The remote replica mode of the old vector and relational adapters is gone; configure a local
-file or another provider.
+file or another provider. Setting `DB_TURSO_URL` / `DB_TURSO_AUTH_TOKEN` is now a hard error, and the
+`turso` extra no longer installs `libsql-experimental`.
+
+A Turso file can also be open in only one process at a time. The old aiosqlite-based relational
+and graph providers allowed several processes on one file, so a deployment that ran the API server
+next to a separate SDK/CLI process, or several server workers, on the same files breaks on upgrade.
 
 ## Transactions and concurrent writes
 
 `wal` mode is SQLite's behaviour: writers take one lock, others wait up to `TURSO_BUSY_TIMEOUT_MS`
 and then fail with `database is locked`. Files stay readable by stock SQLite.
 
-`mvcc` mode (`PRAGMA journal_mode=mvcc`, applied on every connection) makes cognee open write
-transactions with `BEGIN CONCURRENT`. Independent connections commit in parallel; only two
-transactions that write the **same row** conflict, and the engine reports that eagerly, at the
-statement, as `Write-write conflict`, aborting the later transaction. cognee's adapters re-run the
-whole transaction (`retry_on_conflict`, jittered backoff, `TURSO_CONFLICT_RETRIES` attempts).
+`mvcc` mode (`PRAGMA journal_mode=mvcc`, applied on every connection) makes the **graph and
+vector** adapters open write transactions with `BEGIN CONCURRENT`. Independent connections commit
+in parallel; only two transactions that write the **same row** conflict, and the engine reports
+that eagerly, at the statement, as `Write-write conflict`, aborting the later transaction. Every
+graph and vector write is one self-contained transaction, which the adapters re-run
+(`retry_on_conflict`, jittered backoff, `TURSO_CONFLICT_RETRIES` attempts).
+
+The **relational DB and the session cache ignore `mvcc` and always run in `wal`**
+(`TursoConfig.wal_only()`). Their writes go through ORM sessions whose callers run arbitrary code
+between statements, so a conflicted transaction cannot be replayed: under `mvcc` the second of two
+writers to one row (pipeline status, dataset rows, the session-context upsert) would fail and its
+write would be lost. Under `wal` it waits on `busy_timeout` and succeeds. The price is write
+throughput under heavy concurrency: in a local benchmark of concurrent session-cache writes in one
+process, `wal` fell from about 1,200 to about 150 writes/s at 64 writers, while `mvcc` held about
+1,200 on distinct rows but, without retries, lost most same-row writes.
+
 Constraints of the mode:
 
 - DDL needs a plain `BEGIN` ("DDL statements require an exclusive transaction"); cognee runs schema
@@ -96,14 +113,15 @@ Constraints of the mode:
 - The database file gains a `-log` companion and is no longer readable by stock `sqlite3`
   (cognee's dataset cleanup removes `-wal`, `-shm` and `-log`). Switching a file back to `wal`
   restores SQLite compatibility. Migration `c3d5e7f9a1b2`, which heals a standalone `cache.db`,
-  opens a Turso cache through pyturso for this reason.
+  opens a Turso cache through pyturso, so it also handles a cache file left in `mvcc` mode.
 - Plain `BEGIN` writers still serialize with `database is locked`, so mixing tools that do not use
   `BEGIN CONCURRENT` gains nothing.
 - MVCC is experimental upstream. The default stays `wal`.
 
 Measured in `cognee/tests/e2e/turso/test_concurrent_writes.py` (both modes): 6 writers on
 independent connections, 40 rows each, through the graph adapter, the vector adapter and raw
-threads; a forced same-row conflict; retry recovery; and a reopen after the writes.
+threads; a forced same-row conflict; retry recovery; and a reopen after the writes. The relational
+adapter's tests pin that two same-row writers both commit with `TURSO_JOURNAL_MODE=mvcc` set.
 
 ## Test commands
 
@@ -119,10 +137,16 @@ pytest cognee/tests/unit/infrastructure/databases/turso_backend \
        cognee/tests/e2e/turso/test_turso_adapter.py \
        cognee/tests/e2e/turso/test_concurrent_writes.py
 
+# The same adapter tests on concurrent writes (CI runs both modes)
+TURSO_JOURNAL_MODE=mvcc pytest <the paths above>
+
 # Full search suite with every layer on Turso (needs LLM + embedding keys)
 DB_PROVIDER=turso GRAPH_DATABASE_PROVIDER=turso VECTOR_DB_PROVIDER=turso CACHE_BACKEND=turso \
   pytest cognee/tests/test_search_db.py -v
 ```
+
+Coverage: the adapter tests run in both `wal` and `mvcc` in CI. The end-to-end search suites run
+in `wal` only, so `mvcc` is not covered end to end.
 
 Every Turso test asserts `SELECT turso_version()` (or the `cognee_turso` driver name), so a test
 that silently ran on SQLite would fail.
@@ -141,12 +165,15 @@ that silently ran on SQLite would fail.
 | `VACUUM` requires an experimental engine flag | none (cognee never runs `VACUUM`) | – |
 | MVCC files are unreadable by stock SQLite | external tooling on a live `mvcc` database | switch the file to `wal` first |
 | One synchronous connection used from two threads at once aborts the process (Rust panic) | the vector adapter shares one connection | every call runs under `_connection_lock`; keep it that way |
+| A database file can be open in one process at a time: a second process fails with `Locking error: Failed locking file ... File is locked by another process` (both journal modes) | the API server and a separate SDK/CLI process, or several server workers, cannot share one Turso deployment; the stock SQLite backends allow this | run one cognee process per set of Turso files (the server's default `gunicorn -w 1` is fine) |
 
 ## Upstream findings
 
-Each finding is filed upstream with a minimal reproduction and linked from SDK-664. When a
-finding is fixed in a released `pyturso`, the matching workaround (noted in the table above) can
-be retired.
+Each finding has a minimal reproduction in `cognee/tests/e2e/turso/turso_compat_repros.py`
+(`python cognee/tests/e2e/turso/turso_compat_repros.py` prints one line per finding: still present
+or fixed in the installed `pyturso`). They are still to be filed upstream and linked from SDK-664.
+When a finding is fixed in a released `pyturso`, the matching workaround (noted in the table above)
+can be retired.
 
 1. `sqlite+aioturso` dialect fails on SQLAlchemy 2.0.4x+: `'AsyncAdapt_turso_dbapi' object has no
    attribute 'has_stop'`. cognee's dialect sets it.
@@ -156,8 +183,9 @@ be retired.
    dialect restores stock SQLite reflection. Fixed upstream in the 0.8.0 release candidates.
 3. Scalar subquery in `ON CONFLICT DO UPDATE SET`: `Parse error: Subquery is not supported in this
    position` (0.7.2 and 0.8.0rc11).
-4. Bind parameter inside a nested `json_each(?)` subquery: `bind index 1 is out of bounds` (0.7.2),
-   `'json_each' is not a function` (0.8.0rc11).
+4. Bind parameter inside a nested `json_each(?)` subquery is misapplied: on 0.7.2 the tag-removal
+   `UPDATE` runs without error but changes no rows (stock SQLite strips the tag), and earlier shapes
+   failed with `bind index 1 is out of bounds`; 0.8.0rc11 reports `'json_each' is not a function`.
 5. `WITH RECURSIVE`: `Recursive CTEs are not yet supported` (0.7.2); 0.8.0rc11 accepts the syntax
    but aborts the process (`Fatal Python error: Abort`) on cognee's neighborhood query.
 6. Quoted identifiers lowercased in `sqlite_master` (stock SQLite preserves case).

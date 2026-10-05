@@ -7,10 +7,9 @@ the Turso rewrite through ``turso.aio`` via cognee's ``sqlite+cognee_turso://``
 dialect (:mod:`cognee.infrastructure.databases.turso.dialect`) instead of
 ``aiosqlite``.
 
-Journal mode and timeouts come from :class:`TursoConfig` (``TURSO_*`` env vars).
-In ``mvcc`` mode ordinary transactions run as ``BEGIN CONCURRENT`` and the schema
-operations below run inside :func:`exclusive_transaction`, since DDL needs a plain
-``BEGIN`` under MVCC.
+Timeouts come from :class:`TursoConfig` (``TURSO_*`` env vars), but the journal
+mode is always ``wal``, whatever ``TURSO_JOURNAL_MODE`` says: ORM sessions cannot
+be re-run after an ``mvcc`` write-write conflict (see :meth:`TursoConfig.wal_only`).
 
 Only local files are supported. Remote Turso databases (``DB_TURSO_URL``) are
 rejected by ``create_relational_engine`` in this version.
@@ -19,7 +18,6 @@ rejected by ``create_relational_engine`` in this version.
 from cognee.infrastructure.databases.turso import (
     configure_engine,
     connect_args_for_mode,
-    exclusive_transaction,
     get_turso_config,
     remove_database_files,
     turso_url,
@@ -40,7 +38,7 @@ class TursoAdapter(SQLAlchemyAdapter):
         connect_args: dict | None = None,
         pool_args: dict | None = None,
     ):
-        self.turso_config = get_turso_config()
+        self.turso_config = get_turso_config().wal_only()
         connect_args = {**(connect_args or {}), **connect_args_for_mode(self.turso_config)}
         # The base adapter's sqlite branch builds the async engine and the
         # sessionmaker and calls _configure_sqlite_engine (below) for the
@@ -49,26 +47,10 @@ class TursoAdapter(SQLAlchemyAdapter):
 
     def _configure_sqlite_engine(self) -> None:
         # The one Turso engine policy, shared with the graph and cache engines:
-        # journal mode + timeouts on every connection, BEGIN CONCURRENT in mvcc.
+        # journal mode + timeouts on every connection. The config is pinned to
+        # wal, so no BEGIN CONCURRENT hook is installed and DDL needs no
+        # exclusive_transaction().
         configure_engine(self.engine, config=self.turso_config)
-
-    # DDL must run in an exclusive transaction under MVCC; a no-op in WAL mode.
-
-    async def create_database(self, *args, **kwargs):
-        async with exclusive_transaction():
-            return await super().create_database(*args, **kwargs)
-
-    async def create_table(self, *args, **kwargs):
-        async with exclusive_transaction():
-            return await super().create_table(*args, **kwargs)
-
-    async def delete_table(self, *args, **kwargs):
-        async with exclusive_transaction():
-            return await super().delete_table(*args, **kwargs)
-
-    async def drop_tables(self, *args, **kwargs):
-        async with exclusive_transaction():
-            return await super().drop_tables(*args, **kwargs)
 
     async def delete_database(self):
         """Remove the database file and the engine's companion files.

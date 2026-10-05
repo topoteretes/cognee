@@ -13,6 +13,7 @@ import pytest_asyncio
 try:
     import turso
 
+    from cognee.infrastructure.databases.turso import get_turso_config
     from cognee.infrastructure.databases.vector.turso.TursoVectorAdapter import (
         TursoVectorAdapter,
     )
@@ -229,8 +230,20 @@ async def test_batch_search(adapter):
 
 
 @pytest.mark.asyncio
-async def test_prune_drops_all_collections(adapter):
-    await adapter.create_data_points("DocumentChunk_text", _docs())
-    await adapter.prune()
-    assert await adapter.has_collection("DocumentChunk_text") is False
-    assert await adapter.get_table_names() == []
+@pytest.mark.parametrize("journal_mode", ["wal", "mvcc"])
+async def test_prune_drops_all_collections(tmp_path, monkeypatch, journal_mode):
+    # In mvcc the engine keeps its own __turso_internal_* table in sqlite_master;
+    # prune must skip it rather than fail with "Cannot drop system table".
+    monkeypatch.setenv("TURSO_JOURNAL_MODE", journal_mode)
+    get_turso_config.cache_clear()
+    instance = TursoVectorAdapter(
+        url=str(tmp_path / "turso_test.db"), api_key=None, embedding_engine=_FakeEmbeddingEngine()
+    )
+    try:
+        await instance.create_data_points("DocumentChunk_text", _docs())
+        await instance.prune()
+        assert await instance.has_collection("DocumentChunk_text") is False
+        assert await instance.get_table_names() == []
+    finally:
+        await instance.close()
+        get_turso_config.cache_clear()

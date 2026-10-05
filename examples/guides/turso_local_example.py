@@ -15,7 +15,8 @@ Requires: ``pip install cognee"[turso]"`` and an LLM key (``LLM_API_KEY``). The 
 providers and ``CACHE_BACKEND`` are forced to ``turso`` by this script (overriding ``.env``), so no ``.env``
 changes are needed; the database files live under ``TURSO_EXAMPLE_ROOT`` (default:
 ``.turso_example`` next to this file).
-Set ``TURSO_JOURNAL_MODE=mvcc`` to run the same flow with Turso's concurrent writes.
+Set ``TURSO_JOURNAL_MODE=mvcc`` to run the graph and vector stores on Turso's concurrent
+writes (the relational DB and the session cache always stay on ``wal``).
 """
 
 import asyncio

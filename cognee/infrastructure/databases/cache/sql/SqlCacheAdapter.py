@@ -144,13 +144,14 @@ class SqlCacheAdapter(CacheDBInterface):
 
             is_sqlite = url.get_backend_name() == "sqlite"
             # Turso uses the sqlite dialect through cognee's own driver; it needs its
-            # journal-mode PRAGMAs, connect args and (in mvcc mode) transaction hook.
+            # PRAGMAs and connect args. The journal mode is pinned to wal: a cache
+            # write that hit an mvcc write-write conflict would be lost, not retried.
             is_turso = url.get_driver_name() == "cognee_turso"
             turso_config = None
             if is_turso:
                 from cognee.infrastructure.databases.turso import get_turso_config
 
-                turso_config = get_turso_config()
+                turso_config = get_turso_config().wal_only()
 
             relational_config = get_relational_config()
             pool_args: dict = (
@@ -219,13 +220,7 @@ class SqlCacheAdapter(CacheDBInterface):
             if self._initialized:
                 return
             try:
-                # DDL needs an exclusive transaction on Turso in mvcc mode; the
-                # context is a no-op for every other engine.
-                from cognee.infrastructure.databases.turso.transactions import (
-                    exclusive_transaction,
-                )
-
-                async with exclusive_transaction(), self.engine.begin() as connection:
+                async with self.engine.begin() as connection:
                     await connection.run_sync(cache_metadata.create_all, checkfirst=True)
             except Exception as error:
                 error_msg = f"Failed to connect to SQL cache database: {error}"

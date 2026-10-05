@@ -196,6 +196,25 @@ jobs:
           cognee/tests/e2e/turso/test_turso_adapter.py
           cognee/tests/e2e/turso/test_concurrent_writes.py
 
+      # The same adapter tests with TURSO_JOURNAL_MODE=mvcc: graph and vector writes
+      # run as BEGIN CONCURRENT, the relational DB and cache must stay on wal. The
+      # search suites below run in wal only, so mvcc is not covered end to end.
+      - name: Run Turso adapter tests in mvcc mode
+        env:
+          ENV: 'dev'
+          TURSO_JOURNAL_MODE: mvcc
+        run: >-
+          uv run pytest -v
+          cognee/tests/unit/infrastructure/databases/turso_backend
+          cognee/tests/unit/infrastructure/databases/relational/test_turso_adapter.py
+          cognee/tests/unit/infrastructure/databases/relational/test_create_relational_engine.py
+          cognee/tests/unit/infrastructure/databases/graph/test_turso_graph_dataset_database_handler.py
+          cognee/tests/unit/infrastructure/databases/vector/test_turso_adapter.py
+          cognee/tests/unit/infrastructure/databases/cache/test_sql_cache_turso.py
+          cognee/tests/unit/infrastructure/databases/cache/test_sql_adapter_crud.py
+          cognee/tests/e2e/turso/test_turso_adapter.py
+          cognee/tests/e2e/turso/test_concurrent_writes.py
+
       # Full search-type e2e suite, run against Turso via VECTOR_DB_PROVIDER.
       - name: Run Turso search tests
         env:

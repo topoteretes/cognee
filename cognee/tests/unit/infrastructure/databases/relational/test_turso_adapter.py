@@ -52,9 +52,10 @@ class TestLocalMode:
 
         version, pragmas = _run(probe())
         assert version, "turso_version() returned nothing — not running on the Turso engine"
-        # Every connection PRAGMA of the shared Turso engine policy is in effect.
+        # Every connection PRAGMA of the shared Turso engine policy is in effect;
+        # the relational engine is pinned to wal whatever TURSO_JOURNAL_MODE says.
         config = get_turso_config()
-        assert pragmas["journal_mode"] == config.turso_journal_mode
+        assert pragmas["journal_mode"] == "wal"
         assert pragmas["synchronous"] in (1, "1", "NORMAL", "normal")
         assert int(pragmas["busy_timeout"]) == config.turso_busy_timeout_ms
         assert importlib.metadata.version("pyturso")
@@ -72,6 +73,47 @@ class TestLocalMode:
             return rows
 
         assert _run(roundtrip()) == [("hello",)]
+
+    @pytest.mark.parametrize("journal_mode", ["wal", "mvcc"])
+    def test_same_row_writers_wait_instead_of_conflicting(
+        self, tmp_path, monkeypatch, journal_mode
+    ):
+        """Two sessions updating one row both commit, also with TURSO_JOURNAL_MODE=mvcc.
+
+        ORM sessions are never retried, so under BEGIN CONCURRENT the second writer
+        would fail with ``Write-write conflict`` and its update would be lost. The
+        relational engine stays in wal, where it waits on ``busy_timeout``.
+        """
+        monkeypatch.setenv("TURSO_JOURNAL_MODE", journal_mode)
+        get_turso_config.cache_clear()
+        adapter = _make_adapter(tmp_path)
+
+        async def race():
+            async with adapter.engine.begin() as connection:
+                await connection.execute(text("CREATE TABLE t (id INTEGER PRIMARY KEY, n INT)"))
+                await connection.execute(text("INSERT INTO t VALUES (1, 0)"))
+            first_wrote = asyncio.Event()
+
+            async def increment(first: bool):
+                if not first:
+                    await first_wrote.wait()
+                async with adapter.get_async_session() as session:
+                    await session.execute(text("UPDATE t SET n = n + 1 WHERE id = 1"))
+                    if first:
+                        first_wrote.set()
+                        await asyncio.sleep(0.2)  # hold the write open across the second
+                    await session.commit()
+
+            await asyncio.gather(increment(True), increment(False))
+            async with adapter.engine.connect() as connection:
+                total = (await connection.execute(text("SELECT n FROM t"))).scalar()
+            await adapter.engine.dispose()
+            return total
+
+        try:
+            assert _run(race()) == 2
+        finally:
+            get_turso_config.cache_clear()
 
     def test_data_persists_across_reopen(self, tmp_path):
         """A second adapter on the same file sees the committed rows (restart semantics)."""

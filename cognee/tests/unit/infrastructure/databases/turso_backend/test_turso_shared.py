@@ -10,6 +10,7 @@ import asyncio
 import pytest
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -36,9 +37,17 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+@pytest.fixture
+def no_turso_env(monkeypatch):
+    """Keep TURSO_* from the environment (e.g. a CI mvcc pass) out of explicit configs."""
+    for name in ("TURSO_JOURNAL_MODE", "TURSO_BUSY_TIMEOUT_MS", "TURSO_CONFLICT_RETRIES"):
+        monkeypatch.delenv(name, raising=False)
+
+
 # --------------------------------------------------------------------------- #
 # Config
 # --------------------------------------------------------------------------- #
+@pytest.mark.usefixtures("no_turso_env")
 class TestTursoConfig:
     def test_defaults_are_wal(self):
         config = TursoConfig(_env_file=None)
@@ -62,10 +71,19 @@ class TestTursoConfig:
         with pytest.raises(ValueError):
             TursoConfig(_env_file=None, turso_conflict_retries=-1)
 
+    def test_wal_only_pins_journal_mode_and_keeps_other_knobs(self):
+        mvcc = TursoConfig(_env_file=None, turso_journal_mode="mvcc", turso_busy_timeout_ms=10)
+        pinned = mvcc.wal_only()
+        assert pinned.turso_journal_mode == "wal"
+        assert pinned.concurrent_writes is False
+        assert pinned.turso_busy_timeout_ms == 10
+        assert mvcc.concurrent_writes is True  # the source config is untouched
+
 
 # --------------------------------------------------------------------------- #
 # Transaction helpers
 # --------------------------------------------------------------------------- #
+@pytest.mark.usefixtures("no_turso_env")
 class TestTransactionHelpers:
     def test_connect_pragmas_follow_config(self):
         wal = TursoConfig(_env_file=None)
@@ -117,6 +135,19 @@ class TestTransactionHelpers:
     def test_is_retryable_conflict_rejects_deterministic_errors(self, message):
         """A generic 'conflict' substring is not enough: these must fail immediately."""
         assert not is_retryable_conflict(RuntimeError(message))
+
+    def test_is_retryable_conflict_reads_the_driver_error_not_the_statement(self):
+        """SQLAlchemy's str() includes SQL and params; user text must not trigger a retry."""
+        constraint = DBAPIError(
+            "INSERT INTO t (v) VALUES (?)",
+            ("chunk text: the database is locked again",),
+            RuntimeError("UNIQUE constraint failed: t.v"),
+        )
+        assert "database is locked" in str(constraint).lower()
+        assert not is_retryable_conflict(constraint)
+
+        conflict = DBAPIError("UPDATE t SET v = ?", ("x",), RuntimeError("Write-write conflict"))
+        assert is_retryable_conflict(conflict)
 
     def test_retry_on_conflict_retries_then_succeeds(self):
         calls = {"n": 0}
@@ -180,7 +211,8 @@ class TestDialect:
                 connect_args={"timeout": 120, "check_same_thread": False},
             )
             configure_engine(engine, foreign_keys=True)
-            async with engine.begin() as connection:
+            # DDL under mvcc (TURSO_JOURNAL_MODE) needs a plain BEGIN; a no-op in wal.
+            async with exclusive_transaction(), engine.begin() as connection:
                 await connection.execute(
                     text("CREATE TABLE parent (id TEXT PRIMARY KEY, name TEXT UNIQUE)")
                 )
@@ -221,15 +253,23 @@ class TestDialect:
         This is the shape joined-table inheritance produces (cognee's ``Tenant`` /
         ``User`` are ``Principal`` subclasses), so ``get_user`` depends on it.
         """
-        from sqlalchemy import Column, Integer, MetaData, String, Table, select
+        from sqlalchemy import Column, ForeignKey, Integer, MetaData, String, Table, select
 
         metadata = MetaData()
         principals = Table("p", metadata, Column("id", Integer, primary_key=True))
         tenants = Table(
-            "tn", metadata, Column("id", Integer, primary_key=True), Column("name", String)
+            "tn",
+            metadata,
+            Column("id", Integer, ForeignKey("p.id"), primary_key=True),
+            Column("name", String),
         )
         users = Table("us", metadata, Column("id", Integer, primary_key=True))
-        links = Table("lk", metadata, Column("u_id", Integer), Column("t_id", Integer))
+        links = Table(
+            "lk",
+            metadata,
+            Column("u_id", Integer, ForeignKey("us.id")),
+            Column("t_id", Integer, ForeignKey("tn.id")),
+        )
 
         async def probe():
             engine = create_async_engine(turso_url(str(tmp_path / "j.db")), poolclass=NullPool)
@@ -275,18 +315,26 @@ class TestDialect:
         ``users LEFT OUTER JOIN (links JOIN (p JOIN t))``: a user with no link yields
         NULLs (identical to the nested form); a link to a ``t`` row whose inheritance
         parent ``p`` is missing (broken integrity) yields the link/``t`` columns with
-        NULL ``p`` columns where the nested form would yield all NULLs — the ORM drops
-        such rows because the entity primary key is NULL.
+        NULL ``p`` columns where the nested form would yield all NULLs. The foreign keys
+        are declared (that is what lets the compiler flatten), the data breaks one.
         """
-        from sqlalchemy import Column, Integer, MetaData, String, Table, select
+        from sqlalchemy import Column, ForeignKey, Integer, MetaData, String, Table, select
 
         metadata = MetaData()
         principals = Table("p", metadata, Column("id", Integer, primary_key=True))
         tenants = Table(
-            "tn", metadata, Column("id", Integer, primary_key=True), Column("name", String)
+            "tn",
+            metadata,
+            Column("id", Integer, ForeignKey("p.id"), primary_key=True),
+            Column("name", String),
         )
         users = Table("us", metadata, Column("id", Integer, primary_key=True))
-        links = Table("lk", metadata, Column("u_id", Integer), Column("t_id", Integer))
+        links = Table(
+            "lk",
+            metadata,
+            Column("u_id", Integer, ForeignKey("us.id")),
+            Column("t_id", Integer, ForeignKey("tn.id")),
+        )
 
         async def probe():
             engine = create_async_engine(turso_url(str(tmp_path / "j2.db")), poolclass=NullPool)
@@ -319,6 +367,101 @@ class TestDialect:
         assert rows[1] == (5, None, "orphan")  # divergence: nested form gives (5, None, None)
         assert rows[2] == (9, None, None)  # no link at all: NULLs, identical to nested form
 
+    def test_outer_group_steps_must_be_total(self, tmp_path):
+        """A later step of an outer-joined group must follow a foreign key, nothing else.
+
+        Each unsafe shape runs nested on stdlib sqlite3, where a principal never comes
+        back without its users row; a flattened chain would return principal 2 or 3
+        with NULL users columns, so the Turso compiler must raise. The data is fully
+        consistent: principal 2 is a tenant, so it has no users row.
+        """
+        import sqlite3
+
+        from sqlalchemy import Column, ForeignKey, Integer, MetaData, Table, and_, select
+        from sqlalchemy.dialects import sqlite as sqlite_dialect
+        from sqlalchemy.exc import CompileError
+
+        metadata = MetaData()
+        a = Table(
+            "a",
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("pid", Integer, ForeignKey("principals.id")),
+            Column("uid", Integer, ForeignKey("users.id")),
+        )
+        principals = Table("principals", metadata, Column("id", Integer, primary_key=True))
+        users = Table(
+            "users",
+            metadata,
+            Column("id", Integer, ForeignKey("principals.id"), primary_key=True),
+            Column("active", Integer),
+        )
+        inheritance_on = principals.c.id == users.c.id
+        stock_db = sqlite3.connect(":memory:")
+        stock_db.executescript(
+            "CREATE TABLE a (id INT, pid INT, uid INT);"
+            "CREATE TABLE principals (id INT); CREATE TABLE users (id INT, active INT);"
+            "INSERT INTO a VALUES (10, 1, 1), (20, 2, NULL), (30, 3, 3);"
+            "INSERT INTO principals VALUES (1), (2), (3);"
+            "INSERT INTO users VALUES (1, 1), (3, 0);"
+        )
+        engine = create_async_engine(turso_url(str(tmp_path / "j4.db")), poolclass=NullPool)
+
+        def statement(join):
+            columns = (a.c.id, principals.c.id, users.c.id)
+            return select(*columns).select_from(join).order_by(a.c.id)
+
+        def stock_sql(stmt):
+            literal = {"literal_binds": True}
+            return str(stmt.compile(dialect=sqlite_dialect.dialect(), compile_kwargs=literal))
+
+        unsafe = {
+            # outer ON names the base table only: principals then users is not total
+            "base only": a.outerjoin(
+                principals.join(users, inheritance_on), a.c.pid == principals.c.id
+            ),
+            # outer ON filters the subclass table
+            "outer filter": a.outerjoin(
+                principals.join(users, inheritance_on),
+                and_(a.c.pid == principals.c.id, users.c.active == 1),
+            ),
+            # the group's own ON filters the subclass table, entered through the base
+            "inner filter": a.outerjoin(
+                principals.join(users, and_(inheritance_on, users.c.active == 1)),
+                a.c.pid == principals.c.id,
+            ),
+        }
+        stock_rows = {
+            name: stock_db.execute(stock_sql(statement(join))).fetchall()
+            for name, join in unsafe.items()
+        }
+        # The nested form never reports a principal without its users row.
+        assert all(
+            row[1] is None or row[2] is not None for rows in stock_rows.values() for row in rows
+        )
+        for name, join in unsafe.items():
+            with pytest.raises(CompileError, match="foreign-key equality"):
+                str(statement(join).compile(engine.sync_engine))
+
+        # Safe: the outer ON names the subclass, so users comes first (a filter on
+        # it lands on that first step) and principals follows users.id ->
+        # principals.id. The flattened SQL returns the nested form's rows.
+        safe = {
+            "subclass": a.outerjoin(principals.join(users, inheritance_on), a.c.uid == users.c.id),
+            "subclass filtered": a.outerjoin(
+                principals.join(users, and_(inheritance_on, users.c.active == 1)),
+                a.c.uid == users.c.id,
+            ),
+        }
+        for name, join in safe.items():
+            flat_sql = str(
+                statement(join).compile(engine.sync_engine, compile_kwargs={"literal_binds": True})
+            )
+            assert "JOIN (" not in flat_sql, flat_sql
+            stock = stock_db.execute(stock_sql(statement(join))).fetchall()
+            assert stock_db.execute(flat_sql).fetchall() == stock, name
+        _run(engine.dispose())
+
     def test_unverified_join_shapes_fail_to_compile(self, tmp_path):
         """Shapes the flattening has not been verified for raise instead of changing results."""
         from sqlalchemy import Column, Integer, MetaData, Table, select
@@ -349,7 +492,7 @@ class TestDialect:
             second = create_async_engine(url, poolclass=NullPool)
             configure_engine(first)
             configure_engine(second)
-            async with first.begin() as connection:
+            async with exclusive_transaction(), first.begin() as connection:
                 await connection.execute(text("CREATE TABLE t (v TEXT)"))
                 await connection.execute(text("INSERT INTO t VALUES ('a')"))
             async with second.connect() as connection:

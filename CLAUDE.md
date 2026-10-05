@@ -400,9 +400,12 @@ layers — run on the Turso rewrite engine (`pyturso`, `pip install cognee"[turs
 `sqlite+cognee_turso://` (`cognee/infrastructure/databases/turso/`). Local database files only:
 remote Turso settings (`DB_TURSO_URL`, `GRAPH_DATABASE_KEY`, a `libsql://` vector URL) are a hard
 error. Shared knobs (`TursoConfig`, env prefix `TURSO_`): `TURSO_JOURNAL_MODE=wal|mvcc` (default
-`wal`; `mvcc` turns writes into `BEGIN CONCURRENT` transactions that commit in parallel and are
-retried on `Write-write conflict`, at the cost of files that stock SQLite can no longer read),
-`TURSO_BUSY_TIMEOUT_MS`, `TURSO_CONFLICT_RETRIES`. Engine limits that shaped the adapters (no
+`wal`; `mvcc` turns graph and vector writes into `BEGIN CONCURRENT` transactions that commit in
+parallel and are retried on `Write-write conflict`, at the cost of files that stock SQLite can no
+longer read; the relational DB and session cache always stay on `wal`, because their transactions
+cannot be retried), `TURSO_BUSY_TIMEOUT_MS`, `TURSO_CONFLICT_RETRIES`. A Turso database file can be
+open in only one process at a time (pyturso 0.7.x), so the API server and a separate SDK/CLI process
+cannot share one Turso deployment. Engine limits that shaped the adapters (no
 recursive CTEs, no parenthesized joins in a FROM clause — the dialect's compiler flattens them —
 no scalar subquery in an upsert `SET`, primitive-only bind parameters, no approximate vector
 index) are listed with reproductions in `docs/turso-local.md`; setup and a runnable

@@ -30,7 +30,9 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def test_cache_runs_on_the_turso_engine_in_the_configured_mode(tmp_path, journal_mode):
+def test_cache_runs_on_the_turso_engine_in_wal_whatever_the_mode(tmp_path, journal_mode):
+    """TURSO_JOURNAL_MODE=mvcc is for graph/vector: a cache write that hit a
+    write-write conflict would be lost, so the cache engine stays in wal."""
     adapter = SqlCacheAdapter(turso_url(f"{tmp_path}/cache.db"))
     assert adapter.engine.dialect.driver == "cognee_turso"
 
@@ -46,7 +48,7 @@ def test_cache_runs_on_the_turso_engine_in_the_configured_mode(tmp_path, journal
     entries, version, mode = _run(probe())
     assert [entry.qa_id for entry in entries] == ["id1"]
     assert version  # only the Turso rewrite defines turso_version()
-    assert mode == journal_mode
+    assert mode == "wal"
 
 
 def test_cache_persists_across_reopen(tmp_path, journal_mode):

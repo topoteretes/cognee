@@ -144,11 +144,13 @@ async def exclusive_transaction() -> AsyncIterator[None]:
 def is_retryable_conflict(error: BaseException) -> bool:
     """True for the engine errors that a fresh attempt of the same transaction may clear.
 
-    Matches the engine's exact contention messages (SQLAlchemy wraps the driver
-    error, so the check runs on the message text). Deterministic failures such as
+    Matches the engine's exact contention messages. A SQLAlchemy ``DBAPIError``
+    is unwrapped to the driver error first: its own ``str()`` appends the SQL and
+    the bound parameters, so user text containing "database is locked" would make
+    a constraint failure look retryable. Deterministic failures such as
     constraint violations or misconfigured transaction modes are never retried.
     """
-    message = str(error).lower()
+    message = str(getattr(error, "orig", None) or error).lower()
     return any(known in message for known in _RETRYABLE_MESSAGES)
 
 

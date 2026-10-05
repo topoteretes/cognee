@@ -20,7 +20,9 @@ class TursoConfig(BaseSettings):
         when two transactions write the same row (``Write-write conflict``), in
         which case cognee's own write paths retry. The database file gains a
         ``-log`` companion and is no longer readable by stock SQLite. Experimental
-        upstream; opt in per deployment.
+        upstream; opt in per deployment. Applies to the graph and vector stores
+        only: the relational and session-cache engines always run in ``wal``
+        (see :meth:`wal_only`).
     """
 
     turso_journal_mode: str = "wal"
@@ -46,6 +48,17 @@ class TursoConfig(BaseSettings):
     @property
     def concurrent_writes(self) -> bool:
         return self.turso_journal_mode == "mvcc"
+
+    def wal_only(self) -> "TursoConfig":
+        """This config with the journal mode pinned to ``wal``.
+
+        For engines whose write transactions cannot be re-run on a conflict: the
+        relational and session-cache engines serve ``get_async_session()`` callers
+        that run arbitrary code between statements, so an ``mvcc`` write-write
+        conflict there would be a lost write, not a retry. Under ``wal`` the same
+        collision waits on ``busy_timeout`` instead.
+        """
+        return self.model_copy(update={"turso_journal_mode": "wal"})
 
 
 @lru_cache

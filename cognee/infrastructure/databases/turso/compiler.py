@@ -17,23 +17,34 @@ This compiler renders such a tree as a left-deep chain instead::
 
 Every table of the tree is joined in left-to-right order, and each ON clause
 receives the predicates whose tables are all available at that point. For inner
-joins this is exact (a conjunction over the same cross product). A table that
-arrives through an OUTER join keeps the outer join type, so
-``a LEFT OUTER JOIN (b JOIN c ON bc) ON ab`` becomes
-``a LEFT OUTER JOIN b ON ab LEFT OUTER JOIN c ON bc``, which is equivalent whenever
-the inner join is total (every ``b`` has its ``c``), the case for joined-table
-inheritance and for association tables under foreign-key integrity. If a ``b`` row
-has no ``c`` (broken integrity), the original yields NULLs for both and the flattened
-form yields ``b`` with NULL ``c`` columns; the ORM drops such rows because the
-entity's primary key is NULL, so loaded collections are unaffected.
+joins this is exact (a conjunction over the same cross product).
 
-Only the shapes verified against cognee's ORM are rewritten; anything else raises
+A table that arrives through an OUTER join keeps the outer join type, so
+``a LEFT OUTER JOIN (b JOIN c ON bc) ON ab`` becomes
+``a LEFT OUTER JOIN b ON ab LEFT OUTER JOIN c ON bc``. That is equivalent only when
+the step to ``c`` is *total*: every ``b`` row that matched has its ``c`` row, so the
+second step can never leave ``b`` matched with ``c`` NULL where the original would
+have dropped both. The compiler proves totality from the schema: every table after
+the first in an outer-joined group must be reached by an equality
+``b.col = c.col`` where ``b.col`` carries a foreign key to ``c.col``, and must
+receive no other predicate. Joined-table inheritance satisfies this in one direction
+only: ``users.id`` references ``principals.id``, so ``users`` then ``principals`` is
+total, while ``principals`` then ``users`` is not (a tenant's principal has no
+``users`` row). The step order follows the predicates (see ``pick_next``), so an
+outer ON that names the subclass table puts it first. If the data breaks a declared
+foreign key, the flattened form yields ``b`` with NULL ``c`` columns where the
+original yields NULLs for both.
+
+Only shapes the compiler can prove equivalent are rewritten; anything else raises
 ``CompileError`` instead of silently changing results:
 
 * a nested group may contain inner joins only (the outer edge, if any, is the
-  top-level join that introduces the group);
+  join that introduces the group);
 * every OUTER step must receive at least one predicate — an unconstrained
-  ``LEFT OUTER JOIN ... ON 1 = 1`` would multiply rows.
+  ``LEFT OUTER JOIN ... ON 1 = 1`` would multiply rows;
+* every OUTER step after the first of its group must be total, as above. A filter
+  (``u.active = 1``) or a predicate naming a table outside the group landing on
+  such a step would turn "no match" into "half a match".
 
 FULL OUTER joins are left to the stock renderer (SQLite has none).
 """
@@ -44,9 +55,9 @@ import itertools
 from typing import Any
 
 from sqlalchemy.dialects.sqlite.base import SQLiteCompiler
-from sqlalchemy.exc import CompileError
+from sqlalchemy.exc import CompileError, NoReferenceError
 from sqlalchemy.sql import operators
-from sqlalchemy.sql.elements import BooleanClauseList, ClauseElement
+from sqlalchemy.sql.elements import BinaryExpression, BooleanClauseList, ClauseElement
 from sqlalchemy.sql.selectable import FromGrouping, Join
 
 
@@ -65,6 +76,42 @@ def _predicates(onclause: ClauseElement | None) -> list[ClauseElement]:
     return [onclause]
 
 
+def _column_references(column, target) -> bool:
+    """True when ``column`` carries a foreign key to ``target`` (aliases resolved)."""
+    for foreign_key in getattr(column, "foreign_keys", ()):
+        try:
+            referenced = foreign_key.column
+        except NoReferenceError:  # FK target not in this MetaData: no proof of totality
+            continue
+        if referenced in getattr(target, "proxy_set", ()):
+            return True
+    return False
+
+
+def _total_step_predicate(clause: ClauseElement, step, earlier: set[int]) -> bool:
+    """True for ``earlier.col = step.col`` where ``earlier.col`` references ``step.col``.
+
+    Such an equality cannot fail for a matched earlier row while the foreign key
+    holds, so the outer step to ``step`` adds columns without changing which rows
+    match. ``earlier`` holds the ids of the group's tables already placed.
+    """
+    if not isinstance(clause, BinaryExpression) or clause.operator is not operators.eq:
+        return False
+    sides = (clause.left, clause.right)
+    for source, target in (sides, sides[::-1]):
+        source_tables = [_unwrap(item) for item in source._from_objects]
+        target_tables = [_unwrap(item) for item in target._from_objects]
+        if (
+            len(source_tables) == 1
+            and len(target_tables) == 1
+            and id(source_tables[0]) in earlier
+            and target_tables[0] is step
+            and _column_references(source, target)
+        ):
+            return True
+    return False
+
+
 class CogneeTursoCompiler(SQLiteCompiler):
     """SQLite compiler that never emits ``JOIN (x JOIN y ...)``."""
 
@@ -72,26 +119,49 @@ class CogneeTursoCompiler(SQLiteCompiler):
         if join.full or not isinstance(_unwrap(join.right), Join):
             return super().visit_join(join, asfrom=asfrom, from_linter=from_linter, **kwargs)
 
-        steps: list[tuple[Any, bool]] = []  # (from object, arrives through an outer join)
+        # (from object, arrives through an outer join, nested group id or None)
+        steps: list[tuple[Any, bool, int | None]] = []
         predicates: list[ClauseElement] = []
+        group_ids = itertools.count()
 
-        def walk(node, outer: bool, nested: bool) -> None:
+        def walk(node, outer: bool, group: int | None) -> None:
             node = _unwrap(node)
             if isinstance(node, Join) and not node.full:
-                if nested and node.isouter:
+                if group is not None and node.isouter:
                     raise CompileError(
                         "Turso: cannot flatten a nested OUTER join; the engine rejects "
                         "parenthesized joins and only nested INNER joins are rewritten."
                     )
-                walk(node.left, outer, nested)
-                walk(node.right, outer or node.isouter, nested)
+                walk(node.left, outer, group)
+                # A join on the right of a join is a parenthesized group.
+                right_group = group
+                if right_group is None and isinstance(_unwrap(node.right), Join):
+                    right_group = next(group_ids)
+                walk(node.right, outer or node.isouter, right_group)
                 predicates.extend(_predicates(node.onclause))
             else:
-                steps.append((node, outer))
+                steps.append((node, outer, group))
 
-        walk(join.left, False, nested=False)
-        walk(join.right, join.isouter, nested=True)
+        walk(join.left, False, None)
+        walk(join.right, join.isouter, next(group_ids))
         predicates.extend(_predicates(join.onclause))
+
+        # Tables of each outer-joined group already placed (ids): the first one
+        # placed may take any predicate, every later one must be a total step.
+        placed_in_group: dict[int, set[int]] = {}
+
+        def check_outer_group_step(from_object, group, on_clauses) -> None:
+            earlier = placed_in_group.setdefault(group, set())
+            if earlier and not all(
+                _total_step_predicate(clause, from_object, earlier) for clause in on_clauses
+            ):
+                raise CompileError(
+                    "Turso: cannot flatten this join; a later step of an OUTER-joined "
+                    "group is not reached through a foreign-key equality alone, so the "
+                    "flattened chain could return a partial match where the nested "
+                    "join returns none."
+                )
+            earlier.add(id(from_object))
 
         available: set[int] = set()
         remaining = list(predicates)
@@ -105,7 +175,7 @@ class CogneeTursoCompiler(SQLiteCompiler):
                 for item in froms
             )
 
-        def pick_next(pending: list[tuple[Any, bool]]) -> tuple[Any, bool]:
+        def pick_next(pending: list[tuple[Any, bool, int | None]]) -> tuple[Any, bool, int | None]:
             # Prefer a table that some pending predicate can constrain right away,
             # so an OUTER step never degenerates into an unconstrained ``ON 1 = 1``
             # that multiplies rows. Only tables of the same join type as the next
@@ -126,10 +196,11 @@ class CogneeTursoCompiler(SQLiteCompiler):
         parts: list[str] = []
         pending = list(steps)
         previous = None
+        last_step_checked = False
         while pending:
             step = pending[0] if previous is None else pick_next(pending)
             pending.remove(step)
-            from_object, outer = step
+            from_object, outer, group = step
             available.add(id(from_object))
             rendered = from_object._compiler_dispatch(
                 self, asfrom=True, from_linter=from_linter, **kwargs
@@ -152,6 +223,9 @@ class CogneeTursoCompiler(SQLiteCompiler):
                 )
             else:
                 on_sql = "1 = 1"  # exact for inner joins: the predicates land later
+            last_step_checked = outer and group is not None
+            if last_step_checked:  # on_clauses is non-empty here
+                check_outer_group_step(from_object, group, on_clauses)
             if from_linter:
                 from_linter.edges.update(
                     itertools.product(previous._from_objects, from_object._from_objects)
@@ -161,6 +235,11 @@ class CogneeTursoCompiler(SQLiteCompiler):
             previous = from_object
 
         if remaining:  # predicates over tables outside the tree: append to the last step
+            if last_step_checked and len(placed_in_group.get(group, ())) > 1:
+                raise CompileError(
+                    "Turso: cannot flatten this join; a predicate over a table outside "
+                    "the join would land on a later step of an OUTER-joined group."
+                )
             tail = " AND ".join(
                 clause._compiler_dispatch(self, from_linter=from_linter, **kwargs)
                 for clause in remaining

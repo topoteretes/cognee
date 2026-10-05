@@ -43,6 +43,9 @@ logger = get_logger("TursoVectorAdapter")
 
 QUERY_BATCH_SIZE = 1000
 
+# Tables the engine owns: SQLite's internal ones and Turso's mvcc bookkeeping.
+_ENGINE_TABLE_PREFIXES = ("sqlite_", "__turso_internal_")
+
 
 class IndexSchema(DataPoint):
     """Schema for the rows written by ``index_data_points`` (mirrors PGVector)."""
@@ -283,12 +286,17 @@ class TursoVectorAdapter(VectorDBInterface):
         return {"id", "payload", "vector"} <= columns
 
     async def get_table_names(self) -> list[str]:
-        """Return every table name in the database (used by prune / detag / tests)."""
+        """Return every user table name in the database (used by prune / detag / tests).
+
+        Engine-owned tables are left out: ``sqlite_*`` and, in ``mvcc`` mode, the
+        engine's ``__turso_internal_*`` bookkeeping, which cannot be dropped
+        ("Cannot drop system table").
+        """
         rows = await self._execute(
             "SELECT name FROM sqlite_master WHERE type = 'table'",
             fetch=True,
         )
-        return [row[0] for row in rows] if rows else []
+        return [row[0] for row in rows or [] if not row[0].startswith(_ENGINE_TABLE_PREFIXES)]
 
     # ------------------------------------------------------------------ #
     # Writes
