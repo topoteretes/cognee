@@ -13,6 +13,7 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunAlreadyCompleted,
     PipelineRunCompleted,
     PipelineRunErrored,
+    PipelineRunInfo,
     PipelineRunStarted,
     extract_data_ids,
 )
@@ -72,3 +73,19 @@ def test_data_ids_are_serialized_with_the_model():
     assert run.model_dump()["data_ids"] == [data_id]
     assert json.loads(run.model_dump_json())["data_ids"] == [str(data_id)]
     assert [UUID(value) for value in json.loads(run.model_dump_json())["data_ids"]] == [data_id]
+
+
+def test_data_ids_skip_errored_items_after_a_json_round_trip():
+    """A run info rebuilt from JSON has dict run_infos and string ids."""
+    stored, failed = uuid4(), uuid4()
+    run = _run_info(
+        PipelineRunErrored,
+        data_ingestion_info=[
+            {"run_info": _run_info(PipelineRunCompleted), "data_id": stored},
+            {"run_info": _run_info(PipelineRunErrored), "data_id": failed},
+        ],
+    )
+
+    rebuilt = PipelineRunInfo.model_validate(json.loads(run.model_dump_json()))
+
+    assert rebuilt.data_ids == [stored]
