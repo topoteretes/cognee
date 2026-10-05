@@ -45,6 +45,7 @@ def _engine_summary(status="incremental"):
         "deleted_chunks": 1,
         "added_chunks": 2,
         "reused_chunks": 0,
+        "redated_chunks": 0,
         "kept_chunks": 5,
         "reindexed_chunks": 0,
         "total_chunks": 7,

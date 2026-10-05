@@ -122,8 +122,9 @@ async def update(
               (the rebuild's cognify run errored; ``error`` says why, and the call
               can be retried).
             - ``regions``, ``deleted_chunks``, ``added_chunks``, ``reused_chunks``,
-              ``kept_chunks``, ``reindexed_chunks``, ``total_chunks``: the chunk-level
-              counters; None on a rebuild, which has no diff.
+              ``redated_chunks``, ``kept_chunks``, ``reindexed_chunks``,
+              ``total_chunks``: the chunk-level counters; None on a rebuild, which
+              has no diff.
             - ``data_id``, ``dataset_id``: the document, the handle to retry with.
             - ``duration_seconds``: wall-clock time of the update.
             - ``pipeline_run_id``: the run to inspect; None for a no-op.
@@ -250,6 +251,7 @@ async def update(
                 deleted_chunks=summary["deleted_chunks"],
                 added_chunks=summary["added_chunks"],
                 reused_chunks=summary["reused_chunks"],
+                redated_chunks=summary["redated_chunks"],
                 kept_chunks=summary["kept_chunks"],
                 reindexed_chunks=summary["reindexed_chunks"],
                 total_chunks=summary["total_chunks"],

@@ -496,6 +496,7 @@ def _unchanged_result(reindexed: int, kept: int) -> dict:
         "deleted_chunks": 0,
         "added_chunks": 0,
         "reused_chunks": 0,
+        "redated_chunks": 0,
         "kept_chunks": kept,
         "reindexed_chunks": reindexed,
         "total_chunks": kept,
