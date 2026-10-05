@@ -6,6 +6,7 @@ fingerprinted by ``send_telemetry``'s sanitizer, and nothing here may raise,
 because it is computed before a pipeline's first event.
 """
 
+import re
 from typing import TypedDict
 
 from cognee.infrastructure.databases.graph import get_graph_config
@@ -25,6 +26,14 @@ class LLMConfig(TypedDict):
     model: str
     provider: str
     configured: bool
+    structured_output: str
+    instructor_mode: str
+
+
+# The structured-output frameworks cognee ships (STRUCTURED_OUTPUT_FRAMEWORK).
+STRUCTURED_OUTPUT_FRAMEWORKS = ("litellm_native", "instructor", "baml")
+# An instructor mode is an identifier such as ``json_schema_mode`` or ``tool_call``.
+_INSTRUCTOR_MODE = re.compile(r"^[a-z_]{1,32}$")
 
 
 class EmbeddingSettings(TypedDict):
@@ -69,6 +78,33 @@ def _graph_extractor_setting() -> str:
     return extractor if extractor in EXTRACTORS else "invalid"
 
 
+def _structured_output_setting(llm_config) -> str:
+    """Which structured-output path LLM calls take: a closed value, or ``invalid``.
+
+    A graph extraction that fails on a schema the provider rejects looks the
+    same as any other LLM error unless the event says whether the call went
+    through litellm's native response_format, instructor, or BAML. An unknown
+    setting is reported as ``invalid``, never echoed; a config without the
+    attribute (an out-of-tree config object) as ``unknown``.
+    """
+    framework = getattr(llm_config, "structured_output_framework", None)
+    if not isinstance(framework, str) or not framework:
+        return "unknown"
+    framework = framework.lower()
+    return framework if framework in STRUCTURED_OUTPUT_FRAMEWORKS else "invalid"
+
+
+def _instructor_mode_setting(llm_config) -> str:
+    """The instructor mode in force: the identifier set, ``default`` when unset, else ``invalid``."""
+    mode = getattr(llm_config, "llm_instructor_mode", None)
+    if mode is None:
+        return "unknown"
+    if not isinstance(mode, str) or not mode:
+        return "default"
+    mode = mode.lower()
+    return mode if _INSTRUCTOR_MODE.match(mode) else "invalid"
+
+
 def get_current_settings() -> SettingsDict:
     # The context config when a per-call LLMConfig is set, else the process one:
     # the same resolution the embedding half below uses, so one event never
@@ -94,6 +130,10 @@ def get_current_settings() -> SettingsDict:
             # whether that LLM is usable: the rule recall() and the keyless path use,
             # applied to the same per-call config as the rest of this payload.
             "configured": llm_available(llm_config),
+            # How structured output is obtained, so a schema rejection can be
+            # told apart by path (native response_format / instructor / BAML).
+            "structured_output": _structured_output_setting(llm_config),
+            "instructor_mode": _instructor_mode_setting(llm_config),
         },
         "embedding": {
             "provider": embedding_provider,

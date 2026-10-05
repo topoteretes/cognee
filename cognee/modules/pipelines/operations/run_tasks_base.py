@@ -11,7 +11,7 @@ from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.provenance_config import get_provenance_config
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
-from cognee.shared.utils import send_telemetry, telemetry_exception_type
+from cognee.shared.utils import send_telemetry, telemetry_exception_properties
 
 from ..tasks.task import Task
 
@@ -261,8 +261,7 @@ async def handle_task(
                 send_telemetry(
                     f"{task_type} Task Errored",
                     user,
-                    additional_properties=task_properties
-                    | {"exception_type": telemetry_exception_type(error)},
+                    additional_properties=task_properties | telemetry_exception_properties(error),
                 )
             raise
 

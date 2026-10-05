@@ -68,7 +68,13 @@ def test_model_settings_that_are_paths_leave_as_the_local_path_label(monkeypatch
 
     payload = settings_module.get_current_settings()
 
-    assert payload["llm"] == {"provider": "custom", "model": "local_path", "configured": False}
+    assert payload["llm"] == {
+        "provider": "custom",
+        "model": "local_path",
+        "configured": False,
+        "structured_output": "unknown",
+        "instructor_mode": "unknown",
+    }
     assert payload["embedding"] == {"provider": "custom", "model": "local_path"}
 
 
@@ -88,7 +94,38 @@ def test_llm_half_reads_the_same_context_config_as_the_embedding_half(monkeypatc
         "provider": "anthropic",
         "model": "anthropic/claude",
         "configured": True,
+        "structured_output": "unknown",
+        "instructor_mode": "unknown",
     }
+
+
+def test_structured_output_path_leaves_as_a_closed_value(monkeypatch):
+    """Which path obtains structured output is where a schema rejection shows up;
+    the setting leaves as one of the shipped frameworks, ``invalid``, or ``unknown``."""
+    from types import SimpleNamespace
+
+    cases = [
+        ("BAML", "json_schema_mode", "baml", "json_schema_mode"),
+        ("litellm_native", "", "litellm_native", "default"),
+        ("instructor", "Tool Call; drop table", "instructor", "invalid"),
+        ("my_private_framework", None, "invalid", "unknown"),
+    ]
+    for framework, mode, expected_framework, expected_mode in cases:
+        config = SimpleNamespace(
+            llm_provider="openai",
+            llm_model="openai/gpt-5-mini",
+            llm_api_key="sk-test",
+            structured_output_framework=framework,
+        )
+        if mode is not None:
+            config.llm_instructor_mode = mode
+        monkeypatch.setattr(settings_module, "get_llm_context_config", lambda config=config: config)
+
+        llm = settings_module.get_current_settings()["llm"]
+
+        assert llm["structured_output"] == expected_framework, framework
+        assert llm["instructor_mode"] == expected_mode, mode
+        assert "drop table" not in repr(llm)
 
 
 def test_configured_follows_the_per_call_config_not_the_process_one(monkeypatch):

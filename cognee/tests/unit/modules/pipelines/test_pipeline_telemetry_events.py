@@ -186,3 +186,111 @@ async def test_a_nested_failure_is_reported_once_at_the_task_where_it_happened(e
     assert [props["task_name"] for _, props in errored] == ["third"]
     assert errored[0][1]["exception_type"] == "RuntimeError"
     assert len([n for n, _ in _pipeline_events(events) if n == "Pipeline Run Errored"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_errored_carries_the_cause_under_the_wrapper_and_the_provider_status(events):
+    """cognee wraps provider errors (``raise LLMQuotaExceededError(...) from error``);
+    the event names the cause and its HTTP status, so a 429 reads as a 429."""
+
+    class RateLimitError(Exception):
+        status_code = 429
+
+    class LLMQuotaExceededError(Exception):
+        pass
+
+    async def extract(data):
+        try:
+            raise RateLimitError(SECRET_MESSAGE)
+        except RateLimitError as error:
+            raise LLMQuotaExceededError("quota") from error
+
+    with pytest.raises(LLMQuotaExceededError):
+        await _drain([Task(extract)], PipelineContext(pipeline_run_id=uuid4()))
+
+    (pipeline_errored,) = [p for n, p in _pipeline_events(events) if n == "Pipeline Run Errored"]
+    ((_, task_errored),) = _task_events(events, "Errored")
+    for props in (pipeline_errored, task_errored):
+        assert props["exception_type"] == "LLMQuotaExceededError"
+        assert props["exception_cause"] == "RateLimitError"
+        assert props["exception_chain"] == ["LLMQuotaExceededError", "RateLimitError"]
+        assert props["status_code"] == 429
+    for _, props in events:
+        assert SECRET_MESSAGE not in repr(props)
+
+
+@pytest.mark.asyncio
+async def test_every_pipeline_event_carries_the_data_item_profile(events):
+    """cognify runs one pipeline per ``Data`` item: its loader, extension, size and
+    token count travel as closed labels on Started, Completed and Errored alike."""
+    item = SimpleNamespace(
+        loader_engine="pypdf_loader",
+        extension=".PDF",
+        data_size=2_500_000,
+        token_count=42_000,
+        name="customer-secrets-2026.pdf",
+    )
+
+    async def identity(data):
+        return data
+
+    async for _ in telemetry_module.run_tasks_with_telemetry(
+        [Task(identity)],
+        [item],
+        USER,
+        "cognify_pipeline",
+        ctx=PipelineContext(pipeline_run_id=uuid4()),
+    ):
+        pass
+
+    for _, props in _pipeline_events(events):
+        assert props["item_count"] == 1
+        assert props["item_loader"] == "pypdf_loader"
+        assert props["item_extension"] == "pdf"
+        assert props["item_size_bucket"] == "1mb_10mb"
+        assert props["item_token_bucket"] == "10k_100k"
+        assert "customer-secrets" not in repr(props)
+
+
+@pytest.mark.parametrize(
+    "data, expected",
+    [
+        ([1], {"item_count": 1}),  # no Data attributes: the count only
+        ([1, 2, 3], {"item_count": 3}),
+        ("not a list", {}),
+        (None, {}),
+        (
+            [SimpleNamespace(loader_engine="My Loader!", extension=".tar.gz", data_size=0)],
+            {
+                "item_count": 1,
+                "item_loader": "other",
+                "item_extension": "other",  # two dots left after the strip
+                "item_size_bucket": "lt_10kb",
+            },
+        ),
+        (
+            [SimpleNamespace(data_size=250_000_000, token_count=3_000_000)],
+            {"item_count": 1, "item_size_bucket": "gt_100mb", "item_token_bucket": "gt_1m"},
+        ),
+        (
+            [SimpleNamespace(data_size="big", token_count=-1)],
+            {"item_count": 1},  # not a count, not a size
+        ),
+    ],
+)
+def test_item_profile_is_closed_labels_or_nothing(data, expected):
+    assert telemetry_module.data_item_telemetry_properties(data) == expected
+
+
+def test_item_profile_survives_an_attribute_that_raises():
+    class Expired:
+        @property
+        def loader_engine(self):
+            raise RuntimeError("detached instance")
+
+        token_count = 12
+
+    assert telemetry_module.data_item_telemetry_properties([Expired()]) == {
+        "item_count": 1,
+        "item_token_bucket": "lt_1k",
+    }

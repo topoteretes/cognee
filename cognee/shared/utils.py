@@ -192,6 +192,68 @@ def telemetry_model_label(model: Any) -> Any:
     return model
 
 
+# How far an error event follows ``raise X from Y``: enough for the cognee
+# wrapper, the structured-output layer and the provider error underneath it.
+TELEMETRY_EXCEPTION_CHAIN_DEPTH = 4
+
+
+def _telemetry_root_error(error: BaseException) -> BaseException:
+    """The error an event is about.
+
+    A ``PipelineRunFailedError`` wraps the item error that actually broke as
+    ``first_error``; report that root cause, as the run record does.
+    """
+    first_error = getattr(error, "first_error", None)
+    return first_error if isinstance(first_error, BaseException) else error
+
+
+def _telemetry_exception_chain(error: BaseException) -> list[BaseException]:
+    """``error`` and what it was raised from, outermost first.
+
+    Follows ``__cause__`` (``raise X from Y``) and, unless the context was
+    suppressed (``raise X from None``), ``__context__`` (an error raised while
+    handling another). Bounded to ``TELEMETRY_EXCEPTION_CHAIN_DEPTH`` entries
+    and cycle-safe, so a malformed chain can never stall an emitter.
+    """
+    chain: list[BaseException] = []
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while (
+        current is not None
+        and id(current) not in seen
+        and len(chain) < TELEMETRY_EXCEPTION_CHAIN_DEPTH
+    ):
+        chain.append(current)
+        seen.add(id(current))
+        if current.__cause__ is not None:
+            current = current.__cause__
+        elif not current.__suppress_context__:
+            current = current.__context__
+        else:
+            current = None
+    return chain
+
+
+def _telemetry_status_code(chain: list[BaseException]) -> int | None:
+    """The HTTP status closest to the failure, or None.
+
+    The innermost error in the chain that carries an integer ``status_code``
+    in 100–599: a provider's 429/401/503 before the cognee error's mapped
+    status, since the provider's is the one that says why.
+    """
+    for error in reversed(chain):
+        value = getattr(error, "status_code", None)
+        if value is None or isinstance(value, bool):
+            continue
+        try:
+            status_code = int(value)
+        except (TypeError, ValueError):
+            continue
+        if 100 <= status_code <= 599:
+            return status_code
+    return None
+
+
 def telemetry_exception_type(error: BaseException) -> str:
     """The class name telemetry records for ``error`` — never its message.
 
@@ -201,8 +263,34 @@ def telemetry_exception_type(error: BaseException) -> str:
     item error that actually broke as ``first_error``; report that root cause,
     as the run record does.
     """
-    root = getattr(error, "first_error", None) or error
-    return type(root).__name__
+    return type(_telemetry_root_error(error)).__name__
+
+
+def telemetry_exception_properties(error: BaseException) -> dict:
+    """What an error event says about its error: class names and a status, never a message.
+
+    ``exception_type`` is ``telemetry_exception_type``. cognee's LLM and
+    embedding layers wrap provider errors — ``raise LLMQuotaExceededError(...)
+    from error`` — so that class alone says a quota was exceeded, not whether
+    the provider answered 429, 401 or timed out. ``exception_chain`` lists the
+    classes of the ``__cause__``/``__context__`` chain outermost first (at most
+    ``TELEMETRY_EXCEPTION_CHAIN_DEPTH``); ``exception_cause`` is its innermost
+    class, present only when it differs from ``exception_type``; ``status_code``
+    is the innermost integer HTTP status any error in the chain carries (litellm's
+    provider errors and every ``CogneeApiError`` do). Both keys exist only when
+    there is a chain or a status: a bare ``ValueError`` reports its type alone.
+    """
+    chain = _telemetry_exception_chain(_telemetry_root_error(error))
+    names = [type(link).__name__ for link in chain]
+    properties: dict = {"exception_type": names[0]}
+    if len(names) > 1:
+        properties["exception_chain"] = names
+        if names[-1] != names[0]:
+            properties["exception_cause"] = names[-1]
+    status_code = _telemetry_status_code(chain)
+    if status_code is not None:
+        properties["status_code"] = status_code
+    return properties
 
 
 def telemetry_on_error(event_name: str):
@@ -210,11 +298,12 @@ def telemetry_on_error(event_name: str):
 
     The terminal event the Started/Completed pair of an operation lacks: without
     it a failed ``search`` or ``recall`` is a Started with no end, indistinguishable
-    in the warehouse from a run that is still going. Carries ``exception_type``
-    only (``telemetry_exception_type``), never the message. ``BaseException`` so a
-    cancelled call ends too, as ``run_tasks_with_telemetry`` does; the error is
-    always re-raised, telemetry never changes the outcome. The ``user`` argument
-    of the call, when there is one, is the event's identity.
+    in the warehouse from a run that is still going. Carries the error's class,
+    cause chain and status (``telemetry_exception_properties``), never the
+    message. ``BaseException`` so a cancelled call ends too, as
+    ``run_tasks_with_telemetry`` does; the error is always re-raised, telemetry
+    never changes the outcome. The ``user`` argument of the call, when there is
+    one, is the event's identity.
     """
     import functools
     import inspect
@@ -234,10 +323,8 @@ def telemetry_on_error(event_name: str):
                 send_telemetry(
                     event_name,
                     user if user is not None else "sdk",
-                    additional_properties={
-                        "exception_type": telemetry_exception_type(error),
-                        "cognee_version": _cognee_version(),
-                    },
+                    additional_properties=telemetry_exception_properties(error)
+                    | {"cognee_version": _cognee_version()},
                 )
                 raise
 

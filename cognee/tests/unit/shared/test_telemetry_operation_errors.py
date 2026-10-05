@@ -42,6 +42,28 @@ async def test_failure_emits_the_event_with_the_class_and_re_raises(sent):
 
 
 @pytest.mark.asyncio
+async def test_failure_carries_the_cause_and_status_under_the_wrapper(sent):
+    class ProviderError(Exception):
+        status_code = 503
+
+    @utils.telemetry_on_error("cognee.recall ERRORED")
+    async def recall(query_text, user=None):
+        try:
+            raise ProviderError("upstream down")
+        except ProviderError as error:
+            raise RuntimeError("recall failed") from error
+
+    with pytest.raises(RuntimeError):
+        await recall("q")
+
+    properties = sent[0][1]["additional_properties"]
+    assert properties["exception_type"] == "RuntimeError"
+    assert properties["exception_cause"] == "ProviderError"
+    assert properties["status_code"] == 503
+    assert "upstream down" not in str(sent)
+
+
+@pytest.mark.asyncio
 async def test_positional_user_and_missing_user_both_resolve(sent):
     user = SimpleNamespace(id=uuid4(), tenant_id=None)
 
@@ -132,8 +154,11 @@ async def test_payload_carries_the_process_origin(monkeypatch):
     request = AsyncMock()
     monkeypatch.setattr(utils, "_send_telemetry_request", request)
 
+    # Only this call's task: another test's unmocked send, left pending on a
+    # loop that is now closed, must not fail this one.
+    pending_before = set(utils._TELEMETRY_TASKS)
     utils.send_telemetry("cognee.recall", "sdk", additional_properties={"top_k": 3})
-    await asyncio.gather(*list(utils._TELEMETRY_TASKS))
+    await asyncio.gather(*(utils._TELEMETRY_TASKS - pending_before))
 
     payload = request.await_args.args[0]
     assert payload["event_name"] == "cognee.recall"

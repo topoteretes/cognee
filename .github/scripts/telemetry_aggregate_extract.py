@@ -8,8 +8,9 @@ Hard rules enforced here:
 - Only the queries below run; every SELECT lists explicit output columns.
 - Free-text / PII-bearing fields are NEVER selected: search_query,
   system_prompt, dataset names, raw properties, tenant ids, endpoints'
-  query strings, error text. Error events contribute only ``exception_type``,
-  a Python class name, allowlisted to identifier characters.
+  query strings, error text. Error events contribute only Python class names
+  (``exception_type``, ``exception_cause``), allowlisted to identifier
+  characters, and an HTTP ``status_code``.
 - Identity columns (user_id, api_key_hash, anonymous_id, persistent_id)
   are used ONLY inside COUNT(DISTINCT ...); their values are never emitted.
 - Pipeline run ids are used ONLY to group a run's events and inside
@@ -134,30 +135,63 @@ _LLM_CONFIGURED = (
     "CASE json_extract_string(properties, '$.llm.configured') "
     "WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE 'unknown' END"
 )
-# Pipeline error class (``exception_type``): a Python class name. Anything that
-# is not one identifier is bucketed, so an unexpected value cannot stop the export.
 # A run's random id (``pipeline_run_id``): joins the per-item events of one run.
 _RUN_ID = "json_extract_string(properties, '$.pipeline_run_id')"
-_EXCEPTION_TYPE = (
-    "CASE WHEN regexp_matches(json_extract_string(properties, '$.exception_type'), "
-    "'^[A-Za-z_][A-Za-z0-9_]*$') THEN json_extract_string(properties, '$.exception_type') "
-    "WHEN json_extract_string(properties, '$.exception_type') IS NULL THEN 'unknown' "
-    "ELSE 'redacted' END"
-)
 
 
-def _closed_value(property_path: str, pattern: str = "^[A-Za-z0-9_.,:-]{1,64}$") -> str:
-    """A property that should be one of a small set of values, or a bucket.
+def _class_name(property_path: str, missing: str) -> str:
+    """A Python class name, or a bucket.
 
-    ``unknown`` when the event predates the field, ``redacted`` when the value
-    is outside ``pattern`` (a fork, a typo, free text), so an unexpected value
-    can neither stop the export nor carry an identifier.
+    Anything that is not one identifier is ``redacted``, so an unexpected value
+    cannot stop the export; ``missing`` names the absence (``unknown`` for a
+    field every build sends, ``none`` for one sent only when there is a value).
     """
     value = f"json_extract_string(properties, '$.{property_path}')"
     return (
-        f"CASE WHEN {value} IS NULL THEN 'unknown' "
+        f"CASE WHEN regexp_matches({value}, '^[A-Za-z_][A-Za-z0-9_]*$') THEN {value} "
+        f"WHEN {value} IS NULL THEN '{missing}' ELSE 'redacted' END"
+    )
+
+
+# The class of the error that ended a run or a task (SDK-775), and the innermost
+# class of its ``raise ... from`` chain when that differs: the provider error
+# under a cognee wrapper (``RateLimitError`` under ``LLMQuotaExceededError``).
+_EXCEPTION_TYPE = _class_name("exception_type", "unknown")
+_EXCEPTION_CAUSE = _class_name("exception_cause", "none")
+
+
+def _closed_value(
+    property_path: str, pattern: str = "^[A-Za-z0-9_.,:-]{1,64}$", missing: str = "unknown"
+) -> str:
+    """A property that should be one of a small set of values, or a bucket.
+
+    ``missing`` (``unknown`` by default) when the event lacks the field — a
+    build before it, or a field sent only when there is something to say —
+    ``redacted`` when the value is outside ``pattern`` (a fork, a typo, free
+    text), so an unexpected value can neither stop the export nor carry an
+    identifier.
+    """
+    value = f"json_extract_string(properties, '$.{property_path}')"
+    return (
+        f"CASE WHEN {value} IS NULL THEN '{missing}' "
         f"WHEN regexp_matches({value}, '{pattern}') THEN {value} ELSE 'redacted' END"
     )
+
+
+# The HTTP status closest to a failure, when any error in its chain carried one
+# (a provider's 429/401/503, a cognee error's mapped status); ``none`` otherwise.
+_STATUS_CODE = _closed_value("status_code", "^[1-5][0-9][0-9]$", missing="none")
+# The structured-output path of LLM calls: closed values, ``unknown`` before the field.
+_STRUCTURED_OUTPUT = _closed_value(
+    "llm.structured_output", "^(litellm_native|instructor|baml|invalid|unknown)$"
+)
+# The data item a pipeline run processed (SDK-775): a loader registry name and
+# size/token classes, as ``data_item_telemetry_properties`` labels them.
+_ITEM_LOADER = _closed_value("item_loader", "^[a-z0-9_]{1,40}$")
+_ITEM_SIZE_BUCKET = _closed_value(
+    "item_size_bucket", "^(lt_10kb|10kb_100kb|100kb_1mb|1mb_10mb|10mb_100mb|gt_100mb)$"
+)
+_ITEM_TOKEN_BUCKET = _closed_value("item_token_bucket", "^(lt_1k|1k_10k|10k_100k|100k_1m|gt_1m)$")
 
 
 # Task names are cognee function names (``extract_graph_from_data``): identifiers.
@@ -195,11 +229,14 @@ QUERIES: dict[str, str] = {
         WHERE {_BASE_FILTER}
         GROUP BY ALL ORDER BY day, tracking_event
     """,
-    # Which error classes end pipeline runs, by day and version (SDK-775). The
-    # class name is the only thing an Errored event says about its error.
+    # Which error classes end pipeline runs, by day and version (SDK-775), with
+    # the cause under the wrapper and the HTTP status closest to the failure.
+    # Class names and a status are all an Errored event says about its error.
     "pipeline_error_types_daily": f"""
         SELECT ingestion_date AS day, {_VERSION} AS version,
                {_EXCEPTION_TYPE} AS exception_type,
+               {_EXCEPTION_CAUSE} AS exception_cause,
+               {_STATUS_CODE} AS status_code,
                count(*) AS errors,
                count(DISTINCT {_RUN_ID}) AS runs,
                count(DISTINCT {_IDENT}) AS distinct_identities
@@ -246,6 +283,23 @@ QUERIES: dict[str, str] = {
         WHERE {_BASE_FILTER} AND tracking_event LIKE 'Pipeline Run%'
         GROUP BY ALL ORDER BY day, version
     """,
+    # Pipeline outcomes by what was ingested (SDK-775): the loader that produced
+    # the item's text and its size and token classes, so a failure concentrated
+    # in one loader or one size class is visible. Rows from builds before the
+    # fields carry ``unknown``; a custom pipeline's items carry no profile.
+    "pipeline_item_outcomes_daily": f"""
+        SELECT ingestion_date AS day, {_VERSION} AS version,
+               {_ITEM_LOADER} AS item_loader,
+               {_ITEM_SIZE_BUCKET} AS item_size_bucket,
+               {_ITEM_TOKEN_BUCKET} AS item_token_bucket,
+               count(*) FILTER (tracking_event = 'Pipeline Run Started')   AS started,
+               count(*) FILTER (tracking_event = 'Pipeline Run Completed') AS completed,
+               count(*) FILTER (tracking_event = 'Pipeline Run Errored')   AS errored,
+               count(DISTINCT {_IDENT}) AS distinct_identities
+        FROM analytics.main.pipeline_events
+        WHERE {_BASE_FILTER} AND tracking_event LIKE 'Pipeline Run%'
+        GROUP BY ALL ORDER BY day, started DESC
+    """,
     # SDK-level operation health (search/add/cognify) by day and version.
     "sdk_exec_outcomes_daily": f"""
         SELECT ingestion_date AS day, {_VERSION} AS version,
@@ -275,6 +329,7 @@ QUERIES: dict[str, str] = {
                {_provider_dimension("llm.provider")} AS llm_provider,
                {_provider_dimension("llm.model", max_length=60)} AS llm_model,
                {_LLM_CONFIGURED} AS llm_configured,
+               {_STRUCTURED_OUTPUT} AS structured_output,
                {_provider_dimension("embedding.provider")} AS embedding_provider,
                {_provider_dimension("embedding.model", max_length=60)} AS embedding_model,
                {_provider_dimension("graph_extractor")} AS graph_extractor,
@@ -329,6 +384,8 @@ QUERIES: dict[str, str] = {
     "sdk_error_types_daily": f"""
         SELECT ingestion_date AS day, {_VERSION} AS version, {_ORIGIN} AS origin,
                tracking_event, {_EXCEPTION_TYPE} AS exception_type,
+               {_EXCEPTION_CAUSE} AS exception_cause,
+               {_STATUS_CODE} AS status_code,
                count(*) AS errors,
                count(DISTINCT {_IDENT}) AS distinct_identities
         FROM analytics.main.pipeline_events
@@ -398,6 +455,8 @@ QUERIES: dict[str, str] = {
     "task_error_types_daily": f"""
         SELECT ingestion_date AS day, {_VERSION} AS version,
                {_TASK_NAME} AS task_name, {_EXCEPTION_TYPE} AS exception_type,
+               {_EXCEPTION_CAUSE} AS exception_cause,
+               {_STATUS_CODE} AS status_code,
                count(*) AS errors,
                count(DISTINCT {_IDENT}) AS distinct_identities
         FROM analytics.main.pipeline_events

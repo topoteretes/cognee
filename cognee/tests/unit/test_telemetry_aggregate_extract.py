@@ -164,6 +164,94 @@ class TelemetryAggregateExtractTest(unittest.TestCase):
         self.assertEqual(row["errors"], 3)
         self.assertEqual(row["runs"], 2)
 
+    def test_error_types_carry_the_cause_and_status_closest_to_the_failure(self):
+        wrapped = {
+            "exception_type": "LLMQuotaExceededError",
+            "exception_cause": "RateLimitError",
+            "exception_chain": ["LLMQuotaExceededError", "RateLimitError"],
+            "status_code": 429,
+        }
+        self._insert_event("Pipeline Run Errored", "1.6.3", wrapped)
+        self._insert_event("Pipeline Run Errored", "1.6.3", wrapped, "b")
+        self._insert_event("Pipeline Run Errored", "1.6.3", {"exception_type": "ValueError"})
+        self._insert_event(
+            "Pipeline Run Errored",
+            "1.6.3",
+            {"exception_type": "ValueError", "exception_cause": "not a class", "status_code": "x"},
+        )
+        self._insert_event("Pipeline Run Errored", "1.6.0", {})  # before the fields
+        self._insert_event(
+            "Coroutine Task Errored", "1.6.3", wrapped, task_name="extract_graph_from_data"
+        )
+
+        rows = {
+            (row["exception_type"], row["exception_cause"], row["status_code"]): row
+            for row in self._rows("pipeline_error_types_daily")
+        }
+        self.assertEqual(
+            set(rows),
+            {
+                ("LLMQuotaExceededError", "RateLimitError", "429"),
+                ("ValueError", "none", "none"),
+                ("ValueError", "redacted", "redacted"),
+                ("unknown", "none", "none"),
+            },
+        )
+        self.assertEqual(rows[("LLMQuotaExceededError", "RateLimitError", "429")]["errors"], 2)
+        (task_row,) = self._rows("task_error_types_daily")
+        self.assertEqual(task_row["task_name"], "extract_graph_from_data")
+        self.assertEqual(task_row["exception_cause"], "RateLimitError")
+        self.assertEqual(task_row["status_code"], "429")
+
+    def test_item_outcomes_are_bucketed_by_loader_size_and_tokens(self):
+        profile = {
+            "item_loader": "pypdf_loader",
+            "item_size_bucket": "1mb_10mb",
+            "item_token_bucket": "10k_100k",
+            "item_extension": "pdf",
+        }
+        for event in ("Started", "Started", "Completed", "Errored"):
+            self._insert_event(f"Pipeline Run {event}", "1.6.3", profile)
+        self._insert_event("Pipeline Run Started", "1.6.0", {})  # before the fields
+        self._insert_event(
+            "Pipeline Run Started", "1.6.3", {**profile, "item_loader": "Custom Loader (c) ACME"}
+        )
+
+        rows = {
+            (row["version"], row["item_loader"]): row
+            for row in self._rows("pipeline_item_outcomes_daily")
+        }
+        self.assertEqual(
+            set(rows), {("1.6.3", "pypdf_loader"), ("1.6.0", "unknown"), ("1.6.3", "redacted")}
+        )
+        row = rows[("1.6.3", "pypdf_loader")]
+        self.assertEqual((row["started"], row["completed"], row["errored"]), (2, 1, 1))
+        self.assertEqual(row["item_size_bucket"], "1mb_10mb")
+        self.assertEqual(row["item_token_bucket"], "10k_100k")
+        self.assertNotIn("item_extension", row)
+        self.assertEqual(rows[("1.6.0", "unknown")]["item_size_bucket"], "unknown")
+
+    def test_structured_output_path_is_a_closed_dimension(self):
+        for framework, user in (("baml", "a"), ("litellm_native", "b"), (None, "c")):
+            llm = {"provider": "openai", "model": "gpt"}
+            if framework is not None:
+                llm["structured_output"] = framework
+            self._insert_event(
+                "Pipeline Run Completed",
+                "1.6.3",
+                {
+                    "llm": llm,
+                    "graph": {"provider": "kuzu"},
+                    "vector": {"provider": "lancedb"},
+                    "relational": {"provider": "sqlite"},
+                },
+                user,
+            )
+        self.assertEqual(
+            sorted(row["structured_output"] for row in self._provider_rows()),
+            ["baml", "litellm_native", "unknown"],
+        )
+
     def test_llm_configured_separates_keyless_installs(self):
         stack = {
             "embedding": {"provider": "fastembed"},
