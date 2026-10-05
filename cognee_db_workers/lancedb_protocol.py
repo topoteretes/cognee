@@ -26,15 +26,20 @@ OP_TABLE_TO_ARROW = 121  # handle_id; returns pa.Table serialized as IPC stream 
 OP_TABLE_ADD = 122
 OP_TABLE_DELETE = 123  # handle_id; args: (where: str)
 OP_TABLE_RELEASE = 124  # handle_id; release the table handle (no-op if already gone)
-# handle_id; compact the table. No kwargs: lancedb's own ``AsyncTable.optimize``.
-# kwargs (target_rows_per_fragment, retention_seconds, max_tasks): the bounded
-# compaction in ``lancedb_compaction``; returns its stats dict.
+# handle_id; kwargs forwarded to lancedb's own ``AsyncTable.optimize``
+# (cleanup_older_than, delete_unverified, retrain).
 OP_TABLE_OPTIMIZE = 125
 # handle_id; returns the table's Arrow schema, IPC-serialized like the schema
 # in OP_CREATE_TABLE (not pickled — same reasoning). Callers that build an
 # Arrow table to merge_insert need the stored schema: plain dicts make
 # merge_insert re-infer types and choke on the fixed-size-list vector column.
 OP_TABLE_SCHEMA = 126
+# handle_id; the two halves of cognee's bounded compaction in
+# ``lancedb_compaction``, each returning its stats dict.
+# kwargs: target_rows_per_fragment, max_tasks
+OP_TABLE_COMPACT_FRAGMENTS = 127
+# kwargs: retention_seconds, max_versions
+OP_TABLE_PRUNE_VERSIONS = 128
 
 # Builder ops. args: (root_args, chain_steps, terminal_name, terminal_args,
 # terminal_kwargs) where root_args is the tuple passed to the root call

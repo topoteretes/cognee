@@ -1,14 +1,16 @@
-"""LanceDB compaction: bounded, once per pipeline run, fail-open.
+"""LanceDB compaction: bounded, once per cognify run, fail-open.
 
 Every ``merge_insert`` appends a fragment and leaves the superseded rows on
 disk; LanceDB reclaims neither on its own (issue #4684). ``LanceDBAdapter.compact``
-merges only small fragments, a bounded number of tasks per run, keeps old
-files for a retention window, and never raises. These tests pin each of those
-properties, plus the pylance/lancedb pin pair the compaction depends on.
+merges only small fragments, deletes a version only once its successor has
+aged past the retention window, does a bounded number of tasks and version
+deletions per run so a backlog drains over several runs, and never raises. These tests pin each of those
+properties, plus the pylance/lancedb pairing the compaction depends on.
 """
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
@@ -97,6 +99,12 @@ def compaction_settings(monkeypatch):
     get_vectordb_config.cache_clear()
 
 
+def _version_count(db_path: str, collection_name: str) -> int:
+    import lance
+
+    return len(lance.dataset(str(Path(db_path) / f"{collection_name}.lance")).versions())
+
+
 def _adapter(tmp_path) -> tuple[LanceDBAdapter, str]:
     db_path = str(tmp_path / "db")
     return LanceDBAdapter(
@@ -115,18 +123,16 @@ async def test_compact_folds_fragments_and_keeps_every_row(tmp_path, compaction_
     original = _data_files(db_path, collection)
     stats = await adapter.compact()
 
-    assert stats[collection]["executed_tasks"] >= 1
+    assert stats[collection]["executed_tasks"] == 1
     assert await _fragment_count(adapter, collection) == 1
     table = await adapter.get_collection(collection)
     assert await table.count_rows() == 6
     assert len(await adapter.retrieve(collection, [str(i) for i in ids])) == 6
-    # Retention 0: the superseded files are deleted, not just unreferenced. A
-    # compaction commits a twin of the previous state microseconds before the
-    # rewrite, and the cut-off's 1 ms margin may keep that twin for one pass,
-    # so the original files are provably gone after the next write's pass.
-    await _write_n_points(adapter, collection, 1, start=6)
-    await adapter.compact()
+    # Retention 0: every superseded version and the files only it referenced
+    # are gone in the same pass, not just unreferenced.
+    assert stats[collection]["versions_pending"] == 0
     assert _data_files(db_path, collection).isdisjoint(original)
+    assert _version_count(db_path, collection) == 1
 
 
 @pytest.mark.asyncio
@@ -142,6 +148,7 @@ async def test_compact_is_a_cheap_no_op_on_a_compact_table(tmp_path, compaction_
 
     assert stats[collection]["planned_tasks"] == 0
     assert stats[collection]["executed_tasks"] == 0
+    assert stats[collection]["old_versions_removed"] == 0
     assert _data_files(db_path, collection) == before
 
 
@@ -164,20 +171,67 @@ async def test_compact_leaves_fragments_at_target_size_alone(tmp_path, compactio
 
 
 @pytest.mark.asyncio
-async def test_compact_executes_at_most_max_tasks_per_run(tmp_path, compaction_settings):
-    """A bloated store drains over several runs instead of stalling one."""
+async def test_a_fragment_backlog_drains_over_several_passes(tmp_path, compaction_settings):
+    """A bloated store is worked off a bit per cognify, not in one long stall."""
     compaction_settings(retention_seconds=0, target_rows_per_fragment=2, max_tasks_per_run=1)
     adapter, _ = _adapter(tmp_path)
     collection = "BacklogTarget_label"
     await _write_n_points(adapter, collection, 6)
 
-    stats = await adapter.compact()
+    fragment_counts = []
+    for _ in range(4):
+        stats = await adapter.compact()
+        fragment_counts.append(await _fragment_count(adapter, collection))
+        assert stats[collection]["executed_tasks"] <= 1
 
-    assert stats[collection]["planned_tasks"] == 3
-    assert stats[collection]["executed_tasks"] == 1
-    assert await _fragment_count(adapter, collection) == 5
+    assert fragment_counts == [5, 4, 3, 3]
     table = await adapter.get_collection(collection)
     assert await table.count_rows() == 6
+
+
+@pytest.mark.asyncio
+async def test_a_version_backlog_drains_over_several_passes(tmp_path, compaction_settings):
+    """Version cleanup is bounded too: the #4684 store had tens of thousands of
+    versions, and deleting them all in one call outlived the worker's RPC timeout."""
+    compaction_settings(retention_seconds=0, max_versions_per_run=2)
+    adapter, db_path = _adapter(tmp_path)
+    collection = "VersionBacklog_label"
+    await _write_n_points(adapter, collection, 8)
+    versions_before = _version_count(db_path, collection)
+    assert versions_before >= 9
+
+    first = await adapter.compact()
+
+    assert first[collection]["old_versions_removed"] == 2
+    assert first[collection]["versions_pending"] > 0
+
+    passes = 1
+    while (await adapter.compact())[collection]["versions_pending"] > 0:
+        passes += 1
+        assert passes < 20
+    assert passes > 1
+    assert _version_count(db_path, collection) == 1
+    assert await (await adapter.get_collection(collection)).count_rows() == 8
+
+
+@pytest.mark.asyncio
+async def test_zero_budgets_drain_everything_in_one_pass(tmp_path, compaction_settings):
+    compaction_settings(
+        retention_seconds=0,
+        target_rows_per_fragment=2,
+        max_tasks_per_run=0,
+        max_versions_per_run=0,
+    )
+    adapter, db_path = _adapter(tmp_path)
+    collection = "UnlimitedTarget_label"
+    await _write_n_points(adapter, collection, 6)
+
+    stats = await adapter.compact()
+
+    assert stats[collection]["executed_tasks"] == 3
+    assert stats[collection]["versions_pending"] == 0
+    assert await _fragment_count(adapter, collection) == 3
+    assert _version_count(db_path, collection) == 1
 
 
 @pytest.mark.asyncio
@@ -229,25 +283,39 @@ async def test_default_retention_keeps_a_recent_reader_snapshot_readable(
 
 
 @pytest.mark.asyncio
-async def test_cleanup_waits_until_a_versions_successor_has_aged(tmp_path, compaction_settings):
+async def test_cleanup_waits_until_a_versions_successor_has_aged(
+    tmp_path, compaction_settings, monkeypatch
+):
     """The reader-safety rule: a version goes only once its SUCCESSOR is older than the window.
 
-    Lance's own cut-off ages a version by its commit time, which deletes an idle
-    table's old-but-latest version from under a reader that opened it a moment
-    ago. Here the table idles past the window, a reader opens it, compaction
-    supersedes its version, and the files must survive until the next pass.
+    Here the table idles past the window, a reader opens its latest version K,
+    and compaction supersedes K. K's files must survive that pass and go in a
+    later one. Lance is handed the versions to delete by number, so a delay
+    between our clock read and the cleanup call cannot move the cut-off onto
+    K: the cleanup is slowed down on purpose to prove it (with the earlier
+    1 ms time margin, any delay above 1 ms deleted K's manifest, and a reader
+    opening K after the pass failed).
     """
-    import asyncio
-
     import lancedb
+    from lance.dataset import LanceDataset
 
+    real_cleanup = LanceDataset.cleanup_old_versions
+
+    def slow_cleanup(self, *args, **kwargs):
+        import time
+
+        time.sleep(0.05)  # the GIL handed to a busy event loop, for example
+        return real_cleanup(self, *args, **kwargs)
+
+    monkeypatch.setattr(LanceDataset, "cleanup_old_versions", slow_cleanup)
     compaction_settings(retention_seconds=1)
     adapter, db_path = _adapter(tmp_path)
     collection = "IdleTarget_label"
     await _write_n_points(adapter, collection, 3)
     await asyncio.sleep(1.5)  # idle: the latest version is now older than the window
     reader = await (await lancedb.connect_async(db_path)).open_table(collection)
-    await reader.checkout(await reader.version())
+    version_k = await reader.version()
+    await reader.checkout(version_k)
     expected = (await reader.to_arrow()).to_pylist()
     before = _data_files(db_path, collection)
 
@@ -256,19 +324,18 @@ async def test_cleanup_waits_until_a_versions_successor_has_aged(tmp_path, compa
     assert first[collection]["executed_tasks"] == 1
     assert before <= _data_files(db_path, collection), "reader's files were deleted"
     assert (await reader.to_arrow()).to_pylist() == expected
+    # A reader that resolved version K before the pass and opens it only now
+    # (a fresh process, a second query of a long read) must still find it.
+    late_reader = await (await lancedb.connect_async(db_path)).open_table(collection)
+    await late_reader.checkout(version_k)
+    assert (await late_reader.to_arrow()).to_pylist() == expected
 
     await asyncio.sleep(1.5)  # the superseding version has now aged past the window
     second = await adapter.compact()
 
     assert second[collection]["old_versions_removed"] >= 1
-    assert before.isdisjoint(_referenced_files(db_path, collection))
-    # The twin version a compaction commits right before its rewrite can sit
-    # within the cut-off's 1 ms margin; the pass after the next write removes it.
-    await _write_n_points(adapter, collection, 1, start=3)
-    await asyncio.sleep(1.5)
-    await adapter.compact()
     assert _data_files(db_path, collection).isdisjoint(before)
-    assert await (await adapter.get_collection(collection)).count_rows() == 4
+    assert await (await adapter.get_collection(collection)).count_rows() == 3
 
 
 @pytest.mark.asyncio
@@ -286,11 +353,126 @@ async def test_task_budget_is_shared_across_tables_and_rotates(tmp_path, compact
     assert all(first[name]["planned_tasks"] == 3 for name in tables)
     starved = [name for name in tables if executed[name] < 3]
     assert len(starved) == 1
+    # Its rewrite was cut short, so it stays first in line for the next pass.
+    assert adapter._compaction_order(tables)[0] == starved[0]
 
     second = await adapter.compact()
-    assert second[starved[0]]["executed_tasks"] == 2  # the pass started with the other table
+    assert second[starved[0]]["executed_tasks"] == 3 - executed[starved[0]]
     for name in tables:
         assert await _fragment_count(adapter, name) == 3
+
+
+@pytest.mark.asyncio
+async def test_version_budget_is_shared_across_tables(tmp_path, compaction_settings):
+    compaction_settings(retention_seconds=0, max_versions_per_run=3)
+    adapter, _ = _adapter(tmp_path)
+    tables = ["VersionsA_label", "VersionsB_label"]
+    for name in tables:
+        await _write_n_points(adapter, name, 4)
+
+    stats = await adapter.compact()
+
+    assert sum(stats[name]["old_versions_removed"] for name in tables) == 3
+    assert sum(stats[name]["versions_pending"] for name in tables) > 0
+
+
+@pytest.mark.asyncio
+async def test_tables_written_since_their_last_pass_go_first(tmp_path, compaction_settings):
+    compaction_settings(retention_seconds=0)
+    adapter, _ = _adapter(tmp_path)
+    names = ["OrderA_label", "OrderB_label", "OrderC_label"]
+    for name in names:
+        await _write_n_points(adapter, name, 1)
+    await adapter.compact()
+    assert adapter._compaction_dirty == set()
+
+    await _write_n_points(adapter, "OrderC_label", 1)
+    await adapter.delete_data_points("OrderB_label", [uuid4()])
+
+    order = adapter._compaction_order(names)
+    assert set(order[:2]) == {"OrderB_label", "OrderC_label"}
+    assert order[2] == "OrderA_label"
+
+
+@pytest.mark.asyncio
+async def test_a_spent_budget_rotates_which_tables_go_first(tmp_path):
+    """When the budget ends a pass early, the next pass starts elsewhere."""
+    adapter, _ = _adapter(tmp_path)
+    names = ["RotA", "RotB", "RotC"]
+    starts = {adapter._compaction_order(names)[0] for _ in range(3)}
+    assert starts == set(names)
+
+
+@pytest.mark.asyncio
+async def test_an_overlapping_pass_returns_instead_of_queueing(tmp_path, compaction_settings):
+    compaction_settings()
+    adapter, _ = _adapter(tmp_path)
+    async with adapter._compaction_lock:
+        assert await adapter.compact() == {"skipped": "in_progress"}
+
+
+@pytest.mark.asyncio
+async def test_fragment_rewrite_holds_the_write_lock_and_version_pruning_does_not(
+    tmp_path, compaction_settings, monkeypatch
+):
+    """The rewrite commit conflicts with writers; pruning commits nothing and
+    must not hold off upserts while it deletes a backlog of files."""
+    adapter_module = importlib.import_module(
+        "cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter"
+    )
+    compaction_settings(retention_seconds=0)
+    adapter, _ = _adapter(tmp_path)
+    await _write_n_points(adapter, "LockTarget_label", 3)
+    lock_held = {}
+
+    def recording(name, real):
+        def wrapper(*args, **kwargs):
+            lock_held[name] = adapter.VECTOR_DB_LOCK.locked()
+            return real(*args, **kwargs)
+
+        return wrapper
+
+    monkeypatch.setattr(
+        adapter_module,
+        "compact_fragments",
+        recording("compact_fragments", adapter_module.compact_fragments),
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "prune_superseded_versions",
+        recording("prune_superseded_versions", adapter_module.prune_superseded_versions),
+    )
+
+    await adapter.compact()
+
+    assert lock_held == {"compact_fragments": True, "prune_superseded_versions": False}
+
+
+@pytest.mark.asyncio
+async def test_deletes_take_the_write_lock(tmp_path, monkeypatch):
+    """A delete racing a compaction rewrite of the same fragments loses at commit."""
+    adapter, _ = _adapter(tmp_path)
+    collection = "DeleteLock_label"
+    ids = await _write_n_points(adapter, collection, 2)
+    real_get_collection = adapter.get_collection
+    lock_held = []
+
+    async def get_collection(name):
+        table = await real_get_collection(name)
+        real_delete = table.delete
+
+        async def delete(predicate):
+            lock_held.append(adapter.VECTOR_DB_LOCK.locked())
+            return await real_delete(predicate)
+
+        table.delete = delete
+        return table
+
+    monkeypatch.setattr(adapter, "get_collection", get_collection)
+
+    await adapter.delete_data_points(collection, ids)
+
+    assert lock_held == [True]
 
 
 @pytest.mark.asyncio
@@ -301,10 +483,10 @@ async def test_compact_is_fail_open_per_collection(tmp_path, compaction_settings
     await _write_n_points(adapter, "Broken_label", 2)
     original = adapter._compact_collection
 
-    async def flaky(name, options):
+    async def flaky(name, *args):
         if name == "Broken_label":
             raise RuntimeError("boom")
-        return await original(name, options)
+        return await original(name, *args)
 
     monkeypatch.setattr(adapter, "_compact_collection", flaky)
 
@@ -315,34 +497,103 @@ async def test_compact_is_fail_open_per_collection(tmp_path, compaction_settings
 
 
 @pytest.mark.asyncio
-async def test_compaction_options_reach_the_subprocess_worker():
+async def test_an_incompatible_pylance_turns_compaction_off(
+    tmp_path, compaction_settings, monkeypatch
+):
+    """lancedb and pylance on different Lance cores: stop, warn once, never fail writes."""
+    from cognee_db_workers.lancedb_compaction import PylanceIncompatibleError
+
+    adapter_module = importlib.import_module(
+        "cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter"
+    )
+    compaction_settings(retention_seconds=0)
+    adapter, _ = _adapter(tmp_path)
+    await _write_n_points(adapter, "PylanceA_label", 2)
+    await _write_n_points(adapter, "PylanceB_label", 2)
+    attempts = []
+
+    async def incompatible(table):
+        attempts.append(table)
+        raise PylanceIncompatibleError("unsupported manifest version")
+
+    monkeypatch.setattr(adapter_module, "open_as_lance", incompatible)
+
+    first = await adapter.compact()
+
+    assert len(attempts) == 1, "kept trying other tables after an incompatibility"
+    assert [value for value in first.values() if "error" in value]
+    assert await adapter.compact() == {"skipped": "pylance_incompatible"}
+    await _write_n_points(adapter, "PylanceA_label", 1, start=2)  # writes still work
+
+
+@pytest.mark.asyncio
+async def test_proxy_sends_both_compaction_halves_without_a_deadline():
+    """Neither half may be re-issued on a timeout while the first attempt still
+    runs in the worker, so they go without one; their task/version caps bound them."""
     from cognee.infrastructure.databases.vector.lancedb.subprocess.proxy import RemoteLanceDBTable
-    from cognee_db_workers.lancedb_protocol import OP_TABLE_OPTIMIZE
+    from cognee_db_workers.lancedb_protocol import (
+        OP_TABLE_COMPACT_FRAGMENTS,
+        OP_TABLE_PRUNE_VERSIONS,
+    )
 
     session = Mock()
     session.call_async = AsyncMock(return_value=Mock(result={"executed_tasks": 1}))
     table = RemoteLanceDBTable(session, 17, "WorkerTarget_label")
-    options = {"target_rows_per_fragment": 20_000, "retention_seconds": 300, "max_tasks": 4}
 
-    assert await table.optimize(**options) == {"executed_tasks": 1}
-
+    assert await table.compact_fragments(target_rows_per_fragment=20_000, max_tasks=4) == {
+        "executed_tasks": 1
+    }
     request = session.call_async.await_args.args[0]
-    assert request.op == OP_TABLE_OPTIMIZE
-    assert request.handle_id == 17
-    assert request.kwargs == options
+    assert (request.op, request.handle_id) == (OP_TABLE_COMPACT_FRAGMENTS, 17)
+    assert request.kwargs == {"target_rows_per_fragment": 20_000, "max_tasks": 4}
+    assert session.call_async.await_args.kwargs == {"timeout": None}
 
-    # The plain form stays lancedb's own optimize (the id re-key migration uses it).
-    await table.optimize()
-    assert session.call_async.await_args.args[0].kwargs == {}
+    await table.prune_versions(retention_seconds=300, max_versions=1_000)
+    request = session.call_async.await_args.args[0]
+    assert request.op == OP_TABLE_PRUNE_VERSIONS
+    assert request.kwargs == {"retention_seconds": 300, "max_versions": 1_000}
+    assert session.call_async.await_args.kwargs == {"timeout": None}
 
 
 @pytest.mark.asyncio
-async def test_worker_runs_bounded_compaction_on_the_real_table(tmp_path):
+async def test_proxy_optimize_forwards_lancedbs_own_arguments():
+    from datetime import timedelta
+
+    from cognee.infrastructure.databases.vector.lancedb.subprocess.proxy import RemoteLanceDBTable
+    from cognee_db_workers.lancedb_protocol import OP_TABLE_OPTIMIZE
+
+    session = Mock()
+    session.call_async = AsyncMock(return_value=Mock(result=None))
+    table = RemoteLanceDBTable(session, 3, "Optimize_label")
+
+    await table.optimize(cleanup_older_than=timedelta(days=1), retrain=True)
+
+    request = session.call_async.await_args.args[0]
+    assert request.op == OP_TABLE_OPTIMIZE
+    assert request.kwargs == {
+        "cleanup_older_than": timedelta(days=1),
+        "delete_unverified": False,
+        "retrain": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_worker_runs_both_compaction_halves_on_the_real_table(tmp_path):
+    from datetime import timedelta
+
     import lancedb
 
     from cognee_db_workers.harness import HandleRegistry, Request
-    from cognee_db_workers.lancedb_protocol import OP_TABLE_OPTIMIZE
-    from cognee_db_workers.lancedb_worker import _op_table_optimize
+    from cognee_db_workers.lancedb_protocol import (
+        OP_TABLE_COMPACT_FRAGMENTS,
+        OP_TABLE_OPTIMIZE,
+        OP_TABLE_PRUNE_VERSIONS,
+    )
+    from cognee_db_workers.lancedb_worker import (
+        _op_table_compact_fragments,
+        _op_table_optimize,
+        _op_table_prune_versions,
+    )
 
     connection = await lancedb.connect_async(str(tmp_path / "db"))
     rows = [{"id": str(i), "vector": [0.1, 0.2, 0.3], "payload": {"slot": i}} for i in range(5)]
@@ -353,19 +604,41 @@ async def test_worker_runs_bounded_compaction_on_the_real_table(tmp_path):
     registry = HandleRegistry()
     handle_id = registry.register(table)
 
-    stats = await _op_table_optimize(
+    stats = await _op_table_compact_fragments(
         registry,
         Request(
-            op=OP_TABLE_OPTIMIZE,
+            op=OP_TABLE_COMPACT_FRAGMENTS,
             handle_id=handle_id,
-            kwargs={"target_rows_per_fragment": 20_000, "retention_seconds": 0, "max_tasks": 0},
+            kwargs={"target_rows_per_fragment": 20_000, "max_tasks": 0},
         ),
     )
-
     assert stats["executed_tasks"] == 1
     assert (await table.stats())["fragment_stats"]["num_fragments"] == 1
+
+    pruned = await _op_table_prune_versions(
+        registry,
+        Request(
+            op=OP_TABLE_PRUNE_VERSIONS,
+            handle_id=handle_id,
+            kwargs={"retention_seconds": 0, "max_versions": 0},
+        ),
+    )
+    assert pruned["old_versions_removed"] >= 5
+    assert pruned["versions_pending"] == 0
     assert await table.count_rows() == 5
-    # Legacy form: no kwargs -> lancedb's own optimize, no stats.
+
+    # lancedb's own optimize, with its own arguments, no stats returned.
+    assert (
+        await _op_table_optimize(
+            registry,
+            Request(
+                op=OP_TABLE_OPTIMIZE,
+                handle_id=handle_id,
+                kwargs={"cleanup_older_than": timedelta(days=7)},
+            ),
+        )
+        is None
+    )
     assert (
         await _op_table_optimize(registry, Request(op=OP_TABLE_OPTIMIZE, handle_id=handle_id))
         is None
@@ -374,21 +647,30 @@ async def test_worker_runs_bounded_compaction_on_the_real_table(tmp_path):
 
 @pytest.mark.asyncio
 async def test_pylance_reads_the_tables_lancedb_writes(tmp_path, compaction_settings):
-    """Guards the lancedb/pylance pin pair in pyproject.
+    """Guards the lancedb/pylance release-line pairing in pyproject.
 
     lancedb bundles its own Lance core; pylance must be built on the same one or
     ``to_lance()`` (which the compaction relies on) cannot decode the files
-    lancedb wrote. A failure here means the two pins drifted apart.
+    lancedb wrote. A failure here means the two drifted apart.
     """
+    from cognee_db_workers.lancedb_compaction import open_as_lance
+
     compaction_settings()
     adapter, _ = _adapter(tmp_path)
     collection = "PinPair_label"
     await _write_n_points(adapter, collection, 3)
     table = await adapter.get_collection(collection)
 
-    dataset = await table.to_lance()
+    dataset = await open_as_lance(table)
 
     assert dataset.to_table().num_rows == 3
+
+
+def _engine_getter(engine):
+    async def get_vector_engine_async():
+        return engine
+
+    return get_vector_engine_async
 
 
 @pytest.mark.asyncio
@@ -403,16 +685,37 @@ async def test_compact_vector_store_never_fails_the_pipeline(monkeypatch):
         async def compact(self):
             return {"Entity_name": {"planned_tasks": 1, "executed_tasks": 1}}
 
-    monkeypatch.setattr(module, "get_vector_engine", lambda: Exploding())
+    async def unavailable():
+        raise RuntimeError("no vector engine")
+
+    monkeypatch.setattr(module, "get_vector_engine_async", _engine_getter(Exploding()))
     assert await module.compact_vector_store() is None
 
-    monkeypatch.setattr(module, "get_vector_engine", lambda: object())  # adapter without compact
+    monkeypatch.setattr(module, "get_vector_engine_async", unavailable)
     assert await module.compact_vector_store() is None
 
-    monkeypatch.setattr(module, "get_vector_engine", lambda: Quiet())
+    monkeypatch.setattr(module, "get_vector_engine_async", _engine_getter(Quiet()))
     assert await module.compact_vector_store() == {
         "Entity_name": {"planned_tasks": 1, "executed_tasks": 1}
     }
+
+
+@pytest.mark.asyncio
+async def test_compact_vector_store_uses_the_async_engine_getter(monkeypatch):
+    """The deprecated sync getter warns on every run and fails under -W error."""
+    import warnings
+
+    module = importlib.import_module("cognee.infrastructure.databases.vector.compact_vector_store")
+    assert not hasattr(module, "get_vector_engine")
+
+    class Quiet:
+        async def compact(self):
+            return {}
+
+    monkeypatch.setattr(module, "get_vector_engine_async", _engine_getter(Quiet()))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        assert await module.compact_vector_store() == {}
 
 
 @pytest.mark.asyncio
@@ -444,6 +747,7 @@ async def test_compact_runs_end_to_end_inside_the_subprocess_worker(
 
         assert stats[collection]["executed_tasks"] == 1
         assert stats[collection]["fragments_removed"] == 5
+        assert stats[collection]["versions_pending"] == 0
         assert len(_data_files(db_path, collection)) == 1
         assert len(await adapter.retrieve(collection, [str(i) for i in ids])) == 5
     finally:
@@ -452,9 +756,8 @@ async def test_compact_runs_end_to_end_inside_the_subprocess_worker(
 
 @pytest.mark.asyncio
 async def test_compact_vector_store_lets_a_running_pass_finish_before_cancelling(monkeypatch):
-    """A cancel must not leave the pass running against the rollback that follows it."""
-    import asyncio
-
+    """A cancel -- even a repeated one -- must not leave the pass running against
+    the adapter teardown that follows it."""
     module = importlib.import_module("cognee.infrastructure.databases.vector.compact_vector_store")
     started = asyncio.Event()
     finished = False
@@ -467,40 +770,17 @@ async def test_compact_vector_store_lets_a_running_pass_finish_before_cancelling
             finished = True
             return {}
 
-    monkeypatch.setattr(module, "get_vector_engine", lambda: Slow())
+    monkeypatch.setattr(module, "get_vector_engine_async", _engine_getter(Slow()))
     task = asyncio.ensure_future(module.compact_vector_store())
     await started.wait()
+    task.cancel()
+    await asyncio.sleep(0.05)
+    task.cancel()  # e.g. shutdown cancelling again while the first cancel waits
+    await asyncio.sleep(0.05)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
     assert finished, "cancellation propagated while the compaction pass was still running"
-
-
-def test_every_pipeline_run_ends_with_vector_maintenance():
-    """Maintenance is not opt-in: run_tasks calls it unconditionally before completion."""
-    import ast
-
-    from cognee.modules.pipelines.operations import run_tasks as run_tasks_module
-
-    source = Path(run_tasks_module.__file__).read_text()
-    assert "vector_maintenance" not in source
-    calls = [
-        node
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "compact_vector_store"
-    ]
-    assert len(calls) == 1
-    # The call is a plain statement in the success path, not guarded by a condition.
-    for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.If):
-            assert not any(
-                isinstance(sub, ast.Call)
-                and isinstance(sub.func, ast.Name)
-                and sub.func.id == "compact_vector_store"
-                for sub in ast.walk(node)
-            ), "compact_vector_store must not be gated by a condition"
 
 
 @pytest.mark.asyncio
@@ -516,6 +796,7 @@ async def test_compaction_settings_keep_the_vector_factory_usable(tmp_path, monk
         vector_db_name="factory_compaction",
         vector_db_subprocess_enabled=False,
         vector_db_compaction_target_rows_per_fragment=2,
+        vector_db_compaction_max_tasks_per_run=2,
     )
 
     adapter = factory.create_vector_engine(**config.to_dict())

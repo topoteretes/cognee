@@ -35,7 +35,12 @@ from cognee.modules.observability.tracing import (
 )
 from cognee.modules.storage.utils import copy_model
 from cognee.shared.logging_utils import get_logger
-from cognee_db_workers.lancedb_compaction import compact_dataset
+from cognee_db_workers.lancedb_compaction import (
+    PylanceIncompatibleError,
+    compact_fragments,
+    open_as_lance,
+    prune_superseded_versions,
+)
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
@@ -213,9 +218,14 @@ class LanceDBAdapter(VectorDBInterface):
         #   (*,     True)  — closed, not reusable in either mode
         self._subprocess_mode = session is not None
         self._permanently_closed = False
-        # Which table a maintenance pass starts with; advances every pass so a
-        # shared task budget is not always spent on the same first tables.
+        # Compaction state (see ``compact``): tables written since their last
+        # pass, a rotation cursor so a shared task budget is not always spent on
+        # the same tables, a lock so concurrent passes do not overlap, and the
+        # reason compaction was turned off for good, if it was.
+        self._compaction_dirty: set[str] = set()
         self._compaction_cursor = 0
+        self._compaction_lock = asyncio.Lock()
+        self._compaction_unsupported: str | None = None
 
     async def get_connection(self):
         """
@@ -448,6 +458,7 @@ class LanceDBAdapter(VectorDBInterface):
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set with any prior rows."""
         payload_schema = type(data_points[0])
+        self._mark_written(collection_name)
 
         if not await self.has_collection(collection_name):
             async with self.VECTOR_DB_LOCK:
@@ -635,6 +646,7 @@ class LanceDBAdapter(VectorDBInterface):
                 )
             )
 
+        self._mark_written(collection_name)
         async with self.VECTOR_DB_LOCK:
             await (
                 collection.merge_insert("id")
@@ -654,6 +666,13 @@ class LanceDBAdapter(VectorDBInterface):
         connection's URL in subprocess mode (where ``url`` may be ``None``)."""
         return self.url or getattr(self.connection, "_url", None)
 
+    def _is_remote_store(self, url: str | None) -> bool:
+        return bool(url) and url.startswith(self._REMOTE_URL_PREFIXES)
+
+    def _mark_written(self, collection_name: str) -> None:
+        """Record a write so the next compaction pass serves this table first."""
+        self._compaction_dirty.add(collection_name)
+
     def _compaction_options(self) -> dict | None:
         config = get_vectordb_config()
         if not config.vector_db_compaction_enabled:
@@ -662,7 +681,28 @@ class LanceDBAdapter(VectorDBInterface):
             "target_rows_per_fragment": config.vector_db_compaction_target_rows_per_fragment,
             "retention_seconds": config.vector_db_compaction_retention_seconds,
             "max_tasks": config.vector_db_compaction_max_tasks_per_run,
+            "max_versions": config.vector_db_compaction_max_versions_per_run,
         }
+
+    def _compaction_order(self, names: list[str]) -> list[str]:
+        """Tables written since their last pass first, then the rest.
+
+        Each group is rotated by a cursor that advances every pass, so when the
+        budget runs out before the end of the list, the next pass starts with
+        tables this one did not reach. Called under ``_compaction_lock``.
+        """
+        cursor = self._compaction_cursor
+        self._compaction_cursor += 1
+
+        def rotated(group: list[str]) -> list[str]:
+            if len(group) < 2:
+                return group
+            start = cursor % len(group)
+            return group[start:] + group[:start]
+
+        written = [name for name in names if name in self._compaction_dirty]
+        untouched = [name for name in names if name not in self._compaction_dirty]
+        return rotated(written) + rotated(untouched)
 
     async def compact(self, collection_name: str | None = None) -> dict:
         """Fold the fragments cognee's upserts leave behind and prune old versions.
@@ -670,61 +710,83 @@ class LanceDBAdapter(VectorDBInterface):
         Every ``merge_insert`` appends a new fragment and leaves the superseded
         rows on disk; LanceDB never reclaims either on its own, so a store in
         daily use grows without bound (issue #4684: 136 GB on disk for ~6 GB of
-        live vectors). Called once per pipeline run from ``run_tasks``; a
-        no-op on a compact table.
+        live vectors). Called once at the end of every cognify run (see
+        ``compact_vector_store``); a no-op on a compact table.
 
-        Bounded, not whole-table: ``cognee_db_workers.lancedb_compaction``
-        merges only fragments below the configured row target, and the pass
-        executes at most ``vector_db_compaction_max_tasks_per_run`` compaction
-        tasks IN TOTAL across the store's tables (a task rewrites one group of
-        fragments into one of at most ``target_rows_per_fragment`` rows). The
-        budget is spent greedily in table order starting from a cursor that
-        advances every pass, so a backlog spread over several tables drains
-        fairly over several runs. Planning and version pruning run for every
-        table regardless; both are metadata work. Superseded files are kept
-        until their successor has aged past the retention window, so a reader
-        that opened the table a moment ago keeps working.
+        Bounded, not whole-store: a pass executes at most
+        ``vector_db_compaction_max_tasks_per_run`` compaction tasks and deletes
+        at most ``vector_db_compaction_max_versions_per_run`` old versions IN
+        TOTAL across the store's tables (``0`` = no limit). A task rewrites one
+        group of small fragments into one of at most
+        ``target_rows_per_fragment`` rows; a version is deleted only once its
+        successor has aged past the retention window, so a reader that opened
+        the table a moment ago keeps working. A store with a large backlog
+        therefore drains over several cognify runs instead of stalling one.
+        Both budgets are spent greedily in table order: tables written since
+        their last pass first, each group starting from a cursor that advances
+        every pass, so no table starves. A pass ends once both are spent.
 
-        Runs under ``VECTOR_DB_LOCK``: a compaction commit is a Lance
-        "rewrite" transaction that a concurrent upsert pre-empts (the upsert
-        wins and the compaction raises a retryable conflict), so it is
-        serialised with this adapter's writers rather than racing them.
+        Only the fragment rewrite runs under ``VECTOR_DB_LOCK``: its commit is a
+        Lance "rewrite" transaction that conflicts with a concurrent upsert or
+        delete on the same fragments. Version pruning commits nothing and runs
+        outside the lock, so writers are never blocked behind it. Concurrent
+        passes on one adapter do not queue: the second one returns at once.
 
         Skipped for remote stores (``s3://`` and friends), where every rewrite
-        is network transfer and cleanup is thousands of object deletes.
-        Fail-open per collection: a failure is logged and reported in the
-        returned stats, never raised.
+        is network transfer and cleanup is thousands of object deletes, and
+        turned off for the adapter's lifetime when pylance cannot open the
+        tables lancedb wrote. Fail-open per collection: a failure is logged
+        and reported in the returned stats, never raised.
         """
         options = self._compaction_options()
         if options is None:
             return {"skipped": "disabled"}
-        url = self._store_url()
-        if url and url.startswith(self._REMOTE_URL_PREFIXES):
+        if self._is_remote_store(self._store_url()):
             return {"skipped": "remote_store"}
+        if self._compaction_unsupported:
+            return {"skipped": self._compaction_unsupported}
+        if self._compaction_lock.locked():
+            return {"skipped": "in_progress"}
 
-        connection = await self.get_connection()
-        if collection_name is not None:
-            names = [collection_name]
-        else:
-            names = list(await connection.table_names())
+        async with self._compaction_lock:
+            connection = await self.get_connection()
+            if collection_name is not None:
+                names = [collection_name]
+            else:
+                names = self._compaction_order(list(await connection.table_names()))
 
-        if len(names) > 1:
-            start = self._compaction_cursor % len(names)
-            names = names[start:] + names[:start]
-            self._compaction_cursor = start + 1
-
-        budget = int(options["max_tasks"])  # 0 = unlimited
-        remaining = budget
-        results: dict = {}
-        async with self.VECTOR_DB_LOCK:
+            task_budget = int(options["max_tasks"])  # 0 = unlimited
+            version_budget = int(options["max_versions"])  # 0 = unlimited
+            tasks_left, versions_left = task_budget, version_budget
+            results: dict = {}
             for name in names:
-                # Budget spent: plan and prune only, so the stats still report the
-                # work left for later runs and old versions still age out.
-                table_options = dict(
-                    options, max_tasks=remaining if budget == 0 or remaining > 0 else -1
+                tasks_spent = task_budget > 0 and tasks_left <= 0
+                versions_spent = version_budget > 0 and versions_left <= 0
+                if tasks_spent and versions_spent:
+                    break
+                # The helpers read 0 as "no limit" and a negative value as "none".
+                max_tasks = -1 if tasks_spent else (tasks_left if task_budget > 0 else 0)
+                max_versions = (
+                    -1 if versions_spent else (versions_left if version_budget > 0 else 0)
                 )
+                if not tasks_spent:
+                    # Cleared before the pass, so a write that lands during it
+                    # marks the table again for the next one. A table whose
+                    # rewrite the budget skipped stays first in line.
+                    self._compaction_dirty.discard(name)
                 try:
-                    stats = await self._compact_collection(name, table_options)
+                    stats = await self._compact_collection(name, options, max_tasks, max_versions)
+                except PylanceIncompatibleError as exc:
+                    self._compaction_unsupported = "pylance_incompatible"
+                    logger.warning(
+                        "LanceDB compaction turned off: pylance cannot open the tables "
+                        "lancedb wrote (%s). Install the pylance release line matching "
+                        "lancedb's bundled Lance core.",
+                        exc,
+                        exc_info=True,
+                    )
+                    results[name] = {"error": str(exc)[:200]}
+                    break
                 except Exception as exc:
                     logger.warning(
                         "Compaction skipped for collection '%s': %s",
@@ -735,21 +797,49 @@ class LanceDBAdapter(VectorDBInterface):
                     results[name] = {"error": str(exc)[:200]}
                     continue
                 results[name] = stats
-                if budget > 0:
-                    remaining = max(0, remaining - int(stats.get("executed_tasks", 0) or 0))
-        return results
+                if task_budget > 0:
+                    tasks_left -= int(stats.get("executed_tasks", 0) or 0)
+                if version_budget > 0:
+                    versions_left -= int(stats.get("old_versions_removed", 0) or 0)
+            return results
 
-    async def _compact_collection(self, collection_name: str, options: dict) -> dict:
+    async def _compact_collection(
+        self, collection_name: str, options: dict, max_tasks: int, max_versions: int
+    ) -> dict:
         collection = await self.get_collection(collection_name)
+        target_rows = options["target_rows_per_fragment"]
+
+        async with self.VECTOR_DB_LOCK:
+            if self._subprocess_mode:
+                stats = await collection.compact_fragments(
+                    target_rows_per_fragment=target_rows, max_tasks=max_tasks
+                )
+            else:
+                # Hand the table to pylance, do the I/O off the event loop, then
+                # move the handle to the version the compaction committed.
+                dataset = await open_as_lance(collection)
+                stats = await asyncio.to_thread(
+                    compact_fragments,
+                    dataset,
+                    target_rows_per_fragment=target_rows,
+                    max_tasks=max_tasks,
+                )
+                await collection.checkout_latest()
+
+        retention = options["retention_seconds"]
         if self._subprocess_mode:
-            # The worker owns the table; it runs the same helper and returns its stats.
-            return await collection.optimize(**options) or {}
-        # Local mode: hand the table to pylance, do the I/O off the event loop,
-        # then move the handle to the version the compaction committed.
-        dataset = await collection.to_lance()
-        stats = await asyncio.to_thread(compact_dataset, dataset, **options)
-        await collection.checkout_latest()
-        return stats
+            pruned = await collection.prune_versions(
+                retention_seconds=retention, max_versions=max_versions
+            )
+        else:
+            dataset = await open_as_lance(collection)
+            pruned = await asyncio.to_thread(
+                prune_superseded_versions,
+                dataset,
+                retention_seconds=retention,
+                max_versions=max_versions,
+            )
+        return {**(stats or {}), **(pruned or {})}
 
     async def _migrate_collection_schema(
         self,
@@ -1357,6 +1447,7 @@ class LanceDBAdapter(VectorDBInterface):
             import pyarrow
 
             arrow_records = pyarrow.Table.from_pylist(records, schema=schema)
+            self._mark_written(collection_name)
             await collection.merge_insert("id").when_matched_update_all().execute(arrow_records)
 
     # Ids per `IN (...)` delete predicate. Each `collection.delete` is a
@@ -1380,12 +1471,19 @@ class LanceDBAdapter(VectorDBInterface):
         # `id` column is a str, so match by string and escape single quotes to
         # keep the predicate injection-safe (mirrors create_data_points). The
         # sequential batches cannot commit-conflict with each other, and a
-        # non-existent id no-ops.
+        # non-existent id no-ops. Each batch takes VECTOR_DB_LOCK like every
+        # other write here: a Lance delete and a compaction rewrite of the same
+        # fragments conflict at commit, and the loser would be this delete
+        # (surfacing as a failed forget() or rollback). Per batch, not around
+        # the loop, so a large delete does not hold off upserts for its whole
+        # duration.
+        self._mark_written(collection_name)
         for start in range(0, len(data_point_ids), self.DELETE_PREDICATE_BATCH_SIZE):
             batch = data_point_ids[start : start + self.DELETE_PREDICATE_BATCH_SIZE]
             escaped_ids = [str(data_point_id).replace("'", "''") for data_point_id in batch]
             id_list = ", ".join(f"'{escaped_id}'" for escaped_id in escaped_ids)
-            await collection.delete(f"id IN ({id_list})")
+            async with self.VECTOR_DB_LOCK:
+                await collection.delete(f"id IN ({id_list})")
 
     async def remove_belongs_to_set_tags(
         self,
@@ -1502,6 +1600,8 @@ class LanceDBAdapter(VectorDBInterface):
                 # collection pays two round-trips at most instead of N.
                 # Ids are UUID strings produced by cognee so no escaping
                 # is needed (mirrors the assumption in `retrieve()`).
+                if rows_to_delete or rows_to_update:
+                    self._mark_written(collection_name)
                 if rows_to_delete:
                     orphan_predicate = (
                         "id IN (" + ", ".join(f"'{row_id}'" for row_id in rows_to_delete) + ")"
@@ -1573,14 +1673,14 @@ class LanceDBAdapter(VectorDBInterface):
         connection = await self.get_connection()
         collection_names = await connection.table_names()
 
-        for collection_name in collection_names:
-            collection = await self.get_collection(collection_name)
-            await collection.delete("id IS NOT NULL")
-            await connection.drop_table(collection_name)
+        async with self.VECTOR_DB_LOCK:
+            for collection_name in collection_names:
+                collection = await self.get_collection(collection_name)
+                await collection.delete("id IS NOT NULL")
+                await connection.drop_table(collection_name)
+        self._compaction_dirty.clear()
 
-        if self.url and not self.url.startswith(
-            ("db://", "http://", "https://", "s3://", "gs://", "az://")
-        ):
+        if self.url and not self._is_remote_store(self.url):
             db_dir_path = path.dirname(self.url)
             db_file_name = path.basename(self.url)
             await get_file_storage(db_dir_path).remove_all(db_file_name)

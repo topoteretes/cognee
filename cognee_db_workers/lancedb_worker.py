@@ -14,18 +14,20 @@ from .harness import (
     Request,
     run_worker_loop,
 )
-from .lancedb_compaction import compact_dataset
+from .lancedb_compaction import compact_fragments, open_as_lance, prune_superseded_versions
 from .lancedb_protocol import (
     OP_CONNECT,
     OP_CREATE_TABLE,
     OP_DROP_TABLE,
     OP_OPEN_TABLE,
     OP_TABLE_ADD,
+    OP_TABLE_COMPACT_FRAGMENTS,
     OP_TABLE_COUNT_ROWS,
     OP_TABLE_DELETE,
     OP_TABLE_MERGE_INSERT_EXECUTE,
     OP_TABLE_NAMES,
     OP_TABLE_OPTIMIZE,
+    OP_TABLE_PRUNE_VERSIONS,
     OP_TABLE_QUERY_EXECUTE,
     OP_TABLE_RELEASE,
     OP_TABLE_SCHEMA,
@@ -168,19 +170,28 @@ async def _op_table_delete(registry: HandleRegistry, req: Request):
 
 
 async def _op_table_optimize(registry: HandleRegistry, req: Request):
+    # LanceDB's own full ``optimize`` (the id re-key migration compacts this
+    # way after a bulk delete). Its stats object is not returned: nothing
+    # reads it and it is not a plain builtin.
     table = registry.get(req.handle_id)
-    if not req.kwargs:
-        # Legacy form: LanceDB's own full ``optimize`` (the id re-key migration
-        # compacts this way after a bulk delete).
-        await table.optimize()
-        return None
-    # Bounded compaction (see ``lancedb_compaction``): hand the table to
-    # pylance, do the I/O off the event loop so other requests keep flowing,
-    # then move this handle to the version the compaction committed.
-    dataset = await table.to_lance()
-    stats = await asyncio.to_thread(compact_dataset, dataset, **req.kwargs)
+    await table.optimize(**(req.kwargs or {}))
+
+
+async def _op_table_compact_fragments(registry: HandleRegistry, req: Request):
+    # Hand the table to pylance, do the I/O off the event loop so other
+    # requests keep flowing, then move this handle to the committed version.
+    table = registry.get(req.handle_id)
+    dataset = await open_as_lance(table)
+    stats = await asyncio.to_thread(compact_fragments, dataset, **req.kwargs)
     await table.checkout_latest()
     return stats
+
+
+async def _op_table_prune_versions(registry: HandleRegistry, req: Request):
+    table = registry.get(req.handle_id)
+    await table.checkout_latest()
+    dataset = await open_as_lance(table)
+    return await asyncio.to_thread(prune_superseded_versions, dataset, **req.kwargs)
 
 
 def _apply_chain(builder, chain_steps):
@@ -254,6 +265,8 @@ DISPATCH = {
     OP_TABLE_ADD: _op_table_add,
     OP_TABLE_DELETE: _op_table_delete,
     OP_TABLE_OPTIMIZE: _op_table_optimize,
+    OP_TABLE_COMPACT_FRAGMENTS: _op_table_compact_fragments,
+    OP_TABLE_PRUNE_VERSIONS: _op_table_prune_versions,
     OP_TABLE_QUERY_EXECUTE: _op_query_execute,
     OP_TABLE_VECTOR_SEARCH_EXECUTE: _op_vector_search_execute,
     OP_TABLE_MERGE_INSERT_EXECUTE: _op_merge_insert_execute,

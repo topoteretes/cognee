@@ -6,7 +6,6 @@ from uuid import UUID
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.infrastructure.databases.vector.compact_vector_store import compact_vector_store
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.operations import scrub_error_message
@@ -50,6 +49,7 @@ async def run_tasks(
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = False,
+    after_run_completed: Callable[[], Awaitable[Any]] | None = None,
 ):
     """Run a pipeline over a dataset as ONE logical run.
 
@@ -60,12 +60,12 @@ async def run_tasks(
     resolved to different lists still share this run's lifecycle — one run
     record, one database context, one rollback, one terminal status.
 
-    Once every item and batch of this dataset's run has been written, the
-    vector store's fragments are folded once (see ``LanceDBAdapter.compact``)
-    before the run is reported complete. Every pipeline gets this: a run that
-    wrote no vectors costs one plan per table, and the write-heavy ones
-    (cognify, memify) are exactly the ones that need it. The
-    ``VECTOR_DB_COMPACTION_ENABLED`` setting is the only switch.
+    ``after_run_completed`` is awaited once the run is recorded and reported
+    complete, still inside this dataset's database context (cognify uses it
+    to compact the vector store, see ``compact_vector_store``). It sits
+    outside the run's error handling: it cannot fail, roll back, or re-mark a
+    run that already completed. An exception it raises is logged and
+    swallowed; a cancellation propagates.
     """
     task_resolver = tasks if callable(tasks) else None
     if not user:
@@ -104,6 +104,7 @@ async def run_tasks(
             llm_config=llm_config,
             embedding_config=embedding_config,
         ):
+            run_completed = False
             try:
                 if not isinstance(data, list):
                     data = [data]
@@ -278,10 +279,6 @@ async def run_tasks(
                 if hasattr(relational_engine, "push_to_s3"):
                     await relational_engine.push_to_s3()
 
-                # Fold the vector fragments this run wrote before reporting it
-                # complete. Bounded per run (LanceDBAdapter.compact) and
-                # best-effort: it never fails a run that already succeeded.
-                await compact_vector_store()
                 await log_pipeline_run_complete(
                     pipeline_run_id,
                     pipeline_id,
@@ -300,6 +297,7 @@ async def run_tasks(
                     dataset_name=dataset.name,
                     data_ingestion_info=results,
                 )
+                run_completed = True
 
             except (Exception, asyncio.CancelledError) as error:
                 # asyncio.CancelledError is a BaseException (not an Exception)
@@ -360,3 +358,9 @@ async def run_tasks(
                 # In case of error during incremental loading of data just let the user know the pipeline Errored, don't raise error
                 if not isinstance(error, PipelineRunFailedError):
                     raise
+
+            if run_completed and after_run_completed is not None:
+                try:
+                    await after_run_completed()
+                except Exception:
+                    logger.warning("after_run_completed hook failed", exc_info=True)

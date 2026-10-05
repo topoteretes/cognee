@@ -7,64 +7,92 @@ that, so each call rewrites the whole table -- seconds on an SSD, minutes on a
 laptop disk or a cloud volume, and at cognee's write rate hundreds of GB of
 disk writes a day. Lance's lower-level compaction API takes a fragment target.
 With a 20k-row target (~250 MB at 3072 dims) only the small, recently written
-fragments are merged and the large cold ones are left alone, so the cost of a
-run is bounded by one warm fragment regardless of table size.
+fragments are merged and the large cold ones are left alone.
 
-A plan can also be executed partially. A store that already carries a large
-backlog (tens of thousands of fragments, see issue #4684) is drained
-``max_tasks`` tasks per run instead of blocking one pipeline run for an hour on
-a slow disk.
+A pass has two halves, run separately because only the first one conflicts
+with writers:
 
-Superseded versions are pruned behind a retention window, and the window is
-measured from when a version was SUPERSEDED, not from when it was written.
-Lance's own ``cleanup_old_versions`` ages a version by its commit time, which
-is unsafe on an idle table: an hour-old version that is still the latest can be
-opened by a reader and then deleted a second later, right after the compaction
-that supersedes it. ``_cleanup_superseded_versions`` removes a version only
-once its successor is at least ``retention_seconds`` old, so any reader whose
-single read is shorter than the window is safe, in this or any other process
-(only manifest timestamps are consulted). The files are therefore reclaimed by
-the pass that runs after the window, not by the pass that compacted.
-``delete_unverified`` is never set -- the files of an in-progress write from
-another process look exactly like the leftovers of a failed one.
+* ``compact_fragments`` rewrites small fragments into larger ones. Its commit
+  is a Lance "rewrite" transaction, so callers serialise it with their own
+  writers.
+* ``prune_superseded_versions`` deletes old manifests and the files only they
+  reference. It commits nothing, so it can run beside writers: the files of an
+  in-progress write are referenced by no manifest yet, and Lance keeps such
+  "unverified" files for 7 days (``delete_unverified`` is never set).
 
-Requires ``pylance`` built on the same Lance core ``lancedb`` bundles (the two
-are pinned as a pair in pyproject); a mismatched pylance cannot read the files
-lancedb wrote.
+Both halves take a count bound -- ``max_tasks`` compaction tasks,
+``max_versions`` deleted versions -- and leave the rest for the next pass. A
+store that already carries a large backlog (tens of thousands of fragments and
+versions, see issue #4684) is drained over several cognify runs instead of
+stalling one of them for half an hour.
+
+Reader safety: a version is deleted only once its SUCCESSOR is at least
+``retention_seconds`` old. A reader holding version V keeps working as long as
+its read is shorter than the window, in this or any other process. The
+versions to delete are passed to Lance by number, so no clock comparison
+happens inside Lance and a scheduling delay between our clock read and Lance's
+cannot move the cut-off onto a version a reader just opened.
+
+Requires ``pylance`` built on the same Lance core ``lancedb`` bundles (pyproject
+keeps the two on matching release lines); a mismatched pylance cannot read the
+files lancedb wrote, which the adapter detects and turns compaction off for.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
+from itertools import pairwise
 from typing import Any
 
 DEFAULT_TARGET_ROWS_PER_FRAGMENT = 20_000
 DEFAULT_RETENTION_SECONDS = 300
 DEFAULT_MAX_TASKS_PER_RUN = 4
+DEFAULT_MAX_VERSIONS_PER_RUN = 1_000
 #: Fragments with at least this share of deleted rows are rewritten even when
 #: already at target size, so the dead rows that re-upserts leave in cold data
 #: are reclaimed once they reach a fifth of a fragment.
 MATERIALIZE_DELETIONS_THRESHOLD = 0.2
 
 
-def compact_dataset(
+class PylanceIncompatibleError(RuntimeError):
+    """pylance cannot open a table lancedb wrote: the two are built on
+    different Lance cores. Not specific to one table, so callers stop
+    compacting altogether instead of retrying every table."""
+
+
+async def open_as_lance(table):
+    """``table`` (a ``lancedb.AsyncTable``) as a pylance dataset at its latest version."""
+    try:
+        dataset = await table.to_lance()
+        dataset.versions()
+    except Exception as exc:
+        raise PylanceIncompatibleError(f"{type(exc).__name__}: {exc}") from exc
+    return dataset
+
+
+def _bounded(items: list, limit: int) -> list:
+    """``limit`` items: ``0`` = all of them, negative = none (a shared budget
+    already spent elsewhere)."""
+    if limit < 0:
+        return []
+    return items[:limit] if limit > 0 else items
+
+
+def compact_fragments(
     dataset,
     *,
     target_rows_per_fragment: int = DEFAULT_TARGET_ROWS_PER_FRAGMENT,
-    retention_seconds: int = DEFAULT_RETENTION_SECONDS,
     max_tasks: int = DEFAULT_MAX_TASKS_PER_RUN,
 ) -> dict[str, Any]:
-    """Compact ``dataset`` (a ``lance.LanceDataset``) and prune versions older
-    than the retention window.
+    """Merge the small fragments of ``dataset`` (a ``lance.LanceDataset``).
 
     Synchronous and I/O-bound: callers run it in a worker thread. Executes at
     most ``max_tasks`` of the planned compaction tasks (``0`` = all of them,
-    negative = none: plan and prune only, used when a shared budget is spent)
-    and commits only those, which Lance supports explicitly. Returns plain
-    ints so the result crosses the subprocess boundary without pickling
-    anything but builtins.
+    negative = none: plan only, used when a shared budget is spent) and
+    commits only those, which Lance supports explicitly. Returns plain ints so
+    the result crosses the subprocess boundary without pickling anything but
+    builtins.
     """
-    import lance
     from lance.optimize import Compaction, CompactionOptions
 
     options = CompactionOptions(
@@ -73,58 +101,64 @@ def compact_dataset(
         materialize_deletions_threshold=MATERIALIZE_DELETIONS_THRESHOLD,
     )
     plan = Compaction.plan(dataset, options)
-    tasks = list(plan.tasks)
-    if max_tasks < 0:
-        tasks = []
-    elif max_tasks > 0:
-        tasks = tasks[:max_tasks]
+    tasks = _bounded(list(plan.tasks), int(max_tasks))
 
     stats: dict[str, Any] = {
         "planned_tasks": plan.num_tasks(),
         "executed_tasks": len(tasks),
         "fragments_removed": 0,
         "fragments_added": 0,
-        "old_versions_removed": 0,
-        "bytes_removed": 0,
     }
     if tasks:
         metrics = Compaction.commit(dataset, [task.execute(dataset) for task in tasks])
         stats["fragments_removed"] = int(metrics.fragments_removed)
         stats["fragments_added"] = int(metrics.fragments_added)
-
-    # Re-open so the cleanup sees the version committed just above.
-    cleanup = _cleanup_superseded_versions(lance.dataset(dataset.uri), int(retention_seconds))
-    if cleanup is not None:
-        stats["old_versions_removed"] = int(cleanup.old_versions)
-        stats["bytes_removed"] = int(cleanup.bytes_removed)
     return stats
 
 
-def _cleanup_superseded_versions(dataset, retention_seconds: int):
-    """Remove every version whose successor is at least ``retention_seconds`` old.
+def removable_versions(dataset, retention_seconds: int) -> list[int]:
+    """Version numbers whose successor is at least ``retention_seconds`` old.
 
-    ``cleanup_old_versions`` only takes an age cut-off measured against each
-    version's own commit time, so the cut-off is derived from the version list:
-    find the newest version that is itself older than the window (call it K);
-    every version older than K has a successor no newer than K, hence one that
-    has aged past the window, so all of them can go. K stays: its successor may
-    have been committed a moment ago, and a reader may have opened K just
-    before that. The cut-off sits 1 ms before K: Lance evaluates it against
-    its own clock a little after ours, and that margin keeps K out of reach. A
-    version committed within that millisecond before K (a compaction commits a
-    twin of the previous state right before the rewrite) is kept until a pass
-    in which a newer version has aged, i.e. the pass after the next write.
-    Returns Lance's cleanup stats, or ``None`` when nothing is removable yet.
-    Lance always keeps the latest version regardless.
+    ``versions()`` is ordered oldest to newest and commit timestamps only grow,
+    so the result is always a prefix of the history, never the latest version.
     """
-    versions = dataset.versions()  # oldest -> newest
+    versions = dataset.versions()
     if len(versions) < 2:
-        return None
-    stamps = [version["timestamp"] for version in versions]
-    now = datetime.now(stamps[-1].tzinfo)
-    window = max(0, retention_seconds)
-    aged = [i for i, stamp in enumerate(stamps) if (now - stamp).total_seconds() >= window]
-    if not aged or aged[-1] == 0:
-        return None
-    keep_from = stamps[aged[-1]]
-    return dataset.cleanup_old_versions(older_than=(now - keep_from) + timedelta(milliseconds=1))
+        return []
+    now = datetime.now(versions[-1]["timestamp"].tzinfo)
+    window = max(0, int(retention_seconds))
+    removable = []
+    for version, successor in pairwise(versions):
+        if (now - successor["timestamp"]).total_seconds() < window:
+            break
+        removable.append(int(version["version"]))
+    return removable
+
+
+def prune_superseded_versions(
+    dataset,
+    *,
+    retention_seconds: int = DEFAULT_RETENTION_SECONDS,
+    max_versions: int = DEFAULT_MAX_VERSIONS_PER_RUN,
+) -> dict[str, Any]:
+    """Delete the versions of ``dataset`` whose successor has aged past the window.
+
+    Oldest first, at most ``max_versions`` of them (``0`` = all, negative =
+    none); what is left is reported as ``versions_pending`` and goes in a later
+    pass. Tagged versions are skipped, not raised on: cognee never tags, but a
+    user's tag must not stop cleanup.
+    """
+    removable = removable_versions(dataset, retention_seconds)
+    selected = _bounded(removable, int(max_versions))
+    stats: dict[str, Any] = {
+        "old_versions_removed": 0,
+        "bytes_removed": 0,
+        "versions_pending": len(removable) - len(selected),
+    }
+    if selected:
+        cleanup = dataset.cleanup_old_versions(
+            versions=selected, error_if_tagged_old_versions=False
+        )
+        stats["old_versions_removed"] = int(cleanup.old_versions)
+        stats["bytes_removed"] = int(cleanup.bytes_removed)
+    return stats

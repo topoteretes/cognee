@@ -66,6 +66,7 @@ async def run_pipeline(
     data_cache: bool = False,
     skip_connection_test: bool = False,
     needs_llm: bool = True,
+    after_run_completed: Callable[[], Awaitable[Any]] | None = None,
 ):
     """``tasks`` is either the task list every data item runs, or a callable
     mapping one item to its task list (a task resolver — see ``run_tasks``);
@@ -76,7 +77,10 @@ async def run_pipeline(
     probed). For a task list it is derived from the tasks themselves — the
     union of ``Task.needs_llm`` — and the ``needs_llm`` parameter applies only
     when ``tasks`` is a resolver, whose caller must pass the union over every
-    list the resolver can return."""
+    list the resolver can return.
+
+    ``after_run_completed`` is awaited after each dataset's run completes,
+    inside that dataset's database context (see ``run_tasks``)."""
     if tasks is None:
         raise ValueError(
             "run_pipeline requires tasks: a task list or a per-item task resolver callable"
@@ -108,6 +112,7 @@ async def run_pipeline(
             llm_config=llm_config,
             embedding_config=embedding_config,
             data_cache=data_cache,
+            after_run_completed=after_run_completed,
         ):
             yield run_info
 
@@ -124,6 +129,7 @@ async def run_pipeline_per_dataset(
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
     data_cache=False,
+    after_run_completed: Callable[[], Awaitable[Any]] | None = None,
 ):
     # The actual work of a single run, factored out so it can run either under
     # the per-dataset lock (normal case) or directly (re-entrant case below).
@@ -145,6 +151,7 @@ async def run_pipeline_per_dataset(
             llm_config=llm_config,
             embedding_config=embedding_config,
             data_cache=data_cache,
+            after_run_completed=after_run_completed,
         )
 
         async for pipeline_run_info in pipeline_run:
