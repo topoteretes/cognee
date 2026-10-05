@@ -124,7 +124,6 @@ class HybridRetriever(BaseRetriever):
             await self._fetch_candidates(query),
             chunks_limit=self.chunks_top_k,
             entities_limit=self.entities_top_k,
-            max_edges_per_entity=self.max_edges_per_entity,
         )
 
     async def _fetch_candidates(self, query: str) -> HybridCandidates:
@@ -228,6 +227,7 @@ class HybridRetriever(BaseRetriever):
             reachable_edge_type_ids=reachable_ids,
             node_scoped=bool(self.node_name),
             facts_top_k=self.facts_top_k,
+            entity_edge_budget=max_ranked_bullets,
         )
 
     async def get_context_from_objects(

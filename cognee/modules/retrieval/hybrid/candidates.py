@@ -1,19 +1,17 @@
 """The uncut result of a hybrid fetch, and the one step that cuts it.
 
 A hybrid fetch produces more than it shows: ranked chunks, ranked entities with
-their edge bullets, and the raw fact hits. ``HybridCandidates`` carries all of
-that as a value, so a retriever that wants to reorder the lists before showing
-them (the temporal rerank) can do so without the fetch having decided anything.
+their edge bullets, and the raw fact hits. ``HybridCandidates`` carries that as
+a value, so a retriever that reorders the lists before showing them (the
+temporal rerank) can do so without the fetch having decided anything.
 
 ``finalize`` is the only place a candidate list is cut. It cuts chunks and
-entities to the limits it is given and selects the standalone facts *against
-the entities it keeps*, so a fact already shown under an entity is dropped as a
-duplicate only when that entity is shown. The fallback fact budget — spent when
-no entity is shown at all — follows the entity limit that applies here, not the
-size of the fetch.
+entities to the limits it is given and selects the standalone facts against
+the entities it keeps, so a fact is dropped as "already shown under entity X"
+only when X is shown.
 """
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 
 from cognee.modules.retrieval.hybrid.facts import FactCandidates, select_facts_from_candidates
 from cognee.modules.retrieval.hybrid.results import result_id
@@ -29,25 +27,15 @@ class HybridCandidates:
     fact_candidates: FactCandidates = field(default_factory=FactCandidates)
 
 
-def finalize(
-    candidates: HybridCandidates,
-    *,
-    chunks_limit: int,
-    entities_limit: int,
-    max_edges_per_entity: int,
-) -> dict:
+def finalize(candidates: HybridCandidates, *, chunks_limit: int, entities_limit: int) -> dict:
     """Cut the candidates to the limits and select facts against the entities kept."""
     chunks = list(candidates.chunks)[:chunks_limit]
     entities = list(candidates.entities)[:entities_limit]
-    fact_candidates = replace(
-        candidates.fact_candidates,
-        entity_edge_budget=entities_limit * max(0, max_edges_per_entity),
-    )
     return {
         "chunks": chunks,
         "chunk_summaries": summaries_for(candidates.chunk_summaries, chunks),
         "entities": entities,
-        "facts": select_facts_from_candidates(fact_candidates, entities),
+        "facts": select_facts_from_candidates(candidates.fact_candidates, entities),
     }
 
 

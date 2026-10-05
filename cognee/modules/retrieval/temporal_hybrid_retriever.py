@@ -60,12 +60,7 @@ class TemporalHybridRetriever(HybridRetriever):
 
     def _finalize(self, candidates: HybridCandidates) -> dict:
         """Cut to ``top_k`` and select facts against the entities that are kept."""
-        return finalize(
-            candidates,
-            chunks_limit=self.top_k,
-            entities_limit=self.top_k,
-            max_edges_per_entity=self.max_edges_per_entity,
-        )
+        return finalize(candidates, chunks_limit=self.top_k, entities_limit=self.top_k)
 
     async def _anchors(self, start, end, candidates: HybridCandidates) -> dict:
         """Which candidate chunks and entities are attached to a time in the window."""

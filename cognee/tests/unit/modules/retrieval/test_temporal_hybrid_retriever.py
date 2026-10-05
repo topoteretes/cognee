@@ -105,7 +105,7 @@ def _candidates(fact_candidates: FactCandidates | None = None) -> HybridCandidat
 
 
 def _finalize(candidates: HybridCandidates, top_k: int = 2) -> dict:
-    return finalize(candidates, chunks_limit=top_k, entities_limit=top_k, max_edges_per_entity=10)
+    return finalize(candidates, chunks_limit=top_k, entities_limit=top_k)
 
 
 def test_anchored_first_puts_anchored_candidates_first_and_keeps_the_rest():
@@ -160,19 +160,6 @@ def test_finalize_selects_facts_against_the_entities_it_keeps():
     one = _finalize(candidates, top_k=1)
     assert [entity["id"] for entity in one["entities"]] == ["atlas"]
     assert [fact["id"] for fact in one["facts"]] == ["f_helios", "f_other"]
-
-
-def test_finalize_caps_the_fallback_fact_budget_by_the_entities_it_shows():
-    """With no entity kept, facts get the entity lane's edge budget — sized by the
-    limit applied here, not by the (4x larger) temporal fetch."""
-    hits = [{"id": f"f{i}", "text": f"fact number {i} happened"} for i in range(100)]
-    candidates = HybridCandidates(
-        chunks=[{"id": "c1"}], fact_candidates=FactCandidates(edge_hits=hits, facts_top_k=2)
-    )
-    shown_two = finalize(candidates, chunks_limit=2, entities_limit=2, max_edges_per_entity=3)
-    assert len(shown_two["facts"]) == 6  # 2 entities' worth of bullets, not 8 × 3
-    shown_eight = finalize(candidates, chunks_limit=8, entities_limit=8, max_edges_per_entity=3)
-    assert len(shown_eight["facts"]) == 24
 
 
 # --- retriever flow ------------------------------------------------------------
@@ -305,27 +292,6 @@ async def test_temporal_retriever_selects_facts_against_the_entities_it_shows(mo
     assert [entity["id"] for entity in result["entities"]] == ["atlas"]  # helios cut
     assert [fact["id"] for fact in result["facts"]] == ["f_helios", "f_other"]
     assert [fact["id"] for fact in retriever.last_baseline["facts"]] == ["f_helios", "f_other"]
-
-
-@pytest.mark.asyncio
-async def test_temporal_retriever_caps_facts_by_top_k_when_no_entity_is_shown(monkeypatch):
-    """The fallback fact budget follows top_k, not the oversized candidate fetch."""
-    hits = [{"id": f"f{i}", "text": f"fact number {i} happened"} for i in range(100)]
-    candidates = HybridCandidates(
-        chunks=[{"id": "c1"}], fact_candidates=FactCandidates(edge_hits=hits, facts_top_k=2)
-    )
-    retriever, _engine, _fetch, _extract = _retriever(
-        monkeypatch,
-        anchors=_anchors(chunks=("c1",)),
-        interval=(_utc(1950, 1, 1), _utc(1951, 1, 1), None),
-        candidates=candidates,
-    )
-    retriever.max_edges_per_entity = 3
-
-    result = await retriever.get_retrieved_objects(query="in 1950")
-
-    assert result["entities"] == []
-    assert len(result["facts"]) == retriever.top_k * 3  # not candidate_top_k (20) * 3
 
 
 @pytest.mark.asyncio
