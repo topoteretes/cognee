@@ -12,8 +12,11 @@ the session stored.
 
 The rows are read and written through the session manager's context-entry
 methods, the surface the improve watermarks use. Those methods fail open on
-infrastructure errors, so a pin that cannot be written is refused here
-instead of being silently dropped.
+infrastructure errors; here neither direction may. A pin that cannot be
+written is refused instead of being silently dropped, and the read asks the
+manager to re-raise, so an unreadable session is never mistaken for an
+unpinned one: that would let a conflicting set through at pin time, and let
+the bridging stages add a pinned session's text to the graph untagged.
 """
 
 from fastapi import status
@@ -45,8 +48,14 @@ def _state_row(rows: list[dict] | None) -> dict | None:
 
 
 async def get_session_node_set(session_manager, user_id: str, session_id: str) -> tuple[str, ...]:
-    """The session's pinned ``node_set``, sorted; empty when none was pinned."""
-    rows = await session_manager.get_session_context_entries(user_id=user_id, session_id=session_id)
+    """The session's pinned ``node_set``, sorted; empty when none was pinned.
+
+    Raises when the session cache cannot be read: callers decide whether that
+    refuses a pin or skips a session for this run, never treat it as "no pin".
+    """
+    rows = await session_manager.get_session_context_entries(
+        user_id=user_id, session_id=session_id, raise_on_error=True
+    )
     row = _state_row(rows)
     return tuple(sorted(row.get("node_set") or [])) if row else ()
 

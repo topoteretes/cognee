@@ -55,6 +55,7 @@ class FakeSessionManager:
         self.feedback_last_n_calls: list = []
         self.session_last_n_calls: list = []
         self.failing_sessions: set[str] = set()
+        self.unreadable_context_sessions: set[str] = set()
 
     def add_step(self, session_id: str, feedback: str = "", return_value=None):
         self.traces.setdefault(session_id, []).append(
@@ -79,7 +80,12 @@ class FakeSessionManager:
         self.session_last_n_calls.pop()
         return [entry.session_feedback for entry in entries]
 
-    async def get_session_context_entries(self, *, user_id, session_id=None):
+    async def get_session_context_entries(self, *, user_id, session_id=None, raise_on_error=False):
+        if session_id in self.unreadable_context_sessions:
+            # The real manager fails open unless asked to raise.
+            if raise_on_error:
+                raise ConnectionError("cache read failed")
+            return []
         return list(self.context.get(session_id, []))
 
     async def update_session_context_entry(self, *, user_id, entry_id, merge, session_id=None):
@@ -470,3 +476,24 @@ async def test_trace_node_set_survives_pipeline_batching(manager, monkeypatch):
         user=None,
     )
     cognify.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_pin_skips_the_session_this_run_instead_of_bridging_it_untagged(
+    manager,
+):
+    """A failed node-set read must not let a pinned session reach the graph without its set.
+
+    The session is skipped like any other per-session failure: no window, the
+    watermark stays put, and the next improve() retries it.
+    """
+    manager.add_step("s", feedback="edit succeeded.")
+    manager.add_step("other", feedback="other feedback.")
+    _pin(manager, "s", ["project-a"])
+    manager.unreadable_context_sessions.add("s")
+
+    windows = await _extract(["s", "other"])
+
+    assert [window.session_id for window in windows] == ["other"]
+    manager.unreadable_context_sessions.clear()
+    assert await TRACE_PERSIST_WATERMARK.read_count(manager, USER_ID, "s") == 0

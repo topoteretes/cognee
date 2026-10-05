@@ -267,13 +267,18 @@ def _data_to_text(data) -> str:
 _SESSION_PLACEHOLDER_PREFIXES = ("[UploadFile]", "[file:", "[BinaryIO", "[SpooledTemporaryFile")
 
 
-async def _add_to_session(session_id: str, data, user):
+async def _add_to_session(session_id: str, data, user, node_set: list[str] | None = None):
     """Add a Q&A entry to the session cache.
 
     Sessions store chat-shaped content (prompts, assistant answers,
     Q&A turns). File-upload data coerces to placeholder strings like
     ``[UploadFile]`` / ``[file: name]`` — those are useless in the
     session cache and pollute recall results, so they're skipped.
+
+    ``node_set`` is the call-level ``remember(..., node_set=[...])``: it pins the
+    session's node set before the entry is written, exactly as the field on a
+    typed entry does, and raises ``SessionNodeSetConflictError`` when the
+    session already carries a different set.
     """
     from cognee.infrastructure.session.get_session_manager import get_session_manager
 
@@ -301,6 +306,11 @@ async def _add_to_session(session_id: str, data, user):
         )
         return
 
+    if node_set:
+        from cognee.infrastructure.session.session_node_set import pin_session_node_set
+
+        await pin_session_node_set(sm, user_id, session_id, list(node_set))
+
     await sm.add_qa(
         user_id=user_id,
         session_id=session_id,
@@ -309,6 +319,30 @@ async def _add_to_session(session_id: str, data, user):
         answer=text,
     )
     logger.info("remember: added entry to session '%s'", session_id)
+
+
+def _entry_with_node_set(entry: "MemoryEntry", node_set: list[str]) -> "MemoryEntry":
+    """Apply the call-level ``node_set`` kwarg to a typed entry.
+
+    The field on the entry and the kwarg are two spellings of one thing: the
+    kwarg fills an empty field, agrees with an equal one, and is an error
+    against a different one or on an entry type that cannot carry a node set.
+    Both are checked here so the kwarg is never silently ignored.
+    """
+    if not isinstance(entry, (QAEntry, TraceEntry)):
+        raise TypeError(
+            f"node_set is not supported for {type(entry).__name__}; only QAEntry and "
+            "TraceEntry carry a session node_set"
+        )
+    requested = list(node_set)
+    if not entry.node_set:
+        return entry.model_copy(update={"node_set": requested})
+    if sorted(set(entry.node_set)) != sorted(set(requested)):
+        raise ValueError(
+            f"node_set given twice with different values: entry.node_set={entry.node_set}, "
+            f"node_set={requested}; pass one of them"
+        )
+    return entry
 
 
 async def _rearm_session_improve_debounce(session_id: str, user) -> None:
@@ -1103,6 +1137,8 @@ async def remember(
             raise ValueError(
                 "dataset_id is not supported for typed memory entries; use dataset_name."
             )
+        if kwargs.get("node_set") is not None:
+            data = _entry_with_node_set(data, kwargs["node_set"])
         return await _remember_entry(
             data,
             dataset_name=dataset_name,
@@ -1887,7 +1923,7 @@ async def _remember_inner(
         # Session memory: store in session cache, then optionally bridge to graph
         if session_id:
             operation_context.set_session_id(session_id)
-            await _add_to_session(session_id, data, user)
+            await _add_to_session(session_id, data, user, node_set=add_kwargs.get("node_set"))
             result = RememberResult(
                 status="session_stored",
                 dataset_name=dataset_name,

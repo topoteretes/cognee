@@ -41,6 +41,7 @@ await cognee.wait_for_background_tasks()  # before a script exits
 | A fact or note | `remember(text, session_id=...)` (stored as a Q&A entry with the text as the answer) |
 | A Q&A turn | `recall(query, session_id=...)` with a completion search type saves the turn itself; or `remember(cognee.QAEntry(question=..., answer=...), session_id=...)` |
 | An agent step | `remember(cognee.TraceEntry(origin_function=..., status="success", ...), session_id=...)`, or the `@cognee.agent_memory(save_session_traces=True)` decorator |
+| Pin a session to a project / node set | `node_set=[...]` on the first `QAEntry`/`TraceEntry` (or as a kwarg on any session `remember`) pins it; later writes repeat or omit it, a different set raises `cognee.SessionNodeSetConflictError` (HTTP 409). `improve()` keeps the set on everything it bridges, so `recall(node_name=[...])` scopes to the project |
 | Feedback on an answer | `remember(cognee.FeedbackEntry(qa_id=..., feedback_score=...), session_id=...)` or `cognee.session.add_feedback(session_id, qa_id, feedback_text=..., feedback_score=...)` |
 | Read a session | `cognee.session.get_session(session_id, last_n=...)` |
 
@@ -137,6 +138,10 @@ There is no debounce timer: held-back entries wait for the next
 - **A plain `improve(dataset)` often does nothing.** Without `session_ids`,
   only stages 8 and 9 can run, and both are off by default. Result: every
   stage `skipped`. That is expected, not an error.
+- **A session's node set is pinned once.** The first write carrying
+  `node_set` fixes it for the session; a different set is a 409, start a
+  new session instead. Bridged Q&A, traces and lessons carry the set, user
+  preferences never do.
 - **Typed entries do not auto-improve.** `remember(QAEntry/TraceEntry/
   FeedbackEntry, session_id=...)` stores the entry but never starts an
   improve. Call `improve(session_ids=[...])` yourself.

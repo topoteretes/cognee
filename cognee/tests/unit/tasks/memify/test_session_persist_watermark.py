@@ -53,7 +53,7 @@ class FakeSessionManager:
     async def get_session(self, *, user_id, session_id=None, formatted=False, **_):
         return list(self.qa.get((user_id, session_id), []))
 
-    async def get_session_context_entries(self, *, user_id, session_id=None):
+    async def get_session_context_entries(self, *, user_id, session_id=None, raise_on_error=False):
         return list(self.context.get((user_id, session_id), []))
 
     async def update_session_context_entry(self, *, user_id, entry_id, merge, session_id=None):

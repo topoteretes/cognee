@@ -814,13 +814,17 @@ class SessionManager:
         *,
         user_id: str,
         session_id: str | None = None,
+        raise_on_error: bool = False,
     ) -> list[dict]:
         """
         Return all stored session-context entries (both "context" and "feedback" kinds).
 
         Raises SessionParameterValidationError for invalid user_id/session_id.
         Fail-open on infrastructure errors: returns [] when the cache is
-        unavailable or the cache operation fails.
+        unavailable or the cache operation fails. ``raise_on_error=True`` keeps
+        the empty answer for an unavailable cache (nothing can be stored there)
+        but re-raises a failed read, for callers that must not mistake an
+        unreadable session for an empty one (the pinned ``node_set``).
         """
         session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
@@ -833,6 +837,8 @@ class SessionManager:
             logger.warning(
                 "SessionManager: get_session_context_entries failed: %s", e, exc_info=True
             )
+            if raise_on_error:
+                raise
             return []
 
     async def update_session_context_entry(

@@ -28,12 +28,13 @@ class SessionNodeSetEntry(BaseModel):
     repeat it or omit it, and a different set is rejected with HTTP 409
     (``SessionNodeSetConflictError``). ``improve()`` appends the pinned set to
     the node set of everything it bridges from the session into the graph, so a
-    ``node_name``-scoped recall sees it.
+    ``node_name``-scoped recall sees it. Like the call-level ``node_set`` on
+    ``remember()``, ``add()`` and ``update()``, the list is not size-limited;
+    only an empty name is refused, since it would pin a node set with no name.
     """
 
-    node_set: list[Annotated[str, Field(min_length=1, max_length=200)]] | None = Field(
+    node_set: list[Annotated[str, Field(min_length=1)]] | None = Field(
         default=None,
-        max_length=16,
         description=(
             "Optional node set pinned on the session; kept on the graph nodes "
             "improve() builds from it. Immutable once set for a session."

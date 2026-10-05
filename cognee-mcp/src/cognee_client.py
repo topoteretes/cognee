@@ -612,6 +612,7 @@ class CogneeClient:
         content_base64: str | None = None,
         ontology_key: str | list[str] | None = None,
         self_improvement: bool = True,
+        node_set: list[str] | None = None,
     ) -> dict[str, Any]:
         """Store data in memory via remember().
 
@@ -625,6 +626,10 @@ class CogneeClient:
         upload), not both. File uploads are permanent-memory only.
         ontology_key selects one or more uploaded ontologies for permanent
         extraction; local mode resolves keys for the default user.
+        node_set tags permanent data and, with session_id, pins the session's
+        node set (the typed entry's ``node_set`` field in API mode, the
+        call-level kwarg in local mode); a different set on a pinned session
+        is refused by the server with HTTP 409.
         """
         if content_base64 and data:
             raise ValueError("Pass either `data` or `filename` + `content_base64`, not both.")
@@ -662,6 +667,8 @@ class CogneeClient:
                     "dataset_name": dataset_name,
                     "session_id": session_id,
                 }
+                if node_set:
+                    payload["entry"]["node_set"] = list(node_set)
                 if not self_improvement:
                     payload["self_improvement"] = False
                 response = await self.client.post(
@@ -679,6 +686,8 @@ class CogneeClient:
                 form_data["custom_prompt"] = custom_prompt
             if ontology_keys:
                 form_data["ontology_key"] = ontology_keys
+            if node_set:
+                form_data["node_set"] = list(node_set)
             if not self_improvement:
                 form_data["self_improvement"] = "false"
             response = await self.client.post(
@@ -740,6 +749,8 @@ class CogneeClient:
                     kwargs["custom_prompt"] = custom_prompt
                 if not self_improvement:
                     kwargs["self_improvement"] = False
+                if node_set:
+                    kwargs["node_set"] = list(node_set)
 
                 try:
                     result = await self.cognee.remember(**kwargs)

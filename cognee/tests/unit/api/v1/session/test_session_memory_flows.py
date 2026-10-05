@@ -1034,7 +1034,7 @@ async def test_self_improvement_controls_session_bridge_without_skipping_cache(f
         )
         if result._task is not None:
             await result._task
-    store.assert_awaited_once_with("s1", "memory", user)
+    store.assert_awaited_once_with("s1", "memory", user, node_set=None)
     assert improve.await_count == (0 if flag is False else 1)
     assert result.status == "session_stored"
 

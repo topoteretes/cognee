@@ -258,3 +258,27 @@ async def test_window_carries_the_sessions_pinned_node_set(mock_user, mock_qa_da
         windows = [w async for w in extract_user_sessions([{}], session_ids=["test_session"])]
 
     assert [w.node_set for w in windows] == [("project-a", "project-b")]
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_pin_skips_the_session_instead_of_bridging_it_untagged(
+    mock_user, mock_qa_data
+):
+    """A failed node-set read skips the session this run; it is retried next improve()."""
+    mock_session_manager = _make_mock_session_manager(mock_qa_data)
+    mock_session_manager.get_session_context_entries = AsyncMock(
+        side_effect=ConnectionError("cache read failed")
+    )
+
+    with (
+        patch.object(extract_user_sessions_module, "session_user") as mock_session_user,
+        patch.object(
+            extract_user_sessions_module,
+            "get_session_manager",
+            return_value=mock_session_manager,
+        ),
+    ):
+        mock_session_user.get.return_value = mock_user
+        windows = [w async for w in extract_user_sessions([{}], session_ids=["test_session"])]
+
+    assert windows == []

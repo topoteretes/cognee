@@ -136,3 +136,134 @@ async def test_entries_without_a_node_set_never_touch_the_pin(dispatch):
 
     manager.get_session_context_entries.assert_not_awaited()
     manager.create_session_context_entry.assert_not_awaited()
+
+
+# ---------------------------------------------------------------- the field itself
+
+
+def test_node_set_is_not_size_limited_like_the_call_level_node_set():
+    """add()/update()/remember() never capped count or length; the entry must not either."""
+    many = [f"project-{i}" for i in range(40)]
+    long_name = "p" * 1000
+
+    assert QAEntry(question="q", answer="a", node_set=many).node_set == many
+    assert TraceEntry(origin_function="f", node_set=[long_name]).node_set == [long_name]
+
+
+def test_an_empty_node_set_name_is_refused():
+    """An empty name would pin, and add() would create, a node set with no name."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        QAEntry(question="q", answer="a", node_set=["project-a", ""])
+
+
+def test_the_conflict_error_is_exported_from_the_package():
+    import cognee
+
+    assert cognee.SessionNodeSetConflictError is SessionNodeSetConflictError
+
+
+# ------------------------------------------- the call-level kwarg on the session paths
+
+
+def test_kwarg_fills_an_empty_entry_node_set():
+    entry = QAEntry(question="q", answer="a")
+
+    applied = remember_module._entry_with_node_set(entry, ["project-a"])
+
+    assert applied.node_set == ["project-a"]
+    assert entry.node_set is None, "the caller's entry is not mutated"
+
+
+def test_kwarg_that_agrees_with_the_entry_changes_nothing():
+    entry = TraceEntry(origin_function="f", node_set=["project-a", "project-b"])
+
+    assert remember_module._entry_with_node_set(entry, ["project-b", "project-a"]) is entry
+
+
+def test_kwarg_that_disagrees_with_the_entry_is_an_error():
+    entry = QAEntry(question="q", answer="a", node_set=["project-a"])
+
+    with pytest.raises(ValueError, match="node_set given twice"):
+        remember_module._entry_with_node_set(entry, ["project-b"])
+
+
+def test_kwarg_on_an_entry_that_cannot_carry_a_node_set_is_an_error():
+    from cognee.memory.entries import FeedbackEntry
+
+    with pytest.raises(TypeError, match="not supported for FeedbackEntry"):
+        remember_module._entry_with_node_set(
+            FeedbackEntry(qa_id="qa-1", feedback_score=5), ["project-a"]
+        )
+
+
+@pytest.mark.asyncio
+async def test_remember_applies_the_kwarg_before_dispatching_a_typed_entry(monkeypatch):
+    """``remember(entry, session_id=..., node_set=[...])`` must not drop the kwarg."""
+    seen = {}
+
+    async def fake_remember_entry(entry, **kwargs):
+        seen["entry"] = entry
+        return SimpleNamespace(status="session_stored")
+
+    monkeypatch.setattr(remember_module, "_remember_entry", fake_remember_entry)
+
+    await remember_module.remember(
+        QAEntry(question="q", answer="a"), session_id="s", node_set=["project-a"]
+    )
+
+    assert seen["entry"].node_set == ["project-a"]
+
+
+def _plain_text_session_manager(pinned: list[str] | None = None) -> MagicMock:
+    return _session_manager(pinned)
+
+
+@pytest.mark.asyncio
+async def test_plain_text_with_a_node_set_pins_the_session_before_the_write(monkeypatch):
+    gsm = sys.modules["cognee.infrastructure.session.get_session_manager"]
+
+    manager = _plain_text_session_manager()
+    monkeypatch.setattr(gsm, "get_session_manager", lambda: manager)
+    calls = []
+    manager.create_session_context_entry.side_effect = lambda **kw: calls.append("pin") or True
+    manager.add_qa.side_effect = lambda **kw: calls.append("add_qa") or "qa-1"
+
+    await remember_module._add_to_session(
+        "s", "a fact", SimpleNamespace(id=uuid4()), node_set=["project-a"]
+    )
+
+    assert calls == ["pin", "add_qa"]
+    assert manager.create_session_context_entry.await_args.kwargs["entry_dump"]["node_set"] == [
+        "project-a"
+    ]
+    assert manager.add_qa.await_args.kwargs["answer"] == "a fact"
+
+
+@pytest.mark.asyncio
+async def test_plain_text_with_a_conflicting_node_set_writes_nothing(monkeypatch):
+    gsm = sys.modules["cognee.infrastructure.session.get_session_manager"]
+
+    manager = _plain_text_session_manager(pinned=["project-a"])
+    monkeypatch.setattr(gsm, "get_session_manager", lambda: manager)
+
+    with pytest.raises(SessionNodeSetConflictError):
+        await remember_module._add_to_session(
+            "s", "a fact", SimpleNamespace(id=uuid4()), node_set=["project-b"]
+        )
+
+    manager.add_qa.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_plain_text_without_a_node_set_never_touches_the_pin(monkeypatch):
+    gsm = sys.modules["cognee.infrastructure.session.get_session_manager"]
+
+    manager = _plain_text_session_manager()
+    monkeypatch.setattr(gsm, "get_session_manager", lambda: manager)
+
+    await remember_module._add_to_session("s", "a fact", SimpleNamespace(id=uuid4()))
+
+    manager.get_session_context_entries.assert_not_awaited()
+    manager.add_qa.assert_awaited_once()
