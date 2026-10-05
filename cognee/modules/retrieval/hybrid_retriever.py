@@ -8,6 +8,7 @@ from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+from cognee.modules.retrieval.hybrid.candidates import HybridCandidates
 from cognee.modules.retrieval.hybrid.chunks import retrieve_hybrid_chunks, search_collection
 from cognee.modules.retrieval.hybrid.context import (
     extract_context_object_ids as extract_hybrid_object_ids,
@@ -21,7 +22,6 @@ from cognee.modules.retrieval.hybrid.external_metadata import project_external_m
 from cognee.modules.retrieval.hybrid.facts import (
     FactCandidates,
     edge_rank_by_id,
-    select_facts_from_candidates,
 )
 from cognee.modules.retrieval.hybrid.merge import merge_hybrid_results
 from cognee.modules.retrieval.hybrid.references import cite_hybrid_completions
@@ -120,6 +120,18 @@ class HybridRetriever(BaseRetriever):
         return await self._retrieve_one(query)
 
     async def _retrieve_one(self, query: str) -> dict[str, Any]:
+        candidates = await self._fetch_candidates(query)
+        return candidates.finalize(
+            chunks_limit=self.chunks_top_k, entities_limit=self.entities_top_k
+        )
+
+    async def _fetch_candidates(self, query: str) -> HybridCandidates:
+        """Everything the lanes find for ``query``, uncut.
+
+        The cut and the fact selection happen in ``finalize``: plain hybrid cuts
+        to its own limits right away; a retriever that reorders the candidates
+        first (the temporal rerank) cuts afterwards. Nothing is kept on the
+        instance, so ``query_batch`` can run this concurrently."""
         query_embeddings = await self._unified_engine.vector.embedding_engine.embed_text([query])
         query_vector = query_embeddings[0]
 
@@ -165,18 +177,12 @@ class HybridRetriever(BaseRetriever):
             self.include_external_metadata,
             self.external_metadata_keys,
         )
-        self._remember_fact_candidates(fact_candidates)
-        return {
-            **chunk_objects,
-            "entities": entities,
-            "facts": select_facts_from_candidates(fact_candidates, entities),
-        }
-
-    def _remember_fact_candidates(self, fact_candidates: FactCandidates) -> None:
-        """Hook for a subclass that cuts the entity list after the fetch and must
-        re-select facts against the entities it finally shows (the temporal
-        rerank). Plain hybrid keeps nothing: its entity list is already final,
-        and ``query_batch`` runs ``_retrieve_one`` concurrently on one instance."""
+        return HybridCandidates(
+            chunks=chunk_objects["chunks"],
+            chunk_summaries=chunk_objects["chunk_summaries"],
+            entities=entities,
+            fact_candidates=fact_candidates,
+        )
 
     async def _retrieve_entities_and_facts(
         self, query: str, query_vector: list[float]

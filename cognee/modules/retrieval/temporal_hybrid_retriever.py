@@ -4,9 +4,11 @@ The candidate fetch and the query-interval extraction run concurrently. The
 graph adapter is then asked which of the candidate chunks and entities are
 attached to a Timestamp inside the window (``get_temporal_anchors``, a native
 query on Ladybug, Neo4j and the Postgres demo, a neighbourhood walk elsewhere),
-and the oversized candidate set is reordered so the anchored candidates come
-first before the final limit. Facts are selected against the entities that
-survive that cut. Context formatting and completion are inherited unchanged.
+the oversized candidate set is reordered so the anchored candidates come first
+(``HybridCandidates.prioritize``), and ``finalize`` — the same step plain hybrid
+uses — cuts it to ``top_k`` and selects the facts against the entities that
+survive the cut. Context formatting
+and completion are inherited unchanged.
 
 get_retrieved_objects returns the plain hybrid result shape — the reranked
 view, or the baseline slice on fallback. Diagnostics for the last query live
@@ -17,16 +19,15 @@ import asyncio
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.unified import get_unified_engine
-from cognee.modules.retrieval.hybrid.facts import FactCandidates, select_facts_from_candidates
+from cognee.modules.retrieval.hybrid.candidates import HybridCandidates
 from cognee.modules.retrieval.hybrid.results import empty_hybrid_result, result_id
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 from cognee.modules.retrieval.temporal_hybrid.matching import (
     empty_anchors,
     extract_query_interval,
-    rerank_hybrid,
-    slice_hybrid,
     to_epoch_ms,
 )
+from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 
 
 class TemporalHybridRetriever(HybridRetriever):
@@ -56,37 +57,19 @@ class TemporalHybridRetriever(HybridRetriever):
         self.last_reason = None
         self.last_anchors = empty_anchors()
         self.last_baseline = empty_hybrid_result()
-        self._fact_candidates: FactCandidates | None = None
 
-    def _remember_fact_candidates(self, fact_candidates: FactCandidates) -> None:
-        # One query per call (query_batch is refused below), so keeping the
-        # candidates on the instance is safe here where it is not for Hybrid.
-        self._fact_candidates = fact_candidates
+    def _finalize(self, candidates: HybridCandidates) -> dict:
+        return candidates.finalize(chunks_limit=self.top_k, entities_limit=self.top_k)
 
-    def _with_facts(self, result: dict) -> dict:
-        """Facts selected against the entities ``result`` actually shows.
-
-        Hybrid deduplicated its facts against the whole candidate entity set;
-        after the cut to ``top_k`` a fact shown only under a discarded entity
-        would be gone from both sections. Without the candidates (a caller that
-        bypassed Hybrid's fetch) the inherited facts stand.
-        """
-        if self._fact_candidates is None:
-            return result
-        facts = select_facts_from_candidates(self._fact_candidates, result.get("entities") or [])
-        return {**result, "facts": facts}
-
-    async def _anchors(self, start, end, candidates: dict) -> dict:
+    async def _anchors(self, start, end, candidates: HybridCandidates) -> dict:
         """Which candidate chunks and entities are attached to a time in the window."""
         graph = await get_graph_engine()
         chunk_ids = {
-            chunk_id
-            for chunk_id in (result_id(chunk) for chunk in candidates.get("chunks") or [])
-            if chunk_id
+            chunk_id for chunk_id in (result_id(chunk) for chunk in candidates.chunks) if chunk_id
         }
         entity_ids = {
             str(entity["id"])
-            for entity in candidates.get("entities") or []
+            for entity in candidates.entities
             if isinstance(entity, dict) and entity.get("id")
         }
         anchors = await graph.get_temporal_anchors(
@@ -112,12 +95,14 @@ class TemporalHybridRetriever(HybridRetriever):
             self.last_reason = "empty_graph"
             return empty_hybrid_result()
 
+        # The checks HybridRetriever.get_retrieved_objects runs before its fetch.
+        validate_retriever_input(query, query_batch, self._use_session_cache())
         candidates, (start, end, reason) = await asyncio.gather(
-            super().get_retrieved_objects(query=query),
+            self._fetch_candidates(query),
             extract_query_interval(query),
         )
         self.last_interval = (start, end)
-        self.last_baseline = self._with_facts(slice_hybrid(candidates, self.top_k))
+        self.last_baseline = self._finalize(candidates)
         if reason is not None:
             self.last_reason = reason
             return self.last_baseline
@@ -132,7 +117,9 @@ class TemporalHybridRetriever(HybridRetriever):
             self.last_reason = "no_candidate_overlap" if in_window else "no_temporal_match"
             return self.last_baseline
 
-        reranked = self._with_facts(rerank_hybrid(candidates, self.last_anchors, self.top_k))
+        reranked = self._finalize(
+            candidates.prioritize(self.last_anchors["chunk_ids"], self.last_anchors["entity_ids"])
+        )
         if reranked["chunks"] == self.last_baseline["chunks"] and (
             reranked["entities"] == self.last_baseline["entities"]
         ):
