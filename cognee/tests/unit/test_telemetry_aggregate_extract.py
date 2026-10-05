@@ -164,6 +164,21 @@ class TelemetryAggregateExtractTest(unittest.TestCase):
         self.assertEqual(row["errors"], 3)
         self.assertEqual(row["runs"], 2)
 
+    def test_llm_configured_separates_keyless_installs(self):
+        stack = {
+            "embedding": {"provider": "fastembed"},
+            "graph": {"provider": "kuzu"},
+            "vector": {"provider": "lancedb"},
+            "relational": {"provider": "sqlite"},
+        }
+        for configured, user in ((True, "a"), (False, "b"), (None, "c")):
+            llm = {"provider": "openai", "model": "gpt"}
+            if configured is not None:
+                llm["configured"] = configured
+            self._insert_event("Pipeline Run Completed", "1.6.0", {**stack, "llm": llm}, user)
+        kinds = sorted(row["llm_configured"] for row in self._provider_rows())
+        self.assertEqual(kinds, ["false", "true", "unknown"])
+
     def test_redacts_identifiers_in_provider_dimensions(self):
         for value in (
             "custom/person@example.com",

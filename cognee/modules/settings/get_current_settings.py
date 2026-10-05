@@ -17,12 +17,14 @@ from cognee.infrastructure.databases.vector.embeddings.config import (
 )
 from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.modules.cognify.config import EXTRACTORS, get_cognify_config, resolve_extractor_name
+from cognee.modules.preflight import llm_available
 from cognee.shared.utils import telemetry_model_label
 
 
 class LLMConfig(TypedDict):
     model: str
     provider: str
+    configured: bool
 
 
 class EmbeddingSettings(TypedDict):
@@ -87,6 +89,11 @@ def get_current_settings() -> SettingsDict:
             "provider": llm_config.llm_provider,
             # A model that is a filesystem path leaves as "local_path", never the path.
             "model": telemetry_model_label(llm_config.llm_model),
+            # provider/model are the configured values even when no key is set, so
+            # a keyless install reports the unused default. ``configured`` says
+            # whether that LLM is usable: the rule recall() and the keyless path use,
+            # applied to the same per-call config as the rest of this payload.
+            "configured": llm_available(llm_config),
         },
         "embedding": {
             "provider": embedding_provider,
