@@ -226,6 +226,7 @@ def estimate_chunks(
     operation: str,
     graph_model: type[BaseModel] = KnowledgeGraph,
     custom_prompt: str | None = None,
+    summary_method: str | None = None,
     skipped_items: int = 0,
     skipped_dlt_chunks: int = 0,
     skipped_code_items: int = 0,
@@ -239,12 +240,16 @@ def estimate_chunks(
     """
     tokenizer = _llm_tokenizer()
     model = get_llm_config().llm_model
-    summarization_model = get_cognify_config().summarization_model
+    cognify_config = get_cognify_config()
+    summarization_model = cognify_config.summarization_model
 
     llm_chunks = chunks
 
     chunk_token_counts = [_count_tokens(chunk.text, tokenizer) for chunk in llm_chunks]
     chunk_tokens = sum(chunk_token_counts)
+    # Summaries from extraction make no LLM call, so the summary stage counts no chunks.
+    summary_method = summary_method or cognify_config.summary_method
+    summary_chunk_token_counts = [] if summary_method == "from_extraction" else chunk_token_counts
 
     graph_overhead = _count_tokens(_graph_prompt(custom_prompt), tokenizer) + _schema_tokens(
         _simplify_graph_model(graph_model), tokenizer
@@ -262,8 +267,10 @@ def estimate_chunks(
         max(MIN_GRAPH_OUTPUT_TOKENS_PER_CHUNK, int(tokens * GRAPH_OUTPUT_TOKEN_RATIO))
         for tokens in chunk_token_counts
     )
-    summary_input = sum(tokens + summary_overhead for tokens in chunk_token_counts)
-    summary_output = output_multiplier * len(llm_chunks) * SUMMARY_OUTPUT_TOKENS_PER_CHUNK
+    summary_input = sum(tokens + summary_overhead for tokens in summary_chunk_token_counts)
+    summary_output = (
+        output_multiplier * len(summary_chunk_token_counts) * SUMMARY_OUTPUT_TOKENS_PER_CHUNK
+    )
 
     stages = [
         DryRunStageEstimate(
@@ -275,7 +282,7 @@ def estimate_chunks(
         ),
         DryRunStageEstimate(
             name="chunk_summarization",
-            calls=len(llm_chunks),
+            calls=len(summary_chunk_token_counts),
             input_tokens=summary_input,
             output_tokens=summary_output,
             cost_usd=estimate_cost_usd(model, summary_input, summary_output),
@@ -538,13 +545,18 @@ async def estimate_remember_dry_run(
     chunk_size: int,
     graph_model: type[BaseModel] = KnowledgeGraph,
     custom_prompt: str | None = None,
+    summary_method: str | None = None,
 ) -> DryRunEstimate:
     """Estimate ``remember(data)`` for permanent add+cognify inputs."""
     chunks = await _chunks_from_texts(
         await _input_to_texts(data), chunker=chunker, chunk_size=chunk_size
     )
     return estimate_chunks(
-        chunks, operation="remember", graph_model=graph_model, custom_prompt=custom_prompt
+        chunks,
+        operation="remember",
+        graph_model=graph_model,
+        custom_prompt=custom_prompt,
+        summary_method=summary_method,
     )
 
 
@@ -556,6 +568,7 @@ async def estimate_cognify_dry_run(
     chunk_size: int,
     graph_model: type[BaseModel] = KnowledgeGraph,
     custom_prompt: str | None = None,
+    summary_method: str | None = None,
 ) -> DryRunEstimate:
     """Estimate ``cognify(datasets)`` over all data in the authorized datasets.
 
@@ -594,6 +607,7 @@ async def estimate_cognify_dry_run(
         operation="cognify",
         graph_model=graph_model,
         custom_prompt=custom_prompt,
+        summary_method=summary_method,
         skipped_items=skipped,
         skipped_dlt_chunks=skipped_dlt,
         skipped_code_items=skipped_code,

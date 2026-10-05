@@ -42,7 +42,7 @@ logger = get_logger()
 
 
 def _as_uuid(value):
-    """Coerce an id to ``UUID`` for a column declared ``UUID(as_uuid=True)``.
+    """Coerce an id to ``UUID`` for a column declared ``Uuid(as_uuid=True)``.
 
     On SQLite the bind processor calls ``value.hex``, which a plain string does
     not have. Callers pass either — ``get_memory_provenance_graph`` stringifies
@@ -667,7 +667,9 @@ async def get_memory_provenance_graph(
             holds no grant on, along with their files, their ACL edges, and the
             agents and sessions that worked on them. Pass the caller's readable
             set (``get_all_user_permission_datasets``) for any caller who does
-            not administer the tenant.
+            not administer the tenant. Given alone (a caller with no tenant),
+            it is the whole scope: users, roles and tenants are narrowed to
+            the ones tied to these datasets.
         When neither scope is given the read is global — the OSS local default,
         where the single user owns everything.
     """
@@ -692,6 +694,17 @@ async def get_memory_provenance_graph(
         tenant_stmt = select(Tenant)
         if scope_tenant_ids is not None:
             tenant_stmt = tenant_stmt.where(Tenant.id.in_(scope_tenant_ids))
+        elif scope_dataset_ids is not None:
+            # A dataset-only scope (a caller with no tenant) must not list
+            # every tenant in the system: keep only the tenants the in-scope
+            # datasets belong to.
+            tenant_stmt = tenant_stmt.where(
+                Tenant.id.in_(
+                    select(Dataset.tenant_id).where(
+                        Dataset.id.in_([_as_uuid(d) for d in scope_dataset_ids])
+                    )
+                )
+            )
         for tenant in (await session.execute(tenant_stmt)).scalars().all():
             tenants.append({"id": str(tenant.id), "name": tenant.name})
 
