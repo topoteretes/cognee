@@ -59,7 +59,13 @@ class TemporalHybridRetriever(HybridRetriever):
         self.last_baseline = empty_hybrid_result()
 
     def _finalize(self, candidates: HybridCandidates) -> dict:
-        return candidates.finalize(chunks_limit=self.top_k, entities_limit=self.top_k)
+        # The fetch sized the no-entity fact budget for candidate_top_k entities;
+        # this view shows top_k, so the budget follows top_k too.
+        return candidates.finalize(
+            chunks_limit=self.top_k,
+            entities_limit=self.top_k,
+            entity_edge_budget=self.top_k * max(0, self.max_edges_per_entity),
+        )
 
     async def _anchors(self, start, end, candidates: HybridCandidates) -> dict:
         """Which candidate chunks and entities are attached to a time in the window."""
