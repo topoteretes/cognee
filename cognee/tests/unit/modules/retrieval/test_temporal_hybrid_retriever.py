@@ -5,11 +5,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from cognee.modules.retrieval.hybrid.candidates import HybridCandidates, finalize
 from cognee.modules.retrieval.hybrid.facts import FactCandidates
 from cognee.modules.retrieval.temporal_hybrid.matching import (
+    anchored_first,
     extract_query_interval,
-    rerank_hybrid,
-    slice_hybrid,
     to_epoch_ms,
 )
 from cognee.modules.retrieval.temporal_hybrid_retriever import TemporalHybridRetriever
@@ -75,18 +75,24 @@ def test_to_epoch_ms():
     assert to_epoch_ms(_utc(1970, 1, 1, 0, 0, 1)) == 1000
 
 
-# --- rerank ----------------------------------------------------------------------
+# --- anchored-first order + finalize ------------------------------------------------
+
+HITS = [
+    {"id": "f_atlas", "text": "Atlas was founded in 1950"},
+    {"id": "f_helios", "text": "Helios launched in 1898"},
+    {"id": "f_other", "text": "Something else entirely happened"},
+]
 
 
-def _candidates():
-    return {
-        "chunks": [
+def _candidates(fact_candidates: FactCandidates | None = None) -> HybridCandidates:
+    return HybridCandidates(
+        chunks=[
             {"id": "c1", "text": "unrelated"},
             {"id": "c2", "text": "in 1950"},
             {"id": "c3", "text": "also 1950"},
         ],
-        "chunk_summaries": {"c1": "s1", "c2": "s2", "c3": "s3"},
-        "entities": [
+        chunk_summaries={"c1": "s1", "c2": "s2", "c3": "s3"},
+        entities=[
             {"id": "e1", "description": "other", "edges": []},
             {
                 "id": "e2",
@@ -94,42 +100,85 @@ def _candidates():
                 "edges": [{"relationship": "born_at"}, {"relationship": "works_at"}],
             },
         ],
-        "facts": ["f1", "f2"],
-    }
+        fact_candidates=fact_candidates or FactCandidates(edge_hits=HITS, facts_top_k=2),
+    )
 
 
-def test_rerank_puts_anchored_candidates_first_and_keeps_the_rest():
+def _finalize(candidates: HybridCandidates, top_k: int = 2) -> dict:
+    return finalize(candidates, chunks_limit=top_k, entities_limit=top_k, max_edges_per_entity=10)
+
+
+def test_anchored_first_puts_anchored_candidates_first_and_keeps_the_rest():
     anchors = {"timestamp_ids": {"ts"}, "chunk_ids": {"c3", "c2"}, "entity_ids": {"e2"}}
-    result = rerank_hybrid(_candidates(), anchors, top_k=2)
+    result = _finalize(anchored_first(_candidates(), anchors))
 
-    assert [chunk["id"] for chunk in result["chunks"]] == [
-        "c2",
-        "c3",
-    ]  # hybrid order among anchored
+    # hybrid order among the anchored, then the rest; nothing stripped from a candidate
+    assert [chunk["id"] for chunk in result["chunks"]] == ["c2", "c3"]
     assert result["chunk_summaries"] == {"c2": "s2", "c3": "s3"}
     assert [entity["id"] for entity in result["entities"]] == ["e2", "e1"]
-    assert result["entities"][0]["description"] == "keep me"  # nothing stripped
+    assert result["entities"][0]["description"] == "keep me"
     assert len(result["entities"][0]["edges"]) == 2
-    assert result["facts"] == ["f1", "f2"]
+    # facts are selected after the cut, against the entities kept (none carry these hits)
+    assert [fact["id"] for fact in result["facts"]] == ["f_atlas", "f_helios"]
 
 
-def test_rerank_with_no_anchored_candidate_is_the_plain_slice():
+def test_anchored_first_with_no_anchored_candidate_is_the_plain_slice():
     anchors = {"timestamp_ids": {"ts"}, "chunk_ids": {"elsewhere"}, "entity_ids": set()}
-    assert rerank_hybrid(_candidates(), anchors, top_k=2) == slice_hybrid(_candidates(), 2)
+    assert _finalize(anchored_first(_candidates(), anchors)) == _finalize(_candidates())
 
 
-def test_rerank_fills_up_with_unanchored_candidates():
+def test_anchored_first_fills_up_with_unanchored_candidates():
     anchors = {"timestamp_ids": {"ts"}, "chunk_ids": {"c3"}, "entity_ids": set()}
-    result = rerank_hybrid(_candidates(), anchors, top_k=2)
+    result = _finalize(anchored_first(_candidates(), anchors))
     assert [chunk["id"] for chunk in result["chunks"]] == ["c3", "c1"]
+
+
+def test_anchored_first_drops_nothing():
+    anchors = {"timestamp_ids": {"ts"}, "chunk_ids": {"c3"}, "entity_ids": {"e2"}}
+    reordered = anchored_first(_candidates(), anchors)
+    assert [chunk["id"] for chunk in reordered.chunks] == ["c3", "c1", "c2"]
+    assert [entity["id"] for entity in reordered.entities] == ["e2", "e1"]
+    assert reordered.chunk_summaries == _candidates().chunk_summaries
+    assert reordered.fact_candidates == _candidates().fact_candidates
+
+
+def test_finalize_selects_facts_against_the_entities_it_keeps():
+    """A fact deduplicated against a candidate entity must not vanish with that entity."""
+    candidates = HybridCandidates(
+        chunks=[{"id": "c1", "text": "x"}],
+        entities=[
+            {"id": "atlas", "description": "a", "edges": [{"edge_type_id": "f_atlas"}]},
+            {"id": "helios", "description": "h", "edges": [{"edge_type_id": "f_helios"}]},
+        ],
+        fact_candidates=FactCandidates(edge_hits=HITS, facts_top_k=2),
+    )
+    # Both shown: both facts are bullets already, only the unrelated one stands alone.
+    both = _finalize(candidates, top_k=2)
+    assert [fact["id"] for fact in both["facts"]] == ["f_other"]
+    # Helios cut: its fact is no longer shown under an entity and comes back standalone,
+    # ahead of the unrelated one, in hit order; Atlas' stays deduplicated.
+    one = _finalize(candidates, top_k=1)
+    assert [entity["id"] for entity in one["entities"]] == ["atlas"]
+    assert [fact["id"] for fact in one["facts"]] == ["f_helios", "f_other"]
+
+
+def test_finalize_caps_the_fallback_fact_budget_by_the_entities_it_shows():
+    """With no entity kept, facts get the entity lane's edge budget — sized by the
+    limit applied here, not by the (4x larger) temporal fetch."""
+    hits = [{"id": f"f{i}", "text": f"fact number {i} happened"} for i in range(100)]
+    candidates = HybridCandidates(
+        chunks=[{"id": "c1"}], fact_candidates=FactCandidates(edge_hits=hits, facts_top_k=2)
+    )
+    shown_two = finalize(candidates, chunks_limit=2, entities_limit=2, max_edges_per_entity=3)
+    assert len(shown_two["facts"]) == 6  # 2 entities' worth of bullets, not 8 × 3
+    shown_eight = finalize(candidates, chunks_limit=8, entities_limit=8, max_edges_per_entity=3)
+    assert len(shown_eight["facts"]) == 24
 
 
 # --- retriever flow ------------------------------------------------------------
 
 
-def _retriever(
-    monkeypatch, *, anchors, interval, candidates, timestamps=(), empty=False, fact_candidates=None
-):
+def _retriever(monkeypatch, *, anchors, interval, candidates, timestamps=(), empty=False):
     class FakeGraphEngine:
         anchor_calls: list = []
         range_calls: list = []
@@ -158,20 +207,13 @@ def _retriever(
     FakeGraphEngine.anchor_calls = []
     FakeGraphEngine.range_calls = []
     retriever = TemporalHybridRetriever(candidate_top_k=20, top_k=2)
-
-    async def hybrid_fetch_impl(*args, **kwargs):
-        # What HybridRetriever._retrieve_one does once it has the entity lane.
-        if fact_candidates is not None:
-            retriever._remember_fact_candidates(fact_candidates)
-        return candidates
-
-    hybrid_fetch = AsyncMock(side_effect=hybrid_fetch_impl)
+    hybrid_fetch = AsyncMock(return_value=candidates)
     extract = AsyncMock(return_value=interval)
     module = "cognee.modules.retrieval.temporal_hybrid_retriever."
     monkeypatch.setattr(module + "get_graph_engine", fake_graph_engine)
     monkeypatch.setattr(module + "get_unified_engine", fake_unified_engine)
     monkeypatch.setattr(module + "extract_query_interval", extract)
-    monkeypatch.setattr(module + "HybridRetriever.get_retrieved_objects", hybrid_fetch)
+    monkeypatch.setattr(module + "HybridRetriever._fetch_candidates", hybrid_fetch)
     return retriever, FakeGraphEngine, hybrid_fetch, extract
 
 
@@ -241,41 +283,49 @@ async def test_temporal_retriever_reranks_by_the_candidates_anchors(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_temporal_retriever_selects_facts_against_the_entities_it_shows(monkeypatch):
-    """A fact deduplicated against a candidate entity must not vanish with that entity."""
-    hits = [
-        {"id": "f_atlas", "text": "Atlas was founded in 1950"},
-        {"id": "f_helios", "text": "Helios launched in 1898"},
-        {"id": "f_other", "text": "Something else entirely happened"},
-    ]
-    candidates = {
-        "chunks": [{"id": "c1", "text": "x"}],
-        "chunk_summaries": {},
-        "entities": [
+    """End to end through the retriever: the fetch decides no facts; the cut does."""
+    candidates = HybridCandidates(
+        chunks=[{"id": "c1", "text": "x"}],
+        entities=[
             {"id": "atlas", "description": "a", "edges": [{"edge_type_id": "f_atlas"}]},
             {"id": "helios", "description": "h", "edges": [{"edge_type_id": "f_helios"}]},
         ],
-        "facts": ["stale"],
-    }
-    fact_candidates = FactCandidates(
-        edge_hits=hits, reachable_edge_type_ids=set(), node_scoped=False, facts_top_k=2
+        fact_candidates=FactCandidates(edge_hits=HITS, facts_top_k=2),
     )
     retriever, _engine, _fetch, _extract = _retriever(
         monkeypatch,
         anchors=_anchors(chunks=("c1",), entities=("atlas",)),
         interval=(_utc(1950, 1, 1), _utc(1951, 1, 1), None),
         candidates=candidates,
-        fact_candidates=fact_candidates,
     )
     retriever.top_k = 1
 
     result = await retriever.get_retrieved_objects(query="in 1950")
 
     assert [entity["id"] for entity in result["entities"]] == ["atlas"]  # helios cut
-    # Helios' fact is no longer shown under an entity, so it returns as a standalone fact
-    # (ahead of the unrelated one, in hit order); Atlas' stays deduplicated against the
-    # entity that is shown. The inherited "stale" facts never reach the result.
     assert [fact["id"] for fact in result["facts"]] == ["f_helios", "f_other"]
     assert [fact["id"] for fact in retriever.last_baseline["facts"]] == ["f_helios", "f_other"]
+
+
+@pytest.mark.asyncio
+async def test_temporal_retriever_caps_facts_by_top_k_when_no_entity_is_shown(monkeypatch):
+    """The fallback fact budget follows top_k, not the oversized candidate fetch."""
+    hits = [{"id": f"f{i}", "text": f"fact number {i} happened"} for i in range(100)]
+    candidates = HybridCandidates(
+        chunks=[{"id": "c1"}], fact_candidates=FactCandidates(edge_hits=hits, facts_top_k=2)
+    )
+    retriever, _engine, _fetch, _extract = _retriever(
+        monkeypatch,
+        anchors=_anchors(chunks=("c1",)),
+        interval=(_utc(1950, 1, 1), _utc(1951, 1, 1), None),
+        candidates=candidates,
+    )
+    retriever.max_edges_per_entity = 3
+
+    result = await retriever.get_retrieved_objects(query="in 1950")
+
+    assert result["entities"] == []
+    assert len(result["facts"]) == retriever.top_k * 3  # not candidate_top_k (20) * 3
 
 
 @pytest.mark.asyncio

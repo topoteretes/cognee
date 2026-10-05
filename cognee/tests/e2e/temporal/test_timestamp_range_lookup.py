@@ -27,6 +27,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.low_level import setup
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.processing.document_types import TextDocument
+from cognee.modules.retrieval.hybrid.candidates import HybridCandidates
 from cognee.modules.retrieval.temporal_hybrid.matching import to_epoch_ms
 from cognee.modules.retrieval.temporal_hybrid_retriever import TemporalHybridRetriever
 from cognee.shared.data_models import Edge as KGEdge
@@ -164,7 +165,7 @@ async def test_range_lookup_and_anchors_on_the_configured_backend(clean_graph):
     # the entity with the *_at edge, and (through the entity) every candidate
     # chunk that mentions the entity
     retriever = TemporalHybridRetriever(top_k=5)
-    candidates = {"chunks": [{"id": str(curie.id)}, {"id": str(apollo.id)}], "entities": []}
+    candidates = HybridCandidates(chunks=[{"id": str(curie.id)}, {"id": str(apollo.id)}])
     anchors = await retriever._anchors(_utc(1969, 1, 1), _utc(1970, 1, 1), candidates)
     assert anchors["timestamp_ids"] == {
         str(found_id)
