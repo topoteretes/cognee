@@ -21,6 +21,7 @@ in prose ("23 March 1947") into the normalized shape ``timestamp_from_text``
 accepts, at the precision the expression states.
 """
 
+import bisect
 import calendar
 import re
 from dataclasses import dataclass
@@ -92,9 +93,16 @@ _ORDINAL_WORDS = {
 _DAY = r"(?P<day>\d{1,2})(?:st|nd|rd|th)?"
 _DAY_WORD = rf"(?P<day_word>{'|'.join(_ORDINAL_WORDS)})"
 _YEAR = r"(?P<year>\d{4})"
-# A year is a stated year only when it stands alone as a number: "$1986" is
-# money, "1986%" and "1,986" are quantities.
-_BARE_YEAR = re.compile(r"(?<![$\d.,])\b(?P<year>[12]\d{3})\b(?![\d%])")
+# A four-digit number on its own is a year only when a dating word introduces
+# it ("in 1805", "the winter of 1812", "circa 1600"): "1000 MW", "2300 feet",
+# "$1986" and "the 1812 campaign" are not, and a number that is merely
+# mentioned ("a population of 1500") must not become the document's base.
+_BARE_YEAR = re.compile(
+    r"\b(?P<lead>[Ii]n|[Oo]f|[Bb]y|[Uu]ntil|[Tt]ill|[Ss]ince|[Dd]uring|[Ff]rom|[Tt]hrough"
+    r"|[Cc]irca|[Aa]round|[Aa]bout|[Bb]efore|[Aa]fter|[Bb]etween|[Ee]arly|[Ll]ate|[Mm]id|year) "
+    r"(?P<year>1\d{3}|20\d{2})\b(?![\d%])"
+)
+_SENTENCE_END = re.compile(r"[.!?]+(?=\s)")
 
 # One pattern per expression shape, in priority order: a span carrying a
 # year wins over one carrying a day, which wins over a bare month, so
@@ -232,38 +240,39 @@ def _time_value(match: re.Match, base: DateBase) -> str | None:
     return f"{base.year:04d}-{base.month:02d}-{base.day:02d} {hour:02d}:{minute:02d}:{second:02d}"
 
 
+def _sentence_starts(text: str) -> list[int]:
+    return [0] + [match.end() for match in _SENTENCE_END.finditer(text)]
+
+
+def _sentence_of(starts: list[int], position: int) -> int:
+    return bisect.bisect_right(starts, position) - 1
+
+
 def hint_lines(text: str, base: DateBase | None) -> tuple[list[str], DateBase | None]:
     """Return (hint lines, updated base) for one chunk of text.
 
     A span that states its year advances the base and needs no hint. A
     day-and-month or month-only span inherits the base's year and is hinted
-    at the precision it states; it also advances the base's month and day, so
-    a clock time later in the chunk ("at 05:32") can be placed on that day. A
-    time is hinted only when the base has a day. Without a base nothing is
+    at the precision it states; it also advances the base's month and day. A
+    clock time is placed on the day-level date nearest to it in its own
+    sentence ("At 12:30 on May 20"), else on the base's day as of its
+    position — and only when that day exists. Without a base nothing is
     hinted. No part of a hint ever comes from the current date.
     """
-    spans: list[tuple[int, int, dict]] = _calendar_matches(text)
-    for match in _TIME_PATTERN.finditer(text):
-        if match["at"] or match["suffix"]:
-            spans.append((match.start("hour"), match.end(), {"time": match}))
-    spans.sort(key=lambda span: span[0])
-
-    lines: list[str] = []
-    for start, end, groups in spans:
-        if "time" in groups:
-            if base is None or base.month is None or base.day is None:
-                continue
-            value = _time_value(groups["time"], base)
-        else:
-            month, day = _month_number(groups), _day_number(groups)
-            if groups.get("year"):
-                year = int(groups["year"])
-                if month is not None and day is not None and not _valid_day(year, month, day):
-                    day = None
-                base = DateBase(year, month, day)
-                continue
-            if base is None or month is None:
-                continue
+    # Pass 1: calendar spans in text order, each recorded with the base as it
+    # stands after it, so a time can look up the date of its own sentence
+    # whether that date comes before or after it.
+    _incoming_base = base
+    resolved: list[tuple[int, DateBase | None]] = []
+    hints: list[tuple[int, str]] = []
+    for start, end, groups in _calendar_matches(text):
+        month, day = _month_number(groups), _day_number(groups)
+        if groups.get("year"):
+            year = int(groups["year"])
+            if month is not None and day is not None and not _valid_day(year, month, day):
+                day = None
+            base = DateBase(year, month, day)
+        elif base is not None and month is not None:
             if day is None:
                 value = f"{base.year:04d}-{month:02d}"
             elif _valid_day(base.year, month, day):
@@ -271,9 +280,35 @@ def hint_lines(text: str, base: DateBase | None) -> tuple[list[str], DateBase | 
             else:
                 continue
             base = DateBase(base.year, month, day)
-        if value is None:
+            hints.append((start, _hint_line(text[start:end].strip(), value)))
+        resolved.append((start, base))
+
+    # Pass 2: clock times.
+    starts = _sentence_starts(text)
+    for match in _TIME_PATTERN.finditer(text):
+        if not (match["at"] or match["suffix"]):
             continue
-        line = _hint_line(text[start:end].strip(), value)
+        position = match.start("hour")
+        sentence = _sentence_of(starts, position)
+        in_sentence = [
+            (abs(start - position), day_base)
+            for start, day_base in resolved
+            if day_base is not None and day_base.day is not None
+            if _sentence_of(starts, start) == sentence
+        ]
+        if in_sentence:
+            anchor = min(in_sentence)[1]
+        else:
+            before = [day_base for start, day_base in resolved if start < position]
+            anchor = before[-1] if before else _incoming_base
+        if anchor is None or anchor.month is None or anchor.day is None:
+            continue
+        value = _time_value(match, anchor)
+        if value is not None:
+            hints.append((position, _hint_line(text[position : match.end()].strip(), value)))
+
+    lines: list[str] = []
+    for _, line in sorted(hints):
         if line not in lines:
             lines.append(line)
     return lines, base

@@ -66,6 +66,10 @@ def test_hint_lines_without_stated_year_yields_nothing():
         ("On October 11, 1806, one of the regiments halted.", DateBase(1806, 10, 11)),
         ("On the twenty-eighth of October, 1805, Kutuzov crossed.", DateBase(1805, 10, 28)),
         ("Born March of 1947 in Lyon.", DateBase(1947, 3, None)),
+        (
+            "The winter of 1812 was hard; between 1805 and 1807 he served.",
+            DateBase(1805, None, None),
+        ),
         # a stated date with an impossible day keeps only its month
         ("The 31 April 1986 report was wrong.", DateBase(1986, 4, None)),
     ],
@@ -82,6 +86,9 @@ def test_stated_dates_advance_the_base_and_are_not_hinted(text, expected):
         "The budget was $1986 and the score 9-1.",
         "They counted 1,986 crates and 1986% growth.",
         "The 1920s and the 1950s were loud.",
+        # a four-digit quantity is not a year without a dating word before it
+        "The reactor was restored to 1000 MW and the ridge rose 2300 feet.",
+        "The 1812 campaign is described in the second volume.",
     ],
 )
 def test_numbers_that_are_not_years_do_not_become_the_base(text):
@@ -179,6 +186,20 @@ def test_a_time_follows_a_hinted_day_inside_the_chunk():
     assert lines == [
         '- "27 April" -> 1986-04-27 (inferred from context)',
         '- "9:15 pm" -> 1986-04-27 21:15:00 (inferred from context)',
+    ]
+
+
+def test_a_time_belongs_to_the_date_in_its_own_sentence_first():
+    """ "At 12:30 on May 20" is 12:30 on May 20, although a different day was
+    the base when the time was read."""
+    lines, _ = hint_lines(
+        "At 12:30 on May 20, the assembly departed. At 06:30 they headed out.",
+        DateBase(1969, 2, 27),
+    )
+    assert lines == [
+        '- "12:30" -> 1969-05-20 12:30:00 (inferred from context)',
+        '- "May 20" -> 1969-05-20 (inferred from context)',
+        '- "06:30" -> 1969-05-20 06:30:00 (inferred from context)',
     ]
 
 
