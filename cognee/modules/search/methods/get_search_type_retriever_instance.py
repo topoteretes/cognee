@@ -344,6 +344,10 @@ async def get_search_type_retriever_instance(
                 "include_external_metadata": retriever_specific_config.get(
                     "include_external_metadata", False
                 ),
+                # Same option HYBRID_COMPLETION forwards: without it the inherited
+                # projection sees an empty key list and strips the metadata the
+                # caller asked for as soon as the question names a date.
+                "external_metadata_keys": retriever_specific_config.get("external_metadata_keys"),
             },
         ),
         SearchType.CHUNKS_LEXICAL: (BM25ChunksRetriever, {"top_k": top_k}),

@@ -501,3 +501,34 @@ async def test_temporal_forwards_include_references_like_hybrid():
     assert retriever_instance.include_references is True
     assert retriever_instance.top_k == 3
     assert retriever_instance.chunks_top_k == 12  # candidate budget: 4x top_k unless configured
+
+
+@pytest.mark.asyncio
+async def test_temporal_resolves_a_null_top_k_instead_of_crashing():
+    """The REST models accept ``top_k: null``; TEMPORAL must default it like HYBRID does."""
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.TEMPORAL, query_text="q", top_k=None
+    )
+
+    assert isinstance(retriever_instance, TemporalHybridRetriever)
+    assert retriever_instance.top_k == 5
+    assert retriever_instance.chunks_top_k == 20
+
+
+@pytest.mark.asyncio
+async def test_temporal_forwards_external_metadata_keys_like_hybrid():
+    """Adding a date to a question must not strip the source metadata the caller asked for."""
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    config = {"include_external_metadata": True, "external_metadata_keys": ["source_id"]}
+    temporal = await mod.get_search_type_retriever_instance(
+        SearchType.TEMPORAL, query_text="q", top_k=3, retriever_specific_config=config
+    )
+    hybrid = await mod.get_search_type_retriever_instance(
+        SearchType.HYBRID_COMPLETION, query_text="q", top_k=3, retriever_specific_config=config
+    )
+
+    assert temporal.include_external_metadata is True
+    assert temporal.external_metadata_keys == hybrid.external_metadata_keys == ["source_id"]
