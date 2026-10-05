@@ -60,10 +60,11 @@ dependencies = [
     # lancedb bundles its own Lance core and pylance must ship the same one:
     # the bounded compaction in cognee_db_workers.lancedb_compaction hands
     # tables to pylance (``table.to_lance()``). lancedb 0.39.x bundles Lance
-    # 12.x, so both stay on those release lines and are bumped together
+    # 12.0, so pylance stays on 12.0.x and the two are bumped together with
+    # LANCE_CORE_BY_LANCEDB in cognee_db_workers/lancedb_compaction.py
     # (``strings _lancedb*.so | grep lance-core`` shows the bundled core). If
-    # they ever drift, the adapter detects it and turns compaction off with a
-    # warning instead of failing writes. pylance 12 requires
+    # an override pairs them differently, compaction turns itself off with a
+    # warning instead of writing to the tables. pylance 12 requires
     # lance-namespace<0.12, so the lockfile holds lance-namespace at 0.11.x.
     "lancedb>=0.39.0,<0.40.0",
     "nbformat>=5.7.0,<6.0.0",
@@ -84,7 +85,7 @@ dependencies = [
     "onnxruntime>=1.24.1 ; python_version >= '3.14'",
     "structlog>=25.2.0,<26",
     "pympler>=1.1,<2.0.0",
-    "pylance>=12.0.0,<13.0.0",  # same Lance release line as lancedb, see above
+    "pylance>=12.0.0,<12.1.0",  # same Lance release line as lancedb, see above
     # ladybug 0.18.x+ publishes only macosx_15_0 wheels (its sdist needs C++20
     # std::atomic_ref, which Apple Clang's libc++ on macOS <= 14 lacks), so
     # macOS 13/14 (Darwin 22/23) get 0.17.x — the last line with macosx_13_0

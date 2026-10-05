@@ -806,3 +806,183 @@ async def test_compaction_settings_keep_the_vector_factory_usable(tmp_path, monk
         assert await table.count_rows() == 1
     finally:
         await adapter.close()
+
+
+class _FakeVersions:
+    def __init__(self, stamps):
+        self._stamps = stamps
+
+    def versions(self):
+        return [
+            {"version": number, "timestamp": stamp}
+            for number, stamp in enumerate(self._stamps, start=1)
+        ]
+
+
+@pytest.fixture
+def belgrade_time(monkeypatch):
+    """Local time in a zone with DST, so pylance's naive timestamps cross shifts."""
+    import os
+    import time
+
+    if not hasattr(time, "tzset"):
+        pytest.skip("time.tzset is not available on this platform")
+    monkeypatch.setenv("TZ", "Europe/Belgrade")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+    assert os.environ.get("TZ") != "Europe/Belgrade"
+
+
+def _pylance_stamp(epoch_seconds: float):
+    """A timestamp built the way pylance's ``versions()`` builds it."""
+    from datetime import datetime, timedelta
+
+    return datetime.fromtimestamp(int(epoch_seconds)) + timedelta(microseconds=5)  # noqa: DTZ006
+
+
+@pytest.mark.parametrize(
+    "successor_epoch",
+    [
+        pytest.param(1_774_746_000 - 1, id="clocks_forward"),  # 2026-03-29 01:59:59 CET
+        pytest.param(1_792_888_200 + 3_600, id="clocks_back_repeated_hour"),  # 02:30 CET
+    ],
+)
+def test_version_age_survives_a_dst_change(belgrade_time, monkeypatch, successor_epoch):
+    """A successor committed 10 s ago must not look an hour older across a DST shift.
+
+    pylance's timestamps are naive local time with ``fold`` reset, so naive
+    subtraction (or ``.timestamp()`` alone, in the repeated hour) reads them an
+    hour too old -- and would delete a version a reader may still hold.
+    """
+    from cognee_db_workers import lancedb_compaction
+
+    monkeypatch.setattr(lancedb_compaction.time, "time", lambda: successor_epoch + 10)
+    dataset = _FakeVersions([_pylance_stamp(successor_epoch - 60), _pylance_stamp(successor_epoch)])
+
+    assert lancedb_compaction.removable_versions(dataset, retention_seconds=300) == []
+    assert lancedb_compaction.removable_versions(dataset, retention_seconds=5) == [1]
+
+
+def test_lance_core_mapping_rejects_a_pair_on_different_cores(monkeypatch):
+    import lance
+    import lancedb
+
+    from cognee_db_workers import lancedb_compaction
+
+    assert lancedb_compaction.lance_core_mismatch() is None  # the installed, pinned pair
+
+    monkeypatch.setattr(lance, "__version__", "12.1.0")  # newer core than lancedb's
+    assert "pylance 12.1.0" in lancedb_compaction.lance_core_mismatch()
+
+    monkeypatch.setattr(lance, "__version__", "12.0.3")
+    monkeypatch.setattr(lancedb, "__version__", "0.40.0")  # no known bundled core
+    assert "lancedb 0.40.0" in lancedb_compaction.lance_core_mismatch()
+
+
+@pytest.mark.asyncio
+async def test_a_mismatched_lance_core_turns_compaction_off(
+    tmp_path, compaction_settings, monkeypatch
+):
+    adapter_module = importlib.import_module(
+        "cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter"
+    )
+    monkeypatch.setattr(
+        adapter_module, "lance_core_mismatch", lambda: "pylance 12.1.0 is not on Lance 12.0.x"
+    )
+    compaction_settings(retention_seconds=0)
+    adapter, db_path = _adapter(tmp_path)
+    collection = "CoreMismatch_label"
+    await _write_n_points(adapter, collection, 3)  # writes are unaffected
+
+    assert await adapter.compact() == {"skipped": "lance_core_mismatch"}
+    assert adapter._open_prune_task is None
+    assert len(_data_files(db_path, collection)) == 3
+
+
+async def _reopen(tmp_path) -> LanceDBAdapter:
+    """A second adapter on the same store: a new process, or a re-created engine."""
+    adapter, _ = _adapter(tmp_path)
+    await adapter.get_connection()
+    return adapter
+
+
+@pytest.mark.asyncio
+async def test_opening_a_quiet_store_reclaims_its_superseded_versions(
+    tmp_path, compaction_settings
+):
+    """The files a pass supersedes go only in a later pass; a store that gets no
+    more writes (searches only) must still get them back."""
+    compaction_settings(retention_seconds=0)
+    writer, db_path = _adapter(tmp_path)
+    collection = "QuietStore_label"
+    await _write_n_points(writer, collection, 6)
+    await writer.close()
+    assert _version_count(db_path, collection) >= 7
+
+    reader = await _reopen(tmp_path)
+    await asyncio.wait({reader._open_prune_task})
+
+    assert reader._open_prune_task.result()[collection]["old_versions_removed"] >= 6
+    assert _version_count(db_path, collection) == 1
+    assert await (await reader.get_collection(collection)).count_rows() == 6
+    await reader.close()
+
+
+@pytest.mark.asyncio
+async def test_the_open_prune_is_bounded_like_a_pass(tmp_path, compaction_settings):
+    compaction_settings(retention_seconds=0, max_versions_per_run=2)
+    writer, db_path = _adapter(tmp_path)
+    collection = "OpenBudget_label"
+    await _write_n_points(writer, collection, 6)
+    await writer.close()
+    before = _version_count(db_path, collection)
+
+    reader = await _reopen(tmp_path)
+    await asyncio.wait({reader._open_prune_task})
+
+    assert _version_count(db_path, collection) == before - 2
+    await reader.close()
+
+
+@pytest.mark.asyncio
+async def test_no_open_prune_when_compaction_is_disabled(tmp_path, compaction_settings):
+    compaction_settings(enabled="false")
+    adapter, _ = _adapter(tmp_path)
+    await adapter.get_connection()
+    assert adapter._open_prune_task is None
+
+
+@pytest.mark.asyncio
+async def test_compact_and_close_wait_for_a_running_open_prune(
+    tmp_path, compaction_settings, monkeypatch
+):
+    """The two never overlap, and closing never tears the store down under it."""
+    compaction_settings(retention_seconds=0)
+    adapter, _ = _adapter(tmp_path)
+    started, finished = asyncio.Event(), []
+
+    async def slow_prune_pass(options):
+        started.set()
+        await asyncio.sleep(0.2)
+        finished.append(True)
+        return {}
+
+    monkeypatch.setattr(adapter, "_prune_pass", slow_prune_pass)
+    await adapter.get_connection()
+    await started.wait()
+
+    stats = await adapter.compact()
+
+    assert finished == [True]
+    assert "skipped" not in stats
+
+    second, _ = _adapter(tmp_path)
+    monkeypatch.setattr(second, "_prune_pass", slow_prune_pass)
+    started.clear()
+    await second.get_connection()
+    await started.wait()
+    await second.close()
+    assert finished == [True, True]
+    await adapter.close()
