@@ -5,9 +5,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from cognee.modules.retrieval.hybrid.facts import FactCandidates
 from cognee.modules.retrieval.temporal_hybrid.matching import (
-    anchors_from_neighborhood,
-    chunks_containing,
     extract_query_interval,
     rerank_hybrid,
     slice_hybrid,
@@ -76,57 +75,6 @@ def test_to_epoch_ms():
     assert to_epoch_ms(_utc(1970, 1, 1, 0, 0, 1)) == 1000
 
 
-# --- anchors -----------------------------------------------------------------
-
-
-def _node(node_id: str, type_name: str, **properties):
-    return (node_id, {"type": type_name, **properties})
-
-
-def _edge(source: str, target: str, relationship: str):
-    return (source, target, relationship, {})
-
-
-def test_anchors_come_from_edges_into_the_matched_timestamps():
-    nodes = [
-        _node("c1", "DocumentChunk"),
-        _node("c2", "DocumentChunk"),
-        _node("ts_1950", "Timestamp", timestamp_str="1950"),
-        _node("ts_1960", "Timestamp", timestamp_str="1960"),
-        _node("ada", "Entity"),
-        _node("acme", "Entity"),
-        _node("person", "EntityType"),
-    ]
-    edges = [
-        _edge("c1", "ts_1950", "contains"),
-        _edge("c2", "ts_1960", "contains"),
-        _edge("ada", "ts_1950", "born_at"),
-        _edge("acme", "ts_1960", "founded_at"),
-        _edge("ada", "person", "is_a"),
-        _edge("c1", "ada", "contains"),
-    ]
-    anchors = anchors_from_neighborhood({"ts_1950"}, nodes, edges)
-
-    assert anchors["chunk_ids"] == {"c1"}
-    assert anchors["entity_ids"] == {"ada"}  # any edge into the timestamp, not only *_at
-
-
-def test_chunks_containing_follows_contains_edges_only_from_chunks():
-    nodes = [
-        _node("c1", "DocumentChunk"),
-        _node("c2", "DocumentChunk"),
-        _node("ada", "Entity"),
-        _node("x", "Entity"),
-    ]
-    edges = [
-        _edge("c1", "ada", "contains"),
-        _edge("x", "ada", "knows"),
-        _edge("c2", "x", "contains"),
-    ]
-
-    assert chunks_containing({"ada"}, nodes, edges) == {"c1"}
-
-
 # --- rerank ----------------------------------------------------------------------
 
 
@@ -179,18 +127,20 @@ def test_rerank_fills_up_with_unanchored_candidates():
 # --- retriever flow ------------------------------------------------------------
 
 
-def _retriever(monkeypatch, *, timestamps, neighborhoods, interval, candidates, empty=False):
+def _retriever(
+    monkeypatch, *, anchors, interval, candidates, timestamps=(), empty=False, fact_candidates=None
+):
     class FakeGraphEngine:
+        anchor_calls: list = []
         range_calls: list = []
-        neighborhood_calls: list = []
+
+        async def get_temporal_anchors(self, chunk_ids, entity_ids, start, end):
+            FakeGraphEngine.anchor_calls.append((set(chunk_ids), set(entity_ids), start, end))
+            return anchors
 
         async def get_timestamps_in_range(self, start, end):
             FakeGraphEngine.range_calls.append((start, end))
-            return timestamps
-
-        async def get_neighborhood(self, node_ids, depth=1, edge_types=None):
-            FakeGraphEngine.neighborhood_calls.append((list(node_ids), depth, edge_types))
-            return neighborhoods.get(tuple(node_ids), ([], []))
+            return list(timestamps)
 
     class FakeGraph:
         async def is_empty(self):
@@ -205,17 +155,32 @@ def _retriever(monkeypatch, *, timestamps, neighborhoods, interval, candidates, 
     async def fake_unified_engine():
         return FakeUnified()
 
+    FakeGraphEngine.anchor_calls = []
     FakeGraphEngine.range_calls = []
-    FakeGraphEngine.neighborhood_calls = []
-    hybrid_fetch = AsyncMock(return_value=candidates)
+    retriever = TemporalHybridRetriever(candidate_top_k=20, top_k=2)
+
+    async def hybrid_fetch_impl(*args, **kwargs):
+        # What HybridRetriever._retrieve_one does once it has the entity lane.
+        if fact_candidates is not None:
+            retriever._remember_fact_candidates(fact_candidates)
+        return candidates
+
+    hybrid_fetch = AsyncMock(side_effect=hybrid_fetch_impl)
     extract = AsyncMock(return_value=interval)
     module = "cognee.modules.retrieval.temporal_hybrid_retriever."
     monkeypatch.setattr(module + "get_graph_engine", fake_graph_engine)
     monkeypatch.setattr(module + "get_unified_engine", fake_unified_engine)
     monkeypatch.setattr(module + "extract_query_interval", extract)
     monkeypatch.setattr(module + "HybridRetriever.get_retrieved_objects", hybrid_fetch)
-    retriever = TemporalHybridRetriever(candidate_top_k=20, top_k=2)
     return retriever, FakeGraphEngine, hybrid_fetch, extract
+
+
+def _anchors(chunks=(), entities=(), timestamps=("ts_1950",)) -> dict:
+    return {
+        "timestamp_ids": set(timestamps),
+        "chunk_ids": set(chunks),
+        "entity_ids": set(entities),
+    }
 
 
 def test_temporal_retriever_rejects_bad_limits():
@@ -224,12 +189,15 @@ def test_temporal_retriever_rejects_bad_limits():
     with pytest.raises(ValueError):
         TemporalHybridRetriever(candidate_top_k=5, top_k=0)
     assert TemporalHybridRetriever(top_k=3).chunks_top_k == 12
+    # A REST request may carry ``top_k: null``; it must resolve, not multiply None.
+    assert TemporalHybridRetriever(top_k=None).top_k == 5
+    assert TemporalHybridRetriever(top_k=None).chunks_top_k == 20
 
 
 @pytest.mark.asyncio
 async def test_temporal_retriever_empty_graph_makes_no_external_calls(monkeypatch):
     retriever, engine, hybrid_fetch, extract = _retriever(
-        monkeypatch, timestamps=[], neighborhoods={}, interval=None, candidates=None, empty=True
+        monkeypatch, anchors=_anchors(), interval=None, candidates=None, empty=True
     )
     with pytest.raises(ValueError, match="blank"):
         await retriever.get_retrieved_objects(query="   ")
@@ -239,32 +207,31 @@ async def test_temporal_retriever_empty_graph_makes_no_external_calls(monkeypatc
     assert result["chunks"] == []
     hybrid_fetch.assert_not_called()
     extract.assert_not_called()
-    assert engine.range_calls == []
+    assert engine.anchor_calls == []
 
 
 @pytest.mark.asyncio
-async def test_temporal_retriever_reranks_by_timestamp_and_entity_anchors(monkeypatch):
-    ts_neighborhood = (
-        [_node("c2", "DocumentChunk"), _node("ts_1950", "Timestamp"), _node("e2", "Entity")],
-        [_edge("c2", "ts_1950", "contains"), _edge("e2", "ts_1950", "born_at")],
-    )
-    entity_neighborhood = (
-        [_node("c3", "DocumentChunk"), _node("c2", "DocumentChunk"), _node("e2", "Entity")],
-        [_edge("c3", "e2", "contains"), _edge("c2", "e2", "contains")],
-    )
+async def test_temporal_retriever_reranks_by_the_candidates_anchors(monkeypatch):
     retriever, engine, _fetch, _extract = _retriever(
         monkeypatch,
-        timestamps=[{"id": "ts_1950", "timestamp_str": "1950", "time_at": 0, "time_until": 1}],
-        neighborhoods={("ts_1950",): ts_neighborhood, ("e2",): entity_neighborhood},
+        anchors=_anchors(chunks=("c2", "c3"), entities=("e2",)),
         interval=(_utc(1950, 1, 1), _utc(1951, 1, 1), None),
         candidates=_candidates(),
     )
     result = await retriever.get_retrieved_objects(query="in 1950")
 
     assert retriever.last_reason is None
-    assert engine.range_calls == [(to_epoch_ms(_utc(1950, 1, 1)), to_epoch_ms(_utc(1951, 1, 1)))]
-    assert engine.neighborhood_calls == [(["ts_1950"], 1, None), (["e2"], 1, ["contains"])]
-    assert retriever.last_anchors["chunk_ids"] == {"c2", "c3"}  # c3 via the entity anchor
+    # The adapter is asked about the candidates, never about the whole window.
+    assert engine.anchor_calls == [
+        (
+            {"c1", "c2", "c3"},
+            {"e1", "e2"},
+            to_epoch_ms(_utc(1950, 1, 1)),
+            to_epoch_ms(_utc(1951, 1, 1)),
+        )
+    ]
+    assert engine.range_calls == []
+    assert retriever.last_anchors["chunk_ids"] == {"c2", "c3"}
     assert retriever.last_anchors["entity_ids"] == {"e2"}
     assert [chunk["id"] for chunk in result["chunks"]] == ["c2", "c3"]
     assert [entity["id"] for entity in result["entities"]] == ["e2", "e1"]
@@ -273,31 +240,80 @@ async def test_temporal_retriever_reranks_by_timestamp_and_entity_anchors(monkey
 
 
 @pytest.mark.asyncio
+async def test_temporal_retriever_selects_facts_against_the_entities_it_shows(monkeypatch):
+    """A fact deduplicated against a candidate entity must not vanish with that entity."""
+    hits = [
+        {"id": "f_atlas", "text": "Atlas was founded in 1950"},
+        {"id": "f_helios", "text": "Helios launched in 1898"},
+        {"id": "f_other", "text": "Something else entirely happened"},
+    ]
+    candidates = {
+        "chunks": [{"id": "c1", "text": "x"}],
+        "chunk_summaries": {},
+        "entities": [
+            {"id": "atlas", "description": "a", "edges": [{"edge_type_id": "f_atlas"}]},
+            {"id": "helios", "description": "h", "edges": [{"edge_type_id": "f_helios"}]},
+        ],
+        "facts": ["stale"],
+    }
+    fact_candidates = FactCandidates(
+        edge_hits=hits, reachable_edge_type_ids=set(), node_scoped=False, facts_top_k=2
+    )
+    retriever, _engine, _fetch, _extract = _retriever(
+        monkeypatch,
+        anchors=_anchors(chunks=("c1",), entities=("atlas",)),
+        interval=(_utc(1950, 1, 1), _utc(1951, 1, 1), None),
+        candidates=candidates,
+        fact_candidates=fact_candidates,
+    )
+    retriever.top_k = 1
+
+    result = await retriever.get_retrieved_objects(query="in 1950")
+
+    assert [entity["id"] for entity in result["entities"]] == ["atlas"]  # helios cut
+    # Helios' fact is no longer shown under an entity, so it returns as a standalone fact
+    # (ahead of the unrelated one, in hit order); Atlas' stays deduplicated against the
+    # entity that is shown. The inherited "stale" facts never reach the result.
+    assert [fact["id"] for fact in result["facts"]] == ["f_helios", "f_other"]
+    assert [fact["id"] for fact in retriever.last_baseline["facts"]] == ["f_helios", "f_other"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("interval", "timestamps", "reason"),
+    ("interval", "anchors", "timestamps", "reason"),
     [
-        ((None, None, "no_time_constraint"), [], "no_time_constraint"),
-        ((None, None, "invalid_interval"), [], "invalid_interval"),
-        ((_utc(1800, 1, 1), _utc(1801, 1, 1), None), [], "no_temporal_match"),
+        ((None, None, "no_time_constraint"), _anchors(), [], "no_time_constraint"),
+        ((None, None, "invalid_interval"), _anchors(), [], "invalid_interval"),
+        # no candidate is dated in the window — and the graph has no such time at all
+        (
+            (_utc(1800, 1, 1), _utc(1801, 1, 1), None),
+            _anchors(timestamps=()),
+            [],
+            "no_temporal_match",
+        ),
+        # ... or the window's times belong to things outside the candidate set
         (
             (_utc(1950, 1, 1), _utc(1951, 1, 1), None),
+            _anchors(timestamps=()),
             [{"id": "ts_elsewhere", "timestamp_str": "1950", "time_at": 0, "time_until": 1}],
+            "no_candidate_overlap",
+        ),
+        # an anchored candidate that was already first changes nothing
+        (
+            (_utc(1950, 1, 1), _utc(1951, 1, 1), None),
+            _anchors(chunks=("c1",)),
+            [],
             "no_candidate_overlap",
         ),
     ],
 )
 async def test_temporal_retriever_fallbacks_return_the_baseline(
-    monkeypatch, interval, timestamps, reason
+    monkeypatch, interval, anchors, timestamps, reason
 ):
     retriever, _engine, _fetch, _extract = _retriever(
         monkeypatch,
+        anchors=anchors,
         timestamps=timestamps,
-        neighborhoods={
-            ("ts_elsewhere",): (
-                [_node("far", "DocumentChunk")],
-                [_edge("far", "ts_elsewhere", "contains")],
-            )
-        },
         interval=interval,
         candidates=_candidates(),
     )
@@ -311,7 +327,7 @@ async def test_temporal_retriever_fallbacks_return_the_baseline(
 @pytest.mark.asyncio
 async def test_temporal_retriever_propagates_hybrid_errors(monkeypatch):
     retriever, _engine, hybrid_fetch, _extract = _retriever(
-        monkeypatch, timestamps=[], neighborhoods={}, interval=(None, None, None), candidates=None
+        monkeypatch, anchors=_anchors(), interval=(None, None, None), candidates=None
     )
     hybrid_fetch.side_effect = RuntimeError("hybrid down")
     with pytest.raises(RuntimeError, match="hybrid down"):

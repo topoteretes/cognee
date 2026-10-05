@@ -61,40 +61,6 @@ def to_epoch_ms(moment: datetime | None) -> int | None:
     return None if moment is None else int(moment.timestamp() * 1000)
 
 
-def anchors_from_neighborhood(timestamp_ids: set[str], nodes, edges) -> dict:
-    """What the matched timestamps are attached to, read off their one-hop neighbourhood.
-
-    ``nodes``/``edges`` are in ``get_graph_data`` shape. A chunk is anchored
-    when it ``contains`` a matched timestamp; an entity is anchored when any of
-    its edges points at one (``born_at``, ``occurred_on``, ``begins_at`` …: the
-    relationship name is not inspected, the target is what matters).
-    """
-    types = {str(node_id): (properties or {}).get("type") for node_id, properties in nodes}
-    chunk_ids: set[str] = set()
-    entity_ids: set[str] = set()
-    for source, target, relationship, _properties in edges:
-        source_id, target_id = str(source), str(target)
-        if target_id not in timestamp_ids:
-            continue
-        if types.get(source_id) == "DocumentChunk" and relationship == "contains":
-            chunk_ids.add(source_id)
-        elif types.get(source_id) == "Entity":
-            entity_ids.add(source_id)
-    return {"chunk_ids": chunk_ids, "entity_ids": entity_ids}
-
-
-def chunks_containing(entity_ids: set[str], nodes, edges) -> set[str]:
-    """Chunk ids whose ``contains`` edge points at one of ``entity_ids``."""
-    types = {str(node_id): (properties or {}).get("type") for node_id, properties in nodes}
-    return {
-        str(source)
-        for source, target, relationship, _properties in edges
-        if relationship == "contains"
-        and str(target) in entity_ids
-        and types.get(str(source)) == "DocumentChunk"
-    }
-
-
 def empty_anchors() -> dict:
     return {"timestamp_ids": set(), "chunk_ids": set(), "entity_ids": set()}
 

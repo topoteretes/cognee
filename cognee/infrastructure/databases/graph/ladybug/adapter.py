@@ -22,6 +22,7 @@ from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
+    temporal_anchors_from_rows,
 )
 from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
@@ -3883,6 +3884,65 @@ class LadybugAdapter(GraphDBInterface):
             }
             for row in rows
         ]
+
+    async def get_temporal_anchors(
+        self,
+        chunk_ids,
+        entity_ids,
+        start: int | None,
+        end: int | None,
+    ) -> dict[str, set[str]]:
+        """Candidates attached to a Timestamp overlapping ``[start, end)``: directly,
+        or (for chunks) through an entity they ``contains``. See the interface."""
+        chunk_list = sorted({str(node_id) for node_id in chunk_ids})
+        entity_list = sorted({str(node_id) for node_id in entity_ids})
+        if not chunk_list and not entity_list:
+            return temporal_anchors_from_rows([], [])
+        conditions = ["time_at IS NOT NULL"]
+        params: dict[str, Any] = {}
+        if end is not None:
+            conditions.append("time_at < $window_end")
+            params["window_end"] = int(end)
+        if start is not None:
+            conditions.append("time_until > $window_start")
+            params["window_start"] = int(start)
+        # The same JSON casts as get_timestamps_in_range, applied only to the
+        # Timestamp nodes the candidates' edges reach.
+        window = f"""
+        WITH {{carry}}, t,
+             json_extract(t.properties, '$.time_at') AS at_str,
+             json_extract(t.properties, '$.time_until') AS until_str
+        WITH {{carry}}, t,
+             CASE WHEN at_str IS NULL OR at_str = '' THEN NULL ELSE CAST(at_str AS INT64) END AS time_at,
+             CASE WHEN until_str IS NULL OR until_str = '' THEN NULL ELSE CAST(until_str AS INT64) END AS until_raw
+        WITH {{carry}}, t, time_at, COALESCE(until_raw, time_at + 1000) AS time_until
+        WHERE {" AND ".join(conditions)}
+        """
+        direct_rows = await self.query(
+            f"""
+            MATCH (c:Node)-[r:EDGE]->(t:Node)
+            WHERE c.id IN $candidate_ids AND t.type = 'Timestamp'
+            {window.format(carry="c")}
+            RETURN DISTINCT c.id, c.type, t.id
+            """,
+            {**params, "candidate_ids": chunk_list + entity_list},
+        )
+        via_rows = []
+        if chunk_list:
+            via_rows = await self.query(
+                f"""
+                MATCH (c:Node)-[r1:EDGE]->(e:Node)-[r2:EDGE]->(t:Node)
+                WHERE c.id IN $chunk_ids AND r1.relationship_name = 'contains'
+                  AND e.type = 'Entity' AND t.type = 'Timestamp'
+                {window.format(carry="c, e")}
+                RETURN DISTINCT c.id, e.id, t.id
+                """,
+                {**params, "chunk_ids": chunk_list},
+            )
+        return temporal_anchors_from_rows(
+            [(row[0], row[1], row[2]) for row in direct_rows],
+            [(row[0], row[1], row[2]) for row in via_rows],
+        )
 
     async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
         """

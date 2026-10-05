@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from typing import Any
 from uuid import UUID
 
@@ -46,6 +46,30 @@ def timestamp_overlaps(node: dict, start: int | None, end: int | None) -> bool:
     time_until = node.get("time_until")
     time_until = int(time_until) if time_until not in (None, "") else time_at + 1000
     return (end is None or time_at < end) and (start is None or time_until > start)
+
+
+def empty_temporal_anchors() -> dict[str, set[str]]:
+    return {"timestamp_ids": set(), "chunk_ids": set(), "entity_ids": set()}
+
+
+def temporal_anchors_from_rows(
+    direct_rows: Iterable[tuple[str, str, str]],
+    via_rows: Iterable[tuple[str, str, str]],
+) -> dict[str, set[str]]:
+    """Assemble ``get_temporal_anchors``' result from the two row shapes the
+    adapters produce: ``(candidate_id, candidate_type, timestamp_id)`` for an edge
+    straight into a matching timestamp, and ``(chunk_id, entity_id, timestamp_id)``
+    for a candidate chunk that ``contains`` an entity with such an edge."""
+    anchors = empty_temporal_anchors()
+    for candidate_id, candidate_type, timestamp_id in direct_rows:
+        anchors["timestamp_ids"].add(str(timestamp_id))
+        bucket = "chunk_ids" if candidate_type == "DocumentChunk" else "entity_ids"
+        anchors[bucket].add(str(candidate_id))
+    for chunk_id, entity_id, timestamp_id in via_rows:
+        anchors["timestamp_ids"].add(str(timestamp_id))
+        anchors["chunk_ids"].add(str(chunk_id))
+        anchors["entity_ids"].add(str(entity_id))
+    return anchors
 
 
 class GraphDBInterface(ABC):
@@ -864,6 +888,78 @@ class GraphDBInterface(ABC):
             if timestamp_overlaps(node, start, end):
                 matches.append(node)
         return matches
+
+    async def get_temporal_anchors(
+        self,
+        chunk_ids: Iterable[str],
+        entity_ids: Iterable[str],
+        start: int | None,
+        end: int | None,
+    ) -> dict[str, set[str]]:
+        """
+        Which of the given candidates are attached to a ``Timestamp`` inside the
+        half-open window ``[start, end)`` (ms since the epoch, UTC; ``None`` leaves
+        a side open).
+
+        A chunk is anchored when it ``contains`` a matching timestamp, or
+        ``contains`` an entity that has any edge into one — an entity anchored to
+        a time carries it into every chunk that mentions it. An entity is anchored
+        when any of its edges points at a matching timestamp; the relationship
+        name is not inspected. Returns ``{"timestamp_ids", "chunk_ids",
+        "entity_ids"}``: the matched timestamps, the anchored candidate chunks and
+        the anchored entities (candidates and the ones reached through chunks).
+
+        Reading from the candidate side keeps the cost proportional to the
+        candidate count whatever the window matches — the retriever's reason for
+        asking this instead of listing every timestamp in the window. This
+        default walks ``get_neighborhood`` and filters in Python; adapters with a
+        native query override it (Ladybug, Neo4j, Postgres demo).
+        """
+        chunk_set = {str(node_id) for node_id in chunk_ids}
+        entity_set = {str(node_id) for node_id in entity_ids}
+        if not chunk_set and not entity_set:
+            return empty_temporal_anchors()
+
+        nodes, edges = await self.get_neighborhood(sorted(chunk_set | entity_set), depth=1)
+        properties_by_id = {str(node_id): dict(props or {}) for node_id, props in nodes}
+
+        def _in_window(node_id: str) -> bool:
+            props = properties_by_id.get(node_id)
+            return (
+                props is not None
+                and props.get("type") == "Timestamp"
+                and timestamp_overlaps({**props, "id": node_id}, start, end)
+            )
+
+        direct_rows: list[tuple[str, str, str]] = []
+        contained: dict[str, set[str]] = {}  # candidate chunk -> entities it contains
+        for source, target, relationship, _props in edges:
+            source_id, target_id = str(source), str(target)
+            if (
+                source_id in chunk_set
+                and relationship == "contains"
+                and properties_by_id.get(target_id, {}).get("type") == "Entity"
+            ):
+                contained.setdefault(source_id, set()).add(target_id)
+            if _in_window(target_id) and (source_id in chunk_set or source_id in entity_set):
+                source_type = "DocumentChunk" if source_id in chunk_set else "Entity"
+                direct_rows.append((source_id, source_type, target_id))
+
+        via_rows: list[tuple[str, str, str]] = []
+        reached = set().union(*contained.values()) if contained else set()
+        if reached:
+            via_nodes, via_edges = await self.get_neighborhood(sorted(reached), depth=1)
+            via_properties = {str(node_id): dict(props or {}) for node_id, props in via_nodes}
+            for source, target, _relationship, _props in via_edges:
+                source_id, target_id = str(source), str(target)
+                props = via_properties.get(target_id)
+                if source_id not in reached or props is None or props.get("type") != "Timestamp":
+                    continue
+                if timestamp_overlaps({**props, "id": target_id}, start, end):
+                    for chunk_id, entities in contained.items():
+                        if source_id in entities:
+                            via_rows.append((chunk_id, source_id, target_id))
+        return temporal_anchors_from_rows(direct_rows, via_rows)
 
     @abstractmethod
     async def get_neighborhood(

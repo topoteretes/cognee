@@ -1,12 +1,12 @@
 """Temporal rerank on top of HybridRetriever: the TEMPORAL search type (SDK-828).
 
 The candidate fetch and the query-interval extraction run concurrently. The
-graph adapter then returns the Timestamp nodes inside the window
-(``get_timestamps_in_range``, a native query on Ladybug, Neo4j and the Postgres
-demo, a scan elsewhere), their one-hop neighbourhood names the chunks and
-entities anchored to them, and the oversized candidate set is reordered so the
-anchored candidates come first before the final limit. Context formatting and
-completion are inherited unchanged.
+graph adapter is then asked which of the candidate chunks and entities are
+attached to a Timestamp inside the window (``get_temporal_anchors``, a native
+query on Ladybug, Neo4j and the Postgres demo, a neighbourhood walk elsewhere),
+and the oversized candidate set is reordered so the anchored candidates come
+first before the final limit. Facts are selected against the entities that
+survive that cut. Context formatting and completion are inherited unchanged.
 
 get_retrieved_objects returns the plain hybrid result shape — the reranked
 view, or the baseline slice on fallback. Diagnostics for the last query live
@@ -17,11 +17,10 @@ import asyncio
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.unified import get_unified_engine
-from cognee.modules.retrieval.hybrid.results import empty_hybrid_result
+from cognee.modules.retrieval.hybrid.facts import FactCandidates, select_facts_from_candidates
+from cognee.modules.retrieval.hybrid.results import empty_hybrid_result, result_id
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 from cognee.modules.retrieval.temporal_hybrid.matching import (
-    anchors_from_neighborhood,
-    chunks_containing,
     empty_anchors,
     extract_query_interval,
     rerank_hybrid,
@@ -29,16 +28,16 @@ from cognee.modules.retrieval.temporal_hybrid.matching import (
     to_epoch_ms,
 )
 
-# Bounds on the neighbourhood reads: one question rarely names a window with
-# more matching timestamps than this, and past it the anchored set already
-# covers far more than the candidate set can hold.
-MAX_MATCHED_TIMESTAMPS = 500
-
 
 class TemporalHybridRetriever(HybridRetriever):
     """Hybrid retrieval reranked by temporal overlap, falling back to plain hybrid."""
 
-    def __init__(self, candidate_top_k: int | None = None, top_k: int = 5, **kwargs):
+    def __init__(self, candidate_top_k: int | None = None, top_k: int | None = 5, **kwargs):
+        # The REST request models accept ``top_k: null`` and the registry passes it
+        # through unchanged; resolve it here, before the arithmetic, the way
+        # HybridRetriever's lanes fall back to their own defaults.
+        if top_k is None:
+            top_k = 5
         if candidate_top_k is None:
             candidate_top_k = top_k * 4
         if top_k <= 0 or candidate_top_k < top_k:
@@ -57,27 +56,47 @@ class TemporalHybridRetriever(HybridRetriever):
         self.last_reason = None
         self.last_anchors = empty_anchors()
         self.last_baseline = empty_hybrid_result()
+        self._fact_candidates: FactCandidates | None = None
 
-    async def _anchors(self, start, end) -> dict:
-        """Timestamps in the window and the chunks and entities attached to them."""
+    def _remember_fact_candidates(self, fact_candidates: FactCandidates) -> None:
+        # One query per call (query_batch is refused below), so keeping the
+        # candidates on the instance is safe here where it is not for Hybrid.
+        self._fact_candidates = fact_candidates
+
+    def _with_facts(self, result: dict) -> dict:
+        """Facts selected against the entities ``result`` actually shows.
+
+        Hybrid deduplicated its facts against the whole candidate entity set;
+        after the cut to ``top_k`` a fact shown only under a discarded entity
+        would be gone from both sections. Without the candidates (a caller that
+        bypassed Hybrid's fetch) the inherited facts stand.
+        """
+        if self._fact_candidates is None:
+            return result
+        facts = select_facts_from_candidates(self._fact_candidates, result.get("entities") or [])
+        return {**result, "facts": facts}
+
+    async def _anchors(self, start, end, candidates: dict) -> dict:
+        """Which candidate chunks and entities are attached to a time in the window."""
         graph = await get_graph_engine()
-        timestamps = await graph.get_timestamps_in_range(to_epoch_ms(start), to_epoch_ms(end))
-        timestamp_ids = {str(node["id"]) for node in timestamps[:MAX_MATCHED_TIMESTAMPS]}
-        if not timestamp_ids:
-            return empty_anchors()
-        nodes, edges = await graph.get_neighborhood(sorted(timestamp_ids), depth=1)
-        anchors = anchors_from_neighborhood(timestamp_ids, nodes, edges)
-        # An entity anchored to a time carries that time into every chunk that
-        # mentions it — the reception held in July 1805 dates the chunks about
-        # the reception, not just the one that names the month.
-        if anchors["entity_ids"]:
-            entity_nodes, entity_edges = await graph.get_neighborhood(
-                sorted(anchors["entity_ids"]), depth=1, edge_types=["contains"]
-            )
-            anchors["chunk_ids"] |= chunks_containing(
-                anchors["entity_ids"], entity_nodes, entity_edges
-            )
-        return {**anchors, "timestamp_ids": timestamp_ids}
+        chunk_ids = {
+            chunk_id
+            for chunk_id in (result_id(chunk) for chunk in candidates.get("chunks") or [])
+            if chunk_id
+        }
+        entity_ids = {
+            str(entity["id"])
+            for entity in candidates.get("entities") or []
+            if isinstance(entity, dict) and entity.get("id")
+        }
+        anchors = await graph.get_temporal_anchors(
+            chunk_ids, entity_ids, to_epoch_ms(start), to_epoch_ms(end)
+        )
+        return {
+            "timestamp_ids": set(anchors.get("timestamp_ids") or ()),
+            "chunk_ids": set(anchors.get("chunk_ids") or ()),
+            "entity_ids": set(anchors.get("entity_ids") or ()),
+        }
 
     async def get_retrieved_objects(self, query=None, query_batch=None) -> dict:
         if query_batch:
@@ -98,17 +117,22 @@ class TemporalHybridRetriever(HybridRetriever):
             extract_query_interval(query),
         )
         self.last_interval = (start, end)
-        self.last_baseline = slice_hybrid(candidates, self.top_k)
+        self.last_baseline = self._with_facts(slice_hybrid(candidates, self.top_k))
         if reason is not None:
             self.last_reason = reason
             return self.last_baseline
 
-        self.last_anchors = await self._anchors(start, end)
+        self.last_anchors = await self._anchors(start, end, candidates)
         if not self.last_anchors["timestamp_ids"]:
-            self.last_reason = "no_temporal_match"
+            # Nothing in the candidate set is dated inside the window. Tell the
+            # two cases apart for the diagnostics: a window the graph has no
+            # time in at all, or one whose matches lie outside the candidates.
+            graph = await get_graph_engine()
+            in_window = await graph.get_timestamps_in_range(to_epoch_ms(start), to_epoch_ms(end))
+            self.last_reason = "no_candidate_overlap" if in_window else "no_temporal_match"
             return self.last_baseline
 
-        reranked = rerank_hybrid(candidates, self.last_anchors, self.top_k)
+        reranked = self._with_facts(rerank_hybrid(candidates, self.last_anchors, self.top_k))
         if reranked["chunks"] == self.last_baseline["chunks"] and (
             reranked["entities"] == self.last_baseline["entities"]
         ):

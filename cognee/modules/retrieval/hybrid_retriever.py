@@ -19,9 +19,9 @@ from cognee.modules.retrieval.hybrid.context import (
 from cognee.modules.retrieval.hybrid.entities import build_entities, search_entities
 from cognee.modules.retrieval.hybrid.external_metadata import project_external_metadata
 from cognee.modules.retrieval.hybrid.facts import (
+    FactCandidates,
     edge_rank_by_id,
-    resolve_facts_top_k,
-    select_facts_for_entities,
+    select_facts_from_candidates,
 )
 from cognee.modules.retrieval.hybrid.merge import merge_hybrid_results
 from cognee.modules.retrieval.hybrid.references import cite_hybrid_completions
@@ -141,7 +141,7 @@ class HybridRetriever(BaseRetriever):
         # ranking byte-identical to an un-personalized run.
         personal_weights = await load_preference_weights()
 
-        chunk_objects, (entities, facts) = await asyncio.gather(
+        chunk_objects, (entities, fact_candidates) = await asyncio.gather(
             retrieve_hybrid_chunks(
                 vector_engine=self._unified_engine.vector,
                 query=query,
@@ -165,11 +165,27 @@ class HybridRetriever(BaseRetriever):
             self.include_external_metadata,
             self.external_metadata_keys,
         )
-        return {**chunk_objects, "entities": entities, "facts": facts}
+        self._remember_fact_candidates(fact_candidates)
+        return {
+            **chunk_objects,
+            "entities": entities,
+            "facts": select_facts_from_candidates(fact_candidates, entities),
+        }
 
-    async def _retrieve_entities_and_facts(self, query: str, query_vector: list[float]) -> tuple:
+    def _remember_fact_candidates(self, fact_candidates: FactCandidates) -> None:
+        """Hook for a subclass that cuts the entity list after the fetch and must
+        re-select facts against the entities it finally shows (the temporal
+        rerank). Plain hybrid keeps nothing: its entity list is already final,
+        and ``query_batch`` runs ``_retrieve_one`` concurrently on one instance."""
+
+    async def _retrieve_entities_and_facts(
+        self, query: str, query_vector: list[float]
+    ) -> tuple[list[dict], FactCandidates]:
         """Entity lane, run concurrently with the chunk lane so the graph round trip for
-        edge bullets overlaps the chunk pipeline's ranking and summary loading."""
+        edge bullets overlaps the chunk pipeline's ranking and summary loading.
+
+        Returns the entities and the fact candidates; the facts themselves are
+        selected by the caller once it knows which entities it shows."""
         max_ranked_bullets = self.entities_top_k * max(0, self.max_edges_per_entity)
         entity_hits, edge_hits = await asyncio.gather(
             search_entities(
@@ -199,18 +215,12 @@ class HybridRetriever(BaseRetriever):
             self.node_name,
             self.node_name_filter_operator,
         )
-        node_scoped = bool(self.node_name)
-        return entities, select_facts_for_entities(
-            edge_hits,
-            entities,
-            reachable_ids,
-            resolve_facts_top_k(
-                entities,
-                node_scoped=node_scoped,
-                facts_top_k=self.facts_top_k,
-                entity_edge_budget=max_ranked_bullets,
-            ),
-            node_scoped,
+        return entities, FactCandidates(
+            edge_hits=edge_hits,
+            reachable_edge_type_ids=reachable_ids,
+            node_scoped=bool(self.node_name),
+            facts_top_k=self.facts_top_k,
+            entity_edge_budget=max_ranked_bullets,
         )
 
     async def get_context_from_objects(

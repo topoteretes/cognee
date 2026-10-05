@@ -160,10 +160,12 @@ async def test_range_lookup_and_anchors_on_the_configured_backend(clean_graph):
         n["timestamp_str"] for n in await engine.get_timestamps_in_range(landing, landing + 1000)
     ] == ["1969-07-20 20:17:00"]
 
-    # anchors: the chunk that contains the timestamp, the entity with the *_at edge,
-    # and (through the entity) every chunk that mentions the entity
+    # anchors, read from the candidate side: the chunk that contains the timestamp,
+    # the entity with the *_at edge, and (through the entity) every candidate
+    # chunk that mentions the entity
     retriever = TemporalHybridRetriever(top_k=5)
-    anchors = await retriever._anchors(_utc(1969, 1, 1), _utc(1970, 1, 1))
+    candidates = {"chunks": [{"id": str(curie.id)}, {"id": str(apollo.id)}], "entities": []}
+    anchors = await retriever._anchors(_utc(1969, 1, 1), _utc(1970, 1, 1), candidates)
     assert anchors["timestamp_ids"] == {
         str(found_id)
         for found_id in [
