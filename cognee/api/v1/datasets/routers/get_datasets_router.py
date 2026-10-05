@@ -22,6 +22,7 @@ from cognee.modules.data.methods import (
     get_datasets_graph_counts,
 )
 from cognee.modules.data.methods.create_authorized_dataset import create_authorized_dataset
+from cognee.modules.data.methods.provision_session_companion import provision_session_companion
 from cognee.modules.graph.methods import get_formatted_graph_data
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.users.methods import get_authenticated_user
@@ -39,6 +40,19 @@ class ErrorResponseDTO(BaseModel):
 
 class DataCountDTO(OutDTO):
     count: int
+
+
+class SessionCompanionDTO(BaseModel):
+    """Identity of a dataset's session companion.
+
+    Plain snake_case on purpose: the agent plugins read these exact keys and
+    treat anything else as "not attested" (they then write to the primary).
+    """
+
+    primary_dataset_id: str
+    dataset_id: str
+    dataset_name: str
+    permissions_verified: bool
 
 
 # Shared by GET /status and GET /status/progress — both accept the same
@@ -153,6 +167,43 @@ class DatasetSchemaPayloadDTO(InDTO):
 
 def get_datasets_router() -> APIRouter:
     router = APIRouter()
+
+    @router.post("/{dataset_id}/session-companion", response_model=SessionCompanionDTO)
+    async def session_companion(
+        dataset_id: UUID, user: Annotated[User, Depends(get_authenticated_user)]
+    ):
+        """
+        Create or verify the dataset's session companion, ``<name>-agent_sessions``.
+
+        Agent plugins route a session's Q&A and traces into the companion so the
+        primary graph stays free of conversational chatter, and recall across both.
+        The companion is created once, owned by the primary's owner, with a copy of
+        every permission the primary carries at that moment, all in one transaction.
+        Calling again verifies that snapshot; it is never widened or narrowed here.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): The primary dataset. The caller must own it or be an
+          agent user provisioned by its owner.
+
+        ## Response
+        - **primary_dataset_id**, **dataset_id**, **dataset_name** and
+          **permissions_verified** (always true on success). Clients must keep writing
+          to the primary unless the response carries exactly these values.
+
+        ## Error Codes
+        - **403 Forbidden**: The caller is not the owner or an agent of the owner.
+        - **409 Conflict**: The companion exists with different permissions or identity,
+          the primary is itself a companion, or it has no permissions to copy.
+        """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user,
+            additional_properties={
+                "endpoint": "POST /v1/datasets/{dataset_id}/session-companion",
+                "cognee_version": cognee_version,
+            },
+        )
+        return await provision_session_companion(dataset_id, user)
 
     @router.get("", response_model=list[DatasetDTO])
     async def get_datasets(user: User = Depends(get_authenticated_user)):
