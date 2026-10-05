@@ -120,6 +120,18 @@ def test_sanitizer_keeps_an_empty_dataset_name_empty():
     assert out["dataset_name"] == ""
 
 
+def test_shared_masking_preserves_legacy_list_empty_string_behavior():
+    out = utils._sanitize_nested_properties(
+        {"dataset_name": "", "dataset": [""], "datasets": [""]},
+        utils.TELEMETRY_SANITIZED_PROPERTIES,
+    )
+    assert out == {
+        "dataset_name": "",
+        "dataset": [""],
+        "datasets": [utils.TELEMETRY_FINGERPRINT_PREFIX + str(uuid5(NAMESPACE_OID, ""))],
+    }
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("event_name", "key"),

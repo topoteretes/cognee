@@ -104,6 +104,9 @@ EVENT_ALLOWLIST = (
     "Pipeline Run Started",
     "Pipeline Run Completed",
     "Pipeline Run Errored",
+    "Pipeline Item Started",
+    "Pipeline Item Completed",
+    "Pipeline Item Errored",
 )
 
 # The pseudonymous deployment identity, in decreasing stability order:
@@ -139,27 +142,6 @@ _LLM_CONFIGURED = (
 _RUN_ID = "json_extract_string(properties, '$.pipeline_run_id')"
 
 
-def _class_name(property_path: str, missing: str) -> str:
-    """A Python class name, or a bucket.
-
-    Anything that is not one identifier is ``redacted``, so an unexpected value
-    cannot stop the export; ``missing`` names the absence (``unknown`` for a
-    field every build sends, ``none`` for one sent only when there is a value).
-    """
-    value = f"json_extract_string(properties, '$.{property_path}')"
-    return (
-        f"CASE WHEN regexp_matches({value}, '^[A-Za-z_][A-Za-z0-9_]*$') THEN {value} "
-        f"WHEN {value} IS NULL THEN '{missing}' ELSE 'redacted' END"
-    )
-
-
-# The class of the error that ended a run or a task (SDK-775), and the innermost
-# class of its ``raise ... from`` chain when that differs: the provider error
-# under a cognee wrapper (``RateLimitError`` under ``LLMQuotaExceededError``).
-_EXCEPTION_TYPE = _class_name("exception_type", "unknown")
-_EXCEPTION_CAUSE = _class_name("exception_cause", "none")
-
-
 def _closed_value(
     property_path: str, pattern: str = "^[A-Za-z0-9_.,:-]{1,64}$", missing: str = "unknown"
 ) -> str:
@@ -177,6 +159,13 @@ def _closed_value(
         f"WHEN regexp_matches({value}, '{pattern}') THEN {value} ELSE 'redacted' END"
     )
 
+
+# Class names use the same validation/bucketing rule as other closed values.
+_EXCEPTION_TYPE = _closed_value("exception_type", "^[A-Za-z_][A-Za-z0-9_]*$")
+_EXCEPTION_CAUSE = _closed_value("exception_cause", "^[A-Za-z_][A-Za-z0-9_]*$", missing="none")
+_RUN_SCOPE = "coalesce(json_extract_string(properties, '$.pipeline_event_scope') = 'run', false)"
+_RECOVERED = "coalesce(json_extract_string(properties, '$.recovered_at_startup') = 'true', false)"
+_EVENT_SCOPE = f"CASE WHEN {_RUN_SCOPE} OR {_RECOVERED} THEN 'run' ELSE 'legacy_item' END"
 
 # The HTTP status closest to a failure, when any error in its chain carried one
 # (a provider's 429/401/503, a cognee error's mapped status); ``none`` otherwise.
@@ -217,6 +206,30 @@ _BASE_FILTER = (
     f"AND tracking_event IN {_EVENTS_SQL}"
 )
 
+# Both outcome and duration reports use the same authoritative lifecycle.
+# Historical Pipeline Run events were item events. Even matching start/end
+# counts cannot prove the durable-storage flush succeeded, so never infer a
+# successful run from them. Recovery can authoritatively close an older run.
+_RUNS_CTE = f"""
+    WITH runs AS (
+        SELECT {_RUN_ID} AS run_id,
+               min(ingestion_date) FILTER (tracking_event = 'Pipeline Run Started') AS day,
+               min({_VERSION}) FILTER (tracking_event = 'Pipeline Run Started') AS version,
+               bool_or(tracking_event = 'Pipeline Run Started' AND {_RUN_SCOPE}) AS authoritative_start,
+               bool_or(tracking_event = 'Pipeline Run Completed' AND {_RUN_SCOPE}) AS completed,
+               bool_or(tracking_event = 'Pipeline Run Errored' AND ({_RUN_SCOPE} OR {_RECOVERED})) AS errored,
+               min(event_timestamp) FILTER (tracking_event = 'Pipeline Run Started' AND {_RUN_SCOPE}) AS started_at,
+               max(event_timestamp) FILTER (
+                   tracking_event IN ('Pipeline Run Completed', 'Pipeline Run Errored')
+                   AND {_RUN_SCOPE} AND NOT {_RECOVERED}) AS ended_at,
+               bool_or({_RECOVERED}) AS recovered
+        FROM analytics.main.pipeline_events
+        WHERE {_BASE_FILTER} AND tracking_event LIKE 'Pipeline Run%'
+              AND {_RUN_ID} IS NOT NULL
+        GROUP BY {_RUN_ID}
+    )
+"""
+
 QUERIES: dict[str, str] = {
     # Daily volume + reach per event, per surface, per version.
     "daily_event_volumes": f"""
@@ -233,7 +246,12 @@ QUERIES: dict[str, str] = {
     # the cause under the wrapper and the HTTP status closest to the failure.
     # Class names and a status are all an Errored event says about its error.
     "pipeline_error_types_daily": f"""
-        SELECT ingestion_date AS day, {_VERSION} AS version,
+        SELECT ingestion_date AS day, {_VERSION} AS version, {_EVENT_SCOPE} AS event_scope,
+               {_provider_dimension("llm.provider")} AS llm_provider,
+               {_provider_dimension("embedding.provider")} AS embedding_provider,
+               {_provider_dimension("graph.provider")} AS graph_provider,
+               {_provider_dimension("vector.provider")} AS vector_provider,
+               {_STRUCTURED_OUTPUT} AS structured_output,
                {_EXCEPTION_TYPE} AS exception_type,
                {_EXCEPTION_CAUSE} AS exception_cause,
                {_STATUS_CODE} AS status_code,
@@ -244,36 +262,22 @@ QUERIES: dict[str, str] = {
         WHERE {_BASE_FILTER} AND tracking_event = 'Pipeline Run Errored'
         GROUP BY ALL ORDER BY day, errors DESC
     """,
-    # Pipeline runs by outcome (SDK-775). Pipeline events fire once per data item,
-    # while startup recovery closes a whole run with one event, so event counts
-    # cannot balance. Each run is classified once from all its events: errored if
-    # any item errored, silent if no event of the run is Completed or Errored.
-    # Counted on the day and version of the run's Started event.
+    # A whole run ends only at the lifecycle owned by run_tasks(), after flush.
     "pipeline_runs_daily": f"""
-        WITH runs AS (
-            SELECT {_RUN_ID} AS run_id,
-                   min(ingestion_date) FILTER (tracking_event = 'Pipeline Run Started') AS day,
-                   min({_VERSION}) FILTER (tracking_event = 'Pipeline Run Started') AS version,
-                   bool_or(tracking_event = 'Pipeline Run Errored') AS errored,
-                   bool_or(tracking_event IN ('Pipeline Run Completed', 'Pipeline Run Errored'))
-                       AS ended
-            FROM analytics.main.pipeline_events
-            WHERE {_BASE_FILTER} AND tracking_event LIKE 'Pipeline Run%'
-                  AND {_RUN_ID} IS NOT NULL
-            GROUP BY {_RUN_ID}
-        )
+        {_RUNS_CTE}
         SELECT day, version,
                count(*) AS runs_started,
-               count(*) FILTER (ended AND NOT errored) AS runs_completed,
+               count(*) FILTER (completed AND NOT errored) AS runs_completed,
                count(*) FILTER (errored) AS runs_errored,
-               count(*) FILTER (NOT ended) AS runs_silent
+               count(*) FILTER (authoritative_start AND NOT completed AND NOT errored) AS runs_silent,
+               count(*) FILTER (NOT authoritative_start AND NOT completed AND NOT errored) AS runs_unclassified
         FROM runs
         WHERE day IS NOT NULL
         GROUP BY ALL ORDER BY day, version
     """,
     # Graph-build pipeline health by day and version.
     "pipeline_outcomes_daily": f"""
-        SELECT ingestion_date AS day, {_VERSION} AS version,
+        SELECT ingestion_date AS day, {_VERSION} AS version, {_EVENT_SCOPE} AS event_scope,
                count(*) FILTER (tracking_event = 'Pipeline Run Started')   AS started,
                count(*) FILTER (tracking_event = 'Pipeline Run Completed') AS completed,
                count(*) FILTER (tracking_event = 'Pipeline Run Errored')   AS errored,
@@ -292,12 +296,13 @@ QUERIES: dict[str, str] = {
                {_ITEM_LOADER} AS item_loader,
                {_ITEM_SIZE_BUCKET} AS item_size_bucket,
                {_ITEM_TOKEN_BUCKET} AS item_token_bucket,
-               count(*) FILTER (tracking_event = 'Pipeline Run Started')   AS started,
-               count(*) FILTER (tracking_event = 'Pipeline Run Completed') AS completed,
-               count(*) FILTER (tracking_event = 'Pipeline Run Errored')   AS errored,
+               count(*) FILTER (tracking_event IN ('Pipeline Run Started', 'Pipeline Item Started'))   AS started,
+               count(*) FILTER (tracking_event IN ('Pipeline Run Completed', 'Pipeline Item Completed')) AS completed,
+               count(*) FILTER (tracking_event IN ('Pipeline Run Errored', 'Pipeline Item Errored'))   AS errored,
                count(DISTINCT {_IDENT}) AS distinct_identities
         FROM analytics.main.pipeline_events
-        WHERE {_BASE_FILTER} AND tracking_event LIKE 'Pipeline Run%'
+        WHERE {_BASE_FILTER} AND (tracking_event LIKE 'Pipeline Item%'
+              OR (tracking_event LIKE 'Pipeline Run%' AND NOT {_RUN_SCOPE} AND NOT {_RECOVERED}))
         GROUP BY ALL ORDER BY day, started DESC
     """,
     # SDK-level operation health (search/add/cognify) by day and version.
@@ -325,7 +330,7 @@ QUERIES: dict[str, str] = {
     # Provider/model settings can contain custom deployment identifiers. Redact
     # before GROUP BY so run and distinct-identity counts cover the whole bucket.
     "provider_stack_daily": f"""
-        SELECT ingestion_date AS day,
+        SELECT ingestion_date AS day, {_EVENT_SCOPE} AS event_scope,
                {_provider_dimension("llm.provider")} AS llm_provider,
                {_provider_dimension("llm.model", max_length=60)} AS llm_model,
                {_LLM_CONFIGURED} AS llm_configured,
@@ -337,10 +342,12 @@ QUERIES: dict[str, str] = {
                {_provider_dimension("vector.provider")} AS vector_provider,
                {_provider_dimension("relational.provider")} AS relational_provider,
                {_VERSION} AS version,
-               count(*) AS completed_runs,
+               count(*) FILTER (tracking_event = 'Pipeline Run Started') AS started_runs,
+               count(*) FILTER (tracking_event = 'Pipeline Run Completed') AS completed_runs,
+               count(*) FILTER (tracking_event = 'Pipeline Run Errored') AS errored_runs,
                count(DISTINCT {_IDENT}) AS distinct_identities
         FROM analytics.main.pipeline_events
-        WHERE {_BASE_FILTER} AND tracking_event = 'Pipeline Run Completed'
+        WHERE {_BASE_FILTER} AND tracking_event LIKE 'Pipeline Run%'
         GROUP BY ALL ORDER BY day, completed_runs DESC
     """,
     # Search-type mix (SearchType enum values only).
@@ -425,20 +432,7 @@ QUERIES: dict[str, str] = {
     # runs that ended inside the window are timed; silent runs are counted in
     # pipeline_runs_daily instead.
     "pipeline_run_durations_daily": f"""
-        WITH runs AS (
-            SELECT {_RUN_ID} AS run_id,
-                   min(ingestion_date) FILTER (tracking_event = 'Pipeline Run Started') AS day,
-                   min({_VERSION}) FILTER (tracking_event = 'Pipeline Run Started') AS version,
-                   min(event_timestamp) FILTER (tracking_event = 'Pipeline Run Started')
-                       AS started_at,
-                   max(event_timestamp)
-                       FILTER (tracking_event IN ('Pipeline Run Completed', 'Pipeline Run Errored'))
-                       AS ended_at
-            FROM analytics.main.pipeline_events
-            WHERE {_BASE_FILTER} AND tracking_event LIKE 'Pipeline Run%'
-                  AND {_RUN_ID} IS NOT NULL
-            GROUP BY {_RUN_ID}
-        )
+        {_RUNS_CTE}
         SELECT day, version,
                count(*) AS runs_timed,
                round(quantile_cont(epoch(ended_at - started_at), 0.5), 1) AS p50_seconds,
@@ -446,6 +440,7 @@ QUERIES: dict[str, str] = {
                round(max(epoch(ended_at - started_at)), 1) AS max_seconds
         FROM runs
         WHERE day IS NOT NULL AND started_at IS NOT NULL AND ended_at IS NOT NULL
+              AND NOT recovered AND ended_at >= started_at
         GROUP BY ALL ORDER BY day, version
     """,
     # Which task fails (SDK-775): per-task error events by task name and error

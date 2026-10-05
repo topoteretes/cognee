@@ -28,10 +28,17 @@ from cognee.modules.pipelines.utils import generate_pipeline_id
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import send_telemetry, telemetry_exception_properties
 from cognee.tasks.ingestion import resolve_data_directories
 
 from ..tasks.task import Task
 from .run_tasks_data_item import run_tasks_data_item
+from .run_tasks_with_telemetry import (
+    PIPELINE_RUN_COMPLETED,
+    PIPELINE_RUN_ERRORED,
+    PIPELINE_RUN_STARTED,
+    pipeline_run_telemetry_properties,
+)
 
 logger = get_logger("run_tasks(tasks: [Task], data)")
 
@@ -96,7 +103,18 @@ async def run_tasks(
             llm_config=llm_config,
             embedding_config=embedding_config,
         ):
+            telemetry_properties = pipeline_run_telemetry_properties(
+                pipeline_id,
+                pipeline_run_id,
+                user.tenant_id,
+                graph_extractor=(extras or {}).get("graph_extractor"),
+            ) | {"pipeline_event_scope": "run"}
             try:
+                # One lifecycle per dataset, including skipped/empty runs and
+                # failures after the items finish (durable storage, run record).
+                send_telemetry(
+                    PIPELINE_RUN_STARTED, user, additional_properties=telemetry_properties
+                )
                 if not isinstance(data, list):
                     data = [data]
 
@@ -281,6 +299,9 @@ async def run_tasks(
                     tokens_in=run_usage.tokens_in,
                     tokens_out=run_usage.tokens_out,
                 )
+                send_telemetry(
+                    PIPELINE_RUN_COMPLETED, user, additional_properties=telemetry_properties
+                )
 
                 yield PipelineRunCompleted(
                     pipeline_run_id=pipeline_run_id,
@@ -319,6 +340,12 @@ async def run_tasks(
                 # broke ("AuthenticationError: invalid api key"), not
                 # "Pipeline run failed".
                 root_error = getattr(error, "first_error", None) or error
+                send_telemetry(
+                    PIPELINE_RUN_ERRORED,
+                    user,
+                    additional_properties=telemetry_properties
+                    | telemetry_exception_properties(error),
+                )
 
                 await log_pipeline_run_error(
                     pipeline_run_id,

@@ -53,18 +53,11 @@ def _relational_db_for_unit_tests():
 
 
 @pytest.fixture(autouse=True)
-def _telemetry_origin_starts_as_the_sdk():
-    """The telemetry origin default is process state (an entrypoint sets it once).
+def _operation_origin_starts_as_the_sdk():
+    from cognee.modules.operations.origin import ORIGIN_SDK, operation_origin_scope
 
-    A test that starts the API app's lifespan, or calls an entrypoint, would leave
-    it behind for every later test in the worker; start each test from the SDK
-    default, as a fresh process does.
-    """
-    from cognee.shared import utils
-
-    previous = utils.set_default_telemetry_origin(utils.TELEMETRY_ORIGIN_SDK)
-    yield
-    utils.set_default_telemetry_origin(previous)
+    with operation_origin_scope(ORIGIN_SDK):
+        yield
 
 
 @pytest.fixture(autouse=True)

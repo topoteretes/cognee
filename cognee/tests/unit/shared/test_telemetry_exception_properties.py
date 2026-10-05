@@ -111,7 +111,6 @@ def test_first_error_is_unwrapped_before_the_chain_is_read():
     assert properties["exception_type"] == "WrapperError"
     assert properties["exception_cause"] == "ProviderError"
     assert properties["status_code"] == 429
-    assert utils.telemetry_exception_type(run_error) == "WrapperError"
 
 
 @pytest.mark.parametrize(

@@ -4,8 +4,6 @@ before a pipeline's first event."""
 
 import importlib
 
-import cognee.modules.preflight as preflight_module
-
 # The package re-exports the function under the module's name; fetch the module itself.
 settings_module = importlib.import_module("cognee.modules.settings.get_current_settings")
 
@@ -16,29 +14,30 @@ def test_payload_reports_embedder_and_extractor(monkeypatch):
         "resolve_embedding_names",
         lambda *_: ("fastembed", "BAAI/bge-small-en-v1.5"),
     )
-    monkeypatch.setattr(settings_module, "resolve_extractor_name", lambda *_: "gliner_demo")
 
-    payload = settings_module.get_current_settings()
+    payload = settings_module.get_current_settings(graph_extractor="gliner_demo")
 
     assert set(payload) == {"llm", "embedding", "graph_extractor", "graph", "vector", "relational"}
     assert payload["embedding"] == {"provider": "fastembed", "model": "BAAI/bge-small-en-v1.5"}
     assert payload["graph_extractor"] == "gliner_demo"
 
 
-def test_unknown_extractor_setting_is_never_echoed(monkeypatch):
-    monkeypatch.setattr(settings_module, "resolve_extractor_name", lambda *_: "my-private-fork")
+def test_unknown_extractor_setting_is_never_echoed():
+    assert (
+        settings_module.get_current_settings(graph_extractor="my-private-fork")["graph_extractor"]
+        == "invalid"
+    )
 
-    assert settings_module.get_current_settings()["graph_extractor"] == "invalid"
 
+def test_extractor_is_the_resolved_selection_not_a_second_config_lookup(monkeypatch):
+    import cognee.modules.preflight as preflight_module
 
-def test_keyless_install_reports_the_demo_extractor_without_touching_the_runtime(monkeypatch):
-    """The GLiNER runtime is installed (or refused) by ``ensure_extractor_runtime``
-    at cognify time. The telemetry payload only reports the decision."""
-    monkeypatch.setattr(preflight_module, "keyless_local_defaults_apply", lambda *_: True)
-
-    payload = settings_module.get_current_settings()
-
-    assert payload["graph_extractor"] == "gliner_demo"
+    monkeypatch.setattr(preflight_module, "keyless_local_defaults_apply", lambda *_: False)
+    assert (
+        settings_module.get_current_settings(graph_extractor="gliner_demo")["graph_extractor"]
+        == "gliner_demo"
+    )
+    assert settings_module.get_current_settings()["graph_extractor"] == "unknown"
 
 
 def test_llm_block_says_whether_the_llm_is_usable(monkeypatch):

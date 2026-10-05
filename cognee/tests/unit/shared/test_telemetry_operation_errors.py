@@ -1,8 +1,8 @@
 """Operation failures, surfaces and model paths in telemetry (SDK-775).
 
 ``telemetry_on_error`` gives search and recall the terminal event their
-Started/Completed pair lacked; ``set_default_telemetry_origin`` lets each
-entrypoint say which surface it is; ``telemetry_model_label`` keeps a model
+Started/Completed pair lacked; the operation context tells each
+event which surface initiated it; ``telemetry_model_label`` keeps a model
 setting that is a filesystem path (and so an account name) out of the payload.
 """
 
@@ -13,6 +13,7 @@ from uuid import uuid4
 
 import pytest
 
+from cognee.modules.operations.origin import operation_origin_scope
 from cognee.shared import utils
 
 
@@ -131,19 +132,29 @@ def test_model_label_keeps_provider_names_and_hides_paths(model, expected):
     assert utils.telemetry_model_label(model) == expected
 
 
-def test_default_origin_is_process_local_and_the_environment_wins(monkeypatch):
+def test_origin_uses_the_operation_context_and_the_environment_wins(monkeypatch):
     monkeypatch.delenv(utils.TELEMETRY_ORIGIN_ENV, raising=False)
-    monkeypatch.setattr(utils, "_default_telemetry_origin", utils.TELEMETRY_ORIGIN_SDK)
     assert utils.telemetry_origin() == "sdk"
+    with operation_origin_scope("cli"):
+        assert utils.telemetry_origin() == "cli"
+        assert utils.TELEMETRY_ORIGIN_ENV not in utils.os.environ
+        with operation_origin_scope("background"):
+            assert utils.telemetry_origin() == "background"
+        monkeypatch.setenv(utils.TELEMETRY_ORIGIN_ENV, "cloud")
+        assert utils.telemetry_origin() == "cloud"
 
-    utils.set_default_telemetry_origin(utils.TELEMETRY_ORIGIN_CLI)
-    assert utils.telemetry_origin() == "cli"
-    # never written to the environment: a child process must label itself
-    assert utils.TELEMETRY_ORIGIN_ENV not in utils.os.environ
 
-    monkeypatch.setenv(utils.TELEMETRY_ORIGIN_ENV, "cloud")
-    utils.set_default_telemetry_origin(utils.TELEMETRY_ORIGIN_API)
-    assert utils.telemetry_origin() == "cloud"
+@pytest.mark.asyncio
+async def test_concurrent_origins_do_not_label_each_other(monkeypatch):
+    monkeypatch.delenv(utils.TELEMETRY_ORIGIN_ENV, raising=False)
+
+    async def operation(origin):
+        with operation_origin_scope(origin):
+            await asyncio.sleep(0)
+            return utils.telemetry_origin()
+
+    assert await asyncio.gather(operation("api"), operation("sdk")) == ["api", "sdk"]
+    assert utils.telemetry_origin() == "sdk"
 
 
 @pytest.mark.asyncio
@@ -166,16 +177,22 @@ async def test_payload_carries_the_process_origin(monkeypatch):
     assert payload["properties"]["top_k"] == 3
 
 
-def test_an_in_process_server_releases_the_api_label_on_shutdown(monkeypatch):
-    """TestClient runs the lifespan in-process: inside it the origin is "api",
-    after it the process is the SDK again."""
+def test_api_request_origin_does_not_label_sdk_calls_alongside_the_server(monkeypatch):
     monkeypatch.delenv(utils.TELEMETRY_ORIGIN_ENV, raising=False)
     monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "false")
+    from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    import cognee.api.client as client_module
+    from cognee.api.client import _stamp_operation_origin
 
-    assert utils.telemetry_origin() == "sdk"
-    with TestClient(client_module.app):
-        assert utils.telemetry_origin() == "api"
+    app = FastAPI()
+    app.middleware("http")(_stamp_operation_origin)
+
+    @app.get("/origin")
+    async def origin():
+        return {"origin": utils.telemetry_origin()}
+
+    with TestClient(app) as client:
+        assert client.get("/origin").json() == {"origin": "api"}
+        assert utils.telemetry_origin() == "sdk"
     assert utils.telemetry_origin() == "sdk"

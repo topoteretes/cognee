@@ -131,27 +131,101 @@ class TelemetryAggregateExtractTest(unittest.TestCase):
         self.assertEqual(rows["gliner_demo"]["embedding_model"], "baai/bge-small-en-v1.5")
         self.assertEqual(rows["llm"]["embedding_model"], "redacted")
 
-    def test_runs_are_classified_once_from_all_their_events(self):
-        """Events fire per data item and recovery closes a run with one event; runs
-        are counted by pipeline_run_id so a killed multi-item run balances."""
-
-        def run(run_id, *events):
+    def test_runs_are_classified_only_from_authoritative_terminal_events(self):
+        def run(run_id, *events, scope="run"):
             for event in events:
-                self._insert_event(f"Pipeline Run {event}", "1.6.0", {"pipeline_run_id": run_id})
+                self._insert_event(
+                    f"Pipeline Run {event}",
+                    "1.6.3",
+                    {
+                        "pipeline_run_id": run_id,
+                        "pipeline_event_scope": scope,
+                    },
+                )
 
-        run("run-completed", "Started", "Started", "Completed", "Completed")
-        run("run-killed", "Started", "Started", "Started", "Errored")  # recovery: one event
-        run("run-mixed", "Started", "Started", "Completed", "Errored")
-        run("run-silent", "Started")
-        run("run-no-start", "Completed")  # its Started never arrived: not counted
-        self._insert_event("Pipeline Run Started", "1.5.4", {})  # legacy, no run id
-
+        run("completed", "Started", "Completed")
+        run("errored", "Started", "Errored")
+        run("silent", "Started")
+        run("legacy-partial", "Started", "Started", "Completed", scope=None)
+        run("legacy-balanced", "Started", "Completed", scope=None)
+        run("no-start", "Completed")
+        # Item completion must not finish the containing run.
+        self._insert_event("Pipeline Item Completed", "1.6.3", {"pipeline_run_id": "silent"})
         (row,) = self._rows("pipeline_runs_daily")
-        self.assertEqual(row["version"], "1.6.0")
-        self.assertEqual(row["runs_started"], 4)
+        self.assertEqual(row["runs_started"], 5)
         self.assertEqual(row["runs_completed"], 1)
-        self.assertEqual(row["runs_errored"], 2)
+        self.assertEqual(row["runs_errored"], 1)
         self.assertEqual(row["runs_silent"], 1)
+        self.assertEqual(row["runs_unclassified"], 2)
+
+    def test_recovery_closes_legacy_runs_without_inventing_a_duration(self):
+        self._insert_event(
+            "Pipeline Run Started",
+            "1.6.2",
+            {"pipeline_run_id": "legacy"},
+            event_timestamp="2026-10-01 10:00:00",
+        )
+        self._insert_event(
+            "Pipeline Run Errored",
+            "unknown",
+            {
+                "pipeline_run_id": "legacy",
+                "recovered_at_startup": True,
+                "pipeline_event_scope": "run",
+            },
+            event_timestamp="2026-10-05 10:00:00",
+        )
+        (row,) = self._rows("pipeline_runs_daily")
+        self.assertEqual(row["version"], "1.6.2")
+        self.assertEqual(row["runs_errored"], 1)
+        self.assertEqual(row["runs_unclassified"], 0)
+        self.assertEqual(self._rows("pipeline_run_durations_daily"), [])
+
+    def test_item_events_and_partial_legacy_runs_are_not_timed(self):
+        for event, timestamp in (
+            ("Started", "10:00:00"),
+            ("Started", "10:00:01"),
+            ("Completed", "10:00:10"),
+        ):
+            self._insert_event(
+                f"Pipeline Run {event}",
+                "1.6.2",
+                {"pipeline_run_id": "legacy"},
+                event_timestamp=f"2026-10-05 {timestamp}",
+            )
+            self._insert_event(
+                f"Pipeline Item {event}",
+                "1.6.3",
+                {"pipeline_run_id": "current"},
+                event_timestamp=f"2026-10-05 {timestamp}",
+            )
+        self._insert_event(
+            "Pipeline Run Started",
+            "1.6.3",
+            {
+                "pipeline_run_id": "current",
+                "pipeline_event_scope": "run",
+            },
+            event_timestamp="2026-10-05 10:00:00",
+        )
+        self.assertEqual(self._rows("pipeline_run_durations_daily"), [])
+
+    def test_provider_stack_includes_failures_even_without_a_completion(self):
+        for event in ("Started", "Errored"):
+            self._insert_event(
+                f"Pipeline Run {event}",
+                "1.6.3",
+                {
+                    "pipeline_event_scope": "run",
+                    "llm": {"provider": "custom"},
+                },
+            )
+        (row,) = self._provider_rows()
+        self.assertEqual(row["event_scope"], "run")
+        self.assertEqual(row["llm_provider"], "custom")
+        self.assertEqual(
+            (row["started_runs"], row["completed_runs"], row["errored_runs"]), (1, 0, 1)
+        )
 
     def test_error_types_count_items_and_runs_separately(self):
         for run_id in ("run-a", "run-a", "run-b"):
@@ -211,11 +285,21 @@ class TelemetryAggregateExtractTest(unittest.TestCase):
             "item_extension": "pdf",
         }
         for event in ("Started", "Started", "Completed", "Errored"):
-            self._insert_event(f"Pipeline Run {event}", "1.6.3", profile)
+            self._insert_event(f"Pipeline Item {event}", "1.6.3", profile)
         self._insert_event("Pipeline Run Started", "1.6.0", {})  # before the fields
         self._insert_event(
             "Pipeline Run Started", "1.6.3", {**profile, "item_loader": "Custom Loader (c) ACME"}
         )
+
+        self._insert_event(
+            "Pipeline Run Completed",
+            "1.6.3",
+            {
+                **profile,
+                "pipeline_event_scope": "run",
+            },
+        )
+        self._insert_event("Pipeline Run Errored", "unknown", {"recovered_at_startup": True})
 
         rows = {
             (row["version"], row["item_loader"]): row
@@ -464,19 +548,22 @@ class TelemetryAggregateExtractTest(unittest.TestCase):
         start = datetime(2026, 10, 4, 12, 0, 0, tzinfo=timezone.utc)
         for run_id, seconds in (("r1", 10), ("r2", 30), ("r3", 110)):
             self._insert_event(
-                "Pipeline Run Started", "1.6.3", {"pipeline_run_id": run_id}, event_timestamp=start
+                "Pipeline Run Started",
+                "1.6.3",
+                {"pipeline_run_id": run_id, "pipeline_event_scope": "run"},
+                event_timestamp=start,
             )
             self._insert_event(
                 "Pipeline Run Started",
                 "1.6.3",
-                {"pipeline_run_id": run_id},
+                {"pipeline_run_id": run_id, "pipeline_event_scope": "run"},
                 event_timestamp=start + timedelta(seconds=1),
             )
             terminal = "Pipeline Run Errored" if run_id == "r3" else "Pipeline Run Completed"
             self._insert_event(
                 terminal,
                 "1.6.3",
-                {"pipeline_run_id": run_id},
+                {"pipeline_run_id": run_id, "pipeline_event_scope": "run"},
                 event_timestamp=start + timedelta(seconds=seconds),
             )
         self._insert_event(

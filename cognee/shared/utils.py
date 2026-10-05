@@ -140,16 +140,8 @@ TELEMETRY_FINGERPRINT_PREFIX = "fp:"
 TELEMETRY_DATASET_NAME_PROPERTIES = ["dataset_name", "dataset"]
 
 
-# Where a telemetry event originates: the surface the process is. Each entrypoint
-# sets its own value as the process default (``set_default_telemetry_origin``);
-# an explicit TELEMETRY_ORIGIN in the environment (e.g. "cloud") always wins. The
-# default is process-local, not an environment variable: a child process (the API
-# server `cognee-cli -ui` starts) must label itself, not inherit its parent's label.
+# Deployments may override the operation context's origin for telemetry.
 TELEMETRY_ORIGIN_ENV = "TELEMETRY_ORIGIN"
-TELEMETRY_ORIGIN_SDK = "sdk"
-TELEMETRY_ORIGIN_API = "api"
-TELEMETRY_ORIGIN_CLI = "cli"
-TELEMETRY_ORIGIN_MCP = "mcp"
 # A model setting that is a filesystem path (a local GGUF, a mounted checkpoint)
 # carries the account name in it. It leaves the process as this closed value.
 TELEMETRY_LOCAL_PATH_LABEL = "local_path"
@@ -158,26 +150,11 @@ _PATH_LIKE_MODEL = re.compile(
 )
 
 
-_default_telemetry_origin = TELEMETRY_ORIGIN_SDK
-
-
-def set_default_telemetry_origin(origin: str) -> str:
-    """Record the surface this process is: the origin used when TELEMETRY_ORIGIN is unset.
-
-    Called once by each entrypoint (CLI, MCP server, API app). Deployments that
-    set TELEMETRY_ORIGIN themselves (the managed cloud sets "cloud") keep their
-    value; a process that never calls this reports the SDK default. Returns the
-    previous default, so a server started in-process can restore it on shutdown.
-    """
-    global _default_telemetry_origin
-    previous = _default_telemetry_origin
-    _default_telemetry_origin = origin
-    return previous
-
-
 def telemetry_origin() -> str:
-    """The origin the next event carries: the environment's value, else the process default."""
-    return os.getenv(TELEMETRY_ORIGIN_ENV) or _default_telemetry_origin
+    """Use the same origin as run records, unless the deployment overrides it."""
+    from cognee.modules.operations.origin import get_operation_origin
+
+    return os.getenv(TELEMETRY_ORIGIN_ENV) or get_operation_origin()
 
 
 def telemetry_model_label(model: Any) -> Any:
@@ -254,22 +231,10 @@ def _telemetry_status_code(chain: list[BaseException]) -> int | None:
     return None
 
 
-def telemetry_exception_type(error: BaseException) -> str:
-    """The class name telemetry records for ``error`` — never its message.
-
-    Messages interpolate user content (dataset names, paths, prompt fragments),
-    so error events carry the type only, the same rule the API layer applies in
-    ``cognee.api.exception_telemetry``. A ``PipelineRunFailedError`` wraps the
-    item error that actually broke as ``first_error``; report that root cause,
-    as the run record does.
-    """
-    return type(_telemetry_root_error(error)).__name__
-
-
 def telemetry_exception_properties(error: BaseException) -> dict:
     """What an error event says about its error: class names and a status, never a message.
 
-    ``exception_type`` is ``telemetry_exception_type``. cognee's LLM and
+    ``exception_type`` is the root error's class name. cognee's LLM and
     embedding layers wrap provider errors — ``raise LLMQuotaExceededError(...)
     from error`` — so that class alone says a quota was exceeded, not whether
     the provider answered 429, 401 or timed out. ``exception_chain`` lists the
@@ -351,14 +316,15 @@ def _is_uuid(value: str) -> bool:
     return True
 
 
-def _mask_dataset_name(value: Any) -> Any:
+def _mask_dataset_name(value: Any, *, preserve_empty: bool = True) -> Any:
     """A dataset id passes through; a dataset name leaves as ``fp:`` + fingerprint.
 
     Ids are not content. Names are user-chosen and descriptive, so only a marked
     fingerprint leaves the process. Empty strings stay empty (``forget`` sends
-    ``""`` for "no dataset"), and non-strings are untouched.
+    ``""`` for "no dataset"). Legacy list fields pass ``preserve_empty=False``
+    to keep fingerprinting empty strings; non-strings are untouched.
     """
-    if isinstance(value, str) and value and not _is_uuid(value):
+    if isinstance(value, str) and (value or not preserve_empty) and not _is_uuid(value):
         return TELEMETRY_FINGERPRINT_PREFIX + _fingerprint(value)
     return value
 
@@ -384,12 +350,7 @@ def _sanitize_nested_properties(obj: Any, property_names: list[str]) -> Any:
             elif k in property_names and isinstance(v, str):
                 new_obj[k] = _fingerprint(v)
             elif k in property_names and isinstance(v, list):
-                new_obj[k] = [
-                    TELEMETRY_FINGERPRINT_PREFIX + _fingerprint(item)
-                    if isinstance(item, str) and not _is_uuid(item)
-                    else item
-                    for item in v
-                ]
+                new_obj[k] = [_mask_dataset_name(item, preserve_empty=False) for item in v]
             else:
                 new_obj[k] = _sanitize_nested_properties(v, property_names)
         return new_obj

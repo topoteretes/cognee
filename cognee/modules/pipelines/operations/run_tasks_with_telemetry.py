@@ -16,6 +16,9 @@ logger = get_logger("run_tasks_with_telemetry()")
 PIPELINE_RUN_STARTED = "Pipeline Run Started"
 PIPELINE_RUN_COMPLETED = "Pipeline Run Completed"
 PIPELINE_RUN_ERRORED = "Pipeline Run Errored"
+PIPELINE_ITEM_STARTED = "Pipeline Item Started"
+PIPELINE_ITEM_COMPLETED = "Pipeline Item Completed"
+PIPELINE_ITEM_ERRORED = "Pipeline Item Errored"
 
 # The data item's profile leaves as closed labels: a loader registry name, a
 # short extension, and size/token classes. Upper bound of each class (bytes,
@@ -74,7 +77,7 @@ def _bucket(value, buckets, top: str) -> str | None:
 def data_item_telemetry_properties(data) -> dict:
     """What a run's events say about the data item it processes: labels, never content.
 
-    cognify runs one pipeline per data item (``run_tasks_data_item``), so
+    cognify processes each data item through ``run_tasks_data_item``, so
     ``data`` is ``[Data]`` and the item's ingestion record is at hand: the
     loader that produced its text (a registry name such as ``pypdf_loader``),
     its extension, its size and its token count — the last two as classes.
@@ -108,9 +111,14 @@ def data_item_telemetry_properties(data) -> dict:
 
 
 def pipeline_run_telemetry_properties(
-    pipeline_name, pipeline_run_id, tenant_id, *, recovered: bool = False
+    pipeline_name,
+    pipeline_run_id,
+    tenant_id,
+    *,
+    recovered: bool = False,
+    graph_extractor: str | None = None,
 ) -> dict:
-    """The properties every ``Pipeline Run *`` event carries.
+    """Shared properties for pipeline run and item events.
 
     ``pipeline_run_id`` is the run's random UUID (``generate_pipeline_run_id``):
     the join key between a run's Started event and its terminal one, without
@@ -128,14 +136,21 @@ def pipeline_run_telemetry_properties(
     }
     if pipeline_run_id is not None:
         properties["pipeline_run_id"] = str(pipeline_run_id)
-    return properties if recovered else properties | get_current_settings()
+    return (
+        properties
+        if recovered
+        else properties | get_current_settings(graph_extractor=graph_extractor)
+    )
 
 
 async def run_tasks_with_telemetry(
     tasks: list[Task], data, user: User, pipeline_name: str, ctx: PipelineContext | None = None
 ):
     properties = pipeline_run_telemetry_properties(
-        pipeline_name, ctx.pipeline_run_id if ctx else None, user.tenant_id
+        pipeline_name,
+        ctx.pipeline_run_id if ctx else None,
+        user.tenant_id,
+        graph_extractor=ctx.extras.get("graph_extractor") if ctx else None,
     ) | data_item_telemetry_properties(data)
 
     logger.debug(
@@ -144,14 +159,14 @@ async def run_tasks_with_telemetry(
     )
 
     try:
-        logger.info("Pipeline run started: `%s`", pipeline_name)
-        send_telemetry(PIPELINE_RUN_STARTED, user, additional_properties=properties)
+        logger.info("Pipeline item started: `%s`", pipeline_name)
+        send_telemetry(PIPELINE_ITEM_STARTED, user, additional_properties=properties)
 
         async for result in run_tasks_base(tasks, data, user, ctx):
             yield result
 
-        logger.info("Pipeline run completed: `%s`", pipeline_name)
-        send_telemetry(PIPELINE_RUN_COMPLETED, user, additional_properties=properties)
+        logger.info("Pipeline item completed: `%s`", pipeline_name)
+        send_telemetry(PIPELINE_ITEM_COMPLETED, user, additional_properties=properties)
     except BaseException as error:
         # asyncio.CancelledError and GeneratorExit are BaseExceptions, not
         # Exceptions: a run cancelled by a shutdown, or this generator closed by
@@ -160,11 +175,11 @@ async def run_tasks_with_telemetry(
         # run_tasks's CLO-365 handler. Re-raised below either way, so
         # cancellation still propagates.
         if isinstance(error, Exception):
-            logger.exception("Pipeline run errored: `%s`\n", pipeline_name)
+            logger.exception("Pipeline item errored: `%s`\n", pipeline_name)
         else:
-            logger.info("Pipeline run cancelled: `%s` (%s)", pipeline_name, type(error).__name__)
+            logger.info("Pipeline item cancelled: `%s` (%s)", pipeline_name, type(error).__name__)
         send_telemetry(
-            PIPELINE_RUN_ERRORED,
+            PIPELINE_ITEM_ERRORED,
             user,
             additional_properties=properties | telemetry_exception_properties(error),
         )

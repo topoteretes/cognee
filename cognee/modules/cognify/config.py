@@ -137,8 +137,7 @@ def resolve_extractor_name(
     ``auto`` is decided here (``llm`` with a usable key, ``gliner_demo``
     without), but nothing is validated, installed or logged: the result may
     be a value outside ``EXTRACTORS``. ``resolve_extractor`` adds the checks a
-    cognify run needs; the telemetry settings payload reads this one so that
-    reporting the extractor can never raise.
+    cognify run needs. Telemetry receives that already-resolved selection.
     """
     extractor = _requested_extractor(value, config)
     if extractor == AUTO_EXTRACTOR:

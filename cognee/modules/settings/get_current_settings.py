@@ -17,7 +17,7 @@ from cognee.infrastructure.databases.vector.embeddings.config import (
     resolve_embedding_names,
 )
 from cognee.infrastructure.llm.config import get_llm_context_config
-from cognee.modules.cognify.config import EXTRACTORS, get_cognify_config, resolve_extractor_name
+from cognee.modules.cognify.config import EXTRACTORS
 from cognee.modules.preflight import llm_available
 from cognee.shared.utils import telemetry_model_label
 
@@ -65,19 +65,6 @@ class SettingsDict(TypedDict):
     relational: RelationalConfig
 
 
-def _graph_extractor_setting() -> str:
-    """``llm`` / ``gliner_demo`` as cognify would resolve it now, or ``invalid``.
-
-    The same resolution as ``resolve_extractor`` minus its side effects: no
-    install check (a missing ``gliner2`` is cognify's error to raise, at cognify
-    time) and no notice. A setting outside the known extractors is reported as
-    the literal ``invalid`` rather than echoed, so a typo in GRAPH_EXTRACTOR
-    cannot put free text into telemetry.
-    """
-    extractor = resolve_extractor_name(None, get_cognify_config())
-    return extractor if extractor in EXTRACTORS else "invalid"
-
-
 def _structured_output_setting(llm_config) -> str:
     """Which structured-output path LLM calls take: a closed value, or ``invalid``.
 
@@ -105,7 +92,7 @@ def _instructor_mode_setting(llm_config) -> str:
     return mode if _INSTRUCTOR_MODE.match(mode) else "invalid"
 
 
-def get_current_settings() -> SettingsDict:
+def get_current_settings(*, graph_extractor: str | None = None) -> SettingsDict:
     # The context config when a per-call LLMConfig is set, else the process one:
     # the same resolution the embedding half below uses, so one event never
     # describes two configurations.
@@ -139,7 +126,15 @@ def get_current_settings() -> SettingsDict:
             "provider": embedding_provider,
             "model": telemetry_model_label(embedding_model),
         },
-        "graph_extractor": _graph_extractor_setting(),
+        # cognify has already resolved argument/env/default precedence. Custom
+        # pipelines need not extract a graph at all; do not invent a selection.
+        "graph_extractor": (
+            "unknown"
+            if graph_extractor is None
+            else graph_extractor
+            if graph_extractor in EXTRACTORS
+            else "invalid"
+        ),
         "graph": {
             "provider": graph_config.graph_database_provider,
             "url": graph_config.graph_database_url or graph_config.graph_file_path,

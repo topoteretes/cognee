@@ -38,12 +38,12 @@ def events(monkeypatch):
 
     monkeypatch.setattr(telemetry_module, "send_telemetry", capture)
     monkeypatch.setattr(base_module, "send_telemetry", capture)
-    monkeypatch.setattr(telemetry_module, "get_current_settings", lambda: dict(SETTINGS))
+    monkeypatch.setattr(telemetry_module, "get_current_settings", lambda **_: dict(SETTINGS))
     return captured
 
 
 def _pipeline_events(events):
-    return [(name, props) for name, props in events if name.startswith("Pipeline Run")]
+    return [(name, props) for name, props in events if name.startswith("Pipeline Item")]
 
 
 def _task_events(events, suffix):
@@ -67,7 +67,7 @@ async def test_started_and_completed_carry_run_id_and_provider_stack(events):
     await _drain([Task(double)], PipelineContext(pipeline_run_id=run_id))
 
     names = [name for name, _ in _pipeline_events(events)]
-    assert names == ["Pipeline Run Started", "Pipeline Run Completed"]
+    assert names == ["Pipeline Item Started", "Pipeline Item Completed"]
     for _, props in _pipeline_events(events):
         assert props["pipeline_run_id"] == str(run_id)
         assert props["pipeline_name"] == "cognify_pipeline"
@@ -88,7 +88,7 @@ async def test_errored_carries_exception_type_and_never_the_message(events):
     with pytest.raises(ValueError):
         await _drain([Task(explode)], PipelineContext(pipeline_run_id=uuid4()))
 
-    (pipeline_errored,) = [p for n, p in _pipeline_events(events) if n == "Pipeline Run Errored"]
+    (pipeline_errored,) = [p for n, p in _pipeline_events(events) if n == "Pipeline Item Errored"]
     assert pipeline_errored["exception_type"] == "ValueError"
     ((_, task_errored),) = _task_events(events, "Errored")
     assert task_errored["exception_type"] == "ValueError"
@@ -110,7 +110,7 @@ async def test_root_cause_is_reported_through_a_wrapping_error(events):
     with pytest.raises(Wrapper):
         await _drain([Task(explode)], PipelineContext(pipeline_run_id=uuid4()))
 
-    (errored,) = [p for n, p in _pipeline_events(events) if n == "Pipeline Run Errored"]
+    (errored,) = [p for n, p in _pipeline_events(events) if n == "Pipeline Item Errored"]
     assert errored["exception_type"] == "KeyError"
 
 
@@ -123,8 +123,8 @@ async def test_cancelled_run_emits_a_terminal_event(events):
         await _drain([Task(cancelled)], PipelineContext(pipeline_run_id=uuid4()))
 
     names = [name for name, _ in _pipeline_events(events)]
-    assert names == ["Pipeline Run Started", "Pipeline Run Errored"]
-    (errored,) = [p for n, p in _pipeline_events(events) if n == "Pipeline Run Errored"]
+    assert names == ["Pipeline Item Started", "Pipeline Item Errored"]
+    (errored,) = [p for n, p in _pipeline_events(events) if n == "Pipeline Item Errored"]
     assert errored["exception_type"] == "CancelledError"
     ((_, task_errored),) = _task_events(events, "Errored")
     assert task_errored["exception_type"] == "CancelledError"
@@ -146,8 +146,8 @@ async def test_closed_generator_emits_a_terminal_event(events):
     await generator.aclose()
 
     names = [name for name, _ in _pipeline_events(events)]
-    assert names == ["Pipeline Run Started", "Pipeline Run Errored"]
-    (errored,) = [p for n, p in _pipeline_events(events) if n == "Pipeline Run Errored"]
+    assert names == ["Pipeline Item Started", "Pipeline Item Errored"]
+    (errored,) = [p for n, p in _pipeline_events(events) if n == "Pipeline Item Errored"]
     assert errored["exception_type"] == "GeneratorExit"
 
 
@@ -185,7 +185,7 @@ async def test_a_nested_failure_is_reported_once_at_the_task_where_it_happened(e
     errored = _task_events(events, "Errored")
     assert [props["task_name"] for _, props in errored] == ["third"]
     assert errored[0][1]["exception_type"] == "RuntimeError"
-    assert len([n for n, _ in _pipeline_events(events) if n == "Pipeline Run Errored"]) == 1
+    assert len([n for n, _ in _pipeline_events(events) if n == "Pipeline Item Errored"]) == 1
 
 
 @pytest.mark.asyncio
@@ -208,7 +208,7 @@ async def test_errored_carries_the_cause_under_the_wrapper_and_the_provider_stat
     with pytest.raises(LLMQuotaExceededError):
         await _drain([Task(extract)], PipelineContext(pipeline_run_id=uuid4()))
 
-    (pipeline_errored,) = [p for n, p in _pipeline_events(events) if n == "Pipeline Run Errored"]
+    (pipeline_errored,) = [p for n, p in _pipeline_events(events) if n == "Pipeline Item Errored"]
     ((_, task_errored),) = _task_events(events, "Errored")
     for props in (pipeline_errored, task_errored):
         assert props["exception_type"] == "LLMQuotaExceededError"

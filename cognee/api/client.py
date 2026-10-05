@@ -73,7 +73,6 @@ from cognee.modules.users.methods.get_authenticated_user import (
     REQUIRE_AUTHENTICATION,
 )
 from cognee.shared.logging_utils import get_logger, setup_logging
-from cognee.shared.utils import TELEMETRY_ORIGIN_API, set_default_telemetry_origin
 
 # Ensure application logging is configured for container stdout/stderr
 setup_logging()
@@ -98,12 +97,6 @@ BACKGROUND_DRAIN_TIMEOUT_SECONDS = float(os.getenv("BACKGROUND_DRAIN_TIMEOUT_SEC
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Telemetry events from this process say they came from the API server (an
-    # explicit TELEMETRY_ORIGIN in the environment, e.g. the managed cloud's, wins).
-    # Set at startup, not import: importing the app module (tests, tooling) is not
-    # running the server. Restored at shutdown, so an in-process server (a test
-    # client, a script) stops labelling the process once it stops.
-    previous_telemetry_origin = set_default_telemetry_origin(TELEMETRY_ORIGIN_API)
     # from cognee.modules.data.deletion import prune_system, prune_data
     # await prune_data()
     # await prune_system(metadata = True)
@@ -191,7 +184,6 @@ async def lifespan(app: FastAPI):
     from cognee.shared.utils import close_telemetry_session
 
     await close_telemetry_session()
-    set_default_telemetry_origin(previous_telemetry_origin)
 
 
 app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)
@@ -217,10 +209,10 @@ async def _report_unhandled_exceptions(request, call_next):
 async def _stamp_operation_origin(request, call_next):
     # Operations executed for this request record origin="api" in
     # pipeline_runs. ContextVars set here propagate into the handler task.
-    from cognee.modules.operations import ORIGIN_API, set_operation_origin
+    from cognee.modules.operations import ORIGIN_API, operation_origin_scope
 
-    set_operation_origin(ORIGIN_API)
-    return await call_next(request)
+    with operation_origin_scope(ORIGIN_API):
+        return await call_next(request)
 
 
 # Read allowed origins from environment variable (comma-separated)
