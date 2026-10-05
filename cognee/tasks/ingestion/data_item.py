@@ -20,6 +20,13 @@ class DataItem:
     # Data.system_metadata — never merged with user external_metadata.
     system_metadata: dict | None = field(default=None)
     data_id: UUID | None = None
+    # When True, ``data`` (a str) is stored verbatim as a text document and
+    # never interpreted as an http(s) URL, an s3:// path, or a local file
+    # path. Set this on any DataItem whose text came from a field the caller
+    # does not control (e.g. a synced document's body), since such text can
+    # legitimately be just a URL or an existing path, and reading it as one
+    # would fetch or read something the caller never asked to ingest.
+    literal_text: bool = False
 
 
 def parse_labels(labels: str | None) -> list[str | None] | None:

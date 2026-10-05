@@ -41,7 +41,7 @@ class ImproveConfig(BaseSettings):
     stages_disabled: Annotated[list[str], NoDecode] = []
     feedback_alpha: float = DEFAULT_FEEDBACK_ALPHA
 
-    model_config = SettingsConfigDict(env_prefix="IMPROVE_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="IMPROVE_", extra="ignore")
 
     @field_validator("stages_disabled", mode="before")
     @classmethod

@@ -610,6 +610,11 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
     ``url``/``id``). Tagging ``system_metadata["source"] = source_tag``
     routes the document through normal cognify entity extraction rather
     than the deterministic manifest path.
+
+    ``literal_text=True`` because ``content`` is provider data cognee did not
+    write: an untitled row (no "# title" prefix) whose content happens to be
+    just a URL or an existing local path must still be stored as that text,
+    not fetched or read as if the caller had passed it directly to ``add()``.
     """
     row_data = row.row_data
     title = _clean(row_data.get("title"))
@@ -631,6 +636,7 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
         label=title or str(row_data.get("id")),
         system_metadata=system_metadata,
         data_id=data_id,
+        literal_text=True,
     )
 
 

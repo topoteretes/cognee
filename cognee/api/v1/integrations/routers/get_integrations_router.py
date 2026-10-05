@@ -52,6 +52,7 @@ from pydantic import Field
 from sqlalchemy.exc import IntegrityError
 
 from cognee.api.DTO import InDTO, OutDTO
+from cognee.infrastructure.background_tasks import register_background_task
 from cognee.modules.agents.create_agent import create_agent
 from cognee.modules.agents.list_agents import list_agents
 from cognee.modules.agents.registry import (
@@ -116,7 +117,7 @@ def _spawn_background(coro, *, description: str) -> None:
         except Exception:  # detached work must log, not crash the loop
             logger.exception("%s failed", description)
 
-    task = asyncio.create_task(_guarded())
+    task = register_background_task(asyncio.create_task(_guarded()))
     _BACKGROUND_INTEGRATION_TASKS.add(task)
     task.add_done_callback(_BACKGROUND_INTEGRATION_TASKS.discard)
 
