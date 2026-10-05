@@ -18,6 +18,8 @@ from typing import Any
 
 import aiohttp
 
+from cognee.modules.integrations.ingestion import RateLimitedError
+
 logger = logging.getLogger(__name__)
 
 GRAPHQL_URL = "https://api.linear.app/graphql"
@@ -29,7 +31,7 @@ class LinearUnauthorizedError(RuntimeError):
     """Linear answered 401: the token was rejected, whatever its stored expiry says."""
 
 
-class LinearRateLimitedError(RuntimeError):
+class LinearRateLimitedError(RateLimitedError):
     """Linear answered HTTP 400 with the ``RATELIMITED`` code."""
 
 
@@ -37,8 +39,8 @@ async def _is_rate_limited(response: Any) -> bool:
     """Whether a 400 carries the RATELIMITED code. Only the code is read, never echoed."""
     try:
         body = await response.json()
-    except Exception:  # noqa: BLE001 - an unreadable body is just a plain 400
-        return False
+    except (aiohttp.ContentTypeError, ValueError):
+        return False  # an unreadable body is just a plain 400
     errors = body.get("errors") if isinstance(body, dict) else None
     return isinstance(errors, list) and any(
         isinstance(error, dict)

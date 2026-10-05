@@ -50,6 +50,7 @@ def _ago(minutes):
 def test_only_a_pass_cut_short_by_the_quota_long_enough_ago_is_resumable(
     resume_needed_at, expected
 ):
+    """The quota is a leaky bucket: a new attempt is pointless before some of it has refilled."""
     assert resume_module.is_resumable(_credential(resume_needed_at), NOW) is expected
 
 
@@ -96,6 +97,7 @@ async def test_the_tick_resumes_only_active_linear_connections_that_are_due(
 
 @pytest.mark.asyncio
 async def test_a_failing_or_dropped_resume_is_not_counted_and_stops_no_other(monkeypatch):
+    """A sync that finds another one running returns False and is not counted as resumed."""
     due = [_credential(_ago(30), account) for account in ("a", "b", "c")]
 
     class _Session:
@@ -127,6 +129,7 @@ async def test_a_failing_or_dropped_resume_is_not_counted_and_stops_no_other(mon
 
 @pytest.mark.asyncio
 async def test_the_syncs_of_different_connections_run_side_by_side(monkeypatch):
+    """One workspace's long first sync must not hold up the other workspaces' resumes."""
     due = [_credential(_ago(30), account) for account in ("a", "b")]
 
     class _Session:

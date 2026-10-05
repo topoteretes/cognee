@@ -1,11 +1,10 @@
-"""Google names for the provider-neutral ingestion helpers.
+"""Names hosts import from before the helpers became provider-neutral.
 
-Everything lives in ``cognee.modules.integrations.ingestion``; these names keep
-existing callers working and are the same objects.
+The Cloud pod loads this module by its Google name, so it stays until the pod
+switches to ``cognee.modules.integrations.ingestion``. Everything lives there.
 """
 
 from cognee.modules.integrations.ingestion import (
-    _running_syncs,
     add_source_counts,
     build_service,
     dataset_summary,

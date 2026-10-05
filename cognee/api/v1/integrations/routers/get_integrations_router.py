@@ -171,8 +171,7 @@ class IntegrationResourceListDTO(OutDTO):
 
 
 class IntegrationResourceSelectionPayload(InDTO):
-    # Each selected resource costs a source and a sync request on every full pass.
-    resource_ids: list[str] | None = Field(default=None, max_length=1000)
+    resource_ids: list[str] | None = None
 
 
 class IntegrationResourceSelectionResultDTO(OutDTO):

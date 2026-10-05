@@ -15,7 +15,6 @@ way every tick.
 """
 
 import asyncio
-import logging
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timedelta, timezone
 
@@ -25,8 +24,9 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.integrations.linear.linear_settings import linear_settings
 from cognee.modules.integrations.linear.sync import PROVIDER, RESUME_KEY, request_sync
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
+from cognee.shared.logging_utils import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("linear_resume")
 
 # Linear's quota is a leaky bucket that refills continuously; this is long
 # enough for a useful slice of it to come back before the next run starts.
@@ -95,7 +95,7 @@ async def _worker() -> None:
             raise
         except Exception:  # keep the scheduler alive across transient failures
             logger.exception("Linear resume tick failed; will retry")
-        await asyncio.sleep(max(60, linear_settings.resume_interval_seconds))
+        await asyncio.sleep(linear_settings.resume_interval_seconds)
 
 
 @asynccontextmanager
@@ -108,5 +108,6 @@ async def linear_resume_lifespan(app):
     finally:
         if task:
             task.cancel()
-            with suppress(asyncio.CancelledError, Exception):
+            with suppress(asyncio.CancelledError):
                 await task
+            logger.info("Linear resume worker stopped")

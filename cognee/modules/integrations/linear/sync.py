@@ -20,7 +20,6 @@ heavy to fire on every delivery.
 """
 
 import asyncio
-import logging
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -29,8 +28,9 @@ from cognee.modules.integrations import ingestion
 from cognee.modules.integrations.credentials import CredentialInactiveError
 from cognee.modules.integrations.linear.client import graphql
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
+from cognee.shared.logging_utils import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("linear_sync")
 
 LINEAR_DATASET_PREFIX = "linear"
 PROVIDER = "linear"
@@ -53,7 +53,6 @@ SYNC_STATUS_OK = "ok"
 SYNC_STATUS_DEGRADED = "degraded"
 
 _TEAMS_PAGE_SIZE = 100
-_MAX_TEAMS = 1000
 
 _TEAMS_QUERY = """
 query LinearTeams($first: Int!, $after: String) {
@@ -71,11 +70,9 @@ query LinearTeams($first: Int!, $after: String) {
 _LEGACY_TEXT = re.compile(
     rb"\ALinear issue \S+:(?: [^\n]*)?\nURL: [^\n]*\nState: [^\n]*(?:\nDescription: |\Z)"
 )
-# One byte more than the window is read: a match that ends exactly at the end of a
-# full window may be a line cut off by it, and is not accepted.
-_LEGACY_READ_BYTES = 2048
-# More teams than this in one delivery is not a real delivery.
-_MAX_EVENT_TEAMS = 50
+
+# dlt wraps the source's error, then remember() wraps that again.
+_ERROR_CHAIN_DEPTH = 5
 
 _EVENT_TYPES = ("Issue", "Comment", "Project")
 _EVENT_ACTIONS = ("create", "update", "remove")
@@ -95,7 +92,7 @@ def dataset_name_for_credential(credential: IntegrationCredential) -> str:
 
 
 async def list_teams(credential: IntegrationCredential) -> list[dict[str, Any]]:
-    """The teams the app token can access, paged, deduplicated and capped."""
+    """The teams the app token can access."""
     # Imported here: the adapter imports this module to wire its hooks.
     from cognee.modules.integrations.linear.adapter import call_with_token
 
@@ -108,17 +105,12 @@ async def list_teams(credential: IntegrationCredential) -> list[dict[str, Any]]:
                 token, _TEAMS_QUERY, {"first": _TEAMS_PAGE_SIZE, "after": after}
             ),
         )
-        connection = data.get("teams")
-        if not isinstance(connection, dict) or not isinstance(connection.get("nodes"), list):
-            raise RuntimeError("Linear teams response had no team list")
+        connection = data["teams"]
         for node in connection["nodes"]:
-            if isinstance(node, dict) and node.get("id"):
-                teams.setdefault(str(node["id"]), node)
-        info = connection.get("pageInfo") or {}
-        after = info.get("endCursor")
-        if not info.get("hasNextPage") or not after or len(teams) >= _MAX_TEAMS:
-            break
-    return list(teams.values())[:_MAX_TEAMS]
+            teams.setdefault(node["id"], node)
+        if not connection["pageInfo"]["hasNextPage"]:
+            return list(teams.values())
+        after = connection["pageInfo"]["endCursor"]
 
 
 class _LinearService:
@@ -164,10 +156,12 @@ def _classify_error(error: BaseException) -> str:
     """The count key a failed team is reported under, from the source's typed errors."""
     from cognee.tasks.ingestion.connectors.linear import LinearAuthError, LinearTeamNotFoundError
 
-    seen: set[int] = set()
+    # dlt and ingestion each wrap the source's error once, so the typed error is a
+    # few links down: one step per link, and no further than that.
     current: BaseException | None = error
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
+    for _ in range(_ERROR_CHAIN_DEPTH):
+        if current is None:
+            break
         if isinstance(current, LinearTeamNotFoundError):
             return "failed_team_not_found"
         if isinstance(current, LinearAuthError):
@@ -192,34 +186,20 @@ def team_ids_from_event(payload: dict[str, Any]) -> list[str]:
         candidates = list(team_ids) if isinstance(team_ids, list) else []
     else:
         return []
-    teams = list(dict.fromkeys(str(c) for c in candidates if isinstance(c, str) and c))
-    return teams[:_MAX_EVENT_TEAMS]
+    return list(dict.fromkeys(c for c in candidates if isinstance(c, str) and c))
 
 
 def is_team_event(payload: dict[str, Any]) -> bool:
     return payload.get("type") in _EVENT_TYPES and payload.get("action") in _EVENT_ACTIONS
 
 
-def _is_legacy_text(head: bytes) -> bool:
-    """Whether a document's first bytes are exactly the former path's rendering.
-
-    ``head`` is read one byte past the window. A match that stops where a full
-    window stops could be a line the window cut off (a hand-written note after a
-    very long State line), so it is not trusted.
-    """
-    found = _LEGACY_TEXT.match(head)
-    if not found:
-        return False
-    return len(head) <= _LEGACY_READ_BYTES or found.end() < len(head)
-
-
 async def forget_legacy_documents(credential: IntegrationCredential, dataset_name: str) -> int:
     """Forget the plain-text issue documents the former path wrote to this dataset.
 
-    Only rows the owner added, in the owner's dataset, with no source tag whose
-    stored text has the former path's exact shape. A document a user remembered
-    into the dataset by hand, or one a collaborator added, is left alone.
-    Idempotent; returns how many went.
+    Only plain-text rows the owner added, in the owner's dataset, with no source
+    tag whose text has the former path's exact shape. A document a user
+    remembered into the dataset by hand, or one a collaborator added, is left
+    alone. Returns how many went.
     """
     from sqlalchemy import select
 
@@ -237,6 +217,7 @@ async def forget_legacy_documents(credential: IntegrationCredential, dataset_nam
                 Dataset.name == dataset_name,
                 Dataset.owner_id == credential.user_id,
                 Data.owner_id == credential.user_id,
+                Data.extension == "txt",
             )
         )
         untagged = [row for row in result.all() if not row.system_metadata]
@@ -245,11 +226,12 @@ async def forget_legacy_documents(credential: IntegrationCredential, dataset_nam
     for row in untagged:
         try:
             async with open_data_file(row.raw_data_location, mode="rb") as file:
-                head = file.read(_LEGACY_READ_BYTES + 1)
-        except Exception:  # noqa: BLE001 - an unreadable document is skipped, never deleted
+                text = file.read()
+        except (OSError, ValueError):
+            # Unreadable means skipped, never deleted.
             logger.warning("Could not read document %s while looking for old Linear text", row.id)
             continue
-        if isinstance(head, bytes) and _is_legacy_text(head):
+        if _LEGACY_TEXT.match(text):
             legacy.append(row)
     if not legacy:
         return 0

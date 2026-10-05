@@ -9,14 +9,19 @@ of the providers' client libraries.
 
 import asyncio
 import json
-import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from hashlib import sha256
 from importlib import import_module
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("integrations_ingestion")
+
+
+class RateLimitedError(RuntimeError):
+    """A provider refused a call because its rate limit is spent."""
 
 
 @dataclass(frozen=True)
@@ -291,9 +296,8 @@ async def run_sync(provider: str, credential: Any, sync_source: Any) -> None:
             # Store a safe category, never provider exception text (which may
             # include message IDs, URLs, or user content).
             message = str(exc).lower()
-            if any(
-                term in message
-                for term in ("ratelimitexceeded", "ratelimited", "quota exceeded", "http 429")
+            if isinstance(exc, RateLimitedError) or any(
+                term in message for term in ("ratelimitexceeded", "quota exceeded", "http 429")
             ):
                 counts["failed_rate_limit"] = 1
             await record_sync_result(credential, status="degraded", counts=counts)

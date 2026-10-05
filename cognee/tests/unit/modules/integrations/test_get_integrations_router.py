@@ -353,33 +353,6 @@ def test_disconnect_with_delete_data_is_refused_without_a_dataset(client):
     assert response.status_code == 400
 
 
-def test_a_resource_selection_is_capped(client):
-    credential = type("Cred", (), {"provider_account_id": "ACC1", "provider_metadata": {}})()
-    integration = supported_integrations["fake"]
-    with (
-        patch.object(
-            _router_module, "get_active_credential_for_user", new=AsyncMock(return_value=credential)
-        ),
-        patch.object(type(integration), "resource_selection_key", "selected_ids"),
-        patch.object(
-            _router_module,
-            "update_provider_metadata",
-            new=AsyncMock(return_value=type("C", (), {"provider_metadata": {}})()),
-        ),
-    ):
-        ok = client.put(
-            "/api/v1/integrations/fake/resources",
-            json={"resourceIds": [str(n) for n in range(1000)]},
-        )
-        too_many = client.put(
-            "/api/v1/integrations/fake/resources",
-            json={"resourceIds": [str(n) for n in range(1001)]},
-        )
-
-    assert ok.status_code == 200
-    assert too_many.status_code == 422
-
-
 def test_a_manual_sync_is_not_accepted_while_one_is_running(client):
     from cognee.modules.integrations import ingestion
 

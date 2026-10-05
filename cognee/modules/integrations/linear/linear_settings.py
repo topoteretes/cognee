@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 
 from cognee.modules.integrations.base import IntegrationSettings
@@ -30,7 +31,7 @@ class LinearSettings(IntegrationSettings):
     # connection whose last run was cut short by the rate limit or the request
     # budget. Env: LINEAR_RESUME_SYNC_ENABLED, LINEAR_RESUME_INTERVAL_SECONDS
     resume_sync_enabled: bool = True
-    resume_interval_seconds: int = 600
+    resume_interval_seconds: int = Field(default=600, ge=60)
 
 
 linear_settings = LinearSettings()

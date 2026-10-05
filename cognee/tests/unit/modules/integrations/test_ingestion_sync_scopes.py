@@ -82,6 +82,7 @@ async def test_an_unclassified_failure_is_an_ingestion_failure(remember):
 
 @pytest.mark.asyncio
 async def test_a_connection_that_goes_inactive_stops_the_loop_even_on_the_last_scope(remember):
+    """Not counted as a failed scope: the sync must stop and report the connection as gone."""
     remember.side_effect = [SimpleNamespace(status="completed"), CredentialInactiveError()]
 
     with pytest.raises(CredentialInactiveError):
@@ -89,7 +90,8 @@ async def test_a_connection_that_goes_inactive_stops_the_loop_even_on_the_last_s
 
 
 @pytest.mark.asyncio
-async def test_a_failure_that_names_the_linear_rate_limit_is_recorded_as_one(monkeypatch):
+async def test_a_rate_limit_error_is_recorded_as_one_whatever_its_text(monkeypatch):
+    """Typed, not sniffed from the message: Linear's wording is not Google's."""
     recorded = AsyncMock()
     monkeypatch.setattr(
         ingestion, "require_active_credential", AsyncMock(side_effect=lambda credential: credential)
@@ -97,9 +99,9 @@ async def test_a_failure_that_names_the_linear_rate_limit_is_recorded_as_one(mon
     monkeypatch.setattr("cognee.modules.integrations.credentials.record_sync_result", recorded)
 
     async def sync_source(credential, counts):
-        raise RuntimeError("Linear query LinearTeams failed: HTTP 400 RATELIMITED")
+        raise ingestion.RateLimitedError("slow down")
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ingestion.RateLimitedError):
         await ingestion.run_sync("linear", CREDENTIAL, sync_source)
 
     assert recorded.await_args.kwargs["counts"]["failed_rate_limit"] == 1
