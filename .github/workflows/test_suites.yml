@@ -353,6 +353,13 @@ jobs:
   # ── Advisory Claude Code review — pulls the private skill from cognee-ci at runtime ──
   # The rubric + Slack map live in the private cognee-ci repo; this job carries no review
   # logic. Runs only after the suite is green (needs: notify), core-team PRs only, advisory.
+  # The reviewer can also get a "codebase memory": the Cognee code graph of this repo on
+  # Cognee Cloud, queried through the cognee-mcp server (API mode, X-Api-Key). It is what
+  # lets the review say "this helper already exists at path:line" about code outside the
+  # diff. It needs the COGNEE_MCP_BASE_URL + COGNEE_MCP_API_KEY secrets and is switched on
+  # per author by the PR_REVIEW_MEMORY_AUTHORS variable ('*' = everyone, a comma-separated
+  # list of logins = a trial, empty = nobody). Authors in the trial get the
+  # /pr-review-memory skill; everyone else keeps the classic /pr-review, unchanged.
   claude-review:
     name: Claude Code Review
     needs: [ notify ]
@@ -362,6 +369,15 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+    env:
+      # Pinned MCP server release, installed from PyPI (never from the PR checkout, so PR
+      # code cannot sit between the reviewer and the API key). Bump deliberately.
+      COGNEE_MCP_VERSION: "0.5.6"
+      # Read by claude-code-action from the job-level env (its own step env shadows
+      # anything set lower). cognee-mcp imports cognee on start and a code-graph query
+      # over the whole repo takes seconds; the action's defaults are too tight for both.
+      MCP_TIMEOUT: "120000"
+      MCP_TOOL_TIMEOUT: "180000"
     steps:
       - name: Checkout PR
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -372,6 +388,13 @@ jobs:
         id: gate
         env:
           AUTHOR: ${{ github.event.pull_request.user.login }}
+          # Both secrets are needed for the codebase memory.
+          COGNEE_SECRETS: ${{ secrets.COGNEE_MCP_API_KEY != '' && secrets.COGNEE_MCP_BASE_URL != '' }}
+          # Who gets the memory-backed review: '*' = every core-team author, a comma-
+          # separated list of GitHub logins = only those (trial), empty = nobody.
+          MEMORY_AUTHORS: ${{ vars.PR_REVIEW_MEMORY_AUTHORS }}
+          # The code-graph dataset the memory skill queries on the tenant.
+          DATASET: ${{ vars.COGNEE_MCP_DATASET || 'cognee_code' }}
         run: |
           author_lc="$(printf '%s' "$AUTHOR" | tr '[:upper:]' '[:lower:]')"
           if grep -vE '^[[:space:]]*#' .github/core-team.txt \
@@ -380,6 +403,23 @@ jobs:
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "PR author '$AUTHOR' not in core-team.txt — skipping."
+          fi
+          memory=false
+          if [ "$COGNEE_SECRETS" = "true" ]; then
+            if [ "$MEMORY_AUTHORS" = "*" ]; then
+              memory=true
+            elif printf '%s' "$MEMORY_AUTHORS" | tr ',' '\n' \
+                   | sed 's/^[[:space:]@]*//; s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]' \
+                   | grep -qxF "$author_lc"; then
+              memory=true
+            fi
+          fi
+          echo "cognee_memory=$memory" >> "$GITHUB_OUTPUT"
+          if [ "$memory" = "true" ]; then
+            echo "prompt=/pr-review-memory $DATASET" >> "$GITHUB_OUTPUT"
+          else
+            echo "prompt=/pr-review" >> "$GITHUB_OUTPUT"
+            echo "Classic review for '$AUTHOR' (secrets set: $COGNEE_SECRETS, PR_REVIEW_MEMORY_AUTHORS: '${MEMORY_AUTHORS:-}')."
           fi
 
       - name: Mint private-repo token
@@ -410,19 +450,83 @@ jobs:
           # leaves /pr-review unresolved -> 0 turns, nothing posted. $HOME/.claude is
           # untouched by that sanitization and is loaded via settingSources: [user,...].
           mkdir -p "$HOME/.claude/skills"
-          cp -r .ci-private/.claude/skills/pr-review "$HOME/.claude/skills/"
+          cp -r .ci-private/.claude/skills/pr-review* "$HOME/.claude/skills/"
+
+      # The two memory steps are continue-on-error: a PyPI hiccup must degrade the
+      # review to "memory unavailable", not skip it (and the Slack DM with it).
+      - name: Set up uv (Cognee MCP server)
+        id: uv-setup
+        if: ${{ steps.gate.outputs.run == 'true' && steps.gate.outputs.cognee_memory == 'true' }}
+        continue-on-error: true
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4.2.0
+        with:
+          enable-cache: true
+
+      - name: Install the Cognee MCP server
+        id: mcp-install
+        if: ${{ steps.gate.outputs.run == 'true' && steps.uv-setup.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          uv tool install "cognee-mcp==${COGNEE_MCP_VERSION}"
+          # The server runs through this wrapper, from an EMPTY directory outside the
+          # workspace: cognee loads a .env found in its working directory with
+          # precedence over the process environment, and the PR checkout could carry
+          # one (HTTPS_PROXY / SSL_CERT_FILE there would let it read the key in
+          # transit). An empty cwd with no .env in its parents closes that door.
+          mkdir -p "$RUNNER_TEMP/cognee-cwd"
+          cat > "$RUNNER_TEMP/cognee-mcp.sh" <<EOF
+          #!/usr/bin/env bash
+          cd "$RUNNER_TEMP/cognee-cwd" && exec "$(uv tool dir --bin)/cognee-mcp" "\$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/cognee-mcp.sh"
+          # Import cognee once here (slow, ~20s cold) so a broken install fails this
+          # step with a readable error instead of an MCP startup timeout in the review.
+          "$RUNNER_TEMP/cognee-mcp.sh" --help > /dev/null
+
+      - name: Write the Cognee MCP config
+        if: ${{ steps.gate.outputs.run == 'true' }}
+        env:
+          COGNEE_MEMORY: ${{ steps.gate.outputs.cognee_memory == 'true' && steps.mcp-install.outcome == 'success' }}
+        run: |
+          # Written outside the workspace. The key is a ${VAR} placeholder that Claude
+          # Code expands from the review step's environment, so this file holds no
+          # credential. The tenant URL and auth scheme are CLI args, so nothing in the
+          # process environment can point the key at another host.
+          # For authors outside the trial, without the secrets, or with the install
+          # failed, the file declares no servers (and the memory skill, if it ran
+          # anyway, would report "Codebase memory: unavailable").
+          if [ "$COGNEE_MEMORY" = "true" ]; then
+            jq -n --arg cmd "$RUNNER_TEMP/cognee-mcp.sh" '{
+              mcpServers: { cognee: {
+                type: "stdio",
+                command: $cmd,
+                args: ["--transport", "stdio", "--tool-mode", "all",
+                       "--api-url", "${COGNEE_MCP_BASE_URL}", "--api-auth-scheme", "x-api-key"],
+                env: { COGNEE_API_KEY: "${COGNEE_MCP_API_KEY}" }
+              } }
+            }' > "$RUNNER_TEMP/cognee-mcp.json"
+          else
+            echo '{"mcpServers": {}}' > "$RUNNER_TEMP/cognee-mcp.json"
+          fi
 
       - name: Claude Code review
         if: ${{ steps.gate.outputs.run == 'true' }}
         uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790  # v1.0.235
+        env:
+          # Expanded by Claude Code into the MCP config above (not by the shell). Step
+          # scoped on purpose: no other step needs the key.
+          COGNEE_MCP_BASE_URL: ${{ secrets.COGNEE_MCP_BASE_URL }}
+          COGNEE_MCP_API_KEY: ${{ secrets.COGNEE_MCP_API_KEY }}
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          prompt: "/pr-review"
+          # "/pr-review-memory <dataset>" for authors in the trial, "/pr-review" otherwise.
+          prompt: ${{ steps.gate.outputs.prompt }}
           claude_args: >-
-            --allowed-tools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Glob,Grep"
-            --max-turns 40
-            --model claude-sonnet-4-5-20250929
+            --mcp-config "${{ runner.temp }}/cognee-mcp.json"
+            --allowed-tools "mcp__github_inline_comment__create_inline_comment,mcp__cognee__code_search,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Glob,Grep"
+            --max-turns 80
+            --model ${{ vars.PR_REVIEW_MODEL || 'claude-sonnet-4-5-20250929' }}
 
       - name: DM review summary to PR author on Slack
         if: ${{ steps.gate.outputs.run == 'true' }}
