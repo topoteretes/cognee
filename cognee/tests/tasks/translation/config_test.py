@@ -7,9 +7,9 @@ from typing import get_args
 from pydantic import ValidationError
 
 from cognee.tasks.translation.config import (
-    get_translation_config,
     TranslationConfig,
     TranslationProviderType,
+    get_translation_config,
 )
 
 

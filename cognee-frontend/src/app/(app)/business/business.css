@@ -1,0 +1,54 @@
+/* The Business view's canvas animation (node birth, camera moves) is
+   JS-driven and handled by usePrefersReducedMotion — this covers the CSS
+   transitions (rail card highlight/dim) the exported HTML this view is
+   ported from had zero prefers-reduced-motion rules for anywhere. */
+@media (prefers-reduced-motion: reduce) {
+  .bv-motion {
+    transition: none !important;
+  }
+}
+
+/* Compact markdown inside the AnswerCard: Tailwind's preflight zeroes all
+   margins and list styles, so without these the rendered markdown collapses
+   into one undifferentiated blob. Scoped tight — nothing else renders
+   markdown inside the business view. */
+.bv-answer-md p { margin: 0 0 6px; }
+.bv-answer-md p:last-child { margin-bottom: 0; }
+.bv-answer-md ul, .bv-answer-md ol { margin: 0 0 6px; padding-left: 16px; }
+.bv-answer-md ul { list-style: disc; }
+.bv-answer-md ol { list-style: decimal; }
+.bv-answer-md li { margin: 2px 0; }
+.bv-answer-md code { font-family: var(--font-mono, ui-monospace, monospace); font-size: 11.5px; background: rgba(255, 255, 255, 0.08); border-radius: 4px; padding: 0 3px; }
+.bv-answer-md strong { color: #F5A83C; font-weight: 600; }
+.bv-answer-md h1, .bv-answer-md h2, .bv-answer-md h3, .bv-answer-md h4 { margin: 6px 0 3px; font-size: 13px; font-weight: 700; }
+
+/* Tour mode is a hands-off flythrough — the canvas is the show, so every
+   overlay (search bar, rails, dock, cards) blends out the same way
+   non-highlighted nodes do (entity dim is 0.15; a touch above so the
+   dock's stop control stays findable), plus a slight blur. Controls stay
+   clickable through it. */
+.bv-tour-active > *:not(.bv-canvas-layer) {
+  filter: blur(2px);
+  opacity: 0.2;
+  transition: filter 300ms ease, opacity 300ms ease;
+}
+
+/* Mantine's default Menu.Item hover is a light-scheme gray — over the
+   BrainSwitcher's dark dropdown it rendered as a white pill swallowing the
+   light item text entirely. Scoped to this dropdown so other Mantine menus
+   keep whatever theme they were built against. */
+.bv-brain-switcher-dropdown .mantine-Menu-item:hover,
+.bv-brain-switcher-dropdown .mantine-Menu-item[data-hovered] {
+  background-color: #141d33;
+}
+
+/* Mantine's item label wrapper sizes to its content, so the brain rows'
+   truncate classes had no width to truncate against — a brain with many
+   sources stretched its subtitle straight through the dropdown's border
+   and across the canvas. */
+.bv-brain-switcher-dropdown .mantine-Menu-item,
+.bv-brain-switcher-dropdown .mantine-Menu-itemLabel {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}

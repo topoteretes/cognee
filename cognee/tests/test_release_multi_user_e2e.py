@@ -38,7 +38,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
 
@@ -68,7 +68,7 @@ ALL_SENTINELS: dict[int, set[str]] = {index: set() for index in range(NUM_USERS)
 
 
 def log(message: str) -> None:
-    timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    timestamp = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
     print(f"[{timestamp}] {message}", flush=True)
 
 
@@ -448,16 +448,10 @@ async def verify_isolation(users: list[UserSession]) -> None:
                 response = await user.client.get(
                     "/api/v1/datasets/status", params={"dataset": dataset_id}
                 )
-                # Denial surfaces either as 409 or as a response omitting the dataset.
-                if response.status_code == 200:
-                    assert dataset_id not in response.json(), (
-                        f"user {user.index} got status of foreign dataset '{name}'"
-                    )
-                else:
-                    assert response.status_code == 409, (
-                        f"user {user.index} status probe on '{name}':"
-                        f" unexpected {response.status_code} {response.text[:200]}"
-                    )
+                assert response.status_code == 403, (
+                    f"user {user.index} status probe on '{name}':"
+                    f" expected 403, got {response.status_code} {response.text[:200]}"
+                )
 
     await asyncio.gather(*(probe_foreign(user) for user in users))
     log("isolation verified: listings exact, cross-user search 403, status denied")

@@ -1,15 +1,17 @@
-from uuid import uuid4
-from enum import Enum
-from typing import Optional, List
 from datetime import datetime, timezone
+from enum import Enum
+from uuid import uuid4
+
 from sqlalchemy import (
-    Column,
-    Text,
-    DateTime,
-    UUID as SQLAlchemy_UUID,
-    Integer,
-    Enum as SQLEnum,
     JSON,
+    Column,
+    DateTime,
+    Integer,
+    Text,
+    Uuid,
+)
+from sqlalchemy import (
+    Enum as SQLEnum,
 )
 
 from cognee.infrastructure.databases.relational import Base
@@ -36,7 +38,7 @@ class SyncOperation(Base):
     __tablename__ = "sync_operations"
 
     # Primary identifiers
-    id = Column(SQLAlchemy_UUID, primary_key=True, default=uuid4, doc="Database primary key")
+    id = Column(Uuid, primary_key=True, default=uuid4, doc="Database primary key")
     run_id = Column(Text, unique=True, index=True, doc="Public run ID returned to users")
 
     # Status and progress tracking
@@ -48,7 +50,7 @@ class SyncOperation(Base):
     # Operation metadata
     dataset_ids = Column(JSON, doc="Array of dataset IDs being synced")
     dataset_names = Column(JSON, doc="Array of dataset names being synced")
-    user_id = Column(SQLAlchemy_UUID, index=True, doc="ID of the user who initiated the sync")
+    user_id = Column(Uuid, index=True, doc="ID of the user who initiated the sync")
 
     # Timing information
     created_at = Column(
@@ -80,7 +82,7 @@ class SyncOperation(Base):
     error_message = Column(Text, doc="Error message if sync failed")
     retry_count = Column(Integer, default=0, doc="Number of retry attempts")
 
-    def get_duration_seconds(self) -> Optional[float]:
+    def get_duration_seconds(self) -> float | None:
         """Get the duration of the sync operation in seconds."""
         if not self.created_at:
             return None
@@ -107,12 +109,12 @@ class SyncOperation(Base):
             "dataset_sync_hashes": self.dataset_sync_hashes or {},
         }
 
-    def _get_all_sync_hashes(self) -> List[str]:
+    def _get_all_sync_hashes(self) -> list[str]:
         """Get all content hashes for data created/modified during this sync operation."""
         all_hashes = set()
         dataset_hashes = self.dataset_sync_hashes or {}
 
-        for dataset_id, operations in dataset_hashes.items():
+        for operations in dataset_hashes.values():
             if isinstance(operations, dict):
                 all_hashes.update(operations.get("uploaded", []))
                 all_hashes.update(operations.get("downloaded", []))
@@ -124,7 +126,7 @@ class SyncOperation(Base):
         dataset_hashes = self.dataset_sync_hashes or {}
         return dataset_hashes.get(dataset_id, {"uploaded": [], "downloaded": []})
 
-    def was_data_synced(self, content_hash: str, dataset_id: str = None) -> bool:
+    def was_data_synced(self, content_hash: str, dataset_id: str | None = None) -> bool:
         """
         Check if a specific piece of data was part of this sync operation.
 

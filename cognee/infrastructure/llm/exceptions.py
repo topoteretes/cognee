@@ -1,6 +1,9 @@
 import re
 
 from cognee.exceptions.exceptions import CogneeValidationError
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 
 class ContentPolicyFilterError(CogneeValidationError):
@@ -17,9 +20,9 @@ class LLMPaymentRequiredError(CogneeValidationError):
 
 
 # Message text is the only signal that reliably survives the wrapper exceptions
-# the instructor adapters raise: by the time a LiteLLM-proxy budget rejection
-# reaches us it is an ``InstructorRetryException`` whose deepest cause is a
-# client-side ``RateLimitError`` — a different class from
+# the legacy structured-output adapters raise: by the time a LiteLLM-proxy
+# budget rejection reaches us it is a retry-exhausted wrapper whose deepest
+# cause is a client-side ``RateLimitError`` — a different class from
 # ``litellm.BudgetExceededError``, and one whose response body has already been
 # consumed, so the structured ``error.type`` check below cannot fire.
 #
@@ -34,8 +37,9 @@ class LLMPaymentRequiredError(CogneeValidationError):
 #
 # One regex both detects and extracts, so a positive match always yields a
 # detail. Matching the WHOLE sentence — rather than checking for fragments
-# anywhere in the text — is what keeps this safe: ``str(InstructorRetryException)``
-# concatenates the model's own partial completions, so loose fragment matching
+# anywhere in the text — is what keeps this safe: ``str()`` of the legacy
+# retry-exhausted wrapper concatenates the model's own partial completions, so
+# loose fragment matching
 # fires on any document that merely mentions an exceeded budget and a maximum
 # somewhere in several KB of unrelated prose. The bounded ``.{0,200}?`` spans
 # only the variable scope segment, keeps the scan linear, and caps the detail.
@@ -64,6 +68,14 @@ def _has_budget_message(text: str) -> bool:
     return _BUDGET_SENTENCE_RE.search(text) is not None
 
 
+def _budget_detail_from_text(text: str) -> str | None:
+    """The provider's budget sentence inside ``text``, identifiers masked, or None."""
+    match = _BUDGET_SENTENCE_RE.search(text)
+    if match is None:
+        return None
+    return _redact_budget_identifiers(match.group(0).strip())
+
+
 def _is_budget_exhausted_link(e: BaseException) -> bool:
     """Classify a single exception in a ``__cause__`` chain."""
     # Case 1: provider-level payment required
@@ -90,7 +102,7 @@ def _is_budget_exhausted_link(e: BaseException) -> bool:
                 if isinstance(error, dict) and error.get("type") == "budget_exceeded":
                     return True
             except Exception:
-                pass
+                logger.debug("Ignoring exception in _is_budget_exhausted_link", exc_info=True)
 
     # Case 4: message text, the wrapper-proof fallback. ``str()`` is guarded
     # because this runs inside tenacity's retry predicate, where an exception
@@ -98,6 +110,9 @@ def _is_budget_exhausted_link(e: BaseException) -> bool:
     try:
         text = str(e)
     except Exception:
+        logger.debug(
+            "Falling back to False after error in _is_budget_exhausted_link", exc_info=True
+        )
         return False
     return _has_budget_message(text)
 
@@ -105,8 +120,8 @@ def _is_budget_exhausted_link(e: BaseException) -> bool:
 def is_budget_exhausted_error(e: BaseException) -> bool:
     """Return True if e signals LLM budget or payment exhaustion.
 
-    Walks the ``__cause__`` chain, because adapters and instructor wrap the
-    provider error with ``raise ... from``. ``__context__`` is deliberately not
+    Walks the ``__cause__`` chain, because the adapters and their frameworks
+    wrap the provider error with ``raise ... from``. ``__context__`` is deliberately not
     followed, so an unrelated error merely raised while handling a budget error
     is not misclassified.
 
@@ -127,8 +142,9 @@ def is_budget_exhausted_error(e: BaseException) -> bool:
 def budget_exhaustion_detail(e: BaseException) -> str | None:
     """Pull the provider's own budget sentence out of a wrapped exception.
 
-    ``str(e)`` on an ``InstructorRetryException`` is long and embeds the model's
-    partial completions, so the sentence is extracted rather than passed whole,
+    ``str(e)`` on the legacy retry-exhausted wrapper is long and embeds the
+    model's partial completions, so the sentence is extracted rather than passed
+    whole,
     and identifiers within it are masked before it reaches an API response.
 
     Walks the ``__cause__`` chain like ``is_budget_exhausted_error``, since a
@@ -141,10 +157,11 @@ def budget_exhaustion_detail(e: BaseException) -> str | None:
         try:
             text = str(current)
         except Exception:
+            logger.debug("Ignoring exception in budget_exhaustion_detail", exc_info=True)
             text = ""
-        match = _BUDGET_SENTENCE_RE.search(text)
-        if match:
-            return _redact_budget_identifiers(match.group(0).strip())
+        detail = _budget_detail_from_text(text)
+        if detail:
+            return detail
         current = current.__cause__
     return None
 
@@ -152,9 +169,9 @@ def budget_exhaustion_detail(e: BaseException) -> str | None:
 def raise_if_budget_exhausted(error: BaseException) -> None:
     """Re-raise budget exhaustion as ``LLMPaymentRequiredError`` (HTTP 402).
 
-    Instructor reports provider failures as ``InstructorRetryException``, which
-    the adapters catch in an earlier ``except`` clause than their budget
-    handler. The check therefore has to happen at that re-raise site, or the
+    The legacy framework reports provider failures inside its retry-exhausted
+    wrapper, which the adapters catch in an earlier ``except`` clause than their
+    budget handler. The check therefore has to happen at that re-raise site, or the
     budget handler further down is never reached.
     """
     if not is_budget_exhausted_error(error):
@@ -165,13 +182,61 @@ def raise_if_budget_exhausted(error: BaseException) -> None:
     raise LLMPaymentRequiredError() from error
 
 
+def is_budget_exhausted_record(error_class: str | None, error_message: str | None) -> bool:
+    """Return True if a *recorded* failure signals LLM budget or payment exhaustion.
+
+    The counterpart of ``is_budget_exhausted_error`` for a failure that no
+    longer exists as an exception. A pipeline that ends ``PipelineRunErrored``
+    without raising hands back only the root error's class name and its
+    scrubbed message (``error_class`` / ``error_message``), so there is no
+    ``__cause__`` chain, status code or response body left to inspect.
+
+    Two signals, in order: the class name ``LLMPaymentRequiredError``, which is
+    what the LLM and embedding paths raise once they have classified a budget
+    rejection, and then the same whole-sentence message match
+    ``is_budget_exhausted_error`` falls back to (see ``_BUDGET_SENTENCE_RE``),
+    for a run that recorded the provider's own error instead.
+    """
+    if error_class == LLMPaymentRequiredError.__name__:
+        return True
+    if not error_message:
+        return False
+    return _has_budget_message(error_message)
+
+
+def raise_if_budget_exhausted_record(error_class: str | None, error_message: str | None) -> None:
+    """Raise ``LLMPaymentRequiredError`` (HTTP 402) for a recorded budget failure.
+
+    ``raise_if_budget_exhausted`` for the recorded shape (see
+    ``is_budget_exhausted_record``): a caller that ran a pipeline with
+    ``raise_on_error=False`` turns the errored run back into the typed error,
+    so everything above it classifies the failure the same way as a raised one.
+    The provider's budget sentence is carried over when the recorded message
+    still contains it.
+    """
+    if not is_budget_exhausted_record(error_class, error_message):
+        return
+    detail = _budget_detail_from_text(error_message or "")
+    if detail:
+        raise LLMPaymentRequiredError(f"LLM budget exhausted: {detail}")
+    raise LLMPaymentRequiredError()
+
+
 class LLMAPIKeyNotSetError(CogneeValidationError):
     """
     Raised when the LLM API key is not set in the configuration.
     """
 
     def __init__(self, message: str = "LLM API key is not set.") -> None:
-        super().__init__(message=message, name="LLMAPIKeyNotSetError")
+        super().__init__(
+            message=message,
+            name="LLMAPIKeyNotSetError",
+            remediation=(
+                "Set LLM_API_KEY in your .env (copy .env.template to start). Cognee defaults "
+                "to the OpenAI provider; set LLM_PROVIDER and LLM_MODEL as well to use another "
+                "provider, and configure EMBEDDING_* too or embeddings fall back to OpenAI."
+            ),
+        )
 
 
 class UnsupportedLLMProviderError(CogneeValidationError):
@@ -248,3 +313,33 @@ class MCPSamplingUnavailableError(CogneeValidationError):
         ),
     ) -> None:
         super().__init__(message=message, name="MCPSamplingUnavailableError")
+
+
+# Class names of the structured-output validation failures each framework
+# raises once its own self-correction attempts are exhausted. litellm_native
+# surfaces the last ``pydantic.ValidationError`` / ``json.JSONDecodeError``
+# unchanged; the legacy framework raises its own retry-exhausted wrapper. Matched
+# by name so this module never imports the optional legacy framework package.
+_VALIDATION_FAILURE_CLASS_NAMES = frozenset(
+    {"ValidationError", "JSONDecodeError", "InstructorRetryException"}
+)
+
+
+def is_structured_output_validation_error(error: BaseException) -> bool:
+    """Whether ``error`` is a structured-output validation failure.
+
+    True when the model answered but no attempt produced output conforming to
+    the requested ``response_model`` — as opposed to transport, auth, quota, or
+    content-policy errors, which callers must not treat as "bad output".
+    Framework-neutral: the ``__cause__`` chain is walked and each link is
+    matched by class name, so it works for litellm_native and for the legacy
+    framework without importing either.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if type(current).__name__ in _VALIDATION_FAILURE_CLASS_NAMES:
+            return True
+        current = current.__cause__
+    return False

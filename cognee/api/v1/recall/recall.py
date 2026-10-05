@@ -1,5 +1,5 @@
+import asyncio
 import re
-from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -8,15 +8,15 @@ from typing_extensions import TypedDict
 from cognee.base_config import get_base_config
 from cognee.context_global_variables import set_session_user_context_variable
 from cognee.exceptions import CogneeValidationError
-from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
-from cognee.infrastructure.llm.config import LLMConfig
 from cognee.infrastructure.databases.cache import SessionAgentTraceEntry, SessionQAEntry
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.llm.config import LLMConfig
 from cognee.memory.entries import normalize_scope
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_existing_datasets
-from cognee.modules.operations import get_current_operation, record_operation
 from cognee.modules.observability import (
+    COGNEE_RECALL_ROUTE_RULE,
     COGNEE_RECALL_SCOPE,
     COGNEE_RECALL_SOURCE,
     COGNEE_RESULT_COUNT,
@@ -26,6 +26,8 @@ from cognee.modules.observability import (
     COGNEE_SESSION_ID,
     new_span,
 )
+from cognee.modules.operations import get_current_operation, record_operation
+from cognee.modules.preflight import llm_available
 from cognee.modules.recall.types.RecallResponse import (
     RecallResponse,
     ResponseAgentTraceEntry,
@@ -34,11 +36,14 @@ from cognee.modules.recall.types.RecallResponse import (
     ResponseMarkerEntry,
     ResponseQAEntry,
     ResponseSessionContextEntry,
+    ResponseSkillEntry,
     ResponseToolEntry,
 )
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
+from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
+from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
-from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
+from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -47,6 +52,11 @@ logger = get_logger("recall")
 
 # Minimum word length to avoid matching noise words like "a", "I"
 _MIN_WORD_LEN = 2
+
+# Routed types whose empty result means the lane was unavailable — no lexical
+# hits, no rules nodeset — and so is worth retrying as the default. Types the
+# router cannot pick never reach this set: the retry only second-guesses a guess.
+_RETRY_ON_EMPTY = frozenset({SearchType.CHUNKS_LEXICAL, SearchType.CODING_RULES})
 
 
 class RecallKwargs(TypedDict, total=False):
@@ -57,7 +67,6 @@ class RecallKwargs(TypedDict, total=False):
     node_name: list[str]
     node_name_filter_operator: str
     only_context: bool
-    context_format: str
     session_id: str
     wide_search_top_k: int
     triplet_distance_penalty: float
@@ -134,9 +143,7 @@ async def _resolve_session_cache_user_id(session_id: str, caller_user_id: str | 
 
         visible: list[SessionRecord] = []
         for r in rows:
-            if r.user_id == caller_uuid:
-                visible.append(r)
-            elif permitted_ids and r.dataset_id in permitted_ids:
+            if r.user_id == caller_uuid or permitted_ids and r.dataset_id in permitted_ids:
                 visible.append(r)
 
         if not visible:
@@ -153,7 +160,7 @@ async def _resolve_session_cache_user_id(session_id: str, caller_user_id: str | 
         owner = getattr(chosen, "user_id", None)
         return str(owner) if owner is not None else caller_user_id
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _resolve_session_cache_user_id", exc_info=True)
     return caller_user_id
 
 
@@ -168,7 +175,7 @@ async def _search_session(
 
     Tokenizes the query and each QA entry (question + context + answer),
     ranks by token overlap, returns the top_k tagged with
-    ``_source: "session"``.
+    ``source="session"``.
     """
     from cognee.infrastructure.session.get_session_manager import get_session_manager
 
@@ -199,7 +206,7 @@ async def _search_session(
 
     scored: list[tuple[int, SessionQAEntry]] = []
     for entry in entries:
-        entry_text = " ".join((entry.question, entry.context, entry.answer))
+        entry_text = f"{entry.question} {entry.context} {entry.answer}"
         entry_words = _tokenize(entry_text)
 
         hits = len(query_words & entry_words)
@@ -225,7 +232,7 @@ async def _search_trace(
 
     Tokenizes over origin_function, serialized method_params,
     method_return_value, memory_query, memory_context, and
-    session_feedback. Returns top_k tagged with ``_source: "trace"``.
+    session_feedback. Returns top_k tagged with ``source="trace"``.
     """
     import json
 
@@ -265,11 +272,13 @@ async def _search_trace(
         try:
             parts.append(json.dumps(mp, ensure_ascii=False))
         except Exception:
+            logger.debug("Ignoring exception in _search_trace", exc_info=True)
             parts.append(str(mp))
         mrv = entry.method_return_value
         try:
             parts.append(json.dumps(mrv, ensure_ascii=False))
         except Exception:
+            logger.debug("Ignoring exception in _search_trace", exc_info=True)
             parts.append(str(mrv))
 
         entry_words = _tokenize(" ".join(parts))
@@ -352,7 +361,6 @@ async def recall(
     # unspecified hybrid may defer to GRAPH_COMPLETION, and search history
     # still records the type recall chose, not the deferred one.
     only_context: bool = False,
-    context_format: ContextFormat | str = ContextFormat.CONTEXT,
     session_id: str | None = None,
     context_profile: str = "qa",
     wide_search_top_k: int | None = None,
@@ -379,7 +387,7 @@ async def recall(
     hitting the permanent graph. If no session entries match, falls
     through to the permanent graph search.
 
-    Each result dict includes a ``_source`` key (``"session"`` or
+    Each result includes a ``source`` field (``"session"`` or
     ``"graph"``) so callers can tell where the result came from.
 
     When ``query_type`` is omitted and ``auto_route`` is True (default),
@@ -394,7 +402,7 @@ async def recall(
         dataset_ids: Dataset UUIDs to search within. Takes precedence over datasets.
         top_k: Maximum results to return (default *15*).
         auto_route: If True and query_type is None, classify the query
-            automatically. If False, fall back to GRAPH_COMPLETION.
+            automatically. If False, fall back to HYBRID_COMPLETION.
         response_model: Pydantic model class for structured completion output.
             Forwarded to the retriever, which validates the LLM answer against
             it; each result then carries the validated payload as a dict in its
@@ -420,12 +428,12 @@ async def recall(
             ``None`` runs the default ``explore`` operation with the query
             text as seed. Only valid when ``scope`` includes ``"code"``
             (which is never implied by ``"auto"`` or ``"all"``); results are
-            tagged ``_source="code"``. A seed the code graph cannot resolve
+            tagged ``source="code"``. A seed the code graph cannot resolve
             contributes nothing rather than failing the recall.
 
     Returns:
         Search results. When searching session-only, returns a list of
-        matching QA entry dicts with ``_source="session"``.
+        matching QA entries with ``source="session"``.
     """
     from cognee import __version__ as cognee_version
     from cognee.shared.utils import send_telemetry
@@ -459,7 +467,9 @@ async def recall(
     # * no session_id:
     #     graph only.
     #
-    # Explicit ``scope`` values bypass this entirely.
+    # Explicit ``scope`` values bypass this entirely, and each branch above has
+    # one: "session_first" for the short-circuit, ["session", "graph"] for both
+    # contributing, "graph" for graph only. query_type need not be how you ask.
     resolved_scope = normalize_scope(scope)
     if resolved_scope == ["auto"]:
         has_dataset_scope = bool(dataset_ids) or bool(datasets)
@@ -473,15 +483,20 @@ async def recall(
             sources = ["graph"]
             auto_fallthrough = False
     else:
+        # The short-circuit as an explicit request. Without it, omitting
+        # query_type is the only way to ask for that behaviour.
+        auto_fallthrough = "session_first" in resolved_scope
+        if auto_fallthrough:
+            resolved_scope = ["session", "graph"] + [
+                s for s in resolved_scope if s not in ("session_first", "session", "graph")
+            ]
         sources = resolved_scope
-        auto_fallthrough = False
 
     if tools_trigger not in ("always", "on_empty"):
         raise CogneeValidationError(
             message=f"Invalid tools_trigger '{tools_trigger}'. Valid values: 'always', 'on_empty'.",
             name="InvalidToolsTriggerError",
         )
-    context_format = ContextFormat.parse(context_format)
     if code_query is not None and "code" not in sources:
         raise CogneeValidationError(
             message=(
@@ -507,7 +522,8 @@ async def recall(
             "top_k": top_k,
             "search_type": str(query_type.value) if query_type else "auto",
             "session_id": session_id or "",
-            "datasets": ",".join(datasets) if datasets else "",
+            # A list, not a joined string: send_telemetry fingerprints each name.
+            "datasets": list(datasets) if datasets else [],
             "dataset_ids": ",".join(str(dataset_id) for dataset_id in dataset_ids or []),
             "include_references": include_references,
             "cognee_version": cognee_version,
@@ -542,7 +558,6 @@ async def recall(
                 system_prompt=system_prompt,
                 node_name=node_name,
                 only_context=only_context,
-                context_format=context_format,
                 session_id=session_id,
                 context_profile=context_profile,
                 verbose=verbose,
@@ -605,7 +620,6 @@ async def recall(
                 from cognee.modules.recall.methods.normalize_search_payload import (
                     normalize_search_payload,
                 )
-
                 from cognee.modules.search.methods.search import authorized_search
                 from cognee.modules.search.operations import log_search_history
 
@@ -628,35 +642,42 @@ async def recall(
 
                 await set_session_user_context_variable(user)
 
-                local_query_type = query_type
-                if local_query_type is not None:
-                    if auto_route:
-                        from cognee.api.v1.recall.query_router import record_override, route_query
+                from cognee.api.v1.recall.query_router import ROUTER_FALLBACK_TYPE, route_query
 
-                        result = route_query(query_text)
-                        routed_type = result.search_type
-                        record_override(routed_type, local_query_type)
+                # Set only when the router chose the type, so the retry below
+                # never second-guesses a pinned type or the no-LLM CHUNKS pick.
+                routed_rule = None
+
+                if query_type is not None:
+                    local_query_type = query_type
+                elif not llm_available(llm_config):
+                    # No usable LLM is configured, so nothing can write a
+                    # completion answer; the default lookup is the vector
+                    # search over chunks. Keyed on LLM availability, not on the
+                    # extractor that built the graph — a gliner_demo-built graph
+                    # with a key present answers completions fine. An explicit
+                    # query_type still selects any search type.
+                    local_query_type = SearchType.CHUNKS
                 elif auto_route:
-                    from cognee.api.v1.recall.query_router import route_query
-
-                    result = route_query(query_text)
-                    local_query_type = result.search_type
+                    decision = route_query(query_text)
+                    local_query_type = decision.search_type
+                    routed_rule = decision.rule
                 else:
-                    local_query_type = SearchType.HYBRID_COMPLETION
+                    local_query_type = ROUTER_FALLBACK_TYPE
 
-                span.set_attribute(
-                    COGNEE_SEARCH_TYPE,
-                    str(local_query_type.value) if local_query_type else "unknown",
-                )
+                span.set_attribute(COGNEE_SEARCH_TYPE, local_query_type.value)
+                if routed_rule is not None:
+                    span.set_attribute(COGNEE_RECALL_ROUTE_RULE, routed_rule)
 
                 # Dataset UUIDs take precedence over names, matching /api/v1/search.
-                # String dataset names can only resolve for the current user.
+                # String dataset names can only resolve for the current user, and a
+                # name that resolves to nothing fails the request (strict).
                 search_dataset_ids = dataset_ids or None
                 if search_dataset_ids is None and datasets is not None:
                     search_dataset_ids = [
                         dataset.id
                         for dataset in await get_authorized_existing_datasets(
-                            datasets, "read", user
+                            datasets, "read", user, strict=True
                         )
                     ]
                     if not search_dataset_ids:
@@ -673,7 +694,9 @@ async def recall(
                     recall_config = get_recall_config()
                 except Exception as error:
                     logger.warning(
-                        "Recall warm-up config failed to load; skipping guard: %s", error
+                        "Recall warm-up config failed to load; skipping guard: %s",
+                        error,
+                        exc_info=True,
                     )
                 guard_active = (
                     recall_config is not None
@@ -707,21 +730,26 @@ async def recall(
                         logger.warning(
                             "Recall warm-up pre-probe authorization failed; skipping guard: %s",
                             error,
+                            exc_info=True,
                         )
                         guard_active = False
 
                 if guard_active:
-                    from cognee.modules.recall.methods.graph_warmup import is_memory_warm
+                    from cognee.modules.recall.methods.graph_warmup import (
+                        STATE_BUILD_FAILED,
+                        assess_memory_readiness,
+                    )
 
-                    warm, datapoint_count = await is_memory_warm(user, probe_dataset_ids)
-                    if not warm:
+                    probe = await assess_memory_readiness(user, probe_dataset_ids)
+                    if not probe.is_warm:
                         logger.info(
-                            "Recall warm-up short-circuit: graph has %d datapoints "
+                            "Recall warm-up short-circuit: graph readiness is '%s' "
                             "(threshold %d); skipping search.",
-                            datapoint_count,
+                            probe.state,
                             recall_config.recall_warmup_threshold,
                         )
                         span.set_attribute("cognee.recall.warmup_shortcircuit", True)
+                        span.set_attribute("cognee.recall.warmup_state", probe.state)
                         if sources != ["graph"]:
                             # Multi-source recall: a cold graph contributes
                             # nothing, so other lanes — and the tools
@@ -729,42 +757,95 @@ async def recall(
                             # merged result is empty — behave exactly as if
                             # the graph lane returned no results.
                             return []
+                        if probe.state == STATE_BUILD_FAILED:
+                            failure_desc = probe.error_class or "unknown error"
+                            if probe.error_message:
+                                failure_desc = f"{failure_desc}: {probe.error_message}"
+                            status = "build_failed"
+                            text = (
+                                "Memory build failed: the last ingestion for the requested "
+                                f"datasets ended in an error ({failure_desc}). Fix the cause "
+                                "and re-run remember() or cognify()."
+                            )
+                        else:
+                            status = "memory_warming_up"
+                            text = (
+                                "Memory is still warming up: no knowledge graph data "
+                                "exists yet for the requested datasets."
+                            )
                         return [
                             ResponseMarkerEntry(
                                 source="system",
-                                status="memory_warming_up",
-                                text=(
-                                    "Memory is still warming up: no knowledge graph data "
-                                    "exists yet for the requested datasets."
-                                ),
-                                datapoint_count=datapoint_count,
+                                status=status,
+                                text=text,
+                                datapoint_count=probe.datapoint_count,
                                 threshold=recall_config.recall_warmup_threshold,
+                                error_class=probe.error_class,
+                                error_message=probe.error_message,
                             )
                         ]
 
-                graph_results = await authorized_search(
-                    query_text=query_text,
-                    query_type=local_query_type,
-                    user=user,
-                    dataset_ids=search_dataset_ids,
-                    system_prompt_path=system_prompt_path,
-                    system_prompt=system_prompt,
-                    top_k=top_k,
-                    node_name=node_name,
-                    node_name_filter_operator=node_name_filter_operator,
-                    only_context=only_context,
-                    context_format=context_format,
-                    session_id=session_id,
-                    wide_search_top_k=wide_search_top_k,
-                    triplet_distance_penalty=triplet_distance_penalty,
-                    feedback_influence=feedback_influence,
-                    retriever_specific_config=retriever_specific_config,
-                    neighborhood_depth=neighborhood_depth,
-                    neighborhood_seed_top_k=neighborhood_seed_top_k,
-                    include_references=include_references,
-                    llm_config=llm_config,
-                    embedding_config=embedding_config,
+                async def _search(search_type: SearchType):
+                    return await authorized_search(
+                        query_text=query_text,
+                        query_type=search_type,
+                        user=user,
+                        dataset_ids=search_dataset_ids,
+                        system_prompt_path=system_prompt_path,
+                        system_prompt=system_prompt,
+                        top_k=top_k,
+                        node_name=node_name,
+                        node_name_filter_operator=node_name_filter_operator,
+                        only_context=only_context,
+                        session_id=session_id,
+                        wide_search_top_k=wide_search_top_k,
+                        triplet_distance_penalty=triplet_distance_penalty,
+                        feedback_influence=feedback_influence,
+                        retriever_specific_config=retriever_specific_config,
+                        neighborhood_depth=neighborhood_depth,
+                        neighborhood_seed_top_k=neighborhood_seed_top_k,
+                        include_references=include_references,
+                        llm_config=llm_config,
+                        embedding_config=embedding_config,
+                    )
+
+                # The router picked something other than the default, so the
+                # default is still untried and may replace this result. Neither a
+                # pinned type nor the default itself is ever second-guessed.
+                routed_guess = (
+                    routed_rule is not None and local_query_type is not ROUTER_FALLBACK_TYPE
                 )
+
+                try:
+                    graph_results = await _search(local_query_type)
+                except (UnsupportedSearchTypeError, SearchTypeNotSupported) as error:
+                    if not routed_guess:
+                        raise
+                    # The backend rejected a routed guess — a deployment-level
+                    # choice, not the caller's; the default always substitutes.
+                    logger.info(
+                        "Rule %s routed to %s, which the backend rejected (%s); retrying as %s.",
+                        routed_rule,
+                        local_query_type.value,
+                        error,
+                        ROUTER_FALLBACK_TYPE.value,
+                    )
+                    local_query_type = ROUTER_FALLBACK_TYPE
+                    graph_results = await _search(local_query_type)
+
+                if routed_guess and not graph_results and local_query_type in _RETRY_ON_EMPTY:
+                    logger.info(
+                        "Rule %s routed to %s, which returned nothing; retrying as %s.",
+                        routed_rule,
+                        local_query_type.value,
+                        ROUTER_FALLBACK_TYPE.value,
+                    )
+                    local_query_type = ROUTER_FALLBACK_TYPE
+                    graph_results = await _search(local_query_type)
+
+                # A fallback above may have changed the type that answered; the
+                # span recorded the routed one before the search ran.
+                span.set_attribute(COGNEE_SEARCH_TYPE, local_query_type.value)
 
                 # /v1/search records every question it answers; recall never did,
                 # because it calls authorized_search() directly and skips the
@@ -869,7 +950,7 @@ async def recall(
                     search_dataset_ids = [
                         dataset.id
                         for dataset in await get_authorized_existing_datasets(
-                            datasets, "read", user
+                            datasets, "read", user, strict=True
                         )
                     ]
                     if not search_dataset_ids:
@@ -894,7 +975,9 @@ async def recall(
                 tagged: list[RecallResponse] = []
                 for payload in code_results:
                     completion = getattr(payload, "completion", None)
-                    if isinstance(completion, dict) and completion.get("seed_not_found"):
+                    if getattr(payload, "error", None) or (
+                        isinstance(completion, dict) and completion.get("seed_not_found")
+                    ):
                         # Multi-dataset searches soften per-dataset seed misses
                         # into marker payloads; they carry no facts, so drop
                         # them here for the same reason as the except above.
@@ -905,6 +988,60 @@ async def recall(
                     )
                 return tagged
 
+            async def _run_skill_gate(gate_top_k: int) -> list[RecallResponse]:
+                """Metadata-only SKILLS lookup for the deterministic skill gate.
+
+                Skipped silently unless exactly one dataset is targeted (skill
+                lookup is single-dataset by invariant). Any failure contributes
+                nothing instead of failing the recall.
+                """
+                from cognee.modules.search.methods.search import authorized_search
+
+                try:
+                    gate_user = user
+                    if gate_user is None:
+                        gate_user = await get_default_user()
+
+                    if dataset_ids and len(dataset_ids) == 1:
+                        gate_dataset_ids = list(dataset_ids)
+                    elif datasets and len(datasets) == 1:
+                        authorized = await get_authorized_existing_datasets(
+                            datasets, "read", gate_user
+                        )
+                        if len(authorized) != 1:
+                            return []
+                        gate_dataset_ids = [dataset.id for dataset in authorized]
+                    else:
+                        return []
+
+                    payloads = await authorized_search(
+                        query_text=query_text,
+                        query_type=SearchType.SKILLS,
+                        user=gate_user,
+                        dataset_ids=gate_dataset_ids,
+                        top_k=gate_top_k,
+                    )
+                except Exception as error:
+                    logger.warning("Skill gate lookup failed (non-fatal): %s", error, exc_info=True)
+                    return []
+
+                entries: list[RecallResponse] = []
+                for payload in payloads or []:
+                    for item in getattr(payload, "completion", None) or []:
+                        if not isinstance(item, dict):
+                            continue
+                        name = item.get("name") or ""
+                        description = item.get("description") or ""
+                        entries.append(
+                            ResponseSkillEntry(
+                                source="skills",
+                                text=f"{name}: {description}" if description else name,
+                                skill={k: v for k, v in item.items() if k != "score"},
+                                score=item.get("score"),
+                            )
+                        )
+                return entries
+
             runners = {
                 "session": _run_session,
                 "trace": _run_trace,
@@ -914,22 +1051,49 @@ async def recall(
                 "code": _run_code,
             }
 
+            # Deterministic skill gate: a procedural-looking query triggers a
+            # concurrent metadata-only SKILLS lookup (one vector search, no
+            # LLM call). Additive only — the main lanes never wait on it, and
+            # explicit SKILLS / AGENTIC_COMPLETION calls bypass it.
+            skills_task = None
+            if (
+                "graph" in sources
+                and not only_context
+                and query_type not in (SearchType.SKILLS, SearchType.AGENTIC_COMPLETION)
+            ):
+                from cognee.api.v1.recall.skill_gate import (
+                    DEFAULT_SKILL_GATE_TOP_K,
+                    should_search_skills,
+                    skill_gate_enabled,
+                )
+
+                if skill_gate_enabled() and should_search_skills(query_text).fired:
+                    skills_task = asyncio.create_task(_run_skill_gate(DEFAULT_SKILL_GATE_TOP_K))
+
             session_result_count = 0
-            for src in sources:
-                runner = runners.get(src)
-                if runner is None:
-                    continue
-                # Auto mode special case: session hit short-circuits graph.
-                if auto_fallthrough and src == "graph" and merged:
-                    break
-                # on_empty: the other sources gave cognee enough context — don't
-                # go back to the external database.
-                if src == "tools" and tools_trigger == "on_empty" and merged:
-                    continue
-                part = await runner()
-                if src == "session":
-                    session_result_count = len(part)
-                merged.extend(part)
+            try:
+                for src in sources:
+                    runner = runners.get(src)
+                    if runner is None:
+                        continue
+                    # Auto mode special case: session hit short-circuits graph.
+                    if auto_fallthrough and src == "graph" and merged:
+                        break
+                    # on_empty: the other sources gave cognee enough context — don't
+                    # go back to the external database.
+                    if src == "tools" and tools_trigger == "on_empty" and merged:
+                        continue
+                    part = await runner()
+                    if src == "session":
+                        session_result_count = len(part)
+                    merged.extend(part)
+            except BaseException:
+                if skills_task is not None:
+                    skills_task.cancel()
+                raise
+
+            if skills_task is not None:
+                merged.extend(await skills_task)
 
             if session_result_count:
                 span.set_attribute(COGNEE_SESSION_ENTRY_COUNT, session_result_count)

@@ -13,7 +13,8 @@ Input (env):
                `metrics` output; empty/unparseable is treated as `{}`, which is
                what a failed job produces. A `tenant_create` key adds the
                cloud-only tenant row.
-  STATUS_*     header fields (emoji, summary, ran_at, ollama, llamacpp).
+  STATUS_*     header fields (emoji, summary, ran_at, branch, cadence,
+               sha — the last three fall back if unset).
   RUN_URL      link target for the footer.
 
 Output: `blocks=<compact JSON>` appended to $GITHUB_OUTPUT (stdout if unset).
@@ -87,14 +88,20 @@ def arm_block(emoji, title, result, metrics_json, url):
 
 def main():
     env = os.environ
+    # Fall back rather than raise: a hand-dispatch or an older caller may not
+    # set these, and a missing label must not cost the whole message.
+    branch = env.get("STATUS_BRANCH") or "?"
+    cadence = env.get("STATUS_CADENCE") or "manual"
+    sha = (env.get("STATUS_SHA") or "")[:7]
     header = section(
-        f"{env.get('STATUS_EMOJI', '')} *Nightly Tests* — {env.get('STATUS_SUMMARY', '')}\n"
-        f"*Ran at:* `{env.get('STATUS_RAN_AT', '')}`\n"
-        f"*Ollama:* `{env.get('STATUS_OLLAMA', '')}`  •  "
-        f"*Llama-cpp:* `{env.get('STATUS_LLAMACPP', '')}`\n"
+        f"{env.get('STATUS_EMOJI', '')} *Nightly Tests* — `{branch}` — "
+        f"{env.get('STATUS_SUMMARY', '')}\n"
+        f"*Ran at:* `{env.get('STATUS_RAN_AT', '')}`  •  "
+        f"*Branch:* `{branch}` (`{cadence}`)  •  *Commit:* `{sha}`"
     )
 
     blocks = [header]
+    skipped = 0
     for line in env.get("ARMS", "").splitlines():
         if not line.strip():
             continue
@@ -103,8 +110,23 @@ def main():
             raise SystemExit(
                 f"ARMS line must have 5 pipe-separated fields, got {len(fields)}: {line!r}"
             )
-        blocks.append(arm_block(*(f.strip() for f in fields)))
+        emoji, title, result, metrics_json, url = (f.strip() for f in fields)
+        # A cadence-gated arm reports `skipped` and carries no numbers, no
+        # report and no link, so rendering it costs dead lines in a report
+        # that is meant to stay scannable. A FAILED arm still renders: a
+        # missing failure reads as "this suite does not exist", which is worse.
+        if result == "skipped":
+            skipped += 1
+            continue
+        blocks.append(arm_block(emoji, title, result, metrics_json, url))
 
+    # Deliberately worded "not run this cadence", not "weekly arms": a future
+    # `needs:` could skip an arm for a different reason and this line must not
+    # then lie about why.
+    blocks[0] = section(
+        blocks[0]["text"]["text"]
+        + (f"  •  `{skipped}` arms not run this cadence\n" if skipped else "\n")
+    )
     blocks.append(section(f"<{env.get('RUN_URL', '')}|View run>\n"))
 
     payload = f"blocks={json.dumps(blocks, ensure_ascii=False, separators=(',', ':'))}"

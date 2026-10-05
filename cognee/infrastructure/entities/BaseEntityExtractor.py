@@ -25,4 +25,3 @@ class BaseEntityExtractor(ABC):
 
             - text (str): A string containing the text from which to extract entities.
         """
-        pass

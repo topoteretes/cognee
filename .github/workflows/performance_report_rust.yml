@@ -96,11 +96,11 @@ jobs:
     steps:
       # cognee (this repo) supplies the shared orchestrator + reporter.
       - name: Checkout cognee (orchestrator)
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       # cognee-rs supplies the CLI, the perf harness, and the committed cassette.
       - name: Checkout cognee-rs (latest)
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           repository: topoteretes/cognee-rs
           ref: ${{ inputs.cognee_rs_ref }}
@@ -115,7 +115,7 @@ jobs:
           toolchain: stable
 
       - name: Install mold linker
-        uses: rui314/setup-mold@7e4f20ad28a2e8ca6fd0892ccf72e2abb706b9c3  # v1
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621  # v1
         with:
           make-default: true
 
@@ -123,7 +123,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake
 
       - name: Free disk space
-        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be  # main
+        uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6  # main
         with:
           tool-cache: false
           # large-packages removes ^llvm-.* (libclang) which litert bindgen needs.
@@ -138,7 +138,7 @@ jobs:
           shared-key: perf-rust
 
       - name: Cache ORT binary
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: cognee-rs/target/ort-cache
           key: ort-perf-rust-linux-x86_64
@@ -159,7 +159,8 @@ jobs:
       # reports (empty-graph timings are cheap but not representative), and the
       # nightly stays green. The warning surfaces as a GitHub annotation + step
       # summary so it is visible without red-failing the whole nightly. Re-record
-      # cognee-rs/scripts/perf/fixtures/cassette.json to clear it (see its README).
+      # the arm's own cassette — `inputs.cassette`, which the warning names — to
+      # clear it (see cognee-rs/scripts/perf/README.md).
       #
       # LOG_LEVEL=info is pinned so the log-scraping check is deterministic
       # regardless of any RUST_LOG/LOG_LEVEL inherited by the runner.
@@ -182,7 +183,12 @@ jobs:
                       | grep -oE '[0-9]+' | head -1 || true)"
           echo "entity-type nodes created on replay: ${entities:-0}"
           if [ -z "${entities:-}" ] || [ "${entities:-0}" -lt 1 ]; then
-            msg="cognee-rs perf cassette looks STALE — replay produced no entity-type nodes (EmptyGraph fallback). Timings below are NOT representative. Re-record cognee-rs/scripts/perf/fixtures/cassette.json (see its README)."
+            # Name the cassette THIS arm replays. Every mock arm shares this
+            # step, so a hardcoded path sends whoever reads the annotation to
+            # re-record a different arm's fixture — and because the guard only
+            # warns, this arm goes on reporting empty-graph timings as "success"
+            # while the drift it reported stays uncleared.
+            msg="cognee-rs perf cassette looks STALE — replay produced no entity-type nodes (EmptyGraph fallback). Timings below are NOT representative. Re-record cognee-rs/${{ inputs.cassette }} (see cognee-rs/scripts/perf/README.md)."
             echo "::warning::$msg"
             echo "⚠️ $msg" >> "$GITHUB_STEP_SUMMARY"
             cat "$log" >&2
@@ -276,6 +282,38 @@ jobs:
           cp "$GITHUB_WORKSPACE/perf-out/report.html" "$HTML_PATH"
           echo "JSON_PATH=$JSON_PATH" >> "$GITHUB_ENV"
           echo "HTML_PATH=$HTML_PATH" >> "$GITHUB_ENV"
+
+      - name: Stamp run provenance into the report
+        env:
+          BRANCH: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          # Read provenance from the checkout, including detached PR merge refs.
+          # Keep branch as the workflow's comparison series.
+          if [ ! -s "$JSON_PATH" ]; then
+            echo "no report JSON at $JSON_PATH — leaving the upload step to fail"
+            exit 0
+          fi
+          SHA="$(git -C cognee-rs rev-parse HEAD)"
+          COMMIT_TIMESTAMP="$(git -C cognee-rs show -s --format=%cI HEAD)"
+          # Attribute timings to the Rust code and retain the Python harness SHA.
+          WORKFLOW_SHA="$(git rev-parse HEAD)"
+          REPOSITORY="topoteretes/cognee-rs"
+          tmp="$(mktemp)"
+          jq --arg branch "$BRANCH" --arg sha "$SHA" --arg run_id "$RUN_ID" \
+             --arg attempt "$RUN_ATTEMPT" --arg event "$EVENT" \
+             --arg commit_timestamp "$COMMIT_TIMESTAMP" --arg repository "$REPOSITORY" \
+             --arg workflow_sha "$WORKFLOW_SHA" \
+             '. + {branch: $branch, git_sha: $sha, run_id: $run_id,
+                   run_attempt: $attempt, event: $event,
+                   commit_timestamp: $commit_timestamp, git_repository: $repository,
+                   workflow_git_sha: $workflow_sha}' \
+             "$JSON_PATH" > "$tmp"
+          mv "$tmp" "$JSON_PATH"
 
       - name: Upload reports to S3
         id: upload

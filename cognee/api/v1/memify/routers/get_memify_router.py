@@ -1,37 +1,35 @@
+from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, status
 from fastapi.responses import JSONResponse
-from fastapi import Depends, status
 from pydantic import Field
-from typing import List, Optional, Union, Literal
 
-from cognee.api.DTO import InDTO
-from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_authenticated_user
+from cognee import __version__ as cognee_version
+from cognee.api.DTO import ErrorResponse, InDTO
 from cognee.exceptions import CogneeApiError
-from cognee.shared.utils import send_telemetry
 from cognee.modules.pipelines.models import PipelineRunErrored
+from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
-from cognee import __version__ as cognee_version
-from cognee.api.DTO import ErrorResponse
+from cognee.shared.utils import send_telemetry
 
 logger = get_logger()
 
 
 class MemifyPayloadDTO(InDTO):
-    extraction_tasks: Optional[List[str]] = Field(
+    extraction_tasks: list[str] | None = Field(
         default=None,
         examples=[[]],
     )
-    enrichment_tasks: Optional[List[str]] = Field(default=None, examples=[[]])
-    data: Optional[str] = Field(default=None)
-    dataset_name: Optional[str] = Field(default=None)
+    enrichment_tasks: list[str] | None = Field(default=None, examples=[[]])
+    data: str | None = Field(default=None)
+    dataset_name: str | None = Field(default=None)
     # Note: Literal is needed for Swagger use
-    dataset_id: Union[UUID, Literal[""], None] = Field(default=None, examples=[""])
-    node_name: Optional[List[str]] = Field(default=None, examples=[[]])
-    run_in_background: Optional[bool] = Field(default=False)
+    dataset_id: UUID | Literal[""] | None = Field(default=None, examples=[""])
+    node_name: list[str] | None = Field(default=None, examples=[[]])
+    run_in_background: bool | None = Field(default=False)
 
 
 def get_memify_router() -> APIRouter:
@@ -62,7 +60,7 @@ def get_memify_router() -> APIRouter:
               Unknown names are rejected with 422. Tasks requiring parameters are SDK-only.
         - **enrichmentTasks** Optional[List[str]]: Names of built-in Cognee Tasks to handle enrichment of provided graph/data from extraction tasks.
               Supported names: cognify_session, cognify_agent_trace_feedback, apply_feedback_weights,
-              apply_frequency_weights, merge_entity_duplicates, index_data_points.
+              merge_entity_duplicates, index_data_points.
         - **data** Optional[List[str]]: The data to ingest. Can be any text data when custom extraction and enrichment tasks are used.
               Data provided here will be forwarded to the first extraction task in the pipeline as input.
               If no data is provided the whole graph (or subgraph if node_name/node_type is specified) will be forwarded

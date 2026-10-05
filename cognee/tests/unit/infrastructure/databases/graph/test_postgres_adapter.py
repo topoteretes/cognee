@@ -1,3 +1,4 @@
+import asyncio
 import importlib.util
 import json
 import sys
@@ -17,10 +18,14 @@ if importlib.util.find_spec("asyncpg") is None:
     sys.modules["asyncpg"] = asyncpg_stub
     _created_asyncpg_stub = True
 
+from sqlalchemy import NullPool  # noqa: E402
+
 from cognee.infrastructure.databases.graph.postgres_demo.adapter import (  # noqa: E402
+    PostgresDemoAdapter,
     _component_sizes,
     _prepare_edge_rows,
     _prepare_node_rows,
+    _resolve_engine_args,
     _select_nodeset_neighbor_ids,
 )
 
@@ -141,3 +146,135 @@ def test_nodeset_neighbor_selection_supports_or_and_missing_primaries():
 def test_nodeset_neighbor_selection_rejects_unknown_operator():
     with pytest.raises(ValueError, match="must be 'OR' or 'AND'"):
         _select_nodeset_neighbor_ids({"a"}, [("a", "b")], "XOR")
+
+
+# --- pool exhaustion (SDK-533) -------------------------------------------------
+#
+# The datasheets real-LLM postgres arm failed with "QueuePool limit of size 5
+# overflow 10 reached". Not a leak: every acquisition is `async with`. It is
+# 164 concurrent writers each checking a connection out and THEN blocking on
+# pg_advisory_xact_lock, plus hundreds of create_all() reflections per batch,
+# against a pool whose sizing config was silently discarded.
+
+
+def _bare_adapter():
+    adapter = PostgresDemoAdapter.__new__(PostgresDemoAdapter)
+    adapter._write_gate = None
+    adapter._write_gate_loop = None
+    adapter._initialized = False
+    adapter._init_lock = None
+    adapter._init_lock_loop = None
+    return adapter
+
+
+@pytest.mark.asyncio
+async def test_write_gate_serializes_graph_writes():
+    """Fifty concurrent add_nodes must hold at most one session at a time.
+
+    Without the gate each writer pins a pooled connection while waiting on the
+    advisory lock, so peak == min(50, pool ceiling); on origin/dev this is 50.
+    """
+    adapter = _bare_adapter()
+    live = 0
+    peak = 0
+
+    class _Session:
+        async def __aenter__(self):
+            nonlocal live, peak
+            live += 1
+            peak = max(peak, live)
+            await asyncio.sleep(0.01)
+            return self
+
+        async def __aexit__(self, *exc):
+            nonlocal live
+            live -= 1
+
+        async def execute(self, *a, **k):
+            return None
+
+        async def commit(self):
+            return None
+
+    adapter.sessionmaker = lambda: _Session()
+    await asyncio.gather(*[adapter.add_nodes([(f"n{i}", {})]) for i in range(50)])
+    assert peak == 1
+
+
+@pytest.mark.asyncio
+async def test_initialize_runs_create_all_once_per_adapter():
+    """Regression for the read-path QueuePool timeout (job 98411831471).
+
+    Every get_graph_engine() and every get_graph_metadata() called initialize(),
+    each a full create_all(checkfirst=True) reflection on a pooled connection.
+    Fifty concurrent calls must reflect exactly once; on origin/dev it is 50.
+    """
+    adapter = _bare_adapter()
+    calls = 0
+
+    class _Conn:
+        async def __aenter__(self):
+            nonlocal calls
+            calls += 1
+            await asyncio.sleep(0)
+            return self
+
+        async def __aexit__(self, *exc):
+            pass
+
+        async def run_sync(self, *a, **k):
+            pass
+
+    adapter.engine = types.SimpleNamespace(begin=lambda: _Conn())
+    await asyncio.gather(*[adapter.initialize() for _ in range(50)])
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_write_gate_is_rebuilt_for_a_new_event_loop():
+    """The adapter is process-cached and outlives the loop it was built on."""
+    adapter = _bare_adapter()
+    first = adapter._get_write_gate()
+    assert adapter._get_write_gate() is first
+
+    def _other_loop():
+        return asyncio.run(_probe())
+
+    async def _probe():
+        return adapter._get_write_gate()
+
+    import threading
+
+    result = []
+    t = threading.Thread(target=lambda: result.append(_other_loop()))
+    t.start()
+    t.join()
+    assert result[0] is not first
+
+
+def test_resolve_engine_args_defaults_match_the_per_dataset_pgvector_sizing():
+    args = _resolve_engine_args({})
+    assert (args["pool_size"], args["max_overflow"]) == (2, 20)
+    assert args["pool_timeout"] == 280  # stock 30s before this change
+    assert args["pool_recycle"] == 280
+    assert args["pool_pre_ping"] is True
+    assert "poolclass" not in args
+
+
+def test_resolve_engine_args_honors_configured_pool_args():
+    assert _resolve_engine_args({"pool_size": 7})["pool_size"] == 7
+    assert _resolve_engine_args({"pool_size": 7})["max_overflow"] == 20
+
+
+def test_resolve_engine_args_keeps_the_nullpool_escape_hatch():
+    assert _resolve_engine_args({"poolclass": "NullPool"}) == {"poolclass": NullPool}
+    assert _resolve_engine_args({"poolclass": "nullpool", "pool_size": 9}) == {
+        "poolclass": NullPool
+    }
+
+
+def test_resolve_engine_args_accepts_the_configs_tuple_of_pairs_form():
+    # relational/config.py stores POOL_ARGS as tuple(sorted(parsed.items()))
+    args = _resolve_engine_args((("pool_size", 2), ("pool_timeout", 5)))
+    assert args["pool_timeout"] == 5
+    assert args["pool_size"] == 2

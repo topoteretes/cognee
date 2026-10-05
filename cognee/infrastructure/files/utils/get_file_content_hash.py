@@ -1,12 +1,11 @@
 import hashlib
 import os
 from os import path
-from typing import BinaryIO, Union
+from typing import BinaryIO
 
 from ..exceptions import FileContentHashingError
 from ..storage import get_file_storage
 from .local_path_safety import resolve_local_path
-
 
 # Bytes hashed per iteration. md5's block_size (64) was used here before,
 # but that constant is the digest's internal compression block, not an I/O

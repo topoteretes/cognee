@@ -10,8 +10,8 @@ Covers:
 
 import importlib
 from types import SimpleNamespace
-from uuid import uuid4
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
 
@@ -25,9 +25,6 @@ delete_dataset_nodes_and_edges_module = importlib.import_module(
 )
 delete_data_nodes_and_edges_module = importlib.import_module(
     "cognee.modules.graph.methods.delete_data_nodes_and_edges"
-)
-reset_dataset_pipeline_run_status_module = importlib.import_module(
-    "cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status"
 )
 
 # ---------------------------------------------------------------------------
@@ -120,12 +117,18 @@ async def test_forget_dataset_memory_clears_graph_and_resets_pipeline(monkeypatc
     engine = _FakeEngine(session)
 
     mock_delete = AsyncMock(return_value=DeletedGraphElements(node_ids={"node_deleted"}))
-    mock_reset_status = AsyncMock()
     mock_invalidate_deleted_data = AsyncMock()
     monkeypatch.setattr(
         forget_module,
         "_resolve_dataset_id",
         AsyncMock(return_value=DATASET_ID),
+    )
+    # The memory helpers enter the dataset database context inside the lock
+    # (canonical order, SDK-483); stub it out for these unit tests.
+    monkeypatch.setattr(
+        forget_module,
+        "set_database_global_context_variables",
+        lambda *args, **kwargs: _NoOpAsyncContext(),
     )
 
     with (
@@ -146,11 +149,6 @@ async def test_forget_dataset_memory_clears_graph_and_resets_pipeline(monkeypatc
             "cognee.infrastructure.databases.relational.get_relational_engine",
             return_value=engine,
         ),
-        patch.object(
-            reset_dataset_pipeline_run_status_module,
-            "reset_dataset_pipeline_run_status",
-            mock_reset_status,
-        ),
         patch("sqlalchemy.orm.attributes.flag_modified"),
     ):
         result = await forget_module._forget_dataset_memory(str(DATASET_ID), USER)
@@ -165,11 +163,6 @@ async def test_forget_dataset_memory_clears_graph_and_resets_pipeline(monkeypatc
         {"node_deleted"},
         set(),
         user_id=USER.id,
-    )
-    mock_reset_status.assert_awaited_once_with(
-        dataset_id=DATASET_ID,
-        user=USER,
-        pipeline_names=["cognify_pipeline"],
     )
 
     # pipeline_status should have dataset entry removed
@@ -196,7 +189,13 @@ async def test_forget_dataset_memory_skips_records_without_pipeline_status(monke
         "_resolve_dataset_id",
         AsyncMock(return_value=DATASET_ID),
     )
-    mock_reset_status = AsyncMock()
+    # The memory helpers enter the dataset database context inside the lock
+    # (canonical order, SDK-483); stub it out for these unit tests.
+    monkeypatch.setattr(
+        forget_module,
+        "set_database_global_context_variables",
+        lambda *args, **kwargs: _NoOpAsyncContext(),
+    )
 
     with (
         patch.object(
@@ -208,17 +207,11 @@ async def test_forget_dataset_memory_skips_records_without_pipeline_status(monke
             "cognee.infrastructure.databases.relational.get_relational_engine",
             return_value=engine,
         ),
-        patch.object(
-            reset_dataset_pipeline_run_status_module,
-            "reset_dataset_pipeline_run_status",
-            mock_reset_status,
-        ),
     ):
         result = await forget_module._forget_dataset_memory(str(DATASET_ID), USER)
 
     assert result["status"] == "success"
     assert result["data_records_reset"] == 2
-    mock_reset_status.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +237,13 @@ async def test_forget_data_memory_clears_graph_and_resets_pipeline(monkeypatch):
         forget_module,
         "_resolve_dataset_id",
         AsyncMock(return_value=DATASET_ID),
+    )
+    # The memory helpers enter the dataset database context inside the lock
+    # (canonical order, SDK-483); stub it out for these unit tests.
+    monkeypatch.setattr(
+        forget_module,
+        "set_database_global_context_variables",
+        lambda *args, **kwargs: _NoOpAsyncContext(),
     )
 
     with (
@@ -286,6 +286,13 @@ async def test_forget_data_memory_no_record_found(monkeypatch):
         "_resolve_dataset_id",
         AsyncMock(return_value=DATASET_ID),
     )
+    # The memory helpers enter the dataset database context inside the lock
+    # (canonical order, SDK-483); stub it out for these unit tests.
+    monkeypatch.setattr(
+        forget_module,
+        "set_database_global_context_variables",
+        lambda *args, **kwargs: _NoOpAsyncContext(),
+    )
 
     with (
         patch.object(
@@ -326,9 +333,9 @@ async def test_forget_memory_only_without_dataset_raises(monkeypatch):
         patch.object(
             forget_module, "set_database_global_context_variables", return_value=_NoOpAsyncContext()
         ),
+        pytest.raises(ValueError, match="memory_only requires dataset or dataset_id"),
     ):
-        with pytest.raises(ValueError, match="memory_only requires dataset or dataset_id"):
-            await forget_module.forget(memory_only=True)
+        await forget_module.forget(memory_only=True)
 
 
 @pytest.mark.asyncio

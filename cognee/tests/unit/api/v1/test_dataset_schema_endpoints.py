@@ -1,7 +1,8 @@
 """Tests for dataset schema endpoints and related utilities."""
 
-import pytest
 from uuid import uuid4
+
+import pytest
 
 
 def test_dataset_configuration_model_creation():
@@ -131,6 +132,7 @@ def test_inferred_graph_schema_dto_accepts_json_schema_shape():
 def test_inferred_graph_schema_dto_requires_core_fields():
     """Verify InferredGraphSchemaDTO enforces title/type/properties fields."""
     from pydantic import ValidationError
+
     from cognee.api.v1.llm.routers.get_llm_router import InferredGraphSchemaDTO
 
     with pytest.raises(ValidationError):

@@ -1,18 +1,22 @@
 import argparse
 import asyncio
 import json
-from typing import Optional
 
-from cognee.cli.reference import SupportsCliCommand
+import cognee.cli.echo as fmt
 from cognee.cli import DEFAULT_DOCS_URL
+from cognee.cli.code_search import (
+    add_code_arguments,
+    build_code_query,
+    handle_diagram_out,
+)
 from cognee.cli.config import (
-    COMPLETION_SEARCH_TYPES,
     DEFAULT_SEARCH_TYPE,
     OUTPUT_FORMAT_CHOICES,
     SEARCH_TYPE_CHOICES,
 )
-import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.recall_output import print_recall_results
+from cognee.cli.reference import SupportsCliCommand
 
 
 class SearchCommand(SupportsCliCommand):
@@ -51,6 +55,10 @@ Search Types & Use Cases:
 **CODE**:
     Deterministic name resolution and graph exploration over an indexed code graph.
     Best for: Inspecting a function, class, route, module, or dependency without an LLM.
+    Pass the operation with --code-query (JSON) and add --diagram / --diagram-out to
+    get the result drawn as a Mermaid or Graphviz diagram, e.g.
+      cognee-cli search "" -t CODE --code-query '{"operation": "architecture"}' \\
+          --diagram-out architecture.html
     """
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
@@ -86,6 +94,7 @@ Search Types & Use Cases:
             default="pretty",
             help="Output format (default: pretty)",
         )
+        add_code_arguments(parser)
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
@@ -95,6 +104,8 @@ Search Types & Use Cases:
 
             # Convert string to SearchType enum
             query_type = SearchType[args.query_type]
+            code_query = build_code_query(args, args.query_type)
+            code_kwargs = {"code_query": code_query} if code_query is not None else {}
 
             datasets_msg = (
                 f" in datasets {args.datasets}" if args.datasets else " across all datasets"
@@ -119,10 +130,11 @@ Search Types & Use Cases:
                         system_prompt_path=args.system_prompt or "answer_simple_question.txt",
                         top_k=args.top_k,
                         session_id=None,
+                        **code_kwargs,
                     )
                     return results
                 except Exception as e:
-                    raise CliCommandInnerException(f"Failed to search: {str(e)}") from e
+                    raise CliCommandInnerException(f"Failed to search: {e!s}") from e
 
             results = asyncio.run(run_search())
 
@@ -137,27 +149,13 @@ Search Types & Use Cases:
                     fmt.warning("No results found for your query.")
                     return
 
-                fmt.echo(f"\nFound {len(results)} result(s) using {args.query_type}:")
-                fmt.echo("=" * 60)
+                # Same four branches recall prints. --query-type has an argparse
+                # default, so the fallback is always a real type here.
+                print_recall_results(results, args.query_type)
 
-                if args.query_type in COMPLETION_SEARCH_TYPES:
-                    # These return conversational responses
-                    for i, result in enumerate(results, 1):
-                        fmt.echo(f"{fmt.bold('Response:')} {result}")
-                        if i < len(results):
-                            fmt.echo("-" * 40)
-                elif args.query_type == "CHUNKS":
-                    # These return text chunks
-                    for i, result in enumerate(results, 1):
-                        fmt.echo(f"{fmt.bold(f'Chunk {i}:')} {result}")
-                        fmt.echo()
-                else:
-                    # Generic formatting for other types
-                    for i, result in enumerate(results, 1):
-                        fmt.echo(f"{fmt.bold(f'Result {i}:')} {result}")
-                        fmt.echo()
+            handle_diagram_out(results, args)
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(f"Error searching: {str(e)}", error_code=1) from e
+            raise CliCommandException(f"Error searching: {e!s}", error_code=1) from e

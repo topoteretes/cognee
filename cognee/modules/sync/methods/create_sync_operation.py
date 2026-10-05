@@ -1,18 +1,18 @@
-from uuid import UUID
-from typing import Optional, List
 from datetime import datetime, timezone
-from cognee.modules.sync.models import SyncOperation, SyncStatus
+from uuid import UUID
+
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.sync.models import SyncOperation, SyncStatus
 
 
 async def create_sync_operation(
     run_id: str,
-    dataset_ids: List[UUID],
-    dataset_names: List[str],
+    dataset_ids: list[UUID],
+    dataset_names: list[str],
     user_id: UUID,
-    total_records_to_sync: Optional[int] = None,
-    total_records_to_download: Optional[int] = None,
-    total_records_to_upload: Optional[int] = None,
+    total_records_to_sync: int | None = None,
+    total_records_to_download: int | None = None,
+    total_records_to_upload: int | None = None,
 ) -> SyncOperation:
     """
     Create a new sync operation record in the database.

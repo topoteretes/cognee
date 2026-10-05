@@ -6,30 +6,37 @@ within pipeline operations, supporting both incremental and regular processing m
 """
 
 import os
-from typing import Any, Dict, AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
+from typing import Any
+
 from sqlalchemy import select
 
-import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.users.models import User
+from cognee.modules import ingestion
 from cognee.modules.data.models import Data, Dataset
+from cognee.modules.pipelines.models import PipelineContext
+from cognee.modules.pipelines.models.DataItemStatus import (
+    DataItemStatus,
+    is_data_item_completed,
+)
+from cognee.modules.pipelines.models.PipelineRunInfo import (
+    PipelineRunAlreadyCompleted,
+    PipelineRunCompleted,
+    PipelineRunErrored,
+    PipelineRunProgress,
+    PipelineRunYield,
+)
+from cognee.modules.pipelines.operations.run_tasks_with_telemetry import run_tasks_with_telemetry
+from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
+from cognee.modules.provenance.edge_evidence.persistence import flush_context_provenance
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
+from cognee.tasks.ingestion.carried_source import publish_carried_source
 from cognee.tasks.ingestion.save_data_item_to_storage import (
     save_data_item_to_storage_detailed,
 )
-from cognee.tasks.ingestion.carried_source import publish_carried_source
-from cognee.modules.pipelines.models.PipelineRunInfo import (
-    PipelineRunCompleted,
-    PipelineRunErrored,
-    PipelineRunYield,
-    PipelineRunAlreadyCompleted,
-    PipelineRunProgress,
-)
-from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
-from cognee.modules.pipelines.models import PipelineContext
-from cognee.modules.pipelines.operations.run_tasks_with_telemetry import run_tasks_with_telemetry
-from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
+
 from ..tasks.task import Task
 
 logger = get_logger("run_tasks_data_item")
@@ -37,10 +44,10 @@ logger = get_logger("run_tasks_data_item")
 
 def _push_stage_progress(
     yielded: PipelineRunYield,
-    ctx: Optional[PipelineContext],
+    ctx: PipelineContext | None,
     tasks: list[Task],
     pipeline_run_id: str,
-    progress_state: Optional[Dict[str, Any]] = None,
+    progress_state: dict[str, Any] | None = None,
 ) -> None:
     """Turn one intermediate PipelineRunYield into a PipelineRunProgress event
     and push it to this run's queue, so backgrounded runs surface per-stage
@@ -80,11 +87,11 @@ def _push_stage_progress(
 
 async def _drain_item_events(
     events: AsyncGenerator[Any, None],
-    ctx: Optional[PipelineContext],
+    ctx: PipelineContext | None,
     tasks: list[Task],
     pipeline_run_id: str,
-    progress_state: Optional[Dict[str, Any]],
-) -> Optional[Dict[str, Any]]:
+    progress_state: dict[str, Any] | None,
+) -> dict[str, Any] | None:
     """Consume one run_tasks_data_item_incremental/_regular generator to its end.
 
     Every intermediate ``PipelineRunYield`` is forwarded to stage-progress
@@ -107,9 +114,9 @@ async def run_tasks_data_item_incremental(
     pipeline_name: str,
     pipeline_id: str,
     pipeline_run_id: str,
-    ctx: Optional[PipelineContext],
+    ctx: PipelineContext | None,
     user: User,
-) -> AsyncGenerator[Dict[str, Any], None]:
+) -> AsyncGenerator[dict[str, Any], None]:
     """
     Process a single data item with incremental loading support.
 
@@ -189,10 +196,8 @@ async def run_tasks_data_item_incremental(
 
     # Check pipeline status, if Data already processed for pipeline before skip current processing
     if data_point:
-        if (
-            data_point.pipeline_status.get(pipeline_name, {}).get(str(dataset.id))
-            == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
-        ):
+        status_for_pipeline = (data_point.pipeline_status or {}).get(pipeline_name) or {}
+        if is_data_item_completed(status_for_pipeline.get(str(dataset.id))):
             yield {
                 "run_info": PipelineRunAlreadyCompleted(
                     pipeline_run_id=pipeline_run_id,
@@ -254,18 +259,27 @@ async def run_tasks_data_item_incremental(
         logger.error(
             f"Exception caught while processing data: {error}.\n Data processing failed for data item: {data_item}."
         )
+        from cognee.modules.operations import scrub_error_message
+
         yield {
             "run_info": PipelineRunErrored(
                 pipeline_run_id=pipeline_run_id,
                 payload=repr(error),
                 dataset_id=dataset.id,
                 dataset_name=dataset.name,
+                error_class=type(error).__name__,
+                error_message=scrub_error_message(error),
             ),
+            # In-memory handle to the root cause, so run_tasks can record and
+            # surface WHAT failed even on the non-raising path — otherwise the
+            # run ends as a generic "Pipeline run failed. Data item could not
+            # be processed." with a NULL error column.
+            "error": error,
             "data_id": data_id,
         }
 
         if os.getenv("RAISE_INCREMENTAL_LOADING_ERRORS", "true").lower() == "true":
-            raise error
+            raise
 
 
 async def run_tasks_data_item_regular(
@@ -274,9 +288,9 @@ async def run_tasks_data_item_regular(
     tasks: list[Task],
     pipeline_id: str,
     pipeline_run_id: str,
-    ctx: Optional[PipelineContext],
+    ctx: PipelineContext | None,
     user: User,
-) -> AsyncGenerator[Dict[str, Any], None]:
+) -> AsyncGenerator[dict[str, Any], None]:
     """
     Process a single data item in regular (non-incremental) mode.
 
@@ -326,12 +340,12 @@ async def run_tasks_data_item(
     pipeline_name: str,
     pipeline_id: str,
     pipeline_run_id: str,
-    ctx: Optional[PipelineContext],
+    ctx: PipelineContext | None,
     user: User,
     incremental_loading: bool,
     data_cache: bool,
-    progress_state: Optional[Dict[str, Any]] = None,
-) -> Optional[Dict[str, Any]]:
+    progress_state: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """
     Process a single data item, choosing between incremental and regular processing.
 
@@ -382,4 +396,18 @@ async def run_tasks_data_item(
             user=user,
         )
 
-    return await _drain_item_events(events, ctx, tasks, pipeline_run_id, progress_state)
+    try:
+        result = await _drain_item_events(events, ctx, tasks, pipeline_run_id, progress_state)
+    except Exception:
+        # Preserve the original pipeline exception if flushing already-written
+        # edge evidence also fails; rollback still has graph-native run refs.
+        try:
+            await flush_context_provenance(ctx)
+        except Exception:
+            logger.exception(
+                "Failed to persist provenance for an errored data item",
+            )
+        raise
+
+    await flush_context_provenance(ctx)
+    return result

@@ -3,15 +3,15 @@ Tests for CLI utility functions and helper modules.
 """
 
 from cognee.cli import debug
-from cognee.cli.config import (
-    CLI_DESCRIPTION,
-    DEFAULT_DOCS_URL,
-    COMMAND_DESCRIPTIONS,
-    SEARCH_TYPE_CHOICES,
-    CHUNKER_CHOICES,
-    OUTPUT_FORMAT_CHOICES,
-)
 from cognee.cli._cognee import _discover_commands
+from cognee.cli.config import (
+    CHUNKER_CHOICES,
+    CLI_DESCRIPTION,
+    COMMAND_DESCRIPTIONS,
+    DEFAULT_DOCS_URL,
+    OUTPUT_FORMAT_CHOICES,
+    SEARCH_TYPE_CHOICES,
+)
 
 
 class TestCliConfig:
@@ -99,8 +99,9 @@ class TestCliReference:
 
     def test_protocol_methods(self):
         """Test that protocol defines required methods"""
-        from cognee.cli.reference import SupportsCliCommand
         import inspect
+
+        from cognee.cli.reference import SupportsCliCommand
 
         # Get abstract methods
         abstract_methods = []

@@ -1,7 +1,7 @@
 """Factory for the litellm_native structured-output client.
 
 Called by ``LLMGateway`` when ``STRUCTURED_OUTPUT_FRAMEWORK="litellm_native"``.
-Unlike the instructor factory there is no provider dispatch — one universal
+Unlike the legacy factory there is no provider dispatch — one universal
 adapter serves every provider — and construction is pure attribute assignment
 (no client build, no I/O), so no caching layer is needed: each call reads the
 active (possibly per-request) config and builds a fresh adapter.
@@ -14,15 +14,18 @@ from cognee.infrastructure.llm.exceptions import LLMAPIKeyNotSetError
 from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
     NativeLiteLLMAdapter,
 )
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 # Providers that do not require ``llm_api_key`` (mirrors get_llm_client): Bedrock
 # authenticates with AWS credentials and llama.cpp runs locally.
 _NO_API_KEY_PROVIDERS = {"bedrock", "llama_cpp"}
 
-# cognee keeps provider and model as separate settings, and the instructor path
+# cognee keeps provider and model as separate settings, and the legacy path
 # did its own per-provider dispatch. litellm instead routes on a
-# provider-qualified model name, so a config that is perfectly valid for
-# instructor -- LLM_PROVIDER=ollama with LLM_MODEL=phi4 -- reaches litellm as a
+# provider-qualified model name, so a config that is perfectly valid for the
+# legacy path -- LLM_PROVIDER=ollama with LLM_MODEL=phi4 -- reaches litellm as a
 # bare "phi4" and dies with:
 #
 #     litellm.BadRequestError: LLM Provider NOT provided. You passed model=phi4
@@ -61,6 +64,7 @@ def _qualify_model(model: str, provider: str) -> str:
         litellm.get_llm_provider(model=model)
         return model
     except Exception:
+        logger.debug("Falling back after error in _qualify_model", exc_info=True)
         prefix = _LITELLM_PROVIDER_PREFIX.get((provider or "").lower())
         return f"{prefix}/{model}" if prefix else model
 
@@ -103,4 +107,6 @@ def get_native_client(raise_api_key_error: bool = True) -> NativeLiteLLMAdapter:
         fallback_api_key=llm_config.fallback_api_key or None,
         fallback_endpoint=llm_config.fallback_endpoint or None,
         llm_args=llm_config.llm_args or None,
+        transcription_model=_qualify_model(llm_config.transcription_model, provider),
+        image_transcribe_model=_qualify_model(llm_config.image_transcribe_model, provider) or None,
     )

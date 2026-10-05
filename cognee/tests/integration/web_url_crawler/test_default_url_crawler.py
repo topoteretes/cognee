@@ -1,4 +1,5 @@
 import pytest
+
 from cognee.tasks.web_scraper import DefaultUrlCrawler
 
 

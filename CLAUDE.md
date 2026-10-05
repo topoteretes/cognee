@@ -45,12 +45,12 @@ pre-commit install
 - **huggingface** - HuggingFace transformers
 - **aws** - S3 storage backend
 - **redis** - Redis caching
-- **graphiti** - Graphiti-core integration
 - **baml** - BAML structured output
 - **dlt** - Data load tool (dlt) integration
 - **docling** - Docling document processing, slim profile without torch (office/HTML/email/markdown/LaTeX formats)
-- **docling-full** - Full docling install with torch-based ML models (adds PDF/image conversion through docling; conflicts with **codegraph** due to tree-sitter pins)
-- **codegraph** - Code graph extraction
+- **docling-full** - Full docling install with torch-based ML models (adds PDF/image conversion through docling)
+- **codegraph** - Compatibility alias; code graph extraction and Enola are included by default
+- **gliner** - GLiNER demo runtime (gliner2 + torch from PyPI — the CUDA build on Linux, for GPU hosts). Optional: without it the first GLiNER cognify installs CPU-only torch plus this extra itself (see "LLM-free Graph Extraction")
 - **evals** - Evaluation tools
 - **deepeval** - DeepEval testing framework
 - **posthog** - PostHog analytics
@@ -125,7 +125,7 @@ As of cognee 1.x the memory API is the primary surface. All functions are async.
 
 1. **remember()** - Store data in memory. Without `session_id` it runs `add()` + `cognify()` and then `improve()` (`self_improvement=True` by default); with `session_id` it writes to the fast session cache and bridges into the graph in the background.
 2. **recall()** - Query memory. Auto-routes to a search strategy unless `query_type` is passed (`auto_route=False` falls back to `HYBRID_COMPLETION`). A `session_id` reads the session cache first and falls through to the graph.
-3. **improve()** - Enrich/index the graph: triplet embeddings, feedback weights, and (with `session_ids`) bridging session Q&A and distilled learnings into the permanent graph.
+3. **improve()** - Run the self-improvement stages over a dataset: with `session_ids`, bridge session Q&A, agent traces, distilled learnings and user preferences into the permanent graph and apply feedback weights; always, triplet enrichment (when `triplet_embedding` is on) and the opt-in global context index. Returns an `ImproveResult` with one `StageResult` per stage (see "IMPROVE: the orchestrator" below).
 4. **forget()** - Unified deletion (`data_id` / `dataset` / `dataset_id` / `everything=True`, plus `memory_only=True` to drop graph+vectors but keep raw files).
 
 #### Low level operations: add → cognify → search/memify
@@ -138,7 +138,7 @@ These still ship and are what the memory API calls underneath. Reach for them to
 4. **memify()** - Enrich graph with additional context and rules
 
 Note: Using Low level operations over core is useful in the following contexts.
-1) functional_relationships= is completely unreachable from remember(). So Only cognify can constrain single-target relationships.
+1) Some add()/cognify() options are not accepted by remember(): it routes kwargs through a fixed allow-list (`_ADD_ONLY` / `_COGNIFY_ONLY` / `_SHARED` in `cognee/api/v1/remember/remember.py`) and raises `TypeError: Unexpected keyword arguments` for anything else. Unreachable today: cognify's `functional_relationships` (so only cognify can constrain single-target relationships), `chunk_attachment`, and `ontology_file_path` (remember still takes an ontology via `config={"ontology_config": {"ontology_resolver": RDFLibOntologyResolver(ontology_file=...)}}` or `ONTOLOGY_FILE_PATH`); add's `skip_connection_test`; the DLT option `column_value_columns`; and extra cognify `**kwargs` forwarded to the extraction tasks. (`add()` accepts but ignores the web-scraping options `tavily_config` / `soup_crawler_config` / `extraction_rules`; `extraction_rules` works from both via `preferred_loaders={"beautiful_soup_loader": {"extraction_rules": ...}}`, with the `scraping` extra installed; without it the rules are silently ignored.)
 2) remember() hardcodes datasets_arg = [dataset_name]: always exactly one. Use cognify for this: cognify(datasets=["a","b","c"]) or datasets=None (every dataset the user owns.)
 3) remember() always runs add() first. To rebuild a graph over data already in the DB — after forget(memory_only=True), or with a new graph_model/ontology, cognify() is the only path.
 4) add() is like a staging area for cognify(). But remember automatically adds every time.
@@ -150,12 +150,12 @@ Improve & Memify are virtually the same, though. So no reason not to use improve
 
 #### recall() vs search()
 
-`recall()` wraps `search()` — its graph path calls the same authorized search — and adds three things: rule-based query routing when `query_type` is omitted (regex scoring, no LLM call, so auto-routing is free), session memory as a searchable source (`scope` = `graph` / `session` / `trace` / `session_context`; with a bare `session_id` a session hit short-circuits the graph search), and normalized results tagged with a `_source` key. Use `recall()` for ordinary retrieval. Drop to `search()` when you need the agentic extras as first-class parameters (`skills`, `tools`, `max_iter`, `code_query`, `node_type`), raw `SearchResult` objects instead of tagged entries, or a pinned `query_type` with no router in the path. Note `search(session_id=...)` only adds session history to the retrieval context — it never searches the session cache as a source; that is `recall()`-only. Full guide: `docs/recall-vs-search.md`.
+`recall()` wraps `search()` — its graph path calls the same authorized search — and adds three things: rule-based query routing when `query_type` is omitted (an ordered first-match rule table in `cognee/api/v1/recall/query_router.py`, no LLM call, so auto-routing is free; it only ever picks CHUNKS_LEXICAL for a fully quoted phrase, CODING_RULES for an explicit phrase, or the HYBRID_COMPLETION default — never CYPHER, which stays behind an explicit `query_type`, and retries as HYBRID_COMPLETION if a routed type comes up empty), session memory as a searchable source (`scope` = `graph` / `session` / `trace` / `session_context` / `session_first`; with a bare `session_id` a session hit short-circuits the graph search, and `scope="session_first"` asks for that short-circuit explicitly), and normalized results tagged with a `source` key. Use `recall()` for ordinary retrieval. Drop to `search()` when you need the agentic extras as first-class parameters (`skills`, `tools`, `max_iter`, `code_query`, `node_type`), raw `SearchResult` objects instead of tagged entries, or a pinned `query_type` with no router in the path. Note `search(session_id=...)` only adds session history to the retrieval context — it never searches the session cache as a source; that is `recall()`-only. Full guide: `docs/recall-vs-search.md`.
 
 ### Key Architectural Patterns
 
 #### 1. Pipeline-Based Processing
-All data flows through task-based pipelines (`cognee/modules/pipelines/`). Tasks are composable units that can run sequentially or in parallel. Example pipeline tasks: `classify_documents`, `extract_graph_from_data`, `add_data_points`.
+All data flows through task-based pipelines (`cognee/modules/pipelines/`). Tasks are composable units that can run sequentially or in parallel. Example pipeline tasks: `classify_documents`, `extract_graph_from_data`, `add_data_points`. The runner semantics (a task's `batch_size` batches the *previous* task's output, `enriches`, `ctx` injection, and which of the two `run_pipeline` functions to import) are in the `cognee/modules/pipelines/__init__.py` docstring; the index of all task implementations is `cognee/tasks/README.md`.
 
 #### 2. Interface-Based Database Adapters
 Multiple backends are supported through adapter interfaces:
@@ -175,19 +175,19 @@ User → Dataset → Data hierarchy with permission-based filtering. Enable with
 | Layer | Backend | Isolated per user+dataset? | Notes |
 |---|---|---|---|
 | Graph | Ladybug/Kuzu (default) | ✅ | embedded, one database per dataset |
-| Graph | Neo4j | ✅ | one Neo4j database per dataset inside the DBMS — requires an edition with multi-database support (Enterprise/Aura). A second handler, `neo4j_aura_dev`, provisions a whole Aura instance per dataset; dev/PoC only, not production-ready |
-| Graph | Postgres | ✅ | graph-on-Postgres is itself a demo feature (see warning above) |
+| Graph | Neo4j | ✅ | default handler `neo4j`: one Neo4j database per dataset inside the DBMS — requires an edition with multi-database support (Enterprise/Aura). Two alternates: `neo4j_community` runs one Docker container per dataset, because Community edition serves exactly one database per server (needs Docker); `neo4j_aura_dev` provisions a whole Aura instance per dataset — dev/PoC only, not production-ready |
+| Graph | Postgres | ✅ | default handler `postgres_graph`: one Postgres database per dataset. `postgres_graph_shared` instead gives each dataset a schema (`ds_<dataset_id>`) in cognee's main database, so no `CREATE DATABASE` privilege is needed. graph-on-Postgres is itself a demo feature (see warning above) |
 | Graph | Turso | ✅ | |
 | Graph | Neptune, ladybug-remote | ❌ | requires `ENABLE_BACKEND_ACCESS_CONTROL=false` |
 | Vector | LanceDB (default) | ✅ | |
-| Vector | PGVector | ✅ | |
+| Vector | PGVector | ✅ | default handler `pgvector`: one Postgres database per dataset. `pgvector_shared` uses a schema (`ds_<dataset_id>`) in cognee's main database instead — no `CREATE DATABASE` privilege needed |
 | Vector | Turso | ✅ | |
 | Vector | Neptune Analytics | ❌ | requires `ENABLE_BACKEND_ACCESS_CONTROL=false` |
 | Vector | Community adapters (ChromaDB, Qdrant, …) | ❌ | unless the adapter registers a handler via `use_dataset_database_handler()` |
 | Relational | SQLite / Postgres | n/a — always shared | one relational DB holds users, ACLs, and the dataset-database registry; it is never isolated per dataset |
 
 How it works:
-- The handler is selected automatically from the configured provider (`GraphConfig.fill_derived` and the vector-config equivalent) — you never set it by hand for in-tree backends.
+- A default handler is derived from the configured provider (`GraphConfig.fill_derived` and the vector-config equivalent), so in-tree backends work with no handler setting at all. An explicit `GRAPH_DATASET_DATABASE_HANDLER` / `VECTOR_DATASET_DATABASE_HANDLER` is never overwritten by that derivation — that is how you reach the non-default handlers named above (`neo4j_community`, `neo4j_aura_dev`, `postgres_graph_shared`, `pgvector_shared`), each of which also requires its matching provider.
 - **Both** the graph and vector backends must support isolation. If either doesn't, cognee raises an `EnvironmentError` naming the unsupported handler — with the flag on (its default), an unsupported backend is a hard error, not a silent fallback to shared databases. The fix is switching backends or setting `ENABLE_BACKEND_ACCESS_CONTROL=false`.
 - New backends gain multi-tenancy by registering a `DatasetDatabaseHandlerInterface` implementation in the registry (or at runtime via `use_dataset_database_handler()`).
 
@@ -221,6 +221,17 @@ NOTE: This is how the memory API flow works under the hood; it's read as a flow 
 
 Key files: `cognee/api/v1/remember/remember.py`, `cognee/api/v1/recall/recall.py`, `cognee/api/v1/improve/improve.py`, `cognee/api/v1/forget/forget.py`
 
+#### IMPROVE: the orchestrator
+`improve()` is an explicit orchestrator over an ordered registry of nine stages (`cognee/modules/improve/registry.py:DEFAULT_STAGES`): `feedback_weights`, `persist_session_qa`, `persist_agent_traces`, `extract_agent_context`, `distill_sessions`, `update_user_preferences`, `build_truth_subspace`, `triplet_enrichment`, `global_context_index`. The first seven need `session_ids`; the last two work on the graph alone. Order is load-bearing (4 feeds 5, 5 feeds 7, 7 runs before 8) and a test pins it.
+
+Each stage is a gate plus a call into existing code plus a result mapping — it never owns retries or ordering. `gate()` runs before any LLM or embedding cost and returns a skip reason (`no_session_ids`, `backend_unsupported`, `triplet_embedding_disabled`, `opt_in_disabled`, `personalization_disabled`, `disabled_by_config`, …). `run()` returns a `StageResult` whose `status` reuses `PipelineRunInfo`'s vocabulary — `completed`, `already_completed` (nothing new since the stage's watermark), `errored` — plus `skipped`. Only `persist_session_qa` is `fatal=True`; every other failure is recorded as `errored` and the run continues. One failure is run-wide instead: a stage that errors because the LLM budget is exhausted (`LLMPaymentRequiredError`, HTTP 402; `StageResult.budget_exhausted` classifies both a raised error and a `PipelineRunErrored` a stage's pipeline only reported) stops the run, since every later stage would fail the same way — the remaining stages are `skipped: budget_exhausted` and no rerun pass starts. The stage that hit it stays `errored` and so does the run; when it is the fatal stage the run still raises, with `budget_exhausted` instead of `aborted_by_fatal_stage` on the stages it cut off. For the same reason `cognify_session` stops at the first session window whose build fails on the budget and raises `LLMPaymentRequiredError` unwrapped; watermarks of unpersisted windows stay put.
+
+The run resolves the dataset once and hands every stage a frozen `ImproveRunInputs` (user, resolved dataset id, session ids, `ImproveConfig`, adapter `GraphCapabilities`). It claims one improve lock keyed to the run — every session id given (scoped by user id) plus `dataset:<id>`, so improves for one dataset serialize — and holds it until the last stage finishes, background included; a lost claim returns an `ImproveResult` whose stages are all `skipped: lock_held` (never `{}`). A session-keyed run that loses the claim to a run holding one of its sessions asks that holder for one more pass (`rerun_requested=True` on the loser's result); the holder runs the stages again before releasing — cheap, every stage is watermark-gated — and reports the extra passes in `rerun_passes` (at most 2 extra, 3 passes in total: `IMPROVE_MAX_RERUN_PASSES = 3` in `cognee/api/v1/improve/improve.py` counts the first pass, and is a constant, not an env var). Dataset-only runs do not take part, so a burst of `remember()` calls on one dataset still collapses into one enrichment. `run_in_background=True` runs all stages in one anchored task; await it with `await result.wait()`. `ImproveResult` is what every surface returns: SDK, `POST /api/v1/improve` (`response_model`), the CLI (one line per stage), and `RememberResult.improve` / `.improve_error` (MCP reaches improve only through `remember`'s `self_improvement` — `improve` is deliberately not an advertised MCP tool; the advertised tool set is pinned to remember/recall/forget/code_search, with cognify_status registered but not advertised) (an improve failure after a successful cognify no longer marks the remember as errored). Triplet enrichment reports `already_completed` when `pipeline_runs` shows no write pipeline for the dataset since the last completed enrichment — the watermark is the improve row's stage-8 stamp, so a run whose stage 8 was skipped never gates a later one (a `node_name`-scoped run bypasses the check); the improve operation row that carries the stamp is written when the run finishes — deferred to the background task in background mode — with a failed outcome when any stage errored (so a retry is never gated off) and a `noop` outcome when nothing ran — a lost lock claim or an all-skipped run — so a no-op call never advances the watermark. Feedback-weight application records applied element ids per QA row so a deleted node no longer causes the same feedback to be re-applied on every run; trace persistence and distillation carry watermarks like Q&A persistence already did.
+
+Settings the loop owns live in `ImproveConfig` (env prefix `IMPROVE_`): `IMPROVE_AUTO_ENABLED` (default true; false turns off the automatic improve after `remember()`), `IMPROVE_DEBOUNCE_ENTRIES` / `IMPROVE_DEBOUNCE_SECONDS` (session-path auto-improve fires only after that many new entries or that much time; seconds alone is time-only — the entries default of 1 steps aside — and there is no timer, so the check runs on each `remember()`), `IMPROVE_STAGES_DISABLED` (csv of stage names), `IMPROVE_FEEDBACK_ALPHA` (learning rate, default 0.1). Shared knobs stay with their owners: `triplet_embedding` (cognify), `CACHING` / `AUTO_FEEDBACK` (cache layer), `PERSONALIZATION_ENABLED`, `DEFAULT_FEEDBACK_INFLUENCE`. `cognee.wait_for_background_tasks()` drains background improves before a script exits; the API server drains them on shutdown. A host application can also decline a single automatic improve before it starts: `cognee.modules.improve.register_auto_improve_admission(check)` registers one async check per process (a later registration replaces it, `None` / `clear_auto_improve_admission()` removes it) that `remember()` awaits on both paths with `user`, `dataset_id`, `session_id` and `session_ids` — only when an improve would otherwise run, and before the session debounce is consulted, so a skipped bridge never spends the window. A returned reason string (`"insufficient_credits"`) skips the improve and lands on `RememberResult.improve_skipped` (also in `to_dict()`); the data is stored either way. The check is fail-open — one that raises, or answers with anything but `None` or a non-empty string, allows the improve — and explicit `improve()` calls are never gated. Frequency weights were removed (no adapter implemented them and nothing read them).
+
+Key files: `cognee/modules/improve/` (`stage.py`, `stages.py`, `registry.py`, `result.py`, `inputs.py`, `capabilities.py`, `config.py`, `graph_changes.py`, `admission.py`), `cognee/api/v1/improve/improve.py`, `cognee/infrastructure/background_tasks.py`, `cognee/api/v1/remember/auto_improve_debounce.py`
+
 The stages below are the Low level operations these call underneath.
 
 #### ADD: Data Ingestion
@@ -229,12 +240,22 @@ The stages below are the Low level operations these call underneath.
 Key files: `cognee/api/v1/add/add.py`, `cognee/tasks/ingestion/ingest_data.py`
 
 #### COGNIFY: Knowledge Graph Construction
-`cognify()` → `classify_documents` → `extract_chunks_from_documents` → `extract_graph_from_data` (LLM extracts entities/relationships using Instructor) → `summarize_text` → `add_data_points` (store in graph + vector DBs)
+`cognify()` → `classify_documents` → `extract_chunks_from_documents` → `extract_graph_from_data` (LLM extracts entities/relationships using Instructor) → `summarize_text` → `add_data_points` (store in graph + vector DBs). With SUMMARY_METHOD=from_extraction or `cognify(summary_method="from_extraction")` (opt-in), summarize_text is replaced by build_summary_from_extraction, which joins one line per extracted type, then the chunk's extracted relation texts, with no LLM call.
 
 Key files:
 - `cognee/api/v1/cognify/cognify.py`
 - `cognee/tasks/graph/extract_graph_from_data.py`
 - `cognee/tasks/storage/add_data_points.py`
+
+#### UPDATE: Chunk-Level Incremental Updates
+`update(data_id, data, dataset_id)` diffs the new content against the stored processed text (`Data.raw_data_location`) and replaces only the chunks the edits touched: a paragraph-anchored multi-region diff (near-linear for any change shape, including repeated-line-heavy content) finds every disjoint changed span (so edits at the top, middle, and end of a document are three small regions, not one giant one), each span is expanded to chunk boundaries and re-chunked with the standard TextChunker (same boundary semantics as pipeline chunks, cut against the token budget recorded on the chunks it replaces — every chunk stores `max_chunk_tokens`, so documents stay self-consistent across config changes; legacy chunks without the field fall back to the current config; only a region's last chunk may be under-filled), replaced chunks (plus their summaries, chunk-orphaned entities, and triplet embeddings) are deleted, and only the new chunks run through LLM extraction. Chunks between regions are kept without being re-chunked, so their boundaries and ids cannot drift. Unaffected chunks keep their node ids, entities, summaries, and embeddings; surviving chunks are renumbered so `chunk_index` stays contiguous. Chunk identity is content-derived (`uuid5(doc : sha256(text) : occurrence)`, see `cognee/modules/chunking/chunk_id.py`), so unchanged content keeps its identity across edits. Both incremental and full fallback paths preserve `data_id`.
+
+Runs under the per-dataset lock with the dataset-scoped database context (multi-tenant-safe). Falls back to the full delete + re-add + cognify flow when preconditions fail (first ingestion, non-text content, pre-v2 chunk ownership, or an unverified graph adapter — verified: Kuzu/Ladybug, Neo4j and the Postgres demo adapter; Neptune falls back); disable with `update(..., chunk_level_diff=False)` or the same query param on `PATCH /update`.
+
+Key files:
+- `cognee/api/v1/update/update.py` / `cognee/api/v1/update/incremental.py`
+- `cognee/modules/chunking/incremental_chunking.py` (diff + balanced re-split, no-loss invariant)
+- `cognee/modules/graph/methods/delete_chunks_incremental.py` (chunk-scoped orphan deletion)
 
 #### SEARCH: Retrieval
 `search(query_text, query_type)` → route to retriever type → filter by permissions → return results
@@ -242,7 +263,7 @@ Key files:
 Available search types (from `cognee/modules/search/types/SearchType.py`), passed as `query_type` to `recall()` or `search()`:
 - **HYBRID_COMPLETION** (default) - Document passages plus entity neighbourhoods, then LLM completion
 - **GRAPH_COMPLETION** - Graph traversal + LLM completion
-- **GRAPH_SUMMARY_COMPLETION** - Uses pre-computed summaries with graph context
+- **GRAPH_SUMMARY_COMPLETION** - Graph traversal plus a second LLM call that summarizes the answer (reads no pre-computed summaries)
 - **GRAPH_COMPLETION_COT** - Chain-of-thought reasoning over graph
 - **GRAPH_COMPLETION_CONTEXT_EXTENSION** - Extended context graph retrieval
 - **TRIPLET_COMPLETION** - Triplet-based (subject-predicate-object) search
@@ -250,16 +271,23 @@ Available search types (from `cognee/modules/search/types/SearchType.py`), passe
 - **CHUNKS** - Vector similarity search over chunks
 - **CHUNKS_LEXICAL** - Lexical (keyword) search over chunks
 - **SUMMARIES** - Search pre-computed document summaries
-- **CYPHER** - Direct Cypher query execution (requires `ALLOW_CYPHER_QUERY=True`)
+- **CYPHER** - Direct Cypher query execution (enabled by default; `ALLOW_CYPHER_QUERY=false` disables it)
 - **NATURAL_LANGUAGE** - Natural language to structured query
 - **TEMPORAL** - Time-aware graph search
 - **FEELING_LUCKY** - Automatic search type selection
 - **CODING_RULES** - Code-specific search rules
+- **SKILLS** - Semantic discovery of skill playbooks (metadata-only, no LLM; requires exactly one dataset)
+- **GRAPH_COMPLETION_DECOMPOSITION** - Splits the question into focused sub-queries, then runs graph completion over the merged context
+- **AGENTIC_COMPLETION** - Multi-step LLM loop that can load `skills` and call `tools`; bounded by `max_iter`
+- **CODE** - Deterministic operations over the code graph via `code_query` (no LLM); see "Code Files" below
+- **GRAPH_REPORT** - Graph insight report: hub nodes, cross-node-set connections, edge provenance, suggested questions
 
-`recall()` picks one of these automatically when `query_type` is omitted. The CLI is narrower: `cognee-cli recall --query-type` accepts only the choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES` and defaults to `HYBRID_COMPLETION`; the rest are SDK-only.
+`recall()` picks one of these automatically when `query_type` is omitted; so does `cognee-cli recall` when `--query-type` is omitted, and `POST /api/v1/recall` when `searchType` is omitted or `null` (the default). The CLI's explicit `--query-type` accepts only the choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES`; the rest are SDK-only. Routing rules and bypass options: `docs/recall-vs-search.md`.
 
 Key files:
 - `cognee/api/v1/search/search.py`
+- `cognee/modules/retrieval/README.md` — SearchType → retriever class table (kept in sync by a unit test)
+- `cognee/modules/search/methods/get_search_type_retriever_instance.py` — the registry itself
 - `cognee/modules/retrieval/context_providers/TripletSearchContextProvider.py`
 - `cognee/modules/search/types/SearchType.py`
 
@@ -284,20 +312,22 @@ Unified interface for multiple LLM providers: OpenAI, Anthropic, Gemini, Ollama,
 Factory pattern for embeddings: `cognee/infrastructure/databases/vector/embeddings/get_embedding_engine.py`
 
 #### Document Loaders
-Support for PDF, DOCX, CSV, images, audio, code files in `cognee/infrastructure/files/`
+Support for PDF, CSV, images, audio, video, code files (DOCX/PPTX and other office formats through the `docs`/`docling` extras) in `cognee/infrastructure/loaders/` — core loaders in `core/`; loaders backed by third-party libraries in `external/` (pypdf and dlt are core deps; unstructured and beautiful_soup register only with their extras, `docs` / `scraping`; docling registers without its extra but raises on first use; advanced_pdf falls back to pypdf without `docs`); registry in `supported_loaders.py`
 
 ## Important Configuration
 
 ### Environment Setup
-Copy `.env.template` to `.env` and configure:
+Copy `.env.template` to `.env` and configure. Cognee finds the file once per process, at import, searching the working directory and its parents first, then the cognee package directory and its parents (`cognee/shared/env_file.py`). Each search stops at the project root, the nearest directory with a `.git` or `pyproject.toml`, so a `.env` above a project is never loaded; with no such marker (a plain folder of scripts) it continues up to the filesystem root. `COGNEE_ENV_FILE=/path/to/file` skips the search and loads that file (a path that is not a file raises at import). Values from the file take precedence over variables already set in the shell, for settings classes and `os.getenv` reads alike, so a project `.env` is the single source of truth wherever the environment happens to be installed. The path that was loaded (or "No .env file found") is logged at info on import.
 
 ```bash
 # Minimal setup (defaults to OpenAI + local file-based databases)
 LLM_API_KEY="your_openai_api_key"
-LLM_MODEL="openai/gpt-5-mini"  # Default model
+LLM_MODEL="openai/gpt-5.6-luna"  # Default model
 ```
 
 **Important**: If you configure only LLM or only embeddings, the other defaults to OpenAI. Ensure you have a working OpenAI API key, or configure both to avoid unexpected defaults.
+
+**No key at all** is also a working setup: with no LLM and no embedding credentials configured, cognify extracts the graph with the local GLiNER demo model (`pip install "cognee[gliner]"` recommended; without it the CPU runtime installs itself on first use; see "LLM-free Graph Extraction (GLiNER demo)" below) and embeds with the local fastembed model (a core dependency); models download on first use (a warning names the model, its size and the cache location while that happens; `HF_HOME` and `FASTEMBED_CACHE_PATH` move the caches), and `recall()` without a `query_type` answers with `CHUNKS`. The switch is per half — `GRAPH_EXTRACTOR=auto` (default) resolves on the LLM key, embeddings resolve on "nothing configured and no LLM key" — so setting any credential or any embedding setting takes that half back to the configured provider. The env vars that disable the preflight (`COGNEE_SKIP_PREFLIGHT`, `COGNEE_SKIP_CONNECTION_TEST`, `MOCK_EMBEDDING`) also disable this rerouting (`keyless_local_defaults_apply()`): a mocked or deliberately partial config is honoured, not replaced. See "LLM-free Graph Extraction (GLiNER)" below.
 
 Default databases (no extra setup needed):
 - **Relational**: SQLite (metadata and state storage)
@@ -349,7 +379,7 @@ GRAPH_DATABASE_PASSWORD=your_password
 
 # Postgres (requires postgres extra: pip install cognee[postgres])
 # DEMO, not production-ready — see the warning below.
-# Does not support raw Cypher queries, natural language search, or Graphiti.
+# Does not support raw Cypher queries or natural language search.
 # The legacy value `postgres` still resolves to this same adapter.
 GRAPH_DATABASE_PROVIDER=postgres_demo
 GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
@@ -400,49 +430,80 @@ Concurrent mode applies only to `GraphCompletionRetriever`,
 automatically. With `AUTO_FEEDBACK=false`
 neither mode analyzes the turn.
 
-#### only_context and `context_format`
+#### Completion prompt layout
 
-`only_context=True` returns the retrieval context instead of an LLM completion. By
-default that is the bare context string and nothing else — no session guidance, no
-conversation history, no rendered prompt — which is less than a real completion
-receives. Pass `context_format="prompt"` to get the full envelope instead:
+Every completion is assembled by one function, `build_completion_prompts` in
+`cognee/modules/retrieval/utils/completion.py`. The **system prompt** is the retriever's
+task template and nothing else: cognee-authored, static per retriever, so it never
+changes between turns. Everything derived from the user goes into the **user prompt**, in
+this order: the conversation history, the rendered question-and-context template, and
+the guidance block last (the `## Active session guidance` block with a session, the
+durable preference block sessionless). The session layer travels as one
+`SessionPrompt(history, guidance)` value, defined next to the builder; `SessionPrompt()`
+is the empty layer and sessionless callers pass `SessionPrompt(guidance=preference_text)`.
+
+The placement was measured across every combination, not chosen by taste. Soft
+preferences ("the user prefers German") are ignored from the system prompt by the
+default model and followed from the user turn; history is only used when it sits next
+to the context the template points at (the user template says "do not use information
+outside the context", so history delivered as system text or as chat turns is refused);
+guidance placed last wins over older turns that asked for something else; and an
+instruction planted in a past answer is obeyed only from the system prompt. Keep those
+four properties when touching the templates.
+
+#### only_context
+
+`only_context=True` returns what the LLM would have received instead of its answer. For
+completion search types that is the two messages a completion sends, kept apart: the
+**user prompt** (conversation history, then the question and the retrieval context
+rendered through the retriever's user template, then the session guidance block) and the
+**system prompt** (the retriever's task template). `search()` returns the user prompt as the result
+and, with `verbose=True`, carries both as `user_prompt_result` / `system_prompt_result`; a
+`recall()` item has the user prompt in `text` and the system prompt in `system_prompt`.
+Both are built by the same code the real completion uses (`build_session_prompt` in
+read-only mode plus `build_completion_prompts`, see
+`cognee/modules/retrieval/only_context_prompt.py`), so they cannot drift from what
+`generate_completion` sends.
 
 ```python
-result = await cognee.recall(
+items = await cognee.recall(
     "why did the migration stall?",
     query_type=SearchType.GRAPH_COMPLETION,  # pin the graph lane — with a bare
-    session_id="s1",                         # session_id a session hit would
-    only_context=True,                       # short-circuit it (see recall vs search)
-    context_format="prompt",                 # default: "context"
+    session_id="s1",  # session_id a session hit would
+    only_context=True,  # short-circuit it (see recall vs search)
 )
+user_prompt, system_prompt = items[0].text, items[0].system_prompt
 ```
 
-The `"prompt"` shape returns `question`, `context`, `session_context` (the guidance
-block plus conversation history), `user_prompt`, and `system_prompt` — the exact
-strings `generate_completion` would have sent, built by the same code
-(`build_session_prompt` in read-only mode plus `build_completion_prompts`). It makes no
-LLM completion or turn-analysis call, writes nothing to the session, and records no QA
-turn. It does make **one embedding call** — the conversation-history vector recall —
-once per search, shared across the dataset fan-out. With `CACHING=false` the
-`system_prompt` still carries the durable preference block, exactly as the real
-sessionless completion does.
+What it does and does not do: no LLM completion, no turn-analysis call, nothing written
+to the session, no QA turn recorded. It does make **one embedding call** — the
+conversation-history vector recall — once per search, shared across the dataset fan-out,
+and only when a prompt is actually built. With `CACHING=false` the system prompt still
+carries the durable preference block, exactly as the real sessionless completion does.
+Retrievers whose *retrieval* stage calls an LLM (`GRAPH_COMPLETION_COT`,
+`GRAPH_COMPLETION_DECOMPOSITION`, `GRAPH_COMPLETION_CONTEXT_EXTENSION`, `TEMPORAL`'s time
+extraction, `GRAPH_SUMMARY_COMPLETION`'s summaries) still make those calls under
+`only_context`, as they always have; for them the pair is the final prompts over the
+final context.
 
-Search types that never send a single prompt from their template pair report the
-session layer and leave `user_prompt`/`system_prompt` empty: the non-generative types
-(`CHUNKS`, `SUMMARIES`, `CODE`, …) have no template, and `CYPHER` and
-`AGENTIC_COMPLETION` opt out via `supports_prompt_preview = False` (Cypher never
-prompts; the agentic loop answers through other templates). For `recall()`, an empty
-retrieval yields zero items in either format, so the `on_empty` tools fallback still
-fires.
+Where the pair is *not* built and the bare retrieval context comes back instead: the
+non-generative types (`CHUNKS`, `SUMMARIES`, `CODE`, `SKILLS`, …) have no prompt
+template; `CYPHER` and `AGENTIC_COMPLETION` opt out via `supports_prompt_preview = False`
+(Cypher never prompts; the agentic loop answers through other templates); and an empty
+retrieval returns the empty context, never a prompt wrapped around nothing, so "nothing
+found" stays detectable — for `recall()` it yields zero items and the `on_empty` tools
+fallback still fires. The bare context stays reachable for callers that only want that:
+`search(verbose=True)` carries it as `context_result` next to the two prompts.
+`@agent_memory(memory_only_context=True)` reads `context_result`, so an agent's memory
+block never contains cognee's own question framing or answer instructions.
 
-Caveats. `context_format` only affects `only_context` calls. `POST /api/v1/search`
-accepts `session_id`; without one the session layer is the default session's. And the
-preview is knowingly unfaithful in one place: a real sequential turn first rewrites the
-question (`effective_query`), and that rewrite fills `{{ question }}`, drives history
-selection, and ranks the guidance block — concurrent mode also merges a second
-retrieval lane. Producing the rewrite is an LLM call, so the preview uses the raw query
-for all of them: it reports the prompt for the context actually retrieved, not a
-replay of a full turn.
+Caveats. `POST /api/v1/search` accepts `session_id`; without one the session layer is
+the default session's. And the pair is knowingly unfaithful in one place: a real
+sequential turn first rewrites the question (`effective_query`), and that rewrite fills
+`{{ question }}`, drives history selection, and ranks the guidance block — concurrent
+mode also merges a second retrieval lane. Producing the rewrite is an LLM call, so the
+raw query is used for all of them: the pair is the prompts for the context actually
+retrieved, not a replay of a full turn.
 
 ### Memory & Performance Tuning Flags
 
@@ -450,10 +511,10 @@ Four flags trade memory features for speed. Know what each turns off before flip
 
 | Flag (default) | Turns off when disabled | Cost of disabling |
 |---|---|---|
-| `PERSONALIZATION_ENABLED=false` | Per-user preference personalization: one `UserPreference` node per user+dataset with weighted `prefers` edges, retrieval ranking multiplied by those weights, stated-preference text injected into LLM prompts, the per-turn 1-5 rating question, and the `improve()` stage that folds ratings into weights | Off by default, so nothing is lost until you opt in. When on, ranking strength comes from `PERSONALIZATION_INFLUENCE` (default 0.3, valid range [0, 1] — out-of-range values are rejected at startup); personalization also needs a user and a single resolved dataset in context, so multi-dataset searches never personalize |
+| `PERSONALIZATION_ENABLED=false` | Per-user preference personalization: one `UserPreference` node per user+dataset with weighted `prefers` edges, retrieval ranking multiplied by those weights, stated-preference text injected into LLM prompts, and the `improve()` stage that folds ratings into weights (the per-turn 1-5 rating question itself is part of automatic feedback analysis — gated by `AUTO_FEEDBACK`, not this flag — so the rating is produced and stored even before personalization is switched on) | Off by default, so nothing is lost until you opt in. When on, ranking strength comes from `PERSONALIZATION_INFLUENCE` (default 0.3, valid range [0, 1] — out-of-range values are rejected at startup); personalization also needs a user and a single resolved dataset in context, so multi-dataset searches never personalize |
 | `CACHING=true` | The entire session-memory layer: `remember(session_id=...)` raises, `recall()` loses session history and the session-cache short-circuit, `agent_memory` session options error, and `AUTO_FEEDBACK` becomes moot | You lose the fast session write path and self-improving memory — only the slower add+cognify path remains. Do not benchmark cognee with this off; that measures cognee with its memory layer removed |
 | `AUTO_FEEDBACK=true` | The automatic per-turn analysis: one structured-output LLM call after each answered query that detects implicit feedback, guides later retrievals, and feeds `improve()`'s agent-context lessons | Memory stops self-tuning from conversation signals. Session store/recall itself keeps working — this is the flag to disable for low-latency reads, since the per-turn LLM call dominates default read latency |
-| `DATASET_QUEUE_ENABLED=true` | The per-process cap on concurrent datasets (`DATASET_QUEUE_MAX_CONCURRENT`, default 6), subprocess-engine teardown on scope exit, and pinning of in-use engines against cache eviction | Saves minor per-operation overhead, but embedded engines become unbounded: file-lock leaks and mid-use engine eviction under parallel multi-dataset load. Safe only for single-dataset scripts |
+| `DATASET_QUEUE_ENABLED=true` | The per-process cap on concurrent datasets (`DATASET_QUEUE_MAX_CONCURRENT`, default 6), subprocess-engine release on scope exit (kept warm for `SUBPROCESS_IDLE_TTL_SECONDS`, default 600; closed at once when 0), and pinning of in-use engines against cache eviction. Only engages when `ENABLE_BACKEND_ACCESS_CONTROL` is on (its default) — with access control off the flag is a no-op either way | Saves minor per-operation overhead, but embedded engines become unbounded: file-lock leaks and mid-use engine eviction under parallel multi-dataset load. Safe only for single-dataset scripts |
 
 `AUTO_FEEDBACK` is only consulted when `CACHING=true`. If reads feel slow on defaults, set `AUTO_FEEDBACK=false` and keep `CACHING=true` — that keeps session memory while removing the per-turn LLM call.
 
@@ -464,7 +525,7 @@ Supported providers: OpenAI (default), Azure OpenAI, Google Gemini, Anthropic, A
 #### OpenAI (Recommended - Minimal Setup)
 ```bash
 LLM_API_KEY="your_openai_api_key"
-LLM_MODEL="openai/gpt-5-mini"  # default; or gpt-5, gpt-4o, gpt-4o-mini, etc.
+LLM_MODEL="openai/gpt-5.6-luna"  # default; or gpt-5.6-terra, gpt-5-mini, gpt-4o, etc.
 LLM_PROVIDER="openai"
 ```
 
@@ -495,7 +556,7 @@ LLM_API_KEY="your_anthropic_api_key"
 ```bash
 LLM_PROVIDER="ollama"
 LLM_MODEL="llama3.1:8b"
-LLM_ENDPOINT="http://localhost:11434/v1"
+LLM_ENDPOINT="http://localhost:11434"  # bare host; /v1 only with the instructor framework
 LLM_API_KEY="ollama"
 EMBEDDING_PROVIDER="ollama"
 EMBEDDING_MODEL="nomic-embed-text:latest"
@@ -579,7 +640,7 @@ SYSTEM_ROOT_DIRECTORY="s3://your-bucket/cognee/system"
 1. **New Task Type**: Create task function in `cognee/tasks/`, return Task object, register in pipeline
 2. **New Database Backend**: Implement `GraphDBInterface` or `VectorDBInterface` in `cognee/infrastructure/databases/`
 3. **New LLM Provider**: Add configuration in LLM config (uses litellm)
-4. **New Document Processor**: Extend loaders in `cognee/modules/data/processing/`
+4. **New Document Processor**: Implement `LoaderInterface` in `cognee/infrastructure/loaders/` and register it in `supported_loaders.py` there
 5. **New Search Type**: Add to `SearchType` enum and implement retriever in `cognee/modules/retrieval/`
 6. **Custom Graph Models**: Define Pydantic models extending `DataPoint` in your code
 
@@ -591,7 +652,10 @@ Configuration:
 ONTOLOGY_RESOLVER=rdflib  # Default: uses rdflib and OWL files
 MATCHING_STRATEGY=fuzzy   # Default: fuzzy matching with 80% similarity
 ONTOLOGY_FILE_PATH=/path/to/your/ontology.owl  # Full path to ontology file
+ONTOLOGY_MODE=annotate    # Default: enrich only. strict drops entities with no ontology grounding
 ```
+
+`ONTOLOGY_MODE=strict` keeps an entity when either its type matches an ontology class or its name matches an individual, and drops the rest (plus their edges). It prunes only the graph — chunk text stays stored/embedded, so CHUNKS/RAG_COMPLETION can still surface dropped entities. It expects an ontology covering the corpus's vocabulary (a small ontology drops most entities; an aggregate dropped/retained count is logged), and an empty/missing ontology file with strict on is a hard error. The mode can also be set per call via `config={"ontology_config": {"ontology_mode": "strict", ...}}`.
 
 Implementation: `cognee/modules/ontology/`
 
@@ -635,11 +699,13 @@ this rule applies only to internal PRs.
 
 ## Testing Strategy
 
-Tests are organized in `cognee/tests/`:
+Tests are organized in `cognee/tests/` (layout, credentials per folder, and how to run without API keys: `cognee/tests/README.md`; `pytest` with no path collects only this tree):
 - `unit/` - Unit tests for individual modules
 - `integration/` - Full pipeline integration tests
+- `e2e/` - Full-stack end-to-end suites run per backend in CI (e.g. `e2e/incremental_update/` runs on LadybugDB + LanceDB, Postgres graph + PGVector, and Neo4j + LanceDB; `e2e/keyless/` proves ingestion with no LLM key on real local models from core deps only, the GLiNER runtime installed at first use)
 - `cli_tests/` - CLI command tests
 - `tasks/` - Task-specific tests
+- `journeys/` - High-level product contract tests (quickstart, golden-corpus correctness, sessions, lifecycle, idempotency, HTTP API). Deterministic mock-LLM mode by default, `COGNEE_JOURNEY_MODE=llm` for real providers. See `cognee/tests/journeys/README.md`.
 
 When adding features, add corresponding tests. Integration tests should cover the full remember → recall flow (or add → cognify → search when the feature lives in one of those stages).
 
@@ -685,6 +751,7 @@ All functions are async - use `await` or `asyncio.run()`. See `examples/advanced
 
 Several security environment variables in `.env`:
 - `ACCEPT_LOCAL_FILE_PATH` - Allow local file paths (default: True)
+- `COGNEE_ALLOWED_LOCAL_FILE_ROOTS` - Optional `os.pathsep`-separated allowlist of directories local paths may be read from. Unset (default) means any local path is accepted, so a local repo or document tree can be ingested from anywhere; a path-looking string that does not exist is still ingested as text. When set, paths outside the listed roots are rejected (or ingested as text on the non-strict `add()` path); cognee's own data/system/cache/logs/repos roots are always allowed. Set it for servers reachable by untrusted callers.
 - `ALLOW_HTTP_REQUESTS` - Allow HTTP requests from Cognee (default: True)
 - `ALLOW_CYPHER_QUERY` - Allow raw Cypher queries (default: True)
 - `ENABLE_BACKEND_ACCESS_CONTROL` - Multi-tenant isolation (default: True). When `true`, API auth is required and per-user/dataset DB isolation is enabled. When `false`, single-user mode: shared DBs and auth off unless overridden.
@@ -696,12 +763,14 @@ For production deployments, review and tighten these settings.
 
 ### Creating a Custom Pipeline Task
 ```python
-from cognee.modules.pipelines.tasks.Task import Task
+from cognee.modules.pipelines.tasks.task import Task
+
 
 async def my_custom_task(data):
     # Your logic here
     processed_data = process(data)
     return processed_data
+
 
 # Use in pipeline
 task = Task(my_custom_task)
@@ -718,13 +787,10 @@ vector_engine = await get_vector_engine_async()
 
 ### Using LLM Gateway
 ```python
-from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
-llm_client = get_llm_client()
-response = await llm_client.acreate_structured_output(
-    text_input="Your prompt",
-    system_prompt="System instructions",
-    response_model=YourPydanticModel
+response = await LLMGateway.acreate_structured_output(
+    text_input="Your prompt", system_prompt="System instructions", response_model=YourPydanticModel
 )
 ```
 
@@ -744,6 +810,16 @@ await cognee.recall("my question", datasets=["my_project"])
 ### DataPoints
 Atomic knowledge units that form the foundation of graph structures. All graph nodes extend the `DataPoint` base class with versioning and metadata support.
 
+### Custom Graph Models with Typed Edges
+Pass a DataPoint-derived Pydantic model as `graph_model` to `remember()`/`cognify()` and the LLM fills it instead of the generic `KnowledgeGraph`. A field holding a DataPoint (or a list of them) becomes an edge named after the field. Two declarations go further:
+
+- **Typed edge fields** — `list[Edge[Source, Target]]`: the LLM answers flat rows (source/target as identity strings) that cognee resolves against the extracted nodes. The third generic controls naming: omitted = the field name; `Literal["a", "b"]` = the LLM picks one; `str` = free-form (normalized). Declare the edge on the root graph model for relationships with no obvious owner, or on the owning node — endpoints of the owner's own type must then be spelled as strings (`Edge["Person", "Person"]`), which resolve against the owning model and its module. A hand-built `Edge` value that omits `source` falls back to the node declaring it; on a parametrized field the declaring node must match the declared `Source`, or the walk raises.
+- **Identity references** — `Annotated[Role, FromIdentity()]`: the LLM answers the identity string of an existing node instead of a nested object. Supported spellings: `Target`, `Target | None`, `list[Target]`, `list[Target] | None` (Annotated anywhere); anything else raises `InvalidReferenceTypeError` at model-build time.
+
+Constraints: every edge endpoint and `FromIdentity` target needs exactly one entry in `metadata["identity_fields"]`; endpoints resolve by **exact type**, so a subclass instance does not resolve where its base is declared; a row that cannot be resolved is dropped with a warning — it never fails the chunk.
+
+Key files: `cognee/shared/llm_graph_model.py` (the LLM boundary, both directions), `cognee/infrastructure/engine/models/Edge.py`. Example: `examples/guides/custom_graph_model.py`.
+
 ### Contradiction Detection
 Opt-in LLM check that runs as the last `cognify()` task (default **off**). After the graph is stored, it gathers the facts one hop from the entities this ingestion touched — new and pre-existing alike — asks an LLM which pairs cannot both be true, and records each confident conflict as a `contradicts` edge carrying both fact texts, the reason, and the confidence. It only adds edges (never rewrites or deletes) and swallows its own errors, so it can never break ingestion.
 
@@ -752,12 +828,57 @@ Opt-in LLM check that runs as the last `cognify()` task (default **off**). After
 - **Applies to `remember()` too** — and to session memory bridged back by `improve()` — since those build their graphs through `cognify()`. The exception is `remember(content_type="code")`, which runs the separate code-graph pipeline.
 - **Scope / limitations**: only the 1-hop neighbourhood of the touched entities is compared; structural edges (`contains`, `is_part_of`, `made_from`, `exists_in`, `contradicts`) and edges with an unnamed endpoint are skipped; the temporal cognify path is not covered.
 
+### LLM-free Graph Extraction (GLiNER demo)
+
+> **Demo:** The open-source GLiNER extractor (`gliner_demo`) is a demo of cognee's
+> enterprise GLiNER extraction, like `postgres_demo` is the demo graph backend. It is free
+> to use and needs no LLM key; the production-grade version (higher accuracy, broader label
+> coverage) is available with a cognee enterprise licence. The first run with it logs that
+> notice once per process.
+>
+> Interested in the production-grade GLiNER extraction? Write to us at social@cognee.ai
+> to explore the options.
+
+Replacement for the LLM extract-and-summarize step of the default `cognify()` task list. `GRAPH_EXTRACTOR` defaults to **auto**: the LLM path when a usable LLM key is configured (`llm_available()`), the GLiNER demo when none is — so a fresh install with no credentials ingests on local models, and the moment `LLM_API_KEY` is set the pipeline is the LLM one, unchanged. `GRAPH_EXTRACTOR=gliner_demo` / `llm`, or `cognify(extractor=...)` / `remember(extractor=...)` (explicit argument wins over the env setting) pin one regardless of credentials. Resolution happens once, in `resolve_extractor()` (`cognee/modules/cognify/config.py`); when it resolves to `gliner_demo` and `gliner2`/`torch` are missing, it installs the runtime before any work starts (`GLINER_AUTO_INSTALL=false` raises `KeylessExtractorNotInstalledError` instead). The GLiNER pipeline in `cognee/tasks/graph/gliner_demo/` runs one batched local-model pass per chunk batch that builds the `KnowledgeGraph` **and** a deterministic two-line `TextSummary` (kept edges as `head rel tail`, then `type: names`). No `extract_content_graph` / `extract_summary` calls; embeddings in `add_data_points` still run — on keyless setups via the fastembed default (`resolve_embedding_defaults()` in `cognee/infrastructure/databases/vector/embeddings/config.py`: no embedding setting configured + no usable LLM key → `fastembed` / `BAAI/bge-small-en-v1.5`, vector size read from fastembed's model registry; `KeylessEmbedderNotInstalledError` when `fastembed` is missing).
+
+- **Install**: recommended `pip install "cognee[gliner]"` (torch from PyPI: the CUDA build on Linux, for GPU hosts). Without it GLiNER still works: torch is not a cognee dependency (PyPI's Linux torch bundles several GB of CUDA libraries), so LLM-key users never download it, and when a cognify resolves to `gliner_demo` with the runtime missing, `cognify()` awaits `ensure_extractor_runtime()` (`cognee/modules/cognify/config.py`; `resolve_extractor()` itself never installs), which runs `cognee/tasks/graph/gliner_demo/install.py` in a worker thread — the event loop stays free and the pipeline starts only once the runtime imports; concurrent callers in one process or several wait on one install — and it installs the `gliner` extra itself (read from cognee's metadata, so `pyproject.toml` is the only list), with progress logged (step, installer lines, elapsed time): its torch requirement only when no torch build (CPU or GPU) is importable, from `GLINER_TORCH_INDEX_URL` (default `https://download.pytorch.org/whl/cpu`, the only package taken from that index); then the rest, when `gliner2` is missing, from the default index with every installed distribution pinned — a package replaced under a live import would break the running process, so an install that needs to change one fails instead (core pins `huggingface-hub<1` and `tokenizers<=0.23.0`, the ranges transformers 4.x needs, for this). It uses pip, or `uv pip` in uv venvs, under a file lock in `sys.prefix`, and logs a one-line tip to install the extra afterwards. The install thread imports torch and gliner2 before returning (verification, and it keeps the slow first import off the loop). Telemetry: `GLiNER Runtime Install Started` / `Completed` / `Failed`, sent only by the call that installs, with versions, OS/arch, installer, installed packages, duration, and on failure the step and exception class — never paths, URLs, installer output or messages (a custom index is reported as `custom`). Every failure raises `GlinerInstallError` (a `CogneeConfigurationError`) whose remediation is the extra; `GLINER_AUTO_INSTALL=false` raises `KeylessExtractorNotInstalledError` with the same fix. The Docker image runs the installer at build time (`python -m cognee.tasks.graph.gliner_demo.install`, after the exact `uv sync`). A later exact `uv sync` removes the runtime-installed packages (they are not in the lockfile); the next GLiNER cognify installs them again. The model (`fastino/gliner2.5-base-v1`, about 750 MB) downloads on first use; the installer's "about 200 MB to download, 800 MB on disk" is the runtime (CPU PyTorch plus gliner2), not the model.
+- **Schema** (closed, resolved per document before chunk extraction): caller `entity_types`/`relation_types` → else OWL classes / object properties of `ONTOLOGY_FILE_PATH` (snake_case of `rdfs:label` or local name, `rdfs:comment` as description) → else the frozen `LABEL_BANK`/`RELATION_BANK`, filtered by one GLiNER pass over a bounded document sketch. Capped at 20 per kind. Explicit labels are only reachable through `get_gliner_demo_tasks(...)` + `run_custom_pipeline(pipeline_name="cognify_pipeline")`.
+- **LLM-free mode side effects**: a pipeline with no LLM task (the gliner_demo extractor with contradiction detection off) skips the first-run LLM connection probe but still probes embeddings, per capability — an LLM-free run never marks the LLM check done for later LLM runs. In `improve()`, the text-drafting stages `extract_agent_context`, `distill_sessions`, and `global_context_index` skip with `no_llm_configured`; session and trace persistence still run. Separately, `recall()` with no `query_type` defaults to `CHUNKS` when no usable LLM key is configured (keyed on LLM availability, not on the extractor; explicit `query_type` is always honoured). `COGNEE_SKIP_CONNECTION_TEST` stays `false` by default.
+- **Constraints**: generic `KnowledgeGraph` only (custom `graph_model` raises), `custom_prompt` ignored, no CLI/HTTP flag (set the env var); `extractor="gliner_demo"` raises with `temporal_cognify=True`, with `dry_run=True`, and while connected to a remote instance. Long chunks are scanned with overlapping 384-word windows (`batch_extract_long`); schema discovery instead uses one plain pass over a sketch capped at 12,000 characters and 3,000 whitespace tokens. Relation endpoints are matched to entity spans by exact normalized name, then unambiguous containment; unresolved pairs are dropped and counted (`GlinerRunStats`).
+- **Demo**: `examples/guides/gliner_demo_llm_free_cognify.py`. Unit tests: `cognee/tests/unit/tasks/graph/test_gliner_demo_tasks.py`.
+
+### Skills (Procedural Memory)
+Dataset-scoped `SKILL.md` playbooks agents can discover, load on demand, execute, and improve from run history.
+
+- **Ingest**: `remember(content_type="skills", dataset_name=...)` (folder, file, or inline via `skills_text`/`skill_name`) — ingests into the target dataset (default `main_dataset`; pass `dataset_name` to keep skills separate); re-ingest upserts (deterministic ids). HTTP: `POST /skills`.
+- **Discover**: `SearchType.SKILLS` — one vector search over the `Skill_search_text` collection, no LLM, **metadata-only results** (never the procedure body; progressive disclosure). Requires exactly one dataset; skills outside that dataset's scope, inactive skills, and empty-scope legacy skills are filtered out. Missing collection returns `[]`, not an error.
+- **Skill gate**: `recall()` runs a deterministic regex gate (`cognee/api/v1/recall/skill_gate.py`); procedural-sounding queries trigger a concurrent SKILLS lookup whose hits are appended tagged `source="skills"`. Additive and fail-safe; only fires when exactly one dataset is targeted. Disable with `SKILL_GATE_ENABLED=false`.
+- **Execute**: `SearchType.AGENTIC_COMPLETION` with `skills=[...]` — LLM sees name+description, loads bodies via the `load_skill` tool (12k char cap).
+- **Improve**: `SkillRun` records (via `remember()` skill-run entries) feed LLM-drafted `SkillImprovementProposal`s; preview then apply by proposal id (`/proposals` router).
+
 ### Code Files (cognify CODE route)
 Supported code files (`.py`, `.go`, `.ts`, `.java`, `.rs`, … — the extension list lives on `code_loader`) are recognized at add time through the loader system: the code loader claims the file, stores it under its real extension, and `ingest_data` tags the record with `system_metadata = {"source": "code"}`. Cognify then routes such items down the CODE route, which runs the deterministic enola code graph pipeline per file — typed `CodeSymbol`/`CodeModule`/… nodes with `calls`/`imports`/`has_method` edges, **no LLM calls**.
 
-- **Search**: code is searchable through `SearchType.CODE` only (deterministic graph operations via `code_query`). Completion/chunk search types (`GRAPH_COMPLETION`, `CHUNKS`, `RAG_COMPLETION`) do not cover code — the route produces no chunks and no embeddings.
+- **Search**: code is searchable through `SearchType.CODE` only (deterministic graph operations via `code_query`: `query_facts`, `explore`, `traverse`, `find_path`, `impact_analysis`, `insights`, `architecture`, `delta`). Completion/chunk search types (`GRAPH_COMPLETION`, `CHUNKS`, `RAG_COMPLETION`) do not cover code — the route produces no chunks and no embeddings.
+- **Diagrams**: add `"diagram": "mermaid"` (or `"dot"`, or `True`) to any `code_query` and the result carries a `diagram` block with deterministic diagram source (nodes shaped by kind, one subgraph per repository, seeds/focus/path highlighted). `{"operation": "architecture"}` is the module-level overview — symbol-to-symbol edges are rolled up into counted module-to-module edges, routes/storage/services hang off their modules — and it draws itself as Mermaid by default. Renderer: `cognee/modules/retrieval/code_graph_diagram.py`; no LLM, no network. Same option over REST (`code_query` on `POST /api/v1/search` and `/api/v1/recall` with `scope=["code"]`) and the CLI: `cognee-cli search "" -t CODE --code-query '{"operation": "architecture"}' --diagram-out arch.html` (`.html` renders Mermaid in a browser, `.svg/.png/.pdf` run Graphviz on DOT, other extensions get raw source; `--diagram mermaid|dot` prints the source in a fenced block).
+- **enola version**: installed by default as the pinned `enola-cli` wheel, which puts the binary in the environment's scripts directory; `ENOLA_PATH` always wins. A missing binary raises `EnolaNotInstalledError` with a reinstall hint — nothing is downloaded at runtime. The version pin lives only in `pyproject.toml`. Cognee reads enola's documented snapshot contract (`facts.jsonl`, `insights.json`, `receipt.json`; `format_version` 1) and rejects a receipt with a format version it does not understand. Fact ids and resolved relation `target_id`s from the writer are used when present; explainer findings become `CodeInsight` nodes with `evidences` edges; the receipt's provenance/quality block is stamped on the `CodeRepository` node and reported by the `delta` operation. Bumping the pin means re-checking the known answers in `cognee/tests/test_code_graph_e2e.py`.
 - **Opt-out per add**: `preferred_loaders={"text_loader": {}}` treats a code file as a plain document (chunking + LLM extraction).
-- **Whole repositories**: `remember(content_type="code")` remains the repo-level path (cross-file edges); the CODE route is per-file.
+- **Whole repositories**: a local code-project directory or a GitHub/GitLab repository URL passed to `add()`/`remember()` (API: the `raw_data` form field) resolves to ONE `code_repo` manifest that cognify runs through the CODE_REPO route — a single enola pass with cross-file edges, plus the repo's documents as ordinary items. Remote URLs are shallow-cloned under `COGNEE_REPOS_DIR` (default `~/.cognee/repos`). `remember(content_type="code")` builds the same graph without the add step. The CODE route is per-file.
+
+### Provenance
+Cognee has five provenance mechanisms. They answer different questions and are controlled by three unrelated flags — do not confuse them:
+
+| # | Mechanism | Question it answers | Stored where | Flag (default) |
+|---|---|---|---|---|
+| 1 | Source stamping | who/which run wrote this node | `source_*` fields on the graph node | `COGNEE_PROVENANCE_MODE` (`lightweight`) |
+| 2 | Graph source-refs | which documents own this node/edge (drives `forget()` delete/rollback) | source-ref keys on graph nodes/edges | always on (`cognee/infrastructure/databases/provenance/`) |
+| 3 | Audit ledger | tamper-evident history for audits | `provenance_entries` table, hash-chained | `PROVENANCE_TRACKING` (**false**) |
+| 4 | Memory-provenance projection | who can access what (tenant → user → dataset → data + ACL grants) | computed on request from the relational DB (`GET /v1/schema/provenance`) | n/a |
+| 5 | Edge evidence | which document chunk supports this graph edge | `provenance_edge_evidence` table | `EDGE_EVIDENCE_ENABLED` (`true`) |
+
+All three table-backed systems (2, 3, 5) identify a document by the same `make_source_ref_key(dataset_id, data_id)` key.
+
+**Edge evidence** (5) is captured in memory during `add_data_points` and bulk-written once per data item (`EDGE_EVIDENCE_FLUSH_THRESHOLD`, default 10000, forces an earlier flush for huge documents). Search with `include_references=True` returns it as structured `EvidenceReference` objects. Rows are ignored at read time when their pipeline run did not complete or their document is gone, and swept when a document is deleted or its memory dropped with `forget(memory_only=True)`. Scope: only edges extracted from document chunks — contradiction edges, `improve()` enrichment, session bridging, and the code-graph route record no evidence yet (`evidence_kind` is the extension point). Implementation: `cognee/modules/provenance/edge_evidence/`.
 
 ### Permissions System
 Multi-tenant architecture with users, roles, and Access Control Lists (ACLs):
@@ -804,7 +925,7 @@ shutdown = visualization_server(port=8080)  # synchronous; returns a shutdown ca
 - Solution: Always configure both LLM and embedding providers, or ensure valid OpenAI API key
 
 **Permission Denied on Search**
-- Behavior: Returns empty list rather than error (prevents information leakage)
+- Behavior: Without `datasets`, search covers only datasets the user can read, so with `ENABLE_BACKEND_ACCESS_CONTROL` on (default) a user without grants gets an empty list (with it off, search runs over the shared graph). An explicit dataset id the user cannot read raises `PermissionDeniedError` (HTTP 403). Dataset names resolve only among the user's own datasets, so a shared dataset's name raises `DatasetNotFoundError`; pass its id instead.
 - Solution: Check dataset permissions and user access rights
 
 **Database Connection Issues**
@@ -820,5 +941,5 @@ shutdown = visualization_server(port=8080)  # synchronous; returns a shutdown ca
 - [Documentation](https://docs.cognee.ai/)
 - [Discord Community](https://discord.gg/NQPKmU5CCg)
 - [GitHub Issues](https://github.com/topoteretes/cognee/issues)
-- [Example Notebooks](examples/python/)
+- [Example Notebooks](examples/)
 - [Research Paper](https://arxiv.org/abs/2505.24478) - Optimizing knowledge graphs for LLM reasoning
