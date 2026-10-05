@@ -89,6 +89,23 @@ def clear_nonstrict_demotions() -> None:
     _NONSTRICT_DEMOTIONS.clear()
 
 
+def _inline_refs(schema: dict[str, Any]) -> dict[str, Any]:
+    """Inline $defs so the full nested schema reaches the LLM."""
+    if "$defs" not in schema:
+        return schema
+
+    schema_copy = schema.copy()
+    defs = schema_copy.pop("$defs")
+    schema_str = json.dumps(schema_copy)
+
+    for def_name, def_schema in defs.items():
+        ref_str = f'{{"$ref": "#/$defs/{def_name}"}}'
+        val_str = json.dumps(def_schema)
+        schema_str = schema_str.replace(ref_str, val_str)
+
+    return json.loads(schema_str)
+
+
 def _nonstrict_response_format(response_model: type[BaseModel]) -> dict:
     """Non-strict ``json_schema`` payload: the raw schema travels as guidance.
 
@@ -102,7 +119,7 @@ def _nonstrict_response_format(response_model: type[BaseModel]) -> dict:
         "type": "json_schema",
         "json_schema": {
             "name": response_model.__name__,
-            "schema": response_model.model_json_schema(),
+            "schema": _inline_refs(response_model.model_json_schema()),
             "strict": False,
         },
     }
@@ -314,7 +331,7 @@ class NativeLiteLLMAdapter:
         On a validation failure we retry up to ``_MAX_VALIDATION_RETRIES`` times,
         feeding the error back so the model can self-correct.
         """
-        schema_json = json.dumps(response_model.model_json_schema(), indent=2)
+        schema_json = json.dumps(_inline_refs(response_model.model_json_schema()), indent=2)
         augmented_system_prompt = (
             f"{system_prompt}\n\n"
             f"You MUST respond with valid JSON conforming to this schema:\n"
