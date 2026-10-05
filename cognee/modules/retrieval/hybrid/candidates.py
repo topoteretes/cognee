@@ -34,8 +34,8 @@ class HybridCandidates:
         """
         return replace(
             self,
-            chunks=_first(self.chunks, chunk_ids),
-            entities=_first(self.entities, entity_ids),
+            chunks=self._first(self.chunks, chunk_ids),
+            entities=self._first(self.entities, entity_ids),
         )
 
     def finalize(self, *, chunks_limit: int, entities_limit: int) -> dict:
@@ -44,18 +44,18 @@ class HybridCandidates:
         entities = list(self.entities)[:entities_limit]
         return {
             "chunks": chunks,
-            "chunk_summaries": _summaries_for(self.chunk_summaries, chunks),
+            "chunk_summaries": self._summaries_for(self.chunk_summaries, chunks),
             "entities": entities,
             "facts": select_facts_from_candidates(self.fact_candidates, entities),
         }
 
+    @staticmethod
+    def _first(items: list, ids: set[str]) -> list:
+        first = [item for item in items if result_id(item) in ids]
+        rest = [item for item in items if result_id(item) not in ids]
+        return first + rest
 
-def _first(items: list, ids: set[str]) -> list:
-    first = [item for item in items if result_id(item) in ids]
-    rest = [item for item in items if result_id(item) not in ids]
-    return first + rest
-
-
-def _summaries_for(summaries: dict, chunks: list) -> dict:
-    chunk_ids = {result_id(chunk) for chunk in chunks}
-    return {key: value for key, value in (summaries or {}).items() if str(key) in chunk_ids}
+    @staticmethod
+    def _summaries_for(summaries: dict, chunks: list) -> dict:
+        chunk_ids = {result_id(chunk) for chunk in chunks}
+        return {key: value for key, value in (summaries or {}).items() if str(key) in chunk_ids}
