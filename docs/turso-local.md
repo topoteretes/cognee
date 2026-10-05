@@ -169,11 +169,9 @@ that silently ran on SQLite would fail.
 
 ## Upstream findings
 
-Each finding has a minimal reproduction in `cognee/tests/e2e/turso/turso_compat_repros.py`
-(`python cognee/tests/e2e/turso/turso_compat_repros.py` prints one line per finding: still present
-or fixed in the installed `pyturso`). They are still to be filed upstream and linked from SDK-664.
-When a finding is fixed in a released `pyturso`, the matching workaround (noted in the table above)
-can be retired.
+Each finding will be filed upstream with a minimal reproduction and linked from SDK-664. When a
+finding is fixed in a released `pyturso`, the matching workaround (noted in the table above) can
+be retired.
 
 1. `sqlite+aioturso` dialect fails on SQLAlchemy 2.0.4x+: `'AsyncAdapt_turso_dbapi' object has no
    attribute 'has_stop'`. cognee's dialect sets it.
