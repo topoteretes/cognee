@@ -18,6 +18,28 @@ name: performance report (cloud)
 #   COGNEE_CLOUD_API_KEY — API key authorized on the tenant-controller API
 #                          (https://api.aws.cognee.ai)
 on:
+  # Hand-run one cloud suite on its own (the nightly runs every suite through
+  # nightly_tests.yml). Same inputs as the workflow_call below.
+  workflow_dispatch:
+    inputs:
+      label:
+        description: "Dataset label, used in the S3 output path and display name."
+        required: true
+        type: string
+      runs:
+        description: "Number of sequential benchmark runs."
+        required: false
+        type: string
+        default: '3'
+      num_memories:
+        description: "If set, forwarded as --num-memories (limit input documents)."
+        required: false
+        type: string
+        default: ''
+      memories_key:
+        description: "S3 object key (under the bucket) downloaded and used as --memories."
+        required: true
+        type: string
   workflow_call:
     inputs:
       label:
