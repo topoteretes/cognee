@@ -18,6 +18,28 @@ name: performance report (cloud)
 #   COGNEE_CLOUD_API_KEY — API key authorized on the tenant-controller API
 #                          (https://api.aws.cognee.ai)
 on:
+  # Hand-run one cloud suite on its own (the nightly runs every suite through
+  # nightly_tests.yml). Same inputs as the workflow_call below.
+  workflow_dispatch:
+    inputs:
+      label:
+        description: "Dataset label, used in the S3 output path and display name."
+        required: true
+        type: string
+      runs:
+        description: "Number of sequential benchmark runs."
+        required: false
+        type: string
+        default: '3'
+      num_memories:
+        description: "If set, forwarded as --num-memories (limit input documents)."
+        required: false
+        type: string
+        default: ''
+      memories_key:
+        description: "S3 object key (under the bucket) downloaded and used as --memories."
+        required: true
+        type: string
   workflow_call:
     inputs:
       label:
@@ -71,7 +93,7 @@ jobs:
       html_key: ${{ steps.upload.outputs.html_key }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -131,6 +153,34 @@ jobs:
           REPORT_RC=$?
           set -e
           echo "REPORT_RC=$REPORT_RC" >> "$GITHUB_ENV"
+
+      - name: Stamp run provenance into the report
+        env:
+          BRANCH: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          # Read provenance from the checkout, including detached PR merge refs.
+          # Keep branch as the workflow's comparison series.
+          if [ ! -s "$JSON_PATH" ]; then
+            echo "no report JSON at $JSON_PATH — leaving the upload step to fail"
+            exit 0
+          fi
+          SHA="$(git -C . rev-parse HEAD)"
+          COMMIT_TIMESTAMP="$(git -C . show -s --format=%cI HEAD)"
+          # This identifies the benchmark client, not the remotely deployed server.
+          tmp="$(mktemp)"
+          jq --arg branch "$BRANCH" --arg sha "$SHA" --arg run_id "$RUN_ID" \
+             --arg attempt "$RUN_ATTEMPT" --arg event "$EVENT" \
+             --arg commit_timestamp "$COMMIT_TIMESTAMP" --arg repository "$REPOSITORY" \
+             '. + {branch: $branch, git_sha: $sha, run_id: $run_id,
+                   run_attempt: $attempt, event: $event,
+                   commit_timestamp: $commit_timestamp, git_repository: $repository}' \
+             "$JSON_PATH" > "$tmp"
+          mv "$tmp" "$JSON_PATH"
 
       - name: Upload reports to S3
         id: upload

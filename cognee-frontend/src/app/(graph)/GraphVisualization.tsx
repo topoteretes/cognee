@@ -207,13 +207,16 @@ export default function GraphVisualization({ ref, data, graphControls, className
 
   useEffect(() => {
     async function startAnimation() {
-      // @ts-expect-error d3-force-3d has no types
       const { forceCollide, forceManyBody } = await import("d3-force-3d");
 
       if (typeof window !== "undefined" && data && graphRef.current) {
-        // add collision force
-        graphRef.current.d3Force("collision", forceCollide(nodeSize * 1.5));
-        graphRef.current.d3Force("charge", forceManyBody().strength(-10).distanceMin(10).distanceMax(50));
+        // d3-force-3d's Force type requires z/vz on its node datum (3D-aware),
+        // while react-force-graph-2d's ForceFn only ever passes 2D nodes — the
+        // functions are runtime-compatible (d3-force-3d is a superset of
+        // d3-force), only the type declarations disagree.
+        type ForceParam = Parameters<ForceGraphMethods["d3Force"]>[1];
+        graphRef.current.d3Force("collision", forceCollide(nodeSize * 1.5) as unknown as ForceParam);
+        graphRef.current.d3Force("charge", forceManyBody().strength(-10).distanceMin(10).distanceMax(50) as unknown as ForceParam);
       }
     }
     startAnimation();

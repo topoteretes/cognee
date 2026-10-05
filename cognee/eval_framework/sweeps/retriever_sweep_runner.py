@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any
 
 from cognee.eval_framework.answer_generation.question_type_prompts import (
     get_question_type_prompt,
@@ -27,7 +28,7 @@ class RetrieverSweepSettings:
     num_runs: int = 1
     parallel_runs: bool = False
     max_concurrent_questions: int = 10
-    question_types: Optional[list[str]] = None
+    question_types: list[str] | None = None
     primary_metric_name: str = "score"
     artifact_prefix: str = "sweep"
     summary_tags: dict[str, Any] = field(default_factory=dict)
@@ -128,9 +129,7 @@ def _question_answer_cache_path(answer_cache_dir: Path, question: dict[str, Any]
     return answer_cache_dir / f"question_{question_idx}.json"
 
 
-def _load_cached_answer(
-    answer_cache_dir: Optional[Path], question: dict[str, Any]
-) -> Optional[dict]:
+def _load_cached_answer(answer_cache_dir: Path | None, question: dict[str, Any]) -> dict | None:
     if answer_cache_dir is None:
         return None
 
@@ -145,7 +144,7 @@ def _load_cached_answer(
     return None
 
 
-def _write_cached_answer(answer_cache_dir: Optional[Path], answer: dict[str, Any]) -> None:
+def _write_cached_answer(answer_cache_dir: Path | None, answer: dict[str, Any]) -> None:
     if answer_cache_dir is None:
         return
 
@@ -163,7 +162,7 @@ async def _answer_single_fixed_retriever(
     config: dict[str, Any],
     run_idx: int,
     semaphore: asyncio.Semaphore,
-    answer_cache_dir: Optional[Path] = None,
+    answer_cache_dir: Path | None = None,
 ) -> dict[str, Any]:
     cached_answer = _load_cached_answer(answer_cache_dir, question)
     if cached_answer is not None:
@@ -215,12 +214,11 @@ async def _answer_single_fixed_retriever(
             )
             answer_text = normalize_answer_text(search_results)
         except Exception as exc:
-            logger.error(
-                "[%s][run %s] Failed to answer question_idx=%s: %s",
+            logger.exception(
+                "[%s][run %s] Failed to answer question_idx=%s",
                 retriever_name,
                 run_idx,
                 question["question_idx"],
-                exc,
             )
             answer_text = f"ERROR: {exc}"
             retrieval_context = ""
@@ -241,7 +239,7 @@ async def answer_with_config(
     config: dict[str, Any],
     run_idx: int,
     max_concurrent: int,
-    answer_cache_dir: Optional[Path] = None,
+    answer_cache_dir: Path | None = None,
 ) -> list[dict[str, Any]]:
     if config["mode"] != "fixed_retriever":
         raise ValueError(f"Unsupported config mode: {config['mode']}")

@@ -11,6 +11,8 @@ Hard rules enforced here:
   query strings, error text.
 - Identity columns (user_id, api_key_hash, anonymous_id, persistent_id)
   are used ONLY inside COUNT(DISTINCT ...); their values are never emitted.
+- Identifier-bearing provider/model settings are bucketed as 'redacted'
+  before grouping, so custom deployment names cannot stop the daily export.
 - A post-write guard fails the job if any output header matches the
   denylist or any cell matches identifier patterns (email, UUID, ak_ hash).
 
@@ -31,6 +33,28 @@ import duckdb
 
 WINDOW_DAYS = int(os.getenv("TELEMETRY_WINDOW_DAYS", "70"))
 OUT_DIR = Path(os.getenv("TELEMETRY_OUT_DIR", "telemetry_aggregates"))
+
+# Shared by SQL redaction and the independent post-write guard.
+CELL_PATTERNS = (
+    re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"),  # email
+    re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"),  # uuid
+    re.compile(r"\bak_[0-9a-f]{16,}\b"),  # key hash
+)
+_SQL_CELL_PATTERN = "|".join(pattern.pattern for pattern in CELL_PATTERNS).replace("'", "''")
+
+
+def _provider_dimension(property_path: str, *, max_length: int | None = None) -> str:
+    """Bucket identifiers in a fixed provider/model property before aggregation."""
+    value = f"json_extract_string(properties, '$.{property_path}')"
+    identifier_check = f"regexp_matches(lower({value}), '{_SQL_CELL_PATTERN}')"
+    output = value
+    if max_length is not None:
+        output = f"left(lower({value}), {max_length})"
+        # Truncation can hide an identifier or create a word boundary that makes
+        # the shortened value match the guard. Inspect both full and output forms.
+        identifier_check += f" OR regexp_matches({output}, '{_SQL_CELL_PATTERN}')"
+    return f"CASE WHEN {identifier_check} THEN 'redacted' ELSE {output} END"
+
 
 # Events worth analyzing; everything else (internal task/coroutine spam) is skipped.
 EVENT_ALLOWLIST = (
@@ -120,14 +144,15 @@ QUERIES: dict[str, str] = {
               AND endpoint IS NOT NULL
         GROUP BY ALL ORDER BY day, events DESC
     """,
-    # Provider stack correlation (from completed pipeline runs).
+    # Provider/model settings can contain custom deployment identifiers. Redact
+    # before GROUP BY so run and distinct-identity counts cover the whole bucket.
     "provider_stack_daily": f"""
         SELECT ingestion_date AS day,
-               json_extract_string(properties, '$.llm.provider')   AS llm_provider,
-               left(lower(json_extract_string(properties, '$.llm.model')), 60) AS llm_model,
-               json_extract_string(properties, '$.graph.provider') AS graph_provider,
-               json_extract_string(properties, '$.vector.provider') AS vector_provider,
-               json_extract_string(properties, '$.relational.provider') AS relational_provider,
+               {_provider_dimension("llm.provider")} AS llm_provider,
+               {_provider_dimension("llm.model", max_length=60)} AS llm_model,
+               {_provider_dimension("graph.provider")} AS graph_provider,
+               {_provider_dimension("vector.provider")} AS vector_provider,
+               {_provider_dimension("relational.provider")} AS relational_provider,
                {_VERSION} AS version,
                count(*) AS completed_runs,
                count(DISTINCT {_IDENT}) AS distinct_identities
@@ -164,11 +189,6 @@ HEADER_DENYLIST = re.compile(
     r"(search_query|system_prompt|properties|dataset|user_id|api_key|anonymous"
     r"|persistent|tenant|email|error_text|query)",
     re.IGNORECASE,
-)
-CELL_PATTERNS = (
-    re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"),  # email
-    re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"),  # uuid
-    re.compile(r"\bak_[0-9a-f]{16,}\b"),  # key hash
 )
 
 

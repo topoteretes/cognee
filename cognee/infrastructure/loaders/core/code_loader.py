@@ -9,13 +9,15 @@ from cognee.infrastructure.loaders.store_derived_text import store_derived_text
 
 # Source-file extensions of the languages enola extracts (its per-language
 # extractors and tree-sitter grammars; see https://github.com/enola-labs/enola
-# "Supported Languages"), each verified against enola v0.3.13 to produce facts
-# for a single staged file (with a detection marker where needed — see
-# cognee.tasks.code_graph.code_files._DETECTION_MARKERS). Deliberately
-# excludes extensions that double as generic config/markup (yml/yaml for
-# Ansible, json for OpenAPI, xaml/razor/cshtml/hbs templates) — claiming those
-# would hijack ordinary documents — and graphql, which enola only reads inside
-# a larger project context.
+# "Supported Languages"), each verified against enola v0.4.12 to produce facts
+# for a single staged file (js/jsx need a tsconfig.json detection marker — see
+# cognee.tasks.code_graph.code_files._DETECTION_MARKERS; a lone .kts or C .h
+# yields no facts on its own but is still code). Deliberately excludes
+# extensions that double as generic config/markup (yml/yaml for Ansible, json
+# for OpenAPI, xaml/razor/cshtml/hbs templates, md — enola now reads markdown
+# pages too, but they are documents first) — claiming those would hijack
+# ordinary documents — and graphql, which enola only reads inside a larger
+# project context.
 SUPPORTED_CODE_EXTENSIONS = frozenset(
     {
         "c",

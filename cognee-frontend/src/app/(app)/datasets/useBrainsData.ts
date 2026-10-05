@@ -1,0 +1,520 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { notifications } from "@mantine/notifications";
+import { captureException, recordUploadSuccess, recordUploadFailure } from "@/utils/monitoring";
+import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
+import { useFilter } from "@/ui/layout/FilterContext";
+import getDatasets from "@/modules/datasets/getDatasets";
+import { getDatasetDataCount } from "@/modules/datasets/getDatasetData";
+import { MAX_RENDERED_ROWS } from "@/modules/datasets/maxRenderedRows";
+import useDatasetDataPages from "@/modules/datasets/useDatasetDataPages";
+import createDataset from "@/modules/datasets/createDataset";
+import deleteDataset from "@/modules/datasets/deleteDataset";
+import deleteDatasetData from "@/modules/datasets/deleteDatasetData";
+import cognifyDataset from "@/modules/datasets/cognifyDataset";
+import { useDatasetStatuses } from "@/modules/datasets/useDatasetStatuses";
+import { useDatasetProcessing } from "@/modules/datasets/useDatasetProcessing";
+import { normalizeDatasetStatusResponse, type DatasetStatusDetail } from "@/modules/datasets/datasetStatusDetail";
+import { trackEvent } from "@/modules/analytics";
+import { loadGraphModelsConfig } from "@/modules/configuration/userConfiguration";
+import { buildCognifyOptionsForDataset } from "@/modules/configuration/buildCognifyOptionsForDataset";
+import { useBrainUpload } from "@/modules/ingestion/useBrainUpload";
+import { withEstimateStage } from "@/modules/ingestion/uploadProgress";
+import { MAX_FILES_PER_UPLOAD } from "@/modules/ingestion/uploadLimits";
+import { trackUploadStarted, trackUploadFailed, trackFilesUploaded, trackProcessingFailed } from "./brainUploadAnalytics";
+import { isInsufficientCreditsError } from "@/utils/insufficientCredits";
+import { useLowBalanceUploadWarning } from "@/modules/billing/useLowBalanceUploadWarning";
+import { describeProcessingError } from "./processingErrorMessage";
+import { applyCreateBrainTemplate, type CreateBrainTemplateKey } from "./createBrainTemplates";
+import { mapProcessingStatus, type DatasetRaw, type FileEntry, type DisplayStatus, type Dataset, type UseBrainsDataResult } from "./brainsTypes";
+
+export type { FileEntry, DisplayStatus, Dataset, UseBrainsDataResult } from "./brainsTypes";
+
+// Owns all data and interaction state for the brains (datasets) finder:
+// loading the dataset list + per-dataset doc counts, live status polling,
+// selection, upload/paste/delete flows, and the create/delete/share modal
+// state. The page component is a pure view over what this returns.
+export function useBrainsData(): UseBrainsDataResult {
+  const { cogniInstance, isInitializing } = useCogniInstance();
+  const { tenant } = useTenant();
+  const { datasets: contextDatasets, refreshDatasets: refreshFilterDatasets } = useFilter();
+  // Read as a one-shot fallback inside loadDatasets when getDatasets() itself
+  // fails, not as a live data source — a ref keeps that read fresh without
+  // making loadDatasets depend on (and re-run for) every FilterContext change.
+  const contextDatasetsRef = useRef(contextDatasets);
+  contextDatasetsRef.current = contextDatasets;
+
+  const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [datasetsError, setDatasetsError] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [outdatedDatasets, setOutdated] = useState<Set<string>>(new Set());
+
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const processingCounts = useDatasetProcessing(selectedId);
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
+  const {
+    data: selectedDocs, setData: setSelectedDocs, loading: docsLoading,
+    total: docsTotal, error: docsError, hasMore: hasMoreDocs, load: loadDocs, loadMore: loadMoreDocs, reset: resetDocs,
+  } = useDatasetDataPages<FileEntry>(cogniInstance, MAX_RENDERED_ROWS);
+
+  const { isUploading, stage: uploadStage, progress: uploadProgress, upload } = useBrainUpload(cogniInstance);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [canRetryBuild, setCanRetryBuild] = useState(false);
+  const { pendingWarning: pendingLowBalanceWarning, isEstimating, confirmUpload, cancel: cancelLowBalanceUpload } = useLowBalanceUploadWarning();
+
+  // The cost estimate runs before upload() starts, so fold it into the same
+  // progress the bar reads: estimate → upload → build all show in one place.
+  const combinedUploadProgress = withEstimateStage(uploadProgress, isEstimating);
+
+  const [showCreateModal, setShowCreate] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<Dataset | null>(null);
+  const [shareTarget, setShareTarget] = useState<Dataset | null>(null);
+  const [deleteDocTarget, setDeleteDocTarget] = useState<FileEntry | null>(null);
+  const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
+  const [showPasteModal, setShowPasteModal] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  const [pasting, setPasting] = useState(false);
+
+  const { statusDetails } = useDatasetStatuses(datasets.length > 0);
+
+  const listGeneration = useRef(0);
+  const invalidateList = useCallback(() => { listGeneration.current++; }, []);
+
+  const loadDatasets = useCallback(async (): Promise<void> => {
+    if (!cogniInstance) return;
+    const generation = ++listGeneration.current;
+    try {
+      let list: DatasetRaw[];
+      try {
+        const fetched = await getDatasets(cogniInstance);
+        if (generation !== listGeneration.current) return;
+        // A non-array body is just as much a failed fetch as a thrown error —
+        // treat it the same way instead of silently rendering an empty list.
+        if (!Array.isArray(fetched)) throw new Error("Unexpected /v1/datasets response shape");
+        list = fetched;
+        setDatasetsError(false);
+      } catch (err) {
+        if (generation !== listGeneration.current) return;
+        captureException(err, { stage: "load_datasets" });
+        // Fall back to FilterContext's list (which can itself be empty or
+        // stale) rather than leaving the page with nothing — but flag the
+        // failure so the caller can distinguish this from a dataset-free
+        // account instead of rendering a false "no brains yet" empty state.
+        list = contextDatasetsRef.current as DatasetRaw[];
+        setDatasetsError(true);
+        notifications.show({
+          title: list.length > 0 ? "Couldn't refresh your brains" : "Couldn't load your brains",
+          message: list.length > 0
+            ? "Showing the last known list — it may be out of date."
+            : "This can happen while a large upload is still processing. Try refreshing in a moment.",
+          color: "yellow",
+        });
+      }
+      const initial = list.map((ds) => ({ ...ds, documents: -1, status: "loading" as DisplayStatus }));
+      setDatasets(previous => initial.map(ds => {
+        const known = previous.find(d => d.id === ds.id);
+        return known ? { ...ds, documents: known.documents, status: known.status } : ds;
+      }));
+      setLoading(false);
+
+      // The shared client's default GET timeout races a caller's own signal
+      // via AbortSignal.any and wins if shorter — this status poll can cover
+      // many datasets at once, so give it more headroom than the default.
+      const statusResp = await cogniInstance
+        .fetch("/v1/datasets/status?include_error_detail=true", { timeoutMs: 60_000 })
+        .catch((err) => {
+          console.error("Failed to fetch dataset processing status:", err);
+          return null;
+        });
+      const statusData: Record<string, DatasetStatusDetail> = statusResp?.ok
+        ? normalizeDatasetStatusResponse(await statusResp.json())
+        : {};
+
+      if (generation !== listGeneration.current) return;
+      for (const ds of list) {
+        // Only the count is wanted here. Fetching the rows to measure them
+        // downloaded every dataset in full, once per dataset on this page.
+        getDatasetDataCount(ds.id, cogniInstance)
+          .then((count) => {
+            if (generation !== listGeneration.current) return;
+            setDatasets((prev) => prev.map((d) => d.id === ds.id ? { ...d, documents: count, status: mapProcessingStatus(statusData[ds.id]?.status, count, statusData[ds.id]?.reason ?? null) } : d));
+          })
+          .catch(() => {
+            // Keep the last known count (or -1 for unknown), never invent zero.
+          });
+      }
+    } catch (err) {
+      if (generation !== listGeneration.current) return;
+      captureException(err, { stage: "load_datasets_unexpected" });
+      setDatasets([]);
+      setDatasetsError(true);
+      setLoading(false);
+    }
+  }, [cogniInstance]);
+
+  useEffect(() => {
+    if (!cogniInstance || isInitializing) return;
+    loadDatasets();
+    loadGraphModelsConfig(cogniInstance)
+      .then((cfg) => setOutdated(new Set(cfg.outdatedDatasets ?? [])))
+      .catch((err) => { console.error("Failed to load graph models config:", err); });
+    return invalidateList;
+  }, [cogniInstance, isInitializing, loadDatasets, invalidateList]);
+
+  useEffect(() => {
+    if (!cogniInstance || Object.keys(statusDetails).length === 0) return;
+    let completedSelectedId: string | null = null;
+    setDatasets((prev) =>
+      prev.map((d) => {
+        const detail = statusDetails[d.id];
+        if (!detail) return d;
+        const newStatus = mapProcessingStatus(detail.status, d.documents, detail.reason);
+        if (newStatus === d.status) return d;
+        // When the selected brain finishes, schedule a file list refresh
+        if (d.id === selectedId && (d.status === "pending" || d.status === "running") && newStatus === "completed") {
+          completedSelectedId = d.id;
+        }
+        return { ...d, status: newStatus };
+      }),
+    );
+    if (completedSelectedId) {
+      // The paged loader fetches the total along with the first page.
+      void loadDocs(completedSelectedId);
+    }
+  }, [statusDetails, cogniInstance, selectedId, loadDocs]);
+
+  useEffect(() => {
+    if (selectedId && docsTotal !== null) {
+      setDatasets(prev => prev.map(d => d.id === selectedId ? { ...d, documents: docsTotal } : d));
+    }
+  }, [selectedId, docsTotal]);
+
+  // A connector can import more rows while this page stays open. Refresh the
+  // visible page as the persisted total changes, without resetting pagination
+  // on every individual cognify completion.
+  const importedTotal = processingCounts.data?.total;
+  const lastImportSnapshot = useRef<{ id: string | null; total: number | undefined }>({ id: null, total: undefined });
+  useEffect(() => {
+    const previous = lastImportSnapshot.current;
+    lastImportSnapshot.current = { id: selectedId, total: importedTotal };
+    if (selectedId && previous.id === selectedId && previous.total !== undefined && importedTotal !== undefined && previous.total !== importedTotal) {
+      void loadDocs(selectedId);
+    }
+  }, [selectedId, importedTotal, loadDocs]);
+
+  async function refreshSelectedDocs(id: string): Promise<void> {
+    await loadDocs(id);
+  }
+
+  async function handleRefresh(): Promise<void> {
+    setRefreshing(true);
+    await Promise.all([loadDatasets(), selectedId ? refreshSelectedDocs(selectedId) : Promise.resolve(), selectedId ? processingCounts.refetch() : Promise.resolve()]);
+    setRefreshing(false);
+  }
+
+  async function handleSelectDataset(id: string): Promise<void> {
+    if (selectedId === id) return;
+    setSelectedId(id);
+    setSelectedDocs([]);
+    await refreshSelectedDocs(id);
+  }
+
+  async function handleUploadFiles(files: File[]): Promise<void> {
+    if (!files.length) return;
+    if (!cogniInstance) {
+      setUploadError("Your workspace isn't ready yet. Please wait a moment and try again.");
+      return;
+    }
+    if (!selectedId) {
+      setUploadError("Select a brain before uploading files.");
+      return;
+    }
+    const ds = datasets.find((d) => d.id === selectedId);
+    if (!ds) return;
+
+    if (files.length > MAX_FILES_PER_UPLOAD) {
+      setUploadError(`You selected ${files.length} files. Please upload ${MAX_FILES_PER_UPLOAD} or fewer at a time.`);
+      return;
+    }
+
+    if (!(await confirmUpload(files))) return;
+
+    const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
+    const fileTypes = files.map((f) => f.type || "unknown");
+
+    setUploadError(null);
+    setCanRetryBuild(false);
+    trackUploadStarted({ datasetId: ds.id, fileCount: files.length, totalBytes, fileTypes });
+
+    // Load the dataset's saved graph model/prompt/ontology so uploads from
+    // this page respect the same customization as the detail page, instead
+    // of always building with defaults (CLO-292).
+    const options = await buildCognifyOptionsForDataset(cogniInstance, ds.id).catch((err) => {
+      console.error("Failed to load graph settings for upload, using defaults:", err);
+      return undefined;
+    });
+
+    // Shared by the success and processing-error paths below; only the
+    // success path also updates the dataset's status.
+    const fetchSelectedDocs = async (): Promise<void> => {
+      if (selectedIdRef.current === ds.id) await loadDocs(ds.id);
+    };
+
+    const refreshDocs = async (): Promise<void> => {
+      // list is a page, so it cannot supply the badge's total — count separately.
+      let count: number | null = null;
+      if (selectedIdRef.current === ds.id) {
+        await loadDocs(ds.id);
+      } else {
+        count = await getDatasetDataCount(ds.id, cogniInstance).catch(() => null);
+      }
+      // "completed", NOT "running": onProcessed fires only after the status
+      // poll reached COMPLETED (useBrainUpload.ts). Writing "running" here
+      // left the row stuck on "Processing" forever when the shared status
+      // query had already read COMPLETED — react-query's structural sharing
+      // keeps the data's identity unchanged on identical refetches, so the
+      // statusDetails effect never fired again to correct it.
+      setDatasets((prev) =>
+        prev.map((d) =>
+          d.id === ds.id
+            ? { ...d, documents: count ?? d.documents, status: "completed" }
+            : d,
+        ),
+      );
+    };
+
+    await upload({
+      datasetId: ds.id,
+      datasetName: ds.name,
+      files,
+      options,
+      // Belt-and-suspenders: the check above already blocks this case, but if
+      // that check is ever removed/changed the hook's own guard must still
+      // surface an error instead of silently no-opping.
+      onLimitExceeded: (selected) => {
+        setUploadError(`You selected ${selected.length} files. Please upload ${MAX_FILES_PER_UPLOAD} or fewer at a time.`);
+      },
+      onUploadError: (error, ctx) => {
+        const errorName = error instanceof Error ? error.name : "UnknownError";
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        recordUploadFailure(errorName, ctx.durationMs);
+        trackUploadFailed({ datasetId: ds.id, fileCount: files.length, totalBytes, fileTypes, durationMs: ctx.durationMs, errorName, errorMessage });
+        if (isInsufficientCreditsError(error)) {
+          // The pod interceptor (services/http/pod.ts) already opened the
+          // global insufficient-credits modal — avoid a second, conflicting
+          // "upload failed" banner for the same event.
+          return;
+        }
+        if (errorName === "UploadTimeoutError") {
+          // Names elapsed time and never claims data loss (CLO-492): the abort
+          // is client-side only, so the files may well have landed. Telling
+          // someone to "try a smaller file" was wrong on both counts.
+          //
+          // It must not overclaim in the other direction either: upload()
+          // returns straight after this callback, so nothing on THIS page is
+          // still working on the remainder. The pending files are held in the
+          // upload session, which is picked up on the next page load — so
+          // reloading is the action that actually finishes them.
+          setUploadError(
+            ctx.filesUploaded > 0
+              ? `Uploaded ${ctx.filesUploaded} of ${files.length} files before the connection stalled. The rest haven't been sent — reload the page to pick up where this left off.`
+              : "The upload stalled before any files were sent. Reload the page to resume it, or try again.",
+          );
+        } else {
+          captureException(error, { datasetId: ds.id, fileCount: files.length, totalBytes, durationMs: ctx.durationMs });
+          setUploadError(errorMessage || "Upload failed. Please try again.");
+        }
+      },
+      onProcessed: async (ctx) => {
+        await refreshDocs();
+        recordUploadSuccess(ctx.durationMs, totalBytes, files.length);
+        trackFilesUploaded({ datasetId: ds.id, fileCount: files.length, totalBytes, durationMs: ctx.durationMs });
+      },
+      onProcessingError: async (error, ctx) => {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        captureException(error, { datasetId: ds.id, fileCount: files.length, totalBytes, durationMs: ctx.durationMs, stage: "processing" });
+        trackProcessingFailed({ datasetId: ds.id, fileCount: files.length, totalBytes, durationMs: ctx.durationMs, errorMessage });
+        const { message, isTimeout } = describeProcessingError(error);
+        setUploadError(message);
+        setCanRetryBuild(!isTimeout);
+        // Refresh the doc list anyway — the files are there even though the
+        // build errored. Don't flip the dataset to "running" here (it isn't).
+        try {
+          await fetchSelectedDocs();
+        } catch {
+          // best-effort refresh only
+        }
+      },
+    });
+  }
+
+  // Re-kicks the knowledge-graph build for the selected dataset after a
+  // processing failure, without re-uploading files. Fire-and-forget like
+  // DatasetDetailPage's rebuildGraph — the shared status poller (statuses)
+  // picks up the new in-progress state on its own, so this doesn't need to
+  // await the build to completion.
+  async function handleRetryBuild(): Promise<void> {
+    if (!cogniInstance || !selectedId) return;
+    const ds = datasets.find((d) => d.id === selectedId);
+    if (!ds) return;
+    setUploadError(null);
+    setCanRetryBuild(false);
+    setDatasets((prev) => prev.map((d) => d.id === selectedId ? { ...d, status: "running" } : d));
+    try {
+      const options = await buildCognifyOptionsForDataset(cogniInstance, ds.id).catch(() => undefined);
+      await cognifyDataset({ id: ds.id, name: ds.name, data: [], status: "processing" }, cogniInstance, options);
+    } catch (err) {
+      console.error("Failed to retry build:", err);
+      setUploadError("Retrying the build failed. Please try again.");
+      setCanRetryBuild(true);
+    }
+  }
+
+  async function handleDeleteFile(docId: string): Promise<void> {
+    if (!cogniInstance || !selectedId) return;
+    const datasetId = selectedId;
+    setDeletingDocId(docId);
+    try {
+      await deleteDatasetData(datasetId, docId, cogniInstance);
+      if (selectedIdRef.current === datasetId) {
+        setSelectedDocs((prev) => prev.filter((d) => d.id !== docId));
+      }
+      setDatasets((prev) => prev.map((d) => d.id === datasetId ? { ...d, documents: Math.max(0, d.documents - 1) } : d));
+      setDeleteDocTarget(null);
+    } catch (err) {
+      console.error("Failed to delete file:", err);
+    } finally {
+      setDeletingDocId(null);
+    }
+  }
+
+  function handleDelete(ds: Dataset): void {
+    if (!cogniInstance) return;
+    // Optimistic delete: drop the dataset from the UI right away and let the
+    // backend request complete in the background.
+    setDatasets((prev) => prev.filter((d) => d.id !== ds.id));
+    if (selectedId === ds.id) { setSelectedId(null); resetDocs(); }
+    setDeleteTarget(null);
+    refreshFilterDatasets();
+    trackEvent({ pageName: "Brains", eventName: "dataset_deleted", additionalProperties: { dataset_id: ds.id, dataset_name: ds.name } });
+    deleteDataset(ds.id, cogniInstance).catch((err) => {
+      console.error("Failed to delete brain:", err);
+    });
+  }
+
+  async function handleCreate(templateKey: CreateBrainTemplateKey | null): Promise<void> {
+    const trimmed = newName.trim();
+    if (!trimmed || !cogniInstance) return;
+    setCreateError("");
+    if (trimmed.includes(".")) {
+      setCreateError("Dataset name cannot contain periods.");
+      return;
+    }
+    // The input masks spaces to hyphens as the user types (CreateBrainModal)
+    // for a readable name while typing; the backend gets the same name in
+    // snake_case, matching the naming convention datasets are stored under.
+    const backendName = trimmed.toLowerCase().replace(/[\s-]+/g, "_");
+    if (datasets.some((d) => d.name.toLowerCase().replace(/[\s-]+/g, "_") === backendName)) {
+      setCreateError("A brain with this name already exists.");
+      return;
+    }
+    setCreating(true);
+    try {
+      const ds = await createDataset({ name: backendName }, cogniInstance, tenant?.tenant_id);
+      trackEvent({ pageName: "Brains", eventName: "dataset_created", additionalProperties: { dataset_name: ds.name, template: templateKey ?? "blank" } });
+      setDatasets((prev) => [...prev, { ...ds, documents: 0, status: "empty" as DisplayStatus }]);
+      setSelectedId(ds.id);
+      resetDocs();
+      setNewName(""); setCreateError(""); setShowCreate(false);
+      refreshFilterDatasets();
+      if (templateKey) {
+        applyCreateBrainTemplate(cogniInstance, ds.id, templateKey).catch((err) => {
+          console.error("Failed to apply brain template:", err);
+        });
+      }
+    } catch (err) {
+      console.error("Failed to create dataset:", err);
+      setCreateError("Failed to create brain. Please try again.");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function handlePasteText(): Promise<void> {
+    if (!pasteText.trim() || !selectedId) return;
+    setPasting(true);
+    try {
+      const blob = new Blob([pasteText], { type: "text/plain" });
+      const file = new File([blob], `pasted-text-${Date.now()}.txt`, { type: "text/plain" });
+      setShowPasteModal(false);
+      setPasteText("");
+      await handleUploadFiles([file]);
+    } finally {
+      setPasting(false);
+    }
+  }
+
+  const selectedDataset = datasets.find((d) => d.id === selectedId) ?? null;
+  const completionById = new Map(processingCounts.data?.items.map(item => [item.id, item.completed]));
+
+  return {
+    processingCounts: processingCounts.data,
+    processingCountsError: processingCounts.isError,
+    refreshProcessingCounts: () => { void processingCounts.refetch(); },
+    isLoading: loading || isInitializing,
+    datasets: datasets.map(d => d.id === selectedId && processingCounts.data ? { ...d, processingCounts: processingCounts.data } : d),
+    datasetsError,
+    selectedId,
+    selectedDataset,
+    selectedDocs: selectedDocs.map(doc => ({ ...doc, completed: completionById.get(doc.id) })),
+    docsLoading,
+    docsError,
+    docsTotal,
+    hasMoreDocs,
+    loadMoreDocs,
+    retryDocs: () => { if (selectedId) refreshSelectedDocs(selectedId); },
+    outdatedDatasets,
+    refreshing,
+    isUploading,
+    uploadStage,
+    uploadProgress: combinedUploadProgress,
+    uploadError,
+    canRetryBuild,
+    setUploadError,
+    pendingLowBalanceWarning,
+    cancelLowBalanceUpload,
+    showCreateModal,
+    setShowCreate,
+    newName,
+    setNewName,
+    creating,
+    createError,
+    setCreateError,
+    deleteTarget,
+    setDeleteTarget,
+    shareTarget,
+    setShareTarget,
+    deleteDocTarget,
+    setDeleteDocTarget,
+    deletingDocId,
+    showPasteModal,
+    setShowPasteModal,
+    pasteText,
+    setPasteText,
+    pasting,
+    handleRefresh,
+    handleSelectDataset,
+    handleUploadFiles,
+    handleRetryBuild,
+    handleDeleteFile,
+    handleDelete,
+    handleCreate,
+    handlePasteText,
+  };
+}

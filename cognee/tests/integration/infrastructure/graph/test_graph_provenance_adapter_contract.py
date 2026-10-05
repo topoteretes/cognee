@@ -9,21 +9,24 @@ specific tests.
 from __future__ import annotations
 
 import asyncio
+import logging
 from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
 
 from cognee.infrastructure.databases.provenance import (
-    EdgeIdentity,
     GRAPH_DELETE_MODE_GRAPH_PROVENANCE,
     GRAPH_DELETE_MODE_KEY,
     GRAPH_PROVENANCE_VERSION,
     GRAPH_PROVENANCE_VERSION_KEY,
+    EdgeIdentity,
     make_source_ref_key,
     make_source_run_ref,
 )
 from cognee.infrastructure.engine import DataPoint
+
+logger = logging.getLogger(__name__)
 
 try:
     from cognee.infrastructure.databases.graph.ladybug.adapter import LadybugAdapter
@@ -67,6 +70,7 @@ async def _make_postgres_adapter():
             await conn.run_sync(_meta.drop_all)
         await adapter.initialize()
     except Exception as exc:  # pragma: no cover - environment dependent
+        logger.debug("Ignoring exception in _make_postgres_adapter", exc_info=True)
         await adapter.close()
         pytest.skip(f"postgres graph backend not reachable: {exc}")
     return adapter
@@ -100,6 +104,7 @@ async def _make_neo4j_adapter():
         await adapter.initialize()
         await adapter.query("MATCH (n) DETACH DELETE n")
     except Exception as exc:  # pragma: no cover - environment dependent
+        logger.debug("Ignoring exception in _make_neo4j_adapter", exc_info=True)
         await adapter.close()
         pytest.skip(f"neo4j graph backend not reachable: {exc}")
     return adapter
@@ -587,4 +592,43 @@ async def test_concurrent_explicit_attach_keeps_all_keys(graph_provenance_adapte
     assert sorted(snap.source_ref_keys) == sorted([key1, key2])
     assert sorted(snap.source_run_refs) == sorted(
         [make_source_run_ref(UUID(run), key1), make_source_run_ref(UUID(run), key2)]
+    )
+
+
+async def test_concurrent_folded_writes_and_attaches_keep_every_owner(graph_provenance_adapter):
+    """A folded write (owner key stamped inside the MERGE) landing between an
+    attach's read and write must not be lost.
+
+    This is what two documents of one cognify run do to an entity they share:
+    each document's batch folds its first owner into the node and attaches the
+    rest afterwards, concurrently. Seen on CI as one owner missing from
+    ``alice`` and ``rabbit`` at baseline while every other check passed.
+    """
+    from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
+
+    adapter = graph_provenance_adapter
+    shared = _Ent(id=uuid4(), name="Alice")
+    node_id = str(shared.id)
+    dataset_id = uuid4()
+    rounds = 6
+
+    def chunk_keys(document_id):
+        return [make_chunk_source_ref_key(dataset_id, document_id, uuid4()) for _ in range(rounds)]
+
+    doc_a, doc_b = uuid4(), uuid4()
+    folded_a, attached_a = chunk_keys(doc_a), chunk_keys(doc_a)
+    folded_b, attached_b = chunk_keys(doc_b), chunk_keys(doc_b)
+
+    async def writer(folded, attached):
+        for fold_key, attach_key in zip(folded, attached):
+            await adapter.add_nodes([shared], source_ref_key=fold_key)  # one-statement fold
+            await adapter.attach_node_source_refs([node_id], [attach_key])  # read-then-write
+
+    await asyncio.gather(writer(folded_a, attached_a), writer(folded_b, attached_b))
+
+    snapshot = (await adapter.get_node_delete_data([node_id]))[node_id]
+    expected = set(folded_a + attached_a + folded_b + attached_b)
+    missing = expected - set(snapshot.source_ref_keys)
+    assert not missing, (
+        f"{len(missing)} owner key(s) lost to a concurrent write: {sorted(missing)[:4]}"
     )

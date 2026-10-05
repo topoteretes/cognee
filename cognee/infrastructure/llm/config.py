@@ -1,6 +1,6 @@
 import json
 from functools import lru_cache
-from typing import Any, ClassVar
+from typing import Any
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -83,8 +83,10 @@ class LLMConfig(BaseSettings):
     - llm_api_version
     - llm_temperature
     - llm_streaming
+    - llm_answer_streaming
     - llm_max_completion_tokens
     - transcription_model
+    - image_transcribe_model
     - graph_prompt_path
     - llm_rate_limit_enabled
     - llm_rate_limit_requests
@@ -105,7 +107,7 @@ class LLMConfig(BaseSettings):
     structured_output_framework: str = "litellm_native"
     llm_instructor_mode: str = ""
     llm_provider: str = "openai"
-    llm_model: str = "openai/gpt-5-mini"
+    llm_model: str = "openai/gpt-5.6-luna"
     llm_endpoint: str = ""
     llm_api_key: str | None = None
     llm_api_version: str | None = None
@@ -132,16 +134,34 @@ class LLMConfig(BaseSettings):
     llm_temperature: float = 0.0
     llm_seed: int | None = None
     llm_streaming: bool = False
+
+    # Stream answer tokens out of the plain-text completion path so a caller can
+    # render them as they arrive (env LLM_ANSWER_STREAMING). Off by default: the
+    # returned value is identical either way, so enabling it changes nothing for
+    # a caller that is not consuming a token sink.
+    #
+    # Deliberately NOT llm_streaming above, which is a different, older flag:
+    # that one is unread by OpenAI/Azure, absent from every other provider, and
+    # on Bedrock injects stream=True into the instructor path where nothing
+    # consumes a stream. It is also part of the adapter LRU cache key, so
+    # flipping it changes adapter identity.
+    llm_answer_streaming: bool = False
+
     llm_max_completion_tokens: int = 16384
 
     baml_llm_provider: str = "openai"
-    baml_llm_model: str = "gpt-5-mini"
+    baml_llm_model: str = "gpt-5.6-luna"
     baml_llm_endpoint: str = ""
     baml_llm_api_key: str | None = None
     baml_llm_temperature: float = 0.0
     baml_llm_api_version: str = ""
 
     transcription_model: str = "whisper-1"
+    # Vision model for image transcription. Empty means "use llm_model", which is
+    # the right default: the chat model is often already multimodal, and unlike
+    # audio there is no separate-model-by-necessity the way whisper-1 is for
+    # speech. Set it when the base model has no vision capability.
+    image_transcribe_model: str = ""
     graph_prompt_path: str = "generate_graph_prompt.txt"
     temporal_graph_prompt_path: str = "generate_event_graph_prompt.txt"
     event_entity_prompt_path: str = "generate_event_entity_prompt.txt"
@@ -174,7 +194,7 @@ class LLMConfig(BaseSettings):
 
     baml_registry: Any | None = None
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     @model_validator(mode="before")
     @classmethod
@@ -208,9 +228,13 @@ class LLMConfig(BaseSettings):
         """
         for field_name in self.__class__.model_fields:
             value = getattr(self, field_name, None)
-            if isinstance(value, str) and len(value) >= 2:
-                if value[0] == value[-1] and value[0] in ("'", '"'):
-                    setattr(self, field_name, value[1:-1])
+            if (
+                isinstance(value, str)
+                and len(value) >= 2
+                and value[0] == value[-1]
+                and value[0] in ("'", '"')
+            ):
+                setattr(self, field_name, value[1:-1])
 
         return self
 
@@ -289,7 +313,7 @@ class LLMConfig(BaseSettings):
         """
         return _apply_local_rate_limit_default(self)
 
-    def model_post_init(self, __context) -> None:
+    def model_post_init(self, context, /) -> None:
         """Initialize the BAML registry after the model is created."""
         # Check if BAML is selected as structured output framework but not available
         if self.structured_output_framework.lower() == "baml" and ClientRegistry is None:
@@ -344,7 +368,7 @@ class LLMConfig(BaseSettings):
         #
         # llm_endpoint/llm_api_key default to blank ("" / None), so "has a
         # non-blank value" alone tells us whether they were configured.
-        # llm_model defaults to a real model id ("openai/gpt-5-mini"), so the
+        # llm_model defaults to a real model id ("openai/gpt-5.6-luna"), so the
         # same non-blank check can't tell "configured, happens to match the
         # default" from "left unset" - that also needs `model_fields_set`
         # (populated by pydantic-settings whether the value came from a kwarg
@@ -392,8 +416,10 @@ class LLMConfig(BaseSettings):
             "temperature": self.llm_temperature,
             "seed": self.llm_seed,
             "streaming": self.llm_streaming,
+            "answer_streaming": self.llm_answer_streaming,
             "max_completion_tokens": self.llm_max_completion_tokens,
             "transcription_model": self.transcription_model,
+            "image_transcribe_model": self.image_transcribe_model,
             "graph_prompt_path": self.graph_prompt_path,
             "rate_limit_enabled": self.llm_rate_limit_enabled,
             "rate_limit_requests": self.llm_rate_limit_requests,

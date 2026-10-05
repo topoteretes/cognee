@@ -1,30 +1,39 @@
 from datetime import datetime
-from typing import List, Optional
-
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse
-from pydantic import BaseModel, Field
-from starlette.status import WS_1008_POLICY_VIOLATION, WS_1011_INTERNAL_ERROR
 from uuid import UUID
+
+from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
+from starlette.status import WS_1008_POLICY_VIOLATION, WS_1011_INTERNAL_ERROR
+
+from cognee import __version__ as cognee_version
+from cognee.api.sse import SSE_MEDIA_TYPE, sse_headers, wants_event_stream
+from cognee.exceptions import CogneeApiError
+from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.visualization.subgraph_data import (
-    DEFAULT_MAX_NODES,
-    DEFAULT_NEIGHBORHOOD_DEPTH,
-    DEFAULT_SEED_TOP_K,
-)
 from cognee.modules.users.methods import (
     get_authenticated_user,
     get_authenticated_websocket_user,
     get_user,
 )
-from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.users.models import User
-
+from cognee.modules.visualization.graph_stream import begin_graph_stream
+from cognee.modules.visualization.subgraph_data import (
+    DEFAULT_MAX_NODES,
+    DEFAULT_NEIGHBORHOOD_DEPTH,
+    DEFAULT_SEED_TOP_K,
+)
+from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
-from cognee import __version__ as cognee_version
 
 logger = get_logger()
+
+# The JSON response holds the whole graph at once, so its cap limits response
+# size. A streamed response holds one chunk at a time.
+JSON_MAX_NODES = 5000
+STREAM_MAX_NODES = 20000
 
 
 class UserDatasetPair(BaseModel):
@@ -61,11 +70,11 @@ def get_visualize_router() -> APIRouter:
             False,
             description="Render the entire graph instead of a bounded subgraph.",
         ),
-        query: Optional[str] = Query(
+        query: str | None = Query(
             None,
             description="Query string whose nearest vector hits seed the subgraph.",
         ),
-        seed_node_ids: Optional[List[str]] = Query(
+        seed_node_ids: list[str] | None = Query(
             None,
             description="Explicit seed node ids for subgraph neighborhood expansion.",
         ),
@@ -146,6 +155,8 @@ def get_visualize_router() -> APIRouter:
             )
             return HTMLResponse(html_visualization)
 
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Visualization failed for dataset %s", dataset_id)
             return JSONResponse(
@@ -154,6 +165,7 @@ def get_visualize_router() -> APIRouter:
 
     @router.get("/json", response_model=None)
     async def visualize_json(
+        request: Request,
         dataset_id: UUID = Query(
             ...,
             description=(
@@ -166,11 +178,11 @@ def get_visualize_router() -> APIRouter:
             False,
             description="Include the entire graph instead of a bounded subgraph.",
         ),
-        query: Optional[str] = Query(
+        query: str | None = Query(
             None,
             description="Query string whose nearest vector hits seed the subgraph.",
         ),
-        seed_node_ids: Optional[List[str]] = Query(
+        seed_node_ids: list[str] | None = Query(
             None,
             description="Explicit seed node ids for subgraph neighborhood expansion.",
         ),
@@ -189,8 +201,18 @@ def get_visualize_router() -> APIRouter:
         max_nodes: int = Query(
             DEFAULT_MAX_NODES,
             ge=1,
-            le=5000,
-            description="Hard cap on rendered nodes after expansion.",
+            le=STREAM_MAX_NODES,
+            description=(
+                f"Hard cap on rendered nodes after expansion. Up to {JSON_MAX_NODES} "
+                f"as JSON, up to {STREAM_MAX_NODES} when streamed."
+            ),
+        ),
+        stream: bool | None = Query(
+            None,
+            description=(
+                "Stream the graph as server-sent events. Defaults to content "
+                "negotiation on `Accept`; true or false decides outright."
+            ),
         ),
         user: User = Depends(get_authenticated_user),
     ):
@@ -206,7 +228,8 @@ def get_visualize_router() -> APIRouter:
 
         ## Query Parameters
         Same as `GET /visualize` (dataset_id, full, query, seed_node_ids,
-        neighborhood_depth, neighborhood_seed_top_k, max_nodes).
+        neighborhood_depth, neighborhood_seed_top_k, max_nodes), plus
+        `stream`.
 
         ## Response
         A JSON object with `nodes`, `links`, `color_maps`, `schema_graph`,
@@ -214,10 +237,28 @@ def get_visualize_router() -> APIRouter:
         `provenance_index`, `has_meaningful_topological_rank`, `memory_map`
         and `search_events`.
 
+        ## Streaming
+        Sent when the request has `Accept: text/event-stream` or
+        `stream=true`, for graphs too large for one response. Events:
+        `meta` (seeds, seed source, bounds); one `chunk` per read, with
+        compact `nodes` (id, name, type, stage, is_unnamed, belongs_to_set,
+        source_node_set) and `links` (source, target, relation, edge_class)
+        whose endpoints were all sent in this or an earlier chunk; `summary`
+        (`importance` and `label_priority` per node, split into events of at
+        most one chunk's size, the first also carrying `color_maps.node_set`);
+        `done` (totals). A failure after the response started is one
+        `error` event with `message` and `status`. The heavy side payloads
+        are not streamed, and `full=true` cannot be streamed.
+
         ## Error Codes
         - **409 Conflict**: Dataset not found, permission denied, or the
           payload could not be built (generic message; full detail is
           server-logged, not returned, to avoid leaking internals)
+        - **Request validation error** (400 on the cognee server, like any
+          invalid parameter): `max_nodes` above 5000 without streaming, or
+          `full=true` with streaming
+        - **503 Service Unavailable**: streamed, and this server already has
+          its maximum number of graph streams open; retry shortly
 
         ## Notes
         - User must have read permissions on the dataset
@@ -233,10 +274,60 @@ def get_visualize_router() -> APIRouter:
             },
         )
 
-        from cognee.api.v1.visualize import visualize_graph_json
+        from cognee.api.v1.visualize import stream_dataset_graph, visualize_graph_json
+
+        streaming = wants_event_stream(request.headers.get("accept"), stream)
+        # Raised as request validation errors, so they reach the app's own
+        # handler: for max_nodes that is the exact response the JSON path gave
+        # before streaming raised the Query bound (400 on the cognee server).
+        if not streaming and max_nodes > JSON_MAX_NODES:
+            raise RequestValidationError(
+                [
+                    {
+                        "type": "less_than_equal",
+                        "loc": ("query", "max_nodes"),
+                        "msg": f"Input should be less than or equal to {JSON_MAX_NODES}",
+                        "input": str(max_nodes),
+                        "ctx": {"le": JSON_MAX_NODES},
+                    }
+                ]
+            )
+        if streaming and full:
+            raise RequestValidationError(
+                [
+                    {
+                        "type": "value_error",
+                        "loc": ("query", "full"),
+                        "msg": "Value error, full=true reads the whole graph and cannot be streamed",
+                        "input": "true",
+                    }
+                ]
+            )
 
         try:
             dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
+
+            if streaming:
+                # Starts the read and waits for its first chunk, so a failure
+                # before any output keeps the status code the JSON path gives.
+                graph_stream = await begin_graph_stream(
+                    stream_dataset_graph(
+                        dataset[0],
+                        query=query,
+                        seed_node_ids=seed_node_ids,
+                        neighborhood_depth=neighborhood_depth,
+                        neighborhood_seed_top_k=neighborhood_seed_top_k,
+                        max_nodes=max_nodes,
+                    )
+                )
+                return StreamingResponse(
+                    graph_stream.frames(),
+                    media_type=SSE_MEDIA_TYPE,
+                    headers=sse_headers(),
+                    # Runs even when the body was never iterated, which is the
+                    # one exit frames() cannot see.
+                    background=BackgroundTask(graph_stream.close),
+                )
 
             payload = await visualize_graph_json(
                 dataset=dataset[0].id,
@@ -250,6 +341,8 @@ def get_visualize_router() -> APIRouter:
             )
             return JSONResponse(status_code=200, content=payload)
 
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Visualization JSON payload failed for dataset %s", dataset_id)
             return JSONResponse(
@@ -271,11 +364,11 @@ def get_visualize_router() -> APIRouter:
             False,
             description="Include the entire graph instead of a bounded subgraph.",
         ),
-        query: Optional[str] = Query(
+        query: str | None = Query(
             None,
             description="Query string whose nearest vector hits seed the subgraph.",
         ),
-        seed_node_ids: Optional[List[str]] = Query(
+        seed_node_ids: list[str] | None = Query(
             None,
             description="Explicit seed node ids for subgraph neighborhood expansion.",
         ),
@@ -360,6 +453,8 @@ def get_visualize_router() -> APIRouter:
             )
             return JSONResponse(status_code=200, content=payload)
 
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Semantic payload failed for dataset %s", dataset_id)
             return JSONResponse(
@@ -412,6 +507,8 @@ def get_visualize_router() -> APIRouter:
             payload = await build_brains_payload(user=user, max_nodes=max_nodes)
             return JSONResponse(status_code=200, content=payload)
 
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Brains overview payload failed")
             return JSONResponse(
@@ -472,6 +569,8 @@ def get_visualize_router() -> APIRouter:
             payload = await build_brains_summary_payload(user=user)
             return JSONResponse(status_code=200, content=payload)
 
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Brains summary payload failed")
             return JSONResponse(
@@ -484,14 +583,14 @@ def get_visualize_router() -> APIRouter:
         dataset_id: UUID = Query(
             ...,
             description=(
-                "UUID of the dataset this poll is for. Gates who may call this "
-                "endpoint (same read-permission check as every other visualize "
-                "route) — the events themselves are the caller's own, not "
-                "filtered to this dataset's graph."
+                "UUID of the dataset this poll is for. Gates who may call "
+                "this endpoint (same read-permission check as every other "
+                "visualize route) and scopes the events returned: only the "
+                "caller's own sessions attributed to this dataset contribute."
             ),
             examples=[""],
         ),
-        since: Optional[datetime] = Query(
+        since: datetime | None = Query(
             None,
             description=(
                 "Cursor from a previous call's response. Omit on the first "
@@ -509,7 +608,7 @@ def get_visualize_router() -> APIRouter:
         come back. The filter is strict, so nothing is ever delivered twice.
 
         ## Query Parameters
-        - **dataset_id** (UUID): authorization only, see above
+        - **dataset_id** (UUID): authorization and event scope, see above
         - **since** (datetime, optional): cursor from a previous call
 
         ## Response
@@ -524,6 +623,11 @@ def get_visualize_router() -> APIRouter:
 
         ## Notes
         - User must have read permissions on the dataset
+        - Events come only from the caller's own sessions attributed to this
+          dataset. Sessions carrying no dataset attribution are not included.
+        - Attribution is per session, not per answered turn: a session id
+          reused across datasets stays with the first dataset it touched, so
+          its later turns appear on that dataset's timeline.
         """
         send_telemetry(
             "Visualize Live Events API Endpoint Invoked",
@@ -546,6 +650,8 @@ def get_visualize_router() -> APIRouter:
                 status_code=403,
                 content={"error": "Not authorized to read this dataset"},
             )
+        except CogneeApiError:
+            raise
         except Exception:
             logger.exception("Live events payload failed for dataset %s", dataset_id)
             return JSONResponse(
@@ -557,14 +663,14 @@ def get_visualize_router() -> APIRouter:
     async def subscribe_to_dataset_updates(
         websocket: WebSocket,
         dataset_id: UUID,
-        since: Optional[datetime] = Query(
+        since: datetime | None = Query(
             None,
             description=(
                 "Cursor from the last live_events frame of a previous "
                 "connection. Omit to start from every available event."
             ),
         ),
-        user: Optional[User] = Depends(get_authenticated_websocket_user),
+        user: User | None = Depends(get_authenticated_websocket_user),
     ):
         """
         Stream one dataset's live events and graph growth over a WebSocket.
@@ -590,8 +696,8 @@ def get_visualize_router() -> APIRouter:
 
         ## Path Parameters
         - **dataset_id** (UUID): the dataset to follow. Gates the connection
-          with the same read-permission check the other visualize routes use;
-          the events themselves are the caller's own, as on `/live-events`.
+          with the same read-permission check the other visualize routes use,
+          and scopes the events to this dataset, as on `/live-events`.
 
         ## Query Parameters
         - **since** (datetime, optional): reconnect cursor
@@ -650,7 +756,7 @@ def get_visualize_router() -> APIRouter:
 
     @router.post("/multi", response_model=None)
     async def visualize_multi(
-        pairs: List[UserDatasetPair],
+        pairs: list[UserDatasetPair],
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -707,8 +813,10 @@ def get_visualize_router() -> APIRouter:
             html_visualization = await visualize_multi_user_graph(user_dataset_pairs)
             return HTMLResponse(html_visualization)
 
-        except Exception as error:
-            logger.error("Multi-user visualization request failed: %s", error)
+        except CogneeApiError:
+            raise
+        except Exception:
+            logger.exception("Multi-user visualization request failed")
             return JSONResponse(
                 status_code=409, content={"error": "Unable to render visualization."}
             )

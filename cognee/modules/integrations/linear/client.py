@@ -14,15 +14,41 @@ contain secret or user content that must not reach logs.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 import aiohttp
+
+from cognee.modules.integrations.ingestion import RateLimitedError
 
 logger = logging.getLogger(__name__)
 
 GRAPHQL_URL = "https://api.linear.app/graphql"
 
 _TIMEOUT = aiohttp.ClientTimeout(total=30)
+
+
+class LinearUnauthorizedError(RuntimeError):
+    """Linear answered 401: the token was rejected, whatever its stored expiry says."""
+
+
+class LinearRateLimitedError(RateLimitedError):
+    """Linear answered HTTP 400 with the ``RATELIMITED`` code."""
+
+
+async def _is_rate_limited(response: Any) -> bool:
+    """Whether a 400 carries the RATELIMITED code. Only the code is read, never echoed."""
+    try:
+        body = await response.json()
+    except (aiohttp.ContentTypeError, ValueError):
+        return False  # an unreadable body is just a plain 400
+    errors = body.get("errors") if isinstance(body, dict) else None
+    return isinstance(errors, list) and any(
+        isinstance(error, dict)
+        and isinstance(error.get("extensions"), dict)
+        and error["extensions"].get("code") == "RATELIMITED"
+        for error in errors
+    )
+
 
 _AGENT_ACTIVITY_CREATE_MUTATION = """
 mutation AgentActivityCreate($input: AgentActivityCreateInput!) {
@@ -44,7 +70,7 @@ def _operation_label(query: str) -> str:
 
 
 async def graphql(
-    access_token: str, query: str, variables: Optional[dict[str, Any]] = None
+    access_token: str, query: str, variables: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     """Run one GraphQL operation as the app user and return its ``data`` dict.
 
@@ -57,15 +83,22 @@ async def graphql(
     if variables:
         payload["variables"] = variables
 
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-        async with session.post(
+    async with (
+        aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+        session.post(
             GRAPHQL_URL,
             json=payload,
             headers={"Authorization": f"Bearer {access_token}"},
-        ) as response:
-            if response.status != 200:
-                raise RuntimeError(f"Linear {operation} failed: HTTP {response.status}")
-            body: dict[str, Any] = await response.json()
+        ) as response,
+    ):
+        if response.status == 401:
+            raise LinearUnauthorizedError(f"Linear {operation} failed: HTTP 401")
+        if response.status == 400 and await _is_rate_limited(response):
+            # Linear answers a rate limit with HTTP 400 and a RATELIMITED code.
+            raise LinearRateLimitedError(f"Linear {operation} failed: HTTP 400 RATELIMITED")
+        if response.status != 200:
+            raise RuntimeError(f"Linear {operation} failed: HTTP {response.status}")
+        body: dict[str, Any] = await response.json()
 
     errors = body.get("errors")
     if errors:

@@ -64,8 +64,8 @@ def stub_configs(monkeypatch):
         embedding_endpoint=None,
         embedding_dimensions=3072,
     )
-    import cognee.infrastructure.llm.config as llm_config_module
     import cognee.infrastructure.databases.vector.embeddings.config as embedding_config_module
+    import cognee.infrastructure.llm.config as llm_config_module
 
     monkeypatch.setattr(llm_config_module, "get_llm_context_config", lambda: llm_config)
     monkeypatch.setattr(

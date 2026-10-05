@@ -13,10 +13,10 @@ Connections registered here become usable via
 ``cognee.recall(query, scope=["tools"])`` once ``TOOL_CALLS_ENABLED=true``.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 
-async def _resolve_user_id(user: Optional[object]):
+async def _resolve_user_id(user: object | None):
     from cognee.modules.users.methods import get_default_user
 
     if user is None:
@@ -28,12 +28,12 @@ async def register_sql_connection(
     name: str,
     connection_string: str,
     *,
-    provider: Optional[str] = None,
-    allowed_tables: Optional[list[str]] = None,
-    max_rows: Optional[int] = None,
-    description: Optional[str] = None,
+    provider: str | None = None,
+    allowed_tables: list[str] | None = None,
+    max_rows: int | None = None,
+    description: str | None = None,
     allow_writes: bool = False,
-    user: Optional[object] = None,
+    user: object | None = None,
 ) -> dict[str, Any]:
     """Register (or replace) an authorized external SQL database for the user.
 
@@ -62,7 +62,7 @@ async def register_sql_connection(
     )
 
 
-async def list_sql_connections(user: Optional[object] = None) -> list[dict[str, Any]]:
+async def list_sql_connections(user: object | None = None) -> list[dict[str, Any]]:
     """The user's authorized connections (plus deployment-level ones), without secrets."""
     from cognee.modules.tools.connections import list_tool_connections
 
@@ -70,7 +70,7 @@ async def list_sql_connections(user: Optional[object] = None) -> list[dict[str, 
     return await list_tool_connections(user_id)
 
 
-async def remove_sql_connection(name: str, user: Optional[object] = None) -> bool:
+async def remove_sql_connection(name: str, user: object | None = None) -> bool:
     """Remove an authorized connection. Returns False when nothing matched."""
     from cognee.modules.tools.connections import delete_tool_connection
 
@@ -82,8 +82,8 @@ async def propose_sql_write(
     connection: str,
     instruction: str,
     *,
-    evidence: Optional[dict[str, Any]] = None,
-    user: Optional[object] = None,
+    evidence: dict[str, Any] | None = None,
+    user: object | None = None,
 ) -> dict[str, Any]:
     """Draft a correction UPDATE as a reviewable proposal — nothing executes.
 
@@ -102,7 +102,7 @@ async def propose_corrections(
     connection: str,
     *,
     limit: int = 10,
-    user: Optional[object] = None,
+    user: object | None = None,
 ) -> list[dict[str, Any]]:
     """Draft correction proposals from contradictions cognee has detected.
 
@@ -117,7 +117,7 @@ async def propose_corrections(
 
 
 async def list_write_proposals(
-    status: Optional[str] = None, user: Optional[object] = None
+    status: str | None = None, user: object | None = None
 ) -> list[dict[str, Any]]:
     """The user's write proposals, optionally filtered by status."""
     from cognee.modules.tools.text_to_sql import list_write_proposals as _list
@@ -126,7 +126,7 @@ async def list_write_proposals(
     return await _list(user_id, status=status)
 
 
-async def apply_write_proposal(proposal_id, user: Optional[object] = None) -> dict[str, Any]:
+async def apply_write_proposal(proposal_id, user: object | None = None) -> dict[str, Any]:
     """Execute a reviewed proposal against its source database.
 
     This is the ONLY path that commits a write. Rolls back (and marks the
@@ -143,7 +143,7 @@ async def apply_write_proposal(proposal_id, user: Optional[object] = None) -> di
     return await _apply(user_id, proposal_id)
 
 
-async def reject_write_proposal(proposal_id, user: Optional[object] = None) -> dict[str, Any]:
+async def reject_write_proposal(proposal_id, user: object | None = None) -> dict[str, Any]:
     """Mark a proposal rejected so it can never be applied."""
     from uuid import UUID
 

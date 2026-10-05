@@ -31,7 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from mock_ingestion import ingest_mock  # noqa: E402
+from mock_ingestion import ingest_mock
 
 DATASET_A = "large_fork_a"
 DATASET_B = "large_fork_b"

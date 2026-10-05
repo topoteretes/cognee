@@ -1,7 +1,7 @@
+import importlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
-import importlib
 
 import pytest
 

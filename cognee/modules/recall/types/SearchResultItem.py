@@ -37,6 +37,7 @@ class SearchResultKind(str, Enum):
     SUMMARY = "summary"
     CODING_RULE = "coding_rule"
     CODE = "code"
+    SKILL = "skill"
     NATURAL_LANGUAGE = "natural_language"
     TEMPORAL = "temporal"
     STRUCTURED = "structured"  # when a response_model was supplied
@@ -47,11 +48,17 @@ class SearchResultItem(BaseModel):
     """One normalized search hit.
 
     ``text`` is always populated and always renderable — callers that
-    just want to display results can stop there. ``metadata`` carries
-    kind-specific details (chunk_id, doc_id, score, etc.) and ``raw``
-    preserves the original payload for callers that need the full
-    object. ``structured`` is populated when a Pydantic ``response_model``
-    was supplied to the retriever and parsing succeeded.
+    just want to display results can stop there. For an ``only_context``
+    search on a completion type, ``text`` is the user prompt the LLM would
+    have received: the conversation history, the question and the retrieval
+    context rendered through the retriever's template, and the session
+    guidance block. The system prompt, the retriever's task template, is
+    ``system_prompt``, kept apart because the LLM receives the two as
+    separate messages.
+    ``metadata`` carries kind-specific details (chunk_id, doc_id, score,
+    etc.) and ``raw`` preserves the original payload for callers that need
+    the full object. ``structured`` is populated when a Pydantic
+    ``response_model`` was supplied to the retriever and parsing succeeded.
     """
 
     model_config = ConfigDict(use_enum_values=True)
@@ -60,6 +67,8 @@ class SearchResultItem(BaseModel):
     search_type: SearchType
 
     text: str
+    # Only set by only_context searches on completion types; None otherwise.
+    system_prompt: str | None = None
     score: float | None = None
 
     dataset_id: str | None = None

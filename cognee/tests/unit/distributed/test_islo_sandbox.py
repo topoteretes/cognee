@@ -18,7 +18,7 @@ import pytest
 def _import_module(monkeypatch):
     """Import distributed.deploy.islo_sandbox with fake islo modules installed."""
     fake_islo = types.ModuleType("islo")
-    setattr(fake_islo, "Islo", MagicMock(name="Islo"))
+    fake_islo.Islo = MagicMock(name="Islo")
 
     fake_islo_types = types.ModuleType("islo.types")
 
@@ -26,16 +26,16 @@ def _import_module(monkeypatch):
         def __init__(self, **kwargs):
             self.__dict__.update(kwargs)
 
-    setattr(fake_islo_types, "LifecyclePolicy", LifecyclePolicy)
-    setattr(fake_islo, "types", fake_islo_types)
+    fake_islo_types.LifecyclePolicy = LifecyclePolicy
+    fake_islo.types = fake_islo_types
 
     fake_islo_errors = types.ModuleType("islo.errors")
 
     class ConflictError(Exception):
         pass
 
-    setattr(fake_islo_errors, "ConflictError", ConflictError)
-    setattr(fake_islo, "errors", fake_islo_errors)
+    fake_islo_errors.ConflictError = ConflictError
+    fake_islo.errors = fake_islo_errors
 
     monkeypatch.setitem(sys.modules, "islo", fake_islo)
     monkeypatch.setitem(sys.modules, "islo.types", fake_islo_types)

@@ -1,4 +1,4 @@
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 from cognee.context_global_variables import current_dataset_id
 from cognee.modules.retrieval.hybrid.chunks import chunk_candidate_limit, search_collection
@@ -12,9 +12,9 @@ logger = get_logger("HybridRetriever")
 
 
 class TruthContext(NamedTuple):
-    q_coords: Optional[list[float]] = None
-    truth_state_by_id: Optional[dict] = None
-    current_truth_epoch: Optional[int] = None
+    q_coords: list[float] | None = None
+    truth_state_by_id: dict | None = None
+    current_truth_epoch: int | None = None
 
 
 async def build_truth_context(
@@ -60,7 +60,9 @@ async def build_truth_context(
         truth_state_by_id = await unified_engine.graph.get_node_truth_state(candidate_chunk_ids)
         return TruthContext(q_coords, truth_state_by_id, current_truth_epoch)
     except Exception as error:
-        logger.debug("Truth-subspace lookup failed; using baseline ranking: %s", error)
+        logger.debug(
+            "Truth-subspace lookup failed; using baseline ranking: %s", error, exc_info=True
+        )
         return TruthContext()
 
 

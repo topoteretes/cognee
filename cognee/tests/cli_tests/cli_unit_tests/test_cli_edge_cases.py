@@ -2,20 +2,21 @@
 Tests for CLI edge cases and error scenarios with proper mocking.
 """
 
-import os
-import pytest
-import sys
-import asyncio
 import argparse
+import asyncio
+import os
+import sys
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from uuid import uuid4
-from unittest.mock import patch, MagicMock, AsyncMock, ANY
+
+import pytest
 
 import cognee
 from cognee.cli.commands.add_command import AddCommand
-from cognee.cli.commands.search_command import SearchCommand
 from cognee.cli.commands.cognify_command import CognifyCommand
-from cognee.cli.commands.delete_command import DeleteCommand
 from cognee.cli.commands.config_command import ConfigCommand
+from cognee.cli.commands.delete_command import DeleteCommand
+from cognee.cli.commands.search_command import SearchCommand
 from cognee.cli.exceptions import CliCommandException
 from cognee.modules.data.methods.get_deletion_counts import DeletionCountsPreview
 from cognee.modules.engine.operations.setup import setup

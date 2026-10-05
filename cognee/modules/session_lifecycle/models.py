@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Float, Integer, String, Text, UUID
+from sqlalchemy import Column, DateTime, Float, Integer, String, Text, Uuid
 
 from cognee.infrastructure.databases.relational import Base
 
@@ -29,9 +29,15 @@ class SessionRecord(Base):
     # from the Claude Code plugin). Scoped per user — same string from
     # two users is two different sessions.
     session_id = Column(String, primary_key=True)
-    user_id = Column(UUID, primary_key=True, index=True)
+    user_id = Column(Uuid, primary_key=True, index=True)
 
-    dataset_id = Column(UUID, nullable=True, index=True)
+    dataset_id = Column(Uuid, nullable=True, index=True)
+
+    # Agent-connection id (registry string like "my-agent-ab12cd34ef56",
+    # not a UUID) — attributes the session to the agent that drove it.
+    # Stamped best-effort when an agent connection registers with this
+    # session_id; null for sessions no agent claimed.
+    agent_id = Column(String, nullable=True, index=True)
 
     # Stored status. "abandoned" is the only value inferred at read
     # time instead of being stored — everything else (running,
@@ -74,6 +80,7 @@ class SessionRecord(Base):
             "session_id": self.session_id,
             "user_id": str(self.user_id),
             "dataset_id": str(dataset) if dataset is not None else None,
+            "agent_id": getattr(self, "agent_id", None),
             "status": self.status,
             "started_at": started.isoformat() if started is not None else None,
             "last_activity_at": last_act.isoformat() if last_act is not None else None,
@@ -99,7 +106,7 @@ class SessionModelUsage(Base):
     __tablename__ = "session_model_usage"
 
     session_id = Column(String, primary_key=True)
-    user_id = Column(UUID, primary_key=True, index=True)
+    user_id = Column(Uuid, primary_key=True, index=True)
     model = Column(Text, primary_key=True)
 
     tokens_in = Column(Integer, nullable=False, default=0)
