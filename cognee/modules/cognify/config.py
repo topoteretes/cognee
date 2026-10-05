@@ -123,32 +123,6 @@ class KeylessExtractorNotInstalledError(CogneeConfigurationError):
         )
 
 
-def _requested_extractor(value: str | None, config: CognifyConfig) -> str:
-    """The extractor setting as asked for: argument over env, aliases applied."""
-    extractor = (value or config.graph_extractor or AUTO_EXTRACTOR).strip().lower()
-    return EXTRACTOR_ALIASES.get(extractor, extractor)
-
-
-def resolve_extractor_name(
-    value: str | None, config: CognifyConfig, llm_configured: bool | None = None
-) -> str:
-    """Resolve the extractor setting without side effects.
-
-    ``auto`` is decided here (``llm`` with a usable key, ``gliner_demo``
-    without), but nothing is validated, installed or logged: the result may
-    be a value outside ``EXTRACTORS``. ``resolve_extractor`` adds the checks a
-    cognify run needs. Telemetry receives that already-resolved selection.
-    """
-    extractor = _requested_extractor(value, config)
-    if extractor == AUTO_EXTRACTOR:
-        if llm_configured is None:
-            from cognee.modules.preflight import keyless_local_defaults_apply
-
-            llm_configured = not keyless_local_defaults_apply()
-        extractor = LLM_EXTRACTOR if llm_configured else GLINER_DEMO_EXTRACTOR
-    return extractor
-
-
 def resolve_extractor(
     value: str | None, config: CognifyConfig, llm_configured: bool | None = None
 ) -> str:
@@ -164,12 +138,18 @@ def resolve_extractor(
     per process. It never installs anything: the pipeline entry point awaits
     ``ensure_extractor_runtime`` for that, after its own argument checks.
 
-    This is the ONLY place the extractor setting is read for a run
-    (``resolve_extractor_name`` is its side-effect-free half). Callers resolve
-    once, up front, and pass the resolved value (or values derived from it)
+    This is the only place the extractor setting is read for a run. Callers
+    resolve once, up front, and pass the resolved value (or values derived from it)
     onward — no downstream code re-reads the config.
     """
-    extractor = resolve_extractor_name(value, config, llm_configured)
+    extractor = (value or config.graph_extractor or AUTO_EXTRACTOR).strip().lower()
+    extractor = EXTRACTOR_ALIASES.get(extractor, extractor)
+    if extractor == AUTO_EXTRACTOR:
+        if llm_configured is None:
+            from cognee.modules.preflight import keyless_local_defaults_apply
+
+            llm_configured = not keyless_local_defaults_apply()
+        extractor = LLM_EXTRACTOR if llm_configured else GLINER_DEMO_EXTRACTOR
     if extractor not in EXTRACTORS:
         raise ValueError(
             f"Unknown extractor {extractor!r}; expected one of "

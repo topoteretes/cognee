@@ -7,6 +7,7 @@ import pathlib
 import re
 import socketserver
 import ssl
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from threading import Thread
 from typing import Any
@@ -211,6 +212,32 @@ def _telemetry_exception_chain(error: BaseException) -> list[BaseException]:
     return chain
 
 
+def telemetry_integer(value) -> int | None:
+    """Read an optional diagnostic integer without invoking arbitrary conversions."""
+    if type(value) not in (int, float, str):
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if isinstance(value, float) and number != value:
+        return None
+    return number
+
+
+@contextmanager
+def telemetry_guard():
+    """Isolate synchronous diagnostic construction/emission from application work.
+
+    Keep only telemetry inside this boundary. Cancellation and other control-flow
+    BaseExceptions still propagate; diagnostic defects are logged for debugging.
+    """
+    try:
+        yield
+    except Exception:
+        logger.debug("Telemetry skipped after a diagnostic failure", exc_info=True)
+
+
 def _telemetry_status_code(chain: list[BaseException]) -> int | None:
     """The HTTP status closest to the failure, or None.
 
@@ -219,15 +246,10 @@ def _telemetry_status_code(chain: list[BaseException]) -> int | None:
     status, since the provider's is the one that says why.
     """
     for error in reversed(chain):
-        value = getattr(error, "status_code", None)
-        if value is None or isinstance(value, bool):
-            continue
-        try:
-            status_code = int(value)
-        except (TypeError, ValueError):
-            continue
-        if 100 <= status_code <= 599:
-            return status_code
+        with telemetry_guard():
+            status_code = telemetry_integer(getattr(error, "status_code", None))
+            if status_code is not None and 100 <= status_code <= 599:
+                return status_code
     return None
 
 
@@ -285,12 +307,13 @@ def telemetry_on_error(event_name: str):
                     user = signature.bind_partial(*args, **kwargs).arguments.get("user")
                 except TypeError:
                     user = None
-                send_telemetry(
-                    event_name,
-                    user if user is not None else "sdk",
-                    additional_properties=telemetry_exception_properties(error)
-                    | {"cognee_version": _cognee_version()},
-                )
+                with telemetry_guard():
+                    send_telemetry(
+                        event_name,
+                        user if user is not None else "sdk",
+                        additional_properties=telemetry_exception_properties(error)
+                        | {"cognee_version": _cognee_version()},
+                    )
                 raise
 
         return wrapper

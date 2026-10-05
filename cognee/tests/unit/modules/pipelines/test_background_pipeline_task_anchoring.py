@@ -94,3 +94,20 @@ async def test_user_provided_without_datasets_does_not_raise(monkeypatch):
     await asyncio.sleep(0)  # flush any background no-op task
 
     assert isinstance(result, dict)
+
+
+@pytest.mark.asyncio
+async def test_failed_handoff_closes_already_started_runs():
+    closed = []
+
+    async def pipeline(datasets):
+        try:
+            if datasets == "second":
+                raise ValueError("second dataset setup failed")
+            yield SimpleNamespace(dataset_id=datasets, payload=None)
+        finally:
+            closed.append(datasets)
+
+    with pytest.raises(ValueError, match="second dataset"):
+        await run_pipeline_as_background_process(pipeline, datasets=["first", "second"])
+    assert set(closed) == {"first", "second"}

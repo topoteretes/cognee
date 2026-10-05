@@ -3,9 +3,21 @@ extractor as they would resolve now, and can never raise — it is computed
 before a pipeline's first event."""
 
 import importlib
+from types import SimpleNamespace
+
+import pytest
 
 # The package re-exports the function under the module's name; fetch the module itself.
 settings_module = importlib.import_module("cognee.modules.settings.get_current_settings")
+
+
+@pytest.fixture(autouse=True)
+def global_framework(monkeypatch):
+    monkeypatch.setattr(
+        settings_module,
+        "get_llm_config",
+        lambda: SimpleNamespace(structured_output_framework="litellm_native"),
+    )
 
 
 def test_payload_reports_embedder_and_extractor(monkeypatch):
@@ -71,7 +83,7 @@ def test_model_settings_that_are_paths_leave_as_the_local_path_label(monkeypatch
         "provider": "custom",
         "model": "local_path",
         "configured": False,
-        "structured_output": "unknown",
+        "structured_output": "litellm_native",
         "instructor_mode": "unknown",
     }
     assert payload["embedding"] == {"provider": "custom", "model": "local_path"}
@@ -93,21 +105,21 @@ def test_llm_half_reads_the_same_context_config_as_the_embedding_half(monkeypatc
         "provider": "anthropic",
         "model": "anthropic/claude",
         "configured": True,
-        "structured_output": "unknown",
+        "structured_output": "litellm_native",
         "instructor_mode": "unknown",
     }
 
 
 def test_structured_output_path_leaves_as_a_closed_value(monkeypatch):
     """Which path obtains structured output is where a schema rejection shows up;
-    the setting leaves as one of the shipped frameworks, ``invalid``, or ``unknown``."""
+    unknown framework names take the same instructor fallback as the gateway."""
     from types import SimpleNamespace
 
     cases = [
         ("BAML", "json_schema_mode", "baml", "json_schema_mode"),
         ("litellm_native", "", "litellm_native", "default"),
         ("instructor", "Tool Call; drop table", "instructor", "invalid"),
-        ("my_private_framework", None, "invalid", "unknown"),
+        ("my_private_framework", None, "instructor", "unknown"),
     ]
     for framework, mode, expected_framework, expected_mode in cases:
         config = SimpleNamespace(
@@ -119,6 +131,7 @@ def test_structured_output_path_leaves_as_a_closed_value(monkeypatch):
         if mode is not None:
             config.llm_instructor_mode = mode
         monkeypatch.setattr(settings_module, "get_llm_context_config", lambda config=config: config)
+        monkeypatch.setattr(settings_module, "get_llm_config", lambda config=config: config)
 
         llm = settings_module.get_current_settings()["llm"]
 

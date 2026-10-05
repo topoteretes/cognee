@@ -235,15 +235,14 @@ def resolve_embedding_defaults(config, llm_config) -> tuple[str | None, str | No
     its vector size is read from fastembed's registry, so a missing ``fastembed``
     surfaces here as ``KeylessEmbedderNotInstalledError``.
     """
+    provider, model = resolve_embedding_names(config, llm_config)
     if keyless_embedding_defaults_apply(config, llm_config):
-        dimensions = _resolve_embedding_dimensions(
-            DEFAULT_LOCAL_EMBEDDING_PROVIDER, DEFAULT_LOCAL_EMBEDDING_MODEL
-        )
+        dimensions = _resolve_embedding_dimensions(provider, model)
         if dimensions is None:
             # The registry lookup only fails when fastembed itself is absent.
             raise KeylessEmbedderNotInstalledError()
-        return DEFAULT_LOCAL_EMBEDDING_PROVIDER, DEFAULT_LOCAL_EMBEDDING_MODEL, dimensions
-    return config.embedding_provider, config.embedding_model, config.embedding_dimensions
+        return provider, model, dimensions
+    return provider, model, config.embedding_dimensions
 
 
 @lru_cache

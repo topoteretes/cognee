@@ -1,7 +1,8 @@
 """Startup recovery: every pipeline's STARTED runs are rolled back (if the pipeline has a
 rollback) and closed as ERRORED with the STARTED row's own metadata; nothing else is touched."""
 
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
@@ -82,6 +83,16 @@ def _wire(monkeypatch, runs, datasets, *, rollback_fails=False):
     monkeypatch.setattr(recovery_module, "ROLLBACK_HANDLERS", {"cognify_pipeline": _rollback})
     monkeypatch.setattr(recovery_module, "log_pipeline_run_error", _log_error)
     monkeypatch.setattr(recovery_module, "STALE_RUN_MIN_AGE_SECONDS", 3600)
+
+    @contextmanager
+    def claim(run):
+        yield SimpleNamespace(closed=False)
+
+    async def latest(run_id):
+        return next((run for run in runs if run.pipeline_run_id == run_id), None)
+
+    monkeypatch.setattr(recovery_module, "claim_run_ownership", claim)
+    monkeypatch.setattr(recovery_module, "get_latest_pipeline_run", latest)
     return calls
 
 
@@ -272,3 +283,49 @@ async def test_a_run_left_started_after_a_failed_rollback_emits_nothing(monkeypa
     await recovery_module.recover_stale_pipeline_runs_on_startup()
 
     assert events == []
+
+
+@pytest.mark.asyncio
+async def test_terminal_run_is_rechecked_after_claim(monkeypatch):
+    run = _run("cognify_pipeline")
+    calls = _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)})
+
+    async def completed(run_id):
+        return _run("cognify_pipeline", status=PipelineRunStatus.DATASET_PROCESSING_COMPLETED)
+
+    monkeypatch.setattr(recovery_module, "get_latest_pipeline_run", completed)
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_unverifiable_ownership_is_never_rolled_back(monkeypatch):
+    from cognee.modules.pipelines.run_ownership import claim_run_ownership
+
+    run = _run("cognify_pipeline")
+    calls = _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)})
+    monkeypatch.setattr(recovery_module, "claim_run_ownership", claim_run_ownership)
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_recovery_service_revisits_young_runs_and_stops_on_exit(monkeypatch):
+    run = _run("add_pipeline", created_at=datetime.now(timezone.utc))
+    calls = _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)})
+    monkeypatch.setattr(recovery_module, "RECOVERY_POLL_SECONDS", 0.01)
+    recovered = asyncio.Event()
+
+    async def record(**kwargs):
+        calls.append(("error", kwargs))
+        run.status = PipelineRunStatus.DATASET_PROCESSING_ERRORED
+        recovered.set()
+
+    monkeypatch.setattr(recovery_module, "log_pipeline_run_error", record)
+    async with recovery_module.pipeline_recovery_service():
+        assert calls == []
+        run.created_at = TWO_HOURS_AGO
+        await asyncio.wait_for(recovered.wait(), timeout=1)
+    assert len(calls) == 1
+    await asyncio.sleep(0.03)
+    assert len(calls) == 1

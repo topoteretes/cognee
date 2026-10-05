@@ -133,10 +133,7 @@ async def lifespan(app: FastAPI):
         await get_default_user()
         await set_default_user_password_if_unset()
     report_default_user_login_posture()
-    from cognee.modules.cognify.recovery import recover_stale_pipeline_runs_on_startup
-
-    await recover_stale_pipeline_runs_on_startup()
-
+    from cognee.modules.cognify.recovery import pipeline_recovery_service
     from cognee.modules.users.authentication.get_auth_secret import resolve_auth_secrets
 
     # Warns at startup, not on the first login, when a token secret was generated.
@@ -151,7 +148,8 @@ async def lifespan(app: FastAPI):
     # Emit a clear startup message for docker logs
     logger.info("Backend server has started")
 
-    yield
+    async with pipeline_recovery_service():
+        yield
 
     # Let in-flight background work (background remember runs, the session
     # improve bridge) finish before the engines below are torn down under it.

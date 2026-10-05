@@ -6,7 +6,12 @@ from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.settings import get_current_settings
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
-from cognee.shared.utils import send_telemetry, telemetry_exception_properties
+from cognee.shared.utils import (
+    send_telemetry,
+    telemetry_exception_properties,
+    telemetry_guard,
+    telemetry_integer,
+)
 
 from ..tasks.task import Task
 from .run_tasks_base import run_tasks_base
@@ -60,13 +65,8 @@ def _item_attribute(item, name: str):
 
 
 def _bucket(value, buckets, top: str) -> str | None:
-    if value is None or isinstance(value, bool):
-        return None
-    try:
-        number = int(value)
-    except (TypeError, ValueError):
-        return None
-    if number < 0:
+    number = telemetry_integer(value)
+    if number is None or number < 0:
         return None
     for upper_bound, label in buckets:
         if number < upper_bound:
@@ -86,27 +86,33 @@ def data_item_telemetry_properties(data) -> dict:
     without these attributes contributes only ``item_count``, and a value that
     is not a list contributes nothing. Never raises.
     """
-    if not isinstance(data, (list, tuple)):
-        return {}
-    properties: dict = {"item_count": len(data)}
-    if len(data) != 1:
-        return properties
-    item = data[0]
-    loader = _item_attribute(item, "loader_engine")
-    if isinstance(loader, str):
-        properties["item_loader"] = loader if _ITEM_LOADER.match(loader) else "other"
-    extension = _item_attribute(item, "extension")
-    if isinstance(extension, str):
-        extension = extension.lower().lstrip(".")
-        properties["item_extension"] = extension if _ITEM_EXTENSION.match(extension) else "other"
-    size_bucket = _bucket(_item_attribute(item, "data_size"), _ITEM_SIZE_BUCKETS, _ITEM_SIZE_TOP)
-    if size_bucket is not None:
-        properties["item_size_bucket"] = size_bucket
-    token_bucket = _bucket(
-        _item_attribute(item, "token_count"), _ITEM_TOKEN_BUCKETS, _ITEM_TOKEN_TOP
-    )
-    if token_bucket is not None:
-        properties["item_token_bucket"] = token_bucket
+    properties: dict = {}
+    with telemetry_guard():
+        if not isinstance(data, (list, tuple)):
+            return {}
+        properties["item_count"] = len(data)
+        if len(data) != 1:
+            return properties
+        item = data[0]
+        loader = _item_attribute(item, "loader_engine")
+        if isinstance(loader, str):
+            properties["item_loader"] = loader if _ITEM_LOADER.match(loader) else "other"
+        extension = _item_attribute(item, "extension")
+        if isinstance(extension, str):
+            extension = extension.lower().lstrip(".")
+            properties["item_extension"] = (
+                extension if _ITEM_EXTENSION.match(extension) else "other"
+            )
+        size_bucket = _bucket(
+            _item_attribute(item, "data_size"), _ITEM_SIZE_BUCKETS, _ITEM_SIZE_TOP
+        )
+        if size_bucket is not None:
+            properties["item_size_bucket"] = size_bucket
+        token_bucket = _bucket(
+            _item_attribute(item, "token_count"), _ITEM_TOKEN_BUCKETS, _ITEM_TOKEN_TOP
+        )
+        if token_bucket is not None:
+            properties["item_token_bucket"] = token_bucket
     return properties
 
 
@@ -117,6 +123,8 @@ def pipeline_run_telemetry_properties(
     *,
     recovered: bool = False,
     graph_extractor: str | None = None,
+    llm_config=None,
+    embedding_config=None,
 ) -> dict:
     """Shared properties for pipeline run and item events.
 
@@ -136,11 +144,16 @@ def pipeline_run_telemetry_properties(
     }
     if pipeline_run_id is not None:
         properties["pipeline_run_id"] = str(pipeline_run_id)
-    return (
-        properties
-        if recovered
-        else properties | get_current_settings(graph_extractor=graph_extractor)
-    )
+    if not recovered:
+        with telemetry_guard():
+            properties.update(
+                get_current_settings(
+                    graph_extractor=graph_extractor,
+                    llm_config=llm_config,
+                    embedding_config=embedding_config,
+                )
+            )
+    return properties
 
 
 async def run_tasks_with_telemetry(
@@ -160,13 +173,15 @@ async def run_tasks_with_telemetry(
 
     try:
         logger.info("Pipeline item started: `%s`", pipeline_name)
-        send_telemetry(PIPELINE_ITEM_STARTED, user, additional_properties=properties)
+        with telemetry_guard():
+            send_telemetry(PIPELINE_ITEM_STARTED, user, additional_properties=properties)
 
         async for result in run_tasks_base(tasks, data, user, ctx):
             yield result
 
         logger.info("Pipeline item completed: `%s`", pipeline_name)
-        send_telemetry(PIPELINE_ITEM_COMPLETED, user, additional_properties=properties)
+        with telemetry_guard():
+            send_telemetry(PIPELINE_ITEM_COMPLETED, user, additional_properties=properties)
     except BaseException as error:
         # asyncio.CancelledError and GeneratorExit are BaseExceptions, not
         # Exceptions: a run cancelled by a shutdown, or this generator closed by
@@ -178,10 +193,11 @@ async def run_tasks_with_telemetry(
             logger.exception("Pipeline item errored: `%s`\n", pipeline_name)
         else:
             logger.info("Pipeline item cancelled: `%s` (%s)", pipeline_name, type(error).__name__)
-        send_telemetry(
-            PIPELINE_ITEM_ERRORED,
-            user,
-            additional_properties=properties | telemetry_exception_properties(error),
-        )
+        with telemetry_guard():
+            send_telemetry(
+                PIPELINE_ITEM_ERRORED,
+                user,
+                additional_properties=properties | telemetry_exception_properties(error),
+            )
 
         raise

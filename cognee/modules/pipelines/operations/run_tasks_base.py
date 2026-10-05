@@ -11,7 +11,7 @@ from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.provenance_config import get_provenance_config
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
-from cognee.shared.utils import send_telemetry, telemetry_exception_properties
+from cognee.shared.utils import send_telemetry, telemetry_exception_properties, telemetry_guard
 
 from ..tasks.task import Task
 
@@ -169,7 +169,8 @@ async def handle_task(
         task_properties["pipeline_run_id"] = str(ctx.pipeline_run_id)
 
     logger.info(f"{task_type} task started: `{running_task.executable.__name__}`")
-    send_telemetry(f"{task_type} Task Started", user, additional_properties=task_properties)
+    with telemetry_guard():
+        send_telemetry(f"{task_type} Task Started", user, additional_properties=task_properties)
 
     # Pass ctx only to tasks that declare it in their signature.
     # Task caches this check as accepts_ctx at construction time.
@@ -194,6 +195,7 @@ async def handle_task(
     with new_span(f"cognee.pipeline.task.{task_name}") as span:
         span.set_attribute(COGNEE_PIPELINE_TASK_NAME, task_name)
 
+        downstream_failed = False
         try:
             result_count = 0
             pipe_name = ctx.pipeline_name if ctx else None
@@ -222,8 +224,12 @@ async def handle_task(
                         task_index=task_index,
                     )
 
-                async for result in run_tasks_base(leftover_tasks, result_data, user, ctx):
-                    yield result
+                try:
+                    async for result in run_tasks_base(leftover_tasks, result_data, user, ctx):
+                        yield result
+                except BaseException:
+                    downstream_failed = True
+                    raise
 
             span.set_attribute(COGNEE_RESULT_COUNT, result_count)
             span.set_attribute(
@@ -232,9 +238,10 @@ async def handle_task(
             )
 
             logger.info(f"{task_type} task completed: `{task_name}`")
-            send_telemetry(
-                f"{task_type} Task Completed", user, additional_properties=task_properties
-            )
+            with telemetry_guard():
+                send_telemetry(
+                    f"{task_type} Task Completed", user, additional_properties=task_properties
+                )
 
         except BaseException as error:
             # BaseException, not Exception: a cancelled or closed task (CancelledError,
@@ -253,16 +260,14 @@ async def handle_task(
             # unwinds through every upstream task's handler. Only the task where it
             # happened reports it; the ones above re-raise without an event, so
             # "which task failed" has one answer in the warehouse.
-            if not getattr(error, "_cognee_task_errored_reported", False):
-                try:
-                    error._cognee_task_errored_reported = True
-                except AttributeError:
-                    pass
-                send_telemetry(
-                    f"{task_type} Task Errored",
-                    user,
-                    additional_properties=task_properties | telemetry_exception_properties(error),
-                )
+            if not downstream_failed:
+                with telemetry_guard():
+                    send_telemetry(
+                        f"{task_type} Task Errored",
+                        user,
+                        additional_properties=task_properties
+                        | telemetry_exception_properties(error),
+                    )
             raise
 
 

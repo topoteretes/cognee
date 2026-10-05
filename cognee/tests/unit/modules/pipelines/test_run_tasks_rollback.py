@@ -98,7 +98,7 @@ async def test_telemetry_follows_the_whole_run_lifecycle(monkeypatch, outcome):
     monkeypatch.setattr(run_tasks_module, "send_telemetry", capture)
     seen_extractors = []
 
-    def properties(*args, graph_extractor):
+    def properties(*args, graph_extractor, **kwargs):
         seen_extractors.append(graph_extractor)
         return {"pipeline_run_id": str(run_id)}
 

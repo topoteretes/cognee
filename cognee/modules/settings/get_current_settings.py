@@ -16,7 +16,11 @@ from cognee.infrastructure.databases.vector.embeddings.config import (
     get_embedding_context_config,
     resolve_embedding_names,
 )
-from cognee.infrastructure.llm.config import get_llm_context_config
+from cognee.infrastructure.llm.config import (
+    get_llm_config,
+    get_llm_context_config,
+    resolve_structured_output_framework,
+)
 from cognee.modules.cognify.config import EXTRACTORS
 from cognee.modules.preflight import llm_available
 from cognee.shared.utils import telemetry_model_label
@@ -30,8 +34,6 @@ class LLMConfig(TypedDict):
     instructor_mode: str
 
 
-# The structured-output frameworks cognee ships (STRUCTURED_OUTPUT_FRAMEWORK).
-STRUCTURED_OUTPUT_FRAMEWORKS = ("litellm_native", "instructor", "baml")
 # An instructor mode is an identifier such as ``json_schema_mode`` or ``tool_call``.
 _INSTRUCTOR_MODE = re.compile(r"^[a-z_]{1,32}$")
 
@@ -65,22 +67,6 @@ class SettingsDict(TypedDict):
     relational: RelationalConfig
 
 
-def _structured_output_setting(llm_config) -> str:
-    """Which structured-output path LLM calls take: a closed value, or ``invalid``.
-
-    A graph extraction that fails on a schema the provider rejects looks the
-    same as any other LLM error unless the event says whether the call went
-    through litellm's native response_format, instructor, or BAML. An unknown
-    setting is reported as ``invalid``, never echoed; a config without the
-    attribute (an out-of-tree config object) as ``unknown``.
-    """
-    framework = getattr(llm_config, "structured_output_framework", None)
-    if not isinstance(framework, str) or not framework:
-        return "unknown"
-    framework = framework.lower()
-    return framework if framework in STRUCTURED_OUTPUT_FRAMEWORKS else "invalid"
-
-
 def _instructor_mode_setting(llm_config) -> str:
     """The instructor mode in force: the identifier set, ``default`` when unset, else ``invalid``."""
     mode = getattr(llm_config, "llm_instructor_mode", None)
@@ -92,11 +78,12 @@ def _instructor_mode_setting(llm_config) -> str:
     return mode if _INSTRUCTOR_MODE.match(mode) else "invalid"
 
 
-def get_current_settings(*, graph_extractor: str | None = None) -> SettingsDict:
-    # The context config when a per-call LLMConfig is set, else the process one:
-    # the same resolution the embedding half below uses, so one event never
-    # describes two configurations.
-    llm_config = get_llm_context_config()
+def get_current_settings(
+    *, graph_extractor: str | None = None, llm_config=None, embedding_config=None
+) -> SettingsDict:
+    # Explicit configs let the start event describe the pending run before
+    # its database context is entered. Otherwise use the active context.
+    llm_config = llm_config if llm_config is not None else get_llm_context_config()
     graph_config = get_graph_config()
     vector_config = get_vectordb_config()
     relational_config = get_relational_config()
@@ -104,7 +91,8 @@ def get_current_settings(*, graph_extractor: str | None = None) -> SettingsDict:
     # config when one is set, with the keyless fastembed default applied — the
     # same inputs ``get_embedding_engine`` resolves from.
     embedding_provider, embedding_model = resolve_embedding_names(
-        get_embedding_context_config(), get_llm_context_config()
+        embedding_config if embedding_config is not None else get_embedding_context_config(),
+        llm_config,
     )
 
     return {
@@ -119,7 +107,9 @@ def get_current_settings(*, graph_extractor: str | None = None) -> SettingsDict:
             "configured": llm_available(llm_config),
             # How structured output is obtained, so a schema rejection can be
             # told apart by path (native response_format / instructor / BAML).
-            "structured_output": _structured_output_setting(llm_config),
+            # The gateway dispatches using the process setting, even when model
+            # and credentials come from a per-call config.
+            "structured_output": resolve_structured_output_framework(get_llm_config()),
             "instructor_mode": _instructor_mode_setting(llm_config),
         },
         "embedding": {
