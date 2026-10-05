@@ -19,10 +19,16 @@ shared mount:
 
 ```
 snapshot "cognee-memory"           debian-slim + cognee, built once, reused
-  └─ cognee-supervisor  --phase brief    private note + briefing, grant worker read/write, emit token
-       └─ fork: cognee-worker  --phase work     recall by UUID, prove denials, write report
-            └─ fork: cognee-review  --phase review   supervisor recalls the worker's report
+  └─ cognee-supervisor-<run>  --phase brief    private note + briefing, grant worker read/write, emit token
+       └─ fork: cognee-worker-<run>  --phase work     recall by UUID, prove denials, write report
+            └─ fork: cognee-review-<run>  --phase review   supervisor recalls the worker's report
 ```
+
+`<run>` is a random suffix minted per invocation. Names never collide with
+sandboxes a previous `--keep` left behind, and every sandbox of a run carries a
+`run=<run>` label, which is what the cleanup lists by — including a sandbox the
+script lost its handle to (a `create` that timed out after the sandbox existed,
+a fork whose posture re-assertion failed).
 
 Each fork carries the whole cognee state (SQLite users/ACLs, one `.lbug` graph
 and one `.lance.db` vector store per dataset) on sandbox-local disk. The worker
@@ -37,12 +43,33 @@ is written back with `dataset_id=`.
 | Docker Sandboxes kit (`spec.yaml`) | Daytona (`handover.py`) |
 |---|---|
 | `credentials.proxyManaged` + `inject` on `api.openai.com` | organization **Secret** `cognee-openai` with `hosts=["api.openai.com"]`, mounted via `secrets={"LLM_API_KEY": "cognee-openai"}`. The sandbox sees an opaque placeholder; the proxy substitutes the key on requests to that host only. |
-| `sbx policy init deny-all` + `permissions.network.allow` | `domain_allow_list="api.openai.com,extension.ladybugdb.com,raw.githubusercontent.com"`. PyPI is not on it: cognee is installed at snapshot build time, not inside the sandbox. |
+| `sbx policy init deny-all` + `permissions.network.allow` | `domain_allow_list="api.openai.com,extension.ladybugdb.com"`. PyPI is not on it: cognee is installed at snapshot build time, not inside the sandbox. `raw.githubusercontent.com` (the Docker kit lists it for litellm's model-cost map) is not on it either: `LITELLM_LOCAL_MODEL_COST_MAP=True` makes litellm use the map bundled in the package. An allow-list domain is open for the sandbox's whole life, not just setup, so each one is a place the agent can read from. |
 | `setup.install` (`uv tool install cognee` on every sandbox creation) | a **Snapshot** built once with `Image.debian_slim("3.12").pip_install("cognee")`; every sandbox in the chain starts from it warm. |
-| `environment.variables` | passed per `exec` (`DATA_ROOT_DIRECTORY`, `SYSTEM_ROOT_DIRECTORY`, `LLM_MODEL`, `TELEMETRY_DISABLED`, `ENABLE_BACKEND_ACCESS_CONTROL=true`). |
+| `environment.variables` | passed per `exec` (`DATA_ROOT_DIRECTORY`, `SYSTEM_ROOT_DIRECTORY`, `LLM_MODEL`, `TELEMETRY_DISABLED`, `ENABLE_BACKEND_ACCESS_CONTROL=true`, `LITELLM_LOCAL_MODEL_COST_MAP=True`). |
 | `agentInstructions` appended to the agent's memory file | no Daytona equivalent — Daytona has no agent-kit layer. Drop a `CLAUDE.md`/`AGENTS.md` into the work dir with `sandbox.fs.upload_file` when you run a real agent instead of the payload. |
 | `sbx cp` state in and out of each sandbox | `sandbox.fork()` |
-| `sbx policy log` | none locally; the script probes egress from inside the sandbox instead (`example.com` must be unreachable, `$LLM_API_KEY` must be the placeholder). |
+| `sbx policy log` | none locally; the script **checks** the walls from inside the sandbox instead and fails the run when one does not hold (see below). |
+
+## The walls are checked, not shown
+
+After the `brief` phase, `check_boundaries` runs inside the supervisor sandbox:
+
+- `$LLM_API_KEY` must equal the Secret's placeholder (only the verdict and the
+  length are printed, never the value);
+- `https://example.com` must be unreachable on the **proxy path** (a client
+  that honours `HTTP(S)_PROXY`, the way Daytona's egress proxy expects);
+- `https://example.com` must be unreachable on the **direct path** too (the
+  same request with proxy handling disabled). Daytona substitutes Secrets and
+  filters domains in its proxy; a client that ignores the proxy variables — as
+  `aiohttp` did before cognee's remote client set `trust_env=True` in
+  [#5196](https://github.com/topoteretes/cognee/pull/5196) — walks around it,
+  so the wall has to hold there as well.
+
+Any breach raises after all verdicts are printed; the sandboxes are still
+cleaned up, and the run exits non-zero instead of ending in "round trip
+passed". A sandbox that could not be deleted is reported the same way: a
+running sandbox keeps a mounted Secret and an open allow list, so a failed
+cleanup is a failed run.
 
 Not used on purpose: Daytona **Volumes**. They are S3-backed FUSE mounts, the
 same class of storage the Docker demo had to move away from (embedded LanceDB
@@ -66,17 +93,19 @@ in `handover-out/handover_token.json`. Phase output is printed when each phase
 finishes (`remember` builds a knowledge graph, so `brief` and `work` take a
 few minutes each).
 
-Inspecting a kept sandbox:
+Inspecting a kept sandbox (the run id is printed at the start of the run and
+in the `Sandboxes kept:` line):
 
 ```python
 from daytona import Daytona
 
-sb = Daytona().get("cognee-review")
+sb = Daytona().get("cognee-review-<run>")
 print(sb.process.exec("printf '%s' \"$LLM_API_KEY\"").result)  # the placeholder, never a key
 print(sb.process.exec("ls ~/cognee-state/system/databases/").result)  # cognee_db + per-owner dirs
 ```
 
-Cleanup: the script deletes the three sandboxes unless `--keep` is passed. The
+Cleanup: the script deletes the run's sandboxes unless `--keep` is passed, in
+which case it prints a one-liner that deletes them by the `run` label. The
 snapshot and the Secret are kept for the next run.
 
 ## Notes
@@ -84,9 +113,16 @@ snapshot and the Secret are kept for the next run.
 - The Secret is scoped to `api.openai.com`. Using another provider means a
   different `hosts=` list, a different `LLM_MODEL`, and its API host on the
   domain allow list — see the [provider docs](https://docs.cognee.ai/).
-- `handover.py` re-applies `update_secrets` and `update_network_settings` on
-  every fork instead of assuming the child inherits them; if Daytona changes
-  that behaviour the demo keeps its guarantees.
+- `handover.py` re-applies `update_secrets`, `update_network_settings` and the
+  auto-stop interval on every fork instead of assuming the child inherits
+  them; if Daytona changes that behaviour the demo keeps its guarantees. The
+  child is registered for cleanup before any of that runs, so a failed
+  re-assertion cannot leave a running sandbox behind.
+- Secret substitution happens on the proxy path. cognee's LLM and embedding
+  calls go through litellm and httpx, which honour `HTTP(S)_PROXY`; if you add
+  your own HTTP client to the payload, make sure it does too (`aiohttp` needs
+  `trust_env=True`), or its requests leave with the placeholder and the
+  provider answers 401.
 - For concurrent agents that need live shared memory rather than a sequential
   handover, run a central cognee API server (see
   `distributed/deploy/daytona_sandbox.py`) and put its host on each sandbox's

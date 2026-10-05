@@ -10,9 +10,13 @@ fork a running sandbox into a copy-on-write clone of its filesystem, so the
 handover *is* the fork::
 
     snapshot "cognee-memory"  (debian + cognee, built once, reused)
-      -> cognee-supervisor      --phase brief    (state on sandbox-local disk)
-      -> fork: cognee-worker    --phase work     (recall by UUID, prove denials, report)
-      -> fork: cognee-review    --phase review   (supervisor reads the report)
+      -> cognee-supervisor-<run>      --phase brief    (state on sandbox-local disk)
+      -> fork: cognee-worker-<run>    --phase work     (recall by UUID, prove denials, report)
+      -> fork: cognee-review-<run>    --phase review   (supervisor reads the report)
+
+``<run>`` is a random suffix minted per invocation, so a run never collides
+with sandboxes a previous ``--keep`` left behind, and every sandbox carries a
+``run=<run>`` label the cleanup sweeps by.
 
 Every sandbox in the chain runs with:
 
@@ -20,7 +24,14 @@ Every sandbox in the chain runs with:
   The sandbox sees an opaque placeholder; Daytona's proxy substitutes the real
   key on requests to that host. The key never enters any sandbox.
 - a domain allow list that holds only what cognee needs at runtime. PyPI is not
-  on it: cognee is baked into the snapshot.
+  on it: cognee is baked into the snapshot. Neither is GitHub: litellm is told
+  to use its bundled model-cost map instead of fetching it.
+
+The walls are checked, not just shown: after the first phase the script proves
+from inside the sandbox that ``$LLM_API_KEY`` is the placeholder and that a
+host off the allow list is unreachable on both the explicit-proxy path and the
+direct path (a client that ignores ``HTTP(S)_PROXY`` must hit the same wall).
+A wall that does not hold fails the run; sandboxes are still cleaned up.
 
 Prerequisites::
 
@@ -40,6 +51,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import secrets
 import sys
 from pathlib import Path
 
@@ -50,6 +62,7 @@ from daytona import (  # type: ignore[import-untyped]
     Daytona,
     DaytonaError,
     Image,
+    ListSandboxesQuery,
     Resources,
     Sandbox,
 )
@@ -63,13 +76,28 @@ LLM_MODEL = os.environ.get("LLM_MODEL", "openai/gpt-5.6-luna")
 
 # Runtime egress. Derived from the Docker Sandboxes kit, which was run under a
 # deny-all policy and read back from the policy log; minus PyPI, because the
-# install happens at snapshot build time, not inside the sandbox.
+# install happens at snapshot build time, not inside the sandbox; minus
+# raw.githubusercontent.com, because LITELLM_LOCAL_MODEL_COST_MAP (below) makes
+# litellm use the model-cost map bundled in the package instead of fetching it.
+# A domain on this list is open for the sandbox's whole life, so every entry
+# is one more place an agent can read from; keep it at what cognee cannot run
+# without.
 RUNTIME_DOMAINS = (
     LLM_HOST,
-    "extension.ladybugdb.com",  # embedded graph DB fetches extensions on first use
-    "raw.githubusercontent.com",  # litellm's model-cost map
+    # The Linux ladybug wheel downloads its JSON extension on first use. cognee
+    # ships bundled binaries (cognee_db_workers/ladybug_extensions/) and only
+    # falls back to the download when none matches; the host stays listed so
+    # a wheel without a matching bundle still works.
+    "extension.ladybugdb.com",
 )
 DOMAIN_ALLOW_LIST = ",".join(RUNTIME_DOMAINS)
+
+# A host that is NOT on the allow list; the egress probe must fail to reach it.
+EGRESS_PROBE_URL = "https://example.com"
+
+# Minutes of inactivity before a sandbox stops. Set on the first sandbox and
+# re-asserted on every fork, like the rest of the posture.
+AUTO_STOP_MINUTES = 30
 
 # Paths inside the sandbox, relative to the sandbox user's home.
 STATE_DIR = "cognee-state"
@@ -82,11 +110,10 @@ DEFAULT_PAYLOAD = (
     Path(__file__).resolve().parent.parent / "docker-sandbox-kit" / "demo" / PAYLOAD_NAME
 )
 
-PHASES = (
-    ("cognee-supervisor", "brief"),
-    ("cognee-worker", "work"),
-    ("cognee-review", "review"),
-)
+
+def run_labels(run_id: str, role: str) -> dict[str, str]:
+    """Labels every sandbox of one run carries; cleanup lists by `run`."""
+    return {"app": "cognee", "demo": "handover", "run": run_id, "role": role}
 
 
 def ensure_secret(daytona: Daytona) -> str:
@@ -165,21 +192,25 @@ def cognee_env(home: str) -> dict[str, str]:
         # Multi-tenant ACLs + per-user+dataset DB isolation. cognee's default,
         # pinned so the demo is explicit about the boundary it relies on.
         "ENABLE_BACKEND_ACCESS_CONTROL": "true",
+        # Use the model-cost map bundled with litellm instead of fetching it
+        # from raw.githubusercontent.com, so that host can stay off the allow list.
+        "LITELLM_LOCAL_MODEL_COST_MAP": "True",
     }
 
 
-def create_supervisor(daytona: Daytona, payload: Path) -> Sandbox:
+def create_supervisor(daytona: Daytona, payload: Path, run_id: str) -> Sandbox:
     """First sandbox in the chain: fresh from the snapshot, payload uploaded, empty memory."""
-    print("=== creating sandbox: cognee-supervisor (from snapshot) ===")
+    name = f"cognee-supervisor-{run_id}"
+    print(f"=== creating sandbox: {name} (from snapshot) ===")
     sandbox = daytona.create(
         CreateSandboxFromSnapshotParams(
             snapshot=SNAPSHOT_NAME,
-            name="cognee-supervisor",
+            name=name,
             # Env var -> Secret name. The sandbox sees the placeholder only.
             secrets={"LLM_API_KEY": LLM_VAULT_ENTRY},
             domain_allow_list=DOMAIN_ALLOW_LIST,
-            labels={"app": "cognee", "demo": "handover", "role": "supervisor"},
-            auto_stop_interval=30,
+            labels=run_labels(run_id, "supervisor"),
+            auto_stop_interval=AUTO_STOP_MINUTES,
         ),
         timeout=180,
     )
@@ -189,15 +220,24 @@ def create_supervisor(daytona: Daytona, payload: Path) -> Sandbox:
     return sandbox
 
 
-def fork_into(parent: Sandbox, name: str, role: str) -> Sandbox:
-    """Hand the memory over: a copy-on-write clone of the parent's disk, same policy."""
+def fork_into(
+    parent: Sandbox, name: str, role: str, run_id: str, created: list[Sandbox]
+) -> Sandbox:
+    """Hand the memory over: a copy-on-write clone of the parent's disk, same policy.
+
+    The child is appended to `created` the moment it exists, before its posture
+    is re-asserted: if `update_secrets` or `update_network_settings` fails, the
+    run aborts and cleanup must still find the sandbox.
+    """
     print(f"=== forking {parent.name} -> {name} (the memory handover) ===")
     child = parent.fork(name=name, timeout=180)
+    created.append(child)
     # Fork copies the disk; re-assert the security posture on the new sandbox
     # rather than assume it is inherited.
     child.update_secrets({"LLM_API_KEY": LLM_VAULT_ENTRY})
     child.update_network_settings(domain_allow_list=DOMAIN_ALLOW_LIST)
-    child.set_labels({"app": "cognee", "demo": "handover", "role": role})
+    child.set_autostop_interval(AUTO_STOP_MINUTES)
+    child.set_labels(run_labels(run_id, role))
     return child
 
 
@@ -212,29 +252,72 @@ def run_phase(sandbox: Sandbox, phase: str) -> None:
     )
 
 
-def show_boundaries(sandbox: Sandbox, placeholder: str) -> None:
-    """Prove the two isolation properties the kit promises, from inside the sandbox."""
+# Two ways out of the sandbox. Daytona enforces the domain allow list and
+# substitutes Secrets in its egress proxy, which clients reach through the
+# HTTP(S)_PROXY variables it sets. A client that ignores those variables (the
+# way aiohttp did before cognee #5196) takes the direct path, so the wall has
+# to hold there too; the second probe disables proxy handling to take it.
+_PROXY_PROBE = f"import urllib.request as u;u.urlopen('{EGRESS_PROBE_URL}',timeout=5)"
+_DIRECT_PROBE = (
+    f"import urllib.request as u;"
+    f"u.build_opener(u.ProxyHandler({{}})).open('{EGRESS_PROBE_URL}',timeout=5)"
+)
+EGRESS_PROBES = (
+    ("proxy path", f'python3 -c "{_PROXY_PROBE}"'),
+    ("direct path (proxy env ignored)", f'python3 -c "{_DIRECT_PROBE}"'),
+)
+
+
+def check_boundaries(sandbox: Sandbox, placeholder: str) -> None:
+    """Prove the isolation properties from inside the sandbox; fail the run if one is missing.
+
+    A wall that does not hold must not end in "round trip passed": every
+    verdict is printed, then the first breach raises and the caller's cleanup
+    still runs.
+    """
     print(f"\n=== security check inside {sandbox.name} ===")
+    breaches: list[str] = []
+
     # Read the value without `run_in` (which echoes command output): if the
     # Secret binding failed, `seen` would be the real key. Report the verdict
     # and the length only, never the value.
     seen = (sandbox.process.exec("printf '%s' \"$LLM_API_KEY\"", timeout=20).result or "").strip()
-    verdict = (
-        "the placeholder"
-        if seen == placeholder
-        else f"NOT the placeholder ({len(seen)} chars) - Secret binding failed!"
-    )
-    print(f"    LLM_API_KEY inside sandbox is {verdict}")
-    probe = sandbox.process.exec(
-        "python3 -c \"import urllib.request;urllib.request.urlopen('https://example.com',timeout=5)\"",
-        timeout=20,
-    )
-    verdict = (
-        "blocked (not on the allow list)"
-        if probe.exit_code
-        else "REACHABLE - allow list not applied!"
-    )
-    print(f"    egress to example.com: {verdict}")
+    if seen == placeholder:
+        print("    LLM_API_KEY inside sandbox is the placeholder")
+    else:
+        verdict = f"LLM_API_KEY is NOT the placeholder ({len(seen)} chars): Secret binding failed"
+        print(f"    {verdict}")
+        breaches.append(verdict)
+
+    for label, command in EGRESS_PROBES:
+        probe = sandbox.process.exec(command, timeout=20)
+        if probe.exit_code:
+            print(f"    egress to {EGRESS_PROBE_URL} via {label}: blocked (not on the allow list)")
+        else:
+            verdict = (
+                f"egress to {EGRESS_PROBE_URL} via {label}: REACHABLE, allow list not enforced"
+            )
+            print(f"    {verdict}")
+            breaches.append(verdict)
+
+    if breaches:
+        raise RuntimeError(f"isolation breached in {sandbox.name}: " + "; ".join(breaches))
+
+
+def sweep_run(daytona: Daytona, run_id: str, created: list[Sandbox]) -> None:
+    """Add every sandbox labelled with this run that the script lost track of.
+
+    `daytona.create` can time out after the sandbox exists, and a fork can fail
+    after the clone is up; both leave a running sandbox nothing holds a handle
+    to. The labels are set at creation, so listing by `run` finds them.
+    """
+    known = {sandbox.id for sandbox in created}
+    try:
+        for sandbox in daytona.list(ListSandboxesQuery(labels={"demo": "handover", "run": run_id})):
+            if sandbox.id not in known:
+                created.append(sandbox)
+    except DaytonaError as err:
+        print(f"could not list sandboxes of run {run_id}: {err}", file=sys.stderr)
 
 
 def main() -> None:
@@ -259,19 +342,25 @@ def main() -> None:
     placeholder = ensure_secret(daytona)
     ensure_snapshot(daytona, rebuild=args.rebuild)
 
+    # One id per invocation: sandbox names carry it (no collision with a
+    # previous --keep run) and so does a label (cleanup lists by it).
+    run_id = secrets.token_hex(3)
+    print(f"=== run {run_id} ===")
+
     sandboxes: list[Sandbox] = []
+    leaked: list[str] = []
     try:
-        supervisor = create_supervisor(daytona, args.payload)
+        supervisor = create_supervisor(daytona, args.payload, run_id)
         sandboxes.append(supervisor)
         run_phase(supervisor, "brief")
-        show_boundaries(supervisor, placeholder)
+        check_boundaries(supervisor, placeholder)
 
-        worker = fork_into(supervisor, "cognee-worker", role="worker")
-        sandboxes.append(worker)
+        worker = fork_into(supervisor, f"cognee-worker-{run_id}", "worker", run_id, sandboxes)
         run_phase(worker, "work")
 
-        review = fork_into(worker, "cognee-review", role="supervisor-review")
-        sandboxes.append(review)
+        review = fork_into(
+            worker, f"cognee-review-{run_id}", "supervisor-review", run_id, sandboxes
+        )
         run_phase(review, "review")
 
         token = review.fs.download_file(f"{review.get_user_home_dir()}/{TOKEN_REL_PATH}")
@@ -283,18 +372,26 @@ def main() -> None:
         print(f"Token exchanged via: {out / 'handover_token.json'}")
         print(f"Dataset shared by UUID: {json.loads(token or b'{}').get('dataset_id')}")
     finally:
+        sweep_run(daytona, run_id, sandboxes)
         if args.keep:
             print("\nSandboxes kept: " + ", ".join(s.name for s in sandboxes))
             print(
-                'Delete them with: python -c "from daytona import Daytona; d=Daytona(); '
-                "[d.delete(d.get(n)) for n in ('cognee-supervisor','cognee-worker','cognee-review')]\""
+                'Delete them with: python -c "from daytona import Daytona, ListSandboxesQuery; '
+                "d=Daytona(); [d.delete(s) for s in d.list(ListSandboxesQuery("
+                f"labels={{'demo': 'handover', 'run': '{run_id}'}}))]\""
             )
         else:
             for sandbox in sandboxes:
                 try:
                     daytona.delete(sandbox)
                 except DaytonaError as err:
+                    leaked.append(sandbox.name)
                     print(f"could not delete {sandbox.name}: {err}", file=sys.stderr)
+    if leaked:
+        # A sandbox left running keeps a mounted Secret and an open allow
+        # list; that is a failed cleanup, not a passed run. (Raised outside the
+        # finally block so it never hides the traceback of an earlier failure.)
+        raise SystemExit(f"sandboxes still running: {', '.join(leaked)}")
 
 
 if __name__ == "__main__":
