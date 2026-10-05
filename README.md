@@ -1,4 +1,6 @@
 <div align="center">
+
+[![Deploy to Railyard](https://app.railyard.run/deploy/badge)](https://app.railyard.run/deploy?repo=https://github.com/topoteretes/cognee)
   <a href="https://github.com/topoteretes/cognee">
     <img src="assets/cognee-logo.svg" alt="Cognee Logo" width="260">
   </a>
