@@ -23,7 +23,12 @@ Flow (only runs from the update endpoint):
 5. Write: extract ONLY the fresh chunks, in bounded batches, through the
    standard graph-extraction and storage tasks (attributed to the same
    ``data_id``), retire replaced chunk ownership through the shared deletion
-   planner, and renumber moved survivors.
+   planner, and renumber moved survivors. Date context is part of "fresh":
+   the graph prompt's date hints are a function of the whole document in
+   chunk order (``document_temporal_hints``), so they are recomputed for the
+   old and the new text, fresh chunks get the new document's hints, and a
+   surviving chunk whose hints changed — it inferred a date from text that
+   the edit touched — is retired and re-extracted like a fresh one.
 6. PUBLISH in one relational transaction: content location, hashes, size,
    token count, and the processed stamp flip together. A crash anywhere
    before the publish leaves the row on the old content; the stored chunks
@@ -82,7 +87,7 @@ from cognee.modules.data.methods import (
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data
 from cognee.modules.data.processing.document_types.Document import Document
-from cognee.modules.engine.utils.temporal_hints import attach_temporal_hints
+from cognee.modules.engine.utils.temporal_hints import document_temporal_hints
 from cognee.modules.graph.methods.delete_chunks_incremental import (
     delete_chunks_incremental,
     edge_endpoints,
@@ -868,6 +873,57 @@ def _validate_plan_reassembles(plan: ChunkPlan, stored_chunks: list[dict], new_t
         )
 
 
+def _final_positions(plan: ChunkPlan, stored_chunks: list[dict]) -> dict[str, int]:
+    """Final chunk_index of every stored chunk that survives the edit."""
+    moved = set(plan.reused) | set(plan.kept_moves)
+    deleted = set(plan.deleted_ids)
+    positions = {**plan.reused, **plan.kept_moves}
+    for node in stored_chunks:
+        chunk_id = str(node["id"])
+        if chunk_id not in moved and chunk_id not in deleted:
+            positions[chunk_id] = int(node.get("chunk_index", -1))
+    return positions
+
+
+def _replan_temporal_hints(
+    plan: ChunkPlan, stored_chunks: list[dict]
+) -> tuple[dict[int, list[str]], list[str]]:
+    """Date hints for the new document, and the surviving chunks they re-date.
+
+    ``document_temporal_hints`` is a pure function of a document's chunk texts
+    in order, so the hints every stored chunk was extracted with are
+    recomputed from the stored text, never persisted. Running the same function
+    over the new text gives, per final position, the hints a chunk needs now.
+    A surviving chunk whose text is unchanged but whose hints differ inferred a
+    date ("27 April" → 1947-04-27) from text the edit changed; keeping its
+    subgraph would keep the old date, so it is reported for re-extraction.
+    Returns ``(new hints by final position, re-dated stored chunk ids)``.
+    """
+    old_order = sorted(stored_chunks, key=lambda node: int(node.get("chunk_index", -1)))
+    old_hints = dict(
+        zip(
+            (str(node["id"]) for node in old_order),
+            document_temporal_hints([node["text"] for node in old_order]),
+        )
+    )
+    stored_text_by_id = {str(node["id"]): node["text"] for node in stored_chunks}
+    positions = _final_positions(plan, stored_chunks)
+    placed = {chunk.chunk_index: chunk.text for chunk in plan.fresh}
+    placed.update((index, stored_text_by_id[chunk_id]) for chunk_id, index in positions.items())
+    new_hints = dict(
+        zip(
+            sorted(placed),
+            document_temporal_hints([placed[index] for index in sorted(placed)]),
+        )
+    )
+    redated = [
+        chunk_id
+        for chunk_id, index in positions.items()
+        if new_hints.get(index, []) != old_hints.get(chunk_id, [])
+    ]
+    return new_hints, redated
+
+
 async def _write_and_publish(
     bundle: dict,
     data_id: UUID,
@@ -910,9 +966,24 @@ async def _write_and_publish(
     # carries every stored field across, and a field it drops is erased rather
     # than reset (adapters replace a node's whole property set on MERGE). The
     # plan names them; the writer knows how to rebuild them.
+    # Date context first: which hints every chunk needs now, and which kept
+    # chunks inferred a date from text this edit changed. Those are retired
+    # and written again like fresh content, at their final position and under
+    # their own id (identity is content-derived, and the text is unchanged).
+    new_hints, redated_ids = _replan_temporal_hints(plan, stored_chunks)
+    redated = set(redated_ids)
+    final_positions = _final_positions(plan, stored_chunks)
+    redated_chunks = [
+        _rehydrate_chunk(document, stored_by_id[chunk_id], final_positions[chunk_id])
+        for chunk_id in redated_ids
+    ]
+    to_extract = list(plan.fresh) + redated_chunks
+    for chunk in to_extract:
+        chunk._temporal_hints = new_hints.get(chunk.chunk_index, [])
     reused_chunks = [
         _rehydrate_chunk(document, stored_by_id[chunk_id], index)
         for chunk_id, index in plan.reused.items()
+        if chunk_id not in redated
     ]
 
     cognify_config = get_cognify_config()
@@ -924,13 +995,15 @@ async def _write_and_publish(
     # document becomes one oversized extraction step with no intermediate
     # progress and a single all-or-nothing failure.
     batch_size = cognify_config.chunks_per_batch or DEFAULT_CHUNKS_PER_BATCH
-    # Date hints for the fresh chunks, in their order. Computed over the fresh
-    # chunks only: a year stated in a kept chunk earlier in the document does
-    # not reach them yet, and a changed year does not re-date kept chunks that
-    # inferred from it — rebuilding that context is the follow-up to SDK-821.
-    attach_temporal_hints(plan.fresh)
-    for start in range(0, len(plan.fresh), batch_size):
-        batch = plan.fresh[start : start + batch_size]
+    # A re-dated chunk keeps its id, so its old subgraph must go BEFORE the new
+    # extraction lands — deleting afterwards would take the new one with it.
+    # A crash in between leaves a hole, which the tiling gate turns into a full
+    # rebuild on the next touch: the same self-heal every other crash here
+    # relies on.
+    if redated_ids:
+        await delete_chunks_incremental(redated_ids, dataset_id, data_id)
+    for start in range(0, len(to_extract), batch_size):
+        batch = to_extract[start : start + batch_size]
         # Match extract_chunks_from_documents: policies plan content, while
         # the writer carries document membership into graph and vector storage.
         for chunk in batch:
@@ -959,29 +1032,35 @@ async def _write_and_publish(
     shifted_chunks = [
         _rehydrate_chunk(document, stored_by_id[chunk_id], index)
         for chunk_id, index in plan.kept_moves.items()
+        if chunk_id not in redated
     ]
     if shifted_chunks:
         await _restore_repositioned_chunks(shifted_chunks, context)
 
     # -- PUBLISH: content + metadata + token count + stamp, atomically --------- #
-    replaced = set(plan.deleted_ids) | set(plan.reused)
+    replaced = set(plan.deleted_ids) | set(plan.reused) | redated
     surviving_tokens = sum(
         int(node.get("chunk_size", 0)) for node in stored_chunks if str(node["id"]) not in replaced
     )
-    new_tokens = sum(chunk.chunk_size for chunk in plan.fresh)
-    new_tokens += sum(int(stored_by_id[chunk_id].get("chunk_size", 0)) for chunk_id in plan.reused)
+    new_tokens = sum(chunk.chunk_size for chunk in to_extract)
+    new_tokens += sum(
+        int(stored_by_id[chunk_id].get("chunk_size", 0))
+        for chunk_id in plan.reused
+        if chunk_id not in redated
+    )
     await publish_updated_data(data_id, dataset_id, staged, surviving_tokens + new_tokens, node_set)
 
-    added_chunks = len(plan.fresh) + len(plan.reused)
+    added_chunks = len(to_extract) + len(reused_chunks)
     kept_count = len(stored_chunks) - len(replaced)
     logger.info(
         "incremental update: %d regions, kept %d chunks, deleted %d, added %d "
-        "(%d reused), reindexed %d",
+        "(%d reused, %d re-dated), reindexed %d",
         plan.regions,
         kept_count,
         len(plan.deleted_ids),
         added_chunks,
         len(reused_chunks),
+        len(redated_chunks),
         len(shifted_chunks),
     )
     return {
@@ -990,6 +1069,7 @@ async def _write_and_publish(
         "deleted_chunks": len(plan.deleted_ids),
         "added_chunks": added_chunks,
         "reused_chunks": len(reused_chunks),
+        "redated_chunks": len(redated_chunks),
         "kept_chunks": kept_count,
         "reindexed_chunks": len(shifted_chunks),
         "total_chunks": kept_count + added_chunks,
